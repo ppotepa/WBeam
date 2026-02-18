@@ -1,0 +1,18 @@
+[
+    {
+        "merged": "/home/ppotepa/.gradle/daemon/9.0-milestone-1/com.wbeam.app-debug-31:/drawable_status_led_bg.xml.flat",
+        "source": "/home/ppotepa/.gradle/daemon/9.0-milestone-1/com.wbeam.app-main-33:/drawable/status_led_bg.xml"
+    },
+    {
+        "merged": "/home/ppotepa/.gradle/daemon/9.0-milestone-1/com.wbeam.app-debug-31:/drawable_status_panel_bg.xml.flat",
+        "source": "/home/ppotepa/.gradle/daemon/9.0-milestone-1/com.wbeam.app-main-33:/drawable/status_panel_bg.xml"
+    },
+    {
+        "merged": "com.wbeam.app-debug-31:/layout_activity_main.xml.flat",
+        "source": "com.wbeam.app-main-33:/layout/activity_main.xml"
+    },
+    {
+        "merged": "/home/ppotepa/.gradle/daemon/9.0-milestone-1/com.wbeam.app-debug-31:/layout_activity_main.xml.flat",
+        "source": "/home/ppotepa/.gradle/daemon/9.0-milestone-1/com.wbeam.app-main-33:/layout/activity_main.xml"
+    }
+]

@@ -1,0 +1,31 @@
+R_DEF: Internal format may change without notice
+local
+color black
+color white
+drawable status_led_bg
+drawable status_panel_bg
+id actionRow
+id bpsText
+id detailText
+id fullscreenButton
+id modeAButton
+id modeBButton
+id modeCButton
+id modeHintText
+id modeLabelText
+id modeRow
+id previewContainer
+id previewLabel
+id previewSurface
+id rootLayout
+id startButton
+id statusLed
+id statusPanel
+id statusText
+id stopButton
+id subtitleText
+id testButton
+id titleText
+layout activity_main
+string app_name
+style Theme.WBeam
