@@ -8,6 +8,7 @@ import sys
 import dbus
 import dbus.mainloop.glib
 import gi
+
 gi.require_version("Gst", "1.0")
 from gi.repository import GLib, Gst
 
@@ -16,6 +17,18 @@ PORTAL_PATH = "/org/freedesktop/portal/desktop"
 SCREENCAST_IFACE = "org.freedesktop.portal.ScreenCast"
 REQUEST_IFACE = "org.freedesktop.portal.Request"
 SESSION_IFACE = "org.freedesktop.portal.Session"
+
+CURSOR_MODE_MAP = {
+    "hidden": 1,
+    "embedded": 2,
+    "metadata": 4,
+}
+
+PROFILE_DEFAULTS = {
+    "lowlatency": {"size": "1920x1080", "fps": 60, "bitrate_kbps": 18000, "nv_preset": "p1"},
+    "balanced": {"size": "1920x1080", "fps": 60, "bitrate_kbps": 25000, "nv_preset": "p4"},
+    "ultra": {"size": "2560x1440", "fps": 60, "bitrate_kbps": 38000, "nv_preset": "p6"},
+}
 
 STATE = {
     "main_loop": None,
@@ -75,18 +88,17 @@ def create_screencast_session(session_bus, iface):
         }
     )
     results = portal_request(session_bus, iface, "CreateSession", options)
-    session_handle = str(results["session_handle"])
-    return session_handle
+    return str(results["session_handle"])
 
 
-def select_sources(session_bus, iface, session_handle):
+def select_sources(session_bus, iface, session_handle, cursor_mode):
     token = random.randint(100000, 999999)
     options = build_variant_dict(
         {
             "handle_token": dbus.String(f"wbeam_select_{token}"),
             "types": dbus.UInt32(1),  # monitor
             "multiple": dbus.Boolean(False),
-            "cursor_mode": dbus.UInt32(2),  # embedded
+            "cursor_mode": dbus.UInt32(CURSOR_MODE_MAP[cursor_mode]),
         }
     )
     portal_request(session_bus, iface, "SelectSources", dbus.ObjectPath(session_handle), options)
@@ -108,9 +120,7 @@ def start_session(session_bus, iface, session_handle):
     if not streams:
         raise RuntimeError("Portal start returned no streams")
 
-    # stream tuple: (node_id, a{sv})
-    node_id = int(streams[0][0])
-    return node_id
+    return int(streams[0][0])
 
 
 def open_pipewire_fd(iface, session_handle):
@@ -120,7 +130,6 @@ def open_pipewire_fd(iface, session_handle):
         dbus_interface=SCREENCAST_IFACE,
     )
 
-    # dbus-python may return UnixFd or int depending on version
     if hasattr(fd, "take"):
         return int(fd.take())
     return int(fd)
@@ -136,50 +145,42 @@ def close_session(session_bus, session_handle):
         print(f"[warn] failed to close portal session: {exc}", file=sys.stderr)
 
 
-def make_pipeline(fd, node_id, width, height, fps, bitrate_kbps, port, debug_dir, debug_fps):
-    pipeline = Gst.Pipeline.new("wbeam-wayland-pipeline")
+def pick_encoder(requested):
+    nv = Gst.ElementFactory.find("nvh264enc") is not None
+    oh = Gst.ElementFactory.find("openh264enc") is not None
 
-    src = Gst.ElementFactory.make("pipewiresrc", "src")
-    queue = Gst.ElementFactory.make("queue", "q1")
-    convert = Gst.ElementFactory.make("videoconvert", "conv")
-    scale = Gst.ElementFactory.make("videoscale", "scale")
-    rate = Gst.ElementFactory.make("videorate", "rate")
-    caps1 = Gst.ElementFactory.make("capsfilter", "caps1")
-    tee = Gst.ElementFactory.make("tee", "tee")
+    if requested == "nvenc":
+        if not nv:
+            raise RuntimeError("Requested NVENC, but nvh264enc element is not available")
+        return "nvenc"
 
-    queue_main = Gst.ElementFactory.make("queue", "qmain")
-    enc = Gst.ElementFactory.make("openh264enc", "enc")
-    parse = Gst.ElementFactory.make("h264parse", "parse")
-    caps2 = Gst.ElementFactory.make("capsfilter", "caps2")
-    sink = Gst.ElementFactory.make("tcpserversink", "sink")
+    if requested == "openh264":
+        if not oh:
+            raise RuntimeError("Requested openh264, but openh264enc element is not available")
+        return "openh264"
 
-    elements = [
-        src, queue, convert, scale, rate, caps1, tee,
-        queue_main, enc, parse, caps2, sink
-    ]
-    if any(e is None for e in elements):
-        missing = [name for name, e in zip(
-            [
-                "pipewiresrc", "queue", "videoconvert", "videoscale", "videorate",
-                "capsfilter", "tee", "queue", "openh264enc", "h264parse", "capsfilter", "tcpserversink"
-            ],
-            elements,
-        ) if e is None]
-        raise RuntimeError(f"Missing GStreamer elements: {', '.join(missing)}")
+    if nv:
+        return "nvenc"
+    if oh:
+        return "openh264"
 
-    src.set_property("fd", int(fd))
-    src.set_property("path", str(node_id))
-    src.set_property("do-timestamp", True)
-    src.set_property("keepalive-time", 1000)
+    raise RuntimeError("No supported H264 encoder found (nvh264enc/openh264enc)")
 
-    caps1.set_property(
-        "caps",
-        Gst.Caps.from_string(
-            f"video/x-raw,format=I420,width={width},height={height},framerate={fps}/1"
-        ),
-    )
 
-    # openh264enc bitrate is in bits/s, not kbps.
+def configure_encoder(enc, encoder_name, bitrate_kbps, fps, nv_preset):
+    if encoder_name == "nvenc":
+        enc.set_property("bitrate", int(bitrate_kbps))
+        enc.set_property("max-bitrate", int(bitrate_kbps))
+        enc.set_property("rc-mode", "cbr")
+        enc.set_property("preset", nv_preset)
+        enc.set_property("gop-size", max(60, int(fps) * 2))
+        enc.set_property("bframes", 0)
+        enc.set_property("zerolatency", True)
+        enc.set_property("aud", True)
+        enc.set_property("repeat-sequence-header", True)
+        return
+
+    # openh264enc bitrate is bits/s
     enc.set_property("bitrate", int(bitrate_kbps) * 1000)
     enc.set_property("rate-control", "bitrate")
     enc.set_property("complexity", "high")
@@ -192,10 +193,81 @@ def make_pipeline(fd, node_id, width, height, fps, bitrate_kbps, port, debug_dir
     enc.set_property("qp-min", 8)
     enc.set_property("qp-max", 32)
 
-    parse.set_property("config-interval", -1)
+
+def make_pipeline(
+    fd,
+    node_id,
+    width,
+    height,
+    fps,
+    bitrate_kbps,
+    port,
+    debug_dir,
+    debug_fps,
+    encoder_name,
+    nv_preset,
+):
+    pipeline = Gst.Pipeline.new("wbeam-wayland-pipeline")
+
+    src = Gst.ElementFactory.make("pipewiresrc", "src")
+    queue = Gst.ElementFactory.make("queue", "q1")
+    convert = Gst.ElementFactory.make("videoconvert", "conv")
+    scale = Gst.ElementFactory.make("videoscale", "scale")
+    rate = Gst.ElementFactory.make("videorate", "rate")
+    caps1 = Gst.ElementFactory.make("capsfilter", "caps1")
+    tee = Gst.ElementFactory.make("tee", "tee")
+
+    queue_main = Gst.ElementFactory.make("queue", "qmain")
+    enc = Gst.ElementFactory.make("nvh264enc" if encoder_name == "nvenc" else "openh264enc", "enc")
+    parse = Gst.ElementFactory.make("h264parse", "parse")
+    caps2 = Gst.ElementFactory.make("capsfilter", "caps2")
+    sink = Gst.ElementFactory.make("tcpserversink", "sink")
+
+    elements = [src, queue, convert, scale, rate, caps1, tee, queue_main, enc, parse, caps2, sink]
+    if any(e is None for e in elements):
+        missing = [
+            name
+            for name, e in zip(
+                [
+                    "pipewiresrc",
+                    "queue",
+                    "videoconvert",
+                    "videoscale",
+                    "videorate",
+                    "capsfilter",
+                    "tee",
+                    "queue",
+                    "encoder",
+                    "h264parse",
+                    "capsfilter",
+                    "tcpserversink",
+                ],
+                elements,
+            )
+            if e is None
+        ]
+        raise RuntimeError(f"Missing GStreamer elements: {', '.join(missing)}")
+
+    src.set_property("fd", int(fd))
+    src.set_property("path", str(node_id))
+    src.set_property("do-timestamp", True)
+    src.set_property("keepalive-time", 1000)
+
+    raw_format = "NV12" if encoder_name == "nvenc" else "I420"
+    caps1.set_property(
+        "caps",
+        Gst.Caps.from_string(
+            f"video/x-raw,format={raw_format},width={width},height={height},framerate={fps}/1"
+        ),
+    )
+
+    configure_encoder(enc, encoder_name, bitrate_kbps, fps, nv_preset)
+
+    parse.set_property("disable-passthrough", True)
+    parse.set_property("config-interval", 1)
     caps2.set_property(
         "caps",
-        Gst.Caps.from_string("video/x-h264,stream-format=byte-stream,alignment=au"),
+        Gst.Caps.from_string("video/x-h264,stream-format=byte-stream,alignment=nal"),
     )
 
     sink.set_property("host", "0.0.0.0")
@@ -205,7 +277,6 @@ def make_pipeline(fd, node_id, width, height, fps, bitrate_kbps, port, debug_dir
     for element in elements:
         pipeline.add(element)
 
-    # Main branch: PipeWire raw -> H264 -> TCP.
     for a, b in [
         (src, queue),
         (queue, convert),
@@ -222,7 +293,6 @@ def make_pipeline(fd, node_id, width, height, fps, bitrate_kbps, port, debug_dir
         if not a.link(b):
             raise RuntimeError(f"Failed to link {a.get_name()} -> {b.get_name()}")
 
-    # Debug branch: dump 1 fps jpeg frames from exactly what is being encoded.
     if debug_dir and int(debug_fps) > 0:
         os.makedirs(debug_dir, exist_ok=True)
         queue_dbg = Gst.ElementFactory.make("queue", "qdbg")
@@ -234,10 +304,7 @@ def make_pipeline(fd, node_id, width, height, fps, bitrate_kbps, port, debug_dir
         if any(e is None for e in dbg_elements):
             raise RuntimeError("Missing GStreamer debug elements for frame dump")
 
-        caps_dbg.set_property(
-            "caps",
-            Gst.Caps.from_string(f"video/x-raw,framerate={int(debug_fps)}/1"),
-        )
+        caps_dbg.set_property("caps", Gst.Caps.from_string(f"video/x-raw,framerate={int(debug_fps)}/1"))
         multi.set_property("location", os.path.join(debug_dir, "frame-%06d.jpg"))
         multi.set_property("post-messages", False)
         multi.set_property("max-files", 300)
@@ -287,36 +354,55 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Wayland KDE screencast via portal -> PipeWire -> H264 TCP"
     )
+    parser.add_argument("--profile", choices=["lowlatency", "balanced", "ultra"], default="balanced")
     parser.add_argument("--port", type=int, default=5000)
-    parser.add_argument("--size", default="2560x1440")
-    parser.add_argument("--fps", type=int, default=60)
-    parser.add_argument("--bitrate-kbps", type=int, default=30000)
+    parser.add_argument("--size", default=None)
+    parser.add_argument("--fps", type=int, default=None)
+    parser.add_argument("--bitrate-kbps", type=int, default=None)
+    parser.add_argument("--encoder", choices=["auto", "nvenc", "openh264"], default="auto")
+    parser.add_argument("--cursor-mode", choices=["hidden", "embedded", "metadata"], default="hidden")
     parser.add_argument("--debug-dir", default="/tmp/wbeam-frames")
     parser.add_argument("--debug-fps", type=int, default=0)
     return parser.parse_args()
 
 
+def resolve_profile(args):
+    defaults = PROFILE_DEFAULTS[args.profile].copy()
+
+    size = args.size or defaults["size"]
+    fps = args.fps if args.fps is not None else defaults["fps"]
+    bitrate_kbps = args.bitrate_kbps if args.bitrate_kbps is not None else defaults["bitrate_kbps"]
+    nv_preset = defaults["nv_preset"]
+
+    if "x" not in size:
+        raise SystemExit("--size must be WIDTHxHEIGHT")
+    width, height = [int(x) for x in size.lower().split("x", 1)]
+
+    return width, height, fps, bitrate_kbps, nv_preset
+
+
 def main():
     args = parse_args()
 
-    if "x" not in args.size:
-        raise SystemExit("--size must be WIDTHxHEIGHT")
-    width, height = [int(x) for x in args.size.lower().split("x", 1)]
-
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     Gst.init(None)
+
+    width, height, fps, bitrate_kbps, nv_preset = resolve_profile(args)
+    encoder_name = pick_encoder(args.encoder)
 
     session_bus = dbus.SessionBus()
     portal = session_bus.get_object(PORTAL_BUS, PORTAL_PATH)
     iface = dbus.Interface(portal, SCREENCAST_IFACE)
 
+    print(f"[wbeam] profile={args.profile} size={width}x{height} fps={fps} bitrate={bitrate_kbps}kbps encoder={encoder_name} cursor={args.cursor_mode}")
     print("[wbeam] Requesting ScreenCast portal session (you will get KDE share prompt)...")
+
     session_handle = create_screencast_session(session_bus, iface)
     STATE["session_handle"] = session_handle
     STATE["bus"] = session_bus
 
     print("[wbeam] Select source in KDE prompt")
-    select_sources(session_bus, iface, session_handle)
+    select_sources(session_bus, iface, session_handle, args.cursor_mode)
 
     print("[wbeam] Starting portal session")
     node_id = start_session(session_bus, iface, session_handle)
@@ -330,11 +416,13 @@ def main():
         node_id,
         width,
         height,
-        args.fps,
-        args.bitrate_kbps,
+        fps,
+        bitrate_kbps,
         args.port,
         args.debug_dir,
         args.debug_fps,
+        encoder_name,
+        nv_preset,
     )
     STATE["pipeline"] = pipeline
 
@@ -348,6 +436,7 @@ def main():
     print(f"[wbeam] Streaming Wayland screencast on tcp://0.0.0.0:{args.port}")
     if args.debug_dir and args.debug_fps > 0:
         print(f"[wbeam] Debug frames: {args.debug_dir} ({args.debug_fps} fps, max 300 files)")
+
     ret = pipeline.set_state(Gst.State.PLAYING)
     if ret == Gst.StateChangeReturn.FAILURE:
         raise RuntimeError("Failed to start GStreamer pipeline")
