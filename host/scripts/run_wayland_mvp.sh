@@ -41,6 +41,7 @@ CMD=(
   "$SCRIPT_DIR/stream_wayland_portal_h264.py"
   --profile "$PROFILE"
   --port "$PORT"
+  --framed
   --encoder "$ENCODER"
   --cursor-mode "$CURSOR_MODE"
   --debug-dir "$DEBUG_DIR"

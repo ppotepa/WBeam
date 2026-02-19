@@ -1,13 +1,15 @@
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use axum::extract::State;
-use axum::http::StatusCode;
+use axum::extract::{Query, State};
+use axum::http::{header, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use clap::Parser;
+use serde::Deserialize;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 use wbeamd_api::{ClientMetricsRequest, ConfigPatch, ErrorResponse};
@@ -77,6 +79,7 @@ async fn main() {
         .route("/health", get(get_health))
         .route("/presets", get(get_presets))
         .route("/metrics", get(get_metrics))
+        .route("/speedtest", get(get_speedtest))
         .route("/start", post(post_start))
         .route("/stop", post(post_stop))
         .route("/apply", post(post_apply))
@@ -85,6 +88,7 @@ async fn main() {
         .route("/v1/health", get(get_health))
         .route("/v1/presets", get(get_presets))
         .route("/v1/metrics", get(get_metrics))
+        .route("/v1/speedtest", get(get_speedtest))
         .route("/v1/start", post(post_start))
         .route("/v1/stop", post(post_stop))
         .route("/v1/apply", post(post_apply))
@@ -133,6 +137,26 @@ async fn get_presets(State(state): State<AppState>) -> impl IntoResponse {
 
 async fn get_metrics(State(state): State<AppState>) -> impl IntoResponse {
     Json(state.core.metrics().await)
+}
+
+#[derive(Debug, Deserialize)]
+struct SpeedtestQuery {
+    mb: Option<u32>,
+}
+
+async fn get_speedtest(Query(query): Query<SpeedtestQuery>) -> impl IntoResponse {
+    let mb = query.mb.unwrap_or(64).clamp(1, 256);
+    let total = (mb as usize) * 1024 * 1024;
+    let mut payload = vec![0u8; total];
+    fill_pseudorandom(&mut payload);
+    (
+        [
+            (header::CONTENT_TYPE, "application/octet-stream"),
+            (header::CACHE_CONTROL, "no-store"),
+            (header::PRAGMA, "no-cache"),
+        ],
+        payload,
+    )
 }
 
 async fn post_start(
@@ -207,4 +231,32 @@ fn workspace_root_from_manifest(manifest_dir: &str) -> PathBuf {
     let path = Path::new(manifest_dir);
     // host/rust/crates/wbeamd-server -> repo root is 4 levels up.
     path.join("../../../../").canonicalize().unwrap_or_else(|_| PathBuf::from("."))
+}
+
+fn fill_pseudorandom(buf: &mut [u8]) {
+    let mut seed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0x9E37_79B9_7F4A_7C15);
+    if seed == 0 {
+        seed = 0xA5A5_A5A5_A5A5_A5A5;
+    }
+    let mut i = 0usize;
+    while i + 8 <= buf.len() {
+        // xorshift64*
+        seed ^= seed >> 12;
+        seed ^= seed << 25;
+        seed ^= seed >> 27;
+        let v = seed.wrapping_mul(0x2545F4914F6CDD1D);
+        buf[i..i + 8].copy_from_slice(&v.to_le_bytes());
+        i += 8;
+    }
+    if i < buf.len() {
+        seed ^= seed >> 12;
+        seed ^= seed << 25;
+        seed ^= seed >> 27;
+        let v = seed.wrapping_mul(0x2545F4914F6CDD1D).to_le_bytes();
+        let rem = buf.len() - i;
+        buf[i..].copy_from_slice(&v[..rem]);
+    }
 }

@@ -291,9 +291,9 @@ pub fn presets() -> BTreeMap<String, ActiveConfig> {
             profile: "lowlatency".to_string(),
             encoder: "auto".to_string(),
             cursor_mode: "hidden".to_string(),
-            size: "1920x1080".to_string(),
+            size: "1280x720".to_string(),
             fps: 60,
-            bitrate_kbps: 18_000,
+            bitrate_kbps: 16_000,
             debug_fps: 0,
         },
     );
