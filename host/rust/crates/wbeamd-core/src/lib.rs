@@ -1015,3 +1015,273 @@ async fn terminate_pid(pid: u32) {
     sleep(Duration::from_millis(300)).await;
     let _ = kill(pid, Signal::SIGKILL);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    // ── helpers ─────────────────────────────────────────────────────────────
+
+    fn default_inner() -> Inner {
+        Inner::new("test-host".to_string(), ActiveConfig::balanced_default())
+    }
+
+    /// Client metrics indicating high decode pressure (decode_p95 > 12 ms).
+    fn high_pressure_client() -> ClientMetricsRequest {
+        ClientMetricsRequest {
+            decode_time_ms_p95: 15.0,
+            render_time_ms_p95: 3.0,
+            present_fps: 60.0,
+            recv_fps: 60.0,
+            ..Default::default()
+        }
+    }
+
+    /// Client metrics that satisfy all low-pressure conditions.
+    fn low_pressure_client() -> ClientMetricsRequest {
+        // balanced_default fps = 60; target * 0.98 = 58.8
+        ClientMetricsRequest {
+            decode_time_ms_p95: 4.0,
+            render_time_ms_p95: 2.0,
+            present_fps: 60.0,
+            recv_fps: 60.0,
+            transport_queue_depth: 0,
+            decode_queue_depth: 0,
+            render_queue_depth: 0,
+            too_late_frames: 0,
+            ..Default::default()
+        }
+    }
+
+    /// Build a DaemonCore whose inner state looks like it's been streaming
+    /// for 10 seconds (satisfies can_adapt) with adaptation cooldown cleared.
+    async fn streaming_core_ready() -> DaemonCore {
+        let core = DaemonCore::new(
+            PathBuf::from("/tmp/test-wbeam-b2"),
+            15000,
+            15001,
+        );
+        {
+            let mut inner = core.inner.lock().await;
+            inner.state = STATE_STREAMING.to_string();
+            inner.current_pid = Some(99999);
+            // stream started 10 s ago – passes the 8 s warmup guard
+            inner.stream_started_at = Some(Instant::now() - Duration::from_secs(10));
+            inner.last_adaptation_at = None; // cooldown clear
+            inner.adaptation_level = 0;
+            inner.high_pressure_streak = 0;
+            inner.low_pressure_streak = 0;
+        }
+        core
+    }
+
+    // ── is_high_pressure ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_high_pressure_decode_p95() {
+        let inner = default_inner();
+        let client = ClientMetricsRequest {
+            decode_time_ms_p95: 13.0, // > 12.0
+            present_fps: 60.0,
+            ..Default::default()
+        };
+        assert!(is_high_pressure(&inner, &client));
+    }
+
+    #[test]
+    fn test_high_pressure_fps_drop() {
+        let inner = default_inner(); // fps target = 60
+        let client = ClientMetricsRequest {
+            present_fps: 50.0, // < 60 * 0.90 = 54
+            decode_time_ms_p95: 5.0,
+            ..Default::default()
+        };
+        assert!(is_high_pressure(&inner, &client));
+    }
+
+    #[test]
+    fn test_high_pressure_too_late_frames() {
+        let inner = default_inner();
+        let client = ClientMetricsRequest {
+            too_late_frames: 1,
+            present_fps: 60.0,
+            decode_time_ms_p95: 5.0,
+            ..Default::default()
+        };
+        assert!(is_high_pressure(&inner, &client));
+    }
+
+    #[test]
+    fn test_not_high_pressure_healthy() {
+        let inner = default_inner();
+        let client = ClientMetricsRequest {
+            decode_time_ms_p95: 8.0,  // ≤ 12.0
+            render_time_ms_p95: 5.0,  // ≤ 7.0
+            present_fps: 59.0,        // 59 >= 60 * 0.90 = 54
+            ..Default::default()
+        };
+        assert!(!is_high_pressure(&inner, &client));
+    }
+
+    // ── is_low_pressure ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_low_pressure_all_healthy() {
+        let inner = default_inner();
+        assert!(is_low_pressure(&inner, &low_pressure_client()));
+    }
+
+    #[test]
+    fn test_low_pressure_blocked_by_decode_queue() {
+        let inner = default_inner();
+        let mut c = low_pressure_client();
+        c.decode_queue_depth = 1;
+        assert!(!is_low_pressure(&inner, &c));
+    }
+
+    #[test]
+    fn test_low_pressure_blocked_by_fps() {
+        let inner = default_inner(); // fps = 60, min = 58.8
+        let mut c = low_pressure_client();
+        c.present_fps = 58.0; // < 60 * 0.98 = 58.8
+        assert!(!is_low_pressure(&inner, &c));
+    }
+
+    #[test]
+    fn test_low_pressure_blocked_by_zero_decode() {
+        // decode_time_ms_p95 must be > 0 for low_pressure to be true
+        let inner = default_inner();
+        let mut c = low_pressure_client();
+        c.decode_time_ms_p95 = 0.0;
+        assert!(!is_low_pressure(&inner, &c));
+    }
+
+    // ── adaptation state machine ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_adaptation_degrade_after_streak() {
+        let core = streaming_core_ready().await;
+        // Two consecutive high-pressure samples should push level 0 → 1
+        core.ingest_client_metrics(high_pressure_client()).await.expect("ingest");
+        core.ingest_client_metrics(high_pressure_client()).await.expect("ingest");
+        let inner = core.inner.lock().await;
+        assert_eq!(inner.adaptation_level, 1, "level should degrade to 1");
+    }
+
+    #[tokio::test]
+    async fn test_adaptation_single_high_no_degrade() {
+        // Only one high-pressure sample (streak < HIGH_PRESSURE_STREAK_REQUIRED=2)
+        let core = streaming_core_ready().await;
+        core.ingest_client_metrics(high_pressure_client()).await.expect("ingest");
+        let inner = core.inner.lock().await;
+        assert_eq!(inner.adaptation_level, 0, "one sample should not degrade");
+    }
+
+    #[tokio::test]
+    async fn test_adaptation_cooldown_blocks_rapid_degrade() {
+        let core = streaming_core_ready().await;
+        // First degrade: level 0 → 1
+        core.ingest_client_metrics(high_pressure_client()).await.expect("ingest");
+        core.ingest_client_metrics(high_pressure_client()).await.expect("ingest");
+        // Immediately after degrade, cooldown should block further degrade
+        // (last_adaptation_at = Some(Instant::now()), delta < 4s)
+        core.ingest_client_metrics(high_pressure_client()).await.expect("ingest");
+        core.ingest_client_metrics(high_pressure_client()).await.expect("ingest");
+        let inner = core.inner.lock().await;
+        assert_eq!(inner.adaptation_level, 1, "cooldown should block second degrade");
+    }
+
+    #[tokio::test]
+    async fn test_adaptation_cooldown_cleared_allows_degrade() {
+        let core = streaming_core_ready().await;
+        // Simulate first degrade manually, then back-date last_adaptation_at
+        {
+            let mut inner = core.inner.lock().await;
+            inner.adaptation_level = 1;
+            // back-date cooldown beyond 4 seconds
+            inner.last_adaptation_at = Some(Instant::now() - Duration::from_secs(5));
+            inner.high_pressure_streak = 0;
+        }
+        // Two more high-pressure → level 1 → 2
+        core.ingest_client_metrics(high_pressure_client()).await.expect("ingest");
+        core.ingest_client_metrics(high_pressure_client()).await.expect("ingest");
+        let inner = core.inner.lock().await;
+        assert_eq!(inner.adaptation_level, 2, "back-dated cooldown should allow degrade 1→2");
+    }
+
+    #[tokio::test]
+    async fn test_adaptation_clamps_at_max() {
+        let core = streaming_core_ready().await;
+        // Drive to max (3) then try to go further
+        {
+            let mut inner = core.inner.lock().await;
+            inner.adaptation_level = MAX_ADAPTATION_LEVEL;
+            inner.last_adaptation_at = Some(Instant::now() - Duration::from_secs(5));
+        }
+        core.ingest_client_metrics(high_pressure_client()).await.expect("ingest");
+        core.ingest_client_metrics(high_pressure_client()).await.expect("ingest");
+        let inner = core.inner.lock().await;
+        assert_eq!(inner.adaptation_level, MAX_ADAPTATION_LEVEL, "must not exceed MAX (3)");
+    }
+
+    #[tokio::test]
+    async fn test_adaptation_recover_after_low_pressure_streak() {
+        // Start at level 1, send LOW_PRESSURE_STREAK_REQUIRED (8) low samples
+        let core = streaming_core_ready().await;
+        {
+            let mut inner = core.inner.lock().await;
+            inner.adaptation_level = 1;
+            inner.last_adaptation_at = Some(Instant::now() - Duration::from_secs(5));
+        }
+        for _ in 0..LOW_PRESSURE_STREAK_REQUIRED {
+            core.ingest_client_metrics(low_pressure_client()).await.expect("ingest");
+        }
+        let inner = core.inner.lock().await;
+        assert_eq!(inner.adaptation_level, 0, "8 low-pressure samples should recover level 1→0");
+    }
+
+    #[tokio::test]
+    async fn test_adaptation_clamps_at_zero() {
+        // Already at 0, send 8 low-pressure samples → stays 0
+        let core = streaming_core_ready().await;
+        {
+            let mut inner = core.inner.lock().await;
+            inner.adaptation_level = 0;
+            inner.last_adaptation_at = Some(Instant::now() - Duration::from_secs(5));
+        }
+        for _ in 0..LOW_PRESSURE_STREAK_REQUIRED {
+            core.ingest_client_metrics(low_pressure_client()).await.expect("ingest");
+        }
+        let inner = core.inner.lock().await;
+        assert_eq!(inner.adaptation_level, 0, "cannot recover below 0");
+    }
+
+    #[tokio::test]
+    async fn test_adaptation_hold_during_warmup() {
+        // stream_started_at < 8s → can_adapt = false → level stays 0
+        let core = DaemonCore::new(
+            PathBuf::from("/tmp/test-wbeam-b2"),
+            15002,
+            15003,
+        );
+        {
+            let mut inner = core.inner.lock().await;
+            inner.state = STATE_STREAMING.to_string();
+            inner.current_pid = Some(99999);
+            inner.stream_started_at = Some(Instant::now() - Duration::from_secs(3)); // < 8s
+        }
+        core.ingest_client_metrics(high_pressure_client()).await.expect("ingest");
+        core.ingest_client_metrics(high_pressure_client()).await.expect("ingest");
+        let inner = core.inner.lock().await;
+        assert_eq!(inner.adaptation_level, 0, "warmup guard must block early adaptation");
+    }
+
+    // ── telemetry helpers ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_telemetry_dir_returns_path() {
+        let dir = telemetry_dir();
+        assert!(dir.to_str().unwrap().contains("wbeam"));
+    }
+}
