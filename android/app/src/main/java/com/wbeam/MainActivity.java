@@ -1761,6 +1761,9 @@ public class MainActivity extends AppCompatActivity {
         }
 
         private void runLoop() {
+            // P1.1: elevate to real-time audio priority to reduce decode jitter
+            android.os.Process.setThreadPriority(
+                    android.os.Process.THREAD_PRIORITY_URGENT_AUDIO);
             while (running) {
                 MediaCodec codec = null;
                 try {
@@ -1774,6 +1777,8 @@ public class MainActivity extends AppCompatActivity {
                     socket = new Socket();
                     socket.connect(new InetSocketAddress(HOST, PORT), 2000);
                     socket.setTcpNoDelay(true);
+                    socket.setReceiveBufferSize(64 * 1024); // P1.1: 64KB bounded USB recv buf
+                    socket.setSoTimeout(5_000);             // P1.1: cap blocking read to 5s
 
                     codec = MediaCodec.createDecoderByType("video/avc");
                     MediaFormat format = MediaFormat.createVideoFormat("video/avc", decodeWidth, decodeHeight);
@@ -1856,9 +1861,10 @@ public class MainActivity extends AppCompatActivity {
             long outFrames     = 0;
             long droppedSec    = 0;
             long tooLateSec    = 0;
-            long decodeNsTotal = 0;
-            long decodeNsMax   = 0;
-            long renderNsMax   = 0;
+            long   decodeNsTotal = 0;
+            long[] decodeNsBuf   = new long[128]; // P1.3: rolling decode-time buffer
+            int    decodeNsBufN  = 0;
+            long   renderNsMax   = 0;
             long lastLog = SystemClock.elapsedRealtime();
             long lastPresentMs     = SystemClock.elapsedRealtime(); // C5: black-screen watchdog
             long pendingWithNoPresent = 0;
@@ -1931,7 +1937,7 @@ public class MainActivity extends AppCompatActivity {
                             if (queueNal(codec, streamBuf, sHead + 4, nalSize, frames * frameUs)) {
                                 long decodeNs = SystemClock.elapsedRealtimeNanos() - t0;
                                 decodeNsTotal += decodeNs;
-                                decodeNsMax = Math.max(decodeNsMax, decodeNs);
+                                decodeNsBuf[(decodeNsBufN++) & 127] = decodeNs; // P1.3
                                 avgNalSize = ((avgNalSize * 7) + nalSize) / 8;
                                 inFrames++;
                                 pendingDecodeQueue++; // E
@@ -1975,7 +1981,7 @@ public class MainActivity extends AppCompatActivity {
                                     if (queueNal(codec, streamBuf, sHead, nalSize, frames * frameUs)) {
                                         long decodeNs = SystemClock.elapsedRealtimeNanos() - t0;
                                         decodeNsTotal += decodeNs;
-                                        decodeNsMax = Math.max(decodeNsMax, decodeNs);
+                                        decodeNsBuf[(decodeNsBufN++) & 127] = decodeNs; // P1.3
                                         avgNalSize = ((avgNalSize * 7) + nalSize) / 8;
                                         inFrames++;
                                         pendingDecodeQueue++; // E
@@ -2023,7 +2029,8 @@ public class MainActivity extends AppCompatActivity {
                     double decodeMsP50 = inFrames > 0
                             ? (decodeNsTotal / 1_000_000.0) / inFrames
                             : 0.0;
-                    double decodeMsP95 = Math.max(decodeMsP50, decodeNsMax / 1_000_000.0);
+                    // P1.3: true p95 from rolling buffer (was Math.max / pseudo-max)
+                    double decodeMsP95 = percentilesMs(decodeNsBuf, Math.min(decodeNsBufN, 128))[1];
                     double renderMsP95 = renderNsMax / 1_000_000.0;
                     statusListener.onClientMetrics(
                             new ClientMetricsSample(
@@ -2050,7 +2057,7 @@ public class MainActivity extends AppCompatActivity {
                     droppedSec    = 0;
                     tooLateSec    = 0;
                     decodeNsTotal = 0;
-                    decodeNsMax   = 0;
+                    decodeNsBufN  = 0;  // P1.3
                     renderNsMax   = 0;
                     lastLog = now;
                 }
@@ -2075,7 +2082,8 @@ public class MainActivity extends AppCompatActivity {
             long   droppedSec = 0;
             long   tooLateSec = 0;
             long   decodeNsTotal = 0;
-            long   decodeNsMax   = 0;
+            long[] decodeNsBuf   = new long[128]; // P1.3: rolling decode-time buffer
+            int    decodeNsBufN  = 0;
             long   renderNsMax   = 0;
             long   lastLog       = SystemClock.elapsedRealtime();
             // C5: black-screen watchdog state
@@ -2131,7 +2139,7 @@ public class MainActivity extends AppCompatActivity {
                     if (queueNal(codec, payloadBuf, 0, payloadLen, ptsUs)) {
                         long decodeNs = SystemClock.elapsedRealtimeNanos() - t0;
                         decodeNsTotal += decodeNs;
-                        decodeNsMax    = Math.max(decodeNsMax, decodeNs);
+                        decodeNsBuf[(decodeNsBufN++) & 127] = decodeNs; // P1.3
                         inFrames++;
                         totalInSincePresent++;
                         pendingDecodeQueue++; // E: track depth
@@ -2172,7 +2180,8 @@ public class MainActivity extends AppCompatActivity {
                                     + " | reconnects: " + reconnects
                     );
                     double decodeMsP50 = inFrames > 0 ? (decodeNsTotal / 1_000_000.0) / inFrames : 0.0;
-                    double decodeMsP95 = Math.max(decodeMsP50, decodeNsMax / 1_000_000.0);
+                    // P1.3: true p95 from rolling buffer
+                    double decodeMsP95 = percentilesMs(decodeNsBuf, Math.min(decodeNsBufN, 128))[1];
                     double renderMsP95 = renderNsMax / 1_000_000.0;
                     statusListener.onClientMetrics(
                             new ClientMetricsSample(
@@ -2191,11 +2200,21 @@ public class MainActivity extends AppCompatActivity {
                     droppedSec    = 0;
                     tooLateSec    = 0;
                     decodeNsTotal = 0;
-                    decodeNsMax   = 0;
+                    decodeNsBufN  = 0;  // P1.3
                     renderNsMax   = 0;
                     lastLog = nowMs;
                 }
             }
+        }
+
+        // P1.3: compute [p50, p95] in milliseconds from a nanosecond circular buffer
+        private static double[] percentilesMs(long[] buf, int n) {
+            if (n <= 0) return new double[]{0.0, 0.0};
+            long[] tmp = java.util.Arrays.copyOf(buf, n);
+            java.util.Arrays.sort(tmp);
+            double p50 = tmp[(int) Math.min(n - 1, n * 0.50)] / 1_000_000.0;
+            double p95 = tmp[(int) Math.min(n - 1, (int)(n * 0.95))] / 1_000_000.0;
+            return new double[]{p50, p95};
         }
 
         private static boolean queueNal(MediaCodec codec, byte[] data, int offset, int size, long ptsUs) {
