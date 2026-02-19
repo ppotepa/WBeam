@@ -1814,16 +1814,21 @@ public class MainActivity extends AppCompatActivity {
                             break; // wait for more data
                         }
 
-                        long t0 = SystemClock.elapsedRealtimeNanos();
-                        if (queueNal(codec, streamBuf, sHead + 4, nalSize, frames * frameUs)) {
-                            long decodeNs = SystemClock.elapsedRealtimeNanos() - t0;
-                            decodeNsTotal += decodeNs;
-                            decodeNsMax = Math.max(decodeNsMax, decodeNs);
-                            avgNalSize = ((avgNalSize * 7) + nalSize) / 8;
-                            inFrames++;
-                            pendingDecodeQueue++;
+                        // E: drop-late over delay-growth: don't over-fill the decode queue
+                        if (pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES) {
+                            droppedSec++; // E: decode queue full
                         } else {
-                            droppedSec++;
+                            long t0 = SystemClock.elapsedRealtimeNanos();
+                            if (queueNal(codec, streamBuf, sHead + 4, nalSize, frames * frameUs)) {
+                                long decodeNs = SystemClock.elapsedRealtimeNanos() - t0;
+                                decodeNsTotal += decodeNs;
+                                decodeNsMax = Math.max(decodeNsMax, decodeNs);
+                                avgNalSize = ((avgNalSize * 7) + nalSize) / 8;
+                                inFrames++;
+                                pendingDecodeQueue++; // E
+                            } else {
+                                droppedSec++;
+                            }
                         }
                         frames++;
                         drainLatestFrame(codec, bufferInfo, drainStats);
@@ -1853,16 +1858,21 @@ public class MainActivity extends AppCompatActivity {
 
                             int nalSize = next - sHead;
                             if (nalSize > 0) {
-                                long t0 = SystemClock.elapsedRealtimeNanos();
-                                if (queueNal(codec, streamBuf, sHead, nalSize, frames * frameUs)) {
-                                    long decodeNs = SystemClock.elapsedRealtimeNanos() - t0;
-                                    decodeNsTotal += decodeNs;
-                                    decodeNsMax = Math.max(decodeNsMax, decodeNs);
-                                    avgNalSize = ((avgNalSize * 7) + nalSize) / 8;
-                                    inFrames++;
-                                    pendingDecodeQueue++;
+                                // E: drop-late: don't over-fill the decode queue
+                                if (pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES) {
+                                    droppedSec++; // E: decode queue full
                                 } else {
-                                    droppedSec++;
+                                    long t0 = SystemClock.elapsedRealtimeNanos();
+                                    if (queueNal(codec, streamBuf, sHead, nalSize, frames * frameUs)) {
+                                        long decodeNs = SystemClock.elapsedRealtimeNanos() - t0;
+                                        decodeNsTotal += decodeNs;
+                                        decodeNsMax = Math.max(decodeNsMax, decodeNs);
+                                        avgNalSize = ((avgNalSize * 7) + nalSize) / 8;
+                                        inFrames++;
+                                        pendingDecodeQueue++; // E
+                                    } else {
+                                        droppedSec++;
+                                    }
                                 }
                                 frames++;
                                 drainLatestFrame(codec, bufferInfo, drainStats);
@@ -1964,6 +1974,7 @@ public class MainActivity extends AppCompatActivity {
             long   totalInSincePresent = 0;
             MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
             DrainStats drainStats = new DrainStats();
+            int pendingDecodeQueue = 0; // E: bounded decode queue
 
             while (running) {
                 // ── Read 24-byte header ──────────────────────────────────────
@@ -2003,18 +2014,25 @@ public class MainActivity extends AppCompatActivity {
                 bytes += FRAME_HEADER_SIZE + payloadLen;
 
                 // ── Queue to decoder ─────────────────────────────────────────
-                long t0 = SystemClock.elapsedRealtimeNanos();
-                if (queueNal(codec, payloadBuf, 0, payloadLen, ptsUs)) {
-                    long decodeNs = SystemClock.elapsedRealtimeNanos() - t0;
-                    decodeNsTotal += decodeNs;
-                    decodeNsMax    = Math.max(decodeNsMax, decodeNs);
-                    inFrames++;
-                    totalInSincePresent++;
+                // E: bounded decode queue – drop if full (latest-frame-wins)
+                if (pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES) {
+                    droppedSec++; // E: decode queue full, drop oldest frame
                 } else {
-                    droppedSec++;
+                    long t0 = SystemClock.elapsedRealtimeNanos();
+                    if (queueNal(codec, payloadBuf, 0, payloadLen, ptsUs)) {
+                        long decodeNs = SystemClock.elapsedRealtimeNanos() - t0;
+                        decodeNsTotal += decodeNs;
+                        decodeNsMax    = Math.max(decodeNsMax, decodeNs);
+                        inFrames++;
+                        totalInSincePresent++;
+                        pendingDecodeQueue++; // E: track depth
+                    } else {
+                        droppedSec++;
+                    }
                 }
                 frames++;
                 drainLatestFrame(codec, bufferInfo, drainStats);
+                pendingDecodeQueue = Math.max(0, pendingDecodeQueue - drainStats.releasedCount); // E
                 if (drainStats.renderedCount > 0) {
                     outFrames += drainStats.renderedCount;
                     lastPresentMs = SystemClock.elapsedRealtime();
@@ -2041,7 +2059,7 @@ public class MainActivity extends AppCompatActivity {
                             "fps in/out: " + inFrames + "/" + outFrames
                                     + " | drops: " + droppedTotal
                                     + " | late: " + tooLateTotal
-                                    + " | q(d/r): 0/" + (drainStats.renderedCount > 0 ? 1 : 0)
+                                    + " | q(d/r): " + pendingDecodeQueue + "/" + (drainStats.renderedCount > 0 ? 1 : 0)
                                     + " | reconnects: " + reconnects
                     );
                     double decodeMsP50 = inFrames > 0 ? (decodeNsTotal / 1_000_000.0) / inFrames : 0.0;
@@ -2053,7 +2071,7 @@ public class MainActivity extends AppCompatActivity {
                                     decodeMsP50, decodeMsP95, renderMsP95,
                                     0.0, 0.0,
                                     0,
-                                    0,
+                                    Math.min(DECODE_QUEUE_MAX_FRAMES, pendingDecodeQueue), // E
                                     Math.min(RENDER_QUEUE_MAX_FRAMES, drainStats.renderedCount > 0 ? 1 : 0),
                                     0, droppedTotal, tooLateTotal
                             )
