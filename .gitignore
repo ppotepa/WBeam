@@ -47,3 +47,6 @@ host/rust/logs/**
 # Local generated helper files
 codebase_concat*.txt
 
+# Markdown policy
+*.md
+!README.md
