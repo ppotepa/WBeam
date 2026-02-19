@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="app" type="AndroidRunConfigurationType" factoryName="Android App">
+    <module name="WBeamAndroid.app" />
+    <option name="DEPLOY" value="true" />
+    <option name="DEPLOY_APK_FROM_BUNDLE" value="false" />
+    <option name="DEPLOY_AS_INSTANT" value="false" />
+    <option name="ARTIFACT_NAME" value="" />
+    <option name="PM_INSTALL_OPTIONS" value="" />
+    <option name="ALL_USERS" value="false" />
+    <option name="ALWAYS_INSTALL_WITH_PM" value="false" />
+    <option name="RESTORE_DEBUGGER_ON_TARGET_SELECTION" value="false" />
+    <option name="ACTIVITY_EXTRA_FLAGS" value="" />
+    <option name="MODE" value="default_activity" />
+    <RunnerSettings RunnerId="AndroidDebugRunner" />
+    <ConfigurationWrapper RunnerId="AndroidDebugRunner" />
+    <method v="2" />
+  </configuration>
+</component>
