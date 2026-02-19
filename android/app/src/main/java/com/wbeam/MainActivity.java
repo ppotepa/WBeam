@@ -6,6 +6,8 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.media.MediaCodec;
+import android.media.MediaCodecInfo;
+import android.media.MediaCodecList;
 import android.media.MediaFormat;
 import android.media.MediaPlayer;
 import android.os.Build;
@@ -67,6 +69,11 @@ public class MainActivity extends AppCompatActivity {
     private static final long AUTO_START_COOLDOWN_MS = 4000;
     private static final long STOP_SUPPRESS_AUTO_START_MS = 12000;
     private static final int API_RETRY_ATTEMPTS = 2;
+    private static final long CLIENT_METRICS_INTERVAL_MS = 900;
+    private static final long HUD_ADB_LOG_INTERVAL_MS = 1000;
+    private static final int TRANSPORT_QUEUE_MAX_FRAMES = 3;
+    private static final int DECODE_QUEUE_MAX_FRAMES = 2;
+    private static final int RENDER_QUEUE_MAX_FRAMES = 1;
     private static final String TEST_VIDEO_URL =
             "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4";
 
@@ -88,6 +95,8 @@ public class MainActivity extends AppCompatActivity {
     private View topBar;
     private View settingsPanel;
     private View statusPanel;
+    private View perfHudPanel;
+    private View preflightOverlay;
     private View debugControlsRow;
     private View statusLed;
     private View cursorOverlay;
@@ -95,6 +104,10 @@ public class MainActivity extends AppCompatActivity {
     private TextView detailText;
     private TextView bpsText;
     private TextView statsText;
+    private TextView perfHudText;
+    private TextView preflightTitleText;
+    private TextView preflightBodyText;
+    private TextView preflightHintText;
     private TextView liveLogText;
     private TextView resValueText;
     private TextView fpsValueText;
@@ -127,9 +140,18 @@ public class MainActivity extends AppCompatActivity {
     private String daemonHostName = "-";
     private String daemonService = "-";
     private String daemonState = "IDLE";
+    private long daemonRunId = 0L;
+    private long daemonUptimeSec = 0L;
     private boolean statusPollInFlight = false;
     private long lastAutoStartAt = 0L;
     private long suppressAutoStartUntil = 0L;
+    private long lastClientMetricsPostAt = 0L;
+    private long lastHudAdbLogAt = 0L;
+    private String lastHudAdbSnapshot = "";
+    private boolean surfaceReady = false;
+    private boolean preflightComplete = false;
+    private int preflightAnimTick = 0;
+    private boolean hwAvcDecodeAvailable = false;
     private String lastUiState = STATE_IDLE;
     private String lastUiInfo = "tap Settings -> Start Live";
     private long lastUiBps = 0;
@@ -147,6 +169,14 @@ public class MainActivity extends AppCompatActivity {
             uiHandler.postDelayed(this, STATUS_POLL_MS);
         }
     };
+    private final Runnable preflightPulseTask = new Runnable() {
+        @Override
+        public void run() {
+            preflightAnimTick = (preflightAnimTick + 1) % 4;
+            updatePreflightOverlay();
+            uiHandler.postDelayed(this, 350);
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -159,6 +189,7 @@ public class MainActivity extends AppCompatActivity {
         setupSurfaceCallbacks();
         setupButtons();
         loadSavedSettings();
+        hwAvcDecodeAvailable = hasHardwareAvcDecoder();
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                 ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
@@ -173,7 +204,10 @@ public class MainActivity extends AppCompatActivity {
         applySettings(false);
         setDebugControlsVisible(false);
         setFullscreen(false);
-        updateStatsLine("fps in/out: - | drops: - | reconnects: -");
+        updateStatsLine("fps in/out: - | drops: - | late: - | q(t/d/r): -/-/- | reconnects: -");
+        updatePerfHudUnavailable();
+        startPreflightPulse();
+        updatePreflightOverlay();
         updateStatus(STATE_IDLE, "tap Settings -> Start Live", 0);
         startStatusPolling();
     }
@@ -181,6 +215,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         stopStatusPolling();
+        stopPreflightPulse();
         stopLiveView();
         releaseMediaPlayer();
         ioExecutor.shutdownNow();
@@ -205,6 +240,8 @@ public class MainActivity extends AppCompatActivity {
         topBar = findViewById(R.id.topBar);
         settingsPanel = findViewById(R.id.settingsPanel);
         statusPanel = findViewById(R.id.statusPanel);
+        perfHudPanel = findViewById(R.id.perfHudPanel);
+        preflightOverlay = findViewById(R.id.preflightOverlay);
         debugControlsRow = findViewById(R.id.debugControlsRow);
         statusLed = findViewById(R.id.statusLed);
         cursorOverlay = findViewById(R.id.cursorOverlay);
@@ -213,6 +250,10 @@ public class MainActivity extends AppCompatActivity {
         detailText = findViewById(R.id.detailText);
         bpsText = findViewById(R.id.bpsText);
         statsText = findViewById(R.id.statsText);
+        perfHudText = findViewById(R.id.perfHudText);
+        preflightTitleText = findViewById(R.id.preflightTitle);
+        preflightBodyText = findViewById(R.id.preflightBody);
+        preflightHintText = findViewById(R.id.preflightHint);
         liveLogText = findViewById(R.id.liveLogText);
 
         resValueText = findViewById(R.id.resValueText);
@@ -276,18 +317,25 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void surfaceCreated(SurfaceHolder holder) {
                 surface = holder.getSurface();
+                surfaceReady = surface != null && surface.isValid();
+                updatePreflightOverlay();
                 updateStatus(STATE_IDLE, "surface ready", 0);
             }
 
             @Override
             public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
                 surface = holder.getSurface();
+                surfaceReady = surface != null && surface.isValid();
+                updatePreflightOverlay();
             }
 
             @Override
             public void surfaceDestroyed(SurfaceHolder holder) {
                 stopLiveView();
                 surface = null;
+                surfaceReady = false;
+                preflightComplete = false;
+                updatePreflightOverlay();
                 hideCursorOverlay();
                 updateStatus(STATE_IDLE, "surface destroyed", 0);
             }
@@ -471,6 +519,8 @@ public class MainActivity extends AppCompatActivity {
         daemonReachable = true;
         daemonHostName = status.optString("host_name", daemonHostName);
         daemonState = status.optString("state", "IDLE").toUpperCase(Locale.US);
+        daemonRunId = status.optLong("run_id", daemonRunId);
+        daemonUptimeSec = status.optLong("uptime", daemonUptimeSec);
         daemonService = health != null ? health.optString("service", daemonService) : daemonService;
 
         if (!wasReachable) {
@@ -480,6 +530,7 @@ public class MainActivity extends AppCompatActivity {
 
         updateHostHint();
         refreshStatusText();
+        updatePreflightOverlay();
 
         if (metrics != null) {
             long frameIn = metrics.optLong("frame_in", 0);
@@ -494,6 +545,7 @@ public class MainActivity extends AppCompatActivity {
                             + " | bitrate: " + formatBps(bps)
             );
         }
+        updatePerfHud(metrics);
 
         if ("STREAMING".equals(daemonState)) {
             ensureDecoderRunning();
@@ -517,6 +569,9 @@ public class MainActivity extends AppCompatActivity {
         daemonReachable = false;
         daemonState = "DISCONNECTED";
         updateHostHint();
+        updatePerfHudUnavailable();
+        preflightComplete = false;
+        updatePreflightOverlay();
         if (wasReachable) {
             updateStatus(STATE_ERROR, "Host API offline: " + shortError(e), 0);
             appendLiveLogError("daemon poll failed: " + shortError(e));
@@ -654,7 +709,9 @@ public class MainActivity extends AppCompatActivity {
             conn.setRequestMethod(method);
             conn.setConnectTimeout(1500);
             conn.setReadTimeout(1500);
+            conn.setUseCaches(false);
             conn.setRequestProperty("Accept", "application/json");
+            conn.setRequestProperty("Connection", "close");
 
             if (payload != null) {
                 byte[] body = payload.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
@@ -708,6 +765,25 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private void pushClientMetricsAsync(ClientMetricsSample metrics) {
+        if (metrics == null) {
+            return;
+        }
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastClientMetricsPostAt < CLIENT_METRICS_INTERVAL_MS) {
+            return;
+        }
+        lastClientMetricsPostAt = now;
+
+        ioExecutor.execute(() -> {
+            try {
+                apiRequestWithRetry("POST", "/v1/client-metrics", metrics.toJson(), 1);
+            } catch (Exception e) {
+                appendLiveLogWarn("client-metrics post failed: " + shortError(e));
+            }
+        });
+    }
+
     private String shortError(Exception e) {
         String msg = e.getMessage();
         if (msg != null) {
@@ -749,6 +825,11 @@ public class MainActivity extends AppCompatActivity {
                     public void onStats(String line) {
                         runOnUiThread(() -> updateStatsLine(line));
                     }
+
+                    @Override
+                    public void onClientMetrics(ClientMetricsSample metrics) {
+                        pushClientMetricsAsync(metrics);
+                    }
                 },
                 decodeSize[0],
                 decodeSize[1],
@@ -765,7 +846,7 @@ public class MainActivity extends AppCompatActivity {
         }
         releaseMediaPlayer();
         hideCursorOverlay();
-        updateStatsLine("fps in/out: - | drops: - | reconnects: -");
+        updateStatsLine("fps in/out: - | drops: - | late: - | q(t/d/r): -/-/- | reconnects: -");
         updateStatus(STATE_IDLE, "stopped", 0);
     }
 
@@ -1068,8 +1149,299 @@ public class MainActivity extends AppCompatActivity {
 
     private void updateStatsLine(String line) {
         statsText.setText(line == null || line.trim().isEmpty()
-                ? "fps in/out: - | drops: - | reconnects: -"
+                ? "fps in/out: - | drops: - | late: - | q(t/d/r): -/-/- | reconnects: -"
                 : line);
+    }
+
+    private void updatePerfHudUnavailable() {
+        if (perfHudText == null) {
+            return;
+        }
+        perfHudText.setText("HUD OFFLINE\nwaiting for host metrics...");
+        perfHudText.setTextColor(Color.parseColor("#FCA5A5"));
+        if (perfHudPanel != null) {
+            perfHudPanel.setAlpha(0.92f);
+        }
+        emitHudDebugAdb("state=offline waiting_metrics=1");
+    }
+
+    private void updatePerfHud(JSONObject metrics) {
+        if (perfHudText == null) {
+            return;
+        }
+        if (metrics == null) {
+            updatePerfHudUnavailable();
+            return;
+        }
+
+        JSONObject kpi = metrics.optJSONObject("kpi");
+        JSONObject latest = metrics.optJSONObject("latest_client_metrics");
+        JSONObject limits = metrics.optJSONObject("queue_limits");
+        long frameInHost = metrics.optLong("frame_in", 0);
+        long frameOutHost = metrics.optLong("frame_out", 0);
+        long streamUptimeSec = metrics.optLong("stream_uptime_sec", 0);
+
+        double targetFps = kpi != null ? kpi.optDouble("target_fps", getSelectedFps()) : getSelectedFps();
+        double presentFps = kpi != null ? kpi.optDouble("present_fps", 0.0) : 0.0;
+        double frametimeP95 = kpi != null ? kpi.optDouble("frametime_ms_p95", 0.0) : 0.0;
+        double decodeP95 = kpi != null ? kpi.optDouble("decode_time_ms_p95", 0.0) : 0.0;
+        double renderP95 = kpi != null ? kpi.optDouble("render_time_ms_p95", 0.0) : 0.0;
+        double e2eP95 = kpi != null ? kpi.optDouble("e2e_latency_ms_p95", 0.0) : 0.0;
+
+        int qT = latest != null ? latest.optInt("transport_queue_depth", 0) : 0;
+        int qD = latest != null ? latest.optInt("decode_queue_depth", 0) : 0;
+        int qR = latest != null ? latest.optInt("render_queue_depth", 0) : 0;
+
+        int qTMax = limits != null ? limits.optInt("transport_queue_max", TRANSPORT_QUEUE_MAX_FRAMES) : TRANSPORT_QUEUE_MAX_FRAMES;
+        int qDMax = limits != null ? limits.optInt("decode_queue_max", DECODE_QUEUE_MAX_FRAMES) : DECODE_QUEUE_MAX_FRAMES;
+        int qRMax = limits != null ? limits.optInt("render_queue_max", RENDER_QUEUE_MAX_FRAMES) : RENDER_QUEUE_MAX_FRAMES;
+
+        int adaptiveLevel = metrics.optInt("adaptive_level", 0);
+        String adaptiveAction = metrics.optString("adaptive_action", "hold");
+        long drops = metrics.optLong("drops", 0);
+        long bpHigh = metrics.optLong("backpressure_high_events", 0);
+        long bpRecover = metrics.optLong("backpressure_recover_events", 0);
+        String reason = metrics.optString("adaptive_reason", "");
+        if (reason.length() > 44) {
+            reason = reason.substring(0, 44) + "...";
+        }
+
+        String hud = String.format(
+                Locale.US,
+                "HUD %s\nfps %.0f/%.1f frame %.2fms\ndec %.2fms ren %.2fms e2e %.2fms\nq %d/%d/%d max %d/%d/%d\nadapt L%d %s\ndrops %d bp %d/%d\n%s",
+                daemonReachable ? "LIVE" : "DEGRADED",
+                targetFps,
+                presentFps,
+                frametimeP95,
+                decodeP95,
+                renderP95,
+                e2eP95,
+                qT,
+                qD,
+                qR,
+                qTMax,
+                qDMax,
+                qRMax,
+                adaptiveLevel,
+                adaptiveAction,
+                drops,
+                bpHigh,
+                bpRecover,
+                reason.isEmpty() ? "-" : reason
+        );
+        perfHudText.setText(hud);
+
+        boolean highPressure = decodeP95 > 12.0 || renderP95 > 7.0 || qT >= qTMax || qD >= qDMax || qR >= qRMax;
+        if (highPressure) {
+            perfHudText.setTextColor(Color.parseColor("#FCA5A5"));
+        } else if (adaptiveAction.startsWith("degrade")) {
+            perfHudText.setTextColor(Color.parseColor("#FDE68A"));
+        } else {
+            perfHudText.setTextColor(Color.parseColor("#BBF7D0"));
+        }
+        if (perfHudPanel != null) {
+            perfHudPanel.setAlpha(0.95f);
+        }
+
+        String compact = String.format(
+                Locale.US,
+                "state=%s run_id=%d up=%ds stream_up=%ds host_in_out=%d/%d fps_target=%.0f fps_present=%.1f frame_p95=%.2f dec_p95=%.2f ren_p95=%.2f e2e_p95=%.2f q=%d/%d/%d qmax=%d/%d/%d adapt=L%d:%s drops=%d bp=%d/%d reason=%s",
+                daemonState,
+                daemonRunId,
+                daemonUptimeSec,
+                streamUptimeSec,
+                frameInHost,
+                frameOutHost,
+                targetFps,
+                presentFps,
+                frametimeP95,
+                decodeP95,
+                renderP95,
+                e2eP95,
+                qT,
+                qD,
+                qR,
+                qTMax,
+                qDMax,
+                qRMax,
+                adaptiveLevel,
+                adaptiveAction,
+                drops,
+                bpHigh,
+                bpRecover,
+                reason.isEmpty() ? "-" : reason
+        );
+        emitHudDebugAdb(compact);
+    }
+
+    private void startPreflightPulse() {
+        uiHandler.removeCallbacks(preflightPulseTask);
+        uiHandler.post(preflightPulseTask);
+    }
+
+    private void stopPreflightPulse() {
+        uiHandler.removeCallbacks(preflightPulseTask);
+    }
+
+    private void setPreflightVisible(boolean visible) {
+        if (preflightOverlay == null) {
+            return;
+        }
+        if (visible) {
+            preflightOverlay.setVisibility(View.VISIBLE);
+            preflightOverlay.setAlpha(1f);
+            return;
+        }
+        preflightOverlay.animate()
+                .alpha(0f)
+                .setDuration(180)
+                .withEndAction(() -> {
+                    if (preflightOverlay != null) {
+                        preflightOverlay.setVisibility(View.GONE);
+                        preflightOverlay.setAlpha(1f);
+                    }
+                })
+                .start();
+    }
+
+    private void updatePreflightOverlay() {
+        if (preflightOverlay == null || preflightTitleText == null || preflightBodyText == null || preflightHintText == null) {
+            return;
+        }
+
+        boolean usbOk = daemonReachable;
+        boolean hostOk = daemonReachable;
+        boolean surfaceOk = surfaceReady;
+        boolean hwOk = hwAvcDecodeAvailable;
+        boolean streamReady = daemonReachable && (
+                "STREAMING".equals(daemonState)
+                        || "IDLE".equals(daemonState)
+                        || "STARTING".equals(daemonState)
+                        || "RECONNECTING".equals(daemonState)
+        );
+
+        boolean ready = usbOk && hostOk && surfaceOk && hwOk && streamReady;
+        String spin = spinnerGlyph();
+
+        String body = String.format(
+                Locale.US,
+                "[%s] usb_link\n[%s] host_api\n[%s] surface\n[%s] hw_decode_avc\n[%s] stream_ready",
+                usbOk ? "OK" : "..",
+                hostOk ? "OK" : "..",
+                surfaceOk ? "OK" : "..",
+                hwOk ? "OK" : "NO",
+                streamReady ? "OK" : ".."
+        );
+        preflightBodyText.setText(body);
+
+        if (!ready) {
+            preflightComplete = false;
+            setPreflightVisible(true);
+            if (!usbOk) {
+                preflightTitleText.setText("WBEAM PRE-FLIGHT " + spin + " WAITING CONTROL LINK");
+                preflightHintText.setText("busy: adb reverse/control api unreachable");
+                preflightHintText.setTextColor(Color.parseColor("#FCA5A5"));
+            } else if (!surfaceOk) {
+                preflightTitleText.setText("WBEAM PRE-FLIGHT " + spin + " WAITING SURFACE");
+                preflightHintText.setText("busy: waiting for preview surface init");
+                preflightHintText.setTextColor(Color.parseColor("#FDE68A"));
+            } else if (!hwOk) {
+                preflightTitleText.setText("WBEAM PRE-FLIGHT " + spin + " DECODER CHECK");
+                preflightHintText.setText("warning: hardware AVC not detected, fallback may stutter");
+                preflightHintText.setTextColor(Color.parseColor("#FCA5A5"));
+            } else if (!streamReady) {
+                preflightTitleText.setText("WBEAM PRE-FLIGHT " + spin + " WAITING STREAM");
+                preflightHintText.setText("busy: host state=" + daemonState.toLowerCase(Locale.US));
+                preflightHintText.setTextColor(Color.parseColor("#FDE68A"));
+            } else {
+                preflightTitleText.setText("WBEAM PRE-FLIGHT " + spin + " RUNNING");
+                preflightHintText.setText("busy: validating startup path");
+                preflightHintText.setTextColor(Color.parseColor("#FDE68A"));
+            }
+            return;
+        }
+
+        if (!preflightComplete) {
+            preflightComplete = true;
+            preflightTitleText.setText("WBEAM PRE-FLIGHT DONE");
+            preflightHintText.setText("ready: starting live pipeline");
+            preflightHintText.setTextColor(Color.parseColor("#BBF7D0"));
+            preflightBodyText.setText(body);
+            uiHandler.postDelayed(() -> {
+                if (preflightComplete) {
+                    setPreflightVisible(false);
+                }
+            }, 500);
+        }
+    }
+
+    private String spinnerGlyph() {
+        switch (preflightAnimTick) {
+            case 1:
+                return "/";
+            case 2:
+                return "-";
+            case 3:
+                return "\\";
+            default:
+                return "|";
+        }
+    }
+
+    private boolean hasHardwareAvcDecoder() {
+        try {
+            MediaCodecInfo[] infos;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                infos = new MediaCodecList(MediaCodecList.ALL_CODECS).getCodecInfos();
+            } else {
+                int count = MediaCodecList.getCodecCount();
+                infos = new MediaCodecInfo[count];
+                for (int i = 0; i < count; i++) {
+                    infos[i] = MediaCodecList.getCodecInfoAt(i);
+                }
+            }
+
+            for (MediaCodecInfo info : infos) {
+                if (info == null || info.isEncoder()) {
+                    continue;
+                }
+                for (String type : info.getSupportedTypes()) {
+                    if ("video/avc".equalsIgnoreCase(type)) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            if (info.isHardwareAccelerated()) {
+                                return true;
+                            }
+                        } else {
+                            String name = info.getName().toLowerCase(Locale.US);
+                            if (!name.startsWith("omx.google.")
+                                    && !name.startsWith("c2.android.")
+                                    && !name.contains("sw")) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "failed to inspect codecs", e);
+        }
+        return false;
+    }
+
+    private void emitHudDebugAdb(String snapshot) {
+        if (snapshot == null || snapshot.trim().isEmpty()) {
+            return;
+        }
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastHudAdbLogAt < HUD_ADB_LOG_INTERVAL_MS) {
+            return;
+        }
+        if (snapshot.equals(lastHudAdbSnapshot)) {
+            return;
+        }
+        lastHudAdbLogAt = now;
+        lastHudAdbSnapshot = snapshot;
+        Log.i(TAG, "HUDDBG " + snapshot);
     }
 
     private int ledColorForState(String state) {
@@ -1149,6 +1521,83 @@ public class MainActivity extends AppCompatActivity {
         void onStatus(String state, String info, long bps);
 
         void onStats(String line);
+
+        void onClientMetrics(ClientMetricsSample metrics);
+    }
+
+    private static final class ClientMetricsSample {
+        final double recvFps;
+        final double decodeFps;
+        final double presentFps;
+        final long recvBps;
+        final double decodeMsP50;
+        final double decodeMsP95;
+        final double renderMsP95;
+        final double e2eP50;
+        final double e2eP95;
+        final int transportQueueDepth;
+        final int decodeQueueDepth;
+        final int renderQueueDepth;
+        final int jitterBufferFrames;
+        final long droppedFrames;
+        final long tooLateFrames;
+        final long timestampMs;
+
+        ClientMetricsSample(
+                double recvFps,
+                double decodeFps,
+                double presentFps,
+                long recvBps,
+                double decodeMsP50,
+                double decodeMsP95,
+                double renderMsP95,
+                double e2eP50,
+                double e2eP95,
+                int transportQueueDepth,
+                int decodeQueueDepth,
+                int renderQueueDepth,
+                int jitterBufferFrames,
+                long droppedFrames,
+                long tooLateFrames
+        ) {
+            this.recvFps = recvFps;
+            this.decodeFps = decodeFps;
+            this.presentFps = presentFps;
+            this.recvBps = recvBps;
+            this.decodeMsP50 = decodeMsP50;
+            this.decodeMsP95 = decodeMsP95;
+            this.renderMsP95 = renderMsP95;
+            this.e2eP50 = e2eP50;
+            this.e2eP95 = e2eP95;
+            this.transportQueueDepth = transportQueueDepth;
+            this.decodeQueueDepth = decodeQueueDepth;
+            this.renderQueueDepth = renderQueueDepth;
+            this.jitterBufferFrames = jitterBufferFrames;
+            this.droppedFrames = droppedFrames;
+            this.tooLateFrames = tooLateFrames;
+            this.timestampMs = System.currentTimeMillis();
+        }
+
+        JSONObject toJson() throws JSONException {
+            JSONObject json = new JSONObject();
+            json.put("recv_fps", recvFps);
+            json.put("decode_fps", decodeFps);
+            json.put("present_fps", presentFps);
+            json.put("recv_bps", recvBps);
+            json.put("decode_time_ms_p50", decodeMsP50);
+            json.put("decode_time_ms_p95", decodeMsP95);
+            json.put("render_time_ms_p95", renderMsP95);
+            json.put("e2e_latency_ms_p50", e2eP50);
+            json.put("e2e_latency_ms_p95", e2eP95);
+            json.put("transport_queue_depth", transportQueueDepth);
+            json.put("decode_queue_depth", decodeQueueDepth);
+            json.put("render_queue_depth", renderQueueDepth);
+            json.put("jitter_buffer_frames", jitterBufferFrames);
+            json.put("dropped_frames", droppedFrames);
+            json.put("too_late_frames", tooLateFrames);
+            json.put("timestamp_ms", timestampMs);
+            return json;
+        }
     }
 
     private static final class H264TcpPlayer {
@@ -1164,6 +1613,7 @@ public class MainActivity extends AppCompatActivity {
         private Socket socket;
         private long reconnects = 0;
         private long droppedTotal = 0;
+        private long tooLateTotal = 0;
 
         H264TcpPlayer(Surface surface, StatusListener statusListener, int decodeWidth, int decodeHeight, long frameUs) {
             this.surface = surface;
@@ -1199,7 +1649,11 @@ public class MainActivity extends AppCompatActivity {
                 MediaCodec codec = null;
                 try {
                     statusListener.onStatus(STATE_CONNECTING, "connecting to " + HOST + ":" + PORT, 0);
-                    statusListener.onStats("fps in/out: - | drops: " + droppedTotal + " | reconnects: " + reconnects);
+                    statusListener.onStats(
+                            "fps in/out: - | drops: " + droppedTotal
+                                    + " | late: " + tooLateTotal
+                                    + " | reconnects: " + reconnects
+                    );
 
                     socket = new Socket();
                     socket.connect(new InetSocketAddress(HOST, PORT), 2000);
@@ -1216,9 +1670,18 @@ public class MainActivity extends AppCompatActivity {
                     if (running) {
                         reconnects++;
                         reconnectDelayMs = Math.min(5000, reconnectDelayMs + 400);
-                        Log.e(TAG, "stream worker failed", e);
-                        statusListener.onStatus(STATE_ERROR, "stream error: " + e.getClass().getSimpleName(), 0);
-                        statusListener.onStats("fps in/out: - | drops: " + droppedTotal + " | reconnects: " + reconnects);
+                        if (isExpectedStreamClose(e)) {
+                            Log.w(TAG, "stream worker reconnect: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+                            statusListener.onStatus(STATE_CONNECTING, "stream reconnecting", 0);
+                        } else {
+                            Log.e(TAG, "stream worker failed", e);
+                            statusListener.onStatus(STATE_ERROR, "stream error: " + e.getClass().getSimpleName(), 0);
+                        }
+                        statusListener.onStats(
+                                "fps in/out: - | drops: " + droppedTotal
+                                        + " | late: " + tooLateTotal
+                                        + " | reconnects: " + reconnects
+                        );
                     }
                 } finally {
                     closeSocket();
@@ -1241,17 +1704,30 @@ public class MainActivity extends AppCompatActivity {
         }
 
         private void decodeLoop(InputStream input, MediaCodec codec) throws IOException {
-            byte[] readBuf = new byte[64 * 1024];
-            byte[] streamBuf = new byte[2 * 1024 * 1024];
-            int streamLen = 0;
+            // C2: ring-buffer with sHead/sTail pointers – eliminates per-NAL System.arraycopy.
+            // Buffer compacts only when the write pointer reaches the end (≈ every 20 frames
+            // at 720p/12 Mbps). 512 KB ≈ 20 frames; bounded by design (task-id C2, EPIC E).
+            byte[] readBuf  = new byte[64 * 1024];
+            byte[] streamBuf = new byte[512 * 1024]; // C2: was 4 MB linear; now ring, sHead/sTail
+            int sHead = 0; // first unconsumed byte (inclusive)
+            int sTail = 0; // one-past last valid byte; avail = sTail - sHead
             int streamMode = -1; // -1 unknown, 0 annexb, 1 avcc
+            int avgNalSize = 1200;
+            int pendingDecodeQueue = 0;
+            int renderQueueDepth   = 0;
 
-            long frames = 0;
-            long bytes = 0;
-            long inFrames = 0;
-            long outFrames = 0;
-            long droppedSec = 0;
+            long frames        = 0;
+            long bytes         = 0;
+            long inFrames      = 0;
+            long outFrames     = 0;
+            long droppedSec    = 0;
+            long tooLateSec    = 0;
+            long decodeNsTotal = 0;
+            long decodeNsMax   = 0;
+            long renderNsMax   = 0;
             long lastLog = SystemClock.elapsedRealtime();
+            MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
+            DrainStats drainStats = new DrainStats();
 
             while (running) {
                 int count = input.read(readBuf);
@@ -1262,104 +1738,173 @@ public class MainActivity extends AppCompatActivity {
                     continue;
                 }
 
-                if (streamLen + count > streamBuf.length) {
-                    int newLen = Math.max(streamBuf.length * 2, streamLen + count);
-                    byte[] bigger = new byte[newLen];
-                    System.arraycopy(streamBuf, 0, bigger, 0, streamLen);
-                    streamBuf = bigger;
+                // C2: compact only when tail would overflow – avoids per-NAL memmove.
+                int avail = sTail - sHead;
+                if (sTail + count > streamBuf.length) {
+                    if (avail + count > streamBuf.length) {
+                        // Genuinely full: drop oldest data to make room, count as drop.
+                        int keep = streamBuf.length - count;
+                        if (keep <= 0) {
+                            sHead = 0; sTail = 0; avail = 0;
+                        } else {
+                            int newHead = sHead + (avail - keep);
+                            System.arraycopy(streamBuf, newHead, streamBuf, 0, keep);
+                            sHead = 0; sTail = keep; avail = keep;
+                        }
+                        droppedSec++;
+                    } else {
+                        // Free space exists at front: compact in one memmove.
+                        if (avail > 0) System.arraycopy(streamBuf, sHead, streamBuf, 0, avail);
+                        sHead = 0; sTail = avail;
+                    }
                 }
-                System.arraycopy(readBuf, 0, streamBuf, streamLen, count);
-                streamLen += count;
+                System.arraycopy(readBuf, 0, streamBuf, sTail, count);
+                sTail += count;
                 bytes += count;
 
-                if (streamMode < 0 && streamLen >= 8) {
-                    int start = findStartCode(streamBuf, 0, Math.min(streamLen, 128));
-                    streamMode = start >= 0 ? 0 : 1;
+                avail = sTail - sHead;
+                if (streamMode < 0 && avail >= 8) {
+                    int probe = findStartCode(streamBuf, sHead, Math.min(sHead + 128, sTail));
+                    streamMode = (probe >= 0) ? 0 : 1;
                 }
 
                 if (streamMode == 1) {
-                    while (streamLen >= 4) {
+                    // ── AVCC mode: [u32 length][payload] ─────────────────────────────────
+                    // C2: sHead += 4 + nalSize replaces System.arraycopy(streamBuf, consumed, …)
+                    while ((sTail - sHead) >= 4) {
                         int nalSize =
-                                ((streamBuf[0] & 0xFF) << 24) |
-                                        ((streamBuf[1] & 0xFF) << 16) |
-                                        ((streamBuf[2] & 0xFF) << 8) |
-                                        (streamBuf[3] & 0xFF);
+                                ((streamBuf[sHead]     & 0xFF) << 24) |
+                                ((streamBuf[sHead + 1] & 0xFF) << 16) |
+                                ((streamBuf[sHead + 2] & 0xFF) << 8)  |
+                                ((streamBuf[sHead + 3] & 0xFF));
 
-                        if (nalSize <= 0 || nalSize > (4 * 1024 * 1024)) {
-                            System.arraycopy(streamBuf, 1, streamBuf, 0, streamLen - 1);
-                            streamLen -= 1;
+                        if (nalSize <= 0 || nalSize > streamBuf.length) {
+                            sHead += 1; // skip invalid length byte – no arraycopy
                             droppedSec++;
                             continue;
                         }
-                        if (streamLen < 4 + nalSize) {
-                            break;
+                        if ((sTail - sHead) < 4 + nalSize) {
+                            break; // wait for more data
                         }
 
-                        if (queueNal(codec, streamBuf, 4, nalSize, frames * frameUs)) {
+                        long t0 = SystemClock.elapsedRealtimeNanos();
+                        if (queueNal(codec, streamBuf, sHead + 4, nalSize, frames * frameUs)) {
+                            long decodeNs = SystemClock.elapsedRealtimeNanos() - t0;
+                            decodeNsTotal += decodeNs;
+                            decodeNsMax = Math.max(decodeNsMax, decodeNs);
+                            avgNalSize = ((avgNalSize * 7) + nalSize) / 8;
                             inFrames++;
+                            pendingDecodeQueue++;
                         } else {
                             droppedSec++;
                         }
                         frames++;
-                        outFrames += drain(codec);
+                        drainLatestFrame(codec, bufferInfo, drainStats);
+                        pendingDecodeQueue = Math.max(0, pendingDecodeQueue - drainStats.releasedCount);
+                        outFrames   += drainStats.renderedCount;
+                        tooLateSec  += drainStats.droppedLateCount;
+                        renderNsMax  = Math.max(renderNsMax, drainStats.renderNsMax);
+                        renderQueueDepth = drainStats.renderedCount > 0 ? 1 : 0;
 
-                        int consumed = 4 + nalSize;
-                        if (streamLen - consumed > 0) {
-                            System.arraycopy(streamBuf, consumed, streamBuf, 0, streamLen - consumed);
-                        }
-                        streamLen -= consumed;
+                        sHead += 4 + nalSize; // C2: zero-copy advance
                     }
                 } else {
-                    int nalStart = findStartCode(streamBuf, 0, streamLen);
-                    if (nalStart > 0) {
-                        System.arraycopy(streamBuf, nalStart, streamBuf, 0, streamLen - nalStart);
-                        streamLen -= nalStart;
-                        nalStart = 0;
-                    }
+                    // ── AnnexB mode: [0 0 0 1 | 0 0 1][nal][0 0 0 1 | 0 0 1][nal]… ──────
+                    // C2: advance sHead to first start-code (drop garbage), then advance per NAL.
+                    int nalStart = findStartCode(streamBuf, sHead, sTail);
+                    if (nalStart < 0) {
+                        // No start-code yet – keep last 3 bytes for cross-read-boundary match.
+                        sHead = Math.max(sHead, sTail - 3);
+                    } else {
+                        sHead = nalStart; // skip garbage before first start-code – no arraycopy
 
-                    while (true) {
-                        int next = findStartCode(streamBuf, nalStart + 3, streamLen);
-                        if (nalStart < 0 || next < 0) {
-                            break;
-                        }
-
-                        int nalSize = next - nalStart;
-                        if (nalSize > 0) {
-                            if (queueNal(codec, streamBuf, nalStart, nalSize, frames * frameUs)) {
-                                inFrames++;
-                            } else {
-                                droppedSec++;
+                        while (true) {
+                            int next = findStartCode(streamBuf, sHead + 3, sTail);
+                            if (next < 0) {
+                                break; // incomplete NAL – wait for more data
                             }
-                            frames++;
-                            outFrames += drain(codec);
-                        }
-                        nalStart = next;
-                    }
 
-                    if (nalStart > 0) {
-                        System.arraycopy(streamBuf, nalStart, streamBuf, 0, streamLen - nalStart);
-                        streamLen -= nalStart;
+                            int nalSize = next - sHead;
+                            if (nalSize > 0) {
+                                long t0 = SystemClock.elapsedRealtimeNanos();
+                                if (queueNal(codec, streamBuf, sHead, nalSize, frames * frameUs)) {
+                                    long decodeNs = SystemClock.elapsedRealtimeNanos() - t0;
+                                    decodeNsTotal += decodeNs;
+                                    decodeNsMax = Math.max(decodeNsMax, decodeNs);
+                                    avgNalSize = ((avgNalSize * 7) + nalSize) / 8;
+                                    inFrames++;
+                                    pendingDecodeQueue++;
+                                } else {
+                                    droppedSec++;
+                                }
+                                frames++;
+                                drainLatestFrame(codec, bufferInfo, drainStats);
+                                pendingDecodeQueue = Math.max(0, pendingDecodeQueue - drainStats.releasedCount);
+                                outFrames   += drainStats.renderedCount;
+                                tooLateSec  += drainStats.droppedLateCount;
+                                renderNsMax  = Math.max(renderNsMax, drainStats.renderNsMax);
+                                renderQueueDepth = drainStats.renderedCount > 0 ? 1 : 0;
+                            }
+                            sHead = next; // C2: zero-copy advance to next start-code
+                        }
+                        // sHead now points at the last (incomplete) start-code: retained for next read.
                     }
                 }
 
                 long now = SystemClock.elapsedRealtime();
                 if (now - lastLog >= 1000) {
                     droppedTotal += droppedSec;
+                    tooLateTotal += tooLateSec;
                     reconnectDelayMs = 800;
                     statusListener.onStatus(STATE_STREAMING, "rendering live desktop", bytes);
                     statusListener.onStats(
                             "fps in/out: " + inFrames + "/" + outFrames
                                     + " | drops: " + droppedTotal
+                                    + " | late: " + tooLateTotal
+                                    + " | q(t/d/r): "
+                                    + estimateTransportDepthFrames(sTail - sHead, avgNalSize) + "/"
+                                    + Math.min(DECODE_QUEUE_MAX_FRAMES, pendingDecodeQueue) + "/"
+                                    + renderQueueDepth
                                     + " | reconnects: " + reconnects
                     );
-                    bytes = 0;
-                    inFrames = 0;
-                    outFrames = 0;
-                    droppedSec = 0;
+
+                    double decodeMsP50 = inFrames > 0
+                            ? (decodeNsTotal / 1_000_000.0) / inFrames
+                            : 0.0;
+                    double decodeMsP95 = Math.max(decodeMsP50, decodeNsMax / 1_000_000.0);
+                    double renderMsP95 = renderNsMax / 1_000_000.0;
+                    statusListener.onClientMetrics(
+                            new ClientMetricsSample(
+                                    inFrames,
+                                    inFrames,
+                                    outFrames,
+                                    bytes,
+                                    decodeMsP50,
+                                    decodeMsP95,
+                                    renderMsP95,
+                                    0.0,
+                                    0.0,
+                                    estimateTransportDepthFrames(sTail - sHead, avgNalSize),
+                                    Math.min(DECODE_QUEUE_MAX_FRAMES, pendingDecodeQueue),
+                                    Math.min(RENDER_QUEUE_MAX_FRAMES, renderQueueDepth),
+                                    0,
+                                    droppedTotal,
+                                    tooLateTotal
+                            )
+                    );
+                    bytes         = 0;
+                    inFrames      = 0;
+                    outFrames     = 0;
+                    droppedSec    = 0;
+                    tooLateSec    = 0;
+                    decodeNsTotal = 0;
+                    decodeNsMax   = 0;
+                    renderNsMax   = 0;
                     lastLog = now;
                 }
             }
         }
+
 
         private static boolean queueNal(MediaCodec codec, byte[] data, int offset, int size, long ptsUs) {
             int inputIndex = codec.dequeueInputBuffer(10_000);
@@ -1381,15 +1926,29 @@ public class MainActivity extends AppCompatActivity {
             return true;
         }
 
-        private static long drain(MediaCodec codec) {
-            MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
-            long released = 0;
+        private static void drainLatestFrame(
+                MediaCodec codec,
+                MediaCodec.BufferInfo info,
+                DrainStats stats
+        ) {
+            stats.reset();
+            int latestRenderableIndex = -1;
+
             while (true) {
                 int outputIndex = codec.dequeueOutputBuffer(info, 0);
                 if (outputIndex >= 0) {
-                    boolean render = (info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0;
-                    codec.releaseOutputBuffer(outputIndex, render);
-                    released++;
+                    stats.releasedCount++;
+                    boolean renderable = (info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0;
+                    if (!renderable) {
+                        codec.releaseOutputBuffer(outputIndex, false);
+                        continue;
+                    }
+
+                    if (latestRenderableIndex >= 0) {
+                        codec.releaseOutputBuffer(latestRenderableIndex, false);
+                        stats.droppedLateCount++;
+                    }
+                    latestRenderableIndex = outputIndex;
                     continue;
                 }
                 if (outputIndex == MediaCodec.INFO_TRY_AGAIN_LATER ||
@@ -1398,7 +1957,35 @@ public class MainActivity extends AppCompatActivity {
                 }
                 break;
             }
-            return released;
+
+            if (latestRenderableIndex >= 0) {
+                long renderStartNs = SystemClock.elapsedRealtimeNanos();
+                codec.releaseOutputBuffer(latestRenderableIndex, true);
+                stats.renderedCount = 1;
+                stats.renderNsMax = SystemClock.elapsedRealtimeNanos() - renderStartNs;
+            }
+        }
+
+        private static int estimateTransportDepthFrames(int streamLen, int avgNalSize) {
+            int denom = Math.max(512, avgNalSize);
+            if (streamLen <= 0) {
+                return 0;
+            }
+            return Math.min(8, streamLen / denom);
+        }
+
+        private static final class DrainStats {
+            int releasedCount;
+            int renderedCount;
+            int droppedLateCount;
+            long renderNsMax;
+
+            void reset() {
+                releasedCount = 0;
+                renderedCount = 0;
+                droppedLateCount = 0;
+                renderNsMax = 0;
+            }
         }
 
         private static int findStartCode(byte[] data, int from, int toExclusive) {
@@ -1425,6 +2012,21 @@ public class MainActivity extends AppCompatActivity {
                 } catch (IOException ignored) {
                 }
             }
+        }
+
+        private static boolean isExpectedStreamClose(Exception e) {
+            if (!(e instanceof IOException)) {
+                return false;
+            }
+            String msg = e.getMessage();
+            if (msg == null) {
+                return false;
+            }
+            String m = msg.toLowerCase(Locale.US);
+            return m.contains("stream closed")
+                    || m.contains("connection reset")
+                    || m.contains("broken pipe")
+                    || m.contains("software caused connection abort");
         }
     }
 }

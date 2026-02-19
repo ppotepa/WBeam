@@ -249,6 +249,15 @@ def make_pipeline(
         ]
         raise RuntimeError(f"Missing GStreamer elements: {', '.join(missing)}")
 
+    # C1: hard queue limits – prevents buffer bloat and unbounded latency growth.
+    # leaky=2 (downstream) drops oldest frames so encoder always gets the freshest input.
+    # max-size-time 40 ms = ~2.4 frames @60fps; max-size-buffers=2 as secondary guard.
+    for q, label in [(queue, "q1"), (queue_main, "qmain")]:
+        q.set_property("max-size-buffers", 2)
+        q.set_property("max-size-bytes", 0)       # disable bytes limit, use time+buf
+        q.set_property("max-size-time", 40_000_000)  # 40 ms in nanoseconds
+        q.set_property("leaky", 2)                # 2 = GST_QUEUE_LEAK_DOWNSTREAM (drop oldest)
+
     src.set_property("fd", int(fd))
     src.set_property("path", str(node_id))
     src.set_property("do-timestamp", True)
@@ -304,6 +313,11 @@ def make_pipeline(
         dbg_elements = [queue_dbg, vr_dbg, caps_dbg, jpeg, multi]
         if any(e is None for e in dbg_elements):
             raise RuntimeError("Missing GStreamer debug elements for frame dump")
+        # C1: qdbg bounded – debug branch must not stall the main pipeline
+        queue_dbg.set_property("max-size-buffers", 1)
+        queue_dbg.set_property("max-size-bytes", 0)
+        queue_dbg.set_property("max-size-time", 200_000_000)  # 200 ms, debug ok
+        queue_dbg.set_property("leaky", 2)
 
         caps_dbg.set_property("caps", Gst.Caps.from_string(f"video/x-raw,framerate={int(debug_fps)}/1"))
         multi.set_property("location", os.path.join(debug_dir, "frame-%06d.jpg"))
