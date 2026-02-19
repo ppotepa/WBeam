@@ -23,6 +23,10 @@ run_rust() {
     args+=(--lock-file "$WBEAM_LOCK_FILE")
   fi
 
+   if [[ -n "${WBEAM_RUST_LOG_DIR:-}" ]]; then
+    args+=(--log-dir "$WBEAM_RUST_LOG_DIR")
+  fi
+
   exec cargo run \
     --manifest-path "$ROOT_DIR/host/rust/Cargo.toml" \
     -p wbeamd-server -- \
