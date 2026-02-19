@@ -1,0 +1,4 @@
+#Thu Feb 19 15:56:45 CET 2026
+base.0=/mnt/fat_boii/git/WBeam/android/app/build/intermediates/dex/release/mergeDexRelease/classes.dex
+path.0=classes.dex
+renamed.0=classes.dex

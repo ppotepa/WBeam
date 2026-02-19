@@ -1,0 +1,19 @@
+2026-02-19T13:06:30.515847Z  INFO wbeamd_server: wbeamd-rust started control_port=5001 stream_port=5000 root=/mnt/fat_boii/git/WBeam
+2026-02-19T13:06:30.800688Z  INFO wbeamd_core: stream process started run_id=1 pid=346230
+2026-02-19T13:06:30.866807Z  INFO wbeamd_core: stream: [wbeam] profile=lowlatency size=1920x1080 fps=60 bitrate=18000kbps encoder=nvenc cursor=hidden run_id=1
+2026-02-19T13:06:30.866866Z  INFO wbeamd_core: stream: [wbeam] Requesting ScreenCast portal session (you will get KDE share prompt)... run_id=1
+2026-02-19T13:06:30.899851Z  INFO wbeamd_core: stream: [wbeam] Select source in KDE prompt run_id=1
+2026-02-19T13:06:30.900476Z  INFO wbeamd_core: stream: [wbeam] Starting portal session run_id=1
+2026-02-19T13:06:31.867930Z  INFO wbeamd_core: stream: [wbeam] Got PipeWire node id: 143 run_id=1
+2026-02-19T13:06:31.875809Z  INFO wbeamd_core: stream: [wbeam] Opened PipeWire fd: 7 run_id=1
+2026-02-19T13:06:32.477780Z  INFO wbeamd_core: stream: [wbeam] Streaming Wayland screencast on tcp://0.0.0.0:5000 run_id=1
+2026-02-19T13:06:37.125034Z  INFO wbeamd_core: client-metrics trace_id=0x0000003600000000 present=0.0fps decode_p95=11.3ms e2e_p95=0.0ms
+2026-02-19T13:06:38.239264Z  INFO wbeamd_core: client-metrics trace_id=0x0000003600000001 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T13:06:39.264771Z  INFO wbeamd_core: client-metrics trace_id=0x0000003600000002 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T13:06:40.361061Z  INFO wbeamd_core: client-metrics trace_id=0x0000003600000003 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T13:06:41.538111Z  INFO wbeamd_core: client-metrics trace_id=0x0000003600000004 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T13:06:48.846286Z  INFO wbeamd_core: client-metrics trace_id=0x0000000100000000 present=0.0fps decode_p95=6.5ms e2e_p95=0.0ms
+2026-02-19T13:06:49.924795Z  INFO wbeamd_core: client-metrics trace_id=0x0000000100000001 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T13:06:51.893223Z  INFO wbeamd_core: client-metrics trace_id=0x0000000100000002 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T13:06:53.400644Z  INFO wbeamd_core: stream process exited run_id=1 exit_code=0
+2026-02-19T13:06:53.400690Z  INFO wbeamd_core: stream exit ignored in stopping/idle state run_id=1

@@ -71,6 +71,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int API_RETRY_ATTEMPTS = 2;
     private static final long CLIENT_METRICS_INTERVAL_MS = 900;
     private static final long HUD_ADB_LOG_INTERVAL_MS = 1000;
+        private static final long LIVE_TEST_START_TIMEOUT_MS = 12000;
     private static final int TRANSPORT_QUEUE_MAX_FRAMES = 3;
     private static final int DECODE_QUEUE_MAX_FRAMES = 4;
     private static final int RENDER_QUEUE_MAX_FRAMES = 1;
@@ -127,6 +128,9 @@ public class MainActivity extends AppCompatActivity {
     private Button logButton;
     private Button settingsCloseButton;
     private Button applySettingsButton;
+    private Button quickStartButton;
+    private Button quickStopButton;
+    private Button quickTestButton;
     private Button startButton;
     private Button stopButton;
     private Button testButton;
@@ -164,6 +168,10 @@ public class MainActivity extends AppCompatActivity {
     private boolean preflightComplete = false;
     private int preflightAnimTick = 0;
     private boolean hwAvcDecodeAvailable = false;
+    private boolean liveTestOverlayActive = false;
+    private String liveTestOverlayTitle = "";
+    private String liveTestOverlayBody = "";
+    private String liveTestOverlayHint = "";
     private String lastUiState = STATE_IDLE;
     private String lastUiInfo = "tap Settings -> Start Live";
     private long lastUiBps = 0;
@@ -172,6 +180,18 @@ public class MainActivity extends AppCompatActivity {
     private Surface surface;
     private H264TcpPlayer player;
     private MediaPlayer mediaPlayer;
+    private final Runnable liveTestStartTimeoutTask = () -> {
+        if (mediaPlayer == null) {
+            return;
+        }
+        logLiveTestWarn("startup timeout: no video after " + (LIVE_TEST_START_TIMEOUT_MS / 1000) + "s");
+        updateStatus(STATE_ERROR, "RUN TESTS LIVE timeout", 0);
+        setLiveTestOverlay(
+                "RUN TESTS LIVE TIMEOUT",
+                liveTestOverlayBody,
+                "no frames yet; check portal selection / decoder path"
+        );
+    };
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
     private final Runnable statusPollTask = new Runnable() {
@@ -228,6 +248,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onDestroy() {
         stopStatusPolling();
         stopPreflightPulse();
+        uiHandler.removeCallbacks(liveTestStartTimeoutTask);
         stopLiveView();
         releaseMediaPlayer();
         ioExecutor.shutdownNow();
@@ -285,6 +306,9 @@ public class MainActivity extends AppCompatActivity {
         logButton = findViewById(R.id.logButton);
         settingsCloseButton = findViewById(R.id.settingsCloseButton);
         applySettingsButton = findViewById(R.id.applySettingsButton);
+        quickStartButton = findViewById(R.id.quickStartButton);
+        quickStopButton = findViewById(R.id.quickStopButton);
+        quickTestButton = findViewById(R.id.quickTestButton);
         startButton = findViewById(R.id.startButton);
         stopButton = findViewById(R.id.stopButton);
         testButton = findViewById(R.id.testButton);
@@ -399,6 +423,15 @@ public class MainActivity extends AppCompatActivity {
         startButton.setOnClickListener(v -> requestHostStart(true, true));
         stopButton.setOnClickListener(v -> requestHostStop(true));
         testButton.setOnClickListener(v -> startPublicVideoTest());
+        if (quickStartButton != null) {
+            quickStartButton.setOnClickListener(v -> requestHostStart(true, true));
+        }
+        if (quickStopButton != null) {
+            quickStopButton.setOnClickListener(v -> requestHostStop(true));
+        }
+        if (quickTestButton != null) {
+            quickTestButton.setOnClickListener(v -> startPublicVideoTest());
+        }
 
         fullscreenButton.setOnClickListener(v -> toggleFullscreen());
         cursorOverlayButton.setOnClickListener(v -> toggleCursorOverlayMode());
@@ -443,6 +476,26 @@ public class MainActivity extends AppCompatActivity {
             if (advancedPanel != null) advancedPanel.setVisibility(show ? View.VISIBLE : View.GONE);
             if (advancedToggleButton != null) advancedToggleButton.setText(show ? "\u25bc Advanced" : "\u25b6 Advanced");
         });
+
+        updateActionButtonsEnabled();
+    }
+
+    private void setActionButtonEnabled(Button button, boolean enabled) {
+        if (button == null) {
+            return;
+        }
+        button.setEnabled(enabled);
+        button.setAlpha(enabled ? 1.0f : 0.45f);
+    }
+
+    private void updateActionButtonsEnabled() {
+        boolean enabled = daemonReachable;
+        setActionButtonEnabled(quickStartButton, enabled);
+        setActionButtonEnabled(quickStopButton, enabled);
+        setActionButtonEnabled(quickTestButton, enabled);
+        setActionButtonEnabled(startButton, enabled);
+        setActionButtonEnabled(stopButton, enabled);
+        setActionButtonEnabled(testButton, enabled);
     }
 
     // F2: highlight active mode / quality button
@@ -637,6 +690,8 @@ public class MainActivity extends AppCompatActivity {
             appendLiveLogInfo("connected to host " + daemonHostName);
         }
 
+        updateActionButtonsEnabled();
+
         updateHostHint();
         refreshStatusText();
         updatePreflightOverlay();
@@ -677,6 +732,7 @@ public class MainActivity extends AppCompatActivity {
         boolean wasReachable = daemonReachable;
         daemonReachable = false;
         daemonState = "DISCONNECTED";
+        updateActionButtonsEnabled();
         updateHostHint();
         updatePerfHudUnavailable();
         preflightComplete = false;
@@ -965,6 +1021,24 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
+        LiveTestPreset preset = captureLiveTestPreset();
+        String presetLine = preset.toLine();
+        logLiveTestInfo("requested with preset: " + presetLine);
+
+        liveLogVisible = true;
+        if (liveLogText != null) {
+            liveLogText.setVisibility(View.VISIBLE);
+        }
+        if (logButton != null) {
+            logButton.setText("Log ON");
+        }
+
+        setLiveTestOverlay(
+                "RUN TESTS LIVE LOADING",
+                "preset\n" + preset.toMultiline(),
+                "phase: preparing media pipeline"
+        );
+
         if (player != null) {
             player.stop();
             player = null;
@@ -972,8 +1046,8 @@ public class MainActivity extends AppCompatActivity {
         releaseMediaPlayer();
 
         try {
-            updateStatus(STATE_CONNECTING, "loading public test video", 0);
-            updateStatsLine("source: public test player");
+            updateStatus(STATE_CONNECTING, "RUN TESTS LIVE loading", 0);
+            updateStatsLine("source: RUN TESTS LIVE | " + presetLine);
             MediaPlayer mp = new MediaPlayer();
             mediaPlayer = mp;
             mp.setSurface(surface);
@@ -981,32 +1055,70 @@ public class MainActivity extends AppCompatActivity {
             mp.setLooping(true);
             mp.setVolume(0f, 0f);
 
+            uiHandler.removeCallbacks(liveTestStartTimeoutTask);
+            uiHandler.postDelayed(liveTestStartTimeoutTask, LIVE_TEST_START_TIMEOUT_MS);
+
             mp.setOnPreparedListener(ready -> {
-                Log.i(TAG, "public test video prepared");
+                uiHandler.removeCallbacks(liveTestStartTimeoutTask);
+                logLiveTestInfo("media prepared; starting playback");
                 ready.start();
-                updateStatus(STATE_STREAMING, "public test video playing", 0);
+                updateStatus(STATE_STREAMING, "RUN TESTS LIVE playing", 0);
+                setLiveTestOverlay(
+                        "RUN TESTS LIVE ACTIVE",
+                        "preset\n" + preset.toMultiline(),
+                        "phase: playback started"
+                );
+                uiHandler.postDelayed(this::clearLiveTestOverlay, 900);
             });
             mp.setOnCompletionListener(done -> {
-                Log.i(TAG, "public test video completed");
-                updateStatus(STATE_IDLE, "public test completed", 0);
+                uiHandler.removeCallbacks(liveTestStartTimeoutTask);
+                logLiveTestInfo("playback completed");
+                updateStatus(STATE_IDLE, "RUN TESTS LIVE completed", 0);
+                clearLiveTestOverlay();
             });
             mp.setOnErrorListener((errPlayer, what, extra) -> {
-                Log.e(TAG, "public test error what=" + what + " extra=" + extra);
-                updateStatus(STATE_ERROR, "public test error: " + what + "/" + extra, 0);
+                uiHandler.removeCallbacks(liveTestStartTimeoutTask);
+                logLiveTestError("player error what=" + what + " extra=" + extra);
+                updateStatus(STATE_ERROR, "RUN TESTS LIVE error: " + what + "/" + extra, 0);
+                setLiveTestOverlay(
+                        "RUN TESTS LIVE ERROR",
+                        "preset\n" + preset.toMultiline(),
+                        "player error: " + what + "/" + extra
+                );
                 return true;
             });
             mp.setOnInfoListener((infoPlayer, what, extra) -> {
                 if (what == MediaPlayer.MEDIA_INFO_BUFFERING_START) {
-                    updateStatus(STATE_CONNECTING, "public test buffering", 0);
+                    logLiveTestWarn("buffering start");
+                    updateStatus(STATE_CONNECTING, "RUN TESTS LIVE buffering", 0);
+                    setLiveTestOverlay(
+                            "RUN TESTS LIVE LOADING",
+                            "preset\n" + preset.toMultiline(),
+                            "phase: buffering"
+                    );
                 } else if (what == MediaPlayer.MEDIA_INFO_BUFFERING_END) {
-                    updateStatus(STATE_STREAMING, "public test video playing", 0);
+                    logLiveTestInfo("buffering end");
+                    updateStatus(STATE_STREAMING, "RUN TESTS LIVE playing", 0);
+                    setLiveTestOverlay(
+                            "RUN TESTS LIVE ACTIVE",
+                            "preset\n" + preset.toMultiline(),
+                            "phase: streaming frames"
+                    );
                 }
                 return false;
             });
+            logLiveTestInfo("prepareAsync() start; source=public test stream");
             mp.prepareAsync();
         } catch (Exception e) {
+            uiHandler.removeCallbacks(liveTestStartTimeoutTask);
+            logLiveTestError("startup failed: " + shortError(e));
             Log.e(TAG, "failed to start public test video", e);
-            updateStatus(STATE_ERROR, "public test failed: " + e.getClass().getSimpleName(), 0);
+            updateStatus(STATE_ERROR, "RUN TESTS LIVE failed: " + e.getClass().getSimpleName(), 0);
+            setLiveTestOverlay(
+                    "RUN TESTS LIVE FAILED",
+                    "preset\n" + preset.toMultiline(),
+                    shortError(e)
+            );
             releaseMediaPlayer();
         }
     }
@@ -1027,6 +1139,50 @@ public class MainActivity extends AppCompatActivity {
             }
             mediaPlayer = null;
         }
+    }
+
+    private LiveTestPreset captureLiveTestPreset() {
+        int[] sz = computeScaledSize();
+        return new LiveTestPreset(
+                getSelectedProfile(),
+                getSelectedEncoder(),
+                getSelectedCursorMode(),
+                sz[0],
+                sz[1],
+                getSelectedFps(),
+                getSelectedBitrateMbps()
+        );
+    }
+
+    private void logLiveTestInfo(String msg) {
+        appendLiveLogInfo("[RUN TESTS LIVE] " + msg);
+        Log.i(TAG, "[RUN TESTS LIVE] " + msg);
+    }
+
+    private void logLiveTestWarn(String msg) {
+        appendLiveLogWarn("[RUN TESTS LIVE] " + msg);
+        Log.w(TAG, "[RUN TESTS LIVE] " + msg);
+    }
+
+    private void logLiveTestError(String msg) {
+        appendLiveLogError("[RUN TESTS LIVE] " + msg);
+        Log.e(TAG, "[RUN TESTS LIVE] " + msg);
+    }
+
+    private void setLiveTestOverlay(String title, String body, String hint) {
+        liveTestOverlayActive = true;
+        liveTestOverlayTitle = title == null ? "RUN TESTS LIVE" : title;
+        liveTestOverlayBody = body == null ? "" : body;
+        liveTestOverlayHint = hint == null ? "" : hint;
+        updatePreflightOverlay();
+    }
+
+    private void clearLiveTestOverlay() {
+        liveTestOverlayActive = false;
+        liveTestOverlayTitle = "";
+        liveTestOverlayBody = "";
+        liveTestOverlayHint = "";
+        updatePreflightOverlay();
     }
 
     private void toggleSettingsPanel() {
@@ -1441,6 +1597,15 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
+        if (liveTestOverlayActive) {
+            preflightTitleText.setText(liveTestOverlayTitle);
+            preflightBodyText.setText(liveTestOverlayBody);
+            preflightHintText.setText(liveTestOverlayHint);
+            preflightHintText.setTextColor(Color.parseColor("#FDE68A"));
+            setPreflightVisible(true);
+            return;
+        }
+
         boolean usbOk = daemonReachable;
         boolean hostOk = daemonReachable;
         boolean surfaceOk = surfaceReady;
@@ -1655,6 +1820,39 @@ public class MainActivity extends AppCompatActivity {
         void onStats(String line);
 
         void onClientMetrics(ClientMetricsSample metrics);
+    }
+
+    private static final class LiveTestPreset {
+        final String profile;
+        final String encoder;
+        final String cursorMode;
+        final int width;
+        final int height;
+        final int fps;
+        final int bitrateMbps;
+
+        LiveTestPreset(String profile, String encoder, String cursorMode, int width, int height, int fps, int bitrateMbps) {
+            this.profile = profile;
+            this.encoder = encoder;
+            this.cursorMode = cursorMode;
+            this.width = width;
+            this.height = height;
+            this.fps = fps;
+            this.bitrateMbps = bitrateMbps;
+        }
+
+        String toLine() {
+            return profile + " " + width + "x" + height + " " + fps + "fps " + bitrateMbps + "Mbps " + encoder + " cursor=" + cursorMode;
+        }
+
+        String toMultiline() {
+            return "profile=" + profile
+                    + "\nsize=" + width + "x" + height
+                    + "\nfps=" + fps
+                    + "\nbitrate=" + bitrateMbps + "Mbps"
+                    + "\nencoder=" + encoder
+                    + "\ncursor=" + cursorMode;
+        }
     }
 
     private static final class ClientMetricsSample {
@@ -2209,6 +2407,9 @@ public class MainActivity extends AppCompatActivity {
                 // C5: black-screen watchdog – if 5s elapsed with >30 frames decoded but none rendered → reset
                 long nowMs = SystemClock.elapsedRealtime();
                 if (totalInSincePresent > 30 && (nowMs - lastPresentMs) > 5_000) {
+                    framedMode = false;
+                    Log.w(TAG, "C5 watchdog in framed mode -> fallback to legacy parser on reconnect");
+                    statusListener.onStatus(STATE_CONNECTING, "decoder watchdog: switching to legacy parser", 0);
                     throw new IOException("C5: black-screen watchdog: "
                             + totalInSincePresent + " frames decoded, 0 presented for "
                             + (nowMs - lastPresentMs) + "ms – triggering reconnect");
@@ -2276,8 +2477,9 @@ public class MainActivity extends AppCompatActivity {
         }
 
         private static boolean queueNal(MediaCodec codec, byte[] data, int offset, int size, long ptsUs) {
-            // C4: 1ms budget (was 10ms = 60% of frame budget); drop NAL if no slot
-            int inputIndex = codec.dequeueInputBuffer(1_000);
+            // Keep enough headroom for decoder input availability; too short timeouts
+            // can drop SPS/PPS or IDR and lead to persistent black screen.
+            int inputIndex = codec.dequeueInputBuffer(10_000);
             if (inputIndex < 0) {
                 return false;
             }

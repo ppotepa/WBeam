@@ -1,0 +1,42 @@
+2026-02-19T08:10:34.294237Z  INFO wbeamd_server: wbeamd-rust started control_port=5001 stream_port=5000 root=/mnt/fat_boii/git/WBeam
+2026-02-19T08:10:34.366220Z  INFO wbeamd_core: stream process started run_id=1 pid=250780
+2026-02-19T08:10:34.425332Z  INFO wbeamd_core: stream: [wbeam] profile=balanced size=1920x1080 fps=60 bitrate=25000kbps encoder=nvenc cursor=hidden run_id=1
+2026-02-19T08:10:34.425382Z  INFO wbeamd_core: stream: [wbeam] Requesting ScreenCast portal session (you will get KDE share prompt)... run_id=1
+2026-02-19T08:10:34.458405Z  INFO wbeamd_core: stream: [wbeam] Select source in KDE prompt run_id=1
+2026-02-19T08:10:34.459331Z  INFO wbeamd_core: stream: [wbeam] Starting portal session run_id=1
+2026-02-19T08:10:36.137603Z  INFO wbeamd_core: stream: [wbeam] Got PipeWire node id: 98 run_id=1
+2026-02-19T08:10:36.141849Z  INFO wbeamd_core: stream: [wbeam] Opened PipeWire fd: 7 run_id=1
+2026-02-19T08:10:36.793467Z  INFO wbeamd_core: stream: [wbeam] Streaming Wayland screencast on tcp://0.0.0.0:5000 run_id=1
+2026-02-19T08:10:46.281847Z  INFO wbeamd_core: stream process exited run_id=1 exit_code=0
+2026-02-19T08:10:46.405828Z  INFO wbeamd_core: stream process started run_id=2 pid=251030
+2026-02-19T08:10:46.465950Z  INFO wbeamd_core: stream: [wbeam] profile=balanced size=1728x972 fps=54 bitrate=21250kbps encoder=nvenc cursor=hidden run_id=2
+2026-02-19T08:10:46.466019Z  INFO wbeamd_core: stream: [wbeam] Requesting ScreenCast portal session (you will get KDE share prompt)... run_id=2
+2026-02-19T08:10:46.499254Z  INFO wbeamd_core: stream: [wbeam] Select source in KDE prompt run_id=2
+2026-02-19T08:10:46.500042Z  INFO wbeamd_core: stream: [wbeam] Starting portal session run_id=2
+2026-02-19T08:11:31.914253Z  WARN wbeamd_core: watchdog terminating stalled stream process pid=251030
+2026-02-19T08:11:31.915930Z  INFO wbeamd_core: stream process exited run_id=2 exit_code=-1
+2026-02-19T08:11:32.947887Z  INFO wbeamd_core: stream process started run_id=3 pid=251801
+2026-02-19T08:11:33.006399Z  INFO wbeamd_core: stream: [wbeam] profile=balanced size=1728x972 fps=54 bitrate=21250kbps encoder=nvenc cursor=hidden run_id=3
+2026-02-19T08:11:33.006449Z  INFO wbeamd_core: stream: [wbeam] Requesting ScreenCast portal session (you will get KDE share prompt)... run_id=3
+2026-02-19T08:11:33.038925Z  INFO wbeamd_core: stream: [wbeam] Select source in KDE prompt run_id=3
+2026-02-19T08:11:33.039697Z  INFO wbeamd_core: stream: [wbeam] Starting portal session run_id=3
+2026-02-19T08:11:34.353192Z  INFO wbeamd_core: stream: [wbeam] Got PipeWire node id: 129 run_id=3
+2026-02-19T08:11:34.445000Z  INFO wbeamd_core: stream: [wbeam] Opened PipeWire fd: 7 run_id=3
+2026-02-19T08:11:35.077541Z  INFO wbeamd_core: stream: [wbeam] Streaming Wayland screencast on tcp://0.0.0.0:5000 run_id=3
+2026-02-19T08:11:50.147114Z  INFO wbeamd_core: stream process exited run_id=3 exit_code=0
+2026-02-19T08:11:50.244130Z  INFO wbeamd_core: stream process started run_id=4 pid=252320
+2026-02-19T08:11:50.339277Z  INFO wbeamd_core: stream: [wbeam] profile=balanced size=1536x864 fps=48 bitrate=17500kbps encoder=nvenc cursor=hidden run_id=4
+2026-02-19T08:11:50.339374Z  INFO wbeamd_core: stream: [wbeam] Requesting ScreenCast portal session (you will get KDE share prompt)... run_id=4
+2026-02-19T08:11:50.414772Z  INFO wbeamd_core: stream: [wbeam] Select source in KDE prompt run_id=4
+2026-02-19T08:11:50.416106Z  INFO wbeamd_core: stream: [wbeam] Starting portal session run_id=4
+2026-02-19T08:11:51.447011Z  INFO wbeamd_core: stream: [wbeam] Got PipeWire node id: 83 run_id=4
+2026-02-19T08:11:51.456181Z  INFO wbeamd_core: stream: [wbeam] Opened PipeWire fd: 7 run_id=4
+2026-02-19T08:11:52.210273Z  INFO wbeamd_core: stream: [wbeam] Streaming Wayland screencast on tcp://0.0.0.0:5000 run_id=4
+2026-02-19T08:12:02.352765Z  INFO wbeamd_core: stream process exited run_id=4 exit_code=0
+2026-02-19T08:12:02.491693Z  INFO wbeamd_core: stream process started run_id=5 pid=252659
+2026-02-19T08:12:02.558564Z  INFO wbeamd_core: stream: [wbeam] profile=balanced size=1344x756 fps=42 bitrate=13750kbps encoder=nvenc cursor=hidden run_id=5
+2026-02-19T08:12:02.558615Z  INFO wbeamd_core: stream: [wbeam] Requesting ScreenCast portal session (you will get KDE share prompt)... run_id=5
+2026-02-19T08:12:02.592829Z  INFO wbeamd_core: stream: [wbeam] Select source in KDE prompt run_id=5
+2026-02-19T08:12:02.593780Z  INFO wbeamd_core: stream: [wbeam] Starting portal session run_id=5
+2026-02-19T08:12:43.809935Z  INFO wbeamd_core: stream process exited run_id=5 exit_code=-1
+2026-02-19T08:12:43.809997Z  INFO wbeamd_core: stream exit ignored in stopping/idle state run_id=5

@@ -1,0 +1,15 @@
+[Unit]
+Description=WBeam Rust Host Daemon
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=@ROOT@
+ExecStartPre=%h/.local/bin/wbeam-usb-reverse.sh 5000 5001
+ExecStart=%h/.local/bin/wbeamd-rust --control-port 5001 --stream-port 5000 --root @ROOT@
+Restart=always
+RestartSec=1
+Environment=RUST_LOG=info
+
+[Install]
+WantedBy=default.target

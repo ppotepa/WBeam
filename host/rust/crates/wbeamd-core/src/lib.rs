@@ -236,6 +236,7 @@ impl DaemonCore {
             base: self.base_from_inner(&inner),
             ok: true,
             service: "wbeamd-rust".to_string(),
+            build_revision: build_revision(),
             stream_process_alive: inner.current_pid.is_some(),
         }
     }
@@ -1014,6 +1015,10 @@ async fn terminate_pid(pid: u32) {
     let _ = kill(pid, Signal::SIGTERM);
     sleep(Duration::from_millis(300)).await;
     let _ = kill(pid, Signal::SIGKILL);
+}
+
+fn build_revision() -> String {
+    option_env!("WBEAM_BUILD_REV").unwrap_or("0.0.dev0-build").to_string()
 }
 
 #[cfg(test)]

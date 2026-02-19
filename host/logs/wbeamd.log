@@ -1,0 +1,8 @@
+2026-02-18 23:52:51,519 INFO wbeamd started control_port=5101 stream_port=5100 host=ppotepa-dev
+2026-02-18 23:52:52,460 INFO shutdown requested
+2026-02-18 23:53:52,021 INFO wbeamd started control_port=5111 stream_port=5110 host=ppotepa-dev
+2026-02-18 23:53:52,986 INFO shutdown requested
+2026-02-18 23:54:15,199 INFO wbeamd started control_port=5111 stream_port=5110 host=ppotepa-dev
+2026-02-18 23:54:16,161 INFO shutdown requested
+2026-02-19 00:52:19,195 INFO wbeamd started control_port=5133 stream_port=5132 host=ppotepa-dev
+2026-02-19 00:52:20,112 INFO shutdown requested

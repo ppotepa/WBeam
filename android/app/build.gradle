@@ -2,16 +2,39 @@ plugins {
     id 'com.android.application'
 }
 
+def resolveGitShortRev() {
+    try {
+        def repoDir = rootDir.parentFile
+        def proc = ["git", "-C", repoDir.absolutePath, "rev-parse", "--short=4", "HEAD"].execute()
+        proc.waitFor()
+        if (proc.exitValue() == 0) {
+            def rev = proc.in.text.trim()
+            if (!rev.isEmpty()) {
+                return rev
+            }
+        }
+    } catch (Exception ignored) {
+    }
+    return "dev0"
+}
+
+def wbeamBuildRevision = "0.0.${resolveGitShortRev()}-build"
+
 android {
     namespace 'com.wbeam'
     compileSdk 35
+
+    buildFeatures {
+        buildConfig true
+    }
 
     defaultConfig {
         applicationId "com.wbeam"
         minSdk 26
         targetSdk 35
         versionCode 1
-        versionName "0.1.0"
+        versionName wbeamBuildRevision
+        buildConfigField "String", "WBEAM_BUILD_REV", "\"${wbeamBuildRevision}\""
     }
 
     buildTypes {

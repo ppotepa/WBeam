@@ -1,0 +1,59 @@
+2026-02-19T12:26:48.502260Z  INFO wbeamd_server: wbeamd-rust started control_port=5001 stream_port=5000 root=/mnt/fat_boii/git/WBeam
+2026-02-19T12:26:49.033120Z  INFO wbeamd_core: stream process started run_id=1 pid=329987
+2026-02-19T12:26:49.096392Z  INFO wbeamd_core: stream: [wbeam] profile=lowlatency size=1920x1080 fps=60 bitrate=18000kbps encoder=nvenc cursor=hidden run_id=1
+2026-02-19T12:26:49.096448Z  INFO wbeamd_core: stream: [wbeam] Requesting ScreenCast portal session (you will get KDE share prompt)... run_id=1
+2026-02-19T12:26:49.126462Z  INFO wbeamd_core: stream: [wbeam] Select source in KDE prompt run_id=1
+2026-02-19T12:26:49.127299Z  INFO wbeamd_core: stream: [wbeam] Starting portal session run_id=1
+2026-02-19T12:26:51.111907Z  INFO wbeamd_core: stream: [wbeam] Got PipeWire node id: 90 run_id=1
+2026-02-19T12:26:51.119363Z  INFO wbeamd_core: stream: [wbeam] Opened PipeWire fd: 7 run_id=1
+2026-02-19T12:26:51.788015Z  INFO wbeamd_core: stream: [wbeam] Streaming Wayland screencast on tcp://0.0.0.0:5000 run_id=1
+2026-02-19T12:26:54.546477Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000000 present=0.0fps decode_p95=2.1ms e2e_p95=0.0ms
+2026-02-19T12:26:55.862980Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000001 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:26:57.179740Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000002 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:26:58.497715Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000003 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:26:59.816448Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000004 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:27:01.131913Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000005 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:27:02.449352Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000006 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:27:03.765814Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000007 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:27:05.084352Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000008 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:27:06.401058Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000009 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:27:07.756704Z  INFO wbeamd_core: stream process exited run_id=1 exit_code=0
+2026-02-19T12:27:07.913553Z  INFO wbeamd_core: stream process started run_id=2 pid=330328
+2026-02-19T12:27:07.977620Z  INFO wbeamd_core: stream: [wbeam] profile=balanced size=1920x1080 fps=61 bitrate=25000kbps encoder=nvenc cursor=metadata run_id=2
+2026-02-19T12:27:07.977681Z  INFO wbeamd_core: stream: [wbeam] Requesting ScreenCast portal session (you will get KDE share prompt)... run_id=2
+2026-02-19T12:27:08.011187Z  INFO wbeamd_core: stream: [wbeam] Select source in KDE prompt run_id=2
+2026-02-19T12:27:08.012083Z  INFO wbeamd_core: stream: [wbeam] Starting portal session run_id=2
+2026-02-19T12:27:10.395433Z  INFO wbeamd_core: stream: [wbeam] Got PipeWire node id: 90 run_id=2
+2026-02-19T12:27:10.397538Z  INFO wbeamd_core: stream: [wbeam] Opened PipeWire fd: 7 run_id=2
+2026-02-19T12:27:11.109233Z  INFO wbeamd_core: stream: [wbeam] Streaming Wayland screencast on tcp://0.0.0.0:5000 run_id=2
+2026-02-19T12:27:14.081161Z  INFO wbeamd_core: client-metrics trace_id=0x0000000700000000 present=0.0fps decode_p95=5.4ms e2e_p95=0.0ms
+2026-02-19T12:27:15.499784Z  INFO wbeamd_core: client-metrics trace_id=0x0000000700000001 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:27:16.919968Z  INFO wbeamd_core: client-metrics trace_id=0x0000000700000002 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:27:18.344754Z  INFO wbeamd_core: client-metrics trace_id=0x0000000700000003 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:27:19.761819Z  INFO wbeamd_core: client-metrics trace_id=0x0000000700000004 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:27:21.141903Z  INFO wbeamd_core: client-metrics trace_id=0x0000000700000005 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:27:23.053172Z  INFO wbeamd_core: client-metrics trace_id=0x0000000700000006 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:27:24.477853Z  INFO wbeamd_core: client-metrics trace_id=0x0000000700000007 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:27:25.899910Z  INFO wbeamd_core: client-metrics trace_id=0x0000000700000008 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:27:27.325166Z  INFO wbeamd_core: client-metrics trace_id=0x0000000700000009 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:27:28.456314Z  INFO wbeamd_core: stream process exited run_id=2 exit_code=0
+2026-02-19T12:27:28.609048Z  INFO wbeamd_core: stream process started run_id=3 pid=330656
+2026-02-19T12:27:28.668793Z  INFO wbeamd_core: stream: [wbeam] profile=balanced size=1440x810 fps=61 bitrate=15000kbps encoder=nvenc cursor=metadata run_id=3
+2026-02-19T12:27:28.668849Z  INFO wbeamd_core: stream: [wbeam] Requesting ScreenCast portal session (you will get KDE share prompt)... run_id=3
+2026-02-19T12:27:28.702278Z  INFO wbeamd_core: stream: [wbeam] Select source in KDE prompt run_id=3
+2026-02-19T12:27:28.703045Z  INFO wbeamd_core: stream: [wbeam] Starting portal session run_id=3
+2026-02-19T12:27:30.070892Z  INFO wbeamd_core: suppressing duplicate start request state=STARTING
+2026-02-19T12:27:36.960892Z  INFO wbeamd_core: stream: [wbeam] Got PipeWire node id: 81 run_id=3
+2026-02-19T12:27:37.059480Z  INFO wbeamd_core: stream: [wbeam] Opened PipeWire fd: 7 run_id=3
+2026-02-19T12:27:37.674115Z  INFO wbeamd_core: stream: [wbeam] Streaming Wayland screencast on tcp://0.0.0.0:5000 run_id=3
+2026-02-19T12:27:41.587710Z  INFO wbeamd_core: client-metrics trace_id=0x0000000c00000000 present=0.0fps decode_p95=5.9ms e2e_p95=0.0ms
+2026-02-19T12:27:42.785927Z  INFO wbeamd_core: client-metrics trace_id=0x0000000c00000001 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:27:43.921721Z  INFO wbeamd_core: client-metrics trace_id=0x0000000c00000002 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:27:44.987742Z  INFO wbeamd_core: client-metrics trace_id=0x0000000c00000003 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:27:46.469722Z  INFO wbeamd_core: client-metrics trace_id=0x0000000c00000004 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:27:47.923768Z  INFO wbeamd_core: client-metrics trace_id=0x0000000c00000005 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:27:49.154040Z  INFO wbeamd_core: client-metrics trace_id=0x0000000c00000006 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:27:50.486821Z  INFO wbeamd_core: client-metrics trace_id=0x0000000c00000007 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:27:52.920399Z  INFO wbeamd_core: client-metrics trace_id=0x0000000c00000008 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:27:54.194959Z  INFO wbeamd_core: stream process exited run_id=3 exit_code=0
+2026-02-19T12:27:54.195010Z  INFO wbeamd_core: stream exit ignored in stopping/idle state run_id=3

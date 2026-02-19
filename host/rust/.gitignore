@@ -1,0 +1,4 @@
+/target/
+/logs/*.log
+/logs/wbeamd-rust.log*
+/config/runtime_state.json

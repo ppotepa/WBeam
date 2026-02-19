@@ -40,7 +40,22 @@ fi
 if [[ -f "$LOCK_FILE" ]]; then
   lock_pid="$(tr -cd '0-9' < "$LOCK_FILE" || true)"
   if [[ -n "$lock_pid" ]] && kill -0 "$lock_pid" >/dev/null 2>&1; then
-    :
+    lock_cmd="$(ps -p "$lock_pid" -o args= 2>/dev/null || true)"
+    if [[ "$lock_cmd" == *"wbeamd-server"* ]]; then
+      echo "[wbeam-debug] stopping lock holder pid=$lock_pid" | tee -a "$LOG_FILE"
+      kill "$lock_pid" >/dev/null 2>&1 || true
+      for _ in {1..40}; do
+        if ! kill -0 "$lock_pid" >/dev/null 2>&1; then
+          break
+        fi
+        sleep 0.1
+      done
+      if kill -0 "$lock_pid" >/dev/null 2>&1; then
+        echo "[wbeam-debug] force-killing lock holder pid=$lock_pid" | tee -a "$LOG_FILE"
+        kill -9 "$lock_pid" >/dev/null 2>&1 || true
+      fi
+      rm -f "$LOCK_FILE"
+    fi
   else
     rm -f "$LOCK_FILE"
   fi
@@ -87,8 +102,8 @@ tail -n 0 -F "$RUST_TRACE_FILE" 2>/dev/null \
 RUST_TAIL_PID=$!
 
 if command -v adb >/dev/null 2>&1; then
-  adb logcat -v time -s WBeamMain:I WBeamService:E WBeamUsbAttach:E AndroidRuntime:E '*:S' \
-    | grep -i --line-buffered -E "huddbg|offline|ioexception|io error|stream error|failed|socketexception|connectexception|fatal exception|connected to host|daemon poll failed|androidruntime" \
+  adb logcat -v time -s WBeamMain:D WBeamService:I WBeamUsbAttach:I AndroidRuntime:E MediaCodec:E CCodec:E '*:S' \
+    | grep -i --line-buffered -E "huddbg|\[decode/(framed|legacy)\]|black-screen watchdog|rendering live desktop|stream worker reconnect|receiving h264 bytes|connected to stream|offline|ioexception|io error|stream error|failed|socketexception|connectexception|fatal exception|connected to host|daemon poll failed|androidruntime" \
     | sed -u 's/^/[android] /' \
     | tee -a "$LOG_FILE" \
     | awk '
