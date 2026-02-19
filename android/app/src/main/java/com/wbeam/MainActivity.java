@@ -1315,10 +1315,11 @@ public class MainActivity extends AppCompatActivity {
             reason = reason.substring(0, 44) + "...";
         }
 
+        boolean warmingUp = presentFps < 1.0 && streamUptimeSec < 5;
         String hud = String.format(
                 Locale.US,
                 "HUD %s\nfps %.0f/%.1f frame %.2fms\ndec %.2fms ren %.2fms e2e %.2fms\nq %d/%d/%d max %d/%d/%d\nadapt L%d %s\ndrops %d bp %d/%d\n%s",
-                daemonReachable ? "LIVE" : "DEGRADED",
+                daemonReachable ? (warmingUp ? "WARM" : "LIVE") : "DEGRADED",
                 targetFps,
                 presentFps,
                 frametimeP95,
@@ -1340,13 +1341,14 @@ public class MainActivity extends AppCompatActivity {
         );
         perfHudText.setText(hud);
 
-        boolean highPressure = decodeP95 > 12.0 || renderP95 > 7.0 || qT >= qTMax || qD >= qDMax || qR >= qRMax;
+        // Red only when degraded with frames already flowing; warmup = yellow.
+        boolean highPressure = !warmingUp && (decodeP95 > 12.0 || renderP95 > 7.0 || qT >= qTMax || qD >= qDMax || qR >= qRMax);
         if (highPressure) {
-            perfHudText.setTextColor(Color.parseColor("#FCA5A5"));
-        } else if (adaptiveAction.startsWith("degrade")) {
-            perfHudText.setTextColor(Color.parseColor("#FDE68A"));
+            perfHudText.setTextColor(Color.parseColor("#FCA5A5")); // red
+        } else if (adaptiveAction.startsWith("degrade") || warmingUp) {
+            perfHudText.setTextColor(Color.parseColor("#FDE68A")); // yellow
         } else {
-            perfHudText.setTextColor(Color.parseColor("#BBF7D0"));
+            perfHudText.setTextColor(Color.parseColor("#BBF7D0")); // green
         }
         if (perfHudPanel != null) {
             perfHudPanel.setAlpha(0.95f);
@@ -2065,6 +2067,15 @@ public class MainActivity extends AppCompatActivity {
                                     (sessionConnectId << 32) | (sampleSeq++ & 0xFFFFFFFFL) // P2.2
                             )
                     );
+                    Log.d(TAG, String.format(Locale.US,
+                            "[decode/legacy] in=%d out=%d drop=%d late=%d"
+                                    + " qD=%d/%d qR=%d/%d dec_p95=%.1fms ren_p95=%.1fms"
+                                    + " noPresent=%d reconn=%d",
+                            inFrames, outFrames, droppedSec, tooLateSec,
+                            Math.min(DECODE_QUEUE_MAX_FRAMES, pendingDecodeQueue), DECODE_QUEUE_MAX_FRAMES,
+                            renderQueueDepth, RENDER_QUEUE_MAX_FRAMES,
+                            decodeMsP95, renderMsP95,
+                            pendingWithNoPresent, reconnects));
                     bytes         = 0;
                     inFrames      = 0;
                     outFrames     = 0;
@@ -2211,6 +2222,15 @@ public class MainActivity extends AppCompatActivity {
                                     (sessionConnectId << 32) | (sampleSeq++ & 0xFFFFFFFFL) // P2.2
                             )
                     );
+                    Log.d(TAG, String.format(Locale.US,
+                            "[decode/framed] in=%d out=%d drop=%d late=%d"
+                                    + " qD=%d/%d qR=%d dec_p95=%.1fms ren_p95=%.1fms"
+                                    + " noPresent=%d reconn=%d",
+                            inFrames, outFrames, droppedSec, tooLateSec,
+                            Math.min(DECODE_QUEUE_MAX_FRAMES, pendingDecodeQueue), DECODE_QUEUE_MAX_FRAMES,
+                            drainStats.renderedCount > 0 ? 1 : 0,
+                            decodeMsP95, renderMsP95,
+                            totalInSincePresent, reconnects));
                     bytes         = 0;
                     inFrames      = 0;
                     outFrames     = 0;
