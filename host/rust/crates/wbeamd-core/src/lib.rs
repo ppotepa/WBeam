@@ -66,6 +66,7 @@ struct Inner {
     metrics: MetricsSnapshot,
     current_pid: Option<u32>,
     run_id: u64,
+    telemetry_file: Option<File>, // P2.3: JSONL export
     suppress_auto_start_until: Option<Instant>,
     last_reverse_refresh_at: Option<Instant>,
     adaptation_level: u8,
@@ -90,6 +91,7 @@ impl Inner {
             metrics: MetricsSnapshot::default(),
             current_pid: None,
             run_id: 0,
+            telemetry_file: None, // P2.3
             suppress_auto_start_until: None,
             last_reverse_refresh_at: None,
             adaptation_level: 0,
@@ -125,6 +127,27 @@ pub struct DaemonCore {
     reconnect_backoff: Duration,
     stop_cooldown: Duration,
     start_timeout: Duration,
+}
+
+/// P2.3: Return base directory for telemetry JSONL files.
+/// Creates the directory tree if needed.
+fn telemetry_dir() -> PathBuf {
+    let base = std::env::var("HOME")
+        .map(|h| PathBuf::from(h).join(".local").join("share").join("wbeam"))
+        .unwrap_or_else(|_| PathBuf::from("/tmp/wbeam"));
+    let _ = fs::create_dir_all(&base);
+    base
+}
+
+/// P2.3: Open (or create/append) a telemetry JSONL file for the given run_id.
+fn open_telemetry_file(run_id: u64) -> Option<File> {
+    let path = telemetry_dir().join(format!("telemetry-{run_id}.jsonl"));
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| warn!("telemetry open {:?}: {e}", path))
+        .ok()
 }
 
 impl DaemonCore {
@@ -382,6 +405,16 @@ impl DaemonCore {
                 inner.metrics.bitrate_actual_bps = client.recv_bps;
             }
 
+            // P2.3: append JSONL telemetry record
+            let telemetry_run_id = inner.run_id; // capture before mutable borrow
+            if let Some(ref mut f) = inner.telemetry_file {
+                let mut rec = serde_json::to_value(&client).unwrap_or_default();
+                if let serde_json::Value::Object(ref mut m) = rec {
+                    m.insert("run_id".to_string(), serde_json::Value::from(telemetry_run_id));
+                }
+                let _ = writeln!(f, "{rec}");
+            }
+
             if !can_adapt {
                 inner.high_pressure_streak = 0;
                 inner.low_pressure_streak = 0;
@@ -514,6 +547,7 @@ impl DaemonCore {
         inner.stream_started_at = None;
         inner.last_output_at = None;
         inner.last_streaming_line_at = None;
+        inner.telemetry_file = None; // P2.3: flush+close
 
         Ok(StatusResponse {
             base: self.base_from_inner(&inner),
@@ -563,6 +597,7 @@ impl DaemonCore {
             run_id = inner.run_id;
             inner.run_started_at = Some(Instant::now());
             inner.stream_started_at = None;
+            inner.telemetry_file = open_telemetry_file(run_id); // P2.3
             inner.last_output_at = Some(Instant::now());
             inner.last_streaming_line_at = None;
         }
@@ -690,6 +725,7 @@ impl DaemonCore {
             inner.stream_started_at = None;
             inner.last_output_at = None;
             inner.last_streaming_line_at = None;
+            inner.telemetry_file = None; // P2.3: flush+close
 
             if inner.state == STATE_STOPPING || inner.state == STATE_IDLE {
                 inner.state = STATE_IDLE.to_string();
