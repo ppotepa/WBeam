@@ -1938,6 +1938,15 @@ public class MainActivity extends AppCompatActivity {
                             break; // wait for more data
                         }
 
+                        frames++;
+                        // Drain before drop – 16ms when full so HW decoder can flush pipeline.
+                        drainLatestFrame(codec, bufferInfo, drainStats,
+                                pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES ? 16_000 : 5_000);
+                        pendingDecodeQueue = Math.max(0, pendingDecodeQueue - drainStats.releasedCount);
+                        outFrames   += drainStats.renderedCount;
+                        tooLateSec  += drainStats.droppedLateCount;
+                        renderNsMax  = Math.max(renderNsMax, drainStats.renderNsMax);
+                        renderQueueDepth = drainStats.renderedCount > 0 ? 1 : 0;
                         // E: drop-late over delay-growth: don't over-fill the decode queue
                         if (pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES) {
                             droppedSec++; // E: decode queue full
@@ -1954,13 +1963,6 @@ public class MainActivity extends AppCompatActivity {
                                 droppedSec++;
                             }
                         }
-                        frames++;
-                        drainLatestFrame(codec, bufferInfo, drainStats);
-                        pendingDecodeQueue = Math.max(0, pendingDecodeQueue - drainStats.releasedCount);
-                        outFrames   += drainStats.renderedCount;
-                        tooLateSec  += drainStats.droppedLateCount;
-                        renderNsMax  = Math.max(renderNsMax, drainStats.renderNsMax);
-                        renderQueueDepth = drainStats.renderedCount > 0 ? 1 : 0;
 
                         sHead += 4 + nalSize; // C2: zero-copy advance
                     }
@@ -1982,6 +1984,15 @@ public class MainActivity extends AppCompatActivity {
 
                             int nalSize = next - sHead;
                             if (nalSize > 0) {
+                                frames++;
+                                // Drain before drop – 16ms when full so HW decoder can flush pipeline.
+                                drainLatestFrame(codec, bufferInfo, drainStats,
+                                        pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES ? 16_000 : 5_000);
+                                pendingDecodeQueue = Math.max(0, pendingDecodeQueue - drainStats.releasedCount);
+                                outFrames   += drainStats.renderedCount;
+                                tooLateSec  += drainStats.droppedLateCount;
+                                renderNsMax  = Math.max(renderNsMax, drainStats.renderNsMax);
+                                renderQueueDepth = drainStats.renderedCount > 0 ? 1 : 0;
                                 // E: drop-late: don't over-fill the decode queue
                                 if (pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES) {
                                     droppedSec++; // E: decode queue full
@@ -1998,13 +2009,6 @@ public class MainActivity extends AppCompatActivity {
                                         droppedSec++;
                                     }
                                 }
-                                frames++;
-                                drainLatestFrame(codec, bufferInfo, drainStats);
-                                pendingDecodeQueue = Math.max(0, pendingDecodeQueue - drainStats.releasedCount);
-                                outFrames   += drainStats.renderedCount;
-                                tooLateSec  += drainStats.droppedLateCount;
-                                renderNsMax  = Math.max(renderNsMax, drainStats.renderNsMax);
-                                renderQueueDepth = drainStats.renderedCount > 0 ? 1 : 0;
                             }
                             sHead = next; // C2: zero-copy advance to next start-code
                         }
@@ -2140,6 +2144,18 @@ public class MainActivity extends AppCompatActivity {
                 }
                 bytes += FRAME_HEADER_SIZE + payloadLen;
 
+                frames++;
+                // Drain before drop – 16ms when full so HW decoder can flush pipeline.
+                drainLatestFrame(codec, bufferInfo, drainStats,
+                        pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES ? 16_000 : 5_000);
+                pendingDecodeQueue = Math.max(0, pendingDecodeQueue - drainStats.releasedCount); // E
+                if (drainStats.renderedCount > 0) {
+                    outFrames += drainStats.renderedCount;
+                    lastPresentMs = SystemClock.elapsedRealtime();
+                    totalInSincePresent = 0;
+                }
+                tooLateSec += drainStats.droppedLateCount;
+                renderNsMax = Math.max(renderNsMax, drainStats.renderNsMax);
                 // ── Queue to decoder ─────────────────────────────────────────
                 // E: bounded decode queue – drop if full (latest-frame-wins)
                 if (pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES) {
@@ -2157,16 +2173,6 @@ public class MainActivity extends AppCompatActivity {
                         droppedSec++;
                     }
                 }
-                frames++;
-                drainLatestFrame(codec, bufferInfo, drainStats);
-                pendingDecodeQueue = Math.max(0, pendingDecodeQueue - drainStats.releasedCount); // E
-                if (drainStats.renderedCount > 0) {
-                    outFrames += drainStats.renderedCount;
-                    lastPresentMs = SystemClock.elapsedRealtime();
-                    totalInSincePresent = 0;
-                }
-                tooLateSec += drainStats.droppedLateCount;
-                renderNsMax = Math.max(renderNsMax, drainStats.renderNsMax);
 
                 // C5: black-screen watchdog – if 5s elapsed with >30 frames decoded but none rendered → reset
                 long nowMs = SystemClock.elapsedRealtime();
@@ -2252,14 +2258,14 @@ public class MainActivity extends AppCompatActivity {
         private static void drainLatestFrame(
                 MediaCodec codec,
                 MediaCodec.BufferInfo info,
-                DrainStats stats
+                DrainStats stats,
+                long firstTimeoutUs
         ) {
             stats.reset();
             int latestRenderableIndex = -1;
-            // Wait up to 5 ms on the first poll – gives the HW decoder time to
-            // produce output when socket reads are instant (USB recv-buf full).
-            // Subsequent iterations use 0 to drain any already-available backlog.
-            long timeoutUs = 5_000;
+            // firstTimeoutUs: 16ms when queue full (lets HW decoder flush its
+            // pipeline before caller decides to drop); 5ms otherwise.
+            long timeoutUs = firstTimeoutUs;
 
             while (true) {
                 int outputIndex = codec.dequeueOutputBuffer(info, timeoutUs);
