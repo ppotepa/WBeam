@@ -1059,9 +1059,25 @@ public class MainActivity extends AppCompatActivity {
             uiHandler.postDelayed(liveTestStartTimeoutTask, LIVE_TEST_START_TIMEOUT_MS);
 
             mp.setOnPreparedListener(ready -> {
+                if (mediaPlayer != ready) {
+                    logLiveTestWarn("prepared callback ignored for stale player");
+                    return;
+                }
                 uiHandler.removeCallbacks(liveTestStartTimeoutTask);
                 logLiveTestInfo("media prepared; starting playback");
-                ready.start();
+                try {
+                    ready.start();
+                } catch (IllegalStateException ex) {
+                    logLiveTestError("start() failed: " + shortError(ex));
+                    updateStatus(STATE_ERROR, "RUN TESTS LIVE failed: IllegalStateException", 0);
+                    setLiveTestOverlay(
+                            "RUN TESTS LIVE FAILED",
+                            "preset\n" + preset.toMultiline(),
+                            shortError(ex)
+                    );
+                    releaseMediaPlayer();
+                    return;
+                }
                 updateStatus(STATE_STREAMING, "RUN TESTS LIVE playing", 0);
                 setLiveTestOverlay(
                         "RUN TESTS LIVE ACTIVE",
@@ -1071,12 +1087,18 @@ public class MainActivity extends AppCompatActivity {
                 uiHandler.postDelayed(this::clearLiveTestOverlay, 900);
             });
             mp.setOnCompletionListener(done -> {
+                if (mediaPlayer != done) {
+                    return;
+                }
                 uiHandler.removeCallbacks(liveTestStartTimeoutTask);
                 logLiveTestInfo("playback completed");
                 updateStatus(STATE_IDLE, "RUN TESTS LIVE completed", 0);
                 clearLiveTestOverlay();
             });
             mp.setOnErrorListener((errPlayer, what, extra) -> {
+                if (mediaPlayer != errPlayer) {
+                    return true;
+                }
                 uiHandler.removeCallbacks(liveTestStartTimeoutTask);
                 logLiveTestError("player error what=" + what + " extra=" + extra);
                 updateStatus(STATE_ERROR, "RUN TESTS LIVE error: " + what + "/" + extra, 0);
@@ -1088,6 +1110,9 @@ public class MainActivity extends AppCompatActivity {
                 return true;
             });
             mp.setOnInfoListener((infoPlayer, what, extra) -> {
+                if (mediaPlayer != infoPlayer) {
+                    return true;
+                }
                 if (what == MediaPlayer.MEDIA_INFO_BUFFERING_START) {
                     logLiveTestWarn("buffering start");
                     updateStatus(STATE_CONNECTING, "RUN TESTS LIVE buffering", 0);
@@ -1124,20 +1149,29 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void releaseMediaPlayer() {
-        if (mediaPlayer != null) {
+        uiHandler.removeCallbacks(liveTestStartTimeoutTask);
+        MediaPlayer mp = mediaPlayer;
+        mediaPlayer = null;
+        if (mp != null) {
             try {
-                mediaPlayer.stop();
+                mp.setOnPreparedListener(null);
+                mp.setOnCompletionListener(null);
+                mp.setOnErrorListener(null);
+                mp.setOnInfoListener(null);
             } catch (Exception ignored) {
             }
             try {
-                mediaPlayer.reset();
+                mp.stop();
             } catch (Exception ignored) {
             }
             try {
-                mediaPlayer.release();
+                mp.reset();
             } catch (Exception ignored) {
             }
-            mediaPlayer = null;
+            try {
+                mp.release();
+            } catch (Exception ignored) {
+            }
         }
     }
 
