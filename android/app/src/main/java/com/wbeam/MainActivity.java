@@ -72,7 +72,7 @@ public class MainActivity extends AppCompatActivity {
     private static final long CLIENT_METRICS_INTERVAL_MS = 900;
     private static final long HUD_ADB_LOG_INTERVAL_MS = 1000;
     private static final int TRANSPORT_QUEUE_MAX_FRAMES = 3;
-    private static final int DECODE_QUEUE_MAX_FRAMES = 2;
+    private static final int DECODE_QUEUE_MAX_FRAMES = 4;
     private static final int RENDER_QUEUE_MAX_FRAMES = 1;
     private static final String TEST_VIDEO_URL =
             "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4";
