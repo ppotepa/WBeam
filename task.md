@@ -364,3 +364,7 @@ Example:
 3. `2026-02-19 22:00 | host | C1 | host/scripts/stream_wayland_portal_h264.py | q1+qmain: max-size-buffers=2, max-size-time=40ms, leaky=downstream; qdbg: max-size-buffers=1, max-size-time=200ms | pipeline smoke test BUILD OK | C3`
 4. `2026-02-19 22:00 | android | C4 | android/.../MainActivity.java | dequeueInputBuffer 10ms→1ms; drops NAL instead of blocking 10ms | BUILD SUCCESSFUL | C2`
 5. `2026-02-19 22:00 | android | C2 | android/.../MainActivity.java | ring-buffer parser (sHead/sTail): eliminates 6 per-NAL System.arraycopy; buffer 4MB→512KB; compact only on overflow | BUILD SUCCESSFUL 9s | C3, E`
+6. `2026-02-19 23:30 | host | C3 | host/scripts/stream_wayland_portal_h264.py | framed_tcp_server_thread: appsink+24-byte header per AU, --framed CLI/env flag, alignment=au | Python syntax OK | C3 Android`
+7. `2026-02-19 23:30 | android | C3 | android/.../MainActivity.java | framedDecodeLoop: reads 24-byte magic header, exact per-frame PTS; magic auto-detect in runLoop; PushbackInputStream peek fallback | BUILD SUCCESSFUL | C5`
+8. `2026-02-19 23:30 | android | C5 | android/.../MainActivity.java | black-screen watchdog in framedDecodeLoop + legacy decodeLoop: 5s/300-frame threshold, throws IOException to trigger reconnect | BUILD SUCCESSFUL | commit`
+9. `2026-02-19 23:30 | host | C3 | host/rust/crates/wbeamd-core/src/lib.rs | pass --framed to Python when WBEAM_FRAMED=1 | cargo check Finished | commit`

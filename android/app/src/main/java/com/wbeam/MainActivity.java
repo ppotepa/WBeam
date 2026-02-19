@@ -1601,6 +1601,12 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private static final class H264TcpPlayer {
+        // C3 framing constants (must match docs/telemetry_schema.md and host Python)
+        private static final int  FRAME_MAGIC        = 0x57424D30; // "WBM0"
+        private static final byte FRAME_VERSION      = 0x01;
+        private static final int  FRAME_HEADER_SIZE  = 24;
+        // Header layout (big-endian): magic(4) ver(1) flags(1) reserved(2) seq(4) pts_us(8) len(4)
+
         private final Surface surface;
         private final StatusListener statusListener;
         private final int decodeWidth;
@@ -1609,6 +1615,7 @@ public class MainActivity extends AppCompatActivity {
 
         private volatile boolean running;
         private volatile long reconnectDelayMs = 800;
+        private volatile boolean framedMode = false; // C3: set after first valid framing header detected
         private Thread thread;
         private Socket socket;
         private long reconnects = 0;
@@ -1665,7 +1672,25 @@ public class MainActivity extends AppCompatActivity {
                     codec.start();
 
                     statusListener.onStatus(STATE_STREAMING, "connected", 0);
-                    decodeLoop(socket.getInputStream(), codec);
+                    // C3: try framed protocol first; fall back to legacy AnnexB on magic mismatch
+                    if (framedMode) {
+                        framedDecodeLoop(socket.getInputStream(), codec);
+                    } else {
+                        // Peek first 4 bytes to detect magic before routing
+                        java.io.PushbackInputStream pis = new java.io.PushbackInputStream(
+                                socket.getInputStream(), FRAME_HEADER_SIZE);
+                        byte[] peek = new byte[4];
+                        int peekN = 0;
+                        while (peekN < 4) { int r = pis.read(peek, peekN, 4 - peekN); if (r < 0) throw new java.io.IOException("stream closed"); peekN += r; }
+                        pis.unread(peek, 0, peekN);
+                        int magic = ((peek[0]&0xFF)<<24)|((peek[1]&0xFF)<<16)|((peek[2]&0xFF)<<8)|(peek[3]&0xFF);
+                        if (magic == FRAME_MAGIC) {
+                            framedMode = true;
+                            framedDecodeLoop(pis, codec);
+                        } else {
+                            decodeLoop(pis, codec);
+                        }
+                    }
                 } catch (Exception e) {
                     if (running) {
                         reconnects++;
@@ -1726,6 +1751,8 @@ public class MainActivity extends AppCompatActivity {
             long decodeNsMax   = 0;
             long renderNsMax   = 0;
             long lastLog = SystemClock.elapsedRealtime();
+            long lastPresentMs     = SystemClock.elapsedRealtime(); // C5: black-screen watchdog
+            long pendingWithNoPresent = 0;
             MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
             DrainStats drainStats = new DrainStats();
 
@@ -1851,6 +1878,12 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
 
+                // C5: track present activity for black-screen watchdog
+                if (drainStats.renderedCount > 0) { lastPresentMs = SystemClock.elapsedRealtime(); pendingWithNoPresent = 0; }
+                else if (inFrames > 0)            { pendingWithNoPresent++; }
+                if (pendingWithNoPresent > 300 && (SystemClock.elapsedRealtime() - lastPresentMs) > 5_000) {
+                    throw new IOException("C5: black-screen watchdog: 0 frames presented in 5s with " + pendingWithNoPresent + " decoded – reconnecting");
+                }
                 long now = SystemClock.elapsedRealtime();
                 if (now - lastLog >= 1000) {
                     droppedTotal += droppedSec;
@@ -1906,8 +1939,141 @@ public class MainActivity extends AppCompatActivity {
         }
 
 
+        /**
+         * C3: Framed decode loop – host sends 24-byte header + payload per access unit.
+         * Header: magic(4) ver(1) flags(1) rsv(2) seq(4) pts_us(8) len(4)
+         * This eliminates AnnexB start-code scanning entirely and gives exact PTS per frame.
+         * Falls back to legacy decodeLoop if magic is wrong on first read.
+         */
+        private void framedDecodeLoop(InputStream input, MediaCodec codec) throws IOException {
+            // pre-allocated buffers – no alloc in hot path
+            byte[] hdrBuf     = new byte[FRAME_HEADER_SIZE];
+            byte[] payloadBuf = new byte[2 * 1024 * 1024]; // 2 MB, ~166 frames @720p/12Mbps
+            long   frames     = 0;
+            long   bytes      = 0;
+            long   inFrames   = 0;
+            long   outFrames  = 0;
+            long   droppedSec = 0;
+            long   tooLateSec = 0;
+            long   decodeNsTotal = 0;
+            long   decodeNsMax   = 0;
+            long   renderNsMax   = 0;
+            long   lastLog       = SystemClock.elapsedRealtime();
+            // C5: black-screen watchdog state
+            long   lastPresentMs   = SystemClock.elapsedRealtime();
+            long   totalInSincePresent = 0;
+            MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
+            DrainStats drainStats = new DrainStats();
+
+            while (running) {
+                // ── Read 24-byte header ──────────────────────────────────────
+                int hdrRead = 0;
+                while (hdrRead < FRAME_HEADER_SIZE) {
+                    int n = input.read(hdrBuf, hdrRead, FRAME_HEADER_SIZE - hdrRead);
+                    if (n < 0) throw new IOException("stream closed");
+                    hdrRead += n;
+                }
+                // Parse magic (big-endian)
+                int magic = ((hdrBuf[0] & 0xFF) << 24) | ((hdrBuf[1] & 0xFF) << 16)
+                          | ((hdrBuf[2] & 0xFF) << 8)  |  (hdrBuf[3] & 0xFF);
+                if (magic != FRAME_MAGIC) {
+                    throw new IOException("C3: bad frame magic 0x" + Integer.toHexString(magic)
+                            + " – host may be in legacy mode; reconnecting");
+                }
+                // byte[4] = version, byte[5] = flags (bit0=keyframe)
+                // seq: bytes 8..11, pts_us: bytes 12..19, len: bytes 20..23
+                long ptsUs = ((hdrBuf[12] & 0xFFL) << 56) | ((hdrBuf[13] & 0xFFL) << 48)
+                           | ((hdrBuf[14] & 0xFFL) << 40) | ((hdrBuf[15] & 0xFFL) << 32)
+                           | ((hdrBuf[16] & 0xFFL) << 24) | ((hdrBuf[17] & 0xFFL) << 16)
+                           | ((hdrBuf[18] & 0xFFL) << 8)  |  (hdrBuf[19] & 0xFFL);
+                int payloadLen = ((hdrBuf[20] & 0xFF) << 24) | ((hdrBuf[21] & 0xFF) << 16)
+                               | ((hdrBuf[22] & 0xFF) << 8)  |  (hdrBuf[23] & 0xFF);
+
+                if (payloadLen <= 0 || payloadLen > payloadBuf.length) {
+                    throw new IOException("C3: bad payload length " + payloadLen);
+                }
+
+                // ── Read payload ─────────────────────────────────────────────
+                int payRead = 0;
+                while (payRead < payloadLen) {
+                    int n = input.read(payloadBuf, payRead, payloadLen - payRead);
+                    if (n < 0) throw new IOException("stream closed");
+                    payRead += n;
+                }
+                bytes += FRAME_HEADER_SIZE + payloadLen;
+
+                // ── Queue to decoder ─────────────────────────────────────────
+                long t0 = SystemClock.elapsedRealtimeNanos();
+                if (queueNal(codec, payloadBuf, 0, payloadLen, ptsUs)) {
+                    long decodeNs = SystemClock.elapsedRealtimeNanos() - t0;
+                    decodeNsTotal += decodeNs;
+                    decodeNsMax    = Math.max(decodeNsMax, decodeNs);
+                    inFrames++;
+                    totalInSincePresent++;
+                } else {
+                    droppedSec++;
+                }
+                frames++;
+                drainLatestFrame(codec, bufferInfo, drainStats);
+                if (drainStats.renderedCount > 0) {
+                    outFrames += drainStats.renderedCount;
+                    lastPresentMs = SystemClock.elapsedRealtime();
+                    totalInSincePresent = 0;
+                }
+                tooLateSec += drainStats.droppedLateCount;
+                renderNsMax = Math.max(renderNsMax, drainStats.renderNsMax);
+
+                // C5: black-screen watchdog – if 5s elapsed with >30 frames decoded but none rendered → reset
+                long nowMs = SystemClock.elapsedRealtime();
+                if (totalInSincePresent > 30 && (nowMs - lastPresentMs) > 5_000) {
+                    throw new IOException("C5: black-screen watchdog: "
+                            + totalInSincePresent + " frames decoded, 0 presented for "
+                            + (nowMs - lastPresentMs) + "ms – triggering reconnect");
+                }
+
+                // ── 1-second stats ───────────────────────────────────────────
+                if (nowMs - lastLog >= 1000) {
+                    droppedTotal += droppedSec;
+                    tooLateTotal += tooLateSec;
+                    reconnectDelayMs = 800;
+                    statusListener.onStatus(STATE_STREAMING, "rendering live desktop [framed]", bytes);
+                    statusListener.onStats(
+                            "fps in/out: " + inFrames + "/" + outFrames
+                                    + " | drops: " + droppedTotal
+                                    + " | late: " + tooLateTotal
+                                    + " | q(d/r): 0/" + (drainStats.renderedCount > 0 ? 1 : 0)
+                                    + " | reconnects: " + reconnects
+                    );
+                    double decodeMsP50 = inFrames > 0 ? (decodeNsTotal / 1_000_000.0) / inFrames : 0.0;
+                    double decodeMsP95 = Math.max(decodeMsP50, decodeNsMax / 1_000_000.0);
+                    double renderMsP95 = renderNsMax / 1_000_000.0;
+                    statusListener.onClientMetrics(
+                            new ClientMetricsSample(
+                                    inFrames, inFrames, outFrames, bytes,
+                                    decodeMsP50, decodeMsP95, renderMsP95,
+                                    0.0, 0.0,
+                                    0,
+                                    0,
+                                    Math.min(RENDER_QUEUE_MAX_FRAMES, drainStats.renderedCount > 0 ? 1 : 0),
+                                    0, droppedTotal, tooLateTotal
+                            )
+                    );
+                    bytes         = 0;
+                    inFrames      = 0;
+                    outFrames     = 0;
+                    droppedSec    = 0;
+                    tooLateSec    = 0;
+                    decodeNsTotal = 0;
+                    decodeNsMax   = 0;
+                    renderNsMax   = 0;
+                    lastLog = nowMs;
+                }
+            }
+        }
+
         private static boolean queueNal(MediaCodec codec, byte[] data, int offset, int size, long ptsUs) {
-            int inputIndex = codec.dequeueInputBuffer(10_000);
+            // C4: 1ms budget (was 10ms = 60% of frame budget); drop NAL if no slot
+            int inputIndex = codec.dequeueInputBuffer(1_000);
             if (inputIndex < 0) {
                 return false;
             }
