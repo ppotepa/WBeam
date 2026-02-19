@@ -3,7 +3,10 @@ import argparse
 import os
 import random
 import signal
+import socket
+import struct
 import sys
+import threading
 
 import dbus
 import dbus.mainloop.glib
@@ -30,11 +33,19 @@ PROFILE_DEFAULTS = {
     "ultra": {"size": "2560x1440", "fps": 60, "bitrate_kbps": 38000, "nv_preset": "p6"},
 }
 
+# C3 framing constants
+FRAME_MAGIC = 0x57424D30       # b"WBM0"
+FRAME_VERSION = 0x01
+FRAME_HEADER_SIZE = 24         # see docs/telemetry_schema.md
+FRAME_STRUCT = struct.Struct(">IBBHIQI")  # magic ver flags rsv seq pts_us len
+
 STATE = {
     "main_loop": None,
     "session_handle": None,
     "pipeline": None,
     "bus": None,
+    "framing_thread": None,
+    "framing_stop": None,
 }
 
 
@@ -195,6 +206,60 @@ def configure_encoder(enc, encoder_name, bitrate_kbps, fps, nv_preset):
     enc.set_property("qp-max", 32)
 
 
+def framed_tcp_server_thread(appsink, port, stop_event):
+    """C3: Accept one TCP client; send 24-byte-framed H264 access units.
+
+    Header (big-endian, 24 bytes):
+        magic(4)=0x57424D30 | version(1) | flags(1) | reserved(2)
+        seq(4) | pts_us(8) | payload_len(4) | payload(N)
+    """
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("0.0.0.0", port))
+    srv.listen(1)
+    srv.settimeout(1.0)
+    seq = 0
+    print(f"[wbeam-framed] listening on :{port}", flush=True)
+    while not stop_event.is_set():
+        try:
+            conn, addr = srv.accept()
+        except socket.timeout:
+            continue
+        conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        print(f"[wbeam-framed] client connected: {addr}", flush=True)
+        try:
+            while not stop_event.is_set():
+                sample = appsink.emit("try-pull-sample", 500_000_000)
+                if sample is None:
+                    continue
+                buf = sample.get_buffer()
+                pts_us = buf.pts // 1000 if buf.pts != Gst.CLOCK_TIME_NONE else 0
+                ok, map_info = buf.map(Gst.MapFlags.READ)
+                if not ok:
+                    continue
+                data = bytes(map_info.data)
+                buf.unmap(map_info)
+                flags = 0x00 if buf.has_flags(Gst.BufferFlags.DELTA_UNIT) else 0x01
+                header = FRAME_STRUCT.pack(
+                    FRAME_MAGIC, FRAME_VERSION, flags, 0,
+                    seq & 0xFFFFFFFF, pts_us, len(data)
+                )
+                seq += 1
+                conn.sendall(header + data)
+        except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+            print(f"[wbeam-framed] client disconnected: {exc}", flush=True)
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    try:
+        srv.close()
+    except Exception:
+        pass
+    print("[wbeam-framed] sender thread stopped", flush=True)
+
+
 def make_pipeline(
     fd,
     node_id,
@@ -207,6 +272,7 @@ def make_pipeline(
     debug_fps,
     encoder_name,
     nv_preset,
+    framed=False,
 ):
     pipeline = Gst.Pipeline.new("wbeam-wayland-pipeline")
 
@@ -222,7 +288,11 @@ def make_pipeline(
     enc = Gst.ElementFactory.make("nvh264enc" if encoder_name == "nvenc" else "openh264enc", "enc")
     parse = Gst.ElementFactory.make("h264parse", "parse")
     caps2 = Gst.ElementFactory.make("capsfilter", "caps2")
-    sink = Gst.ElementFactory.make("tcpserversink", "sink")
+    # C3: framed mode uses appsink + framed_tcp_server_thread; legacy uses tcpserversink
+    if framed:
+        sink = Gst.ElementFactory.make("appsink", "sink")
+    else:
+        sink = Gst.ElementFactory.make("tcpserversink", "sink")
 
     elements = [src, queue, convert, scale, rate, caps1, tee, queue_main, enc, parse, caps2, sink]
     if any(e is None for e in elements):
@@ -241,7 +311,7 @@ def make_pipeline(
                     "encoder",
                     "h264parse",
                     "capsfilter",
-                    "tcpserversink",
+                    "appsink" if framed else "tcpserversink",
                 ],
                 elements,
             )
@@ -275,14 +345,24 @@ def make_pipeline(
 
     parse.set_property("disable-passthrough", True)
     parse.set_property("config-interval", 1)
-    caps2.set_property(
-        "caps",
-        Gst.Caps.from_string("video/x-h264,stream-format=byte-stream,alignment=nal"),
-    )
-
-    sink.set_property("host", "0.0.0.0")
-    sink.set_property("port", int(port))
-    sink.set_property("sync", False)
+    if framed:
+        # C3: alignment=au → one buffer = one complete H264 access unit (frame)
+        caps2.set_property(
+            "caps",
+            Gst.Caps.from_string("video/x-h264,stream-format=byte-stream,alignment=au"),
+        )
+        sink.set_property("emit-signals", False)
+        sink.set_property("sync", False)
+        sink.set_property("max-buffers", 2)
+        sink.set_property("drop", True)
+    else:
+        caps2.set_property(
+            "caps",
+            Gst.Caps.from_string("video/x-h264,stream-format=byte-stream,alignment=nal"),
+        )
+        sink.set_property("host", "0.0.0.0")
+        sink.set_property("port", int(port))
+        sink.set_property("sync", False)
 
     for element in elements:
         pipeline.add(element)
@@ -357,6 +437,16 @@ def on_bus_message(bus, message):
 
 
 def stop(*_args):
+    # C3: stop framing thread before pipeline teardown
+    stop_event = STATE.get("framing_stop")
+    if stop_event is not None:
+        stop_event.set()
+    framing_thread = STATE.get("framing_thread")
+    if framing_thread is not None and framing_thread.is_alive():
+        framing_thread.join(timeout=3.0)
+    STATE["framing_thread"] = None
+    STATE["framing_stop"] = None
+
     pipeline = STATE.get("pipeline")
     if pipeline is not None:
         pipeline.set_state(Gst.State.NULL)
@@ -383,6 +473,8 @@ def parse_args():
     parser.add_argument("--cursor-mode", choices=["hidden", "embedded", "metadata"], default="hidden")
     parser.add_argument("--debug-dir", default="/tmp/wbeam-frames")
     parser.add_argument("--debug-fps", type=int, default=0)
+    parser.add_argument("--framed", action="store_true", default=False,
+                        help="C3: use framed protocol (or set WBEAM_FRAMED=1)")
     return parser.parse_args()
 
 
@@ -409,6 +501,9 @@ def main():
 
     width, height, fps, bitrate_kbps, nv_preset = resolve_profile(args)
     encoder_name = pick_encoder(args.encoder)
+    framed = args.framed or os.environ.get("WBEAM_FRAMED", "0") == "1"
+    if framed:
+        print("[wbeam] C3 framed protocol enabled (alignment=au)", flush=True)
 
     session_bus = dbus.SessionBus()
     portal = session_bus.get_object(PORTAL_BUS, PORTAL_PATH)
@@ -443,6 +538,7 @@ def main():
         args.debug_fps,
         encoder_name,
         nv_preset,
+        framed=framed,
     )
     STATE["pipeline"] = pipeline
 
@@ -460,6 +556,20 @@ def main():
     ret = pipeline.set_state(Gst.State.PLAYING)
     if ret == Gst.StateChangeReturn.FAILURE:
         raise RuntimeError("Failed to start GStreamer pipeline")
+
+    # C3: start framed TCP sender before entering GLib main loop
+    if framed:
+        stop_event = threading.Event()
+        appsink = pipeline.get_by_name("sink")
+        t = threading.Thread(
+            target=framed_tcp_server_thread,
+            args=(appsink, args.port, stop_event),
+            daemon=True,
+            name="wbeam-framed-sender",
+        )
+        t.start()
+        STATE["framing_thread"] = t
+        STATE["framing_stop"] = stop_event
 
     main_loop = GLib.MainLoop()
     STATE["main_loop"] = main_loop

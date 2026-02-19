@@ -17,8 +17,9 @@ use tokio::sync::{mpsc, Mutex};
 use tokio::time::sleep;
 use tracing::{info, warn};
 use wbeamd_api::{
-    validate_config, valid_values, ActiveConfig, BaseResponse, ConfigPatch, ErrorResponse, HealthResponse,
-    MetricsResponse, MetricsSnapshot, PresetsResponse, StatusResponse, ValidationError,
+    validate_config, valid_values, ActiveConfig, BaseResponse, ClientMetricsRequest, ClientMetricsResponse,
+    ConfigPatch, ErrorResponse, HealthResponse, KpiSnapshot, MetricsResponse, MetricsSnapshot, PresetsResponse,
+    StatusResponse, ValidationError,
 };
 
 const STATE_IDLE: &str = "IDLE";
@@ -29,6 +30,12 @@ const STATE_ERROR: &str = "ERROR";
 const STATE_STOPPING: &str = "STOPPING";
 
 const DEFAULT_START_TIMEOUT: Duration = Duration::from_secs(45);
+const DUPLICATE_START_GUARD: Duration = Duration::from_secs(3);
+const ADAPTATION_COOLDOWN: Duration = Duration::from_secs(4);
+const HIGH_PRESSURE_STREAK_REQUIRED: u8 = 2;
+const LOW_PRESSURE_STREAK_REQUIRED: u8 = 8;
+const MAX_ADAPTATION_LEVEL: u8 = 3;
+const TARGET_FRAMETIME_MS: f64 = 16.67;
 
 #[derive(Debug, Error)]
 pub enum CoreError {
@@ -48,6 +55,7 @@ pub enum CoreError {
 struct Inner {
     state: String,
     active_config: ActiveConfig,
+    baseline_config: ActiveConfig,
     last_error: String,
     host_name: String,
     started_at: Instant,
@@ -60,13 +68,18 @@ struct Inner {
     run_id: u64,
     suppress_auto_start_until: Option<Instant>,
     last_reverse_refresh_at: Option<Instant>,
+    adaptation_level: u8,
+    high_pressure_streak: u8,
+    low_pressure_streak: u8,
+    last_adaptation_at: Option<Instant>,
 }
 
 impl Inner {
     fn new(host_name: String, active_config: ActiveConfig) -> Self {
         Self {
             state: STATE_IDLE.to_string(),
-            active_config,
+            active_config: active_config.clone(),
+            baseline_config: active_config,
             last_error: String::new(),
             host_name,
             started_at: Instant::now(),
@@ -79,6 +92,10 @@ impl Inner {
             run_id: 0,
             suppress_auto_start_until: None,
             last_reverse_refresh_at: None,
+            adaptation_level: 0,
+            high_pressure_streak: 0,
+            low_pressure_streak: 0,
+            last_adaptation_at: None,
         }
     }
 }
@@ -104,6 +121,7 @@ pub struct DaemonCore {
     control_port: u16,
     exit_tx: mpsc::UnboundedSender<(u64, i32)>,
     auto_start: bool,
+    allow_live_adaptive_restart: bool,
     reconnect_backoff: Duration,
     stop_cooldown: Duration,
     start_timeout: Duration,
@@ -151,6 +169,10 @@ impl DaemonCore {
             control_port,
             exit_tx,
             auto_start: true,
+            allow_live_adaptive_restart: std::env::var("WBEAM_ALLOW_LIVE_ADAPTIVE_RESTART")
+                .ok()
+                .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "on"))
+                .unwrap_or(false),
             reconnect_backoff: Duration::from_secs(1),
             stop_cooldown: Duration::from_secs(12),
             start_timeout: std::env::var("WBEAM_START_TIMEOUT_SEC")
@@ -215,10 +237,17 @@ impl DaemonCore {
         };
 
         metrics.stream_uptime_sec = stream_uptime;
+        metrics.kpi.target_fps = inner.active_config.fps;
+        metrics.adaptive_level = inner.adaptation_level;
+
         if stream_uptime > 0 {
             let fps = u64::from(inner.active_config.fps);
-            metrics.frame_in = fps.saturating_mul(stream_uptime);
-            metrics.frame_out = fps.saturating_mul(stream_uptime);
+            if metrics.frame_in == 0 {
+                metrics.frame_in = fps.saturating_mul(stream_uptime);
+            }
+            if metrics.frame_out == 0 {
+                metrics.frame_out = fps.saturating_mul(stream_uptime);
+            }
             if metrics.bitrate_actual_bps == 0 {
                 metrics.bitrate_actual_bps = u64::from(inner.active_config.bitrate_kbps) * 1000;
             }
@@ -248,6 +277,14 @@ impl DaemonCore {
             return Ok(self.status().await);
         }
 
+        {
+            let mut inner = self.inner.lock().await;
+            inner.baseline_config = cfg.clone();
+            inner.adaptation_level = 0;
+            inner.high_pressure_streak = 0;
+            inner.low_pressure_streak = 0;
+            inner.last_adaptation_at = None;
+        }
         self.start_with_config(cfg).await?;
         Ok(self.status().await)
     }
@@ -266,6 +303,11 @@ impl DaemonCore {
         {
             let mut inner = self.inner.lock().await;
             inner.active_config = cfg.clone();
+            inner.baseline_config = cfg.clone();
+            inner.adaptation_level = 0;
+            inner.high_pressure_streak = 0;
+            inner.low_pressure_streak = 0;
+            inner.last_adaptation_at = None;
         }
         let _ = self.persist_active_config().await;
 
@@ -278,6 +320,163 @@ impl DaemonCore {
         }
 
         Ok(self.status().await)
+    }
+
+    pub async fn ingest_client_metrics(
+        &self,
+        mut client: ClientMetricsRequest,
+    ) -> Result<ClientMetricsResponse, CoreError> {
+        if client.timestamp_ms == 0 {
+            client.timestamp_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+        }
+
+        let mut restart_cfg: Option<ActiveConfig> = None;
+        let action;
+
+        {
+            let mut inner = self.inner.lock().await;
+            let now = Instant::now();
+            let can_adapt = inner.state == STATE_STREAMING
+                && inner.current_pid.is_some()
+                && inner
+                    .stream_started_at
+                    .map(|started| started.elapsed() >= Duration::from_secs(8))
+                    .unwrap_or(false);
+
+            inner.metrics.latest_client_metrics = Some(client.clone());
+            inner.metrics.kpi = KpiSnapshot {
+                target_fps: inner.active_config.fps,
+                recv_fps: client.recv_fps,
+                decode_fps: client.decode_fps,
+                present_fps: client.present_fps,
+                frametime_ms_p95: if client.present_fps > 0.0 {
+                    1000.0 / client.present_fps.max(0.1)
+                } else {
+                    0.0
+                },
+                e2e_latency_ms_p50: client.e2e_latency_ms_p50,
+                e2e_latency_ms_p95: client.e2e_latency_ms_p95,
+                decode_time_ms_p95: client.decode_time_ms_p95,
+                render_time_ms_p95: client.render_time_ms_p95,
+            };
+            if let Some(started) = inner.stream_started_at {
+                let elapsed = started.elapsed().as_secs_f64().max(1.0);
+                inner.metrics.frame_in = (client.recv_fps * elapsed) as u64;
+                inner.metrics.frame_out = (client.present_fps * elapsed) as u64;
+                inner.metrics.drops =
+                    client.dropped_frames.saturating_add(client.too_late_frames);
+            }
+
+            if client.recv_bps > 0 {
+                inner.metrics.bitrate_actual_bps = client.recv_bps;
+            }
+
+            if !can_adapt {
+                inner.high_pressure_streak = 0;
+                inner.low_pressure_streak = 0;
+                inner.metrics.adaptive_level = inner.adaptation_level;
+                inner.metrics.adaptive_action = "hold-warmup".to_string();
+                inner.metrics.adaptive_reason = "waiting for stable STREAMING warmup".to_string();
+            } else {
+                let high = is_high_pressure(&inner, &client);
+                let low = is_low_pressure(&inner, &client);
+
+                if high {
+                    inner.high_pressure_streak = inner.high_pressure_streak.saturating_add(1);
+                    inner.low_pressure_streak = 0;
+                    inner.metrics.backpressure_high_events =
+                        inner.metrics.backpressure_high_events.saturating_add(1);
+                } else if low {
+                    inner.low_pressure_streak = inner.low_pressure_streak.saturating_add(1);
+                    inner.high_pressure_streak = 0;
+                    inner.metrics.backpressure_recover_events =
+                        inner.metrics.backpressure_recover_events.saturating_add(1);
+                } else {
+                    inner.high_pressure_streak = 0;
+                    inner.low_pressure_streak = 0;
+                }
+
+                let cooldown_ready = inner
+                    .last_adaptation_at
+                    .map(|t| now.duration_since(t) >= ADAPTATION_COOLDOWN)
+                    .unwrap_or(true);
+
+                let mut adapted = false;
+                if cooldown_ready && inner.high_pressure_streak >= HIGH_PRESSURE_STREAK_REQUIRED {
+                    if inner.adaptation_level < MAX_ADAPTATION_LEVEL {
+                        inner.adaptation_level = inner.adaptation_level.saturating_add(1);
+                        adapted = true;
+                        inner.metrics.adaptive_action = "degrade".to_string();
+                    } else {
+                        inner.metrics.adaptive_action = "degrade-clamped".to_string();
+                    }
+                    inner.high_pressure_streak = 0;
+                } else if cooldown_ready && inner.low_pressure_streak >= LOW_PRESSURE_STREAK_REQUIRED {
+                    if inner.adaptation_level > 0 {
+                        inner.adaptation_level = inner.adaptation_level.saturating_sub(1);
+                        adapted = true;
+                        inner.metrics.adaptive_action = "recover".to_string();
+                    } else {
+                        inner.metrics.adaptive_action = "recover-clamped".to_string();
+                    }
+                    inner.low_pressure_streak = 0;
+                } else {
+                    inner.metrics.adaptive_action = "hold".to_string();
+                }
+
+                if adapted {
+                    inner.last_adaptation_at = Some(now);
+                    inner.metrics.adaptive_events = inner.metrics.adaptive_events.saturating_add(1);
+                    inner.metrics.adaptive_level = inner.adaptation_level;
+
+                    let reason = adaptation_reason(&client, high, low);
+                    inner.metrics.adaptive_reason = reason.clone();
+                    inner.last_error = format!(
+                        "adaptive {} L{} ({})",
+                        inner.metrics.adaptive_action, inner.adaptation_level, reason
+                    );
+
+                    let target_cfg = config_for_level(&inner.baseline_config, inner.adaptation_level);
+                    if target_cfg != inner.active_config && inner.current_pid.is_some() {
+                        if self.allow_live_adaptive_restart {
+                            inner.active_config = target_cfg.clone();
+                            inner.metrics.restart_count = inner.metrics.restart_count.saturating_add(1);
+                            restart_cfg = Some(target_cfg);
+                        } else {
+                            inner.metrics.adaptive_action = format!("{}-pending", inner.metrics.adaptive_action);
+                            inner.metrics.adaptive_reason = format!(
+                                "{} | pending size={} fps={} bitrate={}",
+                                reason, target_cfg.size, target_cfg.fps, target_cfg.bitrate_kbps
+                            );
+                            inner.last_error = format!(
+                                "adaptive pending L{} (live restart disabled)",
+                                inner.adaptation_level
+                            );
+                        }
+                    }
+                } else {
+                    inner.metrics.adaptive_level = inner.adaptation_level;
+                }
+            }
+
+            action = format!(
+                "{}:L{}",
+                inner.metrics.adaptive_action, inner.metrics.adaptive_level
+            );
+        }
+
+        if let Some(cfg) = restart_cfg {
+            self.start_with_config(cfg).await?;
+        }
+
+        Ok(ClientMetricsResponse {
+            base: self.base_response().await,
+            ok: true,
+            action,
+        })
     }
 
     pub async fn stop(&self) -> Result<StatusResponse, CoreError> {
@@ -324,8 +523,24 @@ impl DaemonCore {
     }
 
     async fn start_with_config(&self, cfg: ActiveConfig) -> Result<(), CoreError> {
-        self.ensure_stream_port_available()?;
         self.ensure_usb_reverse().await;
+
+        {
+            let inner = self.inner.lock().await;
+            let recent_start = inner
+                .run_started_at
+                .map(|started| started.elapsed() < DUPLICATE_START_GUARD)
+                .unwrap_or(false);
+
+            if inner.current_pid.is_some()
+                && cfg == inner.active_config
+                && recent_start
+                && matches!(inner.state.as_str(), STATE_STARTING | STATE_STREAMING | STATE_RECONNECTING)
+            {
+                info!(state = %inner.state, "suppressing duplicate start request");
+                return Ok(());
+            }
+        }
 
         let run_id;
         let existing_pid;
@@ -349,10 +564,12 @@ impl DaemonCore {
         if let Some(pid) = existing_pid {
             terminate_pid(pid).await;
         }
+        self.ensure_stream_port_available()?;
 
         let stream_script = self.root.join("host/scripts/stream_wayland_portal_h264.py");
         let mut cmd = Command::new("python3");
-        cmd.arg(stream_script)
+        cmd.arg("-u")
+            .arg(stream_script)
             .arg("--profile")
             .arg(&cfg.profile)
             .arg("--port")
@@ -371,9 +588,14 @@ impl DaemonCore {
             .arg("/tmp/wbeam-frames")
             .arg("--debug-fps")
             .arg(cfg.debug_fps.to_string())
+            .env("PYTHONUNBUFFERED", "1")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        // C3: engage framed protocol when WBEAM_FRAMED=1; Android auto-detects via magic bytes
+        if std::env::var("WBEAM_FRAMED").as_deref() == Ok("1") {
+            cmd.arg("--framed");
+        }
 
         let mut child = cmd
             .spawn()
@@ -448,6 +670,7 @@ impl DaemonCore {
     }
 
     async fn handle_child_exit(&self, run_id: u64, exit_code: i32) {
+        info!(run_id, exit_code, "stream process exited");
         let (should_restart, cfg_for_restart) = {
             let mut inner = self.inner.lock().await;
             if inner.run_id != run_id {
@@ -462,6 +685,7 @@ impl DaemonCore {
 
             if inner.state == STATE_STOPPING || inner.state == STATE_IDLE {
                 inner.state = STATE_IDLE.to_string();
+                info!(run_id, "stream exit ignored in stopping/idle state");
                 return;
             }
 
@@ -598,7 +822,7 @@ impl DaemonCore {
     }
 
     async fn persist_active_config(&self) -> Result<(), CoreError> {
-        let cfg = { self.inner.lock().await.active_config.clone() };
+        let cfg = { self.inner.lock().await.baseline_config.clone() };
         let parent = self
             .runtime_config_path
             .parent()
@@ -616,6 +840,7 @@ impl DaemonCore {
             active_config: inner.active_config.clone(),
             host_name: inner.host_name.clone(),
             uptime: inner.started_at.elapsed().as_secs(),
+            run_id: inner.run_id,
             last_error: inner.last_error.clone(),
         }
     }
@@ -624,6 +849,93 @@ impl DaemonCore {
         let inner = self.inner.lock().await;
         self.base_from_inner(&inner)
     }
+}
+
+fn is_high_pressure(inner: &Inner, client: &ClientMetricsRequest) -> bool {
+    let target = inner.active_config.fps.max(24) as f64;
+    let frametime_ms = if client.present_fps > 0.0 {
+        1000.0 / client.present_fps.max(0.1)
+    } else {
+        0.0
+    };
+    client.decode_time_ms_p95 > 12.0
+        || client.render_time_ms_p95 > 7.0
+        || client.transport_queue_depth >= 3
+        || client.decode_queue_depth >= 2
+        || client.render_queue_depth >= 1
+        || client.too_late_frames > 0
+        || (frametime_ms > 0.0 && frametime_ms > TARGET_FRAMETIME_MS * 1.20)
+        || client.present_fps < target * 0.90
+}
+
+fn is_low_pressure(inner: &Inner, client: &ClientMetricsRequest) -> bool {
+    let target = inner.active_config.fps.max(24) as f64;
+    let frametime_ms = if client.present_fps > 0.0 {
+        1000.0 / client.present_fps.max(0.1)
+    } else {
+        0.0
+    };
+    client.decode_time_ms_p95 > 0.0
+        && client.decode_time_ms_p95 < 6.5
+        && client.render_time_ms_p95 < 3.5
+        && client.transport_queue_depth == 0
+        && client.decode_queue_depth == 0
+        && client.render_queue_depth == 0
+        && (frametime_ms == 0.0 || frametime_ms <= TARGET_FRAMETIME_MS * 1.02)
+        && client.present_fps >= target * 0.98
+}
+
+fn adaptation_reason(client: &ClientMetricsRequest, high: bool, low: bool) -> String {
+    if high {
+        return format!(
+            "decode_p95={:.2} render_p95={:.2} q={}/{}/{} fps={:.1}",
+            client.decode_time_ms_p95,
+            client.render_time_ms_p95,
+            client.transport_queue_depth,
+            client.decode_queue_depth,
+            client.render_queue_depth,
+            client.present_fps
+        );
+    }
+    if low {
+        return format!(
+            "recovery decode_p95={:.2} render_p95={:.2} fps={:.1}",
+            client.decode_time_ms_p95, client.render_time_ms_p95, client.present_fps
+        );
+    }
+    "stable".to_string()
+}
+
+fn config_for_level(base: &ActiveConfig, level: u8) -> ActiveConfig {
+    let mut cfg = base.clone();
+
+    let (scale_pct, fps_pct, bitrate_pct) = match level {
+        0 => (100, 100, 100),
+        1 => (90, 90, 85),
+        2 => (80, 80, 70),
+        _ => (70, 70, 55),
+    };
+
+    if let Some((w, h)) = parse_size(&cfg.size) {
+        let mut scaled_w = (w.saturating_mul(scale_pct) / 100).clamp(640, 3840);
+        let mut scaled_h = (h.saturating_mul(scale_pct) / 100).clamp(360, 2160);
+        if scaled_w % 2 == 1 {
+            scaled_w = scaled_w.saturating_sub(1);
+        }
+        if scaled_h % 2 == 1 {
+            scaled_h = scaled_h.saturating_sub(1);
+        }
+        cfg.size = format!("{scaled_w}x{scaled_h}");
+    }
+
+    cfg.fps = (base.fps.saturating_mul(fps_pct) / 100).clamp(30, 120);
+    cfg.bitrate_kbps = (base.bitrate_kbps.saturating_mul(bitrate_pct) / 100).clamp(4_000, 120_000);
+    cfg
+}
+
+fn parse_size(size: &str) -> Option<(u32, u32)> {
+    let (w, h) = size.split_once('x')?;
+    Some((w.parse().ok()?, h.parse().ok()?))
 }
 
 fn load_runtime_config(path: &Path) -> Option<ActiveConfig> {
