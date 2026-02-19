@@ -1651,6 +1651,7 @@ public class MainActivity extends AppCompatActivity {
         final long droppedFrames;
         final long tooLateFrames;
         final long timestampMs;
+        final long traceId; // P2.2: (sessionConnectId<<32)|sampleSeq
 
         ClientMetricsSample(
                 double recvFps,
@@ -1667,7 +1668,8 @@ public class MainActivity extends AppCompatActivity {
                 int renderQueueDepth,
                 int jitterBufferFrames,
                 long droppedFrames,
-                long tooLateFrames
+                long tooLateFrames,
+                long traceId
         ) {
             this.recvFps = recvFps;
             this.decodeFps = decodeFps;
@@ -1684,6 +1686,7 @@ public class MainActivity extends AppCompatActivity {
             this.jitterBufferFrames = jitterBufferFrames;
             this.droppedFrames = droppedFrames;
             this.tooLateFrames = tooLateFrames;
+            this.traceId = traceId;
             this.timestampMs = System.currentTimeMillis();
         }
 
@@ -1705,6 +1708,7 @@ public class MainActivity extends AppCompatActivity {
             json.put("dropped_frames", droppedFrames);
             json.put("too_late_frames", tooLateFrames);
             json.put("timestamp_ms", timestampMs);
+            json.put("trace_id", traceId);  // P2.2
             return json;
         }
     }
@@ -1730,6 +1734,9 @@ public class MainActivity extends AppCompatActivity {
         private long reconnects = 0;
         private long droppedTotal = 0;
         private long tooLateTotal = 0;
+        // P2.2: trace ID components for correlated host/Android log lines
+        private long sessionConnectId = 0; // incremented per TCP connection
+        private long sampleSeq = 0;        // incremented per stats window
 
         H264TcpPlayer(Surface surface, StatusListener statusListener, int decodeWidth, int decodeHeight, long frameUs) {
             this.surface = surface;
@@ -1779,6 +1786,8 @@ public class MainActivity extends AppCompatActivity {
                     socket.setTcpNoDelay(true);
                     socket.setReceiveBufferSize(64 * 1024); // P1.1: 64KB bounded USB recv buf
                     socket.setSoTimeout(5_000);             // P1.1: cap blocking read to 5s
+                    sessionConnectId++;  // P2.2: new session
+                    sampleSeq = 0;      // P2.2: reset sample counter
 
                     codec = MediaCodec.createDecoderByType("video/avc");
                     MediaFormat format = MediaFormat.createVideoFormat("video/avc", decodeWidth, decodeHeight);
@@ -2048,7 +2057,8 @@ public class MainActivity extends AppCompatActivity {
                                     Math.min(RENDER_QUEUE_MAX_FRAMES, renderQueueDepth),
                                     0,
                                     droppedTotal,
-                                    tooLateTotal
+                                    tooLateTotal,
+                                    (sessionConnectId << 32) | (sampleSeq++ & 0xFFFFFFFFL) // P2.2
                             )
                     );
                     bytes         = 0;
@@ -2191,7 +2201,8 @@ public class MainActivity extends AppCompatActivity {
                                     0,
                                     Math.min(DECODE_QUEUE_MAX_FRAMES, pendingDecodeQueue), // E
                                     Math.min(RENDER_QUEUE_MAX_FRAMES, drainStats.renderedCount > 0 ? 1 : 0),
-                                    0, droppedTotal, tooLateTotal
+                                    0, droppedTotal, tooLateTotal,
+                                    (sessionConnectId << 32) | (sampleSeq++ & 0xFFFFFFFFL) // P2.2
                             )
                     );
                     bytes         = 0;
