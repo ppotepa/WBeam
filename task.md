@@ -357,6 +357,9 @@ Template:
 Example:
 1. `2026-02-19 10:05 | host | C1 | host/scripts/stream_wayland_portal_h264.py | set q1/qmain leaky queue limits | 10 min run no latency drift | start C2`
 
+Entries:
+1. `2026-02-19 17:48 | repo | OPS-IGN | .gitignore, task.md | add project-wide ignore rules for Android/Rust/Python logs and build artifacts | git status shows .gitignore tracked and noisy artifacts ignored going forward | continue with A1/B2 execution`
+
 ## 14) Worklog
 
 1. `2026-02-19 22:00 | docs | A1,A2 | docs/perf_targets.md | KPI table, 16.67ms budget, queue limits, release gate | n/a (doc) | A3`

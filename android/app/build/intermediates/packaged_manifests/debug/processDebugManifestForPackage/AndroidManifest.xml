@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.wbeam"
     android:versionCode="1"
-    android:versionName="0.0.8d33-build" >
+    android:versionName="0.0.9560-build" >
 
     <uses-sdk
         android:minSdkVersion="26"

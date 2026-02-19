@@ -1,0 +1,49 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE
+.idea/
+.vscode/
+
+# Android / Gradle
+android/.gradle/
+android/**/build/
+android/local.properties
+android/captures/
+android/.cxx/
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Java / Kotlin
+*.class
+
+# Rust
+host/rust/target/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+
+# Logs and runtime output
+*.log
+host/logs/**
+host/rust/logs/**
+!host/logs/.gitkeep
+!host/rust/logs/.gitkeep
+*.pid
+*.tmp
+*.cache
+
+# Local generated helper files
+codebase_concat*.txt
+
