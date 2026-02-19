@@ -234,6 +234,7 @@ pub struct HealthResponse {
     pub base: BaseResponse,
     pub ok: bool,
     pub service: String,
+    pub build_revision: String,
     pub stream_process_alive: bool,
 }
 

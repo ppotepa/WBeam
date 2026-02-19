@@ -1,0 +1,91 @@
+2026-02-19T12:43:06.226235Z  INFO wbeamd_server: wbeamd-rust started control_port=5001 stream_port=5000 root=/mnt/fat_boii/git/WBeam
+2026-02-19T12:43:06.405198Z  INFO wbeamd_core: stream process started run_id=1 pid=333153
+2026-02-19T12:43:06.463441Z  INFO wbeamd_core: stream: [wbeam] profile=lowlatency size=1920x1080 fps=60 bitrate=18000kbps encoder=nvenc cursor=hidden run_id=1
+2026-02-19T12:43:06.463495Z  INFO wbeamd_core: stream: [wbeam] Requesting ScreenCast portal session (you will get KDE share prompt)... run_id=1
+2026-02-19T12:43:06.494680Z  INFO wbeamd_core: stream: [wbeam] Select source in KDE prompt run_id=1
+2026-02-19T12:43:06.495413Z  INFO wbeamd_core: stream: [wbeam] Starting portal session run_id=1
+2026-02-19T12:43:07.605631Z  INFO wbeamd_core: stream: [wbeam] Got PipeWire node id: 81 run_id=1
+2026-02-19T12:43:07.609386Z  INFO wbeamd_core: stream: [wbeam] Opened PipeWire fd: 7 run_id=1
+2026-02-19T12:43:08.367675Z  INFO wbeamd_core: stream: [wbeam] Streaming Wayland screencast on tcp://0.0.0.0:5000 run_id=1
+2026-02-19T12:43:11.264116Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000000 present=0.0fps decode_p95=2.2ms e2e_p95=0.0ms
+2026-02-19T12:43:12.650463Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000001 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:14.037532Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000002 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:15.423157Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000003 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:16.810379Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000004 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:18.196678Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000005 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:19.586901Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000006 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:20.967618Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000007 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:22.356884Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000008 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:23.745357Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000009 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:25.131868Z  INFO wbeamd_core: client-metrics trace_id=0x000000040000000a present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:26.519613Z  INFO wbeamd_core: client-metrics trace_id=0x000000040000000b present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:27.905610Z  INFO wbeamd_core: client-metrics trace_id=0x000000040000000c present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:29.290310Z  INFO wbeamd_core: client-metrics trace_id=0x000000040000000d present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:30.678440Z  INFO wbeamd_core: client-metrics trace_id=0x000000040000000e present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:32.064089Z  INFO wbeamd_core: client-metrics trace_id=0x000000040000000f present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:33.457414Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000010 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:34.847061Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000011 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:36.224852Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000012 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:37.611390Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000013 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:39.003762Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000014 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:40.384612Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000015 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:41.772697Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000016 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:43.159736Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000017 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:44.552176Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000018 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:45.938583Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000019 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:47.319564Z  INFO wbeamd_core: client-metrics trace_id=0x000000040000001a present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:48.705689Z  INFO wbeamd_core: client-metrics trace_id=0x000000040000001b present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:50.101406Z  INFO wbeamd_core: client-metrics trace_id=0x000000040000001c present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:51.480645Z  INFO wbeamd_core: client-metrics trace_id=0x000000040000001d present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:52.871388Z  INFO wbeamd_core: client-metrics trace_id=0x000000040000001e present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:54.253108Z  INFO wbeamd_core: client-metrics trace_id=0x000000040000001f present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:55.650868Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000020 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:57.033967Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000021 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:58.421694Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000022 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:43:59.806974Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000023 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:01.191991Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000024 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:02.581217Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000025 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:03.965625Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000026 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:05.355109Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000027 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:06.740622Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000028 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:08.127166Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000029 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:09.507548Z  INFO wbeamd_core: client-metrics trace_id=0x000000040000002a present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:10.901814Z  INFO wbeamd_core: client-metrics trace_id=0x000000040000002b present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:12.289433Z  INFO wbeamd_core: client-metrics trace_id=0x000000040000002c present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:13.672529Z  INFO wbeamd_core: client-metrics trace_id=0x000000040000002d present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:15.053906Z  INFO wbeamd_core: client-metrics trace_id=0x000000040000002e present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:16.441109Z  INFO wbeamd_core: client-metrics trace_id=0x000000040000002f present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:17.833972Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000030 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:19.213867Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000031 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:20.601859Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000032 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:21.987289Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000033 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:23.375127Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000034 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:24.768036Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000035 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:26.154362Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000036 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:27.544646Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000037 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:28.921334Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000038 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:30.307464Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000039 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:31.700758Z  INFO wbeamd_core: client-metrics trace_id=0x000000040000003a present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:33.090932Z  INFO wbeamd_core: client-metrics trace_id=0x000000040000003b present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:34.471504Z  INFO wbeamd_core: client-metrics trace_id=0x000000040000003c present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:35.854862Z  INFO wbeamd_core: client-metrics trace_id=0x000000040000003d present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:37.249431Z  INFO wbeamd_core: client-metrics trace_id=0x000000040000003e present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:38.637384Z  INFO wbeamd_core: client-metrics trace_id=0x000000040000003f present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:40.033328Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000040 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:41.407273Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000041 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:42.795504Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000042 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:44.183256Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000043 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:45.564564Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000044 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:46.955556Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000045 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:48.344409Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000046 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:49.730279Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000047 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:50.755964Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000048 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:52.283606Z  INFO wbeamd_core: client-metrics trace_id=0x0000000400000049 present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:53.662737Z  INFO wbeamd_core: client-metrics trace_id=0x000000040000004a present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:55.049964Z  INFO wbeamd_core: client-metrics trace_id=0x000000040000004b present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:56.436089Z  INFO wbeamd_core: client-metrics trace_id=0x000000040000004c present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:57.830098Z  INFO wbeamd_core: client-metrics trace_id=0x000000040000004d present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:59.215959Z  INFO wbeamd_core: client-metrics trace_id=0x000000040000004e present=0.0fps decode_p95=0.0ms e2e_p95=0.0ms
+2026-02-19T12:44:59.446198Z  WARN wbeamd_core: usb_reverse.sh failed code=None
+2026-02-19T12:44:59.607657Z  INFO wbeamd_core: stream process exited run_id=1 exit_code=0
+2026-02-19T12:44:59.607712Z  INFO wbeamd_core: stream exit ignored in stopping/idle state run_id=1
