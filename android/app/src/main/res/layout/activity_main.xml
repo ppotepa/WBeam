@@ -51,6 +51,77 @@
     </LinearLayout>
 
     <LinearLayout
+        android:id="@+id/preflightOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:layout_margin="16dp"
+        android:background="#D1091220"
+        android:elevation="14dp"
+        android:orientation="vertical"
+        android:padding="14dp">
+
+        <TextView
+            android:id="@+id/preflightTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:text="WBEAM PRE-FLIGHT"
+            android:textColor="#E2E8F0"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <ProgressBar
+            android:id="@+id/preflightSpinner"
+            style="?android:attr/progressBarStyleSmall"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp" />
+
+        <TextView
+            android:id="@+id/preflightBody"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:fontFamily="monospace"
+            android:text="[ ] USB link\n[ ] Host daemon\n[ ] Surface ready\n[ ] HW decode\n[ ] Stream ready"
+            android:textColor="#BFDBFE"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/preflightHint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:fontFamily="monospace"
+            android:text="Waiting..."
+            android:textColor="#FDE68A"
+            android:textSize="11sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/perfHudPanel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:layout_marginStart="10dp"
+        android:layout_marginTop="62dp"
+        android:background="#A40F172A"
+        android:orientation="vertical"
+        android:padding="8dp">
+
+        <TextView
+            android:id="@+id/perfHudText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:maxLines="7"
+            android:text="HUD waiting..."
+            android:textColor="#D1FAE5"
+            android:textSize="11sp" />
+    </LinearLayout>
+
+    <LinearLayout
         android:id="@+id/statusPanel"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -167,13 +238,44 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
-                android:text="Profile"
-                android:textColor="#CBD5E1" />
+                android:text="Mode"
+                android:textColor="#CBD5E1"
+                android:textStyle="bold" />
 
+            <LinearLayout
+                android:id="@+id/modeButtonGroup"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/modeLowLatencyButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="4dp"
+                    android:layout_weight="1"
+                    android:backgroundTint="#1E3A5F"
+                    android:text="ULTRA LOW LATENCY"
+                    android:textAllCaps="true"
+                    android:textSize="11sp" />
+
+                <Button
+                    android:id="@+id/modeSmoothButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:backgroundTint="#1E3A5F"
+                    android:text="SMOOTH BALANCED"
+                    android:textAllCaps="true"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <!-- profileSpinner kept hidden; driven programmatically by mode buttons -->
             <Spinner
                 android:id="@+id/profileSpinner"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
+                android:layout_height="wrap_content"
+                android:visibility="gone" />
 
             <TextView
                 android:layout_width="match_parent"
@@ -199,13 +301,75 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content" />
 
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="Quality"
+                android:textColor="#CBD5E1"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:id="@+id/qualityButtonGroup"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/qualityLowButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="4dp"
+                    android:layout_weight="1"
+                    android:backgroundTint="#1E3A5F"
+                    android:text="LOW"
+                    android:textAllCaps="true" />
+
+                <Button
+                    android:id="@+id/qualityMedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="4dp"
+                    android:layout_weight="1"
+                    android:backgroundTint="#1E4A3F"
+                    android:text="MED"
+                    android:textAllCaps="true" />
+
+                <Button
+                    android:id="@+id/qualityHighButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:backgroundTint="#1E3A5F"
+                    android:text="HIGH"
+                    android:textAllCaps="true" />
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/advancedToggleButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:alpha="0.75"
+                android:backgroundTint="#1F2937"
+                android:text="▶ Advanced"
+                android:textAllCaps="false"
+                android:textSize="12sp" />
+
+            <LinearLayout
+                android:id="@+id/advancedPanel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
             <LinearLayout
                 android:id="@+id/debugControlsRow"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
                 android:orientation="horizontal"
-                android:visibility="gone">
+                android:visibility="visible">
 
                 <TextView
                     android:layout_width="0dp"
@@ -278,6 +442,9 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:max="55" />
+
+            </LinearLayout>
+            <!-- end advancedPanel -->
 
             <Button
                 android:id="@+id/cursorOverlayButton"

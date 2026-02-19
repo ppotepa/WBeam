@@ -89,6 +89,8 @@ public class MainActivity extends AppCompatActivity {
     private static final String PREF_FPS = "fps";
     private static final String PREF_BITRATE = "bitrate";
     private static final String PREF_LOCAL_CURSOR = "local_cursor_overlay";
+    private static final String PREF_MODE    = "mode";    // F2: lowlatency | balanced
+    private static final String PREF_QUALITY = "quality"; // F2: low | med | high
     private static final int LIVE_LOG_MAX_LINES = 80;
 
     private View rootLayout;
@@ -130,6 +132,16 @@ public class MainActivity extends AppCompatActivity {
     private Button testButton;
     private Button fullscreenButton;
     private Button cursorOverlayButton;
+    // F2: mode / quality buttons
+    private Button modeLowLatencyButton;
+    private Button modeSmoothButton;
+    private Button qualityLowButton;
+    private Button qualityMedButton;
+    private Button qualityHighButton;
+    private Button advancedToggleButton;
+    private View   advancedPanel;
+    private String selectedMode    = "lowlatency"; // F2 runtime state
+    private String selectedQuality = "med";        // F2 runtime state
 
     private boolean settingsVisible = false;
     private boolean isFullscreen = false;
@@ -278,6 +290,14 @@ public class MainActivity extends AppCompatActivity {
         testButton = findViewById(R.id.testButton);
         fullscreenButton = findViewById(R.id.fullscreenButton);
         cursorOverlayButton = findViewById(R.id.cursorOverlayButton);
+        // F2: mode / quality / advanced
+        modeLowLatencyButton = findViewById(R.id.modeLowLatencyButton);
+        modeSmoothButton     = findViewById(R.id.modeSmoothButton);
+        qualityLowButton     = findViewById(R.id.qualityLowButton);
+        qualityMedButton     = findViewById(R.id.qualityMedButton);
+        qualityHighButton    = findViewById(R.id.qualityHighButton);
+        advancedToggleButton = findViewById(R.id.advancedToggleButton);
+        advancedPanel        = findViewById(R.id.advancedPanel);
     }
 
     private void setupSpinners() {
@@ -382,6 +402,86 @@ public class MainActivity extends AppCompatActivity {
 
         fullscreenButton.setOnClickListener(v -> toggleFullscreen());
         cursorOverlayButton.setOnClickListener(v -> toggleCursorOverlayMode());
+
+        // F2: mode buttons
+        if (modeLowLatencyButton != null) modeLowLatencyButton.setOnClickListener(v -> {
+            selectedMode = "lowlatency";
+            setSpinnerSelection(profileSpinner, PROFILE_OPTIONS, "lowlatency");
+            refreshModeQualityButtons();
+            applySettings(true);
+        });
+        if (modeSmoothButton != null) modeSmoothButton.setOnClickListener(v -> {
+            selectedMode = "balanced";
+            setSpinnerSelection(profileSpinner, PROFILE_OPTIONS, "balanced");
+            refreshModeQualityButtons();
+            applySettings(true);
+        });
+
+        // F2: quality buttons
+        if (qualityLowButton != null) qualityLowButton.setOnClickListener(v -> {
+            selectedQuality = "low";
+            applyQualityPreset("low");
+            refreshModeQualityButtons();
+            applySettings(true);
+        });
+        if (qualityMedButton != null) qualityMedButton.setOnClickListener(v -> {
+            selectedQuality = "med";
+            applyQualityPreset("med");
+            refreshModeQualityButtons();
+            applySettings(true);
+        });
+        if (qualityHighButton != null) qualityHighButton.setOnClickListener(v -> {
+            selectedQuality = "high";
+            applyQualityPreset("high");
+            refreshModeQualityButtons();
+            applySettings(true);
+        });
+
+        // F2: advanced panel toggle (hidden by default)
+        if (advancedToggleButton != null) advancedToggleButton.setOnClickListener(v -> {
+            boolean show = advancedPanel != null && advancedPanel.getVisibility() != View.VISIBLE;
+            if (advancedPanel != null) advancedPanel.setVisibility(show ? View.VISIBLE : View.GONE);
+            if (advancedToggleButton != null) advancedToggleButton.setText(show ? "\u25bc Advanced" : "\u25b6 Advanced");
+        });
+    }
+
+    // F2: highlight active mode / quality button
+    private void refreshModeQualityButtons() {
+        int activeColor   = 0xFF2563EB; // blue-600
+        int inactiveColor = 0xFF1E3A5F; // dark navy
+        if (modeLowLatencyButton != null)
+            modeLowLatencyButton.setBackgroundTintList(
+                android.content.res.ColorStateList.valueOf(
+                    "lowlatency".equals(selectedMode) ? activeColor : inactiveColor));
+        if (modeSmoothButton != null)
+            modeSmoothButton.setBackgroundTintList(
+                android.content.res.ColorStateList.valueOf(
+                    "balanced".equals(selectedMode) ? activeColor : inactiveColor));
+        if (qualityLowButton != null)
+            qualityLowButton.setBackgroundTintList(
+                android.content.res.ColorStateList.valueOf(
+                    "low".equals(selectedQuality) ? activeColor : inactiveColor));
+        if (qualityMedButton != null)
+            qualityMedButton.setBackgroundTintList(
+                android.content.res.ColorStateList.valueOf(
+                    "med".equals(selectedQuality) ? activeColor : 0xFF1E4A3F));
+        if (qualityHighButton != null)
+            qualityHighButton.setBackgroundTintList(
+                android.content.res.ColorStateList.valueOf(
+                    "high".equals(selectedQuality) ? activeColor : inactiveColor));
+    }
+
+    // F2: map quality preset → res/bitrate sliders
+    private void applyQualityPreset(String quality) {
+        // low: 75% res, 15 Mbps;  med: 100% res, 25 Mbps;  high: 100% res, 45 Mbps
+        int scale, bitrate;
+        switch (quality) {
+            case "low":  scale = 75;  bitrate = 15; break;
+            case "high": scale = 100; bitrate = 45; break;
+            default:     scale = 100; bitrate = 25; break; // med
+        }
+        if (resolutionSeek != null) resolutionSeek.setProgress(clamp(scale, 50, 100) - 50);
+        if (bitrateSeek != null)    bitrateSeek.setProgress(clamp(bitrate, 5, 60) - 5);
     }
 
     private void setDebugControlsVisible(boolean visible) {
@@ -427,6 +527,13 @@ public class MainActivity extends AppCompatActivity {
         cursorOverlayEnabled = prefs.getBoolean(PREF_LOCAL_CURSOR, true);
         cursorOverlayButton.setText(cursorOverlayEnabled ? "Local Cursor Overlay ON" : "Local Cursor Overlay OFF");
 
+        // F2: restore mode / quality
+        selectedMode    = prefs.getString(PREF_MODE, "lowlatency");
+        selectedQuality = prefs.getString(PREF_QUALITY, "med");
+        setSpinnerSelection(profileSpinner, PROFILE_OPTIONS, selectedMode);
+        applyQualityPreset(selectedQuality);
+        refreshModeQualityButtons();
+
         updateSettingValueLabels();
     }
 
@@ -439,6 +546,8 @@ public class MainActivity extends AppCompatActivity {
         e.putInt(PREF_FPS, getSelectedFps());
         e.putInt(PREF_BITRATE, getSelectedBitrateMbps());
         e.putBoolean(PREF_LOCAL_CURSOR, cursorOverlayEnabled);
+        e.putString(PREF_MODE, selectedMode);    // F2
+        e.putString(PREF_QUALITY, selectedQuality); // F2
         e.apply();
     }
 
