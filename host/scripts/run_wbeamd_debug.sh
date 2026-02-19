@@ -12,6 +12,8 @@ LOG_DIR="${WBEAM_DEBUG_LOG_DIR:-$ROOT_DIR/host/rust/logs}"
 mkdir -p "$LOG_DIR"
 TS="$(date +%Y%m%d-%H%M%S)"
 LOG_FILE="${WBEAM_DEBUG_LOG_FILE:-$LOG_DIR/wbeamd-debug-$TS.log}"
+SESSION_RUST_LOG_DIR="$LOG_DIR/runs/$TS"
+mkdir -p "$SESSION_RUST_LOG_DIR"
 
 if command -v systemctl >/dev/null 2>&1; then
   systemctl --user stop wbeamd-rust.service >/dev/null 2>&1 || true
@@ -22,6 +24,7 @@ export RUST_LOG="${RUST_LOG:-debug}"
 export RUST_BACKTRACE="${RUST_BACKTRACE:-1}"
 export WBEAM_START_TIMEOUT_SEC="${WBEAM_START_TIMEOUT_SEC:-45}"
 export WBEAM_LOCK_FILE="$LOCK_FILE"
+export WBEAM_RUST_LOG_DIR="$SESSION_RUST_LOG_DIR"
 
 existing_pid="$(pgrep -f "wbeamd-server --control-port ${CONTROL_PORT} --stream-port ${STREAM_PORT}" | head -n 1 || true)"
 if [[ -n "$existing_pid" ]]; then
@@ -50,6 +53,7 @@ fi
   echo "[wbeam-debug] lock_file=$LOCK_FILE"
   echo "[wbeam-debug] daemon_impl=$WBEAM_DAEMON_IMPL"
   echo "[wbeam-debug] RUST_LOG=$RUST_LOG RUST_BACKTRACE=$RUST_BACKTRACE"
+  echo "[wbeam-debug] rust_log_dir=$SESSION_RUST_LOG_DIR"
   echo "[wbeam-debug] logfile=$LOG_FILE"
 } | tee -a "$LOG_FILE"
 
@@ -59,7 +63,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-RUST_TRACE_FILE="$ROOT_DIR/host/rust/logs/wbeamd-rust.log.$(date +%Y-%m-%d)"
+RUST_TRACE_FILE="$SESSION_RUST_LOG_DIR/wbeamd-rust.log.$(date +%Y-%m-%d)"
 tail -n 0 -F "$RUST_TRACE_FILE" 2>/dev/null \
   | sed -u 's/^/[rust] /' \
   | tee -a "$LOG_FILE" \
@@ -84,7 +88,7 @@ RUST_TAIL_PID=$!
 
 if command -v adb >/dev/null 2>&1; then
   adb logcat -v time -s WBeamMain:I WBeamService:E WBeamUsbAttach:E AndroidRuntime:E '*:S' \
-    | grep -i --line-buffered -E "offline|ioexception|io error|stream error|failed|socketexception|connectexception|fatal exception|connected to host|daemon poll failed|androidruntime" \
+    | grep -i --line-buffered -E "huddbg|offline|ioexception|io error|stream error|failed|socketexception|connectexception|fatal exception|connected to host|daemon poll failed|androidruntime" \
     | sed -u 's/^/[android] /' \
     | tee -a "$LOG_FILE" \
     | awk '

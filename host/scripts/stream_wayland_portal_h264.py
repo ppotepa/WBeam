@@ -25,7 +25,7 @@ CURSOR_MODE_MAP = {
 }
 
 PROFILE_DEFAULTS = {
-    "lowlatency": {"size": "1920x1080", "fps": 60, "bitrate_kbps": 18000, "nv_preset": "p1"},
+    "lowlatency": {"size": "1280x720", "fps": 60, "bitrate_kbps": 12000, "nv_preset": "p1"},
     "balanced": {"size": "1920x1080", "fps": 60, "bitrate_kbps": 25000, "nv_preset": "p4"},
     "ultra": {"size": "2560x1440", "fps": 60, "bitrate_kbps": 38000, "nv_preset": "p6"},
 }
@@ -168,12 +168,13 @@ def pick_encoder(requested):
 
 
 def configure_encoder(enc, encoder_name, bitrate_kbps, fps, nv_preset):
+    gop = max(30, int(fps))
     if encoder_name == "nvenc":
         enc.set_property("bitrate", int(bitrate_kbps))
         enc.set_property("max-bitrate", int(bitrate_kbps))
         enc.set_property("rc-mode", "cbr")
         enc.set_property("preset", nv_preset)
-        enc.set_property("gop-size", max(60, int(fps) * 2))
+        enc.set_property("gop-size", gop)
         enc.set_property("bframes", 0)
         enc.set_property("zerolatency", True)
         enc.set_property("aud", True)
@@ -184,7 +185,7 @@ def configure_encoder(enc, encoder_name, bitrate_kbps, fps, nv_preset):
     enc.set_property("bitrate", int(bitrate_kbps) * 1000)
     enc.set_property("rate-control", "bitrate")
     enc.set_property("complexity", "high")
-    enc.set_property("gop-size", max(60, int(fps) * 2))
+    enc.set_property("gop-size", gop)
     enc.set_property("multi-thread", 0)
     enc.set_property("slice-mode", "n-slices")
     enc.set_property("num-slices", 1)
@@ -332,7 +333,12 @@ def on_bus_message(bus, message):
         print(f"[gst-error] {err}: {debug}", file=sys.stderr)
         stop()
     elif mtype == Gst.MessageType.EOS:
-        print("[gst] EOS")
+        src_name = message.src.get_name() if message.src else "unknown"
+        # tcpserversink can emit EOS when a client disconnects; keep pipeline alive.
+        if src_name == "sink":
+            print("[gst] EOS from sink (client disconnect), keeping pipeline alive")
+            return
+        print(f"[gst] EOS from {src_name}")
         stop()
 
 
