@@ -1341,10 +1341,29 @@ public class MainActivity extends AppCompatActivity {
         );
         perfHudText.setText(hud);
 
+        // Build explicit high-pressure reason so logcat shows exactly which condition fired.
+        StringBuilder hpSb = new StringBuilder();
+        if (!warmingUp) {
+            if (decodeP95 > 12.0) { hpSb.append("dec>12(").append(String.format(Locale.US,"%.1f",decodeP95)).append(")"); }
+            if (renderP95 > 7.0)  { if (hpSb.length()>0) hpSb.append(','); hpSb.append("ren>7(").append(String.format(Locale.US,"%.1f",renderP95)).append(")"); }
+            if (qT >= qTMax)      { if (hpSb.length()>0) hpSb.append(','); hpSb.append("qT=").append(qT).append("/").append(qTMax); }
+            if (qD >= qDMax)      { if (hpSb.length()>0) hpSb.append(','); hpSb.append("qD=").append(qD).append("/").append(qDMax); }
+            if (qR >= qRMax)      { if (hpSb.length()>0) hpSb.append(','); hpSb.append("qR=").append(qR).append("/").append(qRMax); }
+        }
+        String hpReason = hpSb.length() > 0 ? hpSb.toString() : (warmingUp ? "warmup" : "ok");
+
         // Red only when degraded with frames already flowing; warmup = yellow.
-        boolean highPressure = !warmingUp && (decodeP95 > 12.0 || renderP95 > 7.0 || qT >= qTMax || qD >= qDMax || qR >= qRMax);
+        boolean highPressure = !warmingUp && hpSb.length() > 0;
         if (highPressure) {
             perfHudText.setTextColor(Color.parseColor("#FCA5A5")); // red
+            Log.w(TAG, "HUD RED warmingUp=" + warmingUp + " hp=" + hpReason
+                    + " dec_p95=" + String.format(Locale.US, "%.2f", decodeP95)
+                    + " ren_p95=" + String.format(Locale.US, "%.2f", renderP95)
+                    + " qT=" + qT + "/" + qTMax
+                    + " qD=" + qD + "/" + qDMax
+                    + " qR=" + qR + "/" + qRMax
+                    + " fps_present=" + String.format(Locale.US, "%.1f", presentFps)
+                    + " stream_up=" + streamUptimeSec + "s");
         } else if (adaptiveAction.startsWith("degrade") || warmingUp) {
             perfHudText.setTextColor(Color.parseColor("#FDE68A")); // yellow
         } else {
@@ -1356,7 +1375,7 @@ public class MainActivity extends AppCompatActivity {
 
         String compact = String.format(
                 Locale.US,
-                "state=%s run_id=%d up=%ds stream_up=%ds host_in_out=%d/%d fps_target=%.0f fps_present=%.1f frame_p95=%.2f dec_p95=%.2f ren_p95=%.2f e2e_p95=%.2f q=%d/%d/%d qmax=%d/%d/%d adapt=L%d:%s drops=%d bp=%d/%d reason=%s",
+                "state=%s run_id=%d up=%ds stream_up=%ds host_in_out=%d/%d fps_target=%.0f fps_present=%.1f frame_p95=%.2f dec_p95=%.2f ren_p95=%.2f e2e_p95=%.2f q=%d/%d/%d qmax=%d/%d/%d adapt=L%d:%s drops=%d bp=%d/%d warmup=%b hp=%s reason=%s",
                 daemonState,
                 daemonRunId,
                 daemonUptimeSec,
@@ -1380,6 +1399,8 @@ public class MainActivity extends AppCompatActivity {
                 drops,
                 bpHigh,
                 bpRecover,
+                warmingUp,
+                hpReason,
                 reason.isEmpty() ? "-" : reason
         );
         emitHudDebugAdb(compact);
