@@ -326,6 +326,14 @@ impl DaemonCore {
         &self,
         mut client: ClientMetricsRequest,
     ) -> Result<ClientMetricsResponse, CoreError> {
+        // P2.2: log trace_id so host logs can be correlated with Android logcat
+        info!(
+            "client-metrics trace_id={} present={:.1}fps decode_p95={:.1}ms e2e_p95={:.1}ms",
+            client.trace_id.map(|t| format!("{:#018x}", t)).unwrap_or_else(|| "-".to_string()),
+            client.present_fps,
+            client.decode_time_ms_p95,
+            client.e2e_latency_ms_p95,
+        );
         if client.timestamp_ms == 0 {
             client.timestamp_ms = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

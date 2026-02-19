@@ -304,6 +304,15 @@ components:
           type: integer
           format: int64
           description: Client epoch-ms timestamp of this sample
+        trace_id:
+          type: integer
+          format: int64
+          nullable: true
+          description: >
+            P2.2 – monotonic trace ID emitted by Android for log correlation.
+            High 32 bits = TCP connect counter (resets on stop/play),
+            low 32 bits = per-connection sample counter.
+            Absent when not set by the client.
 
     KpiSnapshot:
       type: object
