@@ -36,6 +36,10 @@ const HIGH_PRESSURE_STREAK_REQUIRED: u8 = 2;
 const LOW_PRESSURE_STREAK_REQUIRED: u8 = 8;
 const MAX_ADAPTATION_LEVEL: u8 = 3;
 const TARGET_FRAMETIME_MS: f64 = 16.67;
+const NO_PRESENT_RESTART_STREAK_REQUIRED: u8 = 4;
+const NO_PRESENT_RESTART_COOLDOWN: Duration = Duration::from_secs(15);
+const NO_PRESENT_MIN_RECV_FPS: f64 = 10.0;
+const NO_PRESENT_MAX_PRESENT_FPS: f64 = 1.0;
 
 #[derive(Debug, Error)]
 pub enum CoreError {
@@ -73,6 +77,8 @@ struct Inner {
     high_pressure_streak: u8,
     low_pressure_streak: u8,
     last_adaptation_at: Option<Instant>,
+    no_present_streak: u8,
+    last_no_present_recovery_at: Option<Instant>,
 }
 
 impl Inner {
@@ -98,6 +104,8 @@ impl Inner {
             high_pressure_streak: 0,
             low_pressure_streak: 0,
             last_adaptation_at: None,
+            no_present_streak: 0,
+            last_no_present_recovery_at: None,
         }
     }
 }
@@ -308,6 +316,8 @@ impl DaemonCore {
             inner.high_pressure_streak = 0;
             inner.low_pressure_streak = 0;
             inner.last_adaptation_at = None;
+            inner.no_present_streak = 0;
+            inner.last_no_present_recovery_at = None;
         }
         self.start_with_config(cfg).await?;
         Ok(self.status().await)
@@ -332,6 +342,8 @@ impl DaemonCore {
             inner.high_pressure_streak = 0;
             inner.low_pressure_streak = 0;
             inner.last_adaptation_at = None;
+            inner.no_present_streak = 0;
+            inner.last_no_present_recovery_at = None;
         }
         let _ = self.persist_active_config().await;
 
@@ -416,7 +428,46 @@ impl DaemonCore {
                 let _ = writeln!(f, "{rec}");
             }
 
-            if !can_adapt {
+            let no_present_stream = inner.state == STATE_STREAMING
+                && inner.current_pid.is_some()
+                && client.recv_fps >= NO_PRESENT_MIN_RECV_FPS
+                && client.present_fps <= NO_PRESENT_MAX_PRESENT_FPS;
+            if no_present_stream {
+                inner.no_present_streak = inner.no_present_streak.saturating_add(1);
+            } else {
+                inner.no_present_streak = 0;
+            }
+            let no_present_restart_ready = inner
+                .last_no_present_recovery_at
+                .map(|t| now.duration_since(t) >= NO_PRESENT_RESTART_COOLDOWN)
+                .unwrap_or(true);
+            let forced_no_present_restart =
+                no_present_restart_ready && inner.no_present_streak >= NO_PRESENT_RESTART_STREAK_REQUIRED;
+
+            if forced_no_present_restart {
+                inner.no_present_streak = 0;
+                inner.last_no_present_recovery_at = Some(now);
+                inner.metrics.restart_count = inner.metrics.restart_count.saturating_add(1);
+                inner.metrics.adaptive_level = inner.adaptation_level;
+                inner.metrics.adaptive_action = "recover-restart".to_string();
+                inner.metrics.adaptive_reason = format!(
+                    "present_fps={:.1} recv_fps={:.1} q={}/{}/{}",
+                    client.present_fps,
+                    client.recv_fps,
+                    client.transport_queue_depth,
+                    client.decode_queue_depth,
+                    client.render_queue_depth
+                );
+                inner.last_error = format!(
+                    "no-present recovery restart (present_fps={:.1}, recv_fps={:.1})",
+                    client.present_fps, client.recv_fps
+                );
+                warn!(
+                    "triggering no-present recovery restart run_id={} reason={}",
+                    inner.run_id, inner.metrics.adaptive_reason
+                );
+                restart_cfg = Some(inner.active_config.clone());
+            } else if !can_adapt {
                 inner.high_pressure_streak = 0;
                 inner.low_pressure_streak = 0;
                 inner.metrics.adaptive_level = inner.adaptation_level;
@@ -549,6 +600,7 @@ impl DaemonCore {
         inner.last_output_at = None;
         inner.last_streaming_line_at = None;
         inner.telemetry_file = None; // P2.3: flush+close
+        inner.no_present_streak = 0;
 
         Ok(StatusResponse {
             base: self.base_from_inner(&inner),
@@ -601,6 +653,7 @@ impl DaemonCore {
             inner.telemetry_file = open_telemetry_file(run_id); // P2.3
             inner.last_output_at = Some(Instant::now());
             inner.last_streaming_line_at = None;
+            inner.no_present_streak = 0;
         }
 
         let _ = self.persist_active_config().await;
@@ -636,10 +689,8 @@ impl DaemonCore {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        // C3: engage framed protocol when WBEAM_FRAMED=1; Android auto-detects via magic bytes
-        if std::env::var("WBEAM_FRAMED").as_deref() == Ok("1") {
-            cmd.arg("--framed");
-        }
+        // C3: framed-only transport (legacy parser disabled on Android path).
+        cmd.arg("--framed");
 
         let mut child = cmd
             .spawn()
@@ -706,6 +757,7 @@ impl DaemonCore {
             inner.stream_started_at = Some(Instant::now());
             inner.last_streaming_line_at = Some(Instant::now());
             inner.metrics.bitrate_actual_bps = u64::from(inner.active_config.bitrate_kbps) * 1000;
+            inner.no_present_streak = 0;
         }
 
         if let Some(bps) = parse_kbps_line_to_bps(line) {
@@ -727,6 +779,7 @@ impl DaemonCore {
             inner.last_output_at = None;
             inner.last_streaming_line_at = None;
             inner.telemetry_file = None; // P2.3: flush+close
+            inner.no_present_streak = 0;
 
             if inner.state == STATE_STOPPING || inner.state == STATE_IDLE {
                 inner.state = STATE_IDLE.to_string();

@@ -28,7 +28,7 @@ CURSOR_MODE_MAP = {
 }
 
 PROFILE_DEFAULTS = {
-    "lowlatency": {"size": "1280x720", "fps": 60, "bitrate_kbps": 12000, "nv_preset": "p1"},
+    "lowlatency": {"size": "1280x720", "fps": 60, "bitrate_kbps": 16000, "nv_preset": "p2"},
     "balanced": {"size": "1920x1080", "fps": 60, "bitrate_kbps": 25000, "nv_preset": "p4"},
     "ultra": {"size": "2560x1440", "fps": 60, "bitrate_kbps": 38000, "nv_preset": "p6"},
 }

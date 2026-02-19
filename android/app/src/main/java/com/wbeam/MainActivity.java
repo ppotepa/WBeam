@@ -73,8 +73,15 @@ public class MainActivity extends AppCompatActivity {
     private static final long HUD_ADB_LOG_INTERVAL_MS = 1000;
         private static final long LIVE_TEST_START_TIMEOUT_MS = 12000;
     private static final int TRANSPORT_QUEUE_MAX_FRAMES = 3;
-    private static final int DECODE_QUEUE_MAX_FRAMES = 4;
+    private static final int DECODE_QUEUE_MAX_FRAMES = 2;
     private static final int RENDER_QUEUE_MAX_FRAMES = 1;
+    private static final int BANDWIDTH_TEST_MB = 64;
+    private static final long NO_PRESENT_FLUSH_MS = 1500;
+    private static final long NO_PRESENT_RECONNECT_MS = 3000;
+    private static final long NO_PRESENT_HARD_RESET_MS = 5000;
+    private static final int NO_PRESENT_MIN_IN_FRAMES_FLUSH = 12;
+    private static final int NO_PRESENT_MIN_IN_FRAMES_RECONNECT = 24;
+    private static final int NO_PRESENT_MIN_IN_FRAMES_HARD = 30;
     private static final String TEST_VIDEO_URL =
             "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4";
 
@@ -422,7 +429,11 @@ public class MainActivity extends AppCompatActivity {
 
         startButton.setOnClickListener(v -> requestHostStart(true, true));
         stopButton.setOnClickListener(v -> requestHostStop(true));
-        testButton.setOnClickListener(v -> startPublicVideoTest());
+        testButton.setOnClickListener(v -> startBandwidthTest());
+        testButton.setOnLongClickListener(v -> {
+            startPublicVideoTest();
+            return true;
+        });
         if (quickStartButton != null) {
             quickStartButton.setOnClickListener(v -> requestHostStart(true, true));
         }
@@ -430,7 +441,11 @@ public class MainActivity extends AppCompatActivity {
             quickStopButton.setOnClickListener(v -> requestHostStop(true));
         }
         if (quickTestButton != null) {
-            quickTestButton.setOnClickListener(v -> startPublicVideoTest());
+            quickTestButton.setOnClickListener(v -> startBandwidthTest());
+            quickTestButton.setOnLongClickListener(v -> {
+                startPublicVideoTest();
+                return true;
+            });
         }
 
         fullscreenButton.setOnClickListener(v -> toggleFullscreen());
@@ -1145,6 +1160,145 @@ public class MainActivity extends AppCompatActivity {
                     shortError(e)
             );
             releaseMediaPlayer();
+        }
+    }
+
+    private void startBandwidthTest() {
+        if (!daemonReachable) {
+            updateStatus(STATE_ERROR, "host API offline - cannot run bandwidth test", 0);
+            Toast.makeText(this, "Host API offline", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        updateStatus(STATE_CONNECTING, "running USB bandwidth test...", 0);
+        updateStatsLine("bandwidth test: downloading random payload from host API");
+        appendLiveLogInfo("bandwidth test start: /v1/speedtest?mb=" + BANDWIDTH_TEST_MB);
+
+        ioExecutor.execute(() -> {
+            try {
+                BandwidthResult result = runBandwidthTest(BANDWIDTH_TEST_MB);
+                runOnUiThread(() -> {
+                    String summary = String.format(
+                            Locale.US,
+                            "bandwidth %.1f Mbps (%.2f MiB/s), %d MiB in %.2fs",
+                            result.mbps,
+                            result.mibPerSec,
+                            result.totalMiB,
+                            result.seconds
+                    );
+                    updateStatus(uiStateFromDaemonState(), summary, result.bps);
+                    updateStatsLine(
+                            String.format(
+                                    Locale.US,
+                                    "bandwidth test: %.1f Mbps | %.2f MiB/s | bytes=%d | sec=%.2f",
+                                    result.mbps,
+                                    result.mibPerSec,
+                                    result.totalBytes,
+                                    result.seconds
+                            )
+                    );
+                    appendLiveLogInfo(summary);
+                    Toast.makeText(this, String.format(Locale.US, "Bandwidth: %.1f Mbps", result.mbps), Toast.LENGTH_SHORT).show();
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    String reason = shortError(e);
+                    updateStatus(STATE_ERROR, "bandwidth test failed: " + reason, 0);
+                    appendLiveLogError("bandwidth test failed: " + reason);
+                    Toast.makeText(this, "Bandwidth test failed: " + reason, Toast.LENGTH_LONG).show();
+                });
+            }
+        });
+    }
+
+    private BandwidthResult runBandwidthTest(int sizeMb) throws IOException {
+        HttpURLConnection conn = null;
+        long totalBytes = 0;
+        long startNs = 0;
+        try {
+            URL url = new URL(API_BASE + "/v1/speedtest?mb=" + sizeMb);
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(2500);
+            conn.setReadTimeout(60000);
+            conn.setUseCaches(false);
+            conn.setRequestProperty("Accept", "application/octet-stream");
+            conn.setRequestProperty("Connection", "close");
+
+            int code = conn.getResponseCode();
+            if (code < 200 || code >= 300) {
+                InputStream err = conn.getErrorStream();
+                String msg = "HTTP " + code;
+                if (err != null) {
+                    byte[] b = new byte[256];
+                    int n = err.read(b);
+                    if (n > 0) {
+                        msg += ": " + new String(b, 0, n, java.nio.charset.StandardCharsets.UTF_8);
+                    }
+                    err.close();
+                }
+                throw new IOException(msg);
+            }
+
+            byte[] buf = new byte[64 * 1024];
+            try (BufferedInputStream in = new BufferedInputStream(conn.getInputStream(), 256 * 1024)) {
+                startNs = SystemClock.elapsedRealtimeNanos();
+                int read;
+                while ((read = in.read(buf)) >= 0) {
+                    if (read == 0) {
+                        continue;
+                    }
+                    totalBytes += read;
+                }
+            }
+            long durationNs = Math.max(1L, SystemClock.elapsedRealtimeNanos() - startNs);
+            return BandwidthResult.from(totalBytes, durationNs, sizeMb);
+        } finally {
+            if (conn != null) {
+                conn.disconnect();
+            }
+        }
+    }
+
+    private String uiStateFromDaemonState() {
+        if ("STREAMING".equals(daemonState)) {
+            return STATE_STREAMING;
+        }
+        if ("STARTING".equals(daemonState) || "RECONNECTING".equals(daemonState)) {
+            return STATE_CONNECTING;
+        }
+        if ("ERROR".equals(daemonState) || "DISCONNECTED".equals(daemonState)) {
+            return STATE_ERROR;
+        }
+        return STATE_IDLE;
+    }
+
+    private static final class BandwidthResult {
+        final long totalBytes;
+        final long bps;
+        final double mbps;
+        final double mibPerSec;
+        final double seconds;
+        final int totalMiB;
+
+        private BandwidthResult(long totalBytes, long bps, double mbps, double mibPerSec, double seconds, int totalMiB) {
+            this.totalBytes = totalBytes;
+            this.bps = bps;
+            this.mbps = mbps;
+            this.mibPerSec = mibPerSec;
+            this.seconds = seconds;
+            this.totalMiB = totalMiB;
+        }
+
+        static BandwidthResult from(long totalBytes, long durationNs, int requestedMiB) {
+            double sec = durationNs / 1_000_000_000.0;
+            if (sec <= 0.0) {
+                sec = 0.001;
+            }
+            long bps = (long) ((totalBytes * 8.0) / sec);
+            double mbps = bps / 1_000_000.0;
+            double mibPerSec = (totalBytes / 1024.0 / 1024.0) / sec;
+            return new BandwidthResult(totalBytes, bps, mbps, mibPerSec, sec, requestedMiB);
         }
     }
 
@@ -1983,7 +2137,6 @@ public class MainActivity extends AppCompatActivity {
 
         private volatile boolean running;
         private volatile long reconnectDelayMs = 800;
-        private volatile boolean framedMode = false; // C3: set after first valid framing header detected
         private Thread thread;
         private Socket socket;
         private long reconnects = 0;
@@ -2049,26 +2202,9 @@ public class MainActivity extends AppCompatActivity {
                     codec.configure(format, surface, null, 0);
                     codec.start();
 
-                    statusListener.onStatus(STATE_STREAMING, "connected", 0);
-                    // C3: try framed protocol first; fall back to legacy AnnexB on magic mismatch
-                    if (framedMode) {
-                        framedDecodeLoop(socket.getInputStream(), codec);
-                    } else {
-                        // Peek first 4 bytes to detect magic before routing
-                        java.io.PushbackInputStream pis = new java.io.PushbackInputStream(
-                                socket.getInputStream(), FRAME_HEADER_SIZE);
-                        byte[] peek = new byte[4];
-                        int peekN = 0;
-                        while (peekN < 4) { int r = pis.read(peek, peekN, 4 - peekN); if (r < 0) throw new java.io.IOException("stream closed"); peekN += r; }
-                        pis.unread(peek, 0, peekN);
-                        int magic = ((peek[0]&0xFF)<<24)|((peek[1]&0xFF)<<16)|((peek[2]&0xFF)<<8)|(peek[3]&0xFF);
-                        if (magic == FRAME_MAGIC) {
-                            framedMode = true;
-                            framedDecodeLoop(pis, codec);
-                        } else {
-                            decodeLoop(pis, codec);
-                        }
-                    }
+                    statusListener.onStatus(STATE_STREAMING, "connected [framed]", 0);
+                    // C3: framed-only transport for deterministic frame boundaries and metrics.
+                    framedDecodeLoop(new BufferedInputStream(socket.getInputStream(), 256 * 1024), codec);
                 } catch (Exception e) {
                     if (running) {
                         reconnects++;
@@ -2132,6 +2268,7 @@ public class MainActivity extends AppCompatActivity {
             long lastLog = SystemClock.elapsedRealtime();
             long lastPresentMs     = SystemClock.elapsedRealtime(); // C5: black-screen watchdog
             long pendingWithNoPresent = 0;
+            long lastDecodeProgressMs = SystemClock.elapsedRealtime(); // recovery guard for stale pending count
             MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
             DrainStats drainStats = new DrainStats();
 
@@ -2198,22 +2335,46 @@ public class MainActivity extends AppCompatActivity {
                         drainLatestFrame(codec, bufferInfo, drainStats,
                                 pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES ? 16_000 : 5_000);
                         pendingDecodeQueue = Math.max(0, pendingDecodeQueue - drainStats.releasedCount);
+                        if (drainStats.releasedCount > 0) {
+                            lastDecodeProgressMs = SystemClock.elapsedRealtime();
+                        } else if (pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES
+                                && (SystemClock.elapsedRealtime() - lastDecodeProgressMs) > 300) {
+                            // Guard against stale pending estimate deadlocking decode path.
+                            pendingDecodeQueue = DECODE_QUEUE_MAX_FRAMES - 1;
+                        }
                         outFrames   += drainStats.renderedCount;
                         tooLateSec  += drainStats.droppedLateCount;
                         renderNsMax  = Math.max(renderNsMax, drainStats.renderNsMax);
                         renderQueueDepth = drainStats.renderedCount > 0 ? 1 : 0;
                         // E: drop-late over delay-growth: don't over-fill the decode queue
                         if (pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES) {
-                            droppedSec++; // E: decode queue full
+                            // Let recovery NALs (SPS/PPS/IDR) pass even under pressure.
+                            if (isRecoveryNal(streamBuf, sHead + 4, nalSize)) {
+                                long t0 = SystemClock.elapsedRealtimeNanos();
+                                if (queueNal(codec, streamBuf, sHead + 4, nalSize, frames * frameUs, 1_000)) {
+                                    long decodeNs = SystemClock.elapsedRealtimeNanos() - t0;
+                                    decodeNsTotal += decodeNs;
+                                    decodeNsBuf[(decodeNsBufN++) & 127] = decodeNs; // P1.3
+                                    avgNalSize = ((avgNalSize * 7) + nalSize) / 8;
+                                    inFrames++;
+                                    pendingDecodeQueue = Math.min(DECODE_QUEUE_MAX_FRAMES, pendingDecodeQueue + 1);
+                                    lastDecodeProgressMs = SystemClock.elapsedRealtime();
+                                } else {
+                                    droppedSec++;
+                                }
+                            } else {
+                                droppedSec++; // E: decode queue full
+                            }
                         } else {
                             long t0 = SystemClock.elapsedRealtimeNanos();
-                            if (queueNal(codec, streamBuf, sHead + 4, nalSize, frames * frameUs)) {
+                            if (queueNal(codec, streamBuf, sHead + 4, nalSize, frames * frameUs, 1_000)) {
                                 long decodeNs = SystemClock.elapsedRealtimeNanos() - t0;
                                 decodeNsTotal += decodeNs;
                                 decodeNsBuf[(decodeNsBufN++) & 127] = decodeNs; // P1.3
                                 avgNalSize = ((avgNalSize * 7) + nalSize) / 8;
                                 inFrames++;
                                 pendingDecodeQueue++; // E
+                                lastDecodeProgressMs = SystemClock.elapsedRealtime();
                             } else {
                                 droppedSec++;
                             }
@@ -2244,22 +2405,46 @@ public class MainActivity extends AppCompatActivity {
                                 drainLatestFrame(codec, bufferInfo, drainStats,
                                         pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES ? 16_000 : 5_000);
                                 pendingDecodeQueue = Math.max(0, pendingDecodeQueue - drainStats.releasedCount);
+                                if (drainStats.releasedCount > 0) {
+                                    lastDecodeProgressMs = SystemClock.elapsedRealtime();
+                                } else if (pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES
+                                        && (SystemClock.elapsedRealtime() - lastDecodeProgressMs) > 300) {
+                                    // Guard against stale pending estimate deadlocking decode path.
+                                    pendingDecodeQueue = DECODE_QUEUE_MAX_FRAMES - 1;
+                                }
                                 outFrames   += drainStats.renderedCount;
                                 tooLateSec  += drainStats.droppedLateCount;
                                 renderNsMax  = Math.max(renderNsMax, drainStats.renderNsMax);
                                 renderQueueDepth = drainStats.renderedCount > 0 ? 1 : 0;
                                 // E: drop-late: don't over-fill the decode queue
                                 if (pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES) {
-                                    droppedSec++; // E: decode queue full
+                                    // Let recovery NALs (SPS/PPS/IDR) pass even under pressure.
+                                    if (isRecoveryNal(streamBuf, sHead, nalSize)) {
+                                        long t0 = SystemClock.elapsedRealtimeNanos();
+                                        if (queueNal(codec, streamBuf, sHead, nalSize, frames * frameUs, 1_000)) {
+                                            long decodeNs = SystemClock.elapsedRealtimeNanos() - t0;
+                                            decodeNsTotal += decodeNs;
+                                            decodeNsBuf[(decodeNsBufN++) & 127] = decodeNs; // P1.3
+                                            avgNalSize = ((avgNalSize * 7) + nalSize) / 8;
+                                            inFrames++;
+                                            pendingDecodeQueue = Math.min(DECODE_QUEUE_MAX_FRAMES, pendingDecodeQueue + 1);
+                                            lastDecodeProgressMs = SystemClock.elapsedRealtime();
+                                        } else {
+                                            droppedSec++;
+                                        }
+                                    } else {
+                                        droppedSec++; // E: decode queue full
+                                    }
                                 } else {
                                     long t0 = SystemClock.elapsedRealtimeNanos();
-                                    if (queueNal(codec, streamBuf, sHead, nalSize, frames * frameUs)) {
+                                    if (queueNal(codec, streamBuf, sHead, nalSize, frames * frameUs, 1_000)) {
                                         long decodeNs = SystemClock.elapsedRealtimeNanos() - t0;
                                         decodeNsTotal += decodeNs;
                                         decodeNsBuf[(decodeNsBufN++) & 127] = decodeNs; // P1.3
                                         avgNalSize = ((avgNalSize * 7) + nalSize) / 8;
                                         inFrames++;
                                         pendingDecodeQueue++; // E
+                                        lastDecodeProgressMs = SystemClock.elapsedRealtime();
                                     } else {
                                         droppedSec++;
                                     }
@@ -2347,7 +2532,6 @@ public class MainActivity extends AppCompatActivity {
          * C3: Framed decode loop – host sends 24-byte header + payload per access unit.
          * Header: magic(4) ver(1) flags(1) rsv(2) seq(4) pts_us(8) len(4)
          * This eliminates AnnexB start-code scanning entirely and gives exact PTS per frame.
-         * Falls back to legacy decodeLoop if magic is wrong on first read.
          */
         private void framedDecodeLoop(InputStream input, MediaCodec codec) throws IOException {
             // pre-allocated buffers – no alloc in hot path
@@ -2367,6 +2551,8 @@ public class MainActivity extends AppCompatActivity {
             // C5: black-screen watchdog state
             long   lastPresentMs   = SystemClock.elapsedRealtime();
             long   totalInSincePresent = 0;
+            long   lastDecodeProgressMs = SystemClock.elapsedRealtime(); // recovery guard for stale pending count
+            boolean flushIssued = false;
             MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
             DrainStats drainStats = new DrainStats();
             int pendingDecodeQueue = 0; // E: bounded decode queue
@@ -2384,7 +2570,7 @@ public class MainActivity extends AppCompatActivity {
                           | ((hdrBuf[2] & 0xFF) << 8)  |  (hdrBuf[3] & 0xFF);
                 if (magic != FRAME_MAGIC) {
                     throw new IOException("C3: bad frame magic 0x" + Integer.toHexString(magic)
-                            + " – host may be in legacy mode; reconnecting");
+                            + " – non-framed stream detected");
                 }
                 // byte[4] = version, byte[5] = flags (bit0=keyframe)
                 // seq: bytes 8..11, pts_us: bytes 12..19, len: bytes 20..23
@@ -2413,40 +2599,86 @@ public class MainActivity extends AppCompatActivity {
                 drainLatestFrame(codec, bufferInfo, drainStats,
                         pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES ? 16_000 : 5_000);
                 pendingDecodeQueue = Math.max(0, pendingDecodeQueue - drainStats.releasedCount); // E
+                if (drainStats.releasedCount > 0) {
+                    lastDecodeProgressMs = SystemClock.elapsedRealtime();
+                } else if (pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES
+                        && (SystemClock.elapsedRealtime() - lastDecodeProgressMs) > 300) {
+                    // Guard against stale pending estimate deadlocking decode path.
+                    pendingDecodeQueue = DECODE_QUEUE_MAX_FRAMES - 1;
+                }
                 if (drainStats.renderedCount > 0) {
                     outFrames += drainStats.renderedCount;
                     lastPresentMs = SystemClock.elapsedRealtime();
                     totalInSincePresent = 0;
+                    flushIssued = false;
                 }
                 tooLateSec += drainStats.droppedLateCount;
                 renderNsMax = Math.max(renderNsMax, drainStats.renderNsMax);
                 // ── Queue to decoder ─────────────────────────────────────────
                 // E: bounded decode queue – drop if full (latest-frame-wins)
                 if (pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES) {
-                    droppedSec++; // E: decode queue full, drop oldest frame
+                    // Let recovery AUs (contain SPS/PPS/IDR) pass even under pressure.
+                    if (containsRecoveryNal(payloadBuf, payloadLen)) {
+                        long t0 = SystemClock.elapsedRealtimeNanos();
+                        if (queueNal(codec, payloadBuf, 0, payloadLen, ptsUs, 1_000)) {
+                            long decodeNs = SystemClock.elapsedRealtimeNanos() - t0;
+                            decodeNsTotal += decodeNs;
+                            decodeNsBuf[(decodeNsBufN++) & 127] = decodeNs; // P1.3
+                            inFrames++;
+                            totalInSincePresent++;
+                            pendingDecodeQueue = Math.min(DECODE_QUEUE_MAX_FRAMES, pendingDecodeQueue + 1);
+                            lastDecodeProgressMs = SystemClock.elapsedRealtime();
+                        } else {
+                            droppedSec++;
+                        }
+                    } else {
+                        droppedSec++; // E: decode queue full, drop stale frame
+                    }
                 } else {
                     long t0 = SystemClock.elapsedRealtimeNanos();
-                    if (queueNal(codec, payloadBuf, 0, payloadLen, ptsUs)) {
+                    if (queueNal(codec, payloadBuf, 0, payloadLen, ptsUs, 1_000)) {
                         long decodeNs = SystemClock.elapsedRealtimeNanos() - t0;
                         decodeNsTotal += decodeNs;
                         decodeNsBuf[(decodeNsBufN++) & 127] = decodeNs; // P1.3
                         inFrames++;
                         totalInSincePresent++;
                         pendingDecodeQueue++; // E: track depth
+                        lastDecodeProgressMs = SystemClock.elapsedRealtime();
                     } else {
                         droppedSec++;
                     }
                 }
 
-                // C5: black-screen watchdog – if 5s elapsed with >30 frames decoded but none rendered → reset
+                // C5: recovery ladder for "recv>0 but present==0"
                 long nowMs = SystemClock.elapsedRealtime();
-                if (totalInSincePresent > 30 && (nowMs - lastPresentMs) > 5_000) {
-                    framedMode = false;
-                    Log.w(TAG, "C5 watchdog in framed mode -> fallback to legacy parser on reconnect");
-                    statusListener.onStatus(STATE_CONNECTING, "decoder watchdog: switching to legacy parser", 0);
-                    throw new IOException("C5: black-screen watchdog: "
+                long noPresentMs = nowMs - lastPresentMs;
+                if (!flushIssued
+                        && totalInSincePresent >= NO_PRESENT_MIN_IN_FRAMES_FLUSH
+                        && noPresentMs >= NO_PRESENT_FLUSH_MS) {
+                    try {
+                        codec.flush();
+                        pendingDecodeQueue = 0;
+                        flushIssued = true;
+                        Log.w(TAG, "C5 ladder L1: codec.flush() due to no-present");
+                        statusListener.onStatus(STATE_CONNECTING, "decoder stalled: flushing codec", 0);
+                    } catch (Exception flushErr) {
+                        throw new IOException("C5: codec.flush failed", flushErr);
+                    }
+                }
+                if (totalInSincePresent >= NO_PRESENT_MIN_IN_FRAMES_RECONNECT
+                        && noPresentMs >= NO_PRESENT_RECONNECT_MS) {
+                    Log.w(TAG, "C5 ladder L2: reconnect framed stream due to no-present");
+                    statusListener.onStatus(STATE_CONNECTING, "decoder stalled: reconnecting stream", 0);
+                    throw new IOException("C5: no frames presented for " + noPresentMs
+                            + "ms (" + totalInSincePresent + " decoded) – reconnect");
+                }
+                if (totalInSincePresent >= NO_PRESENT_MIN_IN_FRAMES_HARD
+                        && noPresentMs >= NO_PRESENT_HARD_RESET_MS) {
+                    Log.w(TAG, "C5 ladder L3: hard reconnect watchdog");
+                    statusListener.onStatus(STATE_CONNECTING, "decoder watchdog: hard reconnect", 0);
+                    throw new IOException("C5: hard watchdog: "
                             + totalInSincePresent + " frames decoded, 0 presented for "
-                            + (nowMs - lastPresentMs) + "ms – triggering reconnect");
+                            + noPresentMs + "ms – reconnect");
                 }
 
                 // ── 1-second stats ───────────────────────────────────────────
@@ -2510,10 +2742,15 @@ public class MainActivity extends AppCompatActivity {
             return new double[]{p50, p95};
         }
 
-        private static boolean queueNal(MediaCodec codec, byte[] data, int offset, int size, long ptsUs) {
-            // Keep enough headroom for decoder input availability; too short timeouts
-            // can drop SPS/PPS or IDR and lead to persistent black screen.
-            int inputIndex = codec.dequeueInputBuffer(10_000);
+        private static boolean queueNal(
+                MediaCodec codec,
+                byte[] data,
+                int offset,
+                int size,
+                long ptsUs,
+                long inputTimeoutUs
+        ) {
+            int inputIndex = codec.dequeueInputBuffer(inputTimeoutUs);
             if (inputIndex < 0) {
                 return false;
             }
@@ -2612,6 +2849,52 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
             return -1;
+        }
+
+        private static boolean isRecoveryNal(byte[] data, int offset, int size) {
+            int type = firstNalType(data, offset, size);
+            return type == 5 || type == 7 || type == 8; // IDR/SPS/PPS
+        }
+
+        private static boolean containsRecoveryNal(byte[] data, int size) {
+            int limit = Math.min(size, 64 * 1024); // bound scan cost in hot path
+            int type = firstNalType(data, 0, limit);
+            if (type == 5 || type == 7 || type == 8) {
+                return true;
+            }
+            int sc = findStartCode(data, 0, limit);
+            while (sc >= 0) {
+                int nextSc = findStartCode(data, sc + 3, limit);
+                int nalEnd = nextSc >= 0 ? nextSc : limit;
+                type = firstNalType(data, sc, Math.max(0, nalEnd - sc));
+                if (type == 5 || type == 7 || type == 8) {
+                    return true;
+                }
+                if (nextSc < 0) {
+                    break;
+                }
+                sc = nextSc;
+            }
+            return false;
+        }
+
+        private static int firstNalType(byte[] data, int offset, int size) {
+            if (size <= 0 || offset < 0 || offset >= data.length) {
+                return -1;
+            }
+            int end = Math.min(data.length, offset + size);
+            int i = offset;
+            if (i + 3 < end && data[i] == 0 && data[i + 1] == 0) {
+                if (data[i + 2] == 1) {
+                    i += 3;
+                } else if (i + 4 < end && data[i + 2] == 0 && data[i + 3] == 1) {
+                    i += 4;
+                }
+            }
+            if (i >= end) {
+                return -1;
+            }
+            return data[i] & 0x1F;
         }
 
         private void closeSocket() {
