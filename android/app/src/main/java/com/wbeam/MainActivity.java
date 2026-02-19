@@ -2256,9 +2256,14 @@ public class MainActivity extends AppCompatActivity {
         ) {
             stats.reset();
             int latestRenderableIndex = -1;
+            // Wait up to 5 ms on the first poll – gives the HW decoder time to
+            // produce output when socket reads are instant (USB recv-buf full).
+            // Subsequent iterations use 0 to drain any already-available backlog.
+            long timeoutUs = 5_000;
 
             while (true) {
-                int outputIndex = codec.dequeueOutputBuffer(info, 0);
+                int outputIndex = codec.dequeueOutputBuffer(info, timeoutUs);
+                timeoutUs = 0; // non-blocking for all subsequent backlog frames
                 if (outputIndex >= 0) {
                     stats.releasedCount++;
                     boolean renderable = (info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0;
