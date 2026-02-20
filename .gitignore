@@ -25,6 +25,7 @@ android/.cxx/
 
 # Rust
 host/rust/target/
+protocol/rust/target/
 
 # Python
 __pycache__/
@@ -38,6 +39,7 @@ venv/
 *.log
 host/logs/**
 host/rust/logs/**
+protocol/logs/**
 !host/logs/.gitkeep
 !host/rust/logs/.gitkeep
 *.pid
@@ -46,7 +48,5 @@ host/rust/logs/**
 
 # Local generated helper files
 codebase_concat*.txt
-
-# Markdown policy
-*.md
-!README.md
+concat*.txt
+ALL_CODE.txt
