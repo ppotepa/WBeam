@@ -1,1 +1,0 @@
-/mnt/fat_boii/git/WBeam/protocol/rust/target/release/wbtp-receiver-null: /mnt/fat_boii/git/WBeam/protocol/rust/crates/wbtp-core/src/lib.rs /mnt/fat_boii/git/WBeam/protocol/rust/crates/wbtp-receiver-null/src/main.rs
