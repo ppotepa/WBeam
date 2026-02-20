@@ -1,0 +1,1 @@
+/mnt/fat_boii/git/WBeam/protocol/rust/target/debug/libwbtp_sender.rlib: /mnt/fat_boii/git/WBeam/protocol/rust/crates/wbtp-core/src/lib.rs /mnt/fat_boii/git/WBeam/protocol/rust/crates/wbtp-sender/src/lib.rs

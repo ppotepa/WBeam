@@ -17,6 +17,7 @@ mkdir -p "$SESSION_RUST_LOG_DIR"
 
 if command -v systemctl >/dev/null 2>&1; then
   systemctl --user stop wbeamd-rust.service >/dev/null 2>&1 || true
+  systemctl --user stop wbeam-daemon.service >/dev/null 2>&1 || true
 fi
 
 export WBEAM_DAEMON_IMPL="${WBEAM_DAEMON_IMPL:-rust}"

@@ -8,7 +8,7 @@ public final class BuildConfig {
   public static final String APPLICATION_ID = "com.wbeam";
   public static final String BUILD_TYPE = "debug";
   public static final int VERSION_CODE = 1;
-  public static final String VERSION_NAME = "0.0.2ca0-build";
+  public static final String VERSION_NAME = "0.0.4265-build";
   // Field from default config.
-  public static final String WBEAM_BUILD_REV = "0.0.2ca0-build";
+  public static final String WBEAM_BUILD_REV = "0.0.4265-build";
 }

@@ -33,11 +33,22 @@ PROFILE_DEFAULTS = {
     "ultra": {"size": "2560x1440", "fps": 60, "bitrate_kbps": 38000, "nv_preset": "p6"},
 }
 
-# C3 framing constants
-FRAME_MAGIC = 0x57424D30       # b"WBM0"
+# WBTP/1 wire format - must match wbtp-core/src/lib.rs exactly.
+#   magic(4)=b"WBTP" | version(1)=1 | flags(1) | seq(4) | capture_ts_us(8) | payload_len(4)
+#   Total: 22 bytes  (no reserved, no CRC - CRC flag not set)
+# flags bit-mask:
+#   0x01 = HAS_CHECKSUM (not used here)
+#   0x02 = KEYFRAME
+#   0x04 = END_OF_STREAM
+FRAME_MAGIC = b"WBTP"
 FRAME_VERSION = 0x01
-FRAME_HEADER_SIZE = 24         # see docs/telemetry_schema.md
-FRAME_STRUCT = struct.Struct(">IBBHIQI")  # magic ver flags rsv seq pts_us len
+FRAME_FLAG_KEYFRAME = 0x02
+FRAME_FLAG_EOS      = 0x04
+FRAME_HEADER_SIZE = 22
+FRAME_STRUCT = struct.Struct(">4sBBIQI")  # magic(4s) ver flags seq ts_us len = 22 bytes
+HELLO_MAGIC = b"WBS1"
+HELLO_VERSION = 0x01
+HELLO_STRUCT = struct.Struct(">4sBBHQ")  # magic ver flags len session_id = 16 bytes
 
 STATE = {
     "main_loop": None,
@@ -47,6 +58,43 @@ STATE = {
     "framing_thread": None,
     "framing_stop": None,
 }
+
+
+def send_all_iov(conn, iov):
+    """Send full iovec payload via sendmsg, handling partial writes."""
+    views = [memoryview(chunk) for chunk in iov if len(chunk)]
+    if not views:
+        return 1
+
+    idx = 0
+    offset = 0
+    send_calls = 0
+    while idx < len(views):
+        if offset:
+            chunks = [views[idx][offset:]]
+            if idx + 1 < len(views):
+                chunks.extend(views[idx + 1 :])
+        else:
+            chunks = views[idx:]
+
+        sent = conn.sendmsg(chunks)
+        send_calls += 1
+        if sent <= 0:
+            raise BrokenPipeError("sendmsg returned 0 bytes")
+
+        remaining = sent
+        while idx < len(views):
+            left = len(views[idx]) - offset
+            if remaining < left:
+                offset += remaining
+                break
+            remaining -= left
+            idx += 1
+            offset = 0
+            if remaining == 0:
+                break
+
+    return send_calls
 
 
 def build_variant_dict(values):
@@ -206,46 +254,138 @@ def configure_encoder(enc, encoder_name, bitrate_kbps, fps, nv_preset):
     enc.set_property("qp-max", 32)
 
 
-def framed_tcp_server_thread(appsink, port, stop_event):
-    """C3: Accept one TCP client; send 24-byte-framed H264 access units.
+def set_if_supported(element, prop_name, value):
+    if element is not None and element.find_property(prop_name) is not None:
+        element.set_property(prop_name, value)
 
-    Header (big-endian, 24 bytes):
-        magic(4)=0x57424D30 | version(1) | flags(1) | reserved(2)
-        seq(4) | pts_us(8) | payload_len(4) | payload(N)
+
+def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=None):
+    """WBTP/1 framed sender: accept one TCP client; send WBTP/1-framed H264 access units.
+
+    Header (big-endian, 22 bytes):
+        magic(4)=b"WBTP" | version(1)=1 | flags(1) | seq(4) | capture_ts_us(8) | payload_len(4)
     """
+    import time as _time
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind(("0.0.0.0", port))
     srv.listen(1)
     srv.settimeout(1.0)
+    send_timeout_s = float(os.getenv("WBEAM_FRAMED_SEND_TIMEOUT_S", "0.010"))
     seq = 0
     print(f"[wbeam-framed] listening on :{port}", flush=True)
+    # Track last keyframe so we can duplicate it if capture starves (portal emits only on damage).
+    last_keyframe = None
+    last_keyframe_len = 0
+    # 20 ms pull timeout (~50 fps ceiling) keeps cadence tighter than the prior 33 ms.
+    pull_timeout_ns = 20_000_000
+
     while not stop_event.is_set():
         try:
             conn, addr = srv.accept()
         except socket.timeout:
             continue
         conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        print(f"[wbeam-framed] client connected: {addr}", flush=True)
+        # Larger send buffer reduces syscall overhead at high frame rates
+        conn.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 512 * 1024)
+        if send_timeout_s > 0:
+            conn.settimeout(send_timeout_s)
         try:
+            session_id = random.getrandbits(64)
+            hello = HELLO_STRUCT.pack(HELLO_MAGIC, HELLO_VERSION, 0x00, HELLO_STRUCT.size, session_id)
+            send_all_iov(conn, [hello])
+            print(f"[wbeam-framed] client connected: {addr}", flush=True)
+            print(f"[wbeam-framed] session_id=0x{session_id:016x}", flush=True)
+            _stat_frames = 0
+            _stat_dropped = 0
+            _stat_partial_writes = 0
+            _stat_send_timeouts = 0
+            _stat_t0 = _time.monotonic()
             while not stop_event.is_set():
-                sample = appsink.emit("try-pull-sample", 500_000_000)
+                sample = appsink.emit("try-pull-sample", pull_timeout_ns)
+                payload_view = None
+                payload_len = 0
+                flags = FRAME_FLAG_KEYFRAME
+                pts_us = int(_time.time() * 1_000_000)
+                buf = None
+                map_info = None
+
                 if sample is None:
-                    continue
-                buf = sample.get_buffer()
-                pts_us = buf.pts // 1000 if buf.pts != Gst.CLOCK_TIME_NONE else 0
-                ok, map_info = buf.map(Gst.MapFlags.READ)
-                if not ok:
-                    continue
-                data = bytes(map_info.data)
-                buf.unmap(map_info)
-                flags = 0x00 if buf.has_flags(Gst.BufferFlags.DELTA_UNIT) else 0x01
+                    # No fresh buffer from PipeWire; reuse last keyframe to maintain cadence.
+                    if last_keyframe is None:
+                        _stat_dropped += 1
+                        elapsed = _time.monotonic() - _stat_t0
+                        if elapsed >= 1.0:
+                            sent_fps = _stat_frames / elapsed
+                            pipe_fps = 0
+                            if pipeline_fps_counter is not None:
+                                pipe_fps = pipeline_fps_counter[0]
+                                pipeline_fps_counter[0] = 0
+                            print(
+                                f"[wbeam-framed] pipeline_fps={pipe_fps} sender_fps={sent_fps:.1f}"
+                                f" timeout_misses={_stat_dropped} seq={seq}",
+                                flush=True,
+                            )
+                            _stat_frames = 0
+                            _stat_dropped = 0
+                            _stat_t0 = _time.monotonic()
+                        continue
+
+                    payload_view = memoryview(last_keyframe)
+                    payload_len = last_keyframe_len
+                else:
+                    buf = sample.get_buffer()
+                    pts_us = buf.pts // 1000 if buf.pts != Gst.CLOCK_TIME_NONE else pts_us
+                    ok, map_info = buf.map(Gst.MapFlags.READ)
+                    if not ok:
+                        continue
+                    payload_len = map_info.size
+                    payload_view = memoryview(map_info.data)
+                    flags = 0x00 if buf.has_flags(Gst.BufferFlags.DELTA_UNIT) else FRAME_FLAG_KEYFRAME
+                    if flags & FRAME_FLAG_KEYFRAME:
+                        # Copy to allow reuse if capture stalls.
+                        last_keyframe = bytes(map_info.data)
+                        last_keyframe_len = payload_len
+
                 header = FRAME_STRUCT.pack(
-                    FRAME_MAGIC, FRAME_VERSION, flags, 0,
-                    seq & 0xFFFFFFFF, pts_us, len(data)
+                    FRAME_MAGIC, FRAME_VERSION, flags,
+                    seq & 0xFFFFFFFF, pts_us, payload_len
                 )
+
+                try:
+                    send_calls = send_all_iov(conn, [header, payload_view])
+                except socket.timeout:
+                    _stat_send_timeouts += 1
+                    _stat_dropped += 1
+                    continue
+                finally:
+                    if buf is not None and map_info is not None:
+                        buf.unmap(map_info)
+
+                if send_calls > 1:
+                    _stat_partial_writes += 1
                 seq += 1
-                conn.sendall(header + data)
+                _stat_frames += 1
+                elapsed = _time.monotonic() - _stat_t0
+                if elapsed >= 1.0:
+                    sent_fps = _stat_frames / elapsed
+                    pipe_fps = 0
+                    if pipeline_fps_counter is not None:
+                        pipe_fps = pipeline_fps_counter[0]
+                        pipeline_fps_counter[0] = 0
+                    print(
+                        f"[wbeam-framed] pipeline_fps={pipe_fps} sender_fps={sent_fps:.1f}"
+                        f" timeout_misses={_stat_dropped}"
+                        f" partial_writes={_stat_partial_writes}"
+                        f" send_timeouts={_stat_send_timeouts}"
+                        f" seq={seq}",
+                        flush=True,
+                    )
+                    _stat_frames = 0
+                    _stat_dropped = 0
+                    _stat_partial_writes = 0
+                    _stat_send_timeouts = 0
+                    _stat_t0 = _time.monotonic()
         except (BrokenPipeError, ConnectionResetError, OSError) as exc:
             print(f"[wbeam-framed] client disconnected: {exc}", flush=True)
         finally:
@@ -342,6 +482,11 @@ def make_pipeline(
     )
 
     configure_encoder(enc, encoder_name, bitrate_kbps, fps, nv_preset)
+    # Make cadence deterministic: videorate is allowed to duplicate frames up to target fps.
+    # Without this, Portal can emit only damage-driven updates (e.g., ~3 fps on static scene).
+    set_if_supported(rate, "drop-only", False)
+    set_if_supported(rate, "max-rate", int(fps))
+    set_if_supported(rate, "average-period", int(1_000_000_000 / max(1, int(fps))))
 
     parse.set_property("disable-passthrough", True)
     parse.set_property("config-interval", 1)
@@ -352,8 +497,9 @@ def make_pipeline(
             Gst.Caps.from_string("video/x-h264,stream-format=byte-stream,alignment=au"),
         )
         sink.set_property("emit-signals", False)
-        sink.set_property("sync", False)
-        sink.set_property("max-buffers", 2)
+        # sync=true keeps pipeline on the clock so videorate can synthesize stable CFR output.
+        sink.set_property("sync", True)
+        sink.set_property("max-buffers", 4)  # 4 instead of 2 – gives sender ~2 extra frame slots before drop
         sink.set_property("drop", True)
     else:
         caps2.set_property(
@@ -417,7 +563,23 @@ def make_pipeline(
             if not a.link(b):
                 raise RuntimeError(f"Failed to link debug branch {a.get_name()} -> {b.get_name()}")
 
-    return pipeline
+    # D1: FPS probe on appsink sinkpad – counts how many encoded frames the
+    # pipeline actually delivers (before appsink drop). Compared against sender fps
+    # to determine if the bottleneck is pipewiresrc/encoder or the Python sender.
+    pipeline_fps_counter = [0]  # [int] – mutated from C probe callback, read from sender thread
+    if framed:
+        def _fps_probe(pad, info, counter):  # noqa: E306
+            counter[0] += 1
+            return Gst.PadProbeReturn.OK
+        appsink_sinkpad = sink.get_static_pad("sink")
+        if appsink_sinkpad:
+            appsink_sinkpad.add_probe(
+                Gst.PadProbeType.BUFFER,
+                _fps_probe,
+                pipeline_fps_counter,
+            )
+
+    return pipeline, pipeline_fps_counter
 
 
 def on_bus_message(bus, message):
@@ -526,7 +688,7 @@ def main():
     fd = open_pipewire_fd(iface, session_handle)
     print(f"[wbeam] Opened PipeWire fd: {fd}")
 
-    pipeline = make_pipeline(
+    pipeline, pipeline_fps_counter = make_pipeline(
         fd,
         node_id,
         width,
@@ -563,7 +725,7 @@ def main():
         appsink = pipeline.get_by_name("sink")
         t = threading.Thread(
             target=framed_tcp_server_thread,
-            args=(appsink, args.port, stop_event),
+            args=(appsink, args.port, stop_event, pipeline_fps_counter),
             daemon=True,
             name="wbeam-framed-sender",
         )

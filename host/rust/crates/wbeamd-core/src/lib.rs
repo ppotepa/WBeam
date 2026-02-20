@@ -40,6 +40,7 @@ const NO_PRESENT_RESTART_STREAK_REQUIRED: u8 = 4;
 const NO_PRESENT_RESTART_COOLDOWN: Duration = Duration::from_secs(15);
 const NO_PRESENT_MIN_RECV_FPS: f64 = 10.0;
 const NO_PRESENT_MAX_PRESENT_FPS: f64 = 1.0;
+const REVERSE_REFRESH_BACKSTOP: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Error)]
 pub enum CoreError {
@@ -618,7 +619,11 @@ impl DaemonCore {
     }
 
     async fn start_with_config(&self, cfg: ActiveConfig) -> Result<(), CoreError> {
-        self.ensure_usb_reverse().await;
+        self.ensure_usb_reverse("start").await;
+        {
+            let mut inner = self.inner.lock().await;
+            inner.last_reverse_refresh_at = Some(Instant::now());
+        }
 
         {
             let inner = self.inner.lock().await;
@@ -663,34 +668,73 @@ impl DaemonCore {
         }
         self.ensure_stream_port_available()?;
 
-        let stream_script = self.root.join("host/scripts/stream_wayland_portal_h264.py");
-        let mut cmd = Command::new("python3");
-        cmd.arg("-u")
-            .arg(stream_script)
-            .arg("--profile")
-            .arg(&cfg.profile)
-            .arg("--port")
-            .arg(self.stream_port.to_string())
-            .arg("--encoder")
-            .arg(&cfg.encoder)
-            .arg("--cursor-mode")
-            .arg(&cfg.cursor_mode)
-            .arg("--size")
-            .arg(&cfg.size)
-            .arg("--fps")
-            .arg(cfg.fps.to_string())
-            .arg("--bitrate-kbps")
-            .arg(cfg.bitrate_kbps.to_string())
-            .arg("--debug-dir")
-            .arg("/tmp/wbeam-frames")
-            .arg("--debug-fps")
-            .arg(cfg.debug_fps.to_string())
-            .env("PYTHONUNBUFFERED", "1")
-            .stdin(Stdio::null())
+        let use_rust_streamer = std::env::var("WBEAM_USE_RUST_STREAMER")
+            .ok()
+            .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "on"))
+            .unwrap_or(true);
+        let rust_streamer_bin = std::env::var("WBEAM_RUST_STREAMER_BIN")
+            .ok()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| self.root.join("host/rust/target/release/wbeamd-streamer"));
+
+        let mut cmd;
+        if use_rust_streamer && rust_streamer_bin.exists() {
+            cmd = Command::new(rust_streamer_bin);
+            cmd.arg("--profile")
+                .arg(&cfg.profile)
+                .arg("--port")
+                .arg(self.stream_port.to_string())
+                .arg("--encoder")
+                .arg(&cfg.encoder)
+                .arg("--cursor-mode")
+                .arg(&cfg.cursor_mode)
+                .arg("--size")
+                .arg(&cfg.size)
+                .arg("--fps")
+                .arg(cfg.fps.to_string())
+                .arg("--bitrate-kbps")
+                .arg(cfg.bitrate_kbps.to_string())
+                .arg("--debug-dir")
+                .arg("/tmp/wbeam-frames")
+                .arg("--debug-fps")
+                .arg(cfg.debug_fps.to_string());
+        } else {
+            if use_rust_streamer {
+                warn!(path = %rust_streamer_bin.display(), "rust streamer missing, falling back to python helper");
+            }
+            let stream_script = self.root.join("host/scripts/stream_wayland_portal_h264.py");
+            cmd = Command::new("python3");
+            cmd.arg("-u")
+                .arg(stream_script)
+                .arg("--profile")
+                .arg(&cfg.profile)
+                .arg("--port")
+                .arg(self.stream_port.to_string())
+                .arg("--encoder")
+                .arg(&cfg.encoder)
+                .arg("--cursor-mode")
+                .arg(&cfg.cursor_mode)
+                .arg("--size")
+                .arg(&cfg.size)
+                .arg("--fps")
+                .arg(cfg.fps.to_string())
+                .arg("--bitrate-kbps")
+                .arg(cfg.bitrate_kbps.to_string())
+                .arg("--debug-dir")
+                .arg("/tmp/wbeam-frames")
+                .arg("--debug-fps")
+                .arg(cfg.debug_fps.to_string())
+                .env("PYTHONUNBUFFERED", "1")
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            // C3: framed-only transport (legacy parser disabled on Android path).
+            cmd.arg("--framed");
+        }
+
+        cmd.stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        // C3: framed-only transport (legacy parser disabled on Android path).
-        cmd.arg("--framed");
 
         let mut child = cmd
             .spawn()
@@ -773,6 +817,9 @@ impl DaemonCore {
                 return;
             }
 
+            let had_streaming_session = inner.stream_started_at.is_some();
+            let exited_while_starting = inner.state == STATE_STARTING;
+
             inner.current_pid = None;
             inner.run_started_at = None;
             inner.stream_started_at = None;
@@ -790,6 +837,20 @@ impl DaemonCore {
             inner.last_error = format!("stream exited with code={exit_code}");
             inner.state = STATE_ERROR.to_string();
             inner.metrics.reconnects = inner.metrics.reconnects.saturating_add(1);
+
+            if !had_streaming_session {
+                inner.state = STATE_IDLE.to_string();
+                inner.last_error = format!(
+                    "stream start aborted (code={exit_code}); waiting for explicit /start"
+                );
+                info!(
+                    run_id,
+                    exit_code,
+                    exited_while_starting,
+                    "stream exited before STREAMING; auto-restart suppressed"
+                );
+                return;
+            }
 
             let cooldown_expired = inner
                 .suppress_auto_start_until
@@ -830,18 +891,19 @@ impl DaemonCore {
 
     async fn watchdog_tick(&self) {
         let mut kill_pid = None;
-        let mut should_refresh_reverse = false;
+        let mut refresh_reverse_reason: Option<&'static str> = None;
 
         {
             let mut inner = self.inner.lock().await;
             let now = Instant::now();
             let refresh_due = inner
                 .last_reverse_refresh_at
-                .map(|last| now.duration_since(last) >= Duration::from_secs(3))
+                .map(|last| now.duration_since(last) >= REVERSE_REFRESH_BACKSTOP)
                 .unwrap_or(true);
-            if refresh_due {
+            let refresh_state = matches!(inner.state.as_str(), STATE_STARTING | STATE_RECONNECTING);
+            if refresh_due && refresh_state {
                 inner.last_reverse_refresh_at = Some(now);
-                should_refresh_reverse = true;
+                refresh_reverse_reason = Some("watchdog_backstop");
             }
 
             if let Some(pid) = inner.current_pid {
@@ -858,8 +920,8 @@ impl DaemonCore {
             }
         }
 
-        if should_refresh_reverse {
-            self.ensure_usb_reverse().await;
+        if let Some(reason) = refresh_reverse_reason {
+            self.ensure_usb_reverse(reason).await;
         }
 
         if let Some(pid) = kill_pid {
@@ -890,7 +952,8 @@ impl DaemonCore {
         Err(CoreError::PortBusy(self.stream_port))
     }
 
-    async fn ensure_usb_reverse(&self) {
+    async fn ensure_usb_reverse(&self, reason: &str) {
+        info!(reason, "refreshing adb reverse mappings");
         let script = self.root.join("host/scripts/usb_reverse.sh");
         match Command::new(script)
             .arg(self.stream_port.to_string())
@@ -900,8 +963,8 @@ impl DaemonCore {
             .await
         {
             Ok(status) if status.success() => {}
-            Ok(status) => warn!(code = ?status.code(), "usb_reverse.sh failed"),
-            Err(err) => warn!(error = %err, "failed to execute usb_reverse.sh"),
+            Ok(status) => warn!(reason, code = ?status.code(), "usb_reverse.sh failed"),
+            Err(err) => warn!(reason, error = %err, "failed to execute usb_reverse.sh"),
         }
 
         match Command::new("adb")
@@ -914,8 +977,8 @@ impl DaemonCore {
             .await
         {
             Ok(status) if status.success() => {}
-            Ok(status) => warn!(code = ?status.code(), "adb reverse for control port failed"),
-            Err(err) => warn!(error = %err, "failed to execute adb reverse for control port"),
+            Ok(status) => warn!(reason, code = ?status.code(), "adb reverse for control port failed"),
+            Err(err) => warn!(reason, error = %err, "failed to execute adb reverse for control port"),
         }
     }
 
