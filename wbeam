@@ -1,0 +1,268 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HOST_SCRIPTS_DIR="$ROOT_DIR/host/scripts"
+
+CONTROL_PORT="${WBEAM_CONTROL_PORT:-5001}"
+STREAM_PORT="${WBEAM_STREAM_PORT:-5000}"
+
+SERVICE_NAME="wbeam-daemon"
+SERVICE_FILE="$HOME/.config/systemd/user/${SERVICE_NAME}.service"
+DAEMON_BIN="$ROOT_DIR/host/rust/target/release/wbeamd-server"
+
+print_help() {
+  cat <<'EOF'
+WBeam command runner
+
+Usage:
+  ./wbeam <group> <command> [args]
+
+Groups:
+  service   up | down | restart | status | remove | logs
+  ip        up | down | status
+  daemon    up | down | status
+  debug     up | watch
+  logs      live | daemon | host
+
+Examples:
+  ./wbeam service up
+  ./wbeam service down
+  ./wbeam service remove
+  ./wbeam ip down
+  ./wbeam debug up
+  ./wbeam logs live
+EOF
+}
+
+require_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "Missing required command: $1" >&2
+    exit 1
+  fi
+}
+
+ensure_daemon_binary() {
+  if [[ -x "$DAEMON_BIN" ]]; then
+    return 0
+  fi
+  echo "Daemon binary missing: $DAEMON_BIN" >&2
+  echo "Build it first:" >&2
+  echo "  cd $ROOT_DIR/host/rust && cargo build --release -p wbeamd-server -p wbeamd-streamer" >&2
+  exit 1
+}
+
+stop_local_processes() {
+  pkill -9 wbeamd-streamer 2>/dev/null || true
+  pkill -9 wbeamd-server 2>/dev/null || true
+  rm -f /tmp/wbeamd.lock
+}
+
+service_write_unit() {
+  mkdir -p "$HOME/.config/systemd/user"
+  cat > "$SERVICE_FILE" <<EOF
+[Unit]
+Description=WBeam Screen Streaming Daemon
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=$DAEMON_BIN --control-port $CONTROL_PORT --stream-port $STREAM_PORT --root $ROOT_DIR
+Restart=on-failure
+RestartSec=5
+Environment="RUST_LOG=info"
+Environment="WBEAM_USE_RUST_STREAMER=1"
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
+EOF
+}
+
+service_up() {
+  require_cmd systemctl
+  ensure_daemon_binary
+  stop_local_processes
+
+  if [[ ! -f "$SERVICE_FILE" ]]; then
+    service_write_unit
+  fi
+
+  systemctl --user daemon-reload
+  systemctl --user enable "$SERVICE_NAME" >/dev/null 2>&1 || true
+  systemctl --user restart "$SERVICE_NAME"
+  sleep 1
+  service_status
+}
+
+service_down() {
+  require_cmd systemctl
+  systemctl --user stop "$SERVICE_NAME" >/dev/null 2>&1 || true
+  stop_local_processes
+  echo "Service stopped."
+}
+
+service_restart() {
+  service_down
+  service_up
+}
+
+service_remove() {
+  require_cmd systemctl
+  systemctl --user stop "$SERVICE_NAME" >/dev/null 2>&1 || true
+  systemctl --user disable "$SERVICE_NAME" >/dev/null 2>&1 || true
+  rm -f "$SERVICE_FILE"
+  systemctl --user daemon-reload
+  stop_local_processes
+  echo "Service removed: $SERVICE_FILE"
+}
+
+service_status() {
+  if command -v systemctl >/dev/null 2>&1; then
+    if [[ -f "$SERVICE_FILE" ]]; then
+      systemctl --user status "$SERVICE_NAME" --no-pager --full || true
+    else
+      echo "Service file not installed: $SERVICE_FILE"
+    fi
+  fi
+  echo
+  if curl -sSf "http://127.0.0.1:${CONTROL_PORT}/status" >/dev/null 2>&1; then
+    curl -sS "http://127.0.0.1:${CONTROL_PORT}/status"
+    echo
+  else
+    echo "Control API not reachable on 127.0.0.1:${CONTROL_PORT}"
+  fi
+}
+
+service_logs() {
+  require_cmd journalctl
+  journalctl --user -u "$SERVICE_NAME" -f
+}
+
+ip_up() {
+  require_cmd adb
+  adb start-server >/dev/null
+  adb wait-for-device
+  adb reverse "tcp:${STREAM_PORT}" "tcp:${STREAM_PORT}"
+  adb reverse "tcp:${CONTROL_PORT}" "tcp:${CONTROL_PORT}"
+  ip_status
+}
+
+ip_down() {
+  require_cmd adb
+  adb reverse --remove "tcp:${STREAM_PORT}" >/dev/null 2>&1 || true
+  adb reverse --remove "tcp:${CONTROL_PORT}" >/dev/null 2>&1 || true
+  ip_status
+}
+
+ip_status() {
+  require_cmd adb
+  echo "ADB reverse mappings:"
+  adb reverse --list || true
+}
+
+daemon_up() {
+  exec "$HOST_SCRIPTS_DIR/run_wbeamd.sh" "$CONTROL_PORT" "$STREAM_PORT"
+}
+
+daemon_down() {
+  stop_local_processes
+  echo "Daemon processes stopped."
+}
+
+daemon_status() {
+  if curl -sSf "http://127.0.0.1:${CONTROL_PORT}/status" >/dev/null 2>&1; then
+    curl -sS "http://127.0.0.1:${CONTROL_PORT}/status"
+    echo
+  else
+    echo "Control API not reachable on 127.0.0.1:${CONTROL_PORT}"
+    exit 1
+  fi
+}
+
+debug_up() {
+  exec "$HOST_SCRIPTS_DIR/run_wbeamd_debug.sh" "$CONTROL_PORT" "$STREAM_PORT"
+}
+
+debug_watch() {
+  exec "$HOST_SCRIPTS_DIR/watch_live_debug_logs.sh"
+}
+
+logs_live() {
+  debug_watch
+}
+
+logs_daemon() {
+  service_logs
+}
+
+logs_host() {
+  local host_log
+  host_log="$(ls -1t "$ROOT_DIR"/host/rust/logs/wbeamd-debug-*.log 2>/dev/null | head -n 1 || true)"
+  if [[ -z "$host_log" ]]; then
+    echo "No host debug log found in $ROOT_DIR/host/rust/logs"
+    exit 1
+  fi
+  tail -n 200 -f "$host_log"
+}
+
+group="${1:-}"
+cmd="${2:-}"
+
+if [[ -z "$group" ]]; then
+  print_help
+  exit 1
+fi
+
+case "$group" in
+  service)
+    case "$cmd" in
+      up|start) service_up ;;
+      down|stop) service_down ;;
+      restart) service_restart ;;
+      status) service_status ;;
+      remove|rm) service_remove ;;
+      logs) service_logs ;;
+      *) print_help; exit 1 ;;
+    esac
+    ;;
+  ip)
+    case "$cmd" in
+      up) ip_up ;;
+      down) ip_down ;;
+      status) ip_status ;;
+      *) print_help; exit 1 ;;
+    esac
+    ;;
+  daemon)
+    case "$cmd" in
+      up|start) daemon_up ;;
+      down|stop) daemon_down ;;
+      status) daemon_status ;;
+      *) print_help; exit 1 ;;
+    esac
+    ;;
+  debug)
+    case "$cmd" in
+      up|start) debug_up ;;
+      watch|logs) debug_watch ;;
+      *) print_help; exit 1 ;;
+    esac
+    ;;
+  logs)
+    case "$cmd" in
+      live) logs_live ;;
+      daemon) logs_daemon ;;
+      host) logs_host ;;
+      *) print_help; exit 1 ;;
+    esac
+    ;;
+  help|-h|--help)
+    print_help
+    ;;
+  *)
+    print_help
+    exit 1
+    ;;
+esac

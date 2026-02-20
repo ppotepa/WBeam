@@ -44,15 +44,22 @@ import org.json.JSONObject;
 import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.net.Socket;
-import java.net.URL;
 import java.nio.ByteBuffer;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
+
+import okhttp3.ConnectionPool;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
 
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "WBeamMain";
@@ -65,10 +72,13 @@ public class MainActivity extends AppCompatActivity {
     private static final int PORT = 5000;
     private static final int CONTROL_PORT = 5001;
     private static final String API_BASE = "http://" + HOST + ":" + CONTROL_PORT;
-    private static final long STATUS_POLL_MS = 1200;
+    private static final long STATUS_POLL_MS = 3000;
+    private static final int HEALTH_POLL_EVERY = 3;
     private static final long AUTO_START_COOLDOWN_MS = 4000;
+    private static final long AUTO_START_FAILURE_BACKOFF_MS = 30000;
     private static final long STOP_SUPPRESS_AUTO_START_MS = 12000;
     private static final int API_RETRY_ATTEMPTS = 2;
+    private static final long API_RETRY_BASE_DELAY_MS = 300;
     private static final long CLIENT_METRICS_INTERVAL_MS = 900;
     private static final long HUD_ADB_LOG_INTERVAL_MS = 1000;
         private static final long LIVE_TEST_START_TIMEOUT_MS = 12000;
@@ -84,6 +94,20 @@ public class MainActivity extends AppCompatActivity {
     private static final int NO_PRESENT_MIN_IN_FRAMES_HARD = 30;
     private static final String TEST_VIDEO_URL =
             "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4";
+        private static final MediaType JSON_MEDIA_TYPE = MediaType.get("application/json; charset=utf-8");
+        private static final ConnectionPool HTTP_CONNECTION_POOL = new ConnectionPool(2, 30, TimeUnit.SECONDS);
+        private static final OkHttpClient API_HTTP = new OkHttpClient.Builder()
+            .connectTimeout(1500, TimeUnit.MILLISECONDS)
+            .readTimeout(1500, TimeUnit.MILLISECONDS)
+            .writeTimeout(1500, TimeUnit.MILLISECONDS)
+            .connectionPool(HTTP_CONNECTION_POOL)
+            .retryOnConnectionFailure(true)
+            .build();
+        private static final OkHttpClient SPEEDTEST_HTTP = API_HTTP.newBuilder()
+            .connectTimeout(2500, TimeUnit.MILLISECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(2500, TimeUnit.MILLISECONDS)
+            .build();
 
     private static final String[] PROFILE_OPTIONS = {"lowlatency", "balanced", "ultra"};
     private static final String[] ENCODER_OPTIONS = {"auto", "nvenc", "openh264"};
@@ -163,11 +187,15 @@ public class MainActivity extends AppCompatActivity {
     private String daemonHostName = "-";
     private String daemonService = "-";
     private String daemonState = "IDLE";
+    private String daemonLastError = "";
+    private String daemonStateSnapshot = "";
     private long daemonRunId = 0L;
     private long daemonUptimeSec = 0L;
     private boolean statusPollInFlight = false;
+    private long statusPollTick = 0;
     private long lastAutoStartAt = 0L;
     private long suppressAutoStartUntil = 0L;
+    private boolean autoStartPending = false;
     private long lastClientMetricsPostAt = 0L;
     private long lastHudAdbLogAt = 0L;
     private String lastHudAdbSnapshot = "";
@@ -625,7 +653,8 @@ public class MainActivity extends AppCompatActivity {
         updateHostHint();
 
         if (userAction) {
-            suppressAutoStartUntil = 0;
+            // Do NOT clear suppressAutoStartUntil here – applying settings is not a start intent.
+            // Auto-start suppression is only cleared by an explicit Start Live press.
             JSONObject payload = buildConfigPayload();
             postApiCommand(
                     "POST",
@@ -676,10 +705,14 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         statusPollInFlight = true;
+        long pollTick = ++statusPollTick;
+        boolean fetchHealth = (pollTick % HEALTH_POLL_EVERY) == 1;
         ioExecutor.execute(() -> {
             try {
                 JSONObject status = apiRequestWithRetry("GET", "/status", null, API_RETRY_ATTEMPTS);
-                JSONObject health = apiRequestWithRetry("GET", "/health", null, API_RETRY_ATTEMPTS);
+                JSONObject health = fetchHealth
+                        ? apiRequestWithRetry("GET", "/health", null, API_RETRY_ATTEMPTS)
+                        : null;
                 JSONObject metricsPayload = apiRequestWithRetry("GET", "/metrics", null, API_RETRY_ATTEMPTS);
                 JSONObject metrics = metricsPayload.optJSONObject("metrics");
                 runOnUiThread(() -> onDaemonStatus(status, health, metrics));
@@ -696,13 +729,25 @@ public class MainActivity extends AppCompatActivity {
         daemonReachable = true;
         daemonHostName = status.optString("host_name", daemonHostName);
         daemonState = status.optString("state", "IDLE").toUpperCase(Locale.US);
+        String newLastError = status.optString("last_error", "");
+        boolean daemonErrorChanged = !newLastError.equals(daemonLastError);
+        daemonLastError = newLastError;
         daemonRunId = status.optLong("run_id", daemonRunId);
         daemonUptimeSec = status.optLong("uptime", daemonUptimeSec);
         daemonService = health != null ? health.optString("service", daemonService) : daemonService;
+        String newSnapshot = daemonState + "|" + daemonRunId + "|" + daemonLastError;
+        if (!newSnapshot.equals(daemonStateSnapshot)) {
+            daemonStateSnapshot = newSnapshot;
+            Log.i(TAG, "daemon status state=" + daemonState + " run_id=" + daemonRunId
+                    + (daemonLastError.isEmpty() ? "" : " last_error=" + daemonLastError));
+        }
 
         if (!wasReachable) {
             Toast.makeText(this, "Connected to " + daemonHostName, Toast.LENGTH_SHORT).show();
             appendLiveLogInfo("connected to host " + daemonHostName);
+        }
+        if (daemonErrorChanged && !daemonLastError.isEmpty()) {
+            appendLiveLogError("host last_error: " + daemonLastError);
         }
 
         updateActionButtonsEnabled();
@@ -717,21 +762,35 @@ public class MainActivity extends AppCompatActivity {
             long drops = metrics.optLong("drops", 0);
             long reconnects = metrics.optLong("reconnects", 0);
             long bps = metrics.optLong("bitrate_actual_bps", 0);
+            String errCompact = daemonLastError;
+            if (errCompact.length() > 80) {
+                errCompact = errCompact.substring(0, 80) + "...";
+            }
             updateStatsLine(
                     "host in/out: " + frameIn + "/" + frameOut
                             + " | drops: " + drops
                             + " | reconnects: " + reconnects
                             + " | bitrate: " + formatBps(bps)
+                            + (errCompact.isEmpty() ? "" : " | last_error: " + errCompact)
             );
         }
         updatePerfHud(metrics);
 
         if ("STREAMING".equals(daemonState)) {
+            autoStartPending = false;
             ensureDecoderRunning();
             return;
         }
 
         long now = SystemClock.elapsedRealtime();
+        if (autoStartPending && "IDLE".equals(daemonState)) {
+            autoStartPending = false;
+            // Permanently suppress auto-start after failed capture.
+            // Only a manual "Start Live" press (userAction=true) will clear this.
+            suppressAutoStartUntil = Long.MAX_VALUE / 2;
+            appendLiveLogWarn("auto-start paused after failed capture; tap Start Live to retry");
+            return;
+        }
         if (now < suppressAutoStartUntil) {
             return;
         }
@@ -768,6 +827,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void requestHostStart(boolean userAction, boolean ensureViewer) {
         suppressAutoStartUntil = 0;
+        autoStartPending = !userAction;
         lastAutoStartAt = SystemClock.elapsedRealtime();
         updateStatus(STATE_CONNECTING, "requesting host start", 0);
 
@@ -786,13 +846,20 @@ public class MainActivity extends AppCompatActivity {
                     }
                 });
             } catch (Exception e) {
-                runOnUiThread(() -> handleApiFailure("start failed", userAction, e));
+                runOnUiThread(() -> {
+                    autoStartPending = false;
+                    if (!userAction) {
+                        suppressAutoStartUntil = SystemClock.elapsedRealtime() + AUTO_START_FAILURE_BACKOFF_MS;
+                    }
+                    handleApiFailure("start failed", userAction, e);
+                });
             }
         });
     }
 
     private void requestHostStop(boolean userAction) {
         suppressAutoStartUntil = SystemClock.elapsedRealtime() + STOP_SUPPRESS_AUTO_START_MS;
+        autoStartPending = false;
         ioExecutor.execute(() -> {
             try {
                 JSONObject status = apiRequestWithRetry("POST", "/stop", new JSONObject(), API_RETRY_ATTEMPTS);
@@ -872,62 +939,50 @@ public class MainActivity extends AppCompatActivity {
                 return apiRequest(method, path, payload);
             } catch (IOException io) {
                 lastIo = io;
+                if (isLikelyStaleHttpConnection(io)) {
+                    API_HTTP.connectionPool().evictAll();
+                }
                 if (i == attempts - 1) {
                     break;
                 }
-                SystemClock.sleep(250L * (i + 1));
+                long baseDelay = Math.min(5000L, API_RETRY_BASE_DELAY_MS * (1L << i));
+                long jitter = ThreadLocalRandom.current().nextLong(Math.max(1L, baseDelay / 4L + 1L));
+                SystemClock.sleep(baseDelay + jitter);
             }
         }
         throw lastIo != null ? lastIo : new IOException("request failed");
     }
 
+    private static boolean isLikelyStaleHttpConnection(IOException io) {
+        String message = io.getMessage();
+        if (message == null) {
+            return io instanceof java.io.EOFException;
+        }
+        String m = message.toLowerCase(Locale.US);
+        return io instanceof java.io.EOFException
+                || m.contains("unexpected end of stream")
+                || m.contains("\\n not found")
+                || m.contains("end of stream");
+    }
+
     private JSONObject apiRequest(String method, String path, JSONObject payload) throws IOException, JSONException {
-        HttpURLConnection conn = null;
-        try {
-            URL url = new URL(API_BASE + path);
-            conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod(method);
-            conn.setConnectTimeout(1500);
-            conn.setReadTimeout(1500);
-            conn.setUseCaches(false);
-            conn.setRequestProperty("Accept", "application/json");
-            conn.setRequestProperty("Connection", "close");
+        RequestBody body = payload != null
+                ? RequestBody.create(payload.toString(), JSON_MEDIA_TYPE)
+                : null;
+        Request request = new Request.Builder()
+                .url(API_BASE + path)
+                .header("Accept", "application/json")
+                .method(method, body)
+                .build();
 
-            if (payload != null) {
-                byte[] body = payload.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
-                conn.setDoOutput(true);
-                conn.setRequestProperty("Content-Type", "application/json");
-                conn.setFixedLengthStreamingMode(body.length);
-                try (OutputStream out = conn.getOutputStream()) {
-                    out.write(body);
-                }
-            }
-
-            int code = conn.getResponseCode();
-            InputStream stream = code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream();
-            if (stream == null) {
-                throw new IOException("empty response");
-            }
-
-            byte[] buf = new byte[4096];
-            StringBuilder sb = new StringBuilder();
-            try (BufferedInputStream in = new BufferedInputStream(stream)) {
-                int read;
-                while ((read = in.read(buf)) > 0) {
-                    sb.append(new String(buf, 0, read, java.nio.charset.StandardCharsets.UTF_8));
-                }
-            }
-
+        try (Response response = API_HTTP.newCall(request).execute()) {
+            int code = response.code();
+            ResponseBody responseBody = response.body();
+            String text = responseBody != null ? responseBody.string().trim() : "";
             if (code < 200 || code >= 300) {
-                throw new IOException("HTTP " + code + ": " + sb);
+                throw new IOException("HTTP " + code + ": " + text);
             }
-
-            String text = sb.toString().trim();
             return text.isEmpty() ? new JSONObject() : new JSONObject(text);
-        } finally {
-            if (conn != null) {
-                conn.disconnect();
-            }
         }
     }
 
@@ -1212,36 +1267,35 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private BandwidthResult runBandwidthTest(int sizeMb) throws IOException {
-        HttpURLConnection conn = null;
         long totalBytes = 0;
         long startNs = 0;
-        try {
-            URL url = new URL(API_BASE + "/v1/speedtest?mb=" + sizeMb);
-            conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("GET");
-            conn.setConnectTimeout(2500);
-            conn.setReadTimeout(60000);
-            conn.setUseCaches(false);
-            conn.setRequestProperty("Accept", "application/octet-stream");
-            conn.setRequestProperty("Connection", "close");
+        Request request = new Request.Builder()
+                .url(API_BASE + "/v1/speedtest?mb=" + sizeMb)
+                .header("Accept", "application/octet-stream")
+                .get()
+                .build();
 
-            int code = conn.getResponseCode();
+        try (Response response = SPEEDTEST_HTTP.newCall(request).execute()) {
+            int code = response.code();
             if (code < 200 || code >= 300) {
-                InputStream err = conn.getErrorStream();
+                ResponseBody errBody = response.body();
                 String msg = "HTTP " + code;
-                if (err != null) {
-                    byte[] b = new byte[256];
-                    int n = err.read(b);
-                    if (n > 0) {
-                        msg += ": " + new String(b, 0, n, java.nio.charset.StandardCharsets.UTF_8);
+                if (errBody != null) {
+                    String errText = errBody.string();
+                    if (errText != null && !errText.isEmpty()) {
+                        msg += ": " + errText;
                     }
-                    err.close();
                 }
                 throw new IOException(msg);
             }
 
+            ResponseBody body = response.body();
+            if (body == null) {
+                throw new IOException("empty response");
+            }
+
             byte[] buf = new byte[64 * 1024];
-            try (BufferedInputStream in = new BufferedInputStream(conn.getInputStream(), 256 * 1024)) {
+            try (BufferedInputStream in = new BufferedInputStream(body.byteStream(), 256 * 1024)) {
                 startNs = SystemClock.elapsedRealtimeNanos();
                 int read;
                 while ((read = in.read(buf)) >= 0) {
@@ -1253,10 +1307,6 @@ public class MainActivity extends AppCompatActivity {
             }
             long durationNs = Math.max(1L, SystemClock.elapsedRealtimeNanos() - startNs);
             return BandwidthResult.from(totalBytes, durationNs, sizeMb);
-        } finally {
-            if (conn != null) {
-                conn.disconnect();
-            }
         }
     }
 
@@ -1719,7 +1769,7 @@ public class MainActivity extends AppCompatActivity {
 
         String compact = String.format(
                 Locale.US,
-                "state=%s run_id=%d up=%ds stream_up=%ds host_in_out=%d/%d fps_target=%.0f fps_present=%.1f frame_p95=%.2f dec_p95=%.2f ren_p95=%.2f e2e_p95=%.2f q=%d/%d/%d qmax=%d/%d/%d adapt=L%d:%s drops=%d bp=%d/%d warmup=%b hp=%s reason=%s",
+                "state=%s run_id=%d up=%ds stream_up=%ds host_in_out=%d/%d fps_target=%.0f fps_present=%.1f frame_p95=%.2f dec_p95=%.2f ren_p95=%.2f e2e_p95=%.2f q=%d/%d/%d qmax=%d/%d/%d adapt=L%d:%s drops=%d bp=%d/%d warmup=%b hp=%s reason=%s host_err=%s",
                 daemonState,
                 daemonRunId,
                 daemonUptimeSec,
@@ -1745,7 +1795,12 @@ public class MainActivity extends AppCompatActivity {
                 bpRecover,
                 warmingUp,
                 hpReason,
-                reason.isEmpty() ? "-" : reason
+                reason.isEmpty() ? "-" : reason,
+                daemonLastError.isEmpty()
+                        ? "-"
+                        : (daemonLastError.length() > 44
+                        ? daemonLastError.substring(0, 44) + "..."
+                        : daemonLastError)
         );
         emitHudDebugAdb(compact);
     }
@@ -2123,11 +2178,19 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private static final class H264TcpPlayer {
-        // C3 framing constants (must match docs/telemetry_schema.md and host Python)
-        private static final int  FRAME_MAGIC        = 0x57424D30; // "WBM0"
+        // WBTP/1 framing constants (must match wbtp-core/src/lib.rs and host Python)
+        private static final int  FRAME_MAGIC        = 0x57425450; // "WBTP"
         private static final byte FRAME_VERSION      = 0x01;
-        private static final int  FRAME_HEADER_SIZE  = 24;
-        // Header layout (big-endian): magic(4) ver(1) flags(1) reserved(2) seq(4) pts_us(8) len(4)
+        private static final int  FRAME_HEADER_SIZE  = 22;
+        private static final int  SOCKET_RECV_BUFFER_SIZE = 512 * 1024;
+        private static final int  FRAME_PAYLOAD_INITIAL_CAP = 8 * 1024 * 1024;
+        private static final int  FRAME_PAYLOAD_HARD_CAP = 32 * 1024 * 1024;
+        private static final int  FRAME_RESYNC_SCAN_LIMIT = 64 * 1024;
+        private static final int  HELLO_MAGIC = 0x57425331; // "WBS1"
+        private static final int  HELLO_HEADER_SIZE = 16;
+        private static final byte HELLO_VERSION = 0x01;
+        // Header layout (big-endian): magic(4) ver(1) flags(1) seq(4) capture_ts_us(8) payload_len(4)
+        // flags: 0x01=HAS_CHECKSUM  0x02=KEYFRAME  0x04=END_OF_STREAM
 
         private final Surface surface;
         private final StatusListener statusListener;
@@ -2192,7 +2255,7 @@ public class MainActivity extends AppCompatActivity {
                     socket = new Socket();
                     socket.connect(new InetSocketAddress(HOST, PORT), 2000);
                     socket.setTcpNoDelay(true);
-                    socket.setReceiveBufferSize(64 * 1024); // P1.1: 64KB bounded USB recv buf
+                    socket.setReceiveBufferSize(SOCKET_RECV_BUFFER_SIZE);
                     socket.setSoTimeout(5_000);             // P1.1: cap blocking read to 5s
                     sessionConnectId++;  // P2.2: new session
                     sampleSeq = 0;      // P2.2: reset sample counter
@@ -2209,9 +2272,12 @@ public class MainActivity extends AppCompatActivity {
                     if (running) {
                         reconnects++;
                         reconnectDelayMs = Math.min(5000, reconnectDelayMs + 400);
+                        String reconnectReason = e.getClass().getSimpleName() + ": " + String.valueOf(e.getMessage());
                         if (isExpectedStreamClose(e)) {
-                            Log.w(TAG, "stream worker reconnect: " + e.getClass().getSimpleName() + ": " + e.getMessage());
-                            statusListener.onStatus(STATE_CONNECTING, "stream reconnecting", 0);
+                            Log.w(TAG, "stream worker reconnect #" + reconnects
+                                    + " delay_ms=" + reconnectDelayMs
+                                    + " reason=" + reconnectReason);
+                            statusListener.onStatus(STATE_CONNECTING, "stream reconnecting: " + reconnectReason, 0);
                         } else {
                             Log.e(TAG, "stream worker failed", e);
                             statusListener.onStatus(STATE_ERROR, "stream error: " + e.getClass().getSimpleName(), 0);
@@ -2237,7 +2303,9 @@ public class MainActivity extends AppCompatActivity {
                 }
 
                 if (running) {
-                    SystemClock.sleep(reconnectDelayMs);
+                    long jitterMs = ThreadLocalRandom.current()
+                            .nextLong(Math.max(1L, reconnectDelayMs / 4L + 1L));
+                    SystemClock.sleep(reconnectDelayMs + jitterMs);
                 }
             }
         }
@@ -2529,20 +2597,25 @@ public class MainActivity extends AppCompatActivity {
 
 
         /**
-         * C3: Framed decode loop – host sends 24-byte header + payload per access unit.
-         * Header: magic(4) ver(1) flags(1) rsv(2) seq(4) pts_us(8) len(4)
-         * This eliminates AnnexB start-code scanning entirely and gives exact PTS per frame.
+         * WBTP/1 framed decode loop – host sends 22-byte WBTP/1 header + payload per access unit.
+         * Header: magic(4) ver(1) flags(1) seq(4) capture_ts_us(8) payload_len(4)
+         * Eliminates AnnexB start-code scanning entirely and gives exact PTS per frame.
          */
         private void framedDecodeLoop(InputStream input, MediaCodec codec) throws IOException {
             // pre-allocated buffers – no alloc in hot path
+            byte[] helloBuf   = new byte[HELLO_HEADER_SIZE];
             byte[] hdrBuf     = new byte[FRAME_HEADER_SIZE];
-            byte[] payloadBuf = new byte[2 * 1024 * 1024]; // 2 MB, ~166 frames @720p/12Mbps
+            byte[] payloadBuf = new byte[FRAME_PAYLOAD_INITIAL_CAP];
             long   frames     = 0;
             long   bytes      = 0;
             long   inFrames   = 0;
             long   outFrames  = 0;
             long   droppedSec = 0;
             long   tooLateSec = 0;
+            int    maxPayloadSeen = 0;
+            long   payloadGrowEvents = 0;
+            long   resyncSuccessSec = 0;
+            long   resyncFailSec = 0;
             long   decodeNsTotal = 0;
             long[] decodeNsBuf   = new long[128]; // P1.3: rolling decode-time buffer
             int    decodeNsBufN  = 0;
@@ -2557,6 +2630,19 @@ public class MainActivity extends AppCompatActivity {
             DrainStats drainStats = new DrainStats();
             int pendingDecodeQueue = 0; // E: bounded decode queue
 
+                readFully(input, helloBuf, HELLO_HEADER_SIZE);
+                int helloMagic = ((helloBuf[0] & 0xFF) << 24) | ((helloBuf[1] & 0xFF) << 16)
+                    | ((helloBuf[2] & 0xFF) << 8) | (helloBuf[3] & 0xFF);
+                int helloLen = ((helloBuf[6] & 0xFF) << 8) | (helloBuf[7] & 0xFF);
+                if (helloMagic != HELLO_MAGIC || helloBuf[4] != HELLO_VERSION || helloLen != HELLO_HEADER_SIZE) {
+                throw new IOException("WBTP: bad stream hello magic/version/len");
+                }
+                long streamSessionId = ((helloBuf[8] & 0xFFL) << 56) | ((helloBuf[9] & 0xFFL) << 48)
+                    | ((helloBuf[10] & 0xFFL) << 40) | ((helloBuf[11] & 0xFFL) << 32)
+                    | ((helloBuf[12] & 0xFFL) << 24) | ((helloBuf[13] & 0xFFL) << 16)
+                    | ((helloBuf[14] & 0xFFL) << 8) | (helloBuf[15] & 0xFFL);
+                Log.i(TAG, String.format(Locale.US, "WBTP hello session=0x%016x", streamSessionId));
+
             while (running) {
                 // ── Read 24-byte header ──────────────────────────────────────
                 int hdrRead = 0;
@@ -2566,24 +2652,38 @@ public class MainActivity extends AppCompatActivity {
                     hdrRead += n;
                 }
                 // Parse magic (big-endian)
-                int magic = ((hdrBuf[0] & 0xFF) << 24) | ((hdrBuf[1] & 0xFF) << 16)
-                          | ((hdrBuf[2] & 0xFF) << 8)  |  (hdrBuf[3] & 0xFF);
+                int magic = parseFrameMagic(hdrBuf);
                 if (magic != FRAME_MAGIC) {
-                    throw new IOException("C3: bad frame magic 0x" + Integer.toHexString(magic)
-                            + " – non-framed stream detected");
+                    boolean resynced = tryResyncHeader(input, hdrBuf, FRAME_RESYNC_SCAN_LIMIT);
+                    if (!resynced) {
+                        resyncFailSec++;
+                        throw new IOException("WBTP: bad frame magic 0x" + Integer.toHexString(magic)
+                                + " – resync failed");
+                    }
+                    resyncSuccessSec++;
                 }
-                // byte[4] = version, byte[5] = flags (bit0=keyframe)
-                // seq: bytes 8..11, pts_us: bytes 12..19, len: bytes 20..23
-                long ptsUs = ((hdrBuf[12] & 0xFFL) << 56) | ((hdrBuf[13] & 0xFFL) << 48)
-                           | ((hdrBuf[14] & 0xFFL) << 40) | ((hdrBuf[15] & 0xFFL) << 32)
-                           | ((hdrBuf[16] & 0xFFL) << 24) | ((hdrBuf[17] & 0xFFL) << 16)
-                           | ((hdrBuf[18] & 0xFFL) << 8)  |  (hdrBuf[19] & 0xFFL);
-                int payloadLen = ((hdrBuf[20] & 0xFF) << 24) | ((hdrBuf[21] & 0xFF) << 16)
-                               | ((hdrBuf[22] & 0xFF) << 8)  |  (hdrBuf[23] & 0xFF);
+// byte[4]=version  byte[5]=flags (0x02=keyframe  0x04=eos)
+                // seq: bytes 6..9  capture_ts_us: bytes 10..17  payload_len: bytes 18..21
+                long ptsUs = ((hdrBuf[10] & 0xFFL) << 56) | ((hdrBuf[11] & 0xFFL) << 48)
+                                   | ((hdrBuf[12] & 0xFFL) << 40) | ((hdrBuf[13] & 0xFFL) << 32)
+                                   | ((hdrBuf[14] & 0xFFL) << 24) | ((hdrBuf[15] & 0xFFL) << 16)
+                                   | ((hdrBuf[16] & 0xFFL) << 8)  |  (hdrBuf[17] & 0xFFL);
+                int payloadLen = ((hdrBuf[18] & 0xFF) << 24) | ((hdrBuf[19] & 0xFF) << 16)
+                                       | ((hdrBuf[20] & 0xFF) << 8)  |  (hdrBuf[21] & 0xFF);
 
-                if (payloadLen <= 0 || payloadLen > payloadBuf.length) {
-                    throw new IOException("C3: bad payload length " + payloadLen);
+                if (payloadLen <= 0 || payloadLen > FRAME_PAYLOAD_HARD_CAP) {
+                    throw new IOException("WBTP: bad payload length " + payloadLen);
                 }
+                if (payloadLen > payloadBuf.length) {
+                    int newCap = Math.min(FRAME_PAYLOAD_HARD_CAP, nextPowerOfTwo(payloadLen));
+                    if (newCap < payloadLen) {
+                        throw new IOException("WBTP: payload exceeds dynamic cap " + payloadLen);
+                    }
+                    Log.w(TAG, "WBTP payload buffer grow " + payloadBuf.length + " -> " + newCap);
+                    payloadBuf = new byte[newCap];
+                    payloadGrowEvents++;
+                }
+                maxPayloadSeen = Math.max(maxPayloadSeen, payloadLen);
 
                 // ── Read payload ─────────────────────────────────────────────
                 int payRead = 0;
@@ -2692,6 +2792,7 @@ public class MainActivity extends AppCompatActivity {
                                     + " | drops: " + droppedTotal
                                     + " | late: " + tooLateTotal
                                     + " | q(d/r): " + pendingDecodeQueue + "/" + (drainStats.renderedCount > 0 ? 1 : 0)
+                                    + " | max_payload: " + (maxPayloadSeen / 1024) + "KB"
                                     + " | reconnects: " + reconnects
                     );
                     double decodeMsP50 = inFrames > 0 ? (decodeNsTotal / 1_000_000.0) / inFrames : 0.0;
@@ -2713,23 +2814,71 @@ public class MainActivity extends AppCompatActivity {
                     Log.d(TAG, String.format(Locale.US,
                             "[decode/framed] in=%d out=%d drop=%d late=%d"
                                     + " qD=%d/%d qR=%d dec_p95=%.1fms ren_p95=%.1fms"
-                                    + " noPresent=%d reconn=%d",
+                                + " maxPayload=%d grow=%d resync_ok=%d resync_fail=%d noPresent=%d reconn=%d",
                             inFrames, outFrames, droppedSec, tooLateSec,
                             Math.min(DECODE_QUEUE_MAX_FRAMES, pendingDecodeQueue), DECODE_QUEUE_MAX_FRAMES,
                             drainStats.renderedCount > 0 ? 1 : 0,
                             decodeMsP95, renderMsP95,
+                            maxPayloadSeen, payloadGrowEvents, resyncSuccessSec, resyncFailSec,
                             totalInSincePresent, reconnects));
                     bytes         = 0;
                     inFrames      = 0;
                     outFrames     = 0;
                     droppedSec    = 0;
                     tooLateSec    = 0;
+                    maxPayloadSeen = 0;
+                    resyncSuccessSec = 0;
+                    resyncFailSec = 0;
                     decodeNsTotal = 0;
                     decodeNsBufN  = 0;  // P1.3
                     renderNsMax   = 0;
                     lastLog = nowMs;
                 }
             }
+        }
+
+        private static int parseFrameMagic(byte[] hdrBuf) {
+            return ((hdrBuf[0] & 0xFF) << 24)
+                    | ((hdrBuf[1] & 0xFF) << 16)
+                    | ((hdrBuf[2] & 0xFF) << 8)
+                    | (hdrBuf[3] & 0xFF);
+        }
+
+        private static void readFully(InputStream input, byte[] buf, int len) throws IOException {
+            int read = 0;
+            while (read < len) {
+                int n = input.read(buf, read, len - read);
+                if (n < 0) {
+                    throw new IOException("stream closed");
+                }
+                read += n;
+            }
+        }
+
+        private static boolean tryResyncHeader(InputStream input, byte[] hdrBuf, int scanLimit) throws IOException {
+            int scanned = 0;
+            while (scanned < scanLimit) {
+                System.arraycopy(hdrBuf, 1, hdrBuf, 0, FRAME_HEADER_SIZE - 1);
+                int n = input.read(hdrBuf, FRAME_HEADER_SIZE - 1, 1);
+                if (n < 0) {
+                    return false;
+                }
+                scanned++;
+                if (parseFrameMagic(hdrBuf) == FRAME_MAGIC) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static int nextPowerOfTwo(int value) {
+            if (value <= 1) {
+                return 1;
+            }
+            if (value >= (1 << 30)) {
+                return 1 << 30;
+            }
+            return Integer.highestOneBit(value - 1) << 1;
         }
 
         // P1.3: compute [p50, p95] in milliseconds from a nanosecond circular buffer

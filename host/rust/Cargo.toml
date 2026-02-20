@@ -3,6 +3,7 @@ members = [
   "crates/wbeamd-api",
   "crates/wbeamd-core",
   "crates/wbeamd-server",
+  "crates/wbeamd-streamer",
 ]
 resolver = "2"
 
