@@ -18,6 +18,9 @@ MENU_ENTRIES=(
   "  Build APK:android:build"
   "  Install APK:android:install"
   "  Launch App:android:launch"
+  "  Build APK (release):android:build-release"
+  "  Install APK (release):android:install-release"
+  "  Deploy APK (release):android:deploy-release"
   "──── Host ───────────────────────────────────────────"
   "  Run Host  (release, foreground):host:run"
   "  Run Host  (debug + coloured logs):host:debug"
@@ -52,15 +55,24 @@ if [[ ! -t 1 ]]; then
   exit 1
 fi
 
-saved_stty=$(stty -g </dev/tty)
+saved_stty="$(stty -g </dev/tty 2>/dev/null || true)"
+tty_restored=0
 
 cleanup() {
+  if [[ "$tty_restored" -eq 1 ]]; then
+    return
+  fi
+  tty_restored=1
   # Restore terminal unconditionally
   tput rmcup  >/dev/tty 2>/dev/null || true
   tput cnorm  >/dev/tty 2>/dev/null || true
-  stty "$saved_stty" </dev/tty 2>/dev/null || true
+  if [[ -n "$saved_stty" ]]; then
+    stty "$saved_stty" </dev/tty 2>/dev/null || stty sane </dev/tty 2>/dev/null || true
+  else
+    stty sane </dev/tty 2>/dev/null || true
+  fi
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM HUP
 
 tput smcup  >/dev/tty
 tput civis  >/dev/tty
@@ -147,7 +159,7 @@ while true; do
 done
 
 # cleanup runs via trap
-trap - EXIT
+trap - EXIT INT TERM HUP
 cleanup
 
 # ── dispatch ──────────────────────────────────────────────────────────────────
@@ -159,7 +171,8 @@ case "$selected_action" in
     grp="${selected_action%%:*}"
     cmd_="${selected_action##*:}"
     echo ""
-    exec "$WBEAM" "$grp" "$cmd_"
+    "$WBEAM" "$grp" "$cmd_"
+    exit $?
     ;;
   *)
     exit 0

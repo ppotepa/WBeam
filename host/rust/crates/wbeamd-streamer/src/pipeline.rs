@@ -54,6 +54,7 @@ pub fn make_pipeline(
     let encoder_name = pick_encoder(&cfg.encoder)?;
     let mode_png = is_png(&cfg.encoder);
     let hevc = is_hevc(&cfg.encoder);
+    let low_latency_fresh = mode_png || hevc;
     let enc_element = match encoder_name {
         "nvenc265" => "nvh265enc",
         "x265" => "x265enc",
@@ -78,9 +79,9 @@ pub fn make_pipeline(
 
     // configure drop queues
     for q in [&q1, &qmain] {
-        let _ = q.set_property("max-size-buffers", 2u32);
+        let _ = q.set_property("max-size-buffers", if low_latency_fresh { 1u32 } else { 2u32 });
         let _ = q.set_property("max-size-bytes", 0u32);
-        let _ = q.set_property("max-size-time", 40_000_000u64);
+        let _ = q.set_property("max-size-time", if low_latency_fresh { 20_000_000u64 } else { 40_000_000u64 });
         let _ = q.set_property_from_str("leaky", "downstream");
     }
 
@@ -133,11 +134,13 @@ pub fn make_pipeline(
         .dynamic_cast::<gst_app::AppSink>()
         .map_err(|_| anyhow::anyhow!("sink is not an appsink"))?;
     appsink.set_caps(Some(&caps_sink));
-    appsink.set_sync(true);
+    // For raw PNG / H265 low-latency mode we prefer freshest-frame semantics
+    // over clock-sync accuracy.
+    appsink.set_sync(!low_latency_fresh);
     // 2-buffer appsink depth: 1 being encoded + 1 ready to pull.
     // Deeper queues add latency without benefit — the sender thread pulls
     // immediately and drops if the client is behind.
-    appsink.set_max_buffers(2);
+    appsink.set_max_buffers(if low_latency_fresh { 1 } else { 2 });
     appsink.set_drop(true);
 
     // ── Link main path ───────────────────────────────────────────────────────

@@ -229,25 +229,6 @@ pub fn spawn_sender(
                         }
                         sent_frame = true;
                     }
-                } else if !last_keyframe.is_empty() {
-                    pts_us = last_key_pts;
-                    let header = build_header(seq, pts_us, last_keyframe.len(), true);
-                    let sent = match send_all_vectored(&mut conn, &header, &last_keyframe) {
-                        Ok(n) => n,
-                        Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                            send_timeouts += 1;
-                            dropped += 1;
-                            continue;
-                        }
-                        Err(e) => {
-                            println!("[wbeam-framed] client disconnected: {e}");
-                            break;
-                        }
-                    };
-                    if sent < header.len() + last_keyframe.len() {
-                        partial_writes += 1;
-                    }
-                    sent_frame = true;
                 } else {
                     dropped += 1;
                     let elapsed = t0.elapsed().as_secs_f64();

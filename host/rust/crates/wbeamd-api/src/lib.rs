@@ -408,6 +408,29 @@ pub fn validate_config(patch: ConfigPatch, current: &ActiveConfig) -> Result<Act
     cfg.bitrate_kbps = cfg.bitrate_kbps.clamp(4_000, 300_000);
     cfg.debug_fps = cfg.debug_fps.clamp(0, 10);
 
+    // RAW PNG is CPU/network heavy. Clamp to a latency-friendly envelope.
+    if cfg.encoder == "rawpng" {
+        cfg.fps = cfg.fps.clamp(5, 20);
+
+        let mut rw = w;
+        let mut rh = h;
+        let max_pixels: u32 = 1280 * 720;
+        let pixels = rw.saturating_mul(rh);
+        if pixels > max_pixels {
+            let scale = (max_pixels as f64 / pixels as f64).sqrt();
+            rw = ((rw as f64 * scale).floor() as u32).max(640);
+            rh = ((rh as f64 * scale).floor() as u32).max(360);
+            if rw % 2 == 1 {
+                rw -= 1;
+            }
+            if rh % 2 == 1 {
+                rh -= 1;
+            }
+        }
+        cfg.size = format!("{rw}x{rh}");
+        cfg.intra_only = false;
+    }
+
     Ok(cfg)
 }
 
