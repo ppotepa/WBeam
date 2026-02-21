@@ -431,6 +431,8 @@ public final class H264TcpPlayer {
         long   lastPresentMs       = SystemClock.elapsedRealtime();
         long   totalInSincePresent = 0L;
         long   lastDecodeProgressMs = SystemClock.elapsedRealtime();
+        long   expectedSeq = -1L;
+        long   lastQueuedPtsUs = -1L;
         boolean flushIssued        = false;
         // After codec.flush() the decoder has no reference frames — P-frames
         // queued before the next IDR will produce corrupted blocks.  This flag
@@ -493,7 +495,9 @@ public final class H264TcpPlayer {
             }
             // byte[4]=version  byte[5]=flags (0x02=keyframe 0x04=eos)
             // seq: bytes 6..9  capture_ts_us: bytes 10..17  payload_len: bytes 18..21
-            final boolean frameIsKey = (hdrBuf[5] & FRAME_FLAG_KEYFRAME) != 0;
+                boolean frameIsKey = (hdrBuf[5] & FRAME_FLAG_KEYFRAME) != 0;
+                long seqU32 = ((hdrBuf[6] & 0xFFL) << 24) | ((hdrBuf[7] & 0xFFL) << 16)
+                    | ((hdrBuf[8] & 0xFFL) << 8) | (hdrBuf[9] & 0xFFL);
             long ptsUs = ((hdrBuf[10] & 0xFFL) << 56) | ((hdrBuf[11] & 0xFFL) << 48)
                     | ((hdrBuf[12] & 0xFFL) << 40) | ((hdrBuf[13] & 0xFFL) << 32)
                     | ((hdrBuf[14] & 0xFFL) << 24) | ((hdrBuf[15] & 0xFFL) << 16)
@@ -518,6 +522,73 @@ public final class H264TcpPlayer {
             // ── Read payload ──────────────────────────────────────────────────
             readFully(input, payloadBuf, payloadLen);
             bytes += FRAME_HEADER_SIZE + payloadLen;
+
+            // Freshest-frame mode: if network/input already has queued frames,
+            // skip stale ones and keep only the newest payload.
+            int skippedBacklog = 0;
+            while (input.available() > FRAME_HEADER_SIZE + 4096) {
+                readFully(input, hdrBuf, FRAME_HEADER_SIZE);
+                int magic2 = parseFrameMagic(hdrBuf);
+                if (magic2 != FRAME_MAGIC) {
+                    boolean resynced2 = tryResyncHeader(input, hdrBuf, FRAME_RESYNC_SCAN_LIMIT);
+                    if (!resynced2) {
+                        resyncFailSec++;
+                        throw new IOException("WBTP: bad frame magic 0x" + Integer.toHexString(magic2)
+                                + " – resync failed");
+                    }
+                    resyncSuccessSec++;
+                }
+
+                frameIsKey = (hdrBuf[5] & FRAME_FLAG_KEYFRAME) != 0;
+                seqU32 = ((hdrBuf[6] & 0xFFL) << 24) | ((hdrBuf[7] & 0xFFL) << 16)
+                        | ((hdrBuf[8] & 0xFFL) << 8) | (hdrBuf[9] & 0xFFL);
+                ptsUs = ((hdrBuf[10] & 0xFFL) << 56) | ((hdrBuf[11] & 0xFFL) << 48)
+                        | ((hdrBuf[12] & 0xFFL) << 40) | ((hdrBuf[13] & 0xFFL) << 32)
+                        | ((hdrBuf[14] & 0xFFL) << 24) | ((hdrBuf[15] & 0xFFL) << 16)
+                        | ((hdrBuf[16] & 0xFFL) << 8) | (hdrBuf[17] & 0xFFL);
+
+                int nextLen = ((hdrBuf[18] & 0xFF) << 24) | ((hdrBuf[19] & 0xFF) << 16)
+                        | ((hdrBuf[20] & 0xFF) << 8) | (hdrBuf[21] & 0xFF);
+                if (nextLen <= 0 || nextLen > FRAME_PAYLOAD_HARD_CAP) {
+                    throw new IOException("WBTP: bad payload length " + nextLen);
+                }
+                if (nextLen > payloadBuf.length) {
+                    int newCap = Math.min(FRAME_PAYLOAD_HARD_CAP, nextPowerOfTwo(nextLen));
+                    if (newCap < nextLen) {
+                        throw new IOException("WBTP: payload exceeds dynamic cap " + nextLen);
+                    }
+                    Log.w(TAG, "WBTP payload buffer grow " + payloadBuf.length + " -> " + newCap);
+                    payloadBuf = new byte[newCap];
+                    payloadGrowEvents++;
+                }
+                payloadLen = nextLen;
+                maxPayloadSeen = Math.max(maxPayloadSeen, payloadLen);
+                readFully(input, payloadBuf, payloadLen);
+                bytes += FRAME_HEADER_SIZE + payloadLen;
+                skippedBacklog++;
+            }
+            if (skippedBacklog > 0) {
+                droppedSec += skippedBacklog;
+            }
+
+            // Sequence gate: never display stale/out-of-order frames.
+            if (expectedSeq < 0) {
+                expectedSeq = seqU32;
+            }
+            if (seqU32 < expectedSeq) {
+                droppedSec++;
+                continue;
+            }
+            if (seqU32 > expectedSeq + 120) {
+                expectedSeq = seqU32;
+            }
+
+            // Timestamp gate: do not queue older capture timestamps.
+            if (lastQueuedPtsUs > 0 && ptsUs + 1_000 < lastQueuedPtsUs) {
+                droppedSec++;
+                expectedSeq = seqU32 + 1;
+                continue;
+            }
 
             drainLatestFrame(codec, bufferInfo, drainStats,
                     pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES ? 16_000 : 5_000);
@@ -553,11 +624,15 @@ public final class H264TcpPlayer {
                     totalInSincePresent++;
                     pendingDecodeQueue = Math.min(DECODE_QUEUE_MAX_FRAMES, pendingDecodeQueue + 1);
                     lastDecodeProgressMs = nowAfterDrain;
+                    lastQueuedPtsUs = ptsUs;
+                    expectedSeq = seqU32 + 1;
                 } else {
                     droppedSec++;
+                    expectedSeq = seqU32 + 1;
                 }
             } else {
                 droppedSec++;
+                expectedSeq = seqU32 + 1;
             }
 
             // ── C5 recovery ladder ────────────────────────────────────────────
@@ -591,6 +666,12 @@ public final class H264TcpPlayer {
                 throw new IOException("C5: hard watchdog: "
                         + totalInSincePresent + " frames decoded, 0 presented for "
                         + noPresentMs + "ms – reconnect");
+            }
+            // Absolute guard: if nothing was presented for 5s, always reconnect.
+            if (noPresentMs >= NO_PRESENT_HARD_RESET_MS) {
+                Log.w(TAG, "C5 absolute guard: reconnect after 5s with no present");
+                statusListener.onStatus(STATE_CONNECTING, "decoder stalled >5s: reconnecting", 0);
+                throw new IOException("C5 absolute guard: no frame presented for " + noPresentMs + "ms");
             }
 
             // ── 1-second stats ────────────────────────────────────────────────
@@ -656,6 +737,9 @@ public final class H264TcpPlayer {
         long resyncSuccessSec = 0L;
         long resyncFailSec = 0L;
         long lastLog = SystemClock.elapsedRealtime();
+        long lastPresentMs = SystemClock.elapsedRealtime();
+        long expectedSeq = -1L;
+        long lastQueuedPtsUs = -1L;
         Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
         Rect dstRect = new Rect();
 
@@ -670,6 +754,29 @@ public final class H264TcpPlayer {
                             + " – resync failed");
                 }
                 resyncSuccessSec++;
+            }
+
+            long seqU32 = ((hdrBuf[6] & 0xFFL) << 24) | ((hdrBuf[7] & 0xFFL) << 16)
+                    | ((hdrBuf[8] & 0xFFL) << 8) | (hdrBuf[9] & 0xFFL);
+            long ptsUs = ((hdrBuf[10] & 0xFFL) << 56) | ((hdrBuf[11] & 0xFFL) << 48)
+                    | ((hdrBuf[12] & 0xFFL) << 40) | ((hdrBuf[13] & 0xFFL) << 32)
+                    | ((hdrBuf[14] & 0xFFL) << 24) | ((hdrBuf[15] & 0xFFL) << 16)
+                    | ((hdrBuf[16] & 0xFFL) << 8) | (hdrBuf[17] & 0xFFL);
+
+            if (expectedSeq < 0) {
+                expectedSeq = seqU32;
+            }
+            if (seqU32 < expectedSeq) {
+                droppedSec++;
+                continue;
+            }
+            if (seqU32 > expectedSeq + 120) {
+                expectedSeq = seqU32;
+            }
+            if (lastQueuedPtsUs > 0 && ptsUs + 1_000 < lastQueuedPtsUs) {
+                droppedSec++;
+                expectedSeq = seqU32 + 1;
+                continue;
             }
 
             int payloadLen = ((hdrBuf[18] & 0xFF) << 24) | ((hdrBuf[19] & 0xFF) << 16)
@@ -692,10 +799,51 @@ public final class H264TcpPlayer {
             readFully(input, payloadBuf, payloadLen);
             bytes += FRAME_HEADER_SIZE + payloadLen;
 
+            // If socket/input buffer already contains multiple framed PNGs,
+            // skip stale frames and keep only the newest one to avoid latency buildup.
+            int skippedBacklog = 0;
+            while (input.available() > FRAME_HEADER_SIZE + 4096) {
+                readFully(input, hdrBuf, FRAME_HEADER_SIZE);
+                int magic2 = parseFrameMagic(hdrBuf);
+                if (magic2 != FRAME_MAGIC) {
+                    boolean resynced2 = tryResyncHeader(input, hdrBuf, FRAME_RESYNC_SCAN_LIMIT);
+                    if (!resynced2) {
+                        resyncFailSec++;
+                        throw new IOException("WBTP: bad frame magic 0x" + Integer.toHexString(magic2)
+                                + " – resync failed");
+                    }
+                    resyncSuccessSec++;
+                }
+
+                int nextLen = ((hdrBuf[18] & 0xFF) << 24) | ((hdrBuf[19] & 0xFF) << 16)
+                        | ((hdrBuf[20] & 0xFF) << 8) | (hdrBuf[21] & 0xFF);
+                if (nextLen <= 0 || nextLen > FRAME_PAYLOAD_HARD_CAP) {
+                    throw new IOException("WBTP: bad payload length " + nextLen);
+                }
+                if (nextLen > payloadBuf.length) {
+                    int newCap = Math.min(FRAME_PAYLOAD_HARD_CAP, nextPowerOfTwo(nextLen));
+                    if (newCap < nextLen) {
+                        throw new IOException("WBTP: payload exceeds dynamic cap " + nextLen);
+                    }
+                    Log.w(TAG, "WBTP PNG payload buffer grow " + payloadBuf.length + " -> " + newCap);
+                    payloadBuf = new byte[newCap];
+                    payloadGrowEvents++;
+                }
+                payloadLen = nextLen;
+                maxPayloadSeen = Math.max(maxPayloadSeen, payloadLen);
+                readFully(input, payloadBuf, payloadLen);
+                bytes += FRAME_HEADER_SIZE + payloadLen;
+                skippedBacklog++;
+            }
+            if (skippedBacklog > 0) {
+                droppedSec += skippedBacklog;
+            }
+
             long t0 = SystemClock.elapsedRealtimeNanos();
             Bitmap bitmap = BitmapFactory.decodeByteArray(payloadBuf, 0, payloadLen);
             if (bitmap == null) {
                 droppedSec++;
+                expectedSeq = seqU32 + 1;
             } else {
                 Canvas canvas = null;
                 try {
@@ -704,11 +852,16 @@ public final class H264TcpPlayer {
                         dstRect.set(0, 0, canvas.getWidth(), canvas.getHeight());
                         canvas.drawBitmap(bitmap, null, dstRect, paint);
                         outFrames++;
+                        lastPresentMs = SystemClock.elapsedRealtime();
+                        lastQueuedPtsUs = ptsUs;
+                        expectedSeq = seqU32 + 1;
                     } else {
                         droppedSec++;
+                        expectedSeq = seqU32 + 1;
                     }
                 } catch (Exception e) {
                     droppedSec++;
+                    expectedSeq = seqU32 + 1;
                 } finally {
                     if (canvas != null) {
                         try {
@@ -726,6 +879,11 @@ public final class H264TcpPlayer {
             inFrames++;
 
             long nowMs = SystemClock.elapsedRealtime();
+            if (nowMs - lastPresentMs >= NO_PRESENT_HARD_RESET_MS) {
+                Log.w(TAG, "PNG absolute guard: reconnect after 5s with no present");
+                statusListener.onStatus(STATE_CONNECTING, "png stalled >5s: reconnecting", 0);
+                throw new IOException("PNG absolute guard: no frame presented for " + (nowMs - lastPresentMs) + "ms");
+            }
             if (nowMs - lastLog >= 1000) {
                 droppedTotal += droppedSec;
                 reconnectDelayMs = 800;

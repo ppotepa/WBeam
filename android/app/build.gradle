@@ -21,25 +21,26 @@ def resolveGitShortRev() {
 def wbeamBuildRevision = "0.0.${resolveGitShortRev()}-build"
 
 android {
-    namespace 'com.wbeam'
-    compileSdk 35
+    namespace = 'com.wbeam'
+    compileSdk = 35
 
     buildFeatures {
-        buildConfig true
+        buildConfig = true
     }
 
     defaultConfig {
         applicationId "com.wbeam"
-        minSdk 26
-        targetSdk 35
-        versionCode 1
-        versionName wbeamBuildRevision
+        minSdk = 26
+        targetSdk = 35
+        versionCode = 1
+        versionName = wbeamBuildRevision
         buildConfigField "String", "WBEAM_BUILD_REV", "\"${wbeamBuildRevision}\""
     }
 
     buildTypes {
         release {
-            minifyEnabled false
+            minifyEnabled = false
+            signingConfig = signingConfigs.debug
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }

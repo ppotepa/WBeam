@@ -79,13 +79,21 @@ public class MainActivity extends AppCompatActivity {
     private static final String[] CURSOR_OPTIONS = {"embedded", "hidden", "metadata"};
 
     private static final int LIVE_LOG_MAX_LINES = 80;
+    private static final long SIMPLE_MENU_AUTO_HIDE_MS = 10_000L;
+    private static final float DEBUG_INFO_ALPHA_IDLE = 0.55f;
+    private static final float DEBUG_INFO_ALPHA_TOUCH = 0.92f;
+    private static final long DEBUG_INFO_ALPHA_RESET_MS = 1300L;
+    private static final int DEBUG_FPS_GRAPH_POINTS = 36;
 
     // ── Views ──────────────────────────────────────────────────────────────────
     private View rootLayout;
     private View topBar;
+    private View quickActionRow;
     private View settingsPanel;
+    private View simpleMenuPanel;
     private View statusPanel;
     private View perfHudPanel;
+    private View debugInfoPanel;
     private View preflightOverlay;
     private View debugControlsRow;
     private View statusLed;
@@ -95,6 +103,7 @@ public class MainActivity extends AppCompatActivity {
     private TextView bpsText;
     private TextView statsText;
     private TextView perfHudText;
+    private TextView debugInfoText;
     private TextView preflightTitleText;
     private TextView preflightBodyText;
     private TextView preflightHintText;
@@ -124,10 +133,22 @@ public class MainActivity extends AppCompatActivity {
     private Button fullscreenButton;
     private Button cursorOverlayButton;
     private Button intraOnlyButton;
+    private Button simpleModeH265Button;
+    private Button simpleModeRawButton;
+    private Button simpleFps30Button;
+    private Button simpleFps45Button;
+    private Button simpleFps60Button;
+    private Button simpleFps90Button;
+    private Button simpleFps120Button;
+    private Button simpleFps144Button;
+    private Button simpleApplyButton;
 
     // ── UI state ───────────────────────────────────────────────────────────────
     private boolean intraOnlyEnabled = false;
     private boolean settingsVisible = false;
+    private boolean simpleMenuVisible = false;
+    private String simpleMode = "h265";
+    private int simpleFps = 60;
     private boolean isFullscreen = false;
     private boolean cursorOverlayEnabled = true;
     private boolean debugControlsVisible = false;
@@ -141,6 +162,11 @@ public class MainActivity extends AppCompatActivity {
     private String lastUiState = STATE_IDLE;
     private String lastUiInfo = "tap Settings -> Start Live";
     private long lastUiBps = 0;
+    private String lastStatsLine = "fps in/out: - | drops: - | late: - | q(t/d/r): -/-/- | reconnects: -";
+    private String lastHudCompactLine = "hud: waiting for metrics";
+    private final float[] debugFpsHistory = new float[DEBUG_FPS_GRAPH_POINTS];
+    private int debugFpsHistoryCount = 0;
+    private int debugFpsHistoryIndex = 0;
     private final SpannableStringBuilder liveLogBuffer = new SpannableStringBuilder();
 
     // ── Daemon state (updated via StatusPoller.Callbacks) ──────────────────────
@@ -172,6 +198,12 @@ public class MainActivity extends AppCompatActivity {
             preflightAnimTick = (preflightAnimTick + 1) % 4;
             updatePreflightOverlay();
             uiHandler.postDelayed(this, 600);
+        }
+    };
+    private final Runnable simpleMenuAutoHideTask = this::hideSimpleMenu;
+    private final Runnable debugInfoFadeTask = () -> {
+        if (debugInfoPanel != null) {
+            debugInfoPanel.setAlpha(DEBUG_INFO_ALPHA_IDLE);
         }
     };
 
@@ -376,7 +408,7 @@ public class MainActivity extends AppCompatActivity {
 
         applySettings(false);
         setDebugControlsVisible(false);
-        setFullscreen(false);
+        applyBuildVariantUi();
         updateStatsLine("fps in/out: - | drops: - | late: - | q(t/d/r): -/-/- | reconnects: -");
         updatePerfHudUnavailable();
         startPreflightPulse();
@@ -389,6 +421,8 @@ public class MainActivity extends AppCompatActivity {
     protected void onDestroy() {
         statusPoller.stop();
         stopPreflightPulse();
+        uiHandler.removeCallbacks(simpleMenuAutoHideTask);
+        uiHandler.removeCallbacks(debugInfoFadeTask);
         videoTestController.release();
         stopLiveView();
         ioExecutor.shutdownNow();
@@ -397,6 +431,10 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     public void onBackPressed() {
+        if (simpleMenuVisible) {
+            hideSimpleMenu();
+            return;
+        }
         if (settingsVisible) {
             hideSettingsPanel();
             return;
@@ -415,9 +453,12 @@ public class MainActivity extends AppCompatActivity {
     private void bindViews() {
         rootLayout = findViewById(R.id.rootLayout);
         topBar = findViewById(R.id.topBar);
+        quickActionRow = findViewById(R.id.quickActionRow);
         settingsPanel = findViewById(R.id.settingsPanel);
+        simpleMenuPanel = findViewById(R.id.simpleMenuPanel);
         statusPanel = findViewById(R.id.statusPanel);
         perfHudPanel = findViewById(R.id.perfHudPanel);
+        debugInfoPanel = findViewById(R.id.debugInfoPanel);
         preflightOverlay = findViewById(R.id.preflightOverlay);
         debugControlsRow = findViewById(R.id.debugControlsRow);
         statusLed = findViewById(R.id.statusLed);
@@ -428,6 +469,7 @@ public class MainActivity extends AppCompatActivity {
         bpsText = findViewById(R.id.bpsText);
         statsText = findViewById(R.id.statsText);
         perfHudText = findViewById(R.id.perfHudText);
+        debugInfoText = findViewById(R.id.debugInfoText);
         preflightTitleText = findViewById(R.id.preflightTitle);
         preflightBodyText = findViewById(R.id.preflightBody);
         preflightHintText = findViewById(R.id.preflightHint);
@@ -459,6 +501,67 @@ public class MainActivity extends AppCompatActivity {
         fullscreenButton = findViewById(R.id.fullscreenButton);
         cursorOverlayButton = findViewById(R.id.cursorOverlayButton);
         intraOnlyButton     = findViewById(R.id.intraOnlyButton);
+        simpleModeH265Button = findViewById(R.id.simpleModeH265Button);
+        simpleModeRawButton = findViewById(R.id.simpleModeRawButton);
+        simpleFps30Button = findViewById(R.id.simpleFps30Button);
+        simpleFps45Button = findViewById(R.id.simpleFps45Button);
+        simpleFps60Button = findViewById(R.id.simpleFps60Button);
+        simpleFps90Button = findViewById(R.id.simpleFps90Button);
+        simpleFps120Button = findViewById(R.id.simpleFps120Button);
+        simpleFps144Button = findViewById(R.id.simpleFps144Button);
+        simpleApplyButton = findViewById(R.id.simpleApplyButton);
+    }
+
+    private void applyBuildVariantUi() {
+        if (BuildConfig.DEBUG) {
+            hideSimpleMenu();
+            setFullscreen(false);
+            if (quickActionRow != null) {
+                quickActionRow.setVisibility(View.VISIBLE);
+            }
+            if (statusPanel != null) {
+                statusPanel.setVisibility(View.GONE);
+            }
+            if (perfHudPanel != null) {
+                perfHudPanel.setVisibility(View.GONE);
+            }
+            if (debugInfoPanel != null) {
+                debugInfoPanel.setVisibility(View.VISIBLE);
+                debugInfoPanel.setAlpha(DEBUG_INFO_ALPHA_IDLE);
+            }
+            if (logButton != null) {
+                logButton.setVisibility(View.GONE);
+            }
+            if (fullscreenButton != null) {
+                fullscreenButton.setVisibility(View.VISIBLE);
+            }
+            refreshDebugInfoOverlay();
+            return;
+        }
+
+        hideSettingsPanel();
+        setDebugControlsVisible(false);
+        setFullscreen(true);
+        showSimpleMenu();
+
+        if (quickActionRow != null) {
+            quickActionRow.setVisibility(View.GONE);
+        }
+        if (statusPanel != null) {
+            statusPanel.setVisibility(View.GONE);
+        }
+        if (perfHudPanel != null) {
+            perfHudPanel.setVisibility(View.GONE);
+        }
+        if (debugInfoPanel != null) {
+            debugInfoPanel.setVisibility(View.GONE);
+        }
+        if (logButton != null) {
+            logButton.setVisibility(View.GONE);
+        }
+        if (fullscreenButton != null) {
+            fullscreenButton.setVisibility(View.GONE);
+        }
     }
 
     private void setupSpinners() {
@@ -480,7 +583,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void setupSeekbars() {
         resolutionSeek.setMax(50); // 50..100%
-        fpsSeek.setMax(72); // 24..96 fps
+        fpsSeek.setMax(120); // 24..144 fps
         bitrateSeek.setMax(295); // 5..300 Mbps
 
         SeekBar.OnSeekBarChangeListener listener = new SeekBar.OnSeekBarChangeListener() {
@@ -554,9 +657,18 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void setupButtons() {
-        settingsButton.setOnClickListener(v -> toggleSettingsPanel());
+        settingsButton.setOnClickListener(v -> {
+            if (BuildConfig.DEBUG) {
+                toggleSettingsPanel();
+            } else {
+                toggleSimpleMenu();
+            }
+        });
         logButton.setOnClickListener(v -> toggleLiveLogPanel());
         settingsButton.setOnLongClickListener(v -> {
+            if (!BuildConfig.DEBUG) {
+                return false;
+            }
             setDebugControlsVisible(!debugControlsVisible);
             Toast.makeText(
                     this,
@@ -591,6 +703,62 @@ public class MainActivity extends AppCompatActivity {
 
         fullscreenButton.setOnClickListener(v -> toggleFullscreen());
         cursorOverlayButton.setOnClickListener(v -> toggleCursorOverlayMode());
+
+        if (simpleMenuPanel != null) {
+            simpleMenuPanel.setOnTouchListener((v, event) -> {
+                if (event.getActionMasked() == MotionEvent.ACTION_DOWN
+                        || event.getActionMasked() == MotionEvent.ACTION_MOVE
+                        || event.getActionMasked() == MotionEvent.ACTION_UP) {
+                    scheduleSimpleMenuAutoHide();
+                }
+                return false;
+            });
+        }
+
+        if (debugInfoPanel != null) {
+            debugInfoPanel.setOnTouchListener((v, event) -> {
+                int action = event.getActionMasked();
+                if (action == MotionEvent.ACTION_DOWN
+                        || action == MotionEvent.ACTION_MOVE
+                        || action == MotionEvent.ACTION_UP) {
+                    debugInfoPanel.setAlpha(DEBUG_INFO_ALPHA_TOUCH);
+                    uiHandler.removeCallbacks(debugInfoFadeTask);
+                    uiHandler.postDelayed(debugInfoFadeTask, DEBUG_INFO_ALPHA_RESET_MS);
+                }
+                return false;
+            });
+        }
+
+        if (simpleModeH265Button != null) {
+            simpleModeH265Button.setOnClickListener(v -> {
+                simpleMode = "h265";
+                refreshSimpleMenuButtons();
+                scheduleSimpleMenuAutoHide();
+            });
+        }
+        if (simpleModeRawButton != null) {
+            simpleModeRawButton.setOnClickListener(v -> {
+                simpleMode = "raw-png";
+                refreshSimpleMenuButtons();
+                scheduleSimpleMenuAutoHide();
+            });
+        }
+
+        if (simpleFps30Button != null) simpleFps30Button.setOnClickListener(v -> selectSimpleFps(30));
+        if (simpleFps45Button != null) simpleFps45Button.setOnClickListener(v -> selectSimpleFps(45));
+        if (simpleFps60Button != null) simpleFps60Button.setOnClickListener(v -> selectSimpleFps(60));
+        if (simpleFps90Button != null) simpleFps90Button.setOnClickListener(v -> selectSimpleFps(90));
+        if (simpleFps120Button != null) simpleFps120Button.setOnClickListener(v -> selectSimpleFps(120));
+        if (simpleFps144Button != null) simpleFps144Button.setOnClickListener(v -> selectSimpleFps(144));
+
+        if (simpleApplyButton != null) {
+            simpleApplyButton.setOnClickListener(v -> {
+                applySimpleMenuToSettings();
+                applySettings(true);
+                sessionController.requestStart(false, true);
+                hideSimpleMenu();
+            });
+        }
 
         intraOnlyButton.setOnClickListener(v -> {
             intraOnlyEnabled = !intraOnlyEnabled;
@@ -650,13 +818,16 @@ public class MainActivity extends AppCompatActivity {
         setSpinnerSelection(encoderSpinner, ENCODER_OPTIONS, s.encoder);
         setSpinnerSelection(cursorSpinner, CURSOR_OPTIONS, s.cursor);
         resolutionSeek.setProgress(clamp(s.resScale, 50, 100) - 50);
-        fpsSeek.setProgress(clamp(s.fps, 24, 96) - 24);
+        fpsSeek.setProgress(clamp(s.fps, 24, 144) - 24);
         bitrateSeek.setProgress(clamp(s.bitrateMbps, 5, 300) - 5);
         cursorOverlayEnabled = s.localCursor;
         cursorOverlayButton.setText(cursorOverlayEnabled ? "Local Cursor Overlay ON" : "Local Cursor Overlay OFF");
         intraOnlyEnabled = s.intraOnly;
         updateIntraOnlyButton();
         updateSettingValueLabels();
+        simpleMode = "raw-png".equals(getSelectedEncoder()) ? "raw-png" : "h265";
+        simpleFps = clamp(getSelectedFps(), 30, 144);
+        refreshSimpleMenuButtons();
     }
 
     private void saveSettings() {
@@ -933,6 +1104,93 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private void selectSimpleFps(int fps) {
+        simpleFps = clamp(fps, 30, 144);
+        refreshSimpleMenuButtons();
+        scheduleSimpleMenuAutoHide();
+    }
+
+    private void showSimpleMenu() {
+        if (simpleMenuPanel == null) {
+            return;
+        }
+        simpleMode = "raw-png".equals(getSelectedEncoder()) ? "raw-png" : "h265";
+        simpleFps = clamp(getSelectedFps(), 30, 144);
+        simpleMenuVisible = true;
+        refreshSimpleMenuButtons();
+        simpleMenuPanel.setVisibility(View.VISIBLE);
+        scheduleSimpleMenuAutoHide();
+    }
+
+    private void hideSimpleMenu() {
+        if (simpleMenuPanel == null) {
+            return;
+        }
+        simpleMenuVisible = false;
+        uiHandler.removeCallbacks(simpleMenuAutoHideTask);
+        simpleMenuPanel.setVisibility(View.GONE);
+    }
+
+    private void toggleSimpleMenu() {
+        if (simpleMenuVisible) {
+            hideSimpleMenu();
+        } else {
+            showSimpleMenu();
+        }
+    }
+
+    private void scheduleSimpleMenuAutoHide() {
+        if (!simpleMenuVisible || simpleMenuPanel == null) {
+            return;
+        }
+        uiHandler.removeCallbacks(simpleMenuAutoHideTask);
+        uiHandler.postDelayed(simpleMenuAutoHideTask, SIMPLE_MENU_AUTO_HIDE_MS);
+    }
+
+    private void applySimpleMenuToSettings() {
+        String selectedEncoder = "raw-png".equals(simpleMode) ? "raw-png" : "h265";
+        int selectedFps = clamp(simpleFps, 30, 144);
+
+        setSpinnerSelection(encoderSpinner, ENCODER_OPTIONS, selectedEncoder);
+        fpsSeek.setProgress(clamp(selectedFps, 24, 144) - 24);
+
+        updateIntraOnlyButton();
+        updateSettingValueLabels();
+        updateHostHint();
+    }
+
+    private void refreshSimpleMenuButtons() {
+        if (simpleMenuPanel == null) {
+            return;
+        }
+
+        setSimpleModeSelected(simpleModeH265Button, "h265".equals(simpleMode));
+        setSimpleModeSelected(simpleModeRawButton, "raw-png".equals(simpleMode));
+
+        setSimpleFpsSelected(simpleFps30Button, simpleFps == 30);
+        setSimpleFpsSelected(simpleFps45Button, simpleFps == 45);
+        setSimpleFpsSelected(simpleFps60Button, simpleFps == 60);
+        setSimpleFpsSelected(simpleFps90Button, simpleFps == 90);
+        setSimpleFpsSelected(simpleFps120Button, simpleFps == 120);
+        setSimpleFpsSelected(simpleFps144Button, simpleFps == 144);
+    }
+
+    private void setSimpleModeSelected(Button button, boolean selected) {
+        if (button == null) {
+            return;
+        }
+        button.setSelected(selected);
+        button.setAlpha(selected ? 1f : 0.75f);
+    }
+
+    private void setSimpleFpsSelected(Button button, boolean selected) {
+        if (button == null) {
+            return;
+        }
+        button.setSelected(selected);
+        button.setAlpha(selected ? 1f : 0.75f);
+    }
+
     private void toggleCursorOverlayMode() {
         cursorOverlayEnabled = !cursorOverlayEnabled;
         cursorOverlayButton.setText(cursorOverlayEnabled ? "Local Cursor Overlay ON" : "Local Cursor Overlay OFF");
@@ -971,6 +1229,7 @@ public class MainActivity extends AppCompatActivity {
         lastUiInfo = info == null ? "-" : info;
         lastUiBps = bps;
         refreshStatusText();
+        refreshDebugInfoOverlay();
         if (STATE_ERROR.equals(lastUiState) && isCriticalUiInfo(lastUiInfo)) {
             String line = "status=" + lastUiState + " info=" + lastUiInfo + " bps=" + bps;
             appendLiveLogError(line);
@@ -1089,9 +1348,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateStatsLine(String line) {
-        statsText.setText(line == null || line.trim().isEmpty()
-                ? "fps in/out: - | drops: - | late: - | q(t/d/r): -/-/- | reconnects: -"
-                : line);
+        lastStatsLine = line == null || line.trim().isEmpty()
+            ? "fps in/out: - | drops: - | late: - | q(t/d/r): -/-/- | reconnects: -"
+            : line;
+        statsText.setText(lastStatsLine);
+        refreshDebugInfoOverlay();
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -1102,11 +1363,13 @@ public class MainActivity extends AppCompatActivity {
         if (perfHudText == null) {
             return;
         }
+        lastHudCompactLine = "hud: offline | waiting metrics";
         perfHudText.setText("HUD OFFLINE\nwaiting for host metrics...");
         perfHudText.setTextColor(Color.parseColor("#FCA5A5"));
         if (perfHudPanel != null) {
             perfHudPanel.setAlpha(0.92f);
         }
+        refreshDebugInfoOverlay();
         emitHudDebugAdb("state=offline waiting_metrics=1");
     }
 
@@ -1176,6 +1439,20 @@ public class MainActivity extends AppCompatActivity {
                 reason.isEmpty() ? "-" : reason
         );
         perfHudText.setText(hud);
+            recordFpsSample(presentFps);
+            lastHudCompactLine = String.format(
+                Locale.US,
+                "hud fps %.0f/%.1f | e2e %.1fms | dec %.1fms | ren %.1fms | q %d/%d/%d",
+                targetFps,
+                presentFps,
+                e2eP95,
+                decodeP95,
+                renderP95,
+                qT,
+                qD,
+                qR
+            );
+            refreshDebugInfoOverlay();
 
         // Build explicit high-pressure reason so logcat shows exactly which condition fired.
         StringBuilder hpSb = new StringBuilder();
@@ -1245,6 +1522,61 @@ public class MainActivity extends AppCompatActivity {
                         : daemonLastError)
         );
         emitHudDebugAdb(compact);
+    }
+
+    private void refreshDebugInfoOverlay() {
+        if (!BuildConfig.DEBUG || debugInfoText == null || debugInfoPanel == null) {
+            return;
+        }
+        String state = lastUiState == null ? "IDLE" : lastUiState.toUpperCase(Locale.US);
+        String host = daemonHostName == null || daemonHostName.trim().isEmpty() ? "-" : daemonHostName;
+        String graph = buildFpsSparkline();
+        String text = String.format(
+                Locale.US,
+                "DBG %s | host:%s | daemon:%s\n%s\nfps graph: %s\n%s",
+                state,
+                host,
+                daemonState,
+                lastStatsLine,
+                graph,
+                lastHudCompactLine
+        );
+        debugInfoText.setText(text);
+    }
+
+    private void recordFpsSample(double fps) {
+        if (!Double.isFinite(fps) || fps < 0.0) {
+            return;
+        }
+        float clamped = (float) Math.min(240.0, fps);
+        debugFpsHistory[debugFpsHistoryIndex] = clamped;
+        debugFpsHistoryIndex = (debugFpsHistoryIndex + 1) % DEBUG_FPS_GRAPH_POINTS;
+        if (debugFpsHistoryCount < DEBUG_FPS_GRAPH_POINTS) {
+            debugFpsHistoryCount++;
+        }
+    }
+
+    private String buildFpsSparkline() {
+        if (debugFpsHistoryCount <= 0) {
+            return "-";
+        }
+        final char[] levels = new char[]{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'};
+        float max = 1f;
+        for (int i = 0; i < debugFpsHistoryCount; i++) {
+            float sample = debugFpsHistory[i];
+            if (sample > max) {
+                max = sample;
+            }
+        }
+        int start = debugFpsHistoryCount == DEBUG_FPS_GRAPH_POINTS ? debugFpsHistoryIndex : 0;
+        StringBuilder sb = new StringBuilder(debugFpsHistoryCount);
+        for (int i = 0; i < debugFpsHistoryCount; i++) {
+            float sample = debugFpsHistory[(start + i) % DEBUG_FPS_GRAPH_POINTS];
+            int idx = (int) Math.round((sample / max) * (levels.length - 1));
+            idx = Math.max(0, Math.min(levels.length - 1, idx));
+            sb.append(levels[idx]);
+        }
+        return sb.toString();
     }
 
     // ══════════════════════════════════════════════════════════════════════════

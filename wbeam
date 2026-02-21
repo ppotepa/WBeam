@@ -15,6 +15,8 @@ ANDROID_DIR="$ROOT_DIR/android"
 ANDROID_PACKAGE="com.wbeam"
 ANDROID_ACTIVITY=".MainActivity"
 ANDROID_APK="$ANDROID_DIR/app/build/outputs/apk/debug/app-debug.apk"
+ANDROID_APK_RELEASE="$ANDROID_DIR/app/build/outputs/apk/release/app-release.apk"
+ANDROID_APK_RELEASE_UNSIGNED="$ANDROID_DIR/app/build/outputs/apk/release/app-release-unsigned.apk"
 
 
 
@@ -31,7 +33,7 @@ Groups:
   ip        up | down | status
   host      run | debug | status | down
   daemon    up | down | status   (alias for host)
-  android   build | install | launch | deploy
+  android   build | install | launch | deploy | build-release | install-release | deploy-release
   debug     up | watch           (alias for host debug)
   logs      live | daemon | host
 
@@ -41,8 +43,11 @@ Examples:
   ./wbeam host debug             # debug build + coloured logs + ADB sidecar
   ./wbeam android deploy         # build + install + launch in one step
   ./wbeam android build          # ./gradlew assembleDebug only
-  ./wbeam android install       # adb install only (uses existing APK)
-  ./wbeam android launch        # adb shell am start only
+  ./wbeam android install        # adb install only (uses existing debug APK)
+  ./wbeam android launch         # adb shell am start only
+  ./wbeam android build-release  # ./gradlew assembleRelease
+  ./wbeam android install-release
+  ./wbeam android deploy-release
   ./wbeam debug up
   ./wbeam logs live
 EOF
@@ -245,6 +250,48 @@ android_deploy() {
   android_launch
 }
 
+android_build_release() {
+  echo "[android] Building release APK…"
+  cd "$ANDROID_DIR" && ./gradlew :app:assembleRelease
+  if [[ -f "$ANDROID_APK_RELEASE" ]]; then
+    echo "[android] APK: $ANDROID_APK_RELEASE"
+  elif [[ -f "$ANDROID_APK_RELEASE_UNSIGNED" ]]; then
+    echo "[android] APK: $ANDROID_APK_RELEASE_UNSIGNED"
+  fi
+}
+
+android_install_release() {
+  require_cmd adb
+  local release_apk=""
+  if [[ -f "$ANDROID_APK_RELEASE" ]]; then
+    release_apk="$ANDROID_APK_RELEASE"
+  elif [[ -f "$ANDROID_APK_RELEASE_UNSIGNED" ]]; then
+    release_apk="$ANDROID_APK_RELEASE_UNSIGNED"
+  fi
+
+  if [[ -z "$release_apk" ]]; then
+    echo "Release APK not found." >&2
+    echo "Run './wbeam android build-release' first." >&2
+    exit 1
+  fi
+
+  if [[ "$release_apk" == *"-unsigned.apk" ]]; then
+    echo "Release APK is unsigned: $release_apk" >&2
+    echo "Configure signing for release build before install, or use debug deploy for local testing." >&2
+    exit 1
+  fi
+
+  adb wait-for-device
+  echo "[android] Installing $release_apk…"
+  adb install -r "$release_apk"
+}
+
+android_deploy_release() {
+  android_build_release
+  android_install_release
+  android_launch
+}
+
 debug_up() {
   exec "$HOST_SCRIPTS_DIR/run_wbeamd_debug.sh" "$CONTROL_PORT" "$STREAM_PORT"
 }
@@ -323,6 +370,9 @@ case "$group" in
       install)        android_install ;;
       launch)         android_launch ;;
       deploy|run)     android_deploy ;;
+      build-release|release-build)    android_build_release ;;
+      install-release|release-install) android_install_release ;;
+      deploy-release|release-deploy)   android_deploy_release ;;
       *)              print_help; exit 1 ;;
     esac
     ;;
