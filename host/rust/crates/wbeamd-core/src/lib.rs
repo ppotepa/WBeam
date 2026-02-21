@@ -1,6 +1,5 @@
-use std::fs::{self, File, OpenOptions};
+use std::fs::{File, OpenOptions};
 use std::io::Write;
-use std::net::TcpListener;
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -8,8 +7,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use nix::libc;
-use nix::sys::signal::{kill, Signal};
-use nix::unistd::Pid;
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
@@ -22,20 +19,24 @@ use wbeamd_api::{
     StatusResponse, ValidationError,
 };
 
-const STATE_IDLE: &str = "IDLE";
-const STATE_STARTING: &str = "STARTING";
-const STATE_STREAMING: &str = "STREAMING";
-const STATE_RECONNECTING: &str = "RECONNECTING";
-const STATE_ERROR: &str = "ERROR";
-const STATE_STOPPING: &str = "STOPPING";
+pub mod domain;
+pub mod infra;
+
+use domain::policy::{
+    adaptation_reason, config_for_level, is_high_pressure, is_low_pressure,
+    HIGH_PRESSURE_STREAK_REQUIRED, LOW_PRESSURE_STREAK_REQUIRED, MAX_ADAPTATION_LEVEL,
+};
+#[allow(unused_imports)]
+use domain::state::{
+    STATE_ERROR, STATE_IDLE, STATE_RECONNECTING, STATE_STARTING, STATE_STOPPING, STATE_STREAMING,
+};
+use infra::process as proc;
+use infra::{adb, config_store, telemetry};
 
 const DEFAULT_START_TIMEOUT: Duration = Duration::from_secs(45);
 const DUPLICATE_START_GUARD: Duration = Duration::from_secs(3);
-const ADAPTATION_COOLDOWN: Duration = Duration::from_secs(4);
-const HIGH_PRESSURE_STREAK_REQUIRED: u8 = 2;
-const LOW_PRESSURE_STREAK_REQUIRED: u8 = 8;
-const MAX_ADAPTATION_LEVEL: u8 = 3;
-const TARGET_FRAMETIME_MS: f64 = 16.67;
+const ADAPTATION_COOLDOWN: Duration =
+    Duration::from_secs(domain::policy::ADAPTATION_COOLDOWN_SECS);
 const NO_PRESENT_RESTART_STREAK_REQUIRED: u8 = 4;
 const NO_PRESENT_RESTART_COOLDOWN: Duration = Duration::from_secs(15);
 const NO_PRESENT_MIN_RECV_FPS: f64 = 10.0;
@@ -138,27 +139,6 @@ pub struct DaemonCore {
     start_timeout: Duration,
 }
 
-/// P2.3: Return base directory for telemetry JSONL files.
-/// Creates the directory tree if needed.
-fn telemetry_dir() -> PathBuf {
-    let base = std::env::var("HOME")
-        .map(|h| PathBuf::from(h).join(".local").join("share").join("wbeam"))
-        .unwrap_or_else(|_| PathBuf::from("/tmp/wbeam"));
-    let _ = fs::create_dir_all(&base);
-    base
-}
-
-/// P2.3: Open (or create/append) a telemetry JSONL file for the given run_id.
-fn open_telemetry_file(run_id: u64) -> Option<File> {
-    let path = telemetry_dir().join(format!("telemetry-{run_id}.jsonl"));
-    OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .map_err(|e| warn!("telemetry open {:?}: {e}", path))
-        .ok()
-}
-
 impl DaemonCore {
     pub fn acquire_lock(path: &Path) -> Result<InstanceLock, CoreError> {
         let mut file = OpenOptions::new()
@@ -188,7 +168,7 @@ impl DaemonCore {
             .unwrap_or_else(|| "unknown-host".to_string());
 
         let runtime_config_path = root.join("host/rust/config/runtime_state.json");
-        let active_config = load_runtime_config(&runtime_config_path)
+        let active_config = config_store::load_runtime_config(&runtime_config_path)
             .unwrap_or_else(ActiveConfig::balanced_default);
 
         let (exit_tx, mut exit_rx) = mpsc::unbounded_channel::<(u64, i32)>();
@@ -245,7 +225,7 @@ impl DaemonCore {
             base: self.base_from_inner(&inner),
             ok: true,
             service: "wbeamd-rust".to_string(),
-            build_revision: build_revision(),
+            build_revision: proc::build_revision(),
             stream_process_alive: inner.current_pid.is_some(),
         }
     }
@@ -346,7 +326,8 @@ impl DaemonCore {
             inner.no_present_streak = 0;
             inner.last_no_present_recovery_at = None;
         }
-        let _ = self.persist_active_config().await;
+        let _ = config_store::persist_config(&self.runtime_config_path, &cfg)
+            .map_err(|e| tracing::warn!("persist config: {e}"));
 
         if was_running {
             {
@@ -475,8 +456,8 @@ impl DaemonCore {
                 inner.metrics.adaptive_action = "hold-warmup".to_string();
                 inner.metrics.adaptive_reason = "waiting for stable STREAMING warmup".to_string();
             } else {
-                let high = is_high_pressure(&inner, &client);
-                let low = is_low_pressure(&inner, &client);
+                let high = is_high_pressure(inner.active_config.fps, &client);
+                let low = is_low_pressure(inner.active_config.fps, &client);
 
                 if high {
                     inner.high_pressure_streak = inner.high_pressure_streak.saturating_add(1);
@@ -590,7 +571,7 @@ impl DaemonCore {
         };
 
         if let Some(pid) = pid {
-            terminate_pid(pid).await;
+            proc::terminate_pid(pid).await;
         }
 
         let mut inner = self.inner.lock().await;
@@ -619,7 +600,7 @@ impl DaemonCore {
     }
 
     async fn start_with_config(&self, cfg: ActiveConfig) -> Result<(), CoreError> {
-        self.ensure_usb_reverse("start").await;
+        adb::ensure_usb_reverse(&self.root, self.stream_port, self.control_port, "start").await;
         {
             let mut inner = self.inner.lock().await;
             inner.last_reverse_refresh_at = Some(Instant::now());
@@ -655,18 +636,23 @@ impl DaemonCore {
             run_id = inner.run_id;
             inner.run_started_at = Some(Instant::now());
             inner.stream_started_at = None;
-            inner.telemetry_file = open_telemetry_file(run_id); // P2.3
+            inner.telemetry_file = telemetry::open_telemetry_file(run_id); // P2.3
             inner.last_output_at = Some(Instant::now());
             inner.last_streaming_line_at = None;
             inner.no_present_streak = 0;
         }
 
-        let _ = self.persist_active_config().await;
+        {
+            let cfg = { self.inner.lock().await.baseline_config.clone() };
+            let _ = config_store::persist_config(&self.runtime_config_path, &cfg)
+                .map_err(|e| tracing::warn!("persist config: {e}"));
+        }
 
         if let Some(pid) = existing_pid {
-            terminate_pid(pid).await;
+            proc::terminate_pid(pid).await;
         }
-        self.ensure_stream_port_available()?;
+        adb::ensure_stream_port_available(self.stream_port)
+            .map_err(|_| CoreError::PortBusy(self.stream_port))?;
 
         let use_rust_streamer = std::env::var("WBEAM_USE_RUST_STREAMER")
             .ok()
@@ -698,6 +684,9 @@ impl DaemonCore {
                 .arg("/tmp/wbeam-frames")
                 .arg("--debug-fps")
                 .arg(cfg.debug_fps.to_string());
+            if cfg.intra_only {
+                cmd.arg("--intra-only");
+            }
         } else {
             if use_rust_streamer {
                 warn!(path = %rust_streamer_bin.display(), "rust streamer missing, falling back to python helper");
@@ -804,7 +793,7 @@ impl DaemonCore {
             inner.no_present_streak = 0;
         }
 
-        if let Some(bps) = parse_kbps_line_to_bps(line) {
+        if let Some(bps) = proc::parse_kbps_line_to_bps(line) {
             inner.metrics.bitrate_actual_bps = bps;
         }
     }
@@ -921,78 +910,13 @@ impl DaemonCore {
         }
 
         if let Some(reason) = refresh_reverse_reason {
-            self.ensure_usb_reverse(reason).await;
+            adb::ensure_usb_reverse(&self.root, self.stream_port, self.control_port, reason).await;
         }
 
         if let Some(pid) = kill_pid {
             warn!(pid, "watchdog terminating stalled stream process");
-            terminate_pid(pid).await;
+            proc::terminate_pid(pid).await;
         }
-    }
-
-    fn ensure_stream_port_available(&self) -> Result<(), CoreError> {
-        if TcpListener::bind(("0.0.0.0", self.stream_port)).is_ok() {
-            return Ok(());
-        }
-
-        warn!(port = self.stream_port, "stream port busy, trying self-heal");
-        let _ = std::process::Command::new("fuser")
-            .arg("-k")
-            .arg(format!("{}/tcp", self.stream_port))
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-
-        std::thread::sleep(Duration::from_millis(200));
-
-        if TcpListener::bind(("0.0.0.0", self.stream_port)).is_ok() {
-            return Ok(());
-        }
-
-        Err(CoreError::PortBusy(self.stream_port))
-    }
-
-    async fn ensure_usb_reverse(&self, reason: &str) {
-        info!(reason, "refreshing adb reverse mappings");
-        let script = self.root.join("host/scripts/usb_reverse.sh");
-        match Command::new(script)
-            .arg(self.stream_port.to_string())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .await
-        {
-            Ok(status) if status.success() => {}
-            Ok(status) => warn!(reason, code = ?status.code(), "usb_reverse.sh failed"),
-            Err(err) => warn!(reason, error = %err, "failed to execute usb_reverse.sh"),
-        }
-
-        match Command::new("adb")
-            .arg("reverse")
-            .arg(format!("tcp:{}", self.control_port))
-            .arg(format!("tcp:{}", self.control_port))
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .await
-        {
-            Ok(status) if status.success() => {}
-            Ok(status) => warn!(reason, code = ?status.code(), "adb reverse for control port failed"),
-            Err(err) => warn!(reason, error = %err, "failed to execute adb reverse for control port"),
-        }
-    }
-
-    async fn persist_active_config(&self) -> Result<(), CoreError> {
-        let cfg = { self.inner.lock().await.baseline_config.clone() };
-        let parent = self
-            .runtime_config_path
-            .parent()
-            .ok_or_else(|| CoreError::Io("invalid runtime config path".to_string()))?;
-
-        fs::create_dir_all(parent).map_err(|e| CoreError::Io(e.to_string()))?;
-        let serialized = serde_json::to_string_pretty(&cfg).map_err(|e| CoreError::Io(e.to_string()))?;
-        fs::write(&self.runtime_config_path, serialized).map_err(|e| CoreError::Io(e.to_string()))?;
-        Ok(())
     }
 
     fn base_from_inner(&self, inner: &Inner) -> BaseResponse {
@@ -1012,130 +936,6 @@ impl DaemonCore {
     }
 }
 
-fn is_high_pressure(inner: &Inner, client: &ClientMetricsRequest) -> bool {
-    let target = inner.active_config.fps.max(24) as f64;
-    let frametime_ms = if client.present_fps > 0.0 {
-        1000.0 / client.present_fps.max(0.1)
-    } else {
-        0.0
-    };
-    client.decode_time_ms_p95 > 12.0
-        || client.render_time_ms_p95 > 7.0
-        || client.transport_queue_depth >= 3
-        || client.decode_queue_depth >= 2
-        || client.render_queue_depth >= 1
-        || client.too_late_frames > 0
-        || (frametime_ms > 0.0 && frametime_ms > TARGET_FRAMETIME_MS * 1.20)
-        || client.present_fps < target * 0.90
-}
-
-fn is_low_pressure(inner: &Inner, client: &ClientMetricsRequest) -> bool {
-    let target = inner.active_config.fps.max(24) as f64;
-    let frametime_ms = if client.present_fps > 0.0 {
-        1000.0 / client.present_fps.max(0.1)
-    } else {
-        0.0
-    };
-    client.decode_time_ms_p95 > 0.0
-        && client.decode_time_ms_p95 < 6.5
-        && client.render_time_ms_p95 < 3.5
-        && client.transport_queue_depth == 0
-        && client.decode_queue_depth == 0
-        && client.render_queue_depth == 0
-        && (frametime_ms == 0.0 || frametime_ms <= TARGET_FRAMETIME_MS * 1.02)
-        && client.present_fps >= target * 0.98
-}
-
-fn adaptation_reason(client: &ClientMetricsRequest, high: bool, low: bool) -> String {
-    if high {
-        return format!(
-            "decode_p95={:.2} render_p95={:.2} q={}/{}/{} fps={:.1}",
-            client.decode_time_ms_p95,
-            client.render_time_ms_p95,
-            client.transport_queue_depth,
-            client.decode_queue_depth,
-            client.render_queue_depth,
-            client.present_fps
-        );
-    }
-    if low {
-        return format!(
-            "recovery decode_p95={:.2} render_p95={:.2} fps={:.1}",
-            client.decode_time_ms_p95, client.render_time_ms_p95, client.present_fps
-        );
-    }
-    "stable".to_string()
-}
-
-fn config_for_level(base: &ActiveConfig, level: u8) -> ActiveConfig {
-    let mut cfg = base.clone();
-
-    let (scale_pct, fps_pct, bitrate_pct) = match level {
-        0 => (100, 100, 100),
-        1 => (90, 90, 85),
-        2 => (80, 80, 70),
-        _ => (70, 70, 55),
-    };
-
-    if let Some((w, h)) = parse_size(&cfg.size) {
-        let mut scaled_w = (w.saturating_mul(scale_pct) / 100).clamp(640, 3840);
-        let mut scaled_h = (h.saturating_mul(scale_pct) / 100).clamp(360, 2160);
-        if scaled_w % 2 == 1 {
-            scaled_w = scaled_w.saturating_sub(1);
-        }
-        if scaled_h % 2 == 1 {
-            scaled_h = scaled_h.saturating_sub(1);
-        }
-        cfg.size = format!("{scaled_w}x{scaled_h}");
-    }
-
-    cfg.fps = (base.fps.saturating_mul(fps_pct) / 100).clamp(30, 120);
-    cfg.bitrate_kbps = (base.bitrate_kbps.saturating_mul(bitrate_pct) / 100).clamp(4_000, 120_000);
-    cfg
-}
-
-fn parse_size(size: &str) -> Option<(u32, u32)> {
-    let (w, h) = size.split_once('x')?;
-    Some((w.parse().ok()?, h.parse().ok()?))
-}
-
-fn load_runtime_config(path: &Path) -> Option<ActiveConfig> {
-    let raw = fs::read_to_string(path).ok()?;
-    let parsed: ActiveConfig = serde_json::from_str(&raw).ok()?;
-
-    let patch = ConfigPatch {
-        profile: Some(parsed.profile),
-        encoder: Some(parsed.encoder),
-        cursor_mode: Some(parsed.cursor_mode),
-        size: Some(parsed.size),
-        fps: Some(parsed.fps),
-        bitrate_kbps: Some(parsed.bitrate_kbps),
-        debug_fps: Some(parsed.debug_fps),
-    };
-
-    validate_config(patch, &ActiveConfig::balanced_default()).ok()
-}
-
-fn parse_kbps_line_to_bps(line: &str) -> Option<u64> {
-    // Example: [libx264 @ ...] kb/s:58.61
-    let marker = "kb/s:";
-    let idx = line.find(marker)?;
-    let part = line[idx + marker.len()..].trim();
-    let value = part.split_whitespace().next()?;
-    let kbps: f64 = value.parse().ok()?;
-    Some((kbps * 1000.0) as u64)
-}
-
-async fn terminate_pid(pid: u32) {
-    let pid = Pid::from_raw(pid as i32);
-    let _ = kill(pid, Signal::SIGTERM);
-    sleep(Duration::from_millis(300)).await;
-    let _ = kill(pid, Signal::SIGKILL);
-}
-
-fn build_revision() -> String {
-    option_env!("WBEAM_BUILD_REV").unwrap_or("0.0.dev0-build").to_string()
-}
 
 #[cfg(test)]
 mod tests {
@@ -1207,7 +1007,7 @@ mod tests {
             present_fps: 60.0,
             ..Default::default()
         };
-        assert!(is_high_pressure(&inner, &client));
+        assert!(is_high_pressure(inner.active_config.fps, &client));
     }
 
     #[test]
@@ -1218,7 +1018,7 @@ mod tests {
             decode_time_ms_p95: 5.0,
             ..Default::default()
         };
-        assert!(is_high_pressure(&inner, &client));
+        assert!(is_high_pressure(inner.active_config.fps, &client));
     }
 
     #[test]
@@ -1230,7 +1030,7 @@ mod tests {
             decode_time_ms_p95: 5.0,
             ..Default::default()
         };
-        assert!(is_high_pressure(&inner, &client));
+        assert!(is_high_pressure(inner.active_config.fps, &client));
     }
 
     #[test]
@@ -1242,7 +1042,7 @@ mod tests {
             present_fps: 59.0,        // 59 >= 60 * 0.90 = 54
             ..Default::default()
         };
-        assert!(!is_high_pressure(&inner, &client));
+        assert!(!is_high_pressure(inner.active_config.fps, &client));
     }
 
     // ── is_low_pressure ─────────────────────────────────────────────────────
@@ -1250,7 +1050,7 @@ mod tests {
     #[test]
     fn test_low_pressure_all_healthy() {
         let inner = default_inner();
-        assert!(is_low_pressure(&inner, &low_pressure_client()));
+        assert!(is_low_pressure(inner.active_config.fps, &low_pressure_client()));
     }
 
     #[test]
@@ -1258,7 +1058,7 @@ mod tests {
         let inner = default_inner();
         let mut c = low_pressure_client();
         c.decode_queue_depth = 1;
-        assert!(!is_low_pressure(&inner, &c));
+        assert!(!is_low_pressure(inner.active_config.fps, &c));
     }
 
     #[test]
@@ -1266,7 +1066,7 @@ mod tests {
         let inner = default_inner(); // fps = 60, min = 58.8
         let mut c = low_pressure_client();
         c.present_fps = 58.0; // < 60 * 0.98 = 58.8
-        assert!(!is_low_pressure(&inner, &c));
+        assert!(!is_low_pressure(inner.active_config.fps, &c));
     }
 
     #[test]
@@ -1275,7 +1075,7 @@ mod tests {
         let inner = default_inner();
         let mut c = low_pressure_client();
         c.decode_time_ms_p95 = 0.0;
-        assert!(!is_low_pressure(&inner, &c));
+        assert!(!is_low_pressure(inner.active_config.fps, &c));
     }
 
     // ── adaptation state machine ─────────────────────────────────────────────
@@ -1398,11 +1198,5 @@ mod tests {
         assert_eq!(inner.adaptation_level, 0, "warmup guard must block early adaptation");
     }
 
-    // ── telemetry helpers ────────────────────────────────────────────────────
-
-    #[test]
-    fn test_telemetry_dir_returns_path() {
-        let dir = telemetry_dir();
-        assert!(dir.to_str().unwrap().contains("wbeam"));
-    }
+    // ── telemetry (unit tests are in infra::telemetry) ─────────────────────
 }

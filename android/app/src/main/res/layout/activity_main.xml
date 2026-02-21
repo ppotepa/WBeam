@@ -354,6 +354,14 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content" />
 
+            <Button
+                android:id="@+id/intraOnlyButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="All-Intra: OFF"
+                android:textAllCaps="false" />
+
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -444,7 +452,7 @@
                 android:id="@+id/bitrateSeek"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:max="55" />
+                android:max="295" />
 
             <Button
                 android:id="@+id/cursorOverlayButton"

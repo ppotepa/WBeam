@@ -1,54 +1,5 @@
-################################################################################
-## FILE: adb-logs.sh  (28 lines)
-################################################################################
-#!/bin/bash
-# Stream ADB logs for WBeam app
-
-set -e
-
-APP_PACKAGE="com.wbeam"
-
-echo "=== WBeam ADB Logs Stream ==="
-echo "Package: $APP_PACKAGE"
-echo "Press Ctrl+C to stop"
-echo ""
-
-# Clear logcat buffer first
-adb logcat -c 2>/dev/null || true
-
-# Stream logs filtered for WBeam app
-# Shows: app logs, native crashes, and relevant system messages
-adb logcat \
-  -v color \
-  -v threadtime \
-  --pid=$(adb shell pidof -s $APP_PACKAGE 2>/dev/null || echo "0") \
-  *:V \
-  | grep --line-buffered -E "wbeam|WBeam|WBTP|dalvikvm|AndroidRuntime|DEBUG|libc" \
-  || {
-    # Fallback if package not running - show all WBeam-related logs
-    echo "⚠️  App not running, showing all WBeam logs..."
-    adb logcat -v color -v threadtime | grep --line-buffered -i "wbeam"
-  }
-
-
-################################################################################
-## FILE: service.sh  (13 lines)
-################################################################################
-#!/bin/bash
-# WBeam daemon service management (wrapper)
-
-SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
-SERVICE_SCRIPT="$SCRIPT_DIR/host/scripts/wbeam-service.sh"
-
-if [[ ! -f "$SERVICE_SCRIPT" ]]; then
-    echo "❌ Service script not found: $SERVICE_SCRIPT"
-    exit 1
-fi
-
-# Forward all arguments to the actual service script
-exec "$SERVICE_SCRIPT" "$@"
-
-
+## MISSING: adb-logs.sh
+## MISSING: service.sh
 ################################################################################
 ## FILE: upload-android.sh  (87 lines)
 ################################################################################
@@ -136,317 +87,13 @@ echo ""
 echo "✅ Upload complete!"
 echo ""
 echo "Next steps:"
-echo "  • Start daemon: ./service.sh start"
-echo "  • View logs: ./adb-logs.sh"
+echo "  • Start daemon: ./wbeam service up"
+echo "  • View logs: ./wbeam logs live"
 echo "  • Check status: curl http://127.0.0.1:5001/status"
 
 
-################################################################################
-## FILE: host/scripts/wbeam-service.sh  (197 lines)
-################################################################################
-#!/usr/bin/env bash
-# WBeam Daemon - systemd service manager
-# Usage: ./wbeam-service.sh [start|stop|remove|status]
-
-set -e
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-DAEMON_BIN="$ROOT_DIR/host/rust/target/release/wbeamd-server"
-SERVICE_NAME="wbeam-daemon"
-SERVICE_FILE="$HOME/.config/systemd/user/${SERVICE_NAME}.service"
-
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
-
-usage() {
-    echo "WBeam Daemon Service Manager"
-    echo ""
-    echo "Usage: $0 [command]"
-    echo ""
-    echo "Commands:"
-    echo "  start   - Start daemon (creates service if needed)"
-    echo "  stop    - Stop daemon"
-    echo "  remove  - Remove service completely"
-    echo "  status  - Show service status"
-    echo "  restart - Restart daemon"
-    echo ""
-    exit 1
-}
-
-check_binary() {
-    if [ ! -f "$DAEMON_BIN" ]; then
-        echo -e "${RED}✗ Binary not found: $DAEMON_BIN${NC}"
-        echo "Build it: cd $ROOT_DIR/host/rust && cargo build -p wbeamd-server --release"
-        exit 1
-    fi
-}
-
-create_service() {
-    echo -e "${BLUE}Creating systemd service...${NC}"
-    
-    mkdir -p "$HOME/.config/systemd/user"
-    
-    cat > "$SERVICE_FILE" <<EOF
-[Unit]
-Description=WBeam Screen Streaming Daemon
-After=graphical-session.target
-
-[Service]
-Type=simple
-ExecStart=$DAEMON_BIN --control-port 5001 --stream-port 5000 --root $ROOT_DIR
-Restart=on-failure
-RestartSec=5
-Environment="RUST_LOG=info"
-Environment="WBEAM_USE_RUST_STREAMER=1"
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=default.target
-EOF
-
-    systemctl --user daemon-reload
-    echo -e "${GREEN}✓ Service created: $SERVICE_FILE${NC}"
-}
-
-cmd_start() {
-    check_binary
-    
-    # Kill any manually running instances
-    pkill -9 wbeamd-server 2>/dev/null || true
-    pkill -9 wbeamd-streamer 2>/dev/null || true
-    rm -f /tmp/wbeamd.lock
-    sleep 1
-    
-    # Create service if doesn't exist
-    if [ ! -f "$SERVICE_FILE" ]; then
-        create_service
-    fi
-    
-    # Enable and start
-    systemctl --user enable "$SERVICE_NAME" 2>/dev/null || true
-    systemctl --user start "$SERVICE_NAME"
-    
-    sleep 2
-    
-    # Check status
-    if systemctl --user is-active "$SERVICE_NAME" >/dev/null 2>&1; then
-        echo -e "${GREEN}✓ Daemon started${NC}"
-        
-        # Test HTTP
-        if curl -s -f http://127.0.0.1:5001/status >/dev/null 2>&1; then
-            STATE=$(curl -s http://127.0.0.1:5001/status | grep -o '"state":"[^"]*"' | cut -d'"' -f4)
-            echo "  State: $STATE"
-            echo "  Control: http://127.0.0.1:5001/status"
-            echo "  Stream: tcp://127.0.0.1:5000"
-            echo ""
-            echo "Logs: journalctl --user -u $SERVICE_NAME -f"
-        else
-            echo -e "${YELLOW}⚠ Service started but HTTP not responding yet${NC}"
-            echo "Check logs: journalctl --user -u $SERVICE_NAME -n 50"
-        fi
-    else
-        echo -e "${RED}✗ Failed to start service${NC}"
-        journalctl --user -u "$SERVICE_NAME" -n 20
-        exit 1
-    fi
-}
-
-cmd_stop() {
-    echo -e "${BLUE}Stopping daemon...${NC}"
-    
-    systemctl --user stop "$SERVICE_NAME" 2>/dev/null || true
-    
-    # Kill any stragglers
-    pkill -9 wbeamd-server 2>/dev/null || true
-    pkill -9 wbeamd-streamer 2>/dev/null || true
-    rm -f /tmp/wbeamd.lock
-    
-    echo -e "${GREEN}✓ Daemon stopped${NC}"
-}
-
-cmd_remove() {
-    echo -e "${BLUE}Removing service...${NC}"
-    
-    # Stop first
-    systemctl --user stop "$SERVICE_NAME" 2>/dev/null || true
-    systemctl --user disable "$SERVICE_NAME" 2>/dev/null || true
-    
-    # Remove service file
-    if [ -f "$SERVICE_FILE" ]; then
-        rm -f "$SERVICE_FILE"
-        systemctl --user daemon-reload
-        echo -e "${GREEN}✓ Service removed: $SERVICE_FILE${NC}"
-    else
-        echo -e "${YELLOW}! Service file not found${NC}"
-    fi
-    
-    # Clean up
-    pkill -9 wbeamd-server 2>/dev/null || true
-    pkill -9 wbeamd-streamer 2>/dev/null || true
-    rm -f /tmp/wbeamd.lock
-    
-    echo -e "${GREEN}✓ Cleanup complete${NC}"
-}
-
-cmd_status() {
-    if [ -f "$SERVICE_FILE" ]; then
-        echo -e "${BLUE}Service file:${NC} $SERVICE_FILE"
-        echo ""
-        systemctl --user status "$SERVICE_NAME" --no-pager || true
-        echo ""
-        
-        # Check HTTP
-        if curl -s -f http://127.0.0.1:5001/status >/dev/null 2>&1; then
-            echo -e "${GREEN}✓ HTTP API responding${NC}"
-            curl -s http://127.0.0.1:5001/status | jq . 2>/dev/null || curl -s http://127.0.0.1:5001/status
-        else
-            echo -e "${YELLOW}✗ HTTP API not responding${NC}"
-        fi
-    else
-        echo -e "${YELLOW}! Service not installed${NC}"
-        echo "Run: $0 start"
-    fi
-}
-
-cmd_restart() {
-    cmd_stop
-    sleep 2
-    cmd_start
-}
-
-# Main
-case "${1:-}" in
-    start)
-        cmd_start
-        ;;
-    stop)
-        cmd_stop
-        ;;
-    remove)
-        cmd_remove
-        ;;
-    status)
-        cmd_status
-        ;;
-    restart)
-        cmd_restart
-        ;;
-    *)
-        usage
-        ;;
-esac
-
-
-################################################################################
-## FILE: host/scripts/start_daemon.sh  (99 lines)
-################################################################################
-#!/usr/bin/env bash
-# WBeam Daemon - Production Starter
-# Uruchamia daemon w tle z logowaniem
-
-set -e
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-DAEMON_BIN="$ROOT_DIR/host/rust/target/release/wbeamd-server"
-LOG_FILE="/tmp/wbeam-daemon.log"
-PID_FILE="/tmp/wbeamd.pid"
-
-# Kolory
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-# Sprawdź czy daemon już działa
-if [ -f "$PID_FILE" ]; then
-    OLD_PID=$(cat "$PID_FILE")
-    if ps -p "$OLD_PID" >/dev/null 2>&1; then
-        echo -e "${YELLOW}Daemon już działa (PID: $OLD_PID)${NC}"
-        echo "Status: curl http://127.0.0.1:5001/status"
-        echo "Stop: kill $OLD_PID"
-        exit 0
-    fi
-    rm -f "$PID_FILE"
-fi
-
-# Sprawdź binarkę
-if [ ! -f "$DAEMON_BIN" ]; then
-    echo -e "${RED}Błąd: Binarny daemon nie znaleziony: $DAEMON_BIN${NC}"
-    echo "Zbuduj: cd $ROOT_DIR/host/rust && cargo build -p wbeamd-server --release"
-    exit 1
-fi
-
-# Cleanup starych procesów i locków
-pkill -9 wbeamd-server 2>/dev/null || true
-rm -f /tmp/wbeamd.lock
-sleep 1
-
-# Setup ADB reverse (jeśli Android podłączony)
-if command -v adb >/dev/null 2>&1 && adb devices 2>/dev/null | grep -q "device$"; then
-    echo -e "${GREEN}✓${NC} Android wykryty, setupuję ADB reverse..."
-    adb reverse tcp:5000 tcp:5000 || true
-    adb reverse tcp:5001 tcp:5001 || true
-else
-    echo -e "${YELLOW}!${NC} Brak podłączonego Androida (można połączyć później)"
-fi
-
-# Uruchom daemon
-echo -e "${GREEN}Uruchamiam daemon...${NC}"
-cd "$ROOT_DIR"
-RUST_LOG=info nohup "$DAEMON_BIN" \
-    --control-port 5001 \
-    --stream-port 5000 \
-    --root "$ROOT_DIR" \
-    > "$LOG_FILE" 2>&1 &
-
-DAEMON_PID=$!
-echo $DAEMON_PID > "$PID_FILE"
-
-# Poczekaj na start
-sleep 2
-
-# Sprawdź czy działa
-if ! ps -p $DAEMON_PID >/dev/null 2>&1; then
-    echo -e "${RED}✗ Daemon nie uruchomił się!${NC}"
-    echo "Log:"
-    tail -20 "$LOG_FILE"
-    rm -f "$PID_FILE"
-    exit 1
-fi
-
-# Test HTTP
-if curl -s -f http://127.0.0.1:5001/status >/dev/null 2>&1; then
-    STATE=$(curl -s http://127.0.0.1:5001/status | grep -o '"state":"[^"]*"' | cut -d'"' -f4)
-    echo -e "${GREEN}✓ Daemon działa!${NC}"
-    echo "  PID: $DAEMON_PID"
-    echo "  State: $STATE"
-    echo "  Control: http://127.0.0.1:5001/status"
-    echo "  Stream: tcp://127.0.0.1:5000"
-    echo "  Log: $LOG_FILE"
-    echo ""
-    echo "Komendy:"
-    echo "  Status:  curl http://127.0.0.1:5001/status"
-    echo "  Start:   curl -X POST http://127.0.0.1:5001/start"
-    echo "  Stop:    curl -X POST http://127.0.0.1:5001/stop"
-    echo "  Kill:    kill $DAEMON_PID"
-    echo "  Logs:    tail -f $LOG_FILE"
-else
-    echo -e "${RED}✗ Daemon nie odpowiada na HTTP${NC}"
-    echo "Log:"
-    tail -20 "$LOG_FILE"
-    kill $DAEMON_PID 2>/dev/null || true
-    rm -f "$PID_FILE"
-    exit 1
-fi
-
-
+## MISSING: host/scripts/wbeam-service.sh
+## MISSING: host/scripts/start_daemon.sh
 ################################################################################
 ## FILE: host/scripts/run_wbeamd.sh  (61 lines)
 ################################################################################
@@ -673,78 +320,8 @@ set -e
 exit "$host_exit"
 
 
-################################################################################
-## FILE: host/scripts/run_wbeamd_fast.sh  (31 lines)
-################################################################################
-#!/usr/bin/env bash
-# Fast daemon runner - uses pre-built binary instead of cargo run
-set -euo pipefail
-
-CONTROL_PORT="${1:-5001}"
-STREAM_PORT="${2:-5000}"
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-DAEMON_BIN="$ROOT_DIR/host/rust/target/release/wbeamd-server"
-
-# Check if binary exists
-if [ ! -f "$DAEMON_BIN" ]; then
-    echo "Error: Daemon binary not found at $DAEMON_BIN"
-    echo "Build it first: cd $ROOT_DIR/host/rust && cargo build -p wbeamd-server --release"
-    exit 1
-fi
-
-# Setup ADB reverse
-echo "[wbeam] Setting up ADB reverse..."
-"$SCRIPT_DIR/usb_reverse.sh" "$STREAM_PORT"
-adb reverse "tcp:${CONTROL_PORT}" "tcp:${CONTROL_PORT}"
-
-# Run the daemon
-echo "[wbeam] Starting daemon from: $DAEMON_BIN"
-echo "[wbeam] Control port: $CONTROL_PORT, Stream port: $STREAM_PORT"
-
-exec "$DAEMON_BIN" \
-  --control-port "$CONTROL_PORT" \
-  --stream-port "$STREAM_PORT" \
-  --root "$ROOT_DIR"
-
-
-################################################################################
-## FILE: host/scripts/run_daemon_local.sh  (31 lines)
-################################################################################
-#!/usr/bin/env bash
-# Start daemon bez wymagan ADB - do testów lokalnych
-set -euo pipefail
-
-CONTROL_PORT="${1:-5001}"
-STREAM_PORT="${2:-5000}"
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-DAEMON_BIN="$ROOT_DIR/host/rust/target/release/wbeamd-server"
-
-# Check if binary exists
-if [ ! -f "$DAEMON_BIN" ]; then
-    echo "Error: Daemon binary not found at $DAEMON_BIN"
-    echo "Build it: cd $ROOT_DIR/host/rust && cargo build -p wbeamd-server --release"
-    exit 1
-fi
-
-echo "[wbeam] Starting daemon (NO ADB REQUIRED)"
-echo "[wbeam] Binary: $DAEMON_BIN"
-echo "[wbeam] Control: http://127.0.0.1:$CONTROL_PORT/status"
-echo "[wbeam] Stream: tcp://127.0.0.1:$STREAM_PORT"
-echo ""
-echo "Daemon will start streamer on first /start request"
-echo "Test: curl http://127.0.0.1:$CONTROL_PORT/status"
-echo ""
-
-exec "$DAEMON_BIN" \
-  --control-port "$CONTROL_PORT" \
-  --stream-port "$STREAM_PORT" \
-  --root "$ROOT_DIR"
-
-
+## MISSING: host/scripts/run_wbeamd_fast.sh
+## MISSING: host/scripts/run_daemon_local.sh
 ################################################################################
 ## FILE: host/scripts/run_soak_local.sh  (134 lines)
 ################################################################################
@@ -1117,7 +694,7 @@ fi
 
 if [[ -z "$HOST_FILE" ]]; then
   echo "[live] no host debug log found in $LOG_DIR" >&2
-  echo "[live] start daemon first: ./host/scripts/run_wbeamd_debug.sh 5001 5000" >&2
+  echo "[live] start daemon first: ./wbeam debug up" >&2
   exit 1
 fi
 
@@ -1127,7 +704,7 @@ if [[ -f "$HOST_FILE" ]]; then
   age_s=$((now_ts - file_ts))
   if (( age_s > 300 )); then
     echo "[live] warning: host log looks stale (${age_s}s old): $HOST_FILE" >&2
-    echo "[live] run fresh daemon first: ./host/scripts/run_wbeamd_debug.sh 5001 5000" >&2
+    echo "[live] run fresh daemon first: ./wbeam debug up" >&2
   fi
 fi
 
@@ -1194,570 +771,13 @@ ADB_PID=$!
 wait -n "$TAIL_PID" "$ADB_PID"
 
 
+## MISSING: host/scripts/watch_hud_adb.sh
+## MISSING: host/scripts/test_streamer_manual.sh
+## MISSING: host/scripts/diagnose_streamer.sh
+## MISSING: host/scripts/install_gstreamer_encoder.sh
+## MISSING: host/scripts/virtual_monitor_x11.sh
 ################################################################################
-## FILE: host/scripts/watch_hud_adb.sh  (5 lines)
-################################################################################
-#!/usr/bin/env bash
-set -euo pipefail
-
-# Live HUD debug stream from Android app (1s cadence from app side)
-adb logcat -v time -s WBeamMain:I | rg --line-buffered "HUDDBG|stream worker failed|daemon poll failed|status=error"
-
-
-################################################################################
-## FILE: host/scripts/test_streamer_manual.sh  (89 lines)
-################################################################################
-#!/bin/bash
-# Quick manual test of the Rust streamer
-
-set -e
-
-STREAMER_BIN="/mnt/fat_boii/git/WBeam/host/rust/target/release/wbeamd-streamer"
-
-echo "=== Manual Rust Streamer Test ==="
-echo ""
-echo "This will:"
-echo "  1. Start the streamer (you'll need to select a screen)"
-echo "  2. Run for 5 seconds"
-echo "  3. Test TCP connection for WBTP magic"
-echo "  4. Stop cleanly"
-echo ""
-echo "Press Enter to continue..."
-read
-
-# Start streamer in background
-echo "[1/3] Starting streamer..."
-RUST_LOG=info "$STREAMER_BIN" --profile balanced --port 5000 --debug-fps 1 --debug-dir /tmp/wbeam-test &
-STREAMER_PID=$!
-
-echo "  Streamer PID: $STREAMER_PID"
-echo "  Waiting 5 seconds for startup and portal selection..."
-sleep 5
-
-# Check if still running
-if ! ps -p $STREAMER_PID >/dev/null 2>&1; then
-    echo "  ✗ Streamer died!"
-    exit 1
-fi
-
-echo "  ✓ Streamer is running"
-
-# Test TCP connection
-echo ""
-echo "[2/3] Testing WBTP stream..."
-if timeout 2 bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/5000' 2>/dev/null; then
-    echo "  ✓ Port 5000 accepts connections"
-    
-    # Read header
-    HEADER=$(timeout 2 nc localhost 5000 2>/dev/null | head -c 4 | xxd -p || echo "")
-    if [ "$HEADER" = "57425450" ]; then
-        echo "  ✓ WBTP magic header detected: WBTP (0x57425450)"
-    else
-        echo "  ✗ Wrong header: 0x$HEADER (expected 0x57425450)"
-    fi
-else
-    echo "  ✗ Cannot connect to port 5000"
-fi
-
-# Check debug frames
-echo ""
-echo "[3/3] Checking debug frames..."
-if [ -d "/tmp/wbeam-test" ]; then
-    FRAME_COUNT=$(ls /tmp/wbeam-test/*.jpg 2>/dev/null | wc -l || echo 0)
-    if [ $FRAME_COUNT -gt 0 ]; then
-        echo "  ✓ Found $FRAME_COUNT debug frames"
-        LATEST=$(ls -t /tmp/wbeam-test/*.jpg | head -1)
-        SIZE=$(stat -c %s "$LATEST")
-        echo "  Latest: $LATEST ($SIZE bytes)"
-        
-        if [ $SIZE -lt 1000 ]; then
-            echo "  ⚠ Frame is very small - might be black screen"
-        else
-            echo "  ✓ Frame size looks reasonable"
-        fi
-    else
-        echo "  ⚠ No frames yet (may need more time)"
-    fi
-else
-    echo "  ⚠ Debug directory not created"
-fi
-
-# Cleanup
-echo ""
-echo "Stopping streamer..."
-kill $STREAMER_PID 2>/dev/null || true
-wait $STREAMER_PID 2>/dev/null || true
-
-echo ""
-echo "=== Test Complete ==="
-echo ""
-echo "Next steps:"
-echo "  1. If encoder warnings appeared, check logs above"
-echo "  2. If WBTP header detected, streamer works!"
-echo "  3. View debug frames: ls -lh /tmp/wbeam-test/*.jpg"
-echo "  4. Start daemon: cd /mnt/fat_boii/git/WBeam/host/rust/scripts && ./run_wbeamd_rust.sh"
-
-
-################################################################################
-## FILE: host/scripts/diagnose_streamer.sh  (246 lines)
-################################################################################
-#!/bin/bash
-# WBeam Rust Streamer Diagnostic Script
-# Comprehensive troubleshooting for black screen / portal issues
-
-set -e
-
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-RUST_DIR="$REPO_ROOT/host/rust"
-STREAMER_BIN="$RUST_DIR/target/release/wbeamd-streamer"
-DAEMON_LOG="$RUST_DIR/logs/wbeamd-rust.log"
-
-echo -e "${BLUE}=== WBeam Rust Streamer Diagnostic ===${NC}\n"
-
-# 1. Check binary exists and is recent
-echo -e "${YELLOW}[1/15] Checking Rust streamer binary...${NC}"
-if [ -f "$STREAMER_BIN" ]; then
-    BINARY_AGE=$(stat -c %Y "$STREAMER_BIN")
-    NOW=$(date +%s)
-    AGE_HOURS=$(( (NOW - BINARY_AGE) / 3600 ))
-    echo -e "${GREEN}✓${NC} Binary exists: $STREAMER_BIN"
-    ls -lh "$STREAMER_BIN"
-    echo "  Built $AGE_HOURS hours ago"
-else
-    echo -e "${RED}✗${NC} Binary missing: $STREAMER_BIN"
-    echo "  Run: cd $RUST_DIR && cargo build -p wbeamd-streamer --release"
-    exit 1
-fi
-
-# 2. Check environment variables
-echo -e "\n${YELLOW}[2/15] Checking environment configuration...${NC}"
-USE_RUST="${WBEAM_USE_RUST_STREAMER:-1}"
-RUST_BIN_PATH="${WBEAM_RUST_STREAMER_BIN:-$STREAMER_BIN}"
-echo "  WBEAM_USE_RUST_STREAMER=${USE_RUST}"
-echo "  WBEAM_RUST_STREAMER_BIN=${RUST_BIN_PATH}"
-if [ "$USE_RUST" = "1" ] || [ "$USE_RUST" = "true" ]; then
-    echo -e "${GREEN}✓${NC} Rust streamer enabled"
-else
-    echo -e "${YELLOW}!${NC} Rust streamer disabled (will use Python fallback)"
-fi
-
-# 3. Check portal and PipeWire services
-echo -e "\n${YELLOW}[3/15] Checking portal/PipeWire services...${NC}"
-if systemctl --user is-active pipewire >/dev/null 2>&1; then
-    echo -e "${GREEN}✓${NC} pipewire is active"
-else
-    echo -e "${RED}✗${NC} pipewire is not active"
-    echo "  Run: systemctl --user restart pipewire"
-fi
-
-if systemctl --user is-active xdg-desktop-portal >/dev/null 2>&1; then
-    echo -e "${GREEN}✓${NC} xdg-desktop-portal is active"
-else
-    echo -e "${RED}✗${NC} xdg-desktop-portal is not active"
-    echo "  Run: systemctl --user restart xdg-desktop-portal"
-fi
-
-# 4. Check D-Bus session
-echo -e "\n${YELLOW}[4/15] Checking D-Bus session...${NC}"
-if [ -n "$DBUS_SESSION_BUS_ADDRESS" ]; then
-    echo -e "${GREEN}✓${NC} D-Bus session available: $DBUS_SESSION_BUS_ADDRESS"
-else
-    echo -e "${RED}✗${NC} No D-Bus session address (run from graphical session, not sudo)"
-fi
-
-# 5. Check GStreamer plugins
-echo -e "\n${YELLOW}[5/15] Checking GStreamer H.264 encoders...${NC}"
-HAS_NVENC=$(gst-inspect-1.0 nvh264enc >/dev/null 2>&1 && echo "yes" || echo "no")
-HAS_OPENH264=$(gst-inspect-1.0 openh264enc >/dev/null 2>&1 && echo "yes" || echo "no")
-if [ "$HAS_NVENC" = "yes" ]; then
-    echo -e "${GREEN}✓${NC} nvh264enc available (NVIDIA hardware encoder)"
-else
-    echo -e "${YELLOW}!${NC} nvh264enc not available"
-fi
-if [ "$HAS_OPENH264" = "yes" ]; then
-    echo -e "${GREEN}✓${NC} openh264enc available (software encoder)"
-else
-    echo -e "${RED}✗${NC} openh264enc not available"
-    echo "  Install: sudo apt install gstreamer1.0-plugins-bad"
-fi
-
-# 6. Check port availability
-echo -e "\n${YELLOW}[6/15] Checking port availability...${NC}"
-if ss -ltn | grep -q ":5000 "; then
-    PROC=$(ss -ltnp | grep ":5000 " | awk '{print $6}' | head -1)
-    echo -e "${YELLOW}!${NC} Port 5000 is already in use by: $PROC"
-else
-    echo -e "${GREEN}✓${NC} Port 5000 is available"
-fi
-if ss -ltn | grep -q ":5001 "; then
-    PROC=$(ss -ltnp | grep ":5001 " | awk '{print $6}' | head -1)
-    echo -e "${YELLOW}!${NC} Port 5001 is already in use by: $PROC"
-else
-    echo -e "${GREEN}✓${NC} Port 5001 is available"
-fi
-
-# 7. Check firewall
-echo -e "\n${YELLOW}[7/15] Checking firewall...${NC}"
-if command -v ufw >/dev/null 2>&1; then
-    if sudo ufw status | grep -q "Status: active"; then
-        echo -e "${YELLOW}!${NC} ufw firewall is active"
-        echo "  Ensure ports 5000-5001 are allowed or disable temporarily: sudo ufw disable"
-    else
-        echo -e "${GREEN}✓${NC} ufw firewall is inactive"
-    fi
-else
-    echo -e "${GREEN}✓${NC} ufw not installed"
-fi
-
-# 8. Check ADB reverse
-echo -e "\n${YELLOW}[8/15] Checking ADB reverse setup...${NC}"
-if command -v adb >/dev/null 2>&1; then
-    if adb devices 2>/dev/null | grep -q "device$"; then
-        echo -e "${GREEN}✓${NC} ADB device connected"
-        adb reverse --list 2>/dev/null || echo "  No reverse mappings"
-    else
-        echo -e "${YELLOW}!${NC} No ADB devices connected"
-    fi
-else
-    echo -e "${YELLOW}!${NC} adb command not found"
-fi
-
-# 9. Test manual streamer startup (quick test)
-echo -e "\n${YELLOW}[9/15] Testing manual streamer startup...${NC}"
-echo "  This will prompt for screen selection - accept it, then wait 3 seconds..."
-echo "  Press Ctrl+C if portal hangs."
-timeout 10 env RUST_LOG=info "$STREAMER_BIN" --profile balanced --port 5000 --debug-fps 0 &
-STREAMER_PID=$!
-sleep 3
-
-if ps -p $STREAMER_PID >/dev/null 2>&1; then
-    echo -e "${GREEN}✓${NC} Streamer process started (PID $STREAMER_PID)"
-    
-    # 10. Test TCP connection
-    echo -e "\n${YELLOW}[10/15] Testing WBTP stream availability...${NC}"
-    if timeout 2 bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/5000' 2>/dev/null; then
-        echo -e "${GREEN}✓${NC} Port 5000 accepts connections"
-        
-        # Try to read WBTP header
-        HEADER=$(timeout 2 nc localhost 5000 2>/dev/null | head -c 4 | od -An -tx1 || echo "")
-        if echo "$HEADER" | grep -q "57 42 54 50"; then
-            echo -e "${GREEN}✓${NC} WBTP magic header detected: WBTP"
-        else
-            echo -e "${RED}✗${NC} No WBTP header received (got: $HEADER)"
-        fi
-    else
-        echo -e "${RED}✗${NC} Cannot connect to port 5000"
-    fi
-    
-    # 11. Check debug JPEG output
-    echo -e "\n${YELLOW}[11/15] Checking for debug frame output...${NC}"
-    if [ -d "/tmp/wbeam-frames" ] && [ "$(ls -A /tmp/wbeam-frames 2>/dev/null)" ]; then
-        FRAME_COUNT=$(ls /tmp/wbeam-frames/*.jpg 2>/dev/null | wc -l || echo 0)
-        echo -e "${GREEN}✓${NC} Found $FRAME_COUNT debug JPEG frames in /tmp/wbeam-frames/"
-        if [ $FRAME_COUNT -gt 0 ]; then
-            LATEST=$(ls -t /tmp/wbeam-frames/*.jpg | head -1)
-            SIZE=$(stat -c %s "$LATEST")
-            echo "  Latest frame: $LATEST ($SIZE bytes)"
-            if [ $SIZE -lt 1000 ]; then
-                echo -e "${YELLOW}!${NC} Frame is very small - might be black screen"
-            fi
-        fi
-    else
-        echo -e "${YELLOW}!${NC} No debug frames (run with --debug-fps 1 to enable)"
-    fi
-    
-    kill $STREAMER_PID 2>/dev/null || true
-    wait $STREAMER_PID 2>/dev/null || true
-else
-    echo -e "${RED}✗${NC} Streamer process died immediately"
-    echo "  Check for portal errors in logs"
-fi
-
-# 12. Check daemon logs
-echo -e "\n${YELLOW}[12/15] Checking daemon logs...${NC}"
-if [ -f "$DAEMON_LOG" ]; then
-    echo "  Last 10 lines of daemon log:"
-    tail -10 "$DAEMON_LOG" | sed 's/^/    /'
-    
-    if grep -q "Streaming Wayland screencast" "$DAEMON_LOG"; then
-        echo -e "${GREEN}✓${NC} Daemon has successfully started streaming before"
-    else
-        echo -e "${YELLOW}!${NC} No 'Streaming Wayland screencast' message found in daemon log"
-    fi
-    
-    if grep -q "stream process started" "$DAEMON_LOG"; then
-        echo -e "${GREEN}✓${NC} Daemon has spawned streamer process"
-    else
-        echo -e "${YELLOW}!${NC} No 'stream process started' in daemon log"
-    fi
-else
-    echo -e "${YELLOW}!${NC} Daemon log not found: $DAEMON_LOG"
-fi
-
-# 13. Check portal cache
-echo -e "\n${YELLOW}[13/15] Checking portal cache...${NC}"
-PORTAL_CACHE="$HOME/.cache/xdg-desktop-portal"
-if [ -d "$PORTAL_CACHE" ]; then
-    CACHE_SIZE=$(du -sh "$PORTAL_CACHE" 2>/dev/null | cut -f1)
-    echo "  Portal cache exists: $PORTAL_CACHE ($CACHE_SIZE)"
-    echo "  To clear: rm -rf $PORTAL_CACHE && systemctl --user restart xdg-desktop-portal"
-else
-    echo -e "${GREEN}✓${NC} No portal cache directory"
-fi
-
-# 14. Network connectivity
-echo -e "\n${YELLOW}[14/15] Checking network connectivity...${NC}"
-if ping -c 1 8.8.8.8 >/dev/null 2>&1; then
-    echo -e "${GREEN}✓${NC} Internet connectivity working"
-else
-    echo -e "${YELLOW}!${NC} No internet connectivity"
-fi
-
-# 15. Summary and recommendations
-echo -e "\n${BLUE}=== Summary & Recommendations ===${NC}"
-echo ""
-echo "Pre-flight checklist before connecting Android:"
-echo "  1. Binary exists and is recent: $STREAMER_BIN"
-echo "  2. pipewire + xdg-desktop-portal services are active"
-echo "  3. D-Bus session is available (run from graphical session)"
-echo "  4. At least one H.264 encoder available (nvenc or openh264)"
-echo "  5. Ports 5000-5001 are free or only used by wbeam"
-echo "  6. ADB reverse is set up (adb reverse tcp:5000 tcp:5000 tcp:5001 tcp:5001)"
-echo "  7. Manual streamer test shows WBTP header on port 5000"
-echo ""
-echo "If Android shows black screen:"
-echo "  - Enable debug frames: Run streamer with --debug-fps 1 --debug-dir /tmp/wbeam-frames"
-echo "  - Check /tmp/wbeam-frames/*.jpg - if black, portal is selecting wrong screen"
-echo "  - Clear portal cache: rm -rf ~/.cache/xdg-desktop-portal* && restart services"
-echo "  - Check daemon log for 'Streaming Wayland screencast' message"
-echo ""
-echo "If portal keeps asking for screen selection:"
-echo "  - Portal persist mode might not be working (ashpd 0.7 limitation)"
-echo "  - Manually select same screen each time"
-echo "  - Check journalctl --user -u xdg-desktop-portal for errors"
-echo ""
-echo "Test with Python fallback:"
-echo "  WBEAM_USE_RUST_STREAMER=0 $RUST_DIR/scripts/run_wbeamd_rust.sh"
-echo ""
-echo -e "${GREEN}Diagnostic complete.${NC}"
-
-
-################################################################################
-## FILE: host/scripts/install_gstreamer_encoder.sh  (59 lines)
-################################################################################
-#!/bin/bash
-# Quick fix script for missing H.264 encoder
-
-set -e
-
-echo "=== Installing missing GStreamer components ==="
-echo ""
-
-# Install gstreamer tools
-echo "[1/4] Installing gstreamer1.0-tools..."
-sudo apt-get update -qq
-sudo apt-get install -y gstreamer1.0-tools
-
-# Install x264 encoder (from ugly plugins)
-echo ""
-echo "[2/4] Installing gstreamer1.0-plugins-ugly (x264enc)..."
-sudo apt-get install -y gstreamer1.0-plugins-ugly
-
-# Install additional encoders
-echo ""
-echo "[3/4] Installing gstreamer1.0-plugins-bad (nvh264enc, others)..."
-sudo apt-get install -y gstreamer1.0-plugins-bad-apps || true
-
-# Verify installation
-echo ""
-echo "[4/4] Verifying H.264 encoders..."
-echo ""
-
-if gst-inspect-1.0 x264enc >/dev/null 2>&1; then
-    echo "✓ x264enc available (software encoder)"
-else
-    echo "✗ x264enc not available"
-fi
-
-if gst-inspect-1.0 nvh264enc >/dev/null 2>&1; then
-    echo "✓ nvh264enc available (NVIDIA hardware encoder)"
-else
-    echo "! nvh264enc not available (requires NVIDIA GPU + drivers)"
-fi
-
-if gst-inspect-1.0 openh264enc >/dev/null 2>&1; then
-    echo "✓ openh264enc available (Cisco OpenH264)"
-else
-    echo "! openh264enc not available"
-fi
-
-if gst-inspect-1.0 vaapih264enc >/dev/null 2>&1; then
-    echo "✓ vaapih264enc available (Intel/AMD hardware encoder)"
-else
-    echo "! vaapih264enc not available"
-fi
-
-echo ""
-echo "=== Installation complete ==="
-echo ""
-echo "Note: wbeamd-streamer will automatically select the best available encoder."
-echo "Priority: nvh264enc > openh264enc > x264enc > vaapih264enc"
-echo ""
-echo "To test: /mnt/fat_boii/git/WBeam/host/rust/target/release/wbeamd-streamer --profile balanced --port 5000"
-
-
-################################################################################
-## FILE: host/scripts/virtual_monitor_x11.sh  (138 lines)
-################################################################################
-#!/usr/bin/env bash
-set -euo pipefail
-
-STATE_FILE="/tmp/wbeam_virtual_monitor.env"
-
-usage() {
-  cat <<USAGE
-Usage:
-  $0 up [OUTPUT] [WIDTHxHEIGHT] [RATE]
-  $0 down [OUTPUT]
-  $0 status
-USAGE
-}
-
-need_cmd() {
-  command -v "$1" >/dev/null 2>&1 || {
-    echo "Missing command: $1" >&2
-    exit 1
-  }
-}
-
-first_disconnected_output() {
-  xrandr --query | awk '$2=="disconnected" {print $1; exit}'
-}
-
-primary_or_first_connected() {
-  local primary
-  primary="$(xrandr --query | awk '$2=="connected" && $3=="primary" {print $1; exit}')"
-  if [[ -n "$primary" ]]; then
-    echo "$primary"
-    return
-  fi
-  xrandr --query | awk '$2=="connected" {print $1; exit}'
-}
-
-if [[ "${1:-}" == "" ]]; then
-  usage
-  exit 1
-fi
-
-need_cmd xrandr
-
-CMD="$1"
-shift || true
-
-case "$CMD" in
-  up)
-    OUTPUT="${1:-$(first_disconnected_output)}"
-    SIZE="${2:-1280x720}"
-    RATE="${3:-60}"
-
-    if [[ -z "$OUTPUT" ]]; then
-      echo "No disconnected output found. Pass output name explicitly, e.g. HDMI-1." >&2
-      exit 1
-    fi
-
-    WIDTH="${SIZE%x*}"
-    HEIGHT="${SIZE#*x}"
-    MODE_NAME="WBEAM_${WIDTH}x${HEIGHT}_${RATE}"
-
-    if ! command -v cvt >/dev/null 2>&1; then
-      echo "Missing command: cvt (install package with cvt utility, e.g. x11-xserver-utils/xserver-xorg-core extras)" >&2
-      exit 1
-    fi
-
-    MODEL_REST="$(cvt -r "$WIDTH" "$HEIGHT" "$RATE" | awk '/Modeline/{for(i=3;i<=NF;i++) printf "%s ", $i}')"
-    if [[ -z "$MODEL_REST" ]]; then
-      MODEL_REST="$(cvt "$WIDTH" "$HEIGHT" "$RATE" | awk '/Modeline/{for(i=3;i<=NF;i++) printf "%s ", $i}')"
-    fi
-
-    if ! xrandr --query | grep -q "^${MODE_NAME}[[:space:]]"; then
-      xrandr --newmode "$MODE_NAME" $MODEL_REST || true
-    fi
-
-    xrandr --addmode "$OUTPUT" "$MODE_NAME" || true
-
-    RIGHT_OF="$(primary_or_first_connected)"
-    if [[ -n "$RIGHT_OF" ]]; then
-      xrandr --output "$OUTPUT" --mode "$MODE_NAME" --right-of "$RIGHT_OF"
-    else
-      xrandr --output "$OUTPUT" --mode "$MODE_NAME"
-    fi
-
-    cat > "$STATE_FILE" <<STATE
-OUTPUT=$OUTPUT
-SIZE=$SIZE
-RATE=$RATE
-MODE_NAME=$MODE_NAME
-STATE
-
-    echo "Virtual monitor ON: output=$OUTPUT size=$SIZE rate=$RATE mode=$MODE_NAME"
-    ;;
-
-  down)
-    ARG_OUTPUT="${1:-}"
-    STATE_OUTPUT=""
-    STATE_MODE=""
-
-    if [[ -f "$STATE_FILE" ]]; then
-      # shellcheck disable=SC1090
-      source "$STATE_FILE"
-      STATE_OUTPUT="${OUTPUT:-}"
-      STATE_MODE="${MODE_NAME:-}"
-    fi
-
-    OUTPUT="${ARG_OUTPUT:-$STATE_OUTPUT}"
-    MODE_NAME="$STATE_MODE"
-
-    if [[ -z "$OUTPUT" ]]; then
-      echo "No output specified and no state file found." >&2
-      exit 1
-    fi
-
-    xrandr --output "$OUTPUT" --off || true
-    if [[ -n "$MODE_NAME" ]]; then
-      xrandr --delmode "$OUTPUT" "$MODE_NAME" || true
-      xrandr --rmmode "$MODE_NAME" || true
-    fi
-
-    rm -f "$STATE_FILE"
-    echo "Virtual monitor OFF: output=$OUTPUT"
-    ;;
-
-  status)
-    echo "Connected/disconnected outputs:"
-    xrandr --query | awk '$2=="connected" || $2=="disconnected" {print}'
-    if [[ -f "$STATE_FILE" ]]; then
-      echo
-      echo "Saved WBeam virtual monitor state:"
-      cat "$STATE_FILE"
-    fi
-    ;;
-
-  *)
-    usage
-    exit 1
-    ;;
-esac
-
-
-################################################################################
-## FILE: host/scripts/stream_wayland_portal_h264.py  (742 lines)
+## FILE: host/scripts/stream_wayland_portal_h264.py  (743 lines)
 ################################################################################
 #!/usr/bin/env python3
 import argparse
@@ -2020,7 +1040,7 @@ def set_if_supported(element, prop_name, value):
         element.set_property(prop_name, value)
 
 
-def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=None):
+def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=None, target_fps=60):
     """WBTP/1 framed sender: accept one TCP client; send WBTP/1-framed H264 access units.
 
     Header (big-endian, 22 bytes):
@@ -2038,8 +1058,9 @@ def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=Non
     # Track last keyframe so we can duplicate it if capture starves (portal emits only on damage).
     last_keyframe = None
     last_keyframe_len = 0
-    # 20 ms pull timeout (~50 fps ceiling) keeps cadence tighter than the prior 33 ms.
-    pull_timeout_ns = 20_000_000
+    # Pull timeout tracks target FPS (e.g. ~16.7 ms @ 60 fps), avoiding a hard 20 ms ceiling.
+    fps = max(1, int(target_fps))
+    pull_timeout_ns = max(2_000_000, min(20_000_000, int(1_000_000_000 / fps)))
 
     while not stop_event.is_set():
         try:
@@ -2393,7 +1414,7 @@ def parse_args():
     parser.add_argument("--fps", type=int, default=None)
     parser.add_argument("--bitrate-kbps", type=int, default=None)
     parser.add_argument("--encoder", choices=["auto", "nvenc", "openh264"], default="auto")
-    parser.add_argument("--cursor-mode", choices=["hidden", "embedded", "metadata"], default="hidden")
+    parser.add_argument("--cursor-mode", choices=["hidden", "embedded", "metadata"], default="embedded")
     parser.add_argument("--debug-dir", default="/tmp/wbeam-frames")
     parser.add_argument("--debug-fps", type=int, default=0)
     parser.add_argument("--framed", action="store_true", default=False,
@@ -2486,7 +1507,7 @@ def main():
         appsink = pipeline.get_by_name("sink")
         t = threading.Thread(
             target=framed_tcp_server_thread,
-            args=(appsink, args.port, stop_event, pipeline_fps_counter),
+            args=(appsink, args.port, stop_event, pipeline_fps_counter, args.fps),
             daemon=True,
             name="wbeam-framed-sender",
         )
@@ -2503,244 +1524,13 @@ if __name__ == "__main__":
     main()
 
 
-################################################################################
-## FILE: host/scripts/stream_x11_h264.sh  (18 lines)
-################################################################################
-#!/usr/bin/env bash
-set -euo pipefail
-
-PORT="${1:-5000}"
-SIZE="${2:-1280x720}"
-FPS="${3:-30}"
-DISPLAY_NAME="${DISPLAY:-:0.0}"
-
-# Day-1 baseline: X11 capture, low-latency H.264, raw TCP transport.
-ffmpeg -hide_banner -loglevel info \
-  -f x11grab -video_size "${SIZE}" -framerate "${FPS}" -i "${DISPLAY_NAME}" \
-  -an \
-  -c:v libx264 -preset ultrafast -tune zerolatency \
-  -b:v 8M -maxrate 8M -bufsize 8M \
-  -x264-params "repeat-headers=1:scenecut=0:slice-max-size=1300" \
-  -profile:v baseline -level 4.0 -pix_fmt yuv420p \
-  -g 30 -keyint_min 30 -bf 0 \
-  -f h264 "tcp://0.0.0.0:${PORT}?listen=1"
-
-
-################################################################################
-## FILE: host/scripts/stream_file_h264.sh  (33 lines)
-################################################################################
-#!/usr/bin/env bash
-set -euo pipefail
-
-FILE_PATH="${1:-}"
-PORT="${2:-5000}"
-SIZE="${3:-1280x720}"
-FPS="${4:-30}"
-
-if [[ -z "$FILE_PATH" ]]; then
-  echo "Usage: $0 <VIDEO_FILE> [PORT] [SIZE] [FPS]" >&2
-  exit 1
-fi
-
-if [[ ! -f "$FILE_PATH" ]]; then
-  echo "File not found: $FILE_PATH" >&2
-  exit 1
-fi
-
-WIDTH="${SIZE%x*}"
-HEIGHT="${SIZE#*x}"
-
-echo "Streaming file=$FILE_PATH size=$SIZE fps=$FPS port=$PORT"
-
-ffmpeg -hide_banner -loglevel info \
-  -re -stream_loop -1 -i "$FILE_PATH" \
-  -an \
-  -vf "scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=decrease,pad=${WIDTH}:${HEIGHT}:(ow-iw)/2:(oh-ih)/2,fps=${FPS}" \
-  -c:v libx264 -preset ultrafast -tune zerolatency \
-  -b:v 8M -maxrate 8M -bufsize 8M \
-  -x264-params "repeat-headers=1:scenecut=0:slice-max-size=1300" \
-  -profile:v baseline -level 4.0 -pix_fmt yuv420p \
-  -g 30 -keyint_min 30 -bf 0 \
-  -f h264 "tcp://0.0.0.0:${PORT}?listen=1"
-
-
-################################################################################
-## FILE: host/scripts/stream_output_x11_h264.sh  (36 lines)
-################################################################################
-#!/usr/bin/env bash
-set -euo pipefail
-
-OUTPUT="${1:-}"
-PORT="${2:-5000}"
-FPS="${3:-30}"
-DISPLAY_NAME="${DISPLAY:-:0.0}"
-
-if [[ -z "$OUTPUT" ]]; then
-  echo "Usage: $0 <OUTPUT> [PORT] [FPS]" >&2
-  exit 1
-fi
-
-GEOM="$(xrandr --query | awk -v out="$OUTPUT" '$1==out && $2=="connected" {for(i=1;i<=NF;i++) if($i ~ /^[0-9]+x[0-9]+\+[0-9]+\+[0-9]+$/){print $i; exit}}')"
-if [[ -z "$GEOM" ]]; then
-  echo "Could not find geometry for output '$OUTPUT'. Is it connected and active?" >&2
-  xrandr --query >&2
-  exit 1
-fi
-
-SIZE="${GEOM%%+*}"
-REST="${GEOM#*+}"
-X="${REST%%+*}"
-Y="${REST#*+}"
-
-echo "Streaming output=$OUTPUT size=$SIZE offset=${X},${Y} display=$DISPLAY_NAME port=$PORT fps=$FPS"
-
-ffmpeg -hide_banner -loglevel info \
-  -f x11grab -video_size "$SIZE" -framerate "$FPS" -i "${DISPLAY_NAME}+${X},${Y}" \
-  -an \
-  -c:v libx264 -preset ultrafast -tune zerolatency \
-  -b:v 8M -maxrate 8M -bufsize 8M \
-  -x264-params "repeat-headers=1:scenecut=0:slice-max-size=1300" \
-  -profile:v baseline -level 4.0 -pix_fmt yuv420p \
-  -g 30 -keyint_min 30 -bf 0 \
-  -f h264 "tcp://0.0.0.0:${PORT}?listen=1"
-
-
-################################################################################
-## FILE: host/scripts/run_mvp.sh  (9 lines)
-################################################################################
-#!/usr/bin/env bash
-set -euo pipefail
-
-PORT="${1:-5000}"
-SIZE="${2:-1280x720}"
-FPS="${3:-30}"
-
-"$(dirname "$0")/usb_reverse.sh" "${PORT}"
-"$(dirname "$0")/stream_x11_h264.sh" "${PORT}" "${SIZE}" "${FPS}"
-
-
-################################################################################
-## FILE: host/scripts/run_wayland_mvp.sh  (61 lines)
-################################################################################
-#!/usr/bin/env bash
-set -euo pipefail
-
-PROFILE="balanced"
-
-if [[ "${1:-}" =~ ^(lowlatency|balanced|ultra)$ ]]; then
-  PROFILE="$1"
-  shift
-fi
-
-PORT="${1:-5000}"
-DEBUG_DIR="${2:-/tmp/wbeam-frames}"
-DEBUG_FPS="${3:-0}"
-ENCODER="${4:-auto}"
-CURSOR_MODE="${5:-hidden}"
-SIZE_OVERRIDE="${6:-}"
-FPS_OVERRIDE="${7:-}"
-BITRATE_OVERRIDE="${8:-}"
-FORCE_PORT_CLEAR="${WBEAM_FORCE_PORT_CLEAR:-0}"
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-
-if command -v lsof >/dev/null 2>&1; then
-  LISTEN_PIDS="$(lsof -t -iTCP:"${PORT}" -sTCP:LISTEN 2>/dev/null | tr '\n' ' ' || true)"
-  if [[ -n "${LISTEN_PIDS// }" ]]; then
-    if [[ "$FORCE_PORT_CLEAR" == "1" ]]; then
-      echo "Port ${PORT} busy; killing listener PIDs: ${LISTEN_PIDS}"
-      kill ${LISTEN_PIDS} 2>/dev/null || true
-      sleep 0.2
-    else
-      echo "Port ${PORT} is already in use by PID(s): ${LISTEN_PIDS}" >&2
-      echo "Run: lsof -nP -iTCP:${PORT} -sTCP:LISTEN" >&2
-      echo "Then kill them, or rerun with: WBEAM_FORCE_PORT_CLEAR=1 $0 ${PROFILE} ${PORT} ${DEBUG_DIR} ${DEBUG_FPS} ${ENCODER} ${CURSOR_MODE}" >&2
-      exit 1
-    fi
-  fi
-fi
-
-"$SCRIPT_DIR/usb_reverse.sh" "$PORT"
-CMD=(
-  "$SCRIPT_DIR/stream_wayland_portal_h264.py"
-  --profile "$PROFILE"
-  --port "$PORT"
-  --framed
-  --encoder "$ENCODER"
-  --cursor-mode "$CURSOR_MODE"
-  --debug-dir "$DEBUG_DIR"
-  --debug-fps "$DEBUG_FPS"
-)
-
-if [[ -n "$SIZE_OVERRIDE" ]]; then
-  CMD+=(--size "$SIZE_OVERRIDE")
-fi
-if [[ -n "$FPS_OVERRIDE" ]]; then
-  CMD+=(--fps "$FPS_OVERRIDE")
-fi
-if [[ -n "$BITRATE_OVERRIDE" ]]; then
-  CMD+=(--bitrate-kbps "$BITRATE_OVERRIDE")
-fi
-
-"${CMD[@]}"
-
-
-################################################################################
-## FILE: host/scripts/run_virtual_mvp.sh  (30 lines)
-################################################################################
-#!/usr/bin/env bash
-set -euo pipefail
-
-PORT="${1:-5000}"
-SIZE="${2:-1280x720}"
-FPS="${3:-30}"
-RATE="${4:-60}"
-OUTPUT="${5:-}"
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-STATE_FILE="/tmp/wbeam_virtual_monitor.env"
-
-if [[ -z "$OUTPUT" && -f "$STATE_FILE" ]]; then
-  # shellcheck disable=SC1090
-  source "$STATE_FILE"
-  OUTPUT="${OUTPUT:-}"
-fi
-
-if [[ -z "$OUTPUT" ]]; then
-  OUTPUT="$(xrandr --query | awk '$2=="disconnected" {print $1; exit}')"
-fi
-
-if [[ -z "$OUTPUT" ]]; then
-  echo "No disconnected output found. Pass output explicitly as 5th arg (e.g. HDMI-1)." >&2
-  exit 1
-fi
-
-"$SCRIPT_DIR/virtual_monitor_x11.sh" up "$OUTPUT" "$SIZE" "$RATE"
-"$SCRIPT_DIR/usb_reverse.sh" "$PORT"
-"$SCRIPT_DIR/stream_output_x11_h264.sh" "$OUTPUT" "$PORT" "$FPS"
-
-
-################################################################################
-## FILE: host/scripts/run_file_mvp.sh  (16 lines)
-################################################################################
-#!/usr/bin/env bash
-set -euo pipefail
-
-VIDEO_FILE="${1:-}"
-PORT="${2:-5000}"
-SIZE="${3:-1280x720}"
-FPS="${4:-30}"
-
-if [[ -z "$VIDEO_FILE" ]]; then
-  echo "Usage: $0 <VIDEO_FILE> [PORT] [SIZE] [FPS]" >&2
-  exit 1
-fi
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-"$SCRIPT_DIR/usb_reverse.sh" "$PORT"
-"$SCRIPT_DIR/stream_file_h264.sh" "$VIDEO_FILE" "$PORT" "$SIZE" "$FPS"
-
-
+## MISSING: host/scripts/stream_x11_h264.sh
+## MISSING: host/scripts/stream_file_h264.sh
+## MISSING: host/scripts/stream_output_x11_h264.sh
+## MISSING: host/scripts/run_mvp.sh
+## MISSING: host/scripts/run_wayland_mvp.sh
+## MISSING: host/scripts/run_virtual_mvp.sh
+## MISSING: host/scripts/run_file_mvp.sh
 ################################################################################
 ## FILE: host/rust/scripts/run_wbeamd_rust.sh  (18 lines)
 ################################################################################
@@ -2941,189 +1731,7 @@ while true; do
 done
 
 
-################################################################################
-## FILE: protocol/scripts/soak_loopback.sh  (178 lines)
-################################################################################
-#!/usr/bin/env bash
-# protocol/scripts/soak_loopback.sh
-#
-# WBTP/1 loopback soak test (sender -> receiver-null on localhost).
-# Runs for the configured duration and prints a pass/fail verdict.
-#
-# Usage:
-#   ./protocol/scripts/soak_loopback.sh [duration_sec] [port] [fps] [payload_bytes]
-#
-# Defaults:
-#   duration_sec  = 1800   (30 minutes per next.md pass criteria)
-#   port          = 5000
-#   fps           = 60
-#   payload_bytes = 50000  (~50 KB, rough H.264 720p frame budget)
-#
-# Pass criteria (from next.md):
-#   - recv_fps   >= PASS_FPS_FLOOR (default 58) for every reported second
-#   - crc_errors == 0
-#   - late_frames == 0  (warn-only, not hard fail)
-#
-# The script writes a timestamped log to protocol/logs/ and appends a
-# one-line summary to task.md automatcially.
-
-set -euo pipefail
-
-# ── configuration ─────────────────────────────────────────────────────────────
-DURATION_SEC=${1:-1800}
-PORT=${2:-5000}
-FPS=${3:-60}
-PAYLOAD_BYTES=${4:-50000}
-
-PASS_FPS_FLOOR=58
-BIND="127.0.0.1:${PORT}"
-ADDR="127.0.0.1:${PORT}"
-QUEUE=4
-
-# ── paths ─────────────────────────────────────────────────────────────────────
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-WORKSPACE="${REPO_ROOT}/protocol/rust"
-LOG_DIR="${REPO_ROOT}/protocol/logs"
-mkdir -p "${LOG_DIR}"
-
-TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-LOG_FILE="${LOG_DIR}/soak_loopback_${TIMESTAMP}.log"
-RECEIVER_BIN="${WORKSPACE}/target/release/wbtp-receiver-null"
-SENDER_BIN="${WORKSPACE}/target/release/wbtp-sender"
-
-# ── kill any leftover processes on PORT ──────────────────────────────────────
-EXISTING=$(lsof -ti tcp:"${PORT}" 2>/dev/null || true)
-if [[ -n "${EXISTING}" ]]; then
-    echo "[soak] killing existing processes on port ${PORT}: ${EXISTING}"
-    kill ${EXISTING} 2>/dev/null || true
-    sleep 0.5
-fi
-
-# ── build (release for accurate perf numbers) ─────────────────────────────────
-echo "[soak] building release binaries…"
-cargo build --release --manifest-path "${WORKSPACE}/Cargo.toml" \
-    -p wbtp-sender -p wbtp-receiver-null 2>&1 | tail -5
-echo "[soak] build ok"
-
-# ── launch receiver ───────────────────────────────────────────────────────────
-echo "[soak] starting receiver on ${BIND}"
-"${RECEIVER_BIN}" --bind "${BIND}" \
-    > "${LOG_FILE}" 2>&1 &
-RECEIVER_PID=$!
-echo "[soak] receiver PID ${RECEIVER_PID}"
-
-cleanup() {
-    echo ""
-    echo "[soak] stopping processes…"
-    kill "${RECEIVER_PID}" 2>/dev/null || true
-    kill "${SENDER_PID}"   2>/dev/null || true
-    wait "${RECEIVER_PID}" 2>/dev/null || true
-    wait "${SENDER_PID}"   2>/dev/null || true
-}
-trap cleanup EXIT INT TERM
-
-# small delay so receiver is listening before sender connects
-sleep 0.3
-
-# ── launch sender ─────────────────────────────────────────────────────────────
-echo "[soak] starting sender → ${ADDR}  fps=${FPS}  payload=${PAYLOAD_BYTES}B"
-"${SENDER_BIN}" \
-    --addr "${ADDR}" \
-    --fps "${FPS}" \
-    --payload-bytes "${PAYLOAD_BYTES}" \
-    --queue "${QUEUE}" \
-    >> "${LOG_FILE}" 2>&1 &
-SENDER_PID=$!
-echo "[soak] sender PID ${SENDER_PID}"
-
-# ── progress indicator + early-abort on crash ─────────────────────────────────
-echo "[soak] running for ${DURATION_SEC}s  (log: ${LOG_FILE})"
-echo "[soak] live tail: tail -f ${LOG_FILE}"
-
-END_TIME=$(( $(date +%s) + DURATION_SEC ))
-INTERVAL=10   # check every 10 s
-ELAPSED=0
-
-while [[ $(date +%s) -lt ${END_TIME} ]]; do
-    sleep ${INTERVAL}
-    ELAPSED=$(( ELAPSED + INTERVAL ))
-
-    if ! kill -0 "${RECEIVER_PID}" 2>/dev/null; then
-        echo "[soak] FAIL – receiver process died at ${ELAPSED}s" | tee -a "${LOG_FILE}"
-        exit 1
-    fi
-    if ! kill -0 "${SENDER_PID}" 2>/dev/null; then
-        echo "[soak] FAIL – sender process died at ${ELAPSED}s" | tee -a "${LOG_FILE}"
-        exit 1
-    fi
-
-    REMAINING=$(( END_TIME - $(date +%s) ))
-    printf "\r[soak] %ds elapsed, %ds remaining…" "${ELAPSED}" "${REMAINING}"
-done
-echo ""
-
-# ── stop sender first, let receiver drain ────────────────────────────────────
-echo "[soak] stopping sender…"
-kill "${SENDER_PID}" 2>/dev/null || true
-wait "${SENDER_PID}" 2>/dev/null || true
-sleep 1
-echo "[soak] stopping receiver…"
-kill "${RECEIVER_PID}" 2>/dev/null || true
-wait "${RECEIVER_PID}" 2>/dev/null || true
-
-# ── analyse log ───────────────────────────────────────────────────────────────
-echo "[soak] analysing log…"
-
-# Extract all recv_fps values reported by receiver
-# tracing format: … recv_fps=59.8 …
-TOTAL_WINDOWS=$(grep -ac 'recv_fps=' "${LOG_FILE}" 2>/dev/null) || true
-TOTAL_WINDOWS=${TOTAL_WINDOWS:-0}
-LOW_FPS_LINES=$(grep -a 'recv_fps=' "${LOG_FILE}" | \
-    grep -oP 'recv_fps="?\K[0-9.]+' | \
-    awk -v floor="${PASS_FPS_FLOOR}" '$1+0 > 0 && $1+0 < floor {c++} END {print c+0}')
-
-CRC_ERRORS=$(grep -aoP 'crc_errors=\K[0-9]+' "${LOG_FILE}" | \
-    awk '{s+=$1} END {print s+0}')
-
-LATE_FRAMES=$(grep -aoP 'late_frames=\K[0-9]+' "${LOG_FILE}" | \
-    awk '{s+=$1} END {print s+0}')
-
-echo ""
-echo "══════════════════════════════════════════"
-echo " WBTP/1 loopback soak – ${DURATION_SEC}s"
-echo "══════════════════════════════════════════"
-echo " Metric windows:       ${TOTAL_WINDOWS}"
-echo " FPS below ${PASS_FPS_FLOOR}:        ${LOW_FPS_LINES}"
-echo " Total CRC errors:     ${CRC_ERRORS}"
-echo " Total late frames:    ${LATE_FRAMES} (warn only)"
-echo "══════════════════════════════════════════"
-
-VERDICT="PASS"
-if [[ ${TOTAL_WINDOWS} -eq 0 ]]; then
-    echo " FAIL – no metric windows recorded (receiver may have not started)"
-    VERDICT="FAIL"
-elif [[ ${LOW_FPS_LINES} -gt 0 ]]; then
-    echo " FAIL – ${LOW_FPS_LINES} windows below ${PASS_FPS_FLOOR} fps"
-    VERDICT="FAIL"
-elif [[ ${CRC_ERRORS} -gt 0 ]]; then
-    echo " FAIL – ${CRC_ERRORS} CRC errors"
-    VERDICT="FAIL"
-else
-    echo " PASS – all criteria met"
-fi
-echo "══════════════════════════════════════════"
-
-# ── append to task.md ─────────────────────────────────────────────────────────
-TASK_MD="${REPO_ROOT}/task.md"
-SUMMARY="[soak:loopback ${TIMESTAMP}] ${VERDICT} | ${DURATION_SEC}s | fps_low_windows=${LOW_FPS_LINES}/${TOTAL_WINDOWS} | crc_errors=${CRC_ERRORS} | late_frames=${LATE_FRAMES} | log=${LOG_FILE}"
-echo "" >> "${TASK_MD}"
-echo "${SUMMARY}" >> "${TASK_MD}"
-echo "[soak] appended to task.md"
-
-[[ "${VERDICT}" == "PASS" ]] && exit 0 || exit 1
-
-
+## MISSING: protocol/scripts/soak_loopback.sh
 ################################################################################
 ## FILE: host/rust/crates/wbeamd-api/src/lib.rs  (404 lines)
 ################################################################################
@@ -3419,7 +2027,7 @@ pub fn presets() -> BTreeMap<String, ActiveConfig> {
         ActiveConfig {
             profile: "lowlatency".to_string(),
             encoder: "auto".to_string(),
-            cursor_mode: "hidden".to_string(),
+            cursor_mode: "embedded".to_string(),
             size: "1280x720".to_string(),
             fps: 60,
             bitrate_kbps: 16_000,
@@ -3431,7 +2039,7 @@ pub fn presets() -> BTreeMap<String, ActiveConfig> {
         ActiveConfig {
             profile: "balanced".to_string(),
             encoder: "auto".to_string(),
-            cursor_mode: "hidden".to_string(),
+            cursor_mode: "embedded".to_string(),
             size: "1920x1080".to_string(),
             fps: 60,
             bitrate_kbps: 25_000,
@@ -3443,7 +2051,7 @@ pub fn presets() -> BTreeMap<String, ActiveConfig> {
         ActiveConfig {
             profile: "ultra".to_string(),
             encoder: "auto".to_string(),
-            cursor_mode: "hidden".to_string(),
+            cursor_mode: "embedded".to_string(),
             size: "2560x1440".to_string(),
             fps: 60,
             bitrate_kbps: 38_000,
@@ -5260,7 +3868,7 @@ fn fill_pseudorandom(buf: &mut [u8]) {
 
 
 ################################################################################
-## FILE: host/rust/crates/wbeamd-streamer/src/main.rs  (589 lines)
+## FILE: host/rust/crates/wbeamd-streamer/src/main.rs  (608 lines)
 ################################################################################
 use std::io::{Cursor, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -5303,7 +3911,7 @@ struct Args {
     bitrate_kbps: Option<u32>,
     #[arg(long, default_value = "auto", value_parser = ["auto", "nvenc", "x264", "openh264"])]
     encoder: String,
-    #[arg(long, default_value = "hidden", value_parser = ["hidden", "embedded", "metadata"])]
+    #[arg(long, default_value = "embedded", value_parser = ["hidden", "embedded", "metadata"])]
     cursor_mode: String,
     #[arg(long, default_value = "/tmp/wbeam-frames")]
     debug_dir: String,
@@ -5657,13 +4265,21 @@ fn send_all_vectored(stream: &mut TcpStream, header: &[u8], payload: &[u8]) -> s
     Ok(total)
 }
 
-fn spawn_sender(appsink: gst_app::AppSink, port: u16, stop: Arc<AtomicBool>, fps_counter: Arc<AtomicU64>) -> thread::JoinHandle<()> {
+fn spawn_sender(
+    appsink: gst_app::AppSink,
+    port: u16,
+    fps: u32,
+    stop: Arc<AtomicBool>,
+    fps_counter: Arc<AtomicU64>,
+) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let listener = TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port)))
             .expect("bind tcp listener");
         listener.set_nonblocking(true).ok();
         println!("[wbeam-framed] listening on :{}", port);
-        let pull_timeout = Some(gst::ClockTime::from_mseconds(20));
+        let fps = fps.max(1);
+        let pull_timeout_ms = ((1_000u64 + (fps as u64 - 1)) / fps as u64).clamp(2, 20);
+        let pull_timeout = Some(gst::ClockTime::from_mseconds(pull_timeout_ms));
         let mut seq: u32 = 0;
         let mut last_keyframe: Option<Vec<u8>> = None;
         let mut last_key_pts = 0u64;
@@ -5703,12 +4319,11 @@ fn spawn_sender(appsink: gst_app::AppSink, port: u16, stop: Arc<AtomicBool>, fps
                     break;
                 }
                 let sample = appsink.try_pull_sample(pull_timeout);
-                let mut payload: Option<Vec<u8>> = None;
                 let mut pts_us = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .map(|d| d.as_micros() as u64)
                     .unwrap_or(0);
-                let mut is_key = true;
+                let mut sent_frame = false;
 
                 if let Some(sample) = sample {
                     if let Some(buf) = sample.buffer() {
@@ -5721,56 +4336,68 @@ fn spawn_sender(appsink: gst_app::AppSink, port: u16, stop: Arc<AtomicBool>, fps
                             .pts()
                             .map(|t| t.nseconds() / 1000)
                             .unwrap_or(pts_us);
-                        is_key = !buf.flags().contains(gst::BufferFlags::DELTA_UNIT);
-                        payload = Some(data.to_vec());
+                        let is_key = !buf.flags().contains(gst::BufferFlags::DELTA_UNIT);
                         if is_key {
                             last_keyframe = Some(data.to_vec());
                             last_key_pts = pts_us;
                         }
-                    }
-                } else {
-                    if let Some(ref kf) = last_keyframe {
-                        payload = Some(kf.clone());
-                        pts_us = last_key_pts;
-                        is_key = true;
-                    } else {
-                        dropped += 1;
-                        let elapsed = t0.elapsed().as_secs_f64();
-                        if elapsed >= 1.0 {
-                            let sent_fps = frames as f64 / elapsed;
-                            let pipe_fps = fps_counter.swap(0, Ordering::Relaxed);
-                            println!(
-                                "[wbeam-framed] pipeline_fps={} sender_fps={:.1} timeout_misses={} seq={}",
-                                pipe_fps, sent_fps, dropped, seq
-                            );
-                            frames = 0;
-                            dropped = 0;
-                            t0 = Instant::now();
+
+                        let header = build_header(seq, pts_us, data.len(), is_key);
+                        let sent = match send_all_vectored(&mut conn, &header, data) {
+                            Ok(n) => n,
+                            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                                send_timeouts += 1;
+                                dropped += 1;
+                                continue;
+                            }
+                            Err(e) => {
+                                println!("[wbeam-framed] client disconnected: {e}");
+                                break;
+                            }
+                        };
+                        if sent < header.len() + data.len() {
+                            partial_writes += 1;
                         }
-                        continue;
+                        sent_frame = true;
                     }
+                } else if let Some(kf) = last_keyframe.as_deref() {
+                    pts_us = last_key_pts;
+                    let header = build_header(seq, pts_us, kf.len(), true);
+                    let sent = match send_all_vectored(&mut conn, &header, kf) {
+                        Ok(n) => n,
+                        Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            send_timeouts += 1;
+                            dropped += 1;
+                            continue;
+                        }
+                        Err(e) => {
+                            println!("[wbeam-framed] client disconnected: {e}");
+                            break;
+                        }
+                    };
+                    if sent < header.len() + kf.len() {
+                        partial_writes += 1;
+                    }
+                    sent_frame = true;
+                } else {
+                    dropped += 1;
+                    let elapsed = t0.elapsed().as_secs_f64();
+                    if elapsed >= 1.0 {
+                        let sent_fps = frames as f64 / elapsed;
+                        let pipe_fps = fps_counter.swap(0, Ordering::Relaxed);
+                        println!(
+                            "[wbeam-framed] pipeline_fps={} sender_fps={:.1} timeout_misses={} seq={}",
+                            pipe_fps, sent_fps, dropped, seq
+                        );
+                        frames = 0;
+                        dropped = 0;
+                        t0 = Instant::now();
+                    }
+                    continue;
                 }
 
-                let payload = match payload {
-                    Some(p) => p,
-                    None => continue,
-                };
-
-                let header = build_header(seq, pts_us, payload.len(), is_key);
-                let sent = match send_all_vectored(&mut conn, &header, &payload) {
-                    Ok(n) => n,
-                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        send_timeouts += 1;
-                        dropped += 1;
-                        continue;
-                    }
-                    Err(e) => {
-                        println!("[wbeam-framed] client disconnected: {e}");
-                        break;
-                    }
-                };
-                if sent < header.len() + payload.len() {
-                    partial_writes += 1;
+                if !sent_frame {
+                    continue;
                 }
 
                 seq = seq.wrapping_add(1);
@@ -5815,7 +4442,7 @@ async fn main() -> Result<()> {
         .context("pipeline bus")?;
 
     let stop_flag = Arc::new(AtomicBool::new(false));
-    let sender_handle = spawn_sender(appsink, args.port, stop_flag.clone(), fps_counter);
+    let sender_handle = spawn_sender(appsink, args.port, cfg.fps, stop_flag.clone(), fps_counter);
 
     let main_loop = glib::MainLoop::new(None, false);
     let main_loop_clone = main_loop.clone();
@@ -7241,7 +5868,7 @@ if __name__ == "__main__":
 
 
 ################################################################################
-## FILE: android/app/src/main/java/com/wbeam/MainActivity.java  (3075 lines)
+## FILE: android/app/src/main/java/com/wbeam/MainActivity.java  (3083 lines)
 ################################################################################
 package com.wbeam;
 
@@ -7356,12 +5983,13 @@ public class MainActivity extends AppCompatActivity {
 
     private static final String[] PROFILE_OPTIONS = {"lowlatency", "balanced", "ultra"};
     private static final String[] ENCODER_OPTIONS = {"auto", "nvenc", "openh264"};
-    private static final String[] CURSOR_OPTIONS = {"hidden", "embedded", "metadata"};
+    private static final String[] CURSOR_OPTIONS = {"embedded", "hidden", "metadata"};
 
     private static final String PREFS = "wbeam_settings";
     private static final String PREF_PROFILE = "profile";
     private static final String PREF_ENCODER = "encoder";
     private static final String PREF_CURSOR = "cursor";
+    private static final String PREF_CURSOR_MIGRATED_V2 = "cursor_migrated_v2";
     private static final String PREF_RES_SCALE = "res_scale";
     private static final String PREF_FPS = "fps";
     private static final String PREF_BITRATE = "bitrate";
@@ -7851,7 +6479,14 @@ public class MainActivity extends AppCompatActivity {
 
         String profile = prefs.getString(PREF_PROFILE, "balanced");
         String encoder = prefs.getString(PREF_ENCODER, "auto");
-        String cursor = prefs.getString(PREF_CURSOR, "hidden");
+        String cursor = prefs.getString(PREF_CURSOR, "embedded");
+        if (!prefs.getBoolean(PREF_CURSOR_MIGRATED_V2, false) && "hidden".equals(cursor)) {
+            cursor = "embedded";
+            prefs.edit()
+                    .putString(PREF_CURSOR, cursor)
+                    .putBoolean(PREF_CURSOR_MIGRATED_V2, true)
+                    .apply();
+        }
 
         setSpinnerSelection(profileSpinner, PROFILE_OPTIONS, profile);
         setSpinnerSelection(encoderSpinner, ENCODER_OPTIONS, encoder);

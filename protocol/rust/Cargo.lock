@@ -513,6 +513,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "wbtp-host"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "wbtp-core",
+ "wbtp-sender",
+]
+
+[[package]]
 name = "wbtp-receiver-null"
 version = "0.1.0"
 dependencies = [

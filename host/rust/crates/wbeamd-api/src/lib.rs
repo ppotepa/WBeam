@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub const VALID_ENCODERS: &[&str] = &["auto", "nvenc", "openh264"];
+pub const VALID_ENCODERS: &[&str] = &["h265", "rawpng"];
 pub const VALID_CURSOR_MODES: &[&str] = &["hidden", "embedded", "metadata"];
 pub const VALID_PROFILES: &[&str] = &["lowlatency", "balanced", "ultra"];
 
@@ -16,6 +16,10 @@ pub struct ActiveConfig {
     pub fps: u32,
     pub bitrate_kbps: u32,
     pub debug_fps: u32,
+    /// All-Intra mode: gop=1, every frame is a full IDR keyframe.
+    /// Backward-compatible: missing in JSON deserializes to false.
+    #[serde(default)]
+    pub intra_only: bool,
 }
 
 impl ActiveConfig {
@@ -83,6 +87,7 @@ pub struct ConfigPatch {
     pub fps: Option<u32>,
     pub bitrate_kbps: Option<u32>,
     pub debug_fps: Option<u32>,
+    pub intra_only: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -289,36 +294,39 @@ pub fn presets() -> BTreeMap<String, ActiveConfig> {
         "lowlatency".to_string(),
         ActiveConfig {
             profile: "lowlatency".to_string(),
-            encoder: "auto".to_string(),
-            cursor_mode: "hidden".to_string(),
+            encoder: "h265".to_string(),
+            cursor_mode: "embedded".to_string(),
             size: "1280x720".to_string(),
             fps: 60,
-            bitrate_kbps: 16_000,
+            bitrate_kbps: 60_000,
             debug_fps: 0,
+            intra_only: false,
         },
     );
     map.insert(
         "balanced".to_string(),
         ActiveConfig {
             profile: "balanced".to_string(),
-            encoder: "auto".to_string(),
-            cursor_mode: "hidden".to_string(),
+            encoder: "h265".to_string(),
+            cursor_mode: "embedded".to_string(),
             size: "1920x1080".to_string(),
             fps: 60,
-            bitrate_kbps: 25_000,
+            bitrate_kbps: 100_000,
             debug_fps: 0,
+            intra_only: false,
         },
     );
     map.insert(
         "ultra".to_string(),
         ActiveConfig {
             profile: "ultra".to_string(),
-            encoder: "auto".to_string(),
-            cursor_mode: "hidden".to_string(),
+            encoder: "h265".to_string(),
+            cursor_mode: "embedded".to_string(),
             size: "2560x1440".to_string(),
             fps: 60,
-            bitrate_kbps: 38_000,
+            bitrate_kbps: 150_000,
             debug_fps: 0,
+            intra_only: false,
         },
     );
     map
@@ -356,6 +364,16 @@ pub fn validate_config(patch: ConfigPatch, current: &ActiveConfig) -> Result<Act
     if let Some(debug_fps) = patch.debug_fps {
         cfg.debug_fps = debug_fps;
     }
+    if let Some(intra_only) = patch.intra_only {
+        cfg.intra_only = intra_only;
+    }
+
+    cfg.encoder = match cfg.encoder.as_str() {
+        "h265" | "rawpng" => cfg.encoder,
+        // Backward-compatible migration of old modes to unified h265.
+        "auto" | "nvenc" | "nvenc265" | "x264" | "x265" | "openh264" => "h265".to_string(),
+        _ => cfg.encoder,
+    };
 
     if !VALID_ENCODERS.contains(&cfg.encoder.as_str()) {
         return Err(ValidationError::InvalidEncoder);
@@ -387,7 +405,7 @@ pub fn validate_config(patch: ConfigPatch, current: &ActiveConfig) -> Result<Act
 
     cfg.size = format!("{w}x{h}");
     cfg.fps = cfg.fps.clamp(24, 120);
-    cfg.bitrate_kbps = cfg.bitrate_kbps.clamp(4_000, 120_000);
+    cfg.bitrate_kbps = cfg.bitrate_kbps.clamp(4_000, 300_000);
     cfg.debug_fps = cfg.debug_fps.clamp(0, 10);
 
     Ok(cfg)

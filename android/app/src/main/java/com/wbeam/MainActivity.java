@@ -1,14 +1,11 @@
 package com.wbeam;
 
 import android.Manifest;
-import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
-import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaCodecList;
-import android.media.MediaFormat;
 import android.media.MediaPlayer;
 import android.os.Build;
 import android.os.Bundle;
@@ -24,6 +21,7 @@ import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
+import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.SeekBar;
@@ -38,26 +36,25 @@ import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 
+import com.wbeam.api.HostApiClient;
+import com.wbeam.api.StatusListener;
+import com.wbeam.api.StatusPoller;
+import com.wbeam.settings.SettingsRepository;
+import com.wbeam.stream.H264TcpPlayer;
+import com.wbeam.stream.VideoTestController;
+import com.wbeam.stream.StreamSessionController;
+import com.wbeam.telemetry.ClientMetricsReporter;
+
 import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.BufferedInputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.net.InetSocketAddress;
-import java.net.Socket;
-import java.nio.ByteBuffer;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.TimeUnit;
 
-import okhttp3.ConnectionPool;
-import okhttp3.MediaType;
-import okhttp3.OkHttpClient;
 import okhttp3.Request;
-import okhttp3.RequestBody;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 
@@ -68,63 +65,22 @@ public class MainActivity extends AppCompatActivity {
     private static final String STATE_STREAMING = "streaming";
     private static final String STATE_ERROR = "error";
 
-    private static final String HOST = "127.0.0.1";
-    private static final int PORT = 5000;
-    private static final int CONTROL_PORT = 5001;
-    private static final String API_BASE = "http://" + HOST + ":" + CONTROL_PORT;
-    private static final long STATUS_POLL_MS = 3000;
-    private static final int HEALTH_POLL_EVERY = 3;
-    private static final long AUTO_START_COOLDOWN_MS = 4000;
-    private static final long AUTO_START_FAILURE_BACKOFF_MS = 30000;
-    private static final long STOP_SUPPRESS_AUTO_START_MS = 12000;
-    private static final int API_RETRY_ATTEMPTS = 2;
-    private static final long API_RETRY_BASE_DELAY_MS = 300;
-    private static final long CLIENT_METRICS_INTERVAL_MS = 900;
     private static final long HUD_ADB_LOG_INTERVAL_MS = 1000;
-        private static final long LIVE_TEST_START_TIMEOUT_MS = 12000;
+    private static final long LIVE_TEST_START_TIMEOUT_MS = 12000;
     private static final int TRANSPORT_QUEUE_MAX_FRAMES = 3;
     private static final int DECODE_QUEUE_MAX_FRAMES = 2;
     private static final int RENDER_QUEUE_MAX_FRAMES = 1;
     private static final int BANDWIDTH_TEST_MB = 64;
-    private static final long NO_PRESENT_FLUSH_MS = 1500;
-    private static final long NO_PRESENT_RECONNECT_MS = 3000;
-    private static final long NO_PRESENT_HARD_RESET_MS = 5000;
-    private static final int NO_PRESENT_MIN_IN_FRAMES_FLUSH = 12;
-    private static final int NO_PRESENT_MIN_IN_FRAMES_RECONNECT = 24;
-    private static final int NO_PRESENT_MIN_IN_FRAMES_HARD = 30;
     private static final String TEST_VIDEO_URL =
             "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4";
-        private static final MediaType JSON_MEDIA_TYPE = MediaType.get("application/json; charset=utf-8");
-        private static final ConnectionPool HTTP_CONNECTION_POOL = new ConnectionPool(2, 30, TimeUnit.SECONDS);
-        private static final OkHttpClient API_HTTP = new OkHttpClient.Builder()
-            .connectTimeout(1500, TimeUnit.MILLISECONDS)
-            .readTimeout(1500, TimeUnit.MILLISECONDS)
-            .writeTimeout(1500, TimeUnit.MILLISECONDS)
-            .connectionPool(HTTP_CONNECTION_POOL)
-            .retryOnConnectionFailure(true)
-            .build();
-        private static final OkHttpClient SPEEDTEST_HTTP = API_HTTP.newBuilder()
-            .connectTimeout(2500, TimeUnit.MILLISECONDS)
-            .readTimeout(60, TimeUnit.SECONDS)
-            .writeTimeout(2500, TimeUnit.MILLISECONDS)
-            .build();
 
     private static final String[] PROFILE_OPTIONS = {"lowlatency", "balanced", "ultra"};
-    private static final String[] ENCODER_OPTIONS = {"auto", "nvenc", "openh264"};
-    private static final String[] CURSOR_OPTIONS = {"hidden", "embedded", "metadata"};
+    private static final String[] ENCODER_OPTIONS = {"h265", "raw-png"};
+    private static final String[] CURSOR_OPTIONS = {"embedded", "hidden", "metadata"};
 
-    private static final String PREFS = "wbeam_settings";
-    private static final String PREF_PROFILE = "profile";
-    private static final String PREF_ENCODER = "encoder";
-    private static final String PREF_CURSOR = "cursor";
-    private static final String PREF_RES_SCALE = "res_scale";
-    private static final String PREF_FPS = "fps";
-    private static final String PREF_BITRATE = "bitrate";
-    private static final String PREF_LOCAL_CURSOR = "local_cursor_overlay";
-    private static final String PREF_MODE    = "mode";    // F2: lowlatency | balanced
-    private static final String PREF_QUALITY = "quality"; // F2: low | med | high
     private static final int LIVE_LOG_MAX_LINES = 80;
 
+    // ── Views ──────────────────────────────────────────────────────────────────
     private View rootLayout;
     private View topBar;
     private View settingsPanel;
@@ -167,88 +123,68 @@ public class MainActivity extends AppCompatActivity {
     private Button testButton;
     private Button fullscreenButton;
     private Button cursorOverlayButton;
-    // F2: mode / quality buttons
-    private Button modeLowLatencyButton;
-    private Button modeSmoothButton;
-    private Button qualityLowButton;
-    private Button qualityMedButton;
-    private Button qualityHighButton;
-    private Button advancedToggleButton;
-    private View   advancedPanel;
-    private String selectedMode    = "lowlatency"; // F2 runtime state
-    private String selectedQuality = "med";        // F2 runtime state
+    private Button intraOnlyButton;
 
+    // ── UI state ───────────────────────────────────────────────────────────────
+    private boolean intraOnlyEnabled = false;
     private boolean settingsVisible = false;
     private boolean isFullscreen = false;
     private boolean cursorOverlayEnabled = true;
     private boolean debugControlsVisible = false;
     private boolean liveLogVisible = false;
-    private boolean daemonReachable = false;
-    private String daemonHostName = "-";
-    private String daemonService = "-";
-    private String daemonState = "IDLE";
-    private String daemonLastError = "";
-    private String daemonStateSnapshot = "";
-    private long daemonRunId = 0L;
-    private long daemonUptimeSec = 0L;
-    private boolean statusPollInFlight = false;
-    private long statusPollTick = 0;
-    private long lastAutoStartAt = 0L;
-    private long suppressAutoStartUntil = 0L;
-    private boolean autoStartPending = false;
-    private long lastClientMetricsPostAt = 0L;
     private long lastHudAdbLogAt = 0L;
     private String lastHudAdbSnapshot = "";
     private boolean surfaceReady = false;
     private boolean preflightComplete = false;
     private int preflightAnimTick = 0;
     private boolean hwAvcDecodeAvailable = false;
-    private boolean liveTestOverlayActive = false;
-    private String liveTestOverlayTitle = "";
-    private String liveTestOverlayBody = "";
-    private String liveTestOverlayHint = "";
     private String lastUiState = STATE_IDLE;
     private String lastUiInfo = "tap Settings -> Start Live";
     private long lastUiBps = 0;
     private final SpannableStringBuilder liveLogBuffer = new SpannableStringBuilder();
 
-    private Surface surface;
-    private H264TcpPlayer player;
-    private MediaPlayer mediaPlayer;
-    private final Runnable liveTestStartTimeoutTask = () -> {
-        if (mediaPlayer == null) {
-            return;
-        }
-        logLiveTestWarn("startup timeout: no video after " + (LIVE_TEST_START_TIMEOUT_MS / 1000) + "s");
-        updateStatus(STATE_ERROR, "RUN TESTS LIVE timeout", 0);
-        setLiveTestOverlay(
-                "RUN TESTS LIVE TIMEOUT",
-                liveTestOverlayBody,
-                "no frames yet; check portal selection / decoder path"
-        );
-    };
+    // ── Daemon state (updated via StatusPoller.Callbacks) ──────────────────────
+    private boolean daemonReachable = false;
+    private String daemonHostName = "-";
+    private String daemonService = "-";
+    private String daemonState = "IDLE";
+    private String daemonLastError = "";
+    private long daemonRunId = 0L;
+    private long daemonUptimeSec = 0L;
+
+    // ── Infrastructure ─────────────────────────────────────────────────────────
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
-    private final Runnable statusPollTask = new Runnable() {
-        @Override
-        public void run() {
-            pollDaemonStatusAsync();
-            uiHandler.postDelayed(this, STATUS_POLL_MS);
-        }
-    };
+
+    private SettingsRepository settingsRepository;
+    private StatusPoller statusPoller;
+    private StreamSessionController sessionController;
+    private ClientMetricsReporter metricsReporter;
+    private VideoTestController videoTestController;
+
+    // ── Media ──────────────────────────────────────────────────────────────────
+    private Surface surface;
+    private H264TcpPlayer player;
+    // ── Runnables ──────────────────────────────────────────────────────────────
     private final Runnable preflightPulseTask = new Runnable() {
         @Override
         public void run() {
             preflightAnimTick = (preflightAnimTick + 1) % 4;
             updatePreflightOverlay();
-            uiHandler.postDelayed(this, 350);
+            uiHandler.postDelayed(this, 600);
         }
     };
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Lifecycle
+    // ══════════════════════════════════════════════════════════════════════════
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        settingsRepository = new SettingsRepository(this);
 
         bindViews();
         setupSpinners();
@@ -261,12 +197,182 @@ public class MainActivity extends AppCompatActivity {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                 ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
                         != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(
-                    this,
-                    new String[]{Manifest.permission.POST_NOTIFICATIONS},
-                    1001
-            );
+            ActivityCompat.requestPermissions(this,
+                    new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1001);
         }
+
+        metricsReporter = new ClientMetricsReporter(ioExecutor, msg -> appendLiveLogWarn(msg));
+
+        videoTestController = new VideoTestController(uiHandler, ioExecutor,
+                new VideoTestController.Callbacks() {
+            @Override public Surface getSurface() { return surface; }
+            @Override public void stopVideoPlayer() {
+                if (player != null) { player.stop(); player = null; }
+            }
+            @Override public String getDaemonState()     { return daemonState;     }
+            @Override public boolean isDaemonReachable() { return daemonReachable; }
+            @Override public void onStatus(String state, String info, long bps) {
+                updateStatus(state, info, bps);
+            }
+            @Override public void onStatsLine(String line)  { updateStatsLine(line); }
+            @Override public void logInfo(String msg)  { appendLiveLogInfo(msg);  }
+            @Override public void logWarn(String msg)  { appendLiveLogWarn(msg);  }
+            @Override public void logError(String msg) { appendLiveLogError(msg); }
+            @Override public void onOverlayChanged() { updatePreflightOverlay(); }
+            @Override public void setLiveLogVisible(boolean v) {
+                liveLogVisible = v;
+                if (liveLogText != null)
+                    liveLogText.setVisibility(v ? View.VISIBLE : View.GONE);
+            }
+            @Override public void showToast(String msg, boolean longT) {
+                Toast.makeText(MainActivity.this, msg,
+                        longT ? Toast.LENGTH_LONG : Toast.LENGTH_SHORT).show();
+            }
+            @Override public VideoTestController.TestConfig getTestConfig() {
+                int[] sz = computeScaledSize();
+                return new VideoTestController.TestConfig(
+                        getSelectedProfile(), getSelectedEncoder(),
+                        getSelectedCursorMode(),
+                        sz[0], sz[1],
+                        getSelectedFps(), getSelectedBitrateMbps());
+            }
+        });
+
+        statusPoller = new StatusPoller(uiHandler, ioExecutor, new StatusPoller.Callbacks() {
+            @Override
+            public void onDaemonStatusUpdate(boolean reachable, boolean wasReachable,
+                    String hostName, String state, long runId, String lastError,
+                    boolean errorChanged, long uptimeSec, String service, JSONObject metrics) {
+                daemonReachable = reachable;
+                daemonHostName = hostName;
+                daemonState = state;
+                daemonLastError = lastError;
+                daemonRunId = runId;
+                daemonUptimeSec = uptimeSec;
+                daemonService = service;
+                if (!wasReachable) {
+                    Toast.makeText(MainActivity.this, "Connected to " + hostName, Toast.LENGTH_SHORT).show();
+                    appendLiveLogInfo("connected to host " + hostName);
+                }
+                if (errorChanged && !lastError.isEmpty()) {
+                    appendLiveLogError("host last_error: " + lastError);
+                }
+                updateActionButtonsEnabled();
+                updateHostHint();
+                refreshStatusText();
+                updatePreflightOverlay();
+                if (metrics != null) {
+                    long frameIn = metrics.optLong("frame_in", 0);
+                    long frameOut = metrics.optLong("frame_out", 0);
+                    long drops = metrics.optLong("drops", 0);
+                    long reconnects = metrics.optLong("reconnects", 0);
+                    long bps = metrics.optLong("bitrate_actual_bps", 0);
+                    String errCompact = lastError.length() > 80 ? lastError.substring(0, 80) + "..." : lastError;
+                    updateStatsLine("host in/out: " + frameIn + "/" + frameOut
+                            + " | drops: " + drops + " | reconnects: " + reconnects
+                            + " | bitrate: " + formatBps(bps)
+                            + (errCompact.isEmpty() ? "" : " | last_error: " + errCompact));
+                }
+                updatePerfHud(metrics);
+            }
+
+            @Override
+            public void onDaemonOffline(boolean wasReachable, Exception e) {
+                daemonReachable = false;
+                daemonState = "DISCONNECTED";
+                updateActionButtonsEnabled();
+                updateHostHint();
+                updatePerfHudUnavailable();
+                preflightComplete = false;
+                updatePreflightOverlay();
+                if (wasReachable) {
+                    updateStatus(STATE_ERROR, "Host API offline: " + shortError(e), 0);
+                    appendLiveLogError("daemon poll failed: " + shortError(e));
+                    Toast.makeText(MainActivity.this,
+                            "Host daemon offline (" + shortError(e) + "). Start host: ./host/rust/scripts/run_wbeamd_rust.sh",
+                            Toast.LENGTH_LONG).show();
+                } else {
+                    refreshStatusText();
+                }
+            }
+
+            @Override
+            public void onAutoStartRequired() {
+                sessionController.requestStart(false, true);
+            }
+
+            @Override
+            public void onAutoStartFailed() {
+                appendLiveLogWarn("auto-start paused after failed capture; tap Start Live to retry");
+            }
+
+            @Override
+            public void ensureDecoderRunning() {
+                MainActivity.this.ensureDecoderRunning();
+            }
+        });
+
+        sessionController = new StreamSessionController(uiHandler, ioExecutor, new StreamSessionController.Callbacks() {
+            @Override
+            public void onStatus(String state, String info, long bps) {
+                updateStatus(state, info, bps);
+            }
+
+            @Override
+            public void onDaemonStatusJson(JSONObject status) {
+                updateDaemonStateFromJson(status);
+            }
+
+            @Override
+            public void ensureDecoderRunning() {
+                MainActivity.this.ensureDecoderRunning();
+            }
+
+            @Override
+            public void stopLiveView() {
+                MainActivity.this.stopLiveView();
+            }
+
+            @Override
+            public void showToast(String msg, boolean longToast) {
+                Toast.makeText(MainActivity.this, msg,
+                        longToast ? Toast.LENGTH_LONG : Toast.LENGTH_SHORT).show();
+            }
+
+            @Override
+            public void appendLiveLogWarn(String msg) {
+                MainActivity.this.appendLiveLogWarn(msg);
+            }
+
+            @Override
+            public void handleApiFailure(String prefix, boolean userAction, Exception e) {
+                MainActivity.this.handleApiFailure(prefix, userAction, e);
+            }
+
+            @Override
+            public JSONObject buildConfigPayload() {
+                return MainActivity.this.buildConfigPayload();
+            }
+
+            @Override
+            public void suppressAutoStart(long durationMs) {
+                if (durationMs <= 0) {
+                    statusPoller.clearAutoStartSuppression();
+                } else {
+                    statusPoller.suppressAutoStart(durationMs);
+                }
+            }
+
+            @Override
+            public void recordAutoStartAttempt() {
+                statusPoller.recordAutoStartAttempt();
+            }
+
+            @Override
+            public void setAutoStartPending(boolean pending) {
+                statusPoller.setAutoStartPending(pending);
+            }
+        });
 
         applySettings(false);
         setDebugControlsVisible(false);
@@ -276,16 +382,15 @@ public class MainActivity extends AppCompatActivity {
         startPreflightPulse();
         updatePreflightOverlay();
         updateStatus(STATE_IDLE, "tap Settings -> Start Live", 0);
-        startStatusPolling();
+        statusPoller.start();
     }
 
     @Override
     protected void onDestroy() {
-        stopStatusPolling();
+        statusPoller.stop();
         stopPreflightPulse();
-        uiHandler.removeCallbacks(liveTestStartTimeoutTask);
+        videoTestController.release();
         stopLiveView();
-        releaseMediaPlayer();
         ioExecutor.shutdownNow();
         super.onDestroy();
     }
@@ -302,6 +407,10 @@ public class MainActivity extends AppCompatActivity {
         }
         super.onBackPressed();
     }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // View setup
+    // ══════════════════════════════════════════════════════════════════════════
 
     private void bindViews() {
         rootLayout = findViewById(R.id.rootLayout);
@@ -349,26 +458,30 @@ public class MainActivity extends AppCompatActivity {
         testButton = findViewById(R.id.testButton);
         fullscreenButton = findViewById(R.id.fullscreenButton);
         cursorOverlayButton = findViewById(R.id.cursorOverlayButton);
-        // F2: mode / quality / advanced
-        modeLowLatencyButton = findViewById(R.id.modeLowLatencyButton);
-        modeSmoothButton     = findViewById(R.id.modeSmoothButton);
-        qualityLowButton     = findViewById(R.id.qualityLowButton);
-        qualityMedButton     = findViewById(R.id.qualityMedButton);
-        qualityHighButton    = findViewById(R.id.qualityHighButton);
-        advancedToggleButton = findViewById(R.id.advancedToggleButton);
-        advancedPanel        = findViewById(R.id.advancedPanel);
+        intraOnlyButton     = findViewById(R.id.intraOnlyButton);
     }
 
     private void setupSpinners() {
         profileSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, PROFILE_OPTIONS));
         encoderSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, ENCODER_OPTIONS));
         cursorSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, CURSOR_OPTIONS));
+        encoderSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                updateIntraOnlyButton();
+                updateHostHint();
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        });
     }
 
     private void setupSeekbars() {
         resolutionSeek.setMax(50); // 50..100%
         fpsSeek.setMax(72); // 24..96 fps
-        bitrateSeek.setMax(55); // 5..60 Mbps
+        bitrateSeek.setMax(295); // 5..300 Mbps
 
         SeekBar.OnSeekBarChangeListener listener = new SeekBar.OnSeekBarChangeListener() {
             @Override
@@ -455,23 +568,23 @@ public class MainActivity extends AppCompatActivity {
         settingsCloseButton.setOnClickListener(v -> hideSettingsPanel());
         applySettingsButton.setOnClickListener(v -> applySettings(true));
 
-        startButton.setOnClickListener(v -> requestHostStart(true, true));
-        stopButton.setOnClickListener(v -> requestHostStop(true));
-        testButton.setOnClickListener(v -> startBandwidthTest());
+        startButton.setOnClickListener(v -> sessionController.requestStart(true, true));
+        stopButton.setOnClickListener(v -> sessionController.requestStop(true));
+        testButton.setOnClickListener(v -> videoTestController.startBandwidthTest());
         testButton.setOnLongClickListener(v -> {
-            startPublicVideoTest();
+            videoTestController.startPublicVideoTest();
             return true;
         });
         if (quickStartButton != null) {
-            quickStartButton.setOnClickListener(v -> requestHostStart(true, true));
+            quickStartButton.setOnClickListener(v -> sessionController.requestStart(true, true));
         }
         if (quickStopButton != null) {
-            quickStopButton.setOnClickListener(v -> requestHostStop(true));
+            quickStopButton.setOnClickListener(v -> sessionController.requestStop(true));
         }
         if (quickTestButton != null) {
-            quickTestButton.setOnClickListener(v -> startBandwidthTest());
+            quickTestButton.setOnClickListener(v -> videoTestController.startBandwidthTest());
             quickTestButton.setOnLongClickListener(v -> {
-                startPublicVideoTest();
+                videoTestController.startPublicVideoTest();
                 return true;
             });
         }
@@ -479,45 +592,10 @@ public class MainActivity extends AppCompatActivity {
         fullscreenButton.setOnClickListener(v -> toggleFullscreen());
         cursorOverlayButton.setOnClickListener(v -> toggleCursorOverlayMode());
 
-        // F2: mode buttons
-        if (modeLowLatencyButton != null) modeLowLatencyButton.setOnClickListener(v -> {
-            selectedMode = "lowlatency";
-            setSpinnerSelection(profileSpinner, PROFILE_OPTIONS, "lowlatency");
-            refreshModeQualityButtons();
+        intraOnlyButton.setOnClickListener(v -> {
+            intraOnlyEnabled = !intraOnlyEnabled;
+            updateIntraOnlyButton();
             applySettings(true);
-        });
-        if (modeSmoothButton != null) modeSmoothButton.setOnClickListener(v -> {
-            selectedMode = "balanced";
-            setSpinnerSelection(profileSpinner, PROFILE_OPTIONS, "balanced");
-            refreshModeQualityButtons();
-            applySettings(true);
-        });
-
-        // F2: quality buttons
-        if (qualityLowButton != null) qualityLowButton.setOnClickListener(v -> {
-            selectedQuality = "low";
-            applyQualityPreset("low");
-            refreshModeQualityButtons();
-            applySettings(true);
-        });
-        if (qualityMedButton != null) qualityMedButton.setOnClickListener(v -> {
-            selectedQuality = "med";
-            applyQualityPreset("med");
-            refreshModeQualityButtons();
-            applySettings(true);
-        });
-        if (qualityHighButton != null) qualityHighButton.setOnClickListener(v -> {
-            selectedQuality = "high";
-            applyQualityPreset("high");
-            refreshModeQualityButtons();
-            applySettings(true);
-        });
-
-        // F2: advanced panel toggle (hidden by default)
-        if (advancedToggleButton != null) advancedToggleButton.setOnClickListener(v -> {
-            boolean show = advancedPanel != null && advancedPanel.getVisibility() != View.VISIBLE;
-            if (advancedPanel != null) advancedPanel.setVisibility(show ? View.VISIBLE : View.GONE);
-            if (advancedToggleButton != null) advancedToggleButton.setText(show ? "\u25bc Advanced" : "\u25b6 Advanced");
         });
 
         updateActionButtonsEnabled();
@@ -541,45 +619,6 @@ public class MainActivity extends AppCompatActivity {
         setActionButtonEnabled(testButton, enabled);
     }
 
-    // F2: highlight active mode / quality button
-    private void refreshModeQualityButtons() {
-        int activeColor   = 0xFF2563EB; // blue-600
-        int inactiveColor = 0xFF1E3A5F; // dark navy
-        if (modeLowLatencyButton != null)
-            modeLowLatencyButton.setBackgroundTintList(
-                android.content.res.ColorStateList.valueOf(
-                    "lowlatency".equals(selectedMode) ? activeColor : inactiveColor));
-        if (modeSmoothButton != null)
-            modeSmoothButton.setBackgroundTintList(
-                android.content.res.ColorStateList.valueOf(
-                    "balanced".equals(selectedMode) ? activeColor : inactiveColor));
-        if (qualityLowButton != null)
-            qualityLowButton.setBackgroundTintList(
-                android.content.res.ColorStateList.valueOf(
-                    "low".equals(selectedQuality) ? activeColor : inactiveColor));
-        if (qualityMedButton != null)
-            qualityMedButton.setBackgroundTintList(
-                android.content.res.ColorStateList.valueOf(
-                    "med".equals(selectedQuality) ? activeColor : 0xFF1E4A3F));
-        if (qualityHighButton != null)
-            qualityHighButton.setBackgroundTintList(
-                android.content.res.ColorStateList.valueOf(
-                    "high".equals(selectedQuality) ? activeColor : inactiveColor));
-    }
-
-    // F2: map quality preset → res/bitrate sliders
-    private void applyQualityPreset(String quality) {
-        // low: 75% res, 15 Mbps;  med: 100% res, 25 Mbps;  high: 100% res, 45 Mbps
-        int scale, bitrate;
-        switch (quality) {
-            case "low":  scale = 75;  bitrate = 15; break;
-            case "high": scale = 100; bitrate = 45; break;
-            default:     scale = 100; bitrate = 25; break; // med
-        }
-        if (resolutionSeek != null) resolutionSeek.setProgress(clamp(scale, 50, 100) - 50);
-        if (bitrateSeek != null)    bitrateSeek.setProgress(clamp(bitrate, 5, 60) - 5);
-    }
-
     private void setDebugControlsVisible(boolean visible) {
         debugControlsVisible = visible;
         int visibility = visible ? View.VISIBLE : View.GONE;
@@ -601,69 +640,40 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
+    // Settings
+    // ══════════════════════════════════════════════════════════════════════════
+
     private void loadSavedSettings() {
-        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-
-        String profile = prefs.getString(PREF_PROFILE, "balanced");
-        String encoder = prefs.getString(PREF_ENCODER, "auto");
-        String cursor = prefs.getString(PREF_CURSOR, "hidden");
-
-        setSpinnerSelection(profileSpinner, PROFILE_OPTIONS, profile);
-        setSpinnerSelection(encoderSpinner, ENCODER_OPTIONS, encoder);
-        setSpinnerSelection(cursorSpinner, CURSOR_OPTIONS, cursor);
-
-        int scale = prefs.getInt(PREF_RES_SCALE, 100);
-        int fps = prefs.getInt(PREF_FPS, 60);
-        int bitrate = prefs.getInt(PREF_BITRATE, 25);
-
-        resolutionSeek.setProgress(clamp(scale, 50, 100) - 50);
-        fpsSeek.setProgress(clamp(fps, 24, 96) - 24);
-        bitrateSeek.setProgress(clamp(bitrate, 5, 60) - 5);
-
-        cursorOverlayEnabled = prefs.getBoolean(PREF_LOCAL_CURSOR, true);
+        SettingsRepository.SettingsSnapshot s = settingsRepository.load();
+        setSpinnerSelection(profileSpinner, PROFILE_OPTIONS, s.profile);
+        setSpinnerSelection(encoderSpinner, ENCODER_OPTIONS, s.encoder);
+        setSpinnerSelection(cursorSpinner, CURSOR_OPTIONS, s.cursor);
+        resolutionSeek.setProgress(clamp(s.resScale, 50, 100) - 50);
+        fpsSeek.setProgress(clamp(s.fps, 24, 96) - 24);
+        bitrateSeek.setProgress(clamp(s.bitrateMbps, 5, 300) - 5);
+        cursorOverlayEnabled = s.localCursor;
         cursorOverlayButton.setText(cursorOverlayEnabled ? "Local Cursor Overlay ON" : "Local Cursor Overlay OFF");
-
-        // F2: restore mode / quality
-        selectedMode    = prefs.getString(PREF_MODE, "lowlatency");
-        selectedQuality = prefs.getString(PREF_QUALITY, "med");
-        setSpinnerSelection(profileSpinner, PROFILE_OPTIONS, selectedMode);
-        applyQualityPreset(selectedQuality);
-        refreshModeQualityButtons();
-
+        intraOnlyEnabled = s.intraOnly;
+        updateIntraOnlyButton();
         updateSettingValueLabels();
     }
 
     private void saveSettings() {
-        SharedPreferences.Editor e = getSharedPreferences(PREFS, MODE_PRIVATE).edit();
-        e.putString(PREF_PROFILE, getSelectedProfile());
-        e.putString(PREF_ENCODER, getSelectedEncoder());
-        e.putString(PREF_CURSOR, getSelectedCursorMode());
-        e.putInt(PREF_RES_SCALE, getResolutionScalePercent());
-        e.putInt(PREF_FPS, getSelectedFps());
-        e.putInt(PREF_BITRATE, getSelectedBitrateMbps());
-        e.putBoolean(PREF_LOCAL_CURSOR, cursorOverlayEnabled);
-        e.putString(PREF_MODE, selectedMode);    // F2
-        e.putString(PREF_QUALITY, selectedQuality); // F2
-        e.apply();
+        settingsRepository.save(new SettingsRepository.SettingsSnapshot(
+                getSelectedProfile(), getSelectedEncoder(), getSelectedCursorMode(),
+                getResolutionScalePercent(), getSelectedFps(), getSelectedBitrateMbps(),
+                cursorOverlayEnabled, intraOnlyEnabled
+        ));
     }
 
     private void applySettings(boolean userAction) {
         updateSettingValueLabels();
         saveSettings();
         updateHostHint();
-
         if (userAction) {
-            // Do NOT clear suppressAutoStartUntil here – applying settings is not a start intent.
-            // Auto-start suppression is only cleared by an explicit Start Live press.
             JSONObject payload = buildConfigPayload();
-            postApiCommand(
-                    "POST",
-                    "/apply",
-                    payload,
-                    "applied",
-                    true,
-                    false
-            );
+            sessionController.postApiCommand("POST", "/apply", payload, "applied", true, false);
         }
     }
 
@@ -678,203 +688,53 @@ public class MainActivity extends AppCompatActivity {
         bitrateValueText.setText(bitrate + " Mbps");
     }
 
+    private void updateIntraOnlyButton() {
+        if (intraOnlyButton == null) return;
+        String encoder = getSelectedEncoder();
+        boolean supportsIntra = "h265".equals(encoder);
+        if (!supportsIntra) {
+            intraOnlyEnabled = false;
+        }
+        intraOnlyButton.setEnabled(supportsIntra);
+        intraOnlyButton.setAlpha(supportsIntra ? 1.0f : 0.45f);
+        intraOnlyButton.setText(intraOnlyEnabled
+                ? "All-Intra: ON  \u2014 zero artifacts (HEVC only)"
+            : (supportsIntra ? "All-Intra: OFF" : "All-Intra: N/A (raw-png)"));
+        intraOnlyButton.setBackgroundTintList(
+                android.content.res.ColorStateList.valueOf(
+                intraOnlyEnabled ? 0xFF16A34A : 0xFF374151));
+    }
+
     private void updateHostHint() {
         int[] sz = computeScaledSize();
         String line1 = "Control API " + (daemonReachable ? "connected" : "waiting")
-                + ": 127.0.0.1:" + CONTROL_PORT;
+                + ": http://127.0.0.1:5001";
         String line2 = "Host: " + daemonHostName + " | Daemon: " + daemonState + " (" + daemonService + ")";
         String line3 = "Outgoing config: " + getSelectedProfile()
                 + ", " + sz[0] + "x" + sz[1]
                 + ", " + getSelectedFps() + "fps, "
                 + getSelectedBitrateMbps() + "Mbps, "
-                + getSelectedEncoder() + ", cursor " + getSelectedCursorMode();
+                + getSelectedEncoder() + (intraOnlyEnabled ? "+intra" : "")
+                + ", cursor " + getSelectedCursorMode();
         hostHintText.setText(line1 + "\n" + line2 + "\n" + line3);
     }
 
-    private void startStatusPolling() {
-        uiHandler.removeCallbacks(statusPollTask);
-        uiHandler.post(statusPollTask);
-    }
+    // ══════════════════════════════════════════════════════════════════════════
+    // Core helpers (called by callbacks and internally)
+    // ══════════════════════════════════════════════════════════════════════════
 
-    private void stopStatusPolling() {
-        uiHandler.removeCallbacks(statusPollTask);
-    }
-
-    private void pollDaemonStatusAsync() {
-        if (statusPollInFlight) {
-            return;
-        }
-        statusPollInFlight = true;
-        long pollTick = ++statusPollTick;
-        boolean fetchHealth = (pollTick % HEALTH_POLL_EVERY) == 1;
-        ioExecutor.execute(() -> {
-            try {
-                JSONObject status = apiRequestWithRetry("GET", "/status", null, API_RETRY_ATTEMPTS);
-                JSONObject health = fetchHealth
-                        ? apiRequestWithRetry("GET", "/health", null, API_RETRY_ATTEMPTS)
-                        : null;
-                JSONObject metricsPayload = apiRequestWithRetry("GET", "/metrics", null, API_RETRY_ATTEMPTS);
-                JSONObject metrics = metricsPayload.optJSONObject("metrics");
-                runOnUiThread(() -> onDaemonStatus(status, health, metrics));
-            } catch (Exception e) {
-                runOnUiThread(() -> onDaemonOffline(e));
-            } finally {
-                statusPollInFlight = false;
-            }
-        });
-    }
-
-    private void onDaemonStatus(JSONObject status, JSONObject health, JSONObject metrics) {
-        boolean wasReachable = daemonReachable;
+    private void updateDaemonStateFromJson(JSONObject status) {
+        if (status == null) return;
         daemonReachable = true;
         daemonHostName = status.optString("host_name", daemonHostName);
         daemonState = status.optString("state", "IDLE").toUpperCase(Locale.US);
-        String newLastError = status.optString("last_error", "");
-        boolean daemonErrorChanged = !newLastError.equals(daemonLastError);
-        daemonLastError = newLastError;
+        daemonLastError = status.optString("last_error", daemonLastError);
         daemonRunId = status.optLong("run_id", daemonRunId);
         daemonUptimeSec = status.optLong("uptime", daemonUptimeSec);
-        daemonService = health != null ? health.optString("service", daemonService) : daemonService;
-        String newSnapshot = daemonState + "|" + daemonRunId + "|" + daemonLastError;
-        if (!newSnapshot.equals(daemonStateSnapshot)) {
-            daemonStateSnapshot = newSnapshot;
-            Log.i(TAG, "daemon status state=" + daemonState + " run_id=" + daemonRunId
-                    + (daemonLastError.isEmpty() ? "" : " last_error=" + daemonLastError));
-        }
-
-        if (!wasReachable) {
-            Toast.makeText(this, "Connected to " + daemonHostName, Toast.LENGTH_SHORT).show();
-            appendLiveLogInfo("connected to host " + daemonHostName);
-        }
-        if (daemonErrorChanged && !daemonLastError.isEmpty()) {
-            appendLiveLogError("host last_error: " + daemonLastError);
-        }
-
         updateActionButtonsEnabled();
-
         updateHostHint();
         refreshStatusText();
         updatePreflightOverlay();
-
-        if (metrics != null) {
-            long frameIn = metrics.optLong("frame_in", 0);
-            long frameOut = metrics.optLong("frame_out", 0);
-            long drops = metrics.optLong("drops", 0);
-            long reconnects = metrics.optLong("reconnects", 0);
-            long bps = metrics.optLong("bitrate_actual_bps", 0);
-            String errCompact = daemonLastError;
-            if (errCompact.length() > 80) {
-                errCompact = errCompact.substring(0, 80) + "...";
-            }
-            updateStatsLine(
-                    "host in/out: " + frameIn + "/" + frameOut
-                            + " | drops: " + drops
-                            + " | reconnects: " + reconnects
-                            + " | bitrate: " + formatBps(bps)
-                            + (errCompact.isEmpty() ? "" : " | last_error: " + errCompact)
-            );
-        }
-        updatePerfHud(metrics);
-
-        if ("STREAMING".equals(daemonState)) {
-            autoStartPending = false;
-            ensureDecoderRunning();
-            return;
-        }
-
-        long now = SystemClock.elapsedRealtime();
-        if (autoStartPending && "IDLE".equals(daemonState)) {
-            autoStartPending = false;
-            // Permanently suppress auto-start after failed capture.
-            // Only a manual "Start Live" press (userAction=true) will clear this.
-            suppressAutoStartUntil = Long.MAX_VALUE / 2;
-            appendLiveLogWarn("auto-start paused after failed capture; tap Start Live to retry");
-            return;
-        }
-        if (now < suppressAutoStartUntil) {
-            return;
-        }
-        if (now - lastAutoStartAt < AUTO_START_COOLDOWN_MS) {
-            return;
-        }
-        if ("IDLE".equals(daemonState)) {
-            requestHostStart(false, true);
-        }
-    }
-
-    private void onDaemonOffline(Exception e) {
-        boolean wasReachable = daemonReachable;
-        daemonReachable = false;
-        daemonState = "DISCONNECTED";
-        updateActionButtonsEnabled();
-        updateHostHint();
-        updatePerfHudUnavailable();
-        preflightComplete = false;
-        updatePreflightOverlay();
-        if (wasReachable) {
-            updateStatus(STATE_ERROR, "Host API offline: " + shortError(e), 0);
-            appendLiveLogError("daemon poll failed: " + shortError(e));
-            Toast.makeText(
-                    this,
-                    "Host daemon offline (" + shortError(e) + "). Start host: ./host/rust/scripts/run_wbeamd_rust.sh",
-                    Toast.LENGTH_LONG
-            ).show();
-        } else {
-            refreshStatusText();
-        }
-        Log.e(TAG, "daemon poll failed", e);
-    }
-
-    private void requestHostStart(boolean userAction, boolean ensureViewer) {
-        suppressAutoStartUntil = 0;
-        autoStartPending = !userAction;
-        lastAutoStartAt = SystemClock.elapsedRealtime();
-        updateStatus(STATE_CONNECTING, "requesting host start", 0);
-
-        JSONObject cfg = buildConfigPayload();
-        ioExecutor.execute(() -> {
-            try {
-                apiRequestWithRetry("POST", "/apply", cfg, API_RETRY_ATTEMPTS);
-                JSONObject status = apiRequestWithRetry("POST", "/start", new JSONObject(), API_RETRY_ATTEMPTS);
-                runOnUiThread(() -> {
-                    onDaemonStatus(status, null, null);
-                    if (ensureViewer) {
-                        ensureDecoderRunning();
-                    }
-                    if (userAction) {
-                        Toast.makeText(this, "Host stream start requested", Toast.LENGTH_SHORT).show();
-                    }
-                });
-            } catch (Exception e) {
-                runOnUiThread(() -> {
-                    autoStartPending = false;
-                    if (!userAction) {
-                        suppressAutoStartUntil = SystemClock.elapsedRealtime() + AUTO_START_FAILURE_BACKOFF_MS;
-                    }
-                    handleApiFailure("start failed", userAction, e);
-                });
-            }
-        });
-    }
-
-    private void requestHostStop(boolean userAction) {
-        suppressAutoStartUntil = SystemClock.elapsedRealtime() + STOP_SUPPRESS_AUTO_START_MS;
-        autoStartPending = false;
-        ioExecutor.execute(() -> {
-            try {
-                JSONObject status = apiRequestWithRetry("POST", "/stop", new JSONObject(), API_RETRY_ATTEMPTS);
-                runOnUiThread(() -> {
-                    stopLiveView();
-                    onDaemonStatus(status, null, null);
-                    updateStatus(STATE_IDLE, "stream stopped", 0);
-                    if (userAction) {
-                        Toast.makeText(this, "Host stream stopped", Toast.LENGTH_SHORT).show();
-                    }
-                });
-            } catch (Exception e) {
-                runOnUiThread(() -> handleApiFailure("stop failed", userAction, e));
-            }
-        });
     }
 
     private void ensureDecoderRunning() {
@@ -891,99 +751,20 @@ public class MainActivity extends AppCompatActivity {
         int[] sz = computeScaledSize();
         JSONObject payload = new JSONObject();
         try {
+            String uiEncoder = getSelectedEncoder();
+            String encoder = "raw-png".equals(uiEncoder) ? "rawpng" : "h265";
+            boolean intraOnly = "h265".equals(encoder) && intraOnlyEnabled;
             payload.put("profile", getSelectedProfile());
-            payload.put("encoder", getSelectedEncoder());
+            payload.put("encoder", encoder);
             payload.put("cursor_mode", getSelectedCursorMode());
             payload.put("size", sz[0] + "x" + sz[1]);
             payload.put("fps", getSelectedFps());
             payload.put("bitrate_kbps", getSelectedBitrateMbps() * 1000);
             payload.put("debug_fps", 0);
+            payload.put("intra_only", intraOnly);
         } catch (JSONException ignored) {
         }
         return payload;
-    }
-
-    private void postApiCommand(
-            String method,
-            String path,
-            JSONObject payload,
-            String successInfo,
-            boolean toastOnSuccess,
-            boolean ensureViewer
-    ) {
-        updateStatus(STATE_CONNECTING, "sending " + path, 0);
-        ioExecutor.execute(() -> {
-            try {
-                JSONObject response = apiRequestWithRetry(method, path, payload, API_RETRY_ATTEMPTS);
-                runOnUiThread(() -> {
-                    onDaemonStatus(response, null, null);
-                    updateStatus(STATE_CONNECTING, successInfo, 0);
-                    if (ensureViewer) {
-                        ensureDecoderRunning();
-                    }
-                    if (toastOnSuccess) {
-                        Toast.makeText(this, "Applied on host", Toast.LENGTH_SHORT).show();
-                    }
-                });
-            } catch (Exception e) {
-                runOnUiThread(() -> handleApiFailure("api failed", toastOnSuccess, e));
-            }
-        });
-    }
-
-    private JSONObject apiRequestWithRetry(String method, String path, JSONObject payload, int attempts)
-            throws IOException, JSONException {
-        IOException lastIo = null;
-        for (int i = 0; i < Math.max(1, attempts); i++) {
-            try {
-                return apiRequest(method, path, payload);
-            } catch (IOException io) {
-                lastIo = io;
-                if (isLikelyStaleHttpConnection(io)) {
-                    API_HTTP.connectionPool().evictAll();
-                }
-                if (i == attempts - 1) {
-                    break;
-                }
-                long baseDelay = Math.min(5000L, API_RETRY_BASE_DELAY_MS * (1L << i));
-                long jitter = ThreadLocalRandom.current().nextLong(Math.max(1L, baseDelay / 4L + 1L));
-                SystemClock.sleep(baseDelay + jitter);
-            }
-        }
-        throw lastIo != null ? lastIo : new IOException("request failed");
-    }
-
-    private static boolean isLikelyStaleHttpConnection(IOException io) {
-        String message = io.getMessage();
-        if (message == null) {
-            return io instanceof java.io.EOFException;
-        }
-        String m = message.toLowerCase(Locale.US);
-        return io instanceof java.io.EOFException
-                || m.contains("unexpected end of stream")
-                || m.contains("\\n not found")
-                || m.contains("end of stream");
-    }
-
-    private JSONObject apiRequest(String method, String path, JSONObject payload) throws IOException, JSONException {
-        RequestBody body = payload != null
-                ? RequestBody.create(payload.toString(), JSON_MEDIA_TYPE)
-                : null;
-        Request request = new Request.Builder()
-                .url(API_BASE + path)
-                .header("Accept", "application/json")
-                .method(method, body)
-                .build();
-
-        try (Response response = API_HTTP.newCall(request).execute()) {
-            int code = response.code();
-            ResponseBody responseBody = response.body();
-            String text = responseBody != null ? responseBody.string().trim() : "";
-            if (code < 200 || code >= 300) {
-                throw new IOException("HTTP " + code + ": " + text);
-            }
-            return text.isEmpty() ? new JSONObject() : new JSONObject(text);
-        }
     }
 
     private void handleApiFailure(String prefix, boolean userAction, Exception e) {
@@ -992,31 +773,10 @@ public class MainActivity extends AppCompatActivity {
         appendLiveLogError(prefix + ": " + reason);
         Log.e(TAG, prefix + ": " + reason, e);
         if (userAction) {
-            Toast.makeText(
-                    this,
+            Toast.makeText(this,
                     "Host daemon error (" + reason + "). Start host: ./host/rust/scripts/run_wbeamd_rust.sh",
-                    Toast.LENGTH_LONG
-            ).show();
+                    Toast.LENGTH_LONG).show();
         }
-    }
-
-    private void pushClientMetricsAsync(ClientMetricsSample metrics) {
-        if (metrics == null) {
-            return;
-        }
-        long now = SystemClock.elapsedRealtime();
-        if (now - lastClientMetricsPostAt < CLIENT_METRICS_INTERVAL_MS) {
-            return;
-        }
-        lastClientMetricsPostAt = now;
-
-        ioExecutor.execute(() -> {
-            try {
-                apiRequestWithRetry("POST", "/v1/client-metrics", metrics.toJson(), 1);
-            } catch (Exception e) {
-                appendLiveLogWarn("client-metrics post failed: " + shortError(e));
-            }
-        });
     }
 
     private String shortError(Exception e) {
@@ -1033,8 +793,12 @@ public class MainActivity extends AppCompatActivity {
         return e.getClass().getSimpleName();
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
+    // Stream / media
+    // ══════════════════════════════════════════════════════════════════════════
+
     private void startLiveView() {
-        releaseMediaPlayer();
+        videoTestController.release();
         if (surface == null || !surface.isValid()) {
             updateStatus(STATE_ERROR, "surface not ready yet", 0);
             return;
@@ -1063,7 +827,7 @@ public class MainActivity extends AppCompatActivity {
 
                     @Override
                     public void onClientMetrics(ClientMetricsSample metrics) {
-                        pushClientMetricsAsync(metrics);
+                        metricsReporter.push(metrics);
                     }
                 },
                 decodeSize[0],
@@ -1079,349 +843,15 @@ public class MainActivity extends AppCompatActivity {
             player.stop();
             player = null;
         }
-        releaseMediaPlayer();
+        videoTestController.release();
         hideCursorOverlay();
         updateStatsLine("fps in/out: - | drops: - | late: - | q(t/d/r): -/-/- | reconnects: -");
         updateStatus(STATE_IDLE, "stopped", 0);
     }
 
-    private void startPublicVideoTest() {
-        if (surface == null || !surface.isValid()) {
-            updateStatus(STATE_ERROR, "surface not ready yet", 0);
-            return;
-        }
-
-        LiveTestPreset preset = captureLiveTestPreset();
-        String presetLine = preset.toLine();
-        logLiveTestInfo("requested with preset: " + presetLine);
-
-        liveLogVisible = true;
-        if (liveLogText != null) {
-            liveLogText.setVisibility(View.VISIBLE);
-        }
-        if (logButton != null) {
-            logButton.setText("Log ON");
-        }
-
-        setLiveTestOverlay(
-                "RUN TESTS LIVE LOADING",
-                "preset\n" + preset.toMultiline(),
-                "phase: preparing media pipeline"
-        );
-
-        if (player != null) {
-            player.stop();
-            player = null;
-        }
-        releaseMediaPlayer();
-
-        try {
-            updateStatus(STATE_CONNECTING, "RUN TESTS LIVE loading", 0);
-            updateStatsLine("source: RUN TESTS LIVE | " + presetLine);
-            MediaPlayer mp = new MediaPlayer();
-            mediaPlayer = mp;
-            mp.setSurface(surface);
-            mp.setDataSource(TEST_VIDEO_URL);
-            mp.setLooping(true);
-            mp.setVolume(0f, 0f);
-
-            uiHandler.removeCallbacks(liveTestStartTimeoutTask);
-            uiHandler.postDelayed(liveTestStartTimeoutTask, LIVE_TEST_START_TIMEOUT_MS);
-
-            mp.setOnPreparedListener(ready -> {
-                if (mediaPlayer != ready) {
-                    logLiveTestWarn("prepared callback ignored for stale player");
-                    return;
-                }
-                uiHandler.removeCallbacks(liveTestStartTimeoutTask);
-                logLiveTestInfo("media prepared; starting playback");
-                try {
-                    ready.start();
-                } catch (IllegalStateException ex) {
-                    logLiveTestError("start() failed: " + shortError(ex));
-                    updateStatus(STATE_ERROR, "RUN TESTS LIVE failed: IllegalStateException", 0);
-                    setLiveTestOverlay(
-                            "RUN TESTS LIVE FAILED",
-                            "preset\n" + preset.toMultiline(),
-                            shortError(ex)
-                    );
-                    releaseMediaPlayer();
-                    return;
-                }
-                updateStatus(STATE_STREAMING, "RUN TESTS LIVE playing", 0);
-                setLiveTestOverlay(
-                        "RUN TESTS LIVE ACTIVE",
-                        "preset\n" + preset.toMultiline(),
-                        "phase: playback started"
-                );
-                uiHandler.postDelayed(this::clearLiveTestOverlay, 900);
-            });
-            mp.setOnCompletionListener(done -> {
-                if (mediaPlayer != done) {
-                    return;
-                }
-                uiHandler.removeCallbacks(liveTestStartTimeoutTask);
-                logLiveTestInfo("playback completed");
-                updateStatus(STATE_IDLE, "RUN TESTS LIVE completed", 0);
-                clearLiveTestOverlay();
-            });
-            mp.setOnErrorListener((errPlayer, what, extra) -> {
-                if (mediaPlayer != errPlayer) {
-                    return true;
-                }
-                uiHandler.removeCallbacks(liveTestStartTimeoutTask);
-                logLiveTestError("player error what=" + what + " extra=" + extra);
-                updateStatus(STATE_ERROR, "RUN TESTS LIVE error: " + what + "/" + extra, 0);
-                setLiveTestOverlay(
-                        "RUN TESTS LIVE ERROR",
-                        "preset\n" + preset.toMultiline(),
-                        "player error: " + what + "/" + extra
-                );
-                return true;
-            });
-            mp.setOnInfoListener((infoPlayer, what, extra) -> {
-                if (mediaPlayer != infoPlayer) {
-                    return true;
-                }
-                if (what == MediaPlayer.MEDIA_INFO_BUFFERING_START) {
-                    logLiveTestWarn("buffering start");
-                    updateStatus(STATE_CONNECTING, "RUN TESTS LIVE buffering", 0);
-                    setLiveTestOverlay(
-                            "RUN TESTS LIVE LOADING",
-                            "preset\n" + preset.toMultiline(),
-                            "phase: buffering"
-                    );
-                } else if (what == MediaPlayer.MEDIA_INFO_BUFFERING_END) {
-                    logLiveTestInfo("buffering end");
-                    updateStatus(STATE_STREAMING, "RUN TESTS LIVE playing", 0);
-                    setLiveTestOverlay(
-                            "RUN TESTS LIVE ACTIVE",
-                            "preset\n" + preset.toMultiline(),
-                            "phase: streaming frames"
-                    );
-                }
-                return false;
-            });
-            logLiveTestInfo("prepareAsync() start; source=public test stream");
-            mp.prepareAsync();
-        } catch (Exception e) {
-            uiHandler.removeCallbacks(liveTestStartTimeoutTask);
-            logLiveTestError("startup failed: " + shortError(e));
-            Log.e(TAG, "failed to start public test video", e);
-            updateStatus(STATE_ERROR, "RUN TESTS LIVE failed: " + e.getClass().getSimpleName(), 0);
-            setLiveTestOverlay(
-                    "RUN TESTS LIVE FAILED",
-                    "preset\n" + preset.toMultiline(),
-                    shortError(e)
-            );
-            releaseMediaPlayer();
-        }
-    }
-
-    private void startBandwidthTest() {
-        if (!daemonReachable) {
-            updateStatus(STATE_ERROR, "host API offline - cannot run bandwidth test", 0);
-            Toast.makeText(this, "Host API offline", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        updateStatus(STATE_CONNECTING, "running USB bandwidth test...", 0);
-        updateStatsLine("bandwidth test: downloading random payload from host API");
-        appendLiveLogInfo("bandwidth test start: /v1/speedtest?mb=" + BANDWIDTH_TEST_MB);
-
-        ioExecutor.execute(() -> {
-            try {
-                BandwidthResult result = runBandwidthTest(BANDWIDTH_TEST_MB);
-                runOnUiThread(() -> {
-                    String summary = String.format(
-                            Locale.US,
-                            "bandwidth %.1f Mbps (%.2f MiB/s), %d MiB in %.2fs",
-                            result.mbps,
-                            result.mibPerSec,
-                            result.totalMiB,
-                            result.seconds
-                    );
-                    updateStatus(uiStateFromDaemonState(), summary, result.bps);
-                    updateStatsLine(
-                            String.format(
-                                    Locale.US,
-                                    "bandwidth test: %.1f Mbps | %.2f MiB/s | bytes=%d | sec=%.2f",
-                                    result.mbps,
-                                    result.mibPerSec,
-                                    result.totalBytes,
-                                    result.seconds
-                            )
-                    );
-                    appendLiveLogInfo(summary);
-                    Toast.makeText(this, String.format(Locale.US, "Bandwidth: %.1f Mbps", result.mbps), Toast.LENGTH_SHORT).show();
-                });
-            } catch (Exception e) {
-                runOnUiThread(() -> {
-                    String reason = shortError(e);
-                    updateStatus(STATE_ERROR, "bandwidth test failed: " + reason, 0);
-                    appendLiveLogError("bandwidth test failed: " + reason);
-                    Toast.makeText(this, "Bandwidth test failed: " + reason, Toast.LENGTH_LONG).show();
-                });
-            }
-        });
-    }
-
-    private BandwidthResult runBandwidthTest(int sizeMb) throws IOException {
-        long totalBytes = 0;
-        long startNs = 0;
-        Request request = new Request.Builder()
-                .url(API_BASE + "/v1/speedtest?mb=" + sizeMb)
-                .header("Accept", "application/octet-stream")
-                .get()
-                .build();
-
-        try (Response response = SPEEDTEST_HTTP.newCall(request).execute()) {
-            int code = response.code();
-            if (code < 200 || code >= 300) {
-                ResponseBody errBody = response.body();
-                String msg = "HTTP " + code;
-                if (errBody != null) {
-                    String errText = errBody.string();
-                    if (errText != null && !errText.isEmpty()) {
-                        msg += ": " + errText;
-                    }
-                }
-                throw new IOException(msg);
-            }
-
-            ResponseBody body = response.body();
-            if (body == null) {
-                throw new IOException("empty response");
-            }
-
-            byte[] buf = new byte[64 * 1024];
-            try (BufferedInputStream in = new BufferedInputStream(body.byteStream(), 256 * 1024)) {
-                startNs = SystemClock.elapsedRealtimeNanos();
-                int read;
-                while ((read = in.read(buf)) >= 0) {
-                    if (read == 0) {
-                        continue;
-                    }
-                    totalBytes += read;
-                }
-            }
-            long durationNs = Math.max(1L, SystemClock.elapsedRealtimeNanos() - startNs);
-            return BandwidthResult.from(totalBytes, durationNs, sizeMb);
-        }
-    }
-
-    private String uiStateFromDaemonState() {
-        if ("STREAMING".equals(daemonState)) {
-            return STATE_STREAMING;
-        }
-        if ("STARTING".equals(daemonState) || "RECONNECTING".equals(daemonState)) {
-            return STATE_CONNECTING;
-        }
-        if ("ERROR".equals(daemonState) || "DISCONNECTED".equals(daemonState)) {
-            return STATE_ERROR;
-        }
-        return STATE_IDLE;
-    }
-
-    private static final class BandwidthResult {
-        final long totalBytes;
-        final long bps;
-        final double mbps;
-        final double mibPerSec;
-        final double seconds;
-        final int totalMiB;
-
-        private BandwidthResult(long totalBytes, long bps, double mbps, double mibPerSec, double seconds, int totalMiB) {
-            this.totalBytes = totalBytes;
-            this.bps = bps;
-            this.mbps = mbps;
-            this.mibPerSec = mibPerSec;
-            this.seconds = seconds;
-            this.totalMiB = totalMiB;
-        }
-
-        static BandwidthResult from(long totalBytes, long durationNs, int requestedMiB) {
-            double sec = durationNs / 1_000_000_000.0;
-            if (sec <= 0.0) {
-                sec = 0.001;
-            }
-            long bps = (long) ((totalBytes * 8.0) / sec);
-            double mbps = bps / 1_000_000.0;
-            double mibPerSec = (totalBytes / 1024.0 / 1024.0) / sec;
-            return new BandwidthResult(totalBytes, bps, mbps, mibPerSec, sec, requestedMiB);
-        }
-    }
-
-    private void releaseMediaPlayer() {
-        uiHandler.removeCallbacks(liveTestStartTimeoutTask);
-        MediaPlayer mp = mediaPlayer;
-        mediaPlayer = null;
-        if (mp != null) {
-            try {
-                mp.setOnPreparedListener(null);
-                mp.setOnCompletionListener(null);
-                mp.setOnErrorListener(null);
-                mp.setOnInfoListener(null);
-            } catch (Exception ignored) {
-            }
-            try {
-                mp.stop();
-            } catch (Exception ignored) {
-            }
-            try {
-                mp.reset();
-            } catch (Exception ignored) {
-            }
-            try {
-                mp.release();
-            } catch (Exception ignored) {
-            }
-        }
-    }
-
-    private LiveTestPreset captureLiveTestPreset() {
-        int[] sz = computeScaledSize();
-        return new LiveTestPreset(
-                getSelectedProfile(),
-                getSelectedEncoder(),
-                getSelectedCursorMode(),
-                sz[0],
-                sz[1],
-                getSelectedFps(),
-                getSelectedBitrateMbps()
-        );
-    }
-
-    private void logLiveTestInfo(String msg) {
-        appendLiveLogInfo("[RUN TESTS LIVE] " + msg);
-        Log.i(TAG, "[RUN TESTS LIVE] " + msg);
-    }
-
-    private void logLiveTestWarn(String msg) {
-        appendLiveLogWarn("[RUN TESTS LIVE] " + msg);
-        Log.w(TAG, "[RUN TESTS LIVE] " + msg);
-    }
-
-    private void logLiveTestError(String msg) {
-        appendLiveLogError("[RUN TESTS LIVE] " + msg);
-        Log.e(TAG, "[RUN TESTS LIVE] " + msg);
-    }
-
-    private void setLiveTestOverlay(String title, String body, String hint) {
-        liveTestOverlayActive = true;
-        liveTestOverlayTitle = title == null ? "RUN TESTS LIVE" : title;
-        liveTestOverlayBody = body == null ? "" : body;
-        liveTestOverlayHint = hint == null ? "" : hint;
-        updatePreflightOverlay();
-    }
-
-    private void clearLiveTestOverlay() {
-        liveTestOverlayActive = false;
-        liveTestOverlayTitle = "";
-        liveTestOverlayBody = "";
-        liveTestOverlayHint = "";
-        updatePreflightOverlay();
-    }
+    // ══════════════════════════════════════════════════════════════════════════
+    // UI - settings panel
+    // ══════════════════════════════════════════════════════════════════════════
 
     private void toggleSettingsPanel() {
         if (settingsVisible) {
@@ -1464,6 +894,10 @@ public class MainActivity extends AppCompatActivity {
                 })
                 .start();
     }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // UI - fullscreen / cursor
+    // ══════════════════════════════════════════════════════════════════════════
 
     private void toggleFullscreen() {
         setFullscreen(!isFullscreen);
@@ -1527,6 +961,10 @@ public class MainActivity extends AppCompatActivity {
             cursorOverlay.setVisibility(View.GONE);
         }
     }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // UI - status text
+    // ══════════════════════════════════════════════════════════════════════════
 
     private void updateStatus(String state, String info, long bps) {
         lastUiState = state == null ? STATE_IDLE : state;
@@ -1655,6 +1093,10 @@ public class MainActivity extends AppCompatActivity {
                 ? "fps in/out: - | drops: - | late: - | q(t/d/r): -/-/- | reconnects: -"
                 : line);
     }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // UI - perf HUD
+    // ══════════════════════════════════════════════════════════════════════════
 
     private void updatePerfHudUnavailable() {
         if (perfHudText == null) {
@@ -1805,6 +1247,10 @@ public class MainActivity extends AppCompatActivity {
         emitHudDebugAdb(compact);
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
+    // UI - preflight overlay
+    // ══════════════════════════════════════════════════════════════════════════
+
     private void startPreflightPulse() {
         uiHandler.removeCallbacks(preflightPulseTask);
         uiHandler.post(preflightPulseTask);
@@ -1840,10 +1286,10 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        if (liveTestOverlayActive) {
-            preflightTitleText.setText(liveTestOverlayTitle);
-            preflightBodyText.setText(liveTestOverlayBody);
-            preflightHintText.setText(liveTestOverlayHint);
+        if (videoTestController != null && videoTestController.isOverlayActive()) {
+            preflightTitleText.setText(videoTestController.getOverlayTitle());
+            preflightBodyText.setText(videoTestController.getOverlayBody());
+            preflightHintText.setText(videoTestController.getOverlayHint());
             preflightHintText.setTextColor(Color.parseColor("#FDE68A"));
             setPreflightVisible(true);
             return;
@@ -1927,6 +1373,10 @@ public class MainActivity extends AppCompatActivity {
                 return "|";
         }
     }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Utilities
+    // ══════════════════════════════════════════════════════════════════════════
 
     private boolean hasHardwareAvcDecoder() {
         try {
@@ -2057,1019 +1507,4 @@ public class MainActivity extends AppCompatActivity {
         spinner.setSelection(idx, false);
     }
 
-    private interface StatusListener {
-        void onStatus(String state, String info, long bps);
-
-        void onStats(String line);
-
-        void onClientMetrics(ClientMetricsSample metrics);
-    }
-
-    private static final class LiveTestPreset {
-        final String profile;
-        final String encoder;
-        final String cursorMode;
-        final int width;
-        final int height;
-        final int fps;
-        final int bitrateMbps;
-
-        LiveTestPreset(String profile, String encoder, String cursorMode, int width, int height, int fps, int bitrateMbps) {
-            this.profile = profile;
-            this.encoder = encoder;
-            this.cursorMode = cursorMode;
-            this.width = width;
-            this.height = height;
-            this.fps = fps;
-            this.bitrateMbps = bitrateMbps;
-        }
-
-        String toLine() {
-            return profile + " " + width + "x" + height + " " + fps + "fps " + bitrateMbps + "Mbps " + encoder + " cursor=" + cursorMode;
-        }
-
-        String toMultiline() {
-            return "profile=" + profile
-                    + "\nsize=" + width + "x" + height
-                    + "\nfps=" + fps
-                    + "\nbitrate=" + bitrateMbps + "Mbps"
-                    + "\nencoder=" + encoder
-                    + "\ncursor=" + cursorMode;
-        }
-    }
-
-    private static final class ClientMetricsSample {
-        final double recvFps;
-        final double decodeFps;
-        final double presentFps;
-        final long recvBps;
-        final double decodeMsP50;
-        final double decodeMsP95;
-        final double renderMsP95;
-        final double e2eP50;
-        final double e2eP95;
-        final int transportQueueDepth;
-        final int decodeQueueDepth;
-        final int renderQueueDepth;
-        final int jitterBufferFrames;
-        final long droppedFrames;
-        final long tooLateFrames;
-        final long timestampMs;
-        final long traceId; // P2.2: (sessionConnectId<<32)|sampleSeq
-
-        ClientMetricsSample(
-                double recvFps,
-                double decodeFps,
-                double presentFps,
-                long recvBps,
-                double decodeMsP50,
-                double decodeMsP95,
-                double renderMsP95,
-                double e2eP50,
-                double e2eP95,
-                int transportQueueDepth,
-                int decodeQueueDepth,
-                int renderQueueDepth,
-                int jitterBufferFrames,
-                long droppedFrames,
-                long tooLateFrames,
-                long traceId
-        ) {
-            this.recvFps = recvFps;
-            this.decodeFps = decodeFps;
-            this.presentFps = presentFps;
-            this.recvBps = recvBps;
-            this.decodeMsP50 = decodeMsP50;
-            this.decodeMsP95 = decodeMsP95;
-            this.renderMsP95 = renderMsP95;
-            this.e2eP50 = e2eP50;
-            this.e2eP95 = e2eP95;
-            this.transportQueueDepth = transportQueueDepth;
-            this.decodeQueueDepth = decodeQueueDepth;
-            this.renderQueueDepth = renderQueueDepth;
-            this.jitterBufferFrames = jitterBufferFrames;
-            this.droppedFrames = droppedFrames;
-            this.tooLateFrames = tooLateFrames;
-            this.traceId = traceId;
-            this.timestampMs = System.currentTimeMillis();
-        }
-
-        JSONObject toJson() throws JSONException {
-            JSONObject json = new JSONObject();
-            json.put("recv_fps", recvFps);
-            json.put("decode_fps", decodeFps);
-            json.put("present_fps", presentFps);
-            json.put("recv_bps", recvBps);
-            json.put("decode_time_ms_p50", decodeMsP50);
-            json.put("decode_time_ms_p95", decodeMsP95);
-            json.put("render_time_ms_p95", renderMsP95);
-            json.put("e2e_latency_ms_p50", e2eP50);
-            json.put("e2e_latency_ms_p95", e2eP95);
-            json.put("transport_queue_depth", transportQueueDepth);
-            json.put("decode_queue_depth", decodeQueueDepth);
-            json.put("render_queue_depth", renderQueueDepth);
-            json.put("jitter_buffer_frames", jitterBufferFrames);
-            json.put("dropped_frames", droppedFrames);
-            json.put("too_late_frames", tooLateFrames);
-            json.put("timestamp_ms", timestampMs);
-            json.put("trace_id", traceId);  // P2.2
-            return json;
-        }
-    }
-
-    private static final class H264TcpPlayer {
-        // WBTP/1 framing constants (must match wbtp-core/src/lib.rs and host Python)
-        private static final int  FRAME_MAGIC        = 0x57425450; // "WBTP"
-        private static final byte FRAME_VERSION      = 0x01;
-        private static final int  FRAME_HEADER_SIZE  = 22;
-        private static final int  SOCKET_RECV_BUFFER_SIZE = 512 * 1024;
-        private static final int  FRAME_PAYLOAD_INITIAL_CAP = 8 * 1024 * 1024;
-        private static final int  FRAME_PAYLOAD_HARD_CAP = 32 * 1024 * 1024;
-        private static final int  FRAME_RESYNC_SCAN_LIMIT = 64 * 1024;
-        private static final int  HELLO_MAGIC = 0x57425331; // "WBS1"
-        private static final int  HELLO_HEADER_SIZE = 16;
-        private static final byte HELLO_VERSION = 0x01;
-        // Header layout (big-endian): magic(4) ver(1) flags(1) seq(4) capture_ts_us(8) payload_len(4)
-        // flags: 0x01=HAS_CHECKSUM  0x02=KEYFRAME  0x04=END_OF_STREAM
-
-        private final Surface surface;
-        private final StatusListener statusListener;
-        private final int decodeWidth;
-        private final int decodeHeight;
-        private final long frameUs;
-
-        private volatile boolean running;
-        private volatile long reconnectDelayMs = 800;
-        private Thread thread;
-        private Socket socket;
-        private long reconnects = 0;
-        private long droppedTotal = 0;
-        private long tooLateTotal = 0;
-        // P2.2: trace ID components for correlated host/Android log lines
-        private long sessionConnectId = 0; // incremented per TCP connection
-        private long sampleSeq = 0;        // incremented per stats window
-
-        H264TcpPlayer(Surface surface, StatusListener statusListener, int decodeWidth, int decodeHeight, long frameUs) {
-            this.surface = surface;
-            this.statusListener = statusListener;
-            this.decodeWidth = decodeWidth;
-            this.decodeHeight = decodeHeight;
-            this.frameUs = frameUs;
-        }
-
-        void start() {
-            if (running) {
-                return;
-            }
-            running = true;
-            thread = new Thread(this::runLoop, "wbeam-h264-player");
-            thread.start();
-        }
-
-        void stop() {
-            running = false;
-            closeSocket();
-            if (thread != null) {
-                thread.interrupt();
-            }
-        }
-
-        boolean isRunning() {
-            return running;
-        }
-
-        private void runLoop() {
-            // P1.1: elevate to real-time audio priority to reduce decode jitter
-            android.os.Process.setThreadPriority(
-                    android.os.Process.THREAD_PRIORITY_URGENT_AUDIO);
-            while (running) {
-                MediaCodec codec = null;
-                try {
-                    statusListener.onStatus(STATE_CONNECTING, "connecting to " + HOST + ":" + PORT, 0);
-                    statusListener.onStats(
-                            "fps in/out: - | drops: " + droppedTotal
-                                    + " | late: " + tooLateTotal
-                                    + " | reconnects: " + reconnects
-                    );
-
-                    socket = new Socket();
-                    socket.connect(new InetSocketAddress(HOST, PORT), 2000);
-                    socket.setTcpNoDelay(true);
-                    socket.setReceiveBufferSize(SOCKET_RECV_BUFFER_SIZE);
-                    socket.setSoTimeout(5_000);             // P1.1: cap blocking read to 5s
-                    sessionConnectId++;  // P2.2: new session
-                    sampleSeq = 0;      // P2.2: reset sample counter
-
-                    codec = MediaCodec.createDecoderByType("video/avc");
-                    MediaFormat format = MediaFormat.createVideoFormat("video/avc", decodeWidth, decodeHeight);
-                    codec.configure(format, surface, null, 0);
-                    codec.start();
-
-                    statusListener.onStatus(STATE_STREAMING, "connected [framed]", 0);
-                    // C3: framed-only transport for deterministic frame boundaries and metrics.
-                    framedDecodeLoop(new BufferedInputStream(socket.getInputStream(), 256 * 1024), codec);
-                } catch (Exception e) {
-                    if (running) {
-                        reconnects++;
-                        reconnectDelayMs = Math.min(5000, reconnectDelayMs + 400);
-                        String reconnectReason = e.getClass().getSimpleName() + ": " + String.valueOf(e.getMessage());
-                        if (isExpectedStreamClose(e)) {
-                            Log.w(TAG, "stream worker reconnect #" + reconnects
-                                    + " delay_ms=" + reconnectDelayMs
-                                    + " reason=" + reconnectReason);
-                            statusListener.onStatus(STATE_CONNECTING, "stream reconnecting: " + reconnectReason, 0);
-                        } else {
-                            Log.e(TAG, "stream worker failed", e);
-                            statusListener.onStatus(STATE_ERROR, "stream error: " + e.getClass().getSimpleName(), 0);
-                        }
-                        statusListener.onStats(
-                                "fps in/out: - | drops: " + droppedTotal
-                                        + " | late: " + tooLateTotal
-                                        + " | reconnects: " + reconnects
-                        );
-                    }
-                } finally {
-                    closeSocket();
-                    if (codec != null) {
-                        try {
-                            codec.stop();
-                        } catch (Exception ignored) {
-                        }
-                        try {
-                            codec.release();
-                        } catch (Exception ignored) {
-                        }
-                    }
-                }
-
-                if (running) {
-                    long jitterMs = ThreadLocalRandom.current()
-                            .nextLong(Math.max(1L, reconnectDelayMs / 4L + 1L));
-                    SystemClock.sleep(reconnectDelayMs + jitterMs);
-                }
-            }
-        }
-
-        private void decodeLoop(InputStream input, MediaCodec codec) throws IOException {
-            // C2: ring-buffer with sHead/sTail pointers – eliminates per-NAL System.arraycopy.
-            // Buffer compacts only when the write pointer reaches the end (≈ every 20 frames
-            // at 720p/12 Mbps). 512 KB ≈ 20 frames; bounded by design (task-id C2, EPIC E).
-            byte[] readBuf  = new byte[64 * 1024];
-            byte[] streamBuf = new byte[512 * 1024]; // C2: was 4 MB linear; now ring, sHead/sTail
-            int sHead = 0; // first unconsumed byte (inclusive)
-            int sTail = 0; // one-past last valid byte; avail = sTail - sHead
-            int streamMode = -1; // -1 unknown, 0 annexb, 1 avcc
-            int avgNalSize = 1200;
-            int pendingDecodeQueue = 0;
-            int renderQueueDepth   = 0;
-
-            long frames        = 0;
-            long bytes         = 0;
-            long inFrames      = 0;
-            long outFrames     = 0;
-            long droppedSec    = 0;
-            long tooLateSec    = 0;
-            long   decodeNsTotal = 0;
-            long[] decodeNsBuf   = new long[128]; // P1.3: rolling decode-time buffer
-            int    decodeNsBufN  = 0;
-            long   renderNsMax   = 0;
-            long lastLog = SystemClock.elapsedRealtime();
-            long lastPresentMs     = SystemClock.elapsedRealtime(); // C5: black-screen watchdog
-            long pendingWithNoPresent = 0;
-            long lastDecodeProgressMs = SystemClock.elapsedRealtime(); // recovery guard for stale pending count
-            MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
-            DrainStats drainStats = new DrainStats();
-
-            while (running) {
-                int count = input.read(readBuf);
-                if (count < 0) {
-                    throw new IOException("stream closed");
-                }
-                if (count == 0) {
-                    continue;
-                }
-
-                // C2: compact only when tail would overflow – avoids per-NAL memmove.
-                int avail = sTail - sHead;
-                if (sTail + count > streamBuf.length) {
-                    if (avail + count > streamBuf.length) {
-                        // Genuinely full: drop oldest data to make room, count as drop.
-                        int keep = streamBuf.length - count;
-                        if (keep <= 0) {
-                            sHead = 0; sTail = 0; avail = 0;
-                        } else {
-                            int newHead = sHead + (avail - keep);
-                            System.arraycopy(streamBuf, newHead, streamBuf, 0, keep);
-                            sHead = 0; sTail = keep; avail = keep;
-                        }
-                        droppedSec++;
-                    } else {
-                        // Free space exists at front: compact in one memmove.
-                        if (avail > 0) System.arraycopy(streamBuf, sHead, streamBuf, 0, avail);
-                        sHead = 0; sTail = avail;
-                    }
-                }
-                System.arraycopy(readBuf, 0, streamBuf, sTail, count);
-                sTail += count;
-                bytes += count;
-
-                avail = sTail - sHead;
-                if (streamMode < 0 && avail >= 8) {
-                    int probe = findStartCode(streamBuf, sHead, Math.min(sHead + 128, sTail));
-                    streamMode = (probe >= 0) ? 0 : 1;
-                }
-
-                if (streamMode == 1) {
-                    // ── AVCC mode: [u32 length][payload] ─────────────────────────────────
-                    // C2: sHead += 4 + nalSize replaces System.arraycopy(streamBuf, consumed, …)
-                    while ((sTail - sHead) >= 4) {
-                        int nalSize =
-                                ((streamBuf[sHead]     & 0xFF) << 24) |
-                                ((streamBuf[sHead + 1] & 0xFF) << 16) |
-                                ((streamBuf[sHead + 2] & 0xFF) << 8)  |
-                                ((streamBuf[sHead + 3] & 0xFF));
-
-                        if (nalSize <= 0 || nalSize > streamBuf.length) {
-                            sHead += 1; // skip invalid length byte – no arraycopy
-                            droppedSec++;
-                            continue;
-                        }
-                        if ((sTail - sHead) < 4 + nalSize) {
-                            break; // wait for more data
-                        }
-
-                        frames++;
-                        // Drain before drop – 16ms when full so HW decoder can flush pipeline.
-                        drainLatestFrame(codec, bufferInfo, drainStats,
-                                pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES ? 16_000 : 5_000);
-                        pendingDecodeQueue = Math.max(0, pendingDecodeQueue - drainStats.releasedCount);
-                        if (drainStats.releasedCount > 0) {
-                            lastDecodeProgressMs = SystemClock.elapsedRealtime();
-                        } else if (pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES
-                                && (SystemClock.elapsedRealtime() - lastDecodeProgressMs) > 300) {
-                            // Guard against stale pending estimate deadlocking decode path.
-                            pendingDecodeQueue = DECODE_QUEUE_MAX_FRAMES - 1;
-                        }
-                        outFrames   += drainStats.renderedCount;
-                        tooLateSec  += drainStats.droppedLateCount;
-                        renderNsMax  = Math.max(renderNsMax, drainStats.renderNsMax);
-                        renderQueueDepth = drainStats.renderedCount > 0 ? 1 : 0;
-                        // E: drop-late over delay-growth: don't over-fill the decode queue
-                        if (pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES) {
-                            // Let recovery NALs (SPS/PPS/IDR) pass even under pressure.
-                            if (isRecoveryNal(streamBuf, sHead + 4, nalSize)) {
-                                long t0 = SystemClock.elapsedRealtimeNanos();
-                                if (queueNal(codec, streamBuf, sHead + 4, nalSize, frames * frameUs, 1_000)) {
-                                    long decodeNs = SystemClock.elapsedRealtimeNanos() - t0;
-                                    decodeNsTotal += decodeNs;
-                                    decodeNsBuf[(decodeNsBufN++) & 127] = decodeNs; // P1.3
-                                    avgNalSize = ((avgNalSize * 7) + nalSize) / 8;
-                                    inFrames++;
-                                    pendingDecodeQueue = Math.min(DECODE_QUEUE_MAX_FRAMES, pendingDecodeQueue + 1);
-                                    lastDecodeProgressMs = SystemClock.elapsedRealtime();
-                                } else {
-                                    droppedSec++;
-                                }
-                            } else {
-                                droppedSec++; // E: decode queue full
-                            }
-                        } else {
-                            long t0 = SystemClock.elapsedRealtimeNanos();
-                            if (queueNal(codec, streamBuf, sHead + 4, nalSize, frames * frameUs, 1_000)) {
-                                long decodeNs = SystemClock.elapsedRealtimeNanos() - t0;
-                                decodeNsTotal += decodeNs;
-                                decodeNsBuf[(decodeNsBufN++) & 127] = decodeNs; // P1.3
-                                avgNalSize = ((avgNalSize * 7) + nalSize) / 8;
-                                inFrames++;
-                                pendingDecodeQueue++; // E
-                                lastDecodeProgressMs = SystemClock.elapsedRealtime();
-                            } else {
-                                droppedSec++;
-                            }
-                        }
-
-                        sHead += 4 + nalSize; // C2: zero-copy advance
-                    }
-                } else {
-                    // ── AnnexB mode: [0 0 0 1 | 0 0 1][nal][0 0 0 1 | 0 0 1][nal]… ──────
-                    // C2: advance sHead to first start-code (drop garbage), then advance per NAL.
-                    int nalStart = findStartCode(streamBuf, sHead, sTail);
-                    if (nalStart < 0) {
-                        // No start-code yet – keep last 3 bytes for cross-read-boundary match.
-                        sHead = Math.max(sHead, sTail - 3);
-                    } else {
-                        sHead = nalStart; // skip garbage before first start-code – no arraycopy
-
-                        while (true) {
-                            int next = findStartCode(streamBuf, sHead + 3, sTail);
-                            if (next < 0) {
-                                break; // incomplete NAL – wait for more data
-                            }
-
-                            int nalSize = next - sHead;
-                            if (nalSize > 0) {
-                                frames++;
-                                // Drain before drop – 16ms when full so HW decoder can flush pipeline.
-                                drainLatestFrame(codec, bufferInfo, drainStats,
-                                        pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES ? 16_000 : 5_000);
-                                pendingDecodeQueue = Math.max(0, pendingDecodeQueue - drainStats.releasedCount);
-                                if (drainStats.releasedCount > 0) {
-                                    lastDecodeProgressMs = SystemClock.elapsedRealtime();
-                                } else if (pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES
-                                        && (SystemClock.elapsedRealtime() - lastDecodeProgressMs) > 300) {
-                                    // Guard against stale pending estimate deadlocking decode path.
-                                    pendingDecodeQueue = DECODE_QUEUE_MAX_FRAMES - 1;
-                                }
-                                outFrames   += drainStats.renderedCount;
-                                tooLateSec  += drainStats.droppedLateCount;
-                                renderNsMax  = Math.max(renderNsMax, drainStats.renderNsMax);
-                                renderQueueDepth = drainStats.renderedCount > 0 ? 1 : 0;
-                                // E: drop-late: don't over-fill the decode queue
-                                if (pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES) {
-                                    // Let recovery NALs (SPS/PPS/IDR) pass even under pressure.
-                                    if (isRecoveryNal(streamBuf, sHead, nalSize)) {
-                                        long t0 = SystemClock.elapsedRealtimeNanos();
-                                        if (queueNal(codec, streamBuf, sHead, nalSize, frames * frameUs, 1_000)) {
-                                            long decodeNs = SystemClock.elapsedRealtimeNanos() - t0;
-                                            decodeNsTotal += decodeNs;
-                                            decodeNsBuf[(decodeNsBufN++) & 127] = decodeNs; // P1.3
-                                            avgNalSize = ((avgNalSize * 7) + nalSize) / 8;
-                                            inFrames++;
-                                            pendingDecodeQueue = Math.min(DECODE_QUEUE_MAX_FRAMES, pendingDecodeQueue + 1);
-                                            lastDecodeProgressMs = SystemClock.elapsedRealtime();
-                                        } else {
-                                            droppedSec++;
-                                        }
-                                    } else {
-                                        droppedSec++; // E: decode queue full
-                                    }
-                                } else {
-                                    long t0 = SystemClock.elapsedRealtimeNanos();
-                                    if (queueNal(codec, streamBuf, sHead, nalSize, frames * frameUs, 1_000)) {
-                                        long decodeNs = SystemClock.elapsedRealtimeNanos() - t0;
-                                        decodeNsTotal += decodeNs;
-                                        decodeNsBuf[(decodeNsBufN++) & 127] = decodeNs; // P1.3
-                                        avgNalSize = ((avgNalSize * 7) + nalSize) / 8;
-                                        inFrames++;
-                                        pendingDecodeQueue++; // E
-                                        lastDecodeProgressMs = SystemClock.elapsedRealtime();
-                                    } else {
-                                        droppedSec++;
-                                    }
-                                }
-                            }
-                            sHead = next; // C2: zero-copy advance to next start-code
-                        }
-                        // sHead now points at the last (incomplete) start-code: retained for next read.
-                    }
-                }
-
-                // C5: track present activity for black-screen watchdog
-                if (drainStats.renderedCount > 0) { lastPresentMs = SystemClock.elapsedRealtime(); pendingWithNoPresent = 0; }
-                else if (inFrames > 0)            { pendingWithNoPresent++; }
-                if (pendingWithNoPresent > 300 && (SystemClock.elapsedRealtime() - lastPresentMs) > 5_000) {
-                    throw new IOException("C5: black-screen watchdog: 0 frames presented in 5s with " + pendingWithNoPresent + " decoded – reconnecting");
-                }
-                long now = SystemClock.elapsedRealtime();
-                if (now - lastLog >= 1000) {
-                    droppedTotal += droppedSec;
-                    tooLateTotal += tooLateSec;
-                    reconnectDelayMs = 800;
-                    statusListener.onStatus(STATE_STREAMING, "rendering live desktop", bytes);
-                    statusListener.onStats(
-                            "fps in/out: " + inFrames + "/" + outFrames
-                                    + " | drops: " + droppedTotal
-                                    + " | late: " + tooLateTotal
-                                    + " | q(t/d/r): "
-                                    + estimateTransportDepthFrames(sTail - sHead, avgNalSize) + "/"
-                                    + Math.min(DECODE_QUEUE_MAX_FRAMES, pendingDecodeQueue) + "/"
-                                    + renderQueueDepth
-                                    + " | reconnects: " + reconnects
-                    );
-
-                    double decodeMsP50 = inFrames > 0
-                            ? (decodeNsTotal / 1_000_000.0) / inFrames
-                            : 0.0;
-                    // P1.3: true p95 from rolling buffer (was Math.max / pseudo-max)
-                    double decodeMsP95 = percentilesMs(decodeNsBuf, Math.min(decodeNsBufN, 128))[1];
-                    double renderMsP95 = renderNsMax / 1_000_000.0;
-                    statusListener.onClientMetrics(
-                            new ClientMetricsSample(
-                                    inFrames,
-                                    inFrames,
-                                    outFrames,
-                                    bytes,
-                                    decodeMsP50,
-                                    decodeMsP95,
-                                    renderMsP95,
-                                    0.0,
-                                    0.0,
-                                    estimateTransportDepthFrames(sTail - sHead, avgNalSize),
-                                    Math.min(DECODE_QUEUE_MAX_FRAMES, pendingDecodeQueue),
-                                    Math.min(RENDER_QUEUE_MAX_FRAMES, renderQueueDepth),
-                                    0,
-                                    droppedTotal,
-                                    tooLateTotal,
-                                    (sessionConnectId << 32) | (sampleSeq++ & 0xFFFFFFFFL) // P2.2
-                            )
-                    );
-                    Log.d(TAG, String.format(Locale.US,
-                            "[decode/legacy] in=%d out=%d drop=%d late=%d"
-                                    + " qD=%d/%d qR=%d/%d dec_p95=%.1fms ren_p95=%.1fms"
-                                    + " noPresent=%d reconn=%d",
-                            inFrames, outFrames, droppedSec, tooLateSec,
-                            Math.min(DECODE_QUEUE_MAX_FRAMES, pendingDecodeQueue), DECODE_QUEUE_MAX_FRAMES,
-                            renderQueueDepth, RENDER_QUEUE_MAX_FRAMES,
-                            decodeMsP95, renderMsP95,
-                            pendingWithNoPresent, reconnects));
-                    bytes         = 0;
-                    inFrames      = 0;
-                    outFrames     = 0;
-                    droppedSec    = 0;
-                    tooLateSec    = 0;
-                    decodeNsTotal = 0;
-                    decodeNsBufN  = 0;  // P1.3
-                    renderNsMax   = 0;
-                    lastLog = now;
-                }
-            }
-        }
-
-
-        /**
-         * WBTP/1 framed decode loop – host sends 22-byte WBTP/1 header + payload per access unit.
-         * Header: magic(4) ver(1) flags(1) seq(4) capture_ts_us(8) payload_len(4)
-         * Eliminates AnnexB start-code scanning entirely and gives exact PTS per frame.
-         */
-        private void framedDecodeLoop(InputStream input, MediaCodec codec) throws IOException {
-            // pre-allocated buffers – no alloc in hot path
-            byte[] helloBuf   = new byte[HELLO_HEADER_SIZE];
-            byte[] hdrBuf     = new byte[FRAME_HEADER_SIZE];
-            byte[] payloadBuf = new byte[FRAME_PAYLOAD_INITIAL_CAP];
-            long   frames     = 0;
-            long   bytes      = 0;
-            long   inFrames   = 0;
-            long   outFrames  = 0;
-            long   droppedSec = 0;
-            long   tooLateSec = 0;
-            int    maxPayloadSeen = 0;
-            long   payloadGrowEvents = 0;
-            long   resyncSuccessSec = 0;
-            long   resyncFailSec = 0;
-            long   decodeNsTotal = 0;
-            long[] decodeNsBuf   = new long[128]; // P1.3: rolling decode-time buffer
-            int    decodeNsBufN  = 0;
-            long   renderNsMax   = 0;
-            long   lastLog       = SystemClock.elapsedRealtime();
-            // C5: black-screen watchdog state
-            long   lastPresentMs   = SystemClock.elapsedRealtime();
-            long   totalInSincePresent = 0;
-            long   lastDecodeProgressMs = SystemClock.elapsedRealtime(); // recovery guard for stale pending count
-            boolean flushIssued = false;
-            MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
-            DrainStats drainStats = new DrainStats();
-            int pendingDecodeQueue = 0; // E: bounded decode queue
-
-                readFully(input, helloBuf, HELLO_HEADER_SIZE);
-                int helloMagic = ((helloBuf[0] & 0xFF) << 24) | ((helloBuf[1] & 0xFF) << 16)
-                    | ((helloBuf[2] & 0xFF) << 8) | (helloBuf[3] & 0xFF);
-                int helloLen = ((helloBuf[6] & 0xFF) << 8) | (helloBuf[7] & 0xFF);
-                if (helloMagic != HELLO_MAGIC || helloBuf[4] != HELLO_VERSION || helloLen != HELLO_HEADER_SIZE) {
-                throw new IOException("WBTP: bad stream hello magic/version/len");
-                }
-                long streamSessionId = ((helloBuf[8] & 0xFFL) << 56) | ((helloBuf[9] & 0xFFL) << 48)
-                    | ((helloBuf[10] & 0xFFL) << 40) | ((helloBuf[11] & 0xFFL) << 32)
-                    | ((helloBuf[12] & 0xFFL) << 24) | ((helloBuf[13] & 0xFFL) << 16)
-                    | ((helloBuf[14] & 0xFFL) << 8) | (helloBuf[15] & 0xFFL);
-                Log.i(TAG, String.format(Locale.US, "WBTP hello session=0x%016x", streamSessionId));
-
-            while (running) {
-                // ── Read 24-byte header ──────────────────────────────────────
-                int hdrRead = 0;
-                while (hdrRead < FRAME_HEADER_SIZE) {
-                    int n = input.read(hdrBuf, hdrRead, FRAME_HEADER_SIZE - hdrRead);
-                    if (n < 0) throw new IOException("stream closed");
-                    hdrRead += n;
-                }
-                // Parse magic (big-endian)
-                int magic = parseFrameMagic(hdrBuf);
-                if (magic != FRAME_MAGIC) {
-                    boolean resynced = tryResyncHeader(input, hdrBuf, FRAME_RESYNC_SCAN_LIMIT);
-                    if (!resynced) {
-                        resyncFailSec++;
-                        throw new IOException("WBTP: bad frame magic 0x" + Integer.toHexString(magic)
-                                + " – resync failed");
-                    }
-                    resyncSuccessSec++;
-                }
-// byte[4]=version  byte[5]=flags (0x02=keyframe  0x04=eos)
-                // seq: bytes 6..9  capture_ts_us: bytes 10..17  payload_len: bytes 18..21
-                long ptsUs = ((hdrBuf[10] & 0xFFL) << 56) | ((hdrBuf[11] & 0xFFL) << 48)
-                                   | ((hdrBuf[12] & 0xFFL) << 40) | ((hdrBuf[13] & 0xFFL) << 32)
-                                   | ((hdrBuf[14] & 0xFFL) << 24) | ((hdrBuf[15] & 0xFFL) << 16)
-                                   | ((hdrBuf[16] & 0xFFL) << 8)  |  (hdrBuf[17] & 0xFFL);
-                int payloadLen = ((hdrBuf[18] & 0xFF) << 24) | ((hdrBuf[19] & 0xFF) << 16)
-                                       | ((hdrBuf[20] & 0xFF) << 8)  |  (hdrBuf[21] & 0xFF);
-
-                if (payloadLen <= 0 || payloadLen > FRAME_PAYLOAD_HARD_CAP) {
-                    throw new IOException("WBTP: bad payload length " + payloadLen);
-                }
-                if (payloadLen > payloadBuf.length) {
-                    int newCap = Math.min(FRAME_PAYLOAD_HARD_CAP, nextPowerOfTwo(payloadLen));
-                    if (newCap < payloadLen) {
-                        throw new IOException("WBTP: payload exceeds dynamic cap " + payloadLen);
-                    }
-                    Log.w(TAG, "WBTP payload buffer grow " + payloadBuf.length + " -> " + newCap);
-                    payloadBuf = new byte[newCap];
-                    payloadGrowEvents++;
-                }
-                maxPayloadSeen = Math.max(maxPayloadSeen, payloadLen);
-
-                // ── Read payload ─────────────────────────────────────────────
-                int payRead = 0;
-                while (payRead < payloadLen) {
-                    int n = input.read(payloadBuf, payRead, payloadLen - payRead);
-                    if (n < 0) throw new IOException("stream closed");
-                    payRead += n;
-                }
-                bytes += FRAME_HEADER_SIZE + payloadLen;
-
-                frames++;
-                // Drain before drop – 16ms when full so HW decoder can flush pipeline.
-                drainLatestFrame(codec, bufferInfo, drainStats,
-                        pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES ? 16_000 : 5_000);
-                pendingDecodeQueue = Math.max(0, pendingDecodeQueue - drainStats.releasedCount); // E
-                if (drainStats.releasedCount > 0) {
-                    lastDecodeProgressMs = SystemClock.elapsedRealtime();
-                } else if (pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES
-                        && (SystemClock.elapsedRealtime() - lastDecodeProgressMs) > 300) {
-                    // Guard against stale pending estimate deadlocking decode path.
-                    pendingDecodeQueue = DECODE_QUEUE_MAX_FRAMES - 1;
-                }
-                if (drainStats.renderedCount > 0) {
-                    outFrames += drainStats.renderedCount;
-                    lastPresentMs = SystemClock.elapsedRealtime();
-                    totalInSincePresent = 0;
-                    flushIssued = false;
-                }
-                tooLateSec += drainStats.droppedLateCount;
-                renderNsMax = Math.max(renderNsMax, drainStats.renderNsMax);
-                // ── Queue to decoder ─────────────────────────────────────────
-                // E: bounded decode queue – drop if full (latest-frame-wins)
-                if (pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES) {
-                    // Let recovery AUs (contain SPS/PPS/IDR) pass even under pressure.
-                    if (containsRecoveryNal(payloadBuf, payloadLen)) {
-                        long t0 = SystemClock.elapsedRealtimeNanos();
-                        if (queueNal(codec, payloadBuf, 0, payloadLen, ptsUs, 1_000)) {
-                            long decodeNs = SystemClock.elapsedRealtimeNanos() - t0;
-                            decodeNsTotal += decodeNs;
-                            decodeNsBuf[(decodeNsBufN++) & 127] = decodeNs; // P1.3
-                            inFrames++;
-                            totalInSincePresent++;
-                            pendingDecodeQueue = Math.min(DECODE_QUEUE_MAX_FRAMES, pendingDecodeQueue + 1);
-                            lastDecodeProgressMs = SystemClock.elapsedRealtime();
-                        } else {
-                            droppedSec++;
-                        }
-                    } else {
-                        droppedSec++; // E: decode queue full, drop stale frame
-                    }
-                } else {
-                    long t0 = SystemClock.elapsedRealtimeNanos();
-                    if (queueNal(codec, payloadBuf, 0, payloadLen, ptsUs, 1_000)) {
-                        long decodeNs = SystemClock.elapsedRealtimeNanos() - t0;
-                        decodeNsTotal += decodeNs;
-                        decodeNsBuf[(decodeNsBufN++) & 127] = decodeNs; // P1.3
-                        inFrames++;
-                        totalInSincePresent++;
-                        pendingDecodeQueue++; // E: track depth
-                        lastDecodeProgressMs = SystemClock.elapsedRealtime();
-                    } else {
-                        droppedSec++;
-                    }
-                }
-
-                // C5: recovery ladder for "recv>0 but present==0"
-                long nowMs = SystemClock.elapsedRealtime();
-                long noPresentMs = nowMs - lastPresentMs;
-                if (!flushIssued
-                        && totalInSincePresent >= NO_PRESENT_MIN_IN_FRAMES_FLUSH
-                        && noPresentMs >= NO_PRESENT_FLUSH_MS) {
-                    try {
-                        codec.flush();
-                        pendingDecodeQueue = 0;
-                        flushIssued = true;
-                        Log.w(TAG, "C5 ladder L1: codec.flush() due to no-present");
-                        statusListener.onStatus(STATE_CONNECTING, "decoder stalled: flushing codec", 0);
-                    } catch (Exception flushErr) {
-                        throw new IOException("C5: codec.flush failed", flushErr);
-                    }
-                }
-                if (totalInSincePresent >= NO_PRESENT_MIN_IN_FRAMES_RECONNECT
-                        && noPresentMs >= NO_PRESENT_RECONNECT_MS) {
-                    Log.w(TAG, "C5 ladder L2: reconnect framed stream due to no-present");
-                    statusListener.onStatus(STATE_CONNECTING, "decoder stalled: reconnecting stream", 0);
-                    throw new IOException("C5: no frames presented for " + noPresentMs
-                            + "ms (" + totalInSincePresent + " decoded) – reconnect");
-                }
-                if (totalInSincePresent >= NO_PRESENT_MIN_IN_FRAMES_HARD
-                        && noPresentMs >= NO_PRESENT_HARD_RESET_MS) {
-                    Log.w(TAG, "C5 ladder L3: hard reconnect watchdog");
-                    statusListener.onStatus(STATE_CONNECTING, "decoder watchdog: hard reconnect", 0);
-                    throw new IOException("C5: hard watchdog: "
-                            + totalInSincePresent + " frames decoded, 0 presented for "
-                            + noPresentMs + "ms – reconnect");
-                }
-
-                // ── 1-second stats ───────────────────────────────────────────
-                if (nowMs - lastLog >= 1000) {
-                    droppedTotal += droppedSec;
-                    tooLateTotal += tooLateSec;
-                    reconnectDelayMs = 800;
-                    statusListener.onStatus(STATE_STREAMING, "rendering live desktop [framed]", bytes);
-                    statusListener.onStats(
-                            "fps in/out: " + inFrames + "/" + outFrames
-                                    + " | drops: " + droppedTotal
-                                    + " | late: " + tooLateTotal
-                                    + " | q(d/r): " + pendingDecodeQueue + "/" + (drainStats.renderedCount > 0 ? 1 : 0)
-                                    + " | max_payload: " + (maxPayloadSeen / 1024) + "KB"
-                                    + " | reconnects: " + reconnects
-                    );
-                    double decodeMsP50 = inFrames > 0 ? (decodeNsTotal / 1_000_000.0) / inFrames : 0.0;
-                    // P1.3: true p95 from rolling buffer
-                    double decodeMsP95 = percentilesMs(decodeNsBuf, Math.min(decodeNsBufN, 128))[1];
-                    double renderMsP95 = renderNsMax / 1_000_000.0;
-                    statusListener.onClientMetrics(
-                            new ClientMetricsSample(
-                                    inFrames, inFrames, outFrames, bytes,
-                                    decodeMsP50, decodeMsP95, renderMsP95,
-                                    0.0, 0.0,
-                                    0,
-                                    Math.min(DECODE_QUEUE_MAX_FRAMES, pendingDecodeQueue), // E
-                                    Math.min(RENDER_QUEUE_MAX_FRAMES, drainStats.renderedCount > 0 ? 1 : 0),
-                                    0, droppedTotal, tooLateTotal,
-                                    (sessionConnectId << 32) | (sampleSeq++ & 0xFFFFFFFFL) // P2.2
-                            )
-                    );
-                    Log.d(TAG, String.format(Locale.US,
-                            "[decode/framed] in=%d out=%d drop=%d late=%d"
-                                    + " qD=%d/%d qR=%d dec_p95=%.1fms ren_p95=%.1fms"
-                                + " maxPayload=%d grow=%d resync_ok=%d resync_fail=%d noPresent=%d reconn=%d",
-                            inFrames, outFrames, droppedSec, tooLateSec,
-                            Math.min(DECODE_QUEUE_MAX_FRAMES, pendingDecodeQueue), DECODE_QUEUE_MAX_FRAMES,
-                            drainStats.renderedCount > 0 ? 1 : 0,
-                            decodeMsP95, renderMsP95,
-                            maxPayloadSeen, payloadGrowEvents, resyncSuccessSec, resyncFailSec,
-                            totalInSincePresent, reconnects));
-                    bytes         = 0;
-                    inFrames      = 0;
-                    outFrames     = 0;
-                    droppedSec    = 0;
-                    tooLateSec    = 0;
-                    maxPayloadSeen = 0;
-                    resyncSuccessSec = 0;
-                    resyncFailSec = 0;
-                    decodeNsTotal = 0;
-                    decodeNsBufN  = 0;  // P1.3
-                    renderNsMax   = 0;
-                    lastLog = nowMs;
-                }
-            }
-        }
-
-        private static int parseFrameMagic(byte[] hdrBuf) {
-            return ((hdrBuf[0] & 0xFF) << 24)
-                    | ((hdrBuf[1] & 0xFF) << 16)
-                    | ((hdrBuf[2] & 0xFF) << 8)
-                    | (hdrBuf[3] & 0xFF);
-        }
-
-        private static void readFully(InputStream input, byte[] buf, int len) throws IOException {
-            int read = 0;
-            while (read < len) {
-                int n = input.read(buf, read, len - read);
-                if (n < 0) {
-                    throw new IOException("stream closed");
-                }
-                read += n;
-            }
-        }
-
-        private static boolean tryResyncHeader(InputStream input, byte[] hdrBuf, int scanLimit) throws IOException {
-            int scanned = 0;
-            while (scanned < scanLimit) {
-                System.arraycopy(hdrBuf, 1, hdrBuf, 0, FRAME_HEADER_SIZE - 1);
-                int n = input.read(hdrBuf, FRAME_HEADER_SIZE - 1, 1);
-                if (n < 0) {
-                    return false;
-                }
-                scanned++;
-                if (parseFrameMagic(hdrBuf) == FRAME_MAGIC) {
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        private static int nextPowerOfTwo(int value) {
-            if (value <= 1) {
-                return 1;
-            }
-            if (value >= (1 << 30)) {
-                return 1 << 30;
-            }
-            return Integer.highestOneBit(value - 1) << 1;
-        }
-
-        // P1.3: compute [p50, p95] in milliseconds from a nanosecond circular buffer
-        private static double[] percentilesMs(long[] buf, int n) {
-            if (n <= 0) return new double[]{0.0, 0.0};
-            long[] tmp = java.util.Arrays.copyOf(buf, n);
-            java.util.Arrays.sort(tmp);
-            double p50 = tmp[(int) Math.min(n - 1, n * 0.50)] / 1_000_000.0;
-            double p95 = tmp[(int) Math.min(n - 1, (int)(n * 0.95))] / 1_000_000.0;
-            return new double[]{p50, p95};
-        }
-
-        private static boolean queueNal(
-                MediaCodec codec,
-                byte[] data,
-                int offset,
-                int size,
-                long ptsUs,
-                long inputTimeoutUs
-        ) {
-            int inputIndex = codec.dequeueInputBuffer(inputTimeoutUs);
-            if (inputIndex < 0) {
-                return false;
-            }
-            ByteBuffer inputBuffer = codec.getInputBuffer(inputIndex);
-            if (inputBuffer == null) {
-                codec.queueInputBuffer(inputIndex, 0, 0, ptsUs, 0);
-                return false;
-            }
-            inputBuffer.clear();
-            if (size > inputBuffer.remaining()) {
-                codec.queueInputBuffer(inputIndex, 0, 0, ptsUs, 0);
-                return false;
-            }
-            inputBuffer.put(data, offset, size);
-            codec.queueInputBuffer(inputIndex, 0, size, ptsUs, 0);
-            return true;
-        }
-
-        private static void drainLatestFrame(
-                MediaCodec codec,
-                MediaCodec.BufferInfo info,
-                DrainStats stats,
-                long firstTimeoutUs
-        ) {
-            stats.reset();
-            int latestRenderableIndex = -1;
-            // firstTimeoutUs: 16ms when queue full (lets HW decoder flush its
-            // pipeline before caller decides to drop); 5ms otherwise.
-            long timeoutUs = firstTimeoutUs;
-
-            while (true) {
-                int outputIndex = codec.dequeueOutputBuffer(info, timeoutUs);
-                timeoutUs = 0; // non-blocking for all subsequent backlog frames
-                if (outputIndex >= 0) {
-                    stats.releasedCount++;
-                    boolean renderable = (info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0;
-                    if (!renderable) {
-                        codec.releaseOutputBuffer(outputIndex, false);
-                        continue;
-                    }
-
-                    if (latestRenderableIndex >= 0) {
-                        codec.releaseOutputBuffer(latestRenderableIndex, false);
-                        stats.droppedLateCount++;
-                    }
-                    latestRenderableIndex = outputIndex;
-                    continue;
-                }
-                if (outputIndex == MediaCodec.INFO_TRY_AGAIN_LATER ||
-                        outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                    break;
-                }
-                break;
-            }
-
-            if (latestRenderableIndex >= 0) {
-                long renderStartNs = SystemClock.elapsedRealtimeNanos();
-                codec.releaseOutputBuffer(latestRenderableIndex, true);
-                stats.renderedCount = 1;
-                stats.renderNsMax = SystemClock.elapsedRealtimeNanos() - renderStartNs;
-            }
-        }
-
-        private static int estimateTransportDepthFrames(int streamLen, int avgNalSize) {
-            int denom = Math.max(512, avgNalSize);
-            if (streamLen <= 0) {
-                return 0;
-            }
-            return Math.min(8, streamLen / denom);
-        }
-
-        private static final class DrainStats {
-            int releasedCount;
-            int renderedCount;
-            int droppedLateCount;
-            long renderNsMax;
-
-            void reset() {
-                releasedCount = 0;
-                renderedCount = 0;
-                droppedLateCount = 0;
-                renderNsMax = 0;
-            }
-        }
-
-        private static int findStartCode(byte[] data, int from, int toExclusive) {
-            int limit = toExclusive - 3;
-            for (int i = Math.max(0, from); i <= limit; i++) {
-                if (data[i] == 0 && data[i + 1] == 0) {
-                    if (data[i + 2] == 1) {
-                        return i;
-                    }
-                    if (i + 3 < toExclusive && data[i + 2] == 0 && data[i + 3] == 1) {
-                        return i;
-                    }
-                }
-            }
-            return -1;
-        }
-
-        private static boolean isRecoveryNal(byte[] data, int offset, int size) {
-            int type = firstNalType(data, offset, size);
-            return type == 5 || type == 7 || type == 8; // IDR/SPS/PPS
-        }
-
-        private static boolean containsRecoveryNal(byte[] data, int size) {
-            int limit = Math.min(size, 64 * 1024); // bound scan cost in hot path
-            int type = firstNalType(data, 0, limit);
-            if (type == 5 || type == 7 || type == 8) {
-                return true;
-            }
-            int sc = findStartCode(data, 0, limit);
-            while (sc >= 0) {
-                int nextSc = findStartCode(data, sc + 3, limit);
-                int nalEnd = nextSc >= 0 ? nextSc : limit;
-                type = firstNalType(data, sc, Math.max(0, nalEnd - sc));
-                if (type == 5 || type == 7 || type == 8) {
-                    return true;
-                }
-                if (nextSc < 0) {
-                    break;
-                }
-                sc = nextSc;
-            }
-            return false;
-        }
-
-        private static int firstNalType(byte[] data, int offset, int size) {
-            if (size <= 0 || offset < 0 || offset >= data.length) {
-                return -1;
-            }
-            int end = Math.min(data.length, offset + size);
-            int i = offset;
-            if (i + 3 < end && data[i] == 0 && data[i + 1] == 0) {
-                if (data[i + 2] == 1) {
-                    i += 3;
-                } else if (i + 4 < end && data[i + 2] == 0 && data[i + 3] == 1) {
-                    i += 4;
-                }
-            }
-            if (i >= end) {
-                return -1;
-            }
-            return data[i] & 0x1F;
-        }
-
-        private void closeSocket() {
-            Socket current = socket;
-            socket = null;
-            if (current != null) {
-                try {
-                    current.close();
-                } catch (IOException ignored) {
-                }
-            }
-        }
-
-        private static boolean isExpectedStreamClose(Exception e) {
-            if (!(e instanceof IOException)) {
-                return false;
-            }
-            String msg = e.getMessage();
-            if (msg == null) {
-                return false;
-            }
-            String m = msg.toLowerCase(Locale.US);
-            return m.contains("stream closed")
-                    || m.contains("connection reset")
-                    || m.contains("broken pipe")
-                    || m.contains("software caused connection abort");
-        }
-    }
 }
