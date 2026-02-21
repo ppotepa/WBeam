@@ -49,6 +49,137 @@ done
 
 sel_pos=0
 
+ANDROID_SERIALS=()
+ANDROID_APIS=()
+ANDROID_LABELS=()
+
+collect_android_devices() {
+  ANDROID_SERIALS=()
+  ANDROID_APIS=()
+  ANDROID_LABELS=()
+
+  if ! command -v adb >/dev/null 2>&1; then
+    return 1
+  fi
+
+  adb start-server >/dev/null 2>&1 || true
+
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    [[ "$line" == List\ of\ devices* ]] && continue
+
+    serial="${line%%[[:space:]]*}"
+    rest="${line#"$serial"}"
+    state="$(awk '{print $1}' <<<"$rest")"
+
+    [[ -z "$serial" || "$state" != "device" ]] && continue
+
+    api="$(adb -s "$serial" shell getprop ro.build.version.sdk 2>/dev/null | tr -d '\r[:space:]')"
+    release="$(adb -s "$serial" shell getprop ro.build.version.release 2>/dev/null | tr -d '\r[:space:]')"
+    model="$(adb -s "$serial" shell getprop ro.product.model 2>/dev/null | tr -d '\r')"
+    model="${model:-unknown-model}"
+    api="${api:-?}"
+    release="${release:-?}"
+
+    ANDROID_SERIALS+=("$serial")
+    ANDROID_APIS+=("$api")
+    ANDROID_LABELS+=("$model | android $release | api $api | $serial")
+  done < <(adb devices)
+
+  [[ ${#ANDROID_SERIALS[@]} -gt 0 ]]
+}
+
+auto_pipeline_for_api() {
+  local api="$1"
+  if [[ "$api" =~ ^[0-9]+$ ]] && (( api <= 17 )); then
+    echo "legacy"
+  else
+    echo "modern"
+  fi
+}
+
+auto_pipeline_for_all_devices() {
+  local min_api=999
+  local api
+  for api in "${ANDROID_APIS[@]}"; do
+    if [[ "$api" =~ ^[0-9]+$ ]] && (( api < min_api )); then
+      min_api="$api"
+    fi
+  done
+  auto_pipeline_for_api "$min_api"
+}
+
+pick_android_device() {
+  local n i
+  n=${#ANDROID_SERIALS[@]}
+
+  while true; do
+    tput clear >/dev/tty
+    printf '\033[1;36m  WBeam: Android deploy target\033[0m\n' >/dev/tty
+    printf '\033[90m  wybierz urzadzenie (numer), a=all, q=anuluj\033[0m\n\n' >/dev/tty
+
+    for (( i=0; i<n; i++ )); do
+      printf '  %d) %s\n' "$((i + 1))" "${ANDROID_LABELS[$i]}" >/dev/tty
+    done
+    printf '\n  a) all devices (adb default)\n  q) anuluj\n\n> ' >/dev/tty
+
+    choice=""
+    IFS= read -r choice </dev/tty
+    case "$choice" in
+      q|Q)
+        return 1
+        ;;
+      a|A|"")
+        SELECTED_ANDROID_SERIAL=""
+        SELECTED_ANDROID_API=""
+        return 0
+        ;;
+      *)
+        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= n )); then
+          idx=$((choice - 1))
+          SELECTED_ANDROID_SERIAL="${ANDROID_SERIALS[$idx]}"
+          SELECTED_ANDROID_API="${ANDROID_APIS[$idx]}"
+          return 0
+        fi
+        ;;
+    esac
+  done
+}
+
+pick_android_pipeline() {
+  local auto_mode="$1"
+
+  while true; do
+    tput clear >/dev/tty
+    printf '\033[1;36m  WBeam: Android pipeline\033[0m\n' >/dev/tty
+    printf '\033[90m  wybierz pipeline buildu\033[0m\n\n' >/dev/tty
+    printf '  1) auto   (api-based, default: %s)\n' "$auto_mode" >/dev/tty
+    printf '  2) modern (minSdk 19)\n' >/dev/tty
+    printf '  3) legacy (minSdk 17)\n' >/dev/tty
+    printf '  q) anuluj\n\n> ' >/dev/tty
+
+    choice=""
+    IFS= read -r choice </dev/tty
+    case "$choice" in
+      q|Q)
+        return 1
+        ;;
+      1|"")
+        SELECTED_ANDROID_PIPELINE="$auto_mode"
+        return 0
+        ;;
+      2)
+        SELECTED_ANDROID_PIPELINE="modern"
+        return 0
+        ;;
+      3)
+        SELECTED_ANDROID_PIPELINE="legacy"
+        return 0
+        ;;
+    esac
+  done
+}
+
 # ── terminal setup ────────────────────────────────────────────────────────────
 if [[ ! -t 1 ]]; then
   echo "wbgui requires an interactive terminal" >&2
@@ -171,6 +302,58 @@ case "$selected_action" in
     grp="${selected_action%%:*}"
     cmd_="${selected_action##*:}"
     echo ""
+
+    if [[ "$grp" == "android" ]]; then
+      SELECTED_ANDROID_SERIAL=""
+      SELECTED_ANDROID_API=""
+      SELECTED_ANDROID_PIPELINE="modern"
+
+      if [[ "$cmd_" == "build" || "$cmd_" == "build-release" ]]; then
+        if ! pick_android_pipeline "modern"; then
+          exit 0
+        fi
+      else
+        if collect_android_devices; then
+          if ! pick_android_device; then
+            exit 0
+          fi
+          if [[ -n "$SELECTED_ANDROID_API" ]]; then
+            auto_mode="$(auto_pipeline_for_api "$SELECTED_ANDROID_API")"
+          else
+            auto_mode="$(auto_pipeline_for_all_devices)"
+          fi
+          if ! pick_android_pipeline "$auto_mode"; then
+            exit 0
+          fi
+        else
+          if ! pick_android_pipeline "modern"; then
+            exit 0
+          fi
+        fi
+      fi
+
+      ALLOW_NO_TRANSPORT="0"
+      API_ONLY_FALLBACK="0"
+      if [[ "$cmd_" == "deploy" || "$cmd_" == "deploy-release" ]]; then
+        ALLOW_NO_TRANSPORT="1"
+        API_ONLY_FALLBACK="1"
+      fi
+
+      if [[ -n "$SELECTED_ANDROID_SERIAL" ]]; then
+        WBEAM_ANDROID_SERIAL="$SELECTED_ANDROID_SERIAL" \
+          WBEAM_ANDROID_PIPELINE="$SELECTED_ANDROID_PIPELINE" \
+          WBEAM_ANDROID_ALLOW_NO_TRANSPORT="$ALLOW_NO_TRANSPORT" \
+            WBEAM_ANDROID_API_ONLY_FALLBACK="$API_ONLY_FALLBACK" \
+          "$WBEAM" "$grp" "$cmd_"
+      else
+        WBEAM_ANDROID_PIPELINE="$SELECTED_ANDROID_PIPELINE" \
+          WBEAM_ANDROID_ALLOW_NO_TRANSPORT="$ALLOW_NO_TRANSPORT" \
+            WBEAM_ANDROID_API_ONLY_FALLBACK="$API_ONLY_FALLBACK" \
+          "$WBEAM" "$grp" "$cmd_"
+      fi
+      exit $?
+    fi
+
     "$WBEAM" "$grp" "$cmd_"
     exit $?
     ;;

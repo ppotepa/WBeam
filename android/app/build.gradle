@@ -19,6 +19,14 @@ def resolveGitShortRev() {
 }
 
 def wbeamBuildRevision = "0.0.${resolveGitShortRev()}-build"
+def wbeamMinSdkRaw = (project.findProperty("WBEAM_MIN_SDK") ?: System.getenv("WBEAM_MIN_SDK") ?: "19").toString()
+def wbeamMinSdk = Integer.parseInt(wbeamMinSdkRaw)
+def wbeamHostRaw = (project.findProperty("WBEAM_HOST") ?: System.getenv("WBEAM_HOST") ?: "127.0.0.1").toString().trim()
+def wbeamHost = wbeamHostRaw.isEmpty() ? "127.0.0.1" : wbeamHostRaw.replace("\"", "")
+def wbeamApiHostRaw = (project.findProperty("WBEAM_API_HOST") ?: System.getenv("WBEAM_API_HOST") ?: wbeamHost).toString().trim()
+def wbeamApiHost = wbeamApiHostRaw.isEmpty() ? wbeamHost : wbeamApiHostRaw.replace("\"", "")
+def wbeamStreamHostRaw = (project.findProperty("WBEAM_STREAM_HOST") ?: System.getenv("WBEAM_STREAM_HOST") ?: wbeamHost).toString().trim()
+def wbeamStreamHost = wbeamStreamHostRaw.isEmpty() ? wbeamHost : wbeamStreamHostRaw.replace("\"", "")
 
 android {
     namespace = 'com.wbeam'
@@ -30,11 +38,14 @@ android {
 
     defaultConfig {
         applicationId "com.wbeam"
-        minSdk = 26
+        minSdk = wbeamMinSdk
         targetSdk = 35
         versionCode = 1
         versionName = wbeamBuildRevision
         buildConfigField "String", "WBEAM_BUILD_REV", "\"${wbeamBuildRevision}\""
+        buildConfigField "String", "WBEAM_HOST", "\"${wbeamHost}\""
+        buildConfigField "String", "WBEAM_API_HOST", "\"${wbeamApiHost}\""
+        buildConfigField "String", "WBEAM_STREAM_HOST", "\"${wbeamStreamHost}\""
     }
 
     buildTypes {
@@ -46,14 +57,13 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
     }
 }
 
 dependencies {
-    implementation 'androidx.appcompat:appcompat:1.7.0'
-    implementation 'androidx.core:core-ktx:1.13.1'
-    implementation 'com.google.android.material:material:1.12.0'
-    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'com.google.android.material:material:1.4.0'
+    implementation 'com.squareup.okhttp3:okhttp:3.12.13'
 }

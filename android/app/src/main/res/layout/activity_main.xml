@@ -107,6 +107,12 @@
             android:text="debug overlay"
             android:textColor="#E2E8F0"
             android:textSize="12sp" />
+
+        <com.wbeam.widget.FpsLossGraphView
+            android:id="@+id/debugFpsGraph"
+            android:layout_width="match_parent"
+            android:layout_height="92dp"
+            android:layout_marginTop="8dp" />
     </LinearLayout>
 
     <LinearLayout

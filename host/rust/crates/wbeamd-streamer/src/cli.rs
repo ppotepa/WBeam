@@ -2,7 +2,14 @@
 
 use anyhow::{Context, Result};
 use ashpd::desktop::screencast::CursorMode;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum StreamMode {
+    Ultra,
+    Stable,
+    Quality,
+}
 
 #[derive(Debug, Parser, Clone)]
 #[command(name = "wbeamd-streamer", about = "Wayland portal screencast -> WBTP framed sender")]
@@ -28,6 +35,10 @@ pub struct Args {
     pub debug_dir: String,
     #[arg(long, default_value_t = true)]
     pub framed: bool,
+    #[arg(long, value_enum, default_value_t = StreamMode::Stable)]
+    pub stream_mode: StreamMode,
+    #[arg(long, default_value_t = false)]
+    pub skip_videoscale: bool,
     /// All-Intra mode: every frame is a full keyframe (gop-size=1).
     /// Mathematically eliminates P-frame reference artifacts at the cost of
     /// ~3-4x higher bitrate vs. P-frame HEVC — well within 300 Mbps USB.
@@ -45,6 +56,8 @@ pub struct ResolvedConfig {
     pub encoder: String,
     pub nv_preset: String,
     pub cursor_mode: CursorMode,
+    pub stream_mode: StreamMode,
+    pub skip_videoscale: bool,
     /// When true, gop-size is forced to 1 — every frame is an IDR.
     pub intra_only: bool,
 }
@@ -55,14 +68,19 @@ pub fn resolve_profile(args: &Args) -> Result<ResolvedConfig> {
         // With 300 Mbps USB bandwidth available, raise defaults so bitrate is
         // never the constraint.  HEVC at 100 Mbps / 1080p is near-lossless;
         // no quantisation banding even on cursor-heavy or fast-moving content.
-        "lowlatency" => ("1280x720",  60,  60_000u32, "p2"),
-        "balanced"   => ("1920x1080", 60, 100_000u32, "p4"),
-        _            => ("2560x1440", 60, 150_000u32, "p6"),
+        "lowlatency" => ("1280x720",  60,  60_000u32, "p4"),
+        "balanced"   => ("1920x1080", 60, 100_000u32, "p6"),
+        _            => ("2560x1440", 60, 150_000u32, "p7"),
     };
 
     let size = args.size.as_deref().unwrap_or(default_size);
     let fps = args.fps.unwrap_or(default_fps).clamp(24, 120);
-    let bitrate_kbps = args.bitrate_kbps.unwrap_or(default_bitrate).clamp(4_000, 300_000);
+    let default_scaled_bitrate = ((default_bitrate as u64)
+        .saturating_mul(fps as u64)
+        .saturating_add(default_fps as u64 - 1)
+        / default_fps as u64)
+        .clamp(4_000, 300_000) as u32;
+    let bitrate_kbps = args.bitrate_kbps.unwrap_or(default_scaled_bitrate).clamp(4_000, 300_000);
     let (w, h) = size
         .to_lowercase()
         .split_once('x')
@@ -83,6 +101,8 @@ pub fn resolve_profile(args: &Args) -> Result<ResolvedConfig> {
         encoder: args.encoder.clone(),
         nv_preset: nv_preset.to_string(),
         cursor_mode,
+        stream_mode: args.stream_mode,
+        skip_videoscale: args.skip_videoscale,
         intra_only: args.intra_only,
     })
 }

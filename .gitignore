@@ -50,3 +50,5 @@ protocol/logs/**
 codebase_concat*.txt
 concat*.txt
 ALL_CODE.txt
+ALL_CODE_CLEAN.txt
+.wbeam_android_pipeline
