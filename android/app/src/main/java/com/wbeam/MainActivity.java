@@ -44,6 +44,7 @@ import com.wbeam.stream.H264TcpPlayer;
 import com.wbeam.stream.VideoTestController;
 import com.wbeam.stream.StreamSessionController;
 import com.wbeam.telemetry.ClientMetricsReporter;
+import com.wbeam.widget.FpsLossGraphView;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -83,7 +84,8 @@ public class MainActivity extends AppCompatActivity {
     private static final float DEBUG_INFO_ALPHA_IDLE = 0.55f;
     private static final float DEBUG_INFO_ALPHA_TOUCH = 0.92f;
     private static final long DEBUG_INFO_ALPHA_RESET_MS = 1300L;
-    private static final int DEBUG_FPS_GRAPH_POINTS = 36;
+    private static final long DEBUG_FPS_SAMPLE_MS = 1000L;
+    private static final int DEBUG_FPS_GRAPH_POINTS = 180;
 
     // ── Views ──────────────────────────────────────────────────────────────────
     private View rootLayout;
@@ -94,6 +96,7 @@ public class MainActivity extends AppCompatActivity {
     private View statusPanel;
     private View perfHudPanel;
     private View debugInfoPanel;
+    private FpsLossGraphView debugFpsGraphView;
     private View preflightOverlay;
     private View debugControlsRow;
     private View statusLed;
@@ -164,9 +167,8 @@ public class MainActivity extends AppCompatActivity {
     private long lastUiBps = 0;
     private String lastStatsLine = "fps in/out: - | drops: - | late: - | q(t/d/r): -/-/- | reconnects: -";
     private String lastHudCompactLine = "hud: waiting for metrics";
-    private final float[] debugFpsHistory = new float[DEBUG_FPS_GRAPH_POINTS];
-    private int debugFpsHistoryCount = 0;
-    private int debugFpsHistoryIndex = 0;
+    private double latestTargetFps = 60.0;
+    private double latestPresentFps = 0.0;
     private final SpannableStringBuilder liveLogBuffer = new SpannableStringBuilder();
 
     // ── Daemon state (updated via StatusPoller.Callbacks) ──────────────────────
@@ -204,6 +206,15 @@ public class MainActivity extends AppCompatActivity {
     private final Runnable debugInfoFadeTask = () -> {
         if (debugInfoPanel != null) {
             debugInfoPanel.setAlpha(DEBUG_INFO_ALPHA_IDLE);
+        }
+    };
+    private final Runnable debugGraphSampleTask = new Runnable() {
+        @Override
+        public void run() {
+            if (BuildConfig.DEBUG && debugFpsGraphView != null) {
+                debugFpsGraphView.addSample(latestTargetFps, latestPresentFps);
+            }
+            uiHandler.postDelayed(this, DEBUG_FPS_SAMPLE_MS);
         }
     };
 
@@ -423,6 +434,7 @@ public class MainActivity extends AppCompatActivity {
         stopPreflightPulse();
         uiHandler.removeCallbacks(simpleMenuAutoHideTask);
         uiHandler.removeCallbacks(debugInfoFadeTask);
+        uiHandler.removeCallbacks(debugGraphSampleTask);
         videoTestController.release();
         stopLiveView();
         ioExecutor.shutdownNow();
@@ -459,6 +471,7 @@ public class MainActivity extends AppCompatActivity {
         statusPanel = findViewById(R.id.statusPanel);
         perfHudPanel = findViewById(R.id.perfHudPanel);
         debugInfoPanel = findViewById(R.id.debugInfoPanel);
+        debugFpsGraphView = findViewById(R.id.debugFpsGraph);
         preflightOverlay = findViewById(R.id.preflightOverlay);
         debugControlsRow = findViewById(R.id.debugControlsRow);
         statusLed = findViewById(R.id.statusLed);
@@ -529,12 +542,16 @@ public class MainActivity extends AppCompatActivity {
                 debugInfoPanel.setVisibility(View.VISIBLE);
                 debugInfoPanel.setAlpha(DEBUG_INFO_ALPHA_IDLE);
             }
+            if (debugFpsGraphView != null) {
+                debugFpsGraphView.setCapacity(DEBUG_FPS_GRAPH_POINTS);
+            }
             if (logButton != null) {
                 logButton.setVisibility(View.GONE);
             }
             if (fullscreenButton != null) {
                 fullscreenButton.setVisibility(View.VISIBLE);
             }
+            startDebugGraphSampling();
             refreshDebugInfoOverlay();
             return;
         }
@@ -556,6 +573,7 @@ public class MainActivity extends AppCompatActivity {
         if (debugInfoPanel != null) {
             debugInfoPanel.setVisibility(View.GONE);
         }
+        stopDebugGraphSampling();
         if (logButton != null) {
             logButton.setVisibility(View.GONE);
         }
@@ -572,6 +590,17 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
                 updateIntraOnlyButton();
+                updateHostHint();
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        });
+        cursorSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                enforceCursorOverlayPolicy(false);
                 updateHostHint();
             }
 
@@ -821,7 +850,7 @@ public class MainActivity extends AppCompatActivity {
         fpsSeek.setProgress(clamp(s.fps, 24, 144) - 24);
         bitrateSeek.setProgress(clamp(s.bitrateMbps, 5, 300) - 5);
         cursorOverlayEnabled = s.localCursor;
-        cursorOverlayButton.setText(cursorOverlayEnabled ? "Local Cursor Overlay ON" : "Local Cursor Overlay OFF");
+        enforceCursorOverlayPolicy(false);
         intraOnlyEnabled = s.intraOnly;
         updateIntraOnlyButton();
         updateSettingValueLabels();
@@ -871,15 +900,20 @@ public class MainActivity extends AppCompatActivity {
         intraOnlyButton.setText(intraOnlyEnabled
                 ? "All-Intra: ON  \u2014 zero artifacts (HEVC only)"
             : (supportsIntra ? "All-Intra: OFF" : "All-Intra: N/A (raw-png)"));
-        intraOnlyButton.setBackgroundTintList(
-                android.content.res.ColorStateList.valueOf(
-                intraOnlyEnabled ? 0xFF16A34A : 0xFF374151));
+        int buttonColor = intraOnlyEnabled ? 0xFF16A34A : 0xFF374151;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            intraOnlyButton.setBackgroundTintList(
+                    android.content.res.ColorStateList.valueOf(buttonColor));
+        } else {
+            intraOnlyButton.setBackgroundColor(buttonColor);
+        }
     }
 
     private void updateHostHint() {
         int[] sz = computeScaledSize();
+        String apiBase = HostApiClient.API_BASE;
         String line1 = "Control API " + (daemonReachable ? "connected" : "waiting")
-                + ": http://127.0.0.1:5001";
+            + ": " + apiBase;
         String line2 = "Host: " + daemonHostName + " | Daemon: " + daemonState + " (" + daemonService + ")";
         String line3 = "Outgoing config: " + getSelectedProfile()
                 + ", " + sz[0] + "x" + sz[1]
@@ -982,6 +1016,8 @@ public class MainActivity extends AppCompatActivity {
         int[] decodeSize = computeScaledSize();
         int fps = getSelectedFps();
         long frameUs = Math.max(1L, 1_000_000L / Math.max(1, fps));
+        SurfaceView preview = findViewById(R.id.previewSurface);
+        preview.getHolder().setFixedSize(decodeSize[0], decodeSize[1]);
 
         player = new H264TcpPlayer(
                 surface,
@@ -1192,12 +1228,38 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void toggleCursorOverlayMode() {
+        if (!"hidden".equals(getSelectedCursorMode())) {
+            cursorOverlayEnabled = false;
+            hideCursorOverlay();
+            enforceCursorOverlayPolicy(true);
+            return;
+        }
         cursorOverlayEnabled = !cursorOverlayEnabled;
-        cursorOverlayButton.setText(cursorOverlayEnabled ? "Local Cursor Overlay ON" : "Local Cursor Overlay OFF");
+        enforceCursorOverlayPolicy(true);
         if (!cursorOverlayEnabled) {
             hideCursorOverlay();
         }
-        saveSettings();
+    }
+
+    private void enforceCursorOverlayPolicy(boolean persist) {
+        String cursorMode = getSelectedCursorMode();
+        boolean allowLocalOverlay = "hidden".equals(cursorMode);
+        if (!allowLocalOverlay && cursorOverlayEnabled) {
+            cursorOverlayEnabled = false;
+            hideCursorOverlay();
+        }
+        if (cursorOverlayButton != null) {
+            cursorOverlayButton.setEnabled(allowLocalOverlay);
+            cursorOverlayButton.setAlpha(allowLocalOverlay ? 1.0f : 0.45f);
+            if (allowLocalOverlay) {
+                cursorOverlayButton.setText(cursorOverlayEnabled ? "Local Cursor Overlay ON" : "Local Cursor Overlay OFF");
+            } else {
+                cursorOverlayButton.setText("Local Cursor Overlay N/A (cursor hidden required)");
+            }
+        }
+        if (persist) {
+            saveSettings();
+        }
     }
 
     private void updateCursorOverlay(float x, float y, int action) {
@@ -1355,6 +1417,15 @@ public class MainActivity extends AppCompatActivity {
         refreshDebugInfoOverlay();
     }
 
+    private void startDebugGraphSampling() {
+        uiHandler.removeCallbacks(debugGraphSampleTask);
+        uiHandler.post(debugGraphSampleTask);
+    }
+
+    private void stopDebugGraphSampling() {
+        uiHandler.removeCallbacks(debugGraphSampleTask);
+    }
+
     // ══════════════════════════════════════════════════════════════════════════
     // UI - perf HUD
     // ══════════════════════════════════════════════════════════════════════════
@@ -1363,6 +1434,8 @@ public class MainActivity extends AppCompatActivity {
         if (perfHudText == null) {
             return;
         }
+        latestTargetFps = getSelectedFps();
+        latestPresentFps = 0.0;
         lastHudCompactLine = "hud: offline | waiting metrics";
         perfHudText.setText("HUD OFFLINE\nwaiting for host metrics...");
         perfHudText.setTextColor(Color.parseColor("#FCA5A5"));
@@ -1391,6 +1464,8 @@ public class MainActivity extends AppCompatActivity {
 
         double targetFps = kpi != null ? kpi.optDouble("target_fps", getSelectedFps()) : getSelectedFps();
         double presentFps = kpi != null ? kpi.optDouble("present_fps", 0.0) : 0.0;
+        latestTargetFps = targetFps;
+        latestPresentFps = presentFps;
         double frametimeP95 = kpi != null ? kpi.optDouble("frametime_ms_p95", 0.0) : 0.0;
         double decodeP95 = kpi != null ? kpi.optDouble("decode_time_ms_p95", 0.0) : 0.0;
         double renderP95 = kpi != null ? kpi.optDouble("render_time_ms_p95", 0.0) : 0.0;
@@ -1439,7 +1514,6 @@ public class MainActivity extends AppCompatActivity {
                 reason.isEmpty() ? "-" : reason
         );
         perfHudText.setText(hud);
-            recordFpsSample(presentFps);
             lastHudCompactLine = String.format(
                 Locale.US,
                 "hud fps %.0f/%.1f | e2e %.1fms | dec %.1fms | ren %.1fms | q %d/%d/%d",
@@ -1530,53 +1604,21 @@ public class MainActivity extends AppCompatActivity {
         }
         String state = lastUiState == null ? "IDLE" : lastUiState.toUpperCase(Locale.US);
         String host = daemonHostName == null || daemonHostName.trim().isEmpty() ? "-" : daemonHostName;
-        String graph = buildFpsSparkline();
+        double safeTarget = latestTargetFps > 0.0 ? latestTargetFps : 60.0;
+        double lossPct = Math.max(0.0, ((safeTarget - latestPresentFps) / safeTarget) * 100.0);
         String text = String.format(
                 Locale.US,
-                "DBG %s | host:%s | daemon:%s\n%s\nfps graph: %s\n%s",
+                "DBG %s | host:%s | daemon:%s\nFPS %.0f/%.1f (loss %.0f%%)  thresholds: green <=10%% orange >10%% red >50%%\n%s\n%s",
                 state,
                 host,
                 daemonState,
+                safeTarget,
+                latestPresentFps,
+                lossPct,
                 lastStatsLine,
-                graph,
                 lastHudCompactLine
         );
         debugInfoText.setText(text);
-    }
-
-    private void recordFpsSample(double fps) {
-        if (!Double.isFinite(fps) || fps < 0.0) {
-            return;
-        }
-        float clamped = (float) Math.min(240.0, fps);
-        debugFpsHistory[debugFpsHistoryIndex] = clamped;
-        debugFpsHistoryIndex = (debugFpsHistoryIndex + 1) % DEBUG_FPS_GRAPH_POINTS;
-        if (debugFpsHistoryCount < DEBUG_FPS_GRAPH_POINTS) {
-            debugFpsHistoryCount++;
-        }
-    }
-
-    private String buildFpsSparkline() {
-        if (debugFpsHistoryCount <= 0) {
-            return "-";
-        }
-        final char[] levels = new char[]{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'};
-        float max = 1f;
-        for (int i = 0; i < debugFpsHistoryCount; i++) {
-            float sample = debugFpsHistory[i];
-            if (sample > max) {
-                max = sample;
-            }
-        }
-        int start = debugFpsHistoryCount == DEBUG_FPS_GRAPH_POINTS ? debugFpsHistoryIndex : 0;
-        StringBuilder sb = new StringBuilder(debugFpsHistoryCount);
-        for (int i = 0; i < debugFpsHistoryCount; i++) {
-            float sample = debugFpsHistory[(start + i) % DEBUG_FPS_GRAPH_POINTS];
-            int idx = (int) Math.round((sample / max) * (levels.length - 1));
-            idx = Math.max(0, Math.min(levels.length - 1, idx));
-            sb.append(levels[idx]);
-        }
-        return sb.toString();
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -1632,10 +1674,9 @@ public class MainActivity extends AppCompatActivity {
         boolean surfaceOk = surfaceReady;
         boolean hwOk = hwAvcDecodeAvailable;
         boolean streamReady = daemonReachable && (
-                "STREAMING".equals(daemonState)
-                        || "IDLE".equals(daemonState)
-                        || "STARTING".equals(daemonState)
-                        || "RECONNECTING".equals(daemonState)
+            "STREAMING".equals(daemonState)
+                || "STARTING".equals(daemonState)
+                || "RECONNECTING".equals(daemonState)
         );
 
         boolean ready = usbOk && hostOk && surfaceOk && hwOk && streamReady;
@@ -1657,7 +1698,7 @@ public class MainActivity extends AppCompatActivity {
             setPreflightVisible(true);
             if (!usbOk) {
                 preflightTitleText.setText("WBEAM PRE-FLIGHT " + spin + " WAITING CONTROL LINK");
-                preflightHintText.setText("busy: adb reverse/control api unreachable");
+                preflightHintText.setText("busy: control api unreachable (adb reverse/tunnel down)");
                 preflightHintText.setTextColor(Color.parseColor("#FCA5A5"));
             } else if (!surfaceOk) {
                 preflightTitleText.setText("WBEAM PRE-FLIGHT " + spin + " WAITING SURFACE");
@@ -1669,7 +1710,11 @@ public class MainActivity extends AppCompatActivity {
                 preflightHintText.setTextColor(Color.parseColor("#FCA5A5"));
             } else if (!streamReady) {
                 preflightTitleText.setText("WBEAM PRE-FLIGHT " + spin + " WAITING STREAM");
-                preflightHintText.setText("busy: host state=" + daemonState.toLowerCase(Locale.US));
+                if (daemonReachable && "IDLE".equals(daemonState)) {
+                    preflightHintText.setText("busy: host reachable, stream idle (tap Start Live)");
+                } else {
+                    preflightHintText.setText("busy: host state=" + daemonState.toLowerCase(Locale.US));
+                }
                 preflightHintText.setTextColor(Color.parseColor("#FDE68A"));
             } else {
                 preflightTitleText.setText("WBEAM PRE-FLIGHT " + spin + " RUNNING");

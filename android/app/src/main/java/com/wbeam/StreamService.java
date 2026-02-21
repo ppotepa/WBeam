@@ -32,6 +32,7 @@ public class StreamService extends Service {
 
     private static final String TAG = "WBeamService";
     private static final String CHANNEL_ID = "wbeam_stream";
+    private static final String HOST = resolveHost();
 
     private volatile boolean running;
     private Thread worker;
@@ -49,7 +50,7 @@ public class StreamService extends Service {
 
         emitStatus(STATE_CONNECTING, "opening usb tunnel stream", 0);
         try {
-            startForeground(1, buildNotification("connecting to 127.0.0.1:5000"));
+            startForeground(1, buildNotification("connecting to " + HOST + ":5000"));
         } catch (Exception e) {
             Log.e(TAG, "failed to enter foreground", e);
             emitStatus(STATE_ERROR, "foreground start failed: " + e.getClass().getSimpleName(), 0);
@@ -69,8 +70,8 @@ public class StreamService extends Service {
         running = true;
         worker = new Thread(() -> {
             while (running) {
-                emitStatus(STATE_CONNECTING, "connecting to 127.0.0.1:5000", 0);
-                try (Socket socket = new Socket("127.0.0.1", 5000);
+                 emitStatus(STATE_CONNECTING, "connecting to " + HOST + ":5000", 0);
+                 try (Socket socket = new Socket(HOST, 5000);
                      InputStream input = socket.getInputStream()) {
                     Log.i(TAG, "connected to stream");
                     emitStatus(STATE_STREAMING, "connected", 0);
@@ -151,5 +152,17 @@ public class StreamService extends Service {
     @Override
     public IBinder onBind(Intent intent) {
         return null;
+    }
+
+    private static String resolveHost() {
+        String configured = BuildConfig.WBEAM_STREAM_HOST;
+        if (configured == null || configured.trim().isEmpty()) {
+            configured = BuildConfig.WBEAM_HOST;
+        }
+        if (configured == null) {
+            return "127.0.0.1";
+        }
+        String trimmed = configured.trim();
+        return trimmed.isEmpty() ? "127.0.0.1" : trimmed;
     }
 }

@@ -2,13 +2,14 @@ package com.wbeam.api;
 
 import android.os.SystemClock;
 
+import com.wbeam.BuildConfig;
+
 import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.EOFException;
 import java.io.IOException;
 import java.util.Locale;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.ConnectionPool;
@@ -25,7 +26,7 @@ import okhttp3.ResponseBody;
  */
 public final class HostApiClient {
 
-    private static final String  HOST         = "127.0.0.1";
+    private static final String  HOST         = resolveHost();
     private static final int     CONTROL_PORT = 5001;
     public  static final String  API_BASE     = "http://" + HOST + ":" + CONTROL_PORT;
 
@@ -33,7 +34,7 @@ public final class HostApiClient {
     public  static final long API_RETRY_BASE_DELAY_MS = 300L;
 
     public static final MediaType JSON_MEDIA_TYPE =
-            MediaType.get("application/json; charset=utf-8");
+            MediaType.parse("application/json; charset=utf-8");
 
     private static final ConnectionPool HTTP_CONNECTION_POOL =
             new ConnectionPool(2, 30, TimeUnit.SECONDS);
@@ -54,6 +55,18 @@ public final class HostApiClient {
 
     // Singleton — no instances needed.
     private HostApiClient() {}
+
+    private static String resolveHost() {
+        String configured = BuildConfig.WBEAM_API_HOST;
+        if (configured == null || configured.trim().isEmpty()) {
+            configured = BuildConfig.WBEAM_HOST;
+        }
+        if (configured == null) {
+            return "127.0.0.1";
+        }
+        String trimmed = configured.trim();
+        return trimmed.isEmpty() ? "127.0.0.1" : trimmed;
+    }
 
     /**
      * Execute an HTTP request against the control API with exponential-backoff retry.
@@ -77,8 +90,8 @@ public final class HostApiClient {
                     break;
                 }
                 long baseDelay = Math.min(5000L, API_RETRY_BASE_DELAY_MS * (1L << i));
-                long jitter = ThreadLocalRandom.current()
-                        .nextLong(Math.max(1L, baseDelay / 4L + 1L));
+                long jitterBound = Math.max(1L, baseDelay / 4L + 1L);
+                long jitter = (long) (Math.random() * jitterBound);
                 SystemClock.sleep(baseDelay + jitter);
             }
         }
@@ -94,7 +107,7 @@ public final class HostApiClient {
             JSONObject payload
     ) throws IOException, JSONException {
         RequestBody body = payload != null
-                ? RequestBody.create(payload.toString(), JSON_MEDIA_TYPE)
+            ? RequestBody.create(JSON_MEDIA_TYPE, payload.toString())
                 : null;
         Request request = new Request.Builder()
                 .url(API_BASE + path)

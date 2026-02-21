@@ -17,6 +17,8 @@ ANDROID_ACTIVITY=".MainActivity"
 ANDROID_APK="$ANDROID_DIR/app/build/outputs/apk/debug/app-debug.apk"
 ANDROID_APK_RELEASE="$ANDROID_DIR/app/build/outputs/apk/release/app-release.apk"
 ANDROID_APK_RELEASE_UNSIGNED="$ANDROID_DIR/app/build/outputs/apk/release/app-release-unsigned.apk"
+ANDROID_SERIAL="${WBEAM_ANDROID_SERIAL:-}"
+ANDROID_PIPELINE_FILE="$ROOT_DIR/.wbeam_android_pipeline"
 
 
 
@@ -51,6 +53,157 @@ Examples:
   ./wbeam debug up
   ./wbeam logs live
 EOF
+}
+
+adb_device_cmd() {
+  require_cmd adb
+  if [[ -n "$ANDROID_SERIAL" ]]; then
+    adb -s "$ANDROID_SERIAL" "$@"
+  else
+    adb "$@"
+  fi
+}
+
+android_pipeline_mode() {
+  local mode="${WBEAM_ANDROID_PIPELINE:-}"
+  if [[ -z "$mode" && -f "$ANDROID_PIPELINE_FILE" ]]; then
+    mode="$(tr -d '[:space:]' < "$ANDROID_PIPELINE_FILE" 2>/dev/null || true)"
+  fi
+
+  case "$mode" in
+    legacy|modern)
+      echo "$mode"
+      ;;
+    *)
+      echo "modern"
+      ;;
+  esac
+}
+
+android_pipeline_min_sdk() {
+  case "$1" in
+    legacy) echo "17" ;;
+    *) echo "19" ;;
+  esac
+}
+
+detect_host_ip() {
+  local ip_candidate=""
+  ip_candidate="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++){if($i=="src"){print $(i+1); exit}}}')"
+  if [[ -n "$ip_candidate" ]]; then
+    echo "$ip_candidate"
+    return 0
+  fi
+  ip_candidate="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  if [[ -n "$ip_candidate" ]]; then
+    echo "$ip_candidate"
+    return 0
+  fi
+  return 1
+}
+
+android_build_host() {
+  local pipeline_mode="$1"
+  if [[ -n "${WBEAM_ANDROID_HOST:-}" ]]; then
+    echo "$WBEAM_ANDROID_HOST"
+    return 0
+  fi
+
+  if [[ "$pipeline_mode" == "legacy" ]]; then
+    local detected
+    detected="$(detect_host_ip || true)"
+    if [[ -n "$detected" ]]; then
+      echo "$detected"
+      return 0
+    fi
+  fi
+
+  echo "127.0.0.1"
+}
+
+android_device_has_ipv4() {
+  local ips line ip
+  ips="$(adb_device_cmd shell "ip addr 2>/dev/null | grep 'inet ' | sed -E 's/.*inet ([0-9.]+).*/\\1/'" 2>/dev/null | tr -d '\r')"
+  while IFS= read -r line; do
+    ip="${line%%/*}"
+    if [[ -n "$ip" && "$ip" != "127.0.0.1" ]]; then
+      return 0
+    fi
+  done <<< "$ips"
+  return 1
+}
+
+android_try_reverse_setup() {
+  adb_device_cmd reverse "tcp:${STREAM_PORT}" "tcp:${STREAM_PORT}" >/dev/null 2>&1 || return 1
+  adb_device_cmd reverse "tcp:${CONTROL_PORT}" "tcp:${CONTROL_PORT}" >/dev/null 2>&1 || return 1
+  return 0
+}
+
+android_echo_hosts() {
+  local api_host="$1"
+  local stream_host="$2"
+  printf '%s|%s\n' "$api_host" "$stream_host"
+}
+
+android_resolve_deploy_hosts() {
+  local pipeline_mode="$1"
+  local allow_no_transport="${WBEAM_ANDROID_ALLOW_NO_TRANSPORT:-0}"
+  local api_only_fallback="${WBEAM_ANDROID_API_ONLY_FALLBACK:-0}"
+
+  if [[ -n "${WBEAM_ANDROID_API_HOST:-}" || -n "${WBEAM_ANDROID_STREAM_HOST:-}" || -n "${WBEAM_ANDROID_HOST:-}" ]]; then
+    local explicit_api="${WBEAM_ANDROID_API_HOST:-${WBEAM_ANDROID_HOST:-127.0.0.1}}"
+    local explicit_stream="${WBEAM_ANDROID_STREAM_HOST:-${WBEAM_ANDROID_HOST:-127.0.0.1}}"
+    android_echo_hosts "$explicit_api" "$explicit_stream"
+    return 0
+  fi
+
+  if [[ "$pipeline_mode" != "legacy" ]]; then
+    android_echo_hosts "127.0.0.1" "127.0.0.1"
+    return 0
+  fi
+
+  require_cmd adb
+  adb start-server >/dev/null
+  adb_device_cmd wait-for-device
+
+  if android_try_reverse_setup; then
+    android_echo_hosts "127.0.0.1" "127.0.0.1"
+    return 0
+  fi
+
+  local host_ip
+  host_ip="$(detect_host_ip || true)"
+
+  if android_device_has_ipv4 && [[ -n "$host_ip" ]]; then
+    if [[ "$api_only_fallback" =~ ^(1|true|TRUE|yes|on)$ ]]; then
+      android_echo_hosts "$host_ip" "127.0.0.1"
+    else
+      android_echo_hosts "$host_ip" "$host_ip"
+    fi
+    return 0
+  fi
+
+  if [[ "$allow_no_transport" =~ ^(1|true|TRUE|yes|on)$ ]]; then
+    echo "[android] WARN: no active reverse/LAN path detected; forcing loopback host 127.0.0.1 for deploy." >&2
+    echo "[android] WARN: app may stay offline until adb reverse starts working on this device." >&2
+    android_echo_hosts "127.0.0.1" "127.0.0.1"
+    return 0
+  fi
+
+  echo "[android] ERROR: no transport path to host for legacy device." >&2
+  echo "[android] - adb reverse is unavailable on this device (or ADB transport is unstable)." >&2
+  echo "[android] - device has no active IPv4 network interface for LAN fallback." >&2
+  echo "[android] Hint: set WBEAM_ANDROID_ALLOW_NO_TRANSPORT=1 to force loopback deploy despite missing tunnel." >&2
+  echo "[android] Fix: connect tablet to Wi-Fi (same LAN as host) or set WBEAM_ANDROID_HOST manually after network is up." >&2
+  return 1
+}
+
+android_target_desc() {
+  if [[ -n "$ANDROID_SERIAL" ]]; then
+    echo "serial=$ANDROID_SERIAL"
+  else
+    echo "default-device"
+  fi
 }
 
 require_cmd() {
@@ -161,23 +314,22 @@ service_logs() {
 ip_up() {
   require_cmd adb
   adb start-server >/dev/null
-  adb wait-for-device
-  adb reverse "tcp:${STREAM_PORT}" "tcp:${STREAM_PORT}"
-  adb reverse "tcp:${CONTROL_PORT}" "tcp:${CONTROL_PORT}"
+  adb_device_cmd wait-for-device
+  adb_device_cmd reverse "tcp:${STREAM_PORT}" "tcp:${STREAM_PORT}"
+  adb_device_cmd reverse "tcp:${CONTROL_PORT}" "tcp:${CONTROL_PORT}"
   ip_status
 }
 
 ip_down() {
-  require_cmd adb
-  adb reverse --remove "tcp:${STREAM_PORT}" >/dev/null 2>&1 || true
-  adb reverse --remove "tcp:${CONTROL_PORT}" >/dev/null 2>&1 || true
+  adb_device_cmd reverse --remove "tcp:${STREAM_PORT}" >/dev/null 2>&1 || true
+  adb_device_cmd reverse --remove "tcp:${CONTROL_PORT}" >/dev/null 2>&1 || true
   ip_status
 }
 
 ip_status() {
-  require_cmd adb
+  adb_device_cmd version >/dev/null
   echo "ADB reverse mappings:"
-  adb reverse --list || true
+  adb_device_cmd reverse --list || true
 }
 
 # Run the release binary in the foreground (no systemd, clean output)
@@ -220,39 +372,57 @@ daemon_status() {
 }
 
 android_build() {
-  echo "[android] Building debug APK…"
-  cd "$ANDROID_DIR" && ./gradlew :app:assembleDebug
+  local pipeline_mode min_sdk build_api_host build_stream_host
+  pipeline_mode="$(android_pipeline_mode)"
+  min_sdk="$(android_pipeline_min_sdk "$pipeline_mode")"
+  build_api_host="${WBEAM_ANDROID_API_HOST:-${WBEAM_ANDROID_HOST:-$(android_build_host "$pipeline_mode")}}"
+  build_stream_host="${WBEAM_ANDROID_STREAM_HOST:-${WBEAM_ANDROID_HOST:-$(android_build_host "$pipeline_mode")}}"
+
+  echo "[android] Building debug APK (pipeline=${pipeline_mode}, minSdk=${min_sdk}, api_host=${build_api_host}, stream_host=${build_stream_host})…"
+  cd "$ANDROID_DIR" && ./gradlew -PWBEAM_MIN_SDK="$min_sdk" -PWBEAM_HOST="$build_stream_host" -PWBEAM_API_HOST="$build_api_host" -PWBEAM_STREAM_HOST="$build_stream_host" :app:assembleDebug
   echo "[android] APK: $ANDROID_APK"
 }
 
 android_install() {
-  require_cmd adb
   if [[ ! -f "$ANDROID_APK" ]]; then
     echo "APK not found: $ANDROID_APK" >&2
     echo "Run './wbeam android build' first." >&2
     exit 1
   fi
-  adb wait-for-device
-  echo "[android] Installing $ANDROID_APK…"
-  adb install -r "$ANDROID_APK"
+  adb start-server >/dev/null
+  adb_device_cmd wait-for-device
+  echo "[android] Installing $ANDROID_APK (${ANDROID_SERIAL:-default})…"
+  adb_device_cmd install -r "$ANDROID_APK"
 }
 
 android_launch() {
-  require_cmd adb
-  adb wait-for-device
-  echo "[android] Launching ${ANDROID_PACKAGE}/${ANDROID_ACTIVITY}…"
-  adb shell am start -n "${ANDROID_PACKAGE}/${ANDROID_ACTIVITY}"
+  adb start-server >/dev/null
+  adb_device_cmd wait-for-device
+  echo "[android] Launching ${ANDROID_PACKAGE}/${ANDROID_ACTIVITY} ($(android_target_desc))…"
+  adb_device_cmd shell am start -n "${ANDROID_PACKAGE}/${ANDROID_ACTIVITY}"
 }
 
 android_deploy() {
-  android_build
+  local pipeline_mode build_hosts build_api_host build_stream_host
+  pipeline_mode="$(android_pipeline_mode)"
+  build_hosts="$(android_resolve_deploy_hosts "$pipeline_mode")"
+  build_api_host="${build_hosts%%|*}"
+  build_stream_host="${build_hosts##*|}"
+  echo "[android] Deploy hosts: api=$build_api_host stream=$build_stream_host"
+  WBEAM_ANDROID_API_HOST="$build_api_host" WBEAM_ANDROID_STREAM_HOST="$build_stream_host" android_build
   android_install
   android_launch
 }
 
 android_build_release() {
-  echo "[android] Building release APK…"
-  cd "$ANDROID_DIR" && ./gradlew :app:assembleRelease
+  local pipeline_mode min_sdk build_api_host build_stream_host
+  pipeline_mode="$(android_pipeline_mode)"
+  min_sdk="$(android_pipeline_min_sdk "$pipeline_mode")"
+  build_api_host="${WBEAM_ANDROID_API_HOST:-${WBEAM_ANDROID_HOST:-$(android_build_host "$pipeline_mode")}}"
+  build_stream_host="${WBEAM_ANDROID_STREAM_HOST:-${WBEAM_ANDROID_HOST:-$(android_build_host "$pipeline_mode")}}"
+
+  echo "[android] Building release APK (pipeline=${pipeline_mode}, minSdk=${min_sdk}, api_host=${build_api_host}, stream_host=${build_stream_host})…"
+  cd "$ANDROID_DIR" && ./gradlew -PWBEAM_MIN_SDK="$min_sdk" -PWBEAM_HOST="$build_stream_host" -PWBEAM_API_HOST="$build_api_host" -PWBEAM_STREAM_HOST="$build_stream_host" :app:assembleRelease
   if [[ -f "$ANDROID_APK_RELEASE" ]]; then
     echo "[android] APK: $ANDROID_APK_RELEASE"
   elif [[ -f "$ANDROID_APK_RELEASE_UNSIGNED" ]]; then
@@ -261,7 +431,6 @@ android_build_release() {
 }
 
 android_install_release() {
-  require_cmd adb
   local release_apk=""
   if [[ -f "$ANDROID_APK_RELEASE" ]]; then
     release_apk="$ANDROID_APK_RELEASE"
@@ -281,13 +450,20 @@ android_install_release() {
     exit 1
   fi
 
-  adb wait-for-device
-  echo "[android] Installing $release_apk…"
-  adb install -r "$release_apk"
+  adb start-server >/dev/null
+  adb_device_cmd wait-for-device
+  echo "[android] Installing $release_apk ($(android_target_desc))…"
+  adb_device_cmd install -r "$release_apk"
 }
 
 android_deploy_release() {
-  android_build_release
+  local pipeline_mode build_hosts build_api_host build_stream_host
+  pipeline_mode="$(android_pipeline_mode)"
+  build_hosts="$(android_resolve_deploy_hosts "$pipeline_mode")"
+  build_api_host="${build_hosts%%|*}"
+  build_stream_host="${build_hosts##*|}"
+  echo "[android] Release deploy hosts: api=$build_api_host stream=$build_stream_host"
+  WBEAM_ANDROID_API_HOST="$build_api_host" WBEAM_ANDROID_STREAM_HOST="$build_stream_host" android_build_release
   android_install_release
   android_launch
 }

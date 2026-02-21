@@ -4,13 +4,47 @@ set -euo pipefail
 CONTROL_PORT="${1:-5001}"
 STREAM_PORT="${2:-5000}"
 DAEMON_IMPL="${WBEAM_DAEMON_IMPL:-auto}" # auto|rust|python
+ANDROID_SERIAL="${WBEAM_ANDROID_SERIAL:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
+adb_device_cmd() {
+  if [[ -n "$ANDROID_SERIAL" ]]; then
+    adb -s "$ANDROID_SERIAL" "$@"
+  else
+    adb "$@"
+  fi
+}
+
+adb_best_effort_reverse() {
+  local port="$1"
+  local attempts=4
+  local i
+
+  adb start-server >/dev/null 2>&1 || true
+  for (( i=1; i<=attempts; i++ )); do
+    if adb_device_cmd reverse "tcp:${port}" "tcp:${port}" >/dev/null 2>&1; then
+      return 0
+    fi
+    if (( i < attempts )); then
+      sleep 0.3
+      adb kill-server >/dev/null 2>&1 || true
+      adb start-server >/dev/null 2>&1 || true
+    fi
+  done
+  return 1
+}
+
 # Control plane + media plane over USB tunnel.
-"$SCRIPT_DIR/usb_reverse.sh" "$STREAM_PORT"
-adb reverse "tcp:${CONTROL_PORT}" "tcp:${CONTROL_PORT}"
+if ! "$SCRIPT_DIR/usb_reverse.sh" "$STREAM_PORT"; then
+  echo "[wbeam] warning: stream adb reverse setup failed (continuing)" >&2
+  echo "[wbeam] info: this is expected on some old Android/adbd versions; daemon startup is not blocked" >&2
+fi
+if ! adb_best_effort_reverse "$CONTROL_PORT"; then
+  echo "[wbeam] warning: control adb reverse setup failed (continuing)" >&2
+  echo "[wbeam] info: if reverse stays unavailable, use LAN host/IP fallback for API/stream" >&2
+fi
 
 run_rust() {
   local args=(

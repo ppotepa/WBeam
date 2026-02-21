@@ -4,9 +4,18 @@ set -euo pipefail
 CONTROL_PORT="${1:-5001}"
 STREAM_PORT="${2:-5000}"
 LOCK_FILE="${WBEAM_LOCK_FILE:-/tmp/wbeamd.lock}"
+ANDROID_SERIAL="${WBEAM_ANDROID_SERIAL:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+adb_device_cmd() {
+  if [[ -n "$ANDROID_SERIAL" ]]; then
+    adb -s "$ANDROID_SERIAL" "$@"
+  else
+    adb "$@"
+  fi
+}
 
 LOG_DIR="${WBEAM_DEBUG_LOG_DIR:-$ROOT_DIR/host/rust/logs}"
 mkdir -p "$LOG_DIR"
@@ -103,7 +112,9 @@ tail -n 0 -F "$RUST_TRACE_FILE" 2>/dev/null \
 RUST_TAIL_PID=$!
 
 if command -v adb >/dev/null 2>&1; then
-  adb logcat -v time -s WBeamMain:D WBeamService:I WBeamUsbAttach:I AndroidRuntime:E MediaCodec:E CCodec:E '*:S' \
+  adb start-server >/dev/null 2>&1 || true
+  adb_device_cmd wait-for-device >/dev/null 2>&1 || true
+  adb_device_cmd logcat -v time -s WBeamMain:D WBeamService:I WBeamUsbAttach:I AndroidRuntime:E MediaCodec:E CCodec:E '*:S' 2>/dev/null \
     | grep -i --line-buffered -E "huddbg|\[decode/(framed|legacy)\]|black-screen watchdog|rendering live desktop|stream worker reconnect|receiving h264 bytes|connected to stream|offline|ioexception|io error|stream error|failed|socketexception|connectexception|fatal exception|connected to host|daemon poll failed|androidruntime" \
     | sed -u 's/^/[android] /' \
     | tee -a "$LOG_FILE" \

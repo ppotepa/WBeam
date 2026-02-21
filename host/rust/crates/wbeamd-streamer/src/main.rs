@@ -15,7 +15,7 @@ use gst::prelude::*;
 use cli::{Args, resolve_profile};
 use capture::request_portal_stream;
 use pipeline::make_pipeline;
-use transport::{spawn_sender, HELLO_CODEC_HEVC, HELLO_CODEC_PNG};
+use transport::{hello_mode_bits, spawn_sender, HELLO_CODEC_HEVC, HELLO_CODEC_PNG};
 use encoder::{is_hevc, is_png};
 
 #[tokio::main(flavor = "current_thread")]
@@ -25,8 +25,8 @@ async fn main() -> Result<()> {
 
     let cfg = resolve_profile(&args)?;
     println!(
-        "[wbeam] profile={} size={}x{} fps={} bitrate={}kbps encoder={} cursor={}",
-        args.profile, cfg.width, cfg.height, cfg.fps, cfg.bitrate_kbps, cfg.encoder, args.cursor_mode
+        "[wbeam] profile={} mode={:?} size={}x{} fps={} bitrate={}kbps encoder={} cursor={} skip_videoscale={}",
+        args.profile, cfg.stream_mode, cfg.width, cfg.height, cfg.fps, cfg.bitrate_kbps, cfg.encoder, args.cursor_mode, cfg.skip_videoscale
     );
     println!("[wbeam] Requesting ScreenCast portal session (KDE prompt expected)...");
 
@@ -39,18 +39,20 @@ async fn main() -> Result<()> {
     let bus = pipeline.bus().context("pipeline bus")?;
 
     let stop_flag = Arc::new(AtomicBool::new(false));
-    let codec_flags = if is_png(&cfg.encoder) {
+    let codec_bits = if is_png(&cfg.encoder) {
         HELLO_CODEC_PNG
     } else if is_hevc(&cfg.encoder) {
         HELLO_CODEC_HEVC
     } else {
         0x00
     };
+    let codec_flags = codec_bits | hello_mode_bits(cfg.stream_mode);
 
     let sender_handle = spawn_sender(
         appsink,
         args.port,
         cfg.fps,
+        cfg.stream_mode,
         stop_flag.clone(),
         fps_counter,
         codec_flags,
@@ -93,7 +95,7 @@ async fn main() -> Result<()> {
     pipeline.set_state(gst::State::Playing)?;
     main_loop.run();
 
-    stop_flag.store(true, Ordering::SeqCst);
+    stop_flag.store(true, Ordering::Release);
     let _ = sender_handle.join();
     pipeline.set_state(gst::State::Null)?;
 
