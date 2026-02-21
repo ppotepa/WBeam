@@ -1,0 +1,18 @@
+[package]
+name        = "wbtp-host"
+version.workspace   = true
+edition.workspace   = true
+license.workspace   = true
+description = "WBTP/1 host-side integration helper – wraps wbtp-sender with a thread-safe push API and live stats"
+
+[dependencies]
+wbtp-core   = { workspace = true }
+wbtp-sender = { path = "../wbtp-sender" }
+
+bytes       = { workspace = true }
+tokio       = { workspace = true }
+tracing     = { workspace = true }
+
+[dev-dependencies]
+tokio       = { workspace = true, features = ["test-util"] }
+tracing-subscriber = { workspace = true }

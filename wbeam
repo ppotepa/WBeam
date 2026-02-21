@@ -11,25 +11,38 @@ SERVICE_NAME="wbeam-daemon"
 SERVICE_FILE="$HOME/.config/systemd/user/${SERVICE_NAME}.service"
 DAEMON_BIN="$ROOT_DIR/host/rust/target/release/wbeamd-server"
 
+ANDROID_DIR="$ROOT_DIR/android"
+ANDROID_PACKAGE="com.wbeam"
+ANDROID_ACTIVITY=".MainActivity"
+ANDROID_APK="$ANDROID_DIR/app/build/outputs/apk/debug/app-debug.apk"
+
+
+
 print_help() {
   cat <<'EOF'
 WBeam command runner
 
 Usage:
-  ./wbeam <group> <command> [args]
+  ./wbeam <group> <command>
+  ./wbgui                        # interactive TUI menu (arrow keys)
 
 Groups:
   service   up | down | restart | status | remove | logs
   ip        up | down | status
-  daemon    up | down | status
-  debug     up | watch
+  host      run | debug | status | down
+  daemon    up | down | status   (alias for host)
+  android   build | install | launch | deploy
+  debug     up | watch           (alias for host debug)
   logs      live | daemon | host
 
 Examples:
-  ./wbeam service up
-  ./wbeam service down
-  ./wbeam service remove
-  ./wbeam ip down
+  ./wbgui
+  ./wbeam host run               # release binary, foreground
+  ./wbeam host debug             # debug build + coloured logs + ADB sidecar
+  ./wbeam android deploy         # build + install + launch in one step
+  ./wbeam android build          # ./gradlew assembleDebug only
+  ./wbeam android install       # adb install only (uses existing APK)
+  ./wbeam android launch        # adb shell am start only
   ./wbeam debug up
   ./wbeam logs live
 EOF
@@ -162,15 +175,35 @@ ip_status() {
   adb reverse --list || true
 }
 
-daemon_up() {
-  exec "$HOST_SCRIPTS_DIR/run_wbeamd.sh" "$CONTROL_PORT" "$STREAM_PORT"
-}
-
-daemon_down() {
+# Run the release binary in the foreground (no systemd, clean output)
+host_run() {
+  ensure_daemon_binary
   stop_local_processes
-  echo "Daemon processes stopped."
+  if command -v adb >/dev/null 2>&1; then
+    adb start-server >/dev/null 2>&1 || true
+    adb reverse "tcp:${STREAM_PORT}"   "tcp:${STREAM_PORT}"   2>/dev/null || true
+    adb reverse "tcp:${CONTROL_PORT}" "tcp:${CONTROL_PORT}" 2>/dev/null || true
+  fi
+  echo "[wbeam] host run — release binary, foreground"
+  echo "[wbeam] control=127.0.0.1:${CONTROL_PORT}  stream=127.0.0.1:${STREAM_PORT}"
+  echo "[wbeam] Ctrl-C to stop"
+  echo ""
+  export RUST_LOG="${RUST_LOG:-info}"
+  export WBEAM_USE_RUST_STREAMER=1
+  exec "$DAEMON_BIN" \
+    --control-port "$CONTROL_PORT" \
+    --stream-port  "$STREAM_PORT" \
+    --root         "$ROOT_DIR"
 }
 
+# Debug run: full RUST_LOG=debug, coloured output, ADB logcat sidecar
+host_debug() {
+  exec "$HOST_SCRIPTS_DIR/run_wbeamd_debug.sh" "$CONTROL_PORT" "$STREAM_PORT"
+}
+
+# Backwards-compat aliases
+daemon_up()   { host_run; }
+daemon_down() { stop_local_processes; echo "Daemon processes stopped."; }
 daemon_status() {
   if curl -sSf "http://127.0.0.1:${CONTROL_PORT}/status" >/dev/null 2>&1; then
     curl -sS "http://127.0.0.1:${CONTROL_PORT}/status"
@@ -179,6 +212,37 @@ daemon_status() {
     echo "Control API not reachable on 127.0.0.1:${CONTROL_PORT}"
     exit 1
   fi
+}
+
+android_build() {
+  echo "[android] Building debug APK…"
+  cd "$ANDROID_DIR" && ./gradlew :app:assembleDebug
+  echo "[android] APK: $ANDROID_APK"
+}
+
+android_install() {
+  require_cmd adb
+  if [[ ! -f "$ANDROID_APK" ]]; then
+    echo "APK not found: $ANDROID_APK" >&2
+    echo "Run './wbeam android build' first." >&2
+    exit 1
+  fi
+  adb wait-for-device
+  echo "[android] Installing $ANDROID_APK…"
+  adb install -r "$ANDROID_APK"
+}
+
+android_launch() {
+  require_cmd adb
+  adb wait-for-device
+  echo "[android] Launching ${ANDROID_PACKAGE}/${ANDROID_ACTIVITY}…"
+  adb shell am start -n "${ANDROID_PACKAGE}/${ANDROID_ACTIVITY}"
+}
+
+android_deploy() {
+  android_build
+  android_install
+  android_launch
 }
 
 debug_up() {
@@ -218,44 +282,63 @@ fi
 case "$group" in
   service)
     case "$cmd" in
-      up|start) service_up ;;
-      down|stop) service_down ;;
-      restart) service_restart ;;
-      status) service_status ;;
-      remove|rm) service_remove ;;
-      logs) service_logs ;;
-      *) print_help; exit 1 ;;
+      up|start)       service_up ;;
+      down|stop)      service_down ;;
+      restart)        service_restart ;;
+      status)         service_status ;;
+      remove|rm)      service_remove ;;
+      logs)           service_logs ;;
+      *)              print_help; exit 1 ;;
     esac
     ;;
   ip)
     case "$cmd" in
-      up) ip_up ;;
-      down) ip_down ;;
-      status) ip_status ;;
-      *) print_help; exit 1 ;;
+      up)             ip_up ;;
+      down)           ip_down ;;
+      status)         ip_status ;;
+      *)              print_help; exit 1 ;;
+    esac
+    ;;
+  host)
+    case "$cmd" in
+      run|start|up)   host_run ;;
+      debug)          host_debug ;;
+      status)         daemon_status ;;
+      down|stop)      daemon_down ;;
+      *)              print_help; exit 1 ;;
     esac
     ;;
   daemon)
     case "$cmd" in
-      up|start) daemon_up ;;
-      down|stop) daemon_down ;;
-      status) daemon_status ;;
-      *) print_help; exit 1 ;;
+      up|start|run)   daemon_up ;;
+      down|stop)      daemon_down ;;
+      status)         daemon_status ;;
+      debug)          host_debug ;;
+      *)              print_help; exit 1 ;;
+    esac
+    ;;
+  android)
+    case "$cmd" in
+      build)          android_build ;;
+      install)        android_install ;;
+      launch)         android_launch ;;
+      deploy|run)     android_deploy ;;
+      *)              print_help; exit 1 ;;
     esac
     ;;
   debug)
     case "$cmd" in
-      up|start) debug_up ;;
-      watch|logs) debug_watch ;;
-      *) print_help; exit 1 ;;
+      up|start)       debug_up ;;
+      watch|logs)     debug_watch ;;
+      *)              print_help; exit 1 ;;
     esac
     ;;
   logs)
     case "$cmd" in
-      live) logs_live ;;
-      daemon) logs_daemon ;;
-      host) logs_host ;;
-      *) print_help; exit 1 ;;
+      live)           logs_live ;;
+      daemon)         logs_daemon ;;
+      host)           logs_host ;;
+      *)              print_help; exit 1 ;;
     esac
     ;;
   help|-h|--help)

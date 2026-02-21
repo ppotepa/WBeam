@@ -430,6 +430,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "crc32fast"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9481c1c90cbf2ac953f07c8d4a58aa3945c425b7185c9154d67a65e4230da511"
+dependencies = [
+ "cfg-if",
+]
+
+[[package]]
 name = "crossbeam-channel"
 version = "0.5.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2452,6 +2461,7 @@ dependencies = [
  "anyhow",
  "ashpd",
  "byteorder",
+ "bytes",
  "clap",
  "gstreamer",
  "gstreamer-app",
@@ -2459,6 +2469,16 @@ dependencies = [
  "rand",
  "tokio",
  "tracing",
+ "wbtp-core",
+]
+
+[[package]]
+name = "wbtp-core"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "crc32fast",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

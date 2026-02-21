@@ -259,7 +259,7 @@ def set_if_supported(element, prop_name, value):
         element.set_property(prop_name, value)
 
 
-def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=None):
+def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=None, target_fps=60):
     """WBTP/1 framed sender: accept one TCP client; send WBTP/1-framed H264 access units.
 
     Header (big-endian, 22 bytes):
@@ -277,8 +277,9 @@ def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=Non
     # Track last keyframe so we can duplicate it if capture starves (portal emits only on damage).
     last_keyframe = None
     last_keyframe_len = 0
-    # 20 ms pull timeout (~50 fps ceiling) keeps cadence tighter than the prior 33 ms.
-    pull_timeout_ns = 20_000_000
+    # Pull timeout tracks target FPS (e.g. ~16.7 ms @ 60 fps), avoiding a hard 20 ms ceiling.
+    fps = max(1, int(target_fps))
+    pull_timeout_ns = max(2_000_000, min(20_000_000, int(1_000_000_000 / fps)))
 
     while not stop_event.is_set():
         try:
@@ -632,7 +633,7 @@ def parse_args():
     parser.add_argument("--fps", type=int, default=None)
     parser.add_argument("--bitrate-kbps", type=int, default=None)
     parser.add_argument("--encoder", choices=["auto", "nvenc", "openh264"], default="auto")
-    parser.add_argument("--cursor-mode", choices=["hidden", "embedded", "metadata"], default="hidden")
+    parser.add_argument("--cursor-mode", choices=["hidden", "embedded", "metadata"], default="embedded")
     parser.add_argument("--debug-dir", default="/tmp/wbeam-frames")
     parser.add_argument("--debug-fps", type=int, default=0)
     parser.add_argument("--framed", action="store_true", default=False,
@@ -725,7 +726,7 @@ def main():
         appsink = pipeline.get_by_name("sink")
         t = threading.Thread(
             target=framed_tcp_server_thread,
-            args=(appsink, args.port, stop_event, pipeline_fps_counter),
+            args=(appsink, args.port, stop_event, pipeline_fps_counter, args.fps),
             daemon=True,
             name="wbeam-framed-sender",
         )

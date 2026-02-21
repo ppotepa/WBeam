@@ -1,0 +1,224 @@
+package com.wbeam.api;
+
+import android.os.Handler;
+import android.os.SystemClock;
+import android.util.Log;
+
+import org.json.JSONObject;
+
+import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+
+/**
+ * Polls the WBeam daemon's /status, /health, and /metrics endpoints every STATUS_POLL_MS.
+ * Holds all daemon state fields so MainActivity can query them without coupling to the poll logic.
+ */
+public final class StatusPoller {
+
+    private static final String TAG = "WBeamStatusPoller";
+
+    private static final long STATUS_POLL_MS           = 3_000L;
+    private static final int  HEALTH_POLL_EVERY        = 3;
+    private static final long AUTO_START_COOLDOWN_MS   = 4_000L;
+
+    // ── Daemon state (queried by MainActivity via getters) ────────────────────
+    private boolean daemonReachable    = false;
+    private String  daemonHostName     = "-";
+    private String  daemonState        = "IDLE";
+    private String  daemonLastError    = "";
+    private long    daemonRunId        = 0L;
+    private long    daemonUptimeSec    = 0L;
+    private String  daemonService      = "-";
+    private String  daemonStateSnapshot = "";
+
+    // ── Poll bookkeeping ──────────────────────────────────────────────────────
+    private volatile boolean statusPollInFlight = false;
+    private long    statusPollTick   = 0L;
+
+    // ── Auto-start state (shared with StreamSessionController via getters/setters) ──
+    private long    suppressAutoStartUntil = 0L;
+    private boolean autoStartPending       = false;
+    private long    lastAutoStartAt        = 0L;
+
+    // ── Infrastructure ────────────────────────────────────────────────────────
+    private final Handler         uiHandler;
+    private final ExecutorService ioExecutor;
+    private final Callbacks       callbacks;
+
+    private final Runnable pollTask = new Runnable() {
+        @Override
+        public void run() {
+            pollAsync();
+            uiHandler.postDelayed(this, STATUS_POLL_MS);
+        }
+    };
+
+    // ── Callback interface ────────────────────────────────────────────────────
+
+    public interface Callbacks {
+        /** Called on UI thread after a successful poll. */
+        void onDaemonStatusUpdate(
+                boolean reachable,
+                boolean wasReachable,
+                String  hostName,
+                String  daemonState,
+                long    runId,
+                String  lastError,
+                boolean errorChanged,
+                long    uptimeSec,
+                String  service,
+                JSONObject metrics
+        );
+
+        /** Called on UI thread when the daemon is unreachable. */
+        void onDaemonOffline(boolean wasReachableBeforeThisPoll, Exception e);
+
+        /** Called on UI thread when auto-start should be triggered. */
+        void onAutoStartRequired();
+
+        /** Called on UI thread when auto-start should be suppressed (failed capture). */
+        void onAutoStartFailed();
+
+        /** Called on UI thread to start the decoder (STREAMING state confirmed). */
+        void ensureDecoderRunning();
+    }
+
+    // ── Constructor ───────────────────────────────────────────────────────────
+
+    public StatusPoller(Handler uiHandler, ExecutorService ioExecutor, Callbacks callbacks) {
+        this.uiHandler  = uiHandler;
+        this.ioExecutor = ioExecutor;
+        this.callbacks  = callbacks;
+    }
+
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
+
+    public void start() {
+        uiHandler.removeCallbacks(pollTask);
+        uiHandler.post(pollTask);
+    }
+
+    public void stop() {
+        uiHandler.removeCallbacks(pollTask);
+    }
+
+    // ── Auto-start helpers (called by StreamSessionController) ────────────────
+
+    public void suppressAutoStart(long durationMs) {
+        suppressAutoStartUntil = SystemClock.elapsedRealtime() + durationMs;
+    }
+
+    public void clearAutoStartSuppression() {
+        suppressAutoStartUntil = 0L;
+    }
+
+    public void permanentlySuppressAutoStart() {
+        suppressAutoStartUntil = Long.MAX_VALUE / 2;
+    }
+
+    public void setAutoStartPending(boolean pending) {
+        autoStartPending = pending;
+    }
+
+    public void recordAutoStartAttempt() {
+        lastAutoStartAt = SystemClock.elapsedRealtime();
+    }
+
+    // ── Daemon state getters (query from UI thread) ────────────────────────────
+
+    public boolean isDaemonReachable()  { return daemonReachable; }
+    public String  getDaemonHostName()  { return daemonHostName; }
+    public String  getDaemonState()     { return daemonState; }
+    public String  getDaemonLastError() { return daemonLastError; }
+    public long    getDaemonRunId()     { return daemonRunId; }
+    public long    getDaemonUptimeSec() { return daemonUptimeSec; }
+    public String  getDaemonService()   { return daemonService; }
+
+    // ── Poll logic ────────────────────────────────────────────────────────────
+
+    private void pollAsync() {
+        if (statusPollInFlight) {
+            return;
+        }
+        statusPollInFlight = true;
+        long pollTick = ++statusPollTick;
+        boolean fetchHealth = (pollTick % HEALTH_POLL_EVERY) == 1;
+
+        ioExecutor.execute(() -> {
+            try {
+                JSONObject status = HostApiClient.apiRequestWithRetry(
+                        "GET", "/status", null, HostApiClient.API_RETRY_ATTEMPTS);
+                JSONObject health = fetchHealth
+                        ? HostApiClient.apiRequestWithRetry(
+                                "GET", "/health", null, HostApiClient.API_RETRY_ATTEMPTS)
+                        : null;
+                JSONObject metricsPayload = HostApiClient.apiRequestWithRetry(
+                        "GET", "/metrics", null, HostApiClient.API_RETRY_ATTEMPTS);
+                JSONObject metrics = metricsPayload.optJSONObject("metrics");
+                uiHandler.post(() -> processStatusResult(status, health, metrics));
+            } catch (Exception e) {
+                uiHandler.post(() -> processOfflineResult(e));
+            } finally {
+                statusPollInFlight = false;
+            }
+        });
+    }
+
+    private void processStatusResult(JSONObject status, JSONObject health, JSONObject metrics) {
+        boolean wasReachable = daemonReachable;
+        daemonReachable  = true;
+
+        daemonHostName   = status.optString("host_name", daemonHostName);
+        daemonState      = status.optString("state", "IDLE").toUpperCase(Locale.US);
+        String newLastError = status.optString("last_error", "");
+        boolean errorChanged = !newLastError.equals(daemonLastError);
+        daemonLastError  = newLastError;
+        daemonRunId      = status.optLong("run_id", daemonRunId);
+        daemonUptimeSec  = status.optLong("uptime", daemonUptimeSec);
+        daemonService    = health != null ? health.optString("service", daemonService) : daemonService;
+
+        String newSnapshot = daemonState + "|" + daemonRunId + "|" + daemonLastError;
+        if (!newSnapshot.equals(daemonStateSnapshot)) {
+            daemonStateSnapshot = newSnapshot;
+            Log.i(TAG, "daemon state=" + daemonState + " run_id=" + daemonRunId
+                    + (daemonLastError.isEmpty() ? "" : " last_error=" + daemonLastError));
+        }
+
+        callbacks.onDaemonStatusUpdate(
+                true, wasReachable,
+                daemonHostName, daemonState, daemonRunId, daemonLastError, errorChanged,
+                daemonUptimeSec, daemonService, metrics
+        );
+
+        if ("STREAMING".equals(daemonState)) {
+            autoStartPending = false;
+            callbacks.ensureDecoderRunning();
+            return;
+        }
+
+        long now = SystemClock.elapsedRealtime();
+        if (autoStartPending && "IDLE".equals(daemonState)) {
+            autoStartPending = false;
+            permanentlySuppressAutoStart();
+            callbacks.onAutoStartFailed();
+            return;
+        }
+        if (now < suppressAutoStartUntil) {
+            return;
+        }
+        if (now - lastAutoStartAt < AUTO_START_COOLDOWN_MS) {
+            return;
+        }
+        if ("IDLE".equals(daemonState)) {
+            callbacks.onAutoStartRequired();
+        }
+    }
+
+    private void processOfflineResult(Exception e) {
+        boolean wasReachable = daemonReachable;
+        daemonReachable = false;
+        daemonState     = "DISCONNECTED";
+        Log.e(TAG, "daemon poll failed", e);
+        callbacks.onDaemonOffline(wasReachable, e);
+    }
+}
