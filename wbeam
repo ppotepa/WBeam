@@ -33,7 +33,7 @@ Usage:
 Groups:
   service   up | down | restart | status | remove | logs
   ip        up | down | status
-  host      run | debug | status | down
+  host      build | run | debug | status | down
   daemon    up | down | status   (alias for host)
   android   build | install | launch | deploy | build-release | install-release | deploy-release
   debug     up | watch           (alias for host debug)
@@ -41,6 +41,7 @@ Groups:
 
 Examples:
   ./wbgui
+  ./wbeam host build             # cargo build --release wbeamd-server + wbeamd-streamer
   ./wbeam host run               # release binary, foreground
   ./wbeam host debug             # debug build + coloured logs + ADB sidecar
   ./wbeam android deploy         # build + install + launch in one step
@@ -87,7 +88,46 @@ android_pipeline_min_sdk() {
   esac
 }
 
+detect_tether_ip() {
+  # Android USB tethering always uses 192.168.42.0/24 or 192.168.43.0/24
+  # (AOSP hardcoded).  Three ways to find the host's tether-side IP:
+  #
+  # Priority 1 — ask the connected device for its default gateway.
+  #   That IP is the host's tether address.  Cross-check that the host
+  #   actually has that IP (avoids false-positive when device is on LAN Wi-Fi).
+  local gw all_host_ips
+  all_host_ips="$(ip -4 addr show 2>/dev/null | awk '/inet /{gsub(/\/.*/, "", $2); print $2}')"
+  if command -v adb >/dev/null 2>&1; then
+    gw="$(adb_device_cmd shell ip route 2>/dev/null \
+          | awk '/^default/{for(i=1;i<=NF;i++){if($i=="via"){print $(i+1); exit}}}' \
+          | tr -d '\r' || true)"
+    if [[ -n "$gw" ]] && grep -qxF "$gw" <<< "$all_host_ips" 2>/dev/null; then
+      # gateway IS one of our interfaces and is not loopback — confirmed tether
+      if [[ "$gw" != "127."* ]]; then
+        echo "$gw"; return 0
+      fi
+    fi
+  fi
+  # Priority 2 — look for a host interface in the AOSP tether subnets.
+  local ip
+  ip="$(ip -4 addr show 2>/dev/null \
+        | awk '/inet 192\.168\.4[23]\./{gsub(/\/.*/, "", $2); print $2; exit}')"
+  if [[ -n "$ip" ]]; then echo "$ip"; return 0; fi
+  # Priority 3 — USB gadget interface names: usb*, rndis*, enx*
+  ip="$(ip -4 addr show 2>/dev/null \
+        | awk '/^[0-9]+: (usb|rndis|enx)/{iface=1} iface && /inet /{gsub(/\/.*/, "", $2); print $2; iface=0; exit}')"
+  if [[ -n "$ip" ]]; then echo "$ip"; return 0; fi
+  return 1
+}
+
 detect_host_ip() {
+  # For tethered Android (legacy path) we prefer the tether interface IP.
+  local tether_ip
+  tether_ip="$(detect_tether_ip 2>/dev/null || true)"
+  if [[ -n "$tether_ip" ]]; then
+    echo "$tether_ip"; return 0
+  fi
+  # Fallback: IP of the interface used to reach the internet (LAN).
   local ip_candidate=""
   ip_candidate="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++){if($i=="src"){print $(i+1); exit}}}')"
   if [[ -n "$ip_candidate" ]]; then
@@ -121,12 +161,70 @@ android_build_host() {
   echo "127.0.0.1"
 }
 
+android_expected_version_name() {
+  local explicit="${WBEAM_BUILD_REV:-}"
+  if [[ -n "$explicit" ]]; then
+    if [[ "$explicit" == 0.0.* ]]; then
+      echo "$explicit"
+    else
+      echo "0.0.${explicit}-build"
+    fi
+    return 0
+  fi
+
+  local rev
+  rev="$(git -C "$ROOT_DIR" rev-parse --short=4 HEAD 2>/dev/null || true)"
+  if [[ -z "$rev" ]]; then
+    rev="dev0"
+  fi
+  echo "0.0.${rev}-build"
+}
+
+android_installed_version_name() {
+  adb_device_cmd shell dumpsys package "$ANDROID_PACKAGE" 2>/dev/null \
+    | sed -n 's/^[[:space:]]*versionName=//p' \
+    | head -n 1 \
+    | tr -d '\r' \
+    || true
+}
+
+android_should_skip_install() {
+  local force_install="${WBEAM_ANDROID_FORCE_INSTALL:-0}"
+  if [[ "$force_install" =~ ^(1|true|TRUE|yes|on)$ ]]; then
+    return 1
+  fi
+
+  local expected installed
+  expected="$(android_expected_version_name)"
+  installed="$(android_installed_version_name)"
+  if [[ -z "$installed" || "$installed" != "$expected" ]]; then
+    return 1  # version mismatch — must install
+  fi
+
+  # Also force reinstall when the baked-in host/pipeline changed since last
+  # install (covers: same git SHA but different host IP or pipeline variant).
+  local build_stamp="${ANDROID_APK}.wbeam-config"
+  local install_stamp="${ANDROID_APK}.wbeam-installed"
+  if [[ -f "$build_stamp" && -f "$install_stamp" ]]; then
+    if ! diff -q "$build_stamp" "$install_stamp" >/dev/null 2>&1; then
+      return 1  # config changed since last install
+    fi
+  elif [[ -f "$build_stamp" && ! -f "$install_stamp" ]]; then
+    return 1  # never recorded as installed with this config
+  fi
+
+  return 0  # version + config match — safe to skip
+}
+
 android_device_has_ipv4() {
   local ips line ip
-  ips="$(adb_device_cmd shell "ip addr 2>/dev/null | grep 'inet ' | sed -E 's/.*inet ([0-9.]+).*/\\1/'" 2>/dev/null | tr -d '\r')"
+  # Try modern 'ip addr' first; fall back to 'ifconfig' and 'netcfg' for API<21
+  # Android (busybox) where 'ip' is absent or the GNU sed pattern fails.
+  ips="$(adb_device_cmd shell 'ip -f inet addr show 2>/dev/null | grep inet || ifconfig 2>/dev/null | grep -Eo "addr:[0-9.]+" | sed s/addr:// || netcfg 2>/dev/null | awk "{print \$3}" | grep -v "^0\.0\.0\.0"' 2>/dev/null | tr -d '\r')"
   while IFS= read -r line; do
     ip="${line%%/*}"
-    if [[ -n "$ip" && "$ip" != "127.0.0.1" ]]; then
+    ip="${ip##addr:}"
+    if [[ -n "$ip" && "$ip" != "127.0.0.1" && "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
       return 0
     fi
   done <<< "$ips"
@@ -157,11 +255,6 @@ android_resolve_deploy_hosts() {
     return 0
   fi
 
-  if [[ "$pipeline_mode" != "legacy" ]]; then
-    android_echo_hosts "127.0.0.1" "127.0.0.1"
-    return 0
-  fi
-
   require_cmd adb
   adb start-server >/dev/null
   adb_device_cmd wait-for-device
@@ -171,21 +264,38 @@ android_resolve_deploy_hosts() {
     return 0
   fi
 
+  if [[ "$pipeline_mode" != "legacy" ]]; then
+    # Modern pipeline: adb reverse failed — fall back to LAN IP so the app can
+    # still reach the host when connected on Wi-Fi.
+    local host_ip_mod
+    host_ip_mod="$(detect_host_ip || true)"
+    if [[ -n "$host_ip_mod" ]]; then
+      echo "[android] WARN: adb reverse failed; using LAN IP ${host_ip_mod} for modern pipeline" >&2
+      android_echo_hosts "$host_ip_mod" "$host_ip_mod"
+      return 0
+    fi
+    echo "[android] WARN: adb reverse failed and no LAN IP detected; falling back to 127.0.0.1" >&2
+    android_echo_hosts "127.0.0.1" "127.0.0.1"
+    return 0
+  fi
+
   local host_ip
   host_ip="$(detect_host_ip || true)"
 
-  if android_device_has_ipv4 && [[ -n "$host_ip" ]]; then
-    if [[ "$api_only_fallback" =~ ^(1|true|TRUE|yes|on)$ ]]; then
-      android_echo_hosts "$host_ip" "127.0.0.1"
-    else
-      android_echo_hosts "$host_ip" "$host_ip"
-    fi
+  # For the legacy pipeline, adb reverse is never available (API<21), so
+  # 127.0.0.1 is NEVER useful — bake the host's LAN/tether IP instead.
+  # Try host IP unconditionally; the device-side IP check is irrelevant here
+  # because it's the *host* address we're embedding in the APK.
+  if [[ -n "$host_ip" ]]; then
+    # api_only_fallback is only meaningful for modern (where stream may use
+    # adb reverse): for legacy both endpoints must use the direct IP.
+    android_echo_hosts "$host_ip" "$host_ip"
     return 0
   fi
 
   if [[ "$allow_no_transport" =~ ^(1|true|TRUE|yes|on)$ ]]; then
-    echo "[android] WARN: no active reverse/LAN path detected; forcing loopback host 127.0.0.1 for deploy." >&2
-    echo "[android] WARN: app may stay offline until adb reverse starts working on this device." >&2
+    echo "[android] WARN: legacy pipeline — no host IP detected; app will be unreachable." >&2
+    echo "[android] Hint: set WBEAM_ANDROID_HOST=<host-ip> explicitly (e.g. 192.168.100.201)." >&2
     android_echo_hosts "127.0.0.1" "127.0.0.1"
     return 0
   fi
@@ -211,6 +321,14 @@ require_cmd() {
     echo "Missing required command: $1" >&2
     exit 1
   fi
+}
+
+host_build() {
+  require_cmd cargo
+  local rust_dir="$ROOT_DIR/host/rust"
+  echo "[host] Building Rust backend (release)…"
+  cd "$rust_dir" && cargo build --release -p wbeamd-server -p wbeamd-streamer
+  echo "[host] Build OK → $DAEMON_BIN"
 }
 
 ensure_daemon_binary() {
@@ -338,8 +456,8 @@ host_run() {
   stop_local_processes
   if command -v adb >/dev/null 2>&1; then
     adb start-server >/dev/null 2>&1 || true
-    adb reverse "tcp:${STREAM_PORT}"   "tcp:${STREAM_PORT}"   2>/dev/null || true
-    adb reverse "tcp:${CONTROL_PORT}" "tcp:${CONTROL_PORT}" 2>/dev/null || true
+    adb_device_cmd reverse "tcp:${STREAM_PORT}"   "tcp:${STREAM_PORT}"   2>/dev/null || true
+    adb_device_cmd reverse "tcp:${CONTROL_PORT}" "tcp:${CONTROL_PORT}" 2>/dev/null || true
   fi
   echo "[wbeam] host run — release binary, foreground"
   echo "[wbeam] control=127.0.0.1:${CONTROL_PORT}  stream=127.0.0.1:${STREAM_PORT}"
@@ -381,6 +499,9 @@ android_build() {
   echo "[android] Building debug APK (pipeline=${pipeline_mode}, minSdk=${min_sdk}, api_host=${build_api_host}, stream_host=${build_stream_host})…"
   cd "$ANDROID_DIR" && ./gradlew -PWBEAM_MIN_SDK="$min_sdk" -PWBEAM_HOST="$build_stream_host" -PWBEAM_API_HOST="$build_api_host" -PWBEAM_STREAM_HOST="$build_stream_host" :app:assembleDebug
   echo "[android] APK: $ANDROID_APK"
+  # Record the baked config so android_should_skip_install can detect host changes.
+  printf 'api=%s|stream=%s|pipeline=%s' "$build_api_host" "$build_stream_host" "$pipeline_mode" \
+    > "${ANDROID_APK}.wbeam-config" 2>/dev/null || true
 }
 
 android_install() {
@@ -391,8 +512,18 @@ android_install() {
   fi
   adb start-server >/dev/null
   adb_device_cmd wait-for-device
+  if android_should_skip_install; then
+    echo "[android] APK version+config unchanged ($(android_expected_version_name)); skipping install (${ANDROID_SERIAL:-default})."
+    return 0
+  fi
   echo "[android] Installing $ANDROID_APK (${ANDROID_SERIAL:-default})…"
   adb_device_cmd install -r "$ANDROID_APK"
+  # Record the build config that is now on the device so future skip checks work.
+  local build_stamp="${ANDROID_APK}.wbeam-config"
+  local install_stamp="${ANDROID_APK}.wbeam-installed"
+  if [[ -f "$build_stamp" ]]; then
+    cp "$build_stamp" "$install_stamp" 2>/dev/null || true
+  fi
 }
 
 android_launch() {
@@ -411,6 +542,13 @@ android_deploy() {
   echo "[android] Deploy hosts: api=$build_api_host stream=$build_stream_host"
   WBEAM_ANDROID_API_HOST="$build_api_host" WBEAM_ANDROID_STREAM_HOST="$build_stream_host" android_build
   android_install
+  # Ensure adb reverse is active before the app launches so 127.0.0.1
+  # loopback tunnels the control+stream ports to this host.
+  if android_try_reverse_setup; then
+    echo "[android] adb reverse OK (control:${CONTROL_PORT} stream:${STREAM_PORT})"
+  else
+    echo "[android] WARN: adb reverse not available — app will use baked-in host ${build_api_host}" >&2
+  fi
   android_launch
 }
 
@@ -452,6 +590,10 @@ android_install_release() {
 
   adb start-server >/dev/null
   adb_device_cmd wait-for-device
+  if android_should_skip_install; then
+    echo "[android] APK version unchanged ($(android_expected_version_name)); skipping release install (${ANDROID_SERIAL:-default})."
+    return 0
+  fi
   echo "[android] Installing $release_apk ($(android_target_desc))…"
   adb_device_cmd install -r "$release_apk"
 }
@@ -524,6 +666,7 @@ case "$group" in
     ;;
   host)
     case "$cmd" in
+      build)          host_build ;;
       run|start|up)   host_run ;;
       debug)          host_debug ;;
       status)         daemon_status ;;

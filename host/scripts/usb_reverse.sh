@@ -12,34 +12,33 @@ adb_device_cmd() {
 	fi
 }
 
-adb_try() {
-	local attempts="${1:-3}"
-	shift
-	local i
-	for (( i=1; i<=attempts; i++ )); do
-		if adb_device_cmd "$@" >/dev/null 2>&1; then
-			return 0
-		fi
-		if (( i < attempts )); then
-			sleep 0.3
-			adb kill-server >/dev/null 2>&1 || true
-			adb start-server >/dev/null 2>&1 || true
-		fi
-	done
-	return 1
-}
-
+# Reset adbd state upfront — this is the pattern proven to work on legacy
+# devices (API 17) where adb reverse returns "error: closed" on a stale session.
+adb kill-server >/dev/null 2>&1 || true
+sleep 0.5
 adb start-server >/dev/null 2>&1 || true
+adb_device_cmd reconnect >/dev/null 2>&1 || true
+sleep 0.3
 
-if ! adb_try 4 wait-for-device; then
+if ! adb_device_cmd wait-for-device >/dev/null 2>&1; then
 	echo "[usb-reverse] warning: adb wait-for-device failed" >&2
 	exit 1
 fi
 
-if ! adb_try 4 reverse "tcp:${PORT}" "tcp:${PORT}"; then
-	echo "[usb-reverse] warning: adb reverse failed for tcp:${PORT} (${ANDROID_SERIAL:-default})" >&2
-	echo "[usb-reverse] info: common on legacy Android (API<21) or unstable adbd; caller may continue with fallback" >&2
-	exit 1
-fi
+for (( i=1; i<=4; i++ )); do
+	if adb_device_cmd reverse "tcp:${PORT}" "tcp:${PORT}" >/dev/null 2>&1; then
+		echo "ADB reverse active: device 127.0.0.1:${PORT} -> host 127.0.0.1:${PORT}"
+		exit 0
+	fi
+	if (( i < 4 )); then
+		echo "[usb-reverse] attempt ${i} failed, resetting adb…" >&2
+		adb kill-server >/dev/null 2>&1 || true
+		sleep 0.5
+		adb start-server >/dev/null 2>&1 || true
+		adb_device_cmd wait-for-device >/dev/null 2>&1 || true
+	fi
+done
 
-echo "ADB reverse active: device 127.0.0.1:${PORT} -> host 127.0.0.1:${PORT}"
+echo "[usb-reverse] warning: adb reverse failed for tcp:${PORT} (${ANDROID_SERIAL:-default})" >&2
+echo "[usb-reverse] info: common on legacy Android (API<21) or unstable adbd; caller may continue with fallback" >&2
+exit 1

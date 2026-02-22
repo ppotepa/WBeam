@@ -76,7 +76,37 @@ public class MainActivity extends AppCompatActivity {
             "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4";
 
     private static final String[] PROFILE_OPTIONS = {"lowlatency", "balanced", "ultra"};
-    private static final String[] ENCODER_OPTIONS = {"h265", "raw-png"};
+    /**
+     * Preferred video encoder for this device.
+     * HEVC hardware decode was standardised in API 21 (Android 5.0).  On older
+     * devices we also check MediaCodecList at runtime — if no video/hevc decoder
+     * is present we fall back to H.264 which every Android device supports.
+     */
+    static final String PREFERRED_VIDEO = preferredVideoEncoder();
+    private static String preferredVideoEncoder() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+            return "h264";
+        }
+        try {
+            MediaCodecInfo[] infos;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                infos = new MediaCodecList(MediaCodecList.ALL_CODECS).getCodecInfos();
+            } else {
+                int count = MediaCodecList.getCodecCount();
+                infos = new MediaCodecInfo[count];
+                for (int i = 0; i < count; i++) infos[i] = MediaCodecList.getCodecInfoAt(i);
+            }
+            for (MediaCodecInfo info : infos) {
+                if (info.isEncoder()) continue;
+                for (String type : info.getSupportedTypes()) {
+                    if ("video/hevc".equalsIgnoreCase(type)) return "h265";
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return "h264";
+    }
+    private static final String[] ENCODER_OPTIONS = {PREFERRED_VIDEO, "raw-png"};
     private static final String[] CURSOR_OPTIONS = {"embedded", "hidden", "metadata"};
 
     private static final int LIVE_LOG_MAX_LINES = 80;
@@ -107,9 +137,22 @@ public class MainActivity extends AppCompatActivity {
     private TextView statsText;
     private TextView perfHudText;
     private TextView debugInfoText;
-    private TextView preflightTitleText;
-    private TextView preflightBodyText;
-    private TextView preflightHintText;
+    // ── Startup overlay ────────────────────────────────────────────────────────
+    private TextView startupTitleText;
+    private TextView startupSubtitleText;
+    private TextView startupStep1Badge;
+    private TextView startupStep1Label;
+    private TextView startupStep1Detail;
+    private TextView startupStep1Status;
+    private TextView startupStep2Badge;
+    private TextView startupStep2Label;
+    private TextView startupStep2Detail;
+    private TextView startupStep2Status;
+    private TextView startupStep3Badge;
+    private TextView startupStep3Label;
+    private TextView startupStep3Detail;
+    private TextView startupStep3Status;
+    private TextView startupInfoText;
     private TextView liveLogText;
     private TextView resValueText;
     private TextView fpsValueText;
@@ -150,7 +193,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean intraOnlyEnabled = false;
     private boolean settingsVisible = false;
     private boolean simpleMenuVisible = false;
-    private String simpleMode = "h265";
+    private String simpleMode = PREFERRED_VIDEO;
     private int simpleFps = 60;
     private boolean isFullscreen = false;
     private boolean cursorOverlayEnabled = true;
@@ -158,13 +201,30 @@ public class MainActivity extends AppCompatActivity {
     private boolean liveLogVisible = false;
     private long lastHudAdbLogAt = 0L;
     private String lastHudAdbSnapshot = "";
+    // startup step state constants
+    private static final int SS_PENDING = 0;
+    private static final int SS_ACTIVE  = 1;
+    private static final int SS_OK      = 2;
+    private static final int SS_ERROR   = 3;
+
     private boolean surfaceReady = false;
     private boolean preflightComplete = false;
     private int preflightAnimTick = 0;
+    private long startupBeganAtMs = 0L;
+    private boolean startupDismissed = false;
+    private boolean handshakeResolved = false;
+    private int controlRetryCount = 0;
+    private boolean transportProbeOk = false;
+    private boolean transportProbeInFlight = false;
+    private long transportProbeLastAtMs = 0L;
+    private long transportProbeRetryAfterMs = 0L;
+    private String transportProbeInfo = "not started";
     private boolean hwAvcDecodeAvailable = false;
     private String lastUiState = STATE_IDLE;
     private String lastUiInfo = "tap Settings -> Start Live";
     private long lastUiBps = 0;
+    private String lastCriticalErrorInfo = "";
+    private long lastCriticalErrorLogAtMs = 0L;
     private String lastStatsLine = "fps in/out: - | drops: - | late: - | q(t/d/r): -/-/- | reconnects: -";
     private String lastHudCompactLine = "hud: waiting for metrics";
     private double latestTargetFps = 60.0;
@@ -175,6 +235,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean daemonReachable = false;
     private String daemonHostName = "-";
     private String daemonService = "-";
+    private String daemonBuildRevision = "-";
     private String daemonState = "IDLE";
     private String daemonLastError = "";
     private long daemonRunId = 0L;
@@ -199,7 +260,7 @@ public class MainActivity extends AppCompatActivity {
         public void run() {
             preflightAnimTick = (preflightAnimTick + 1) % 4;
             updatePreflightOverlay();
-            uiHandler.postDelayed(this, 600);
+            uiHandler.postDelayed(this, 400);
         }
     };
     private final Runnable simpleMenuAutoHideTask = this::hideSimpleMenu;
@@ -236,6 +297,9 @@ public class MainActivity extends AppCompatActivity {
         setupButtons();
         loadSavedSettings();
         hwAvcDecodeAvailable = hasHardwareAvcDecoder();
+        Log.i(TAG, "startup transport api_impl=" + BuildConfig.WBEAM_API_IMPL
+            + " api=" + HostApiClient.API_BASE
+            + " stream=tcp://" + BuildConfig.WBEAM_STREAM_HOST + ":5000");
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                 ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
@@ -285,7 +349,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onDaemonStatusUpdate(boolean reachable, boolean wasReachable,
                     String hostName, String state, long runId, String lastError,
-                    boolean errorChanged, long uptimeSec, String service, JSONObject metrics) {
+                    boolean errorChanged, long uptimeSec, String service, String buildRevision, JSONObject metrics) {
                 daemonReachable = reachable;
                 daemonHostName = hostName;
                 daemonState = state;
@@ -293,6 +357,15 @@ public class MainActivity extends AppCompatActivity {
                 daemonRunId = runId;
                 daemonUptimeSec = uptimeSec;
                 daemonService = service;
+                daemonBuildRevision = (buildRevision == null || buildRevision.trim().isEmpty()) ? "-" : buildRevision.trim();
+                if (!handshakeResolved && !service.equals("-")) {
+                    handshakeResolved = true;
+                }
+
+                if (requiresTransportProbe()) {
+                    maybeStartTransportProbe();
+                }
+
                 if (!wasReachable) {
                     Toast.makeText(MainActivity.this, "Connected to " + hostName, Toast.LENGTH_SHORT).show();
                     appendLiveLogInfo("connected to host " + hostName);
@@ -323,16 +396,28 @@ public class MainActivity extends AppCompatActivity {
             public void onDaemonOffline(boolean wasReachable, Exception e) {
                 daemonReachable = false;
                 daemonState = "DISCONNECTED";
+                handshakeResolved = false;
+                transportProbeOk = false;
+                transportProbeInFlight = false;
+                transportProbeRetryAfterMs = 0L;
+                transportProbeInfo = "waiting for control link";
                 updateActionButtonsEnabled();
                 updateHostHint();
                 updatePerfHudUnavailable();
                 preflightComplete = false;
+                startupDismissed = false;
+                if (wasReachable) {
+                    // Host was reachable and just dropped — restart retry cycle clean
+                    startupBeganAtMs = SystemClock.elapsedRealtime();
+                    controlRetryCount = 0;
+                }
                 updatePreflightOverlay();
                 if (wasReachable) {
                     updateStatus(STATE_ERROR, "Host API offline: " + shortError(e), 0);
-                    appendLiveLogError("daemon poll failed: " + shortError(e));
+                    appendLiveLogError("daemon poll failed: " + shortError(e)
+                            + " | api=" + HostApiClient.API_BASE);
                     Toast.makeText(MainActivity.this,
-                            "Host daemon offline (" + shortError(e) + "). Start host: ./host/rust/scripts/run_wbeamd_rust.sh",
+                            "Host API unreachable (" + shortError(e) + "). Check USB tethering/LAN and host IP: " + HostApiClient.API_BASE,
                             Toast.LENGTH_LONG).show();
                 } else {
                     refreshStatusText();
@@ -341,7 +426,7 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onAutoStartRequired() {
-                sessionController.requestStart(false, true);
+                requestStartGuarded(false, true);
             }
 
             @Override
@@ -422,6 +507,9 @@ public class MainActivity extends AppCompatActivity {
         applyBuildVariantUi();
         updateStatsLine("fps in/out: - | drops: - | late: - | q(t/d/r): -/-/- | reconnects: -");
         updatePerfHudUnavailable();
+        startupBeganAtMs = SystemClock.elapsedRealtime();
+        handshakeResolved = false;
+        startupDismissed = false;
         startPreflightPulse();
         updatePreflightOverlay();
         updateStatus(STATE_IDLE, "tap Settings -> Start Live", 0);
@@ -483,9 +571,21 @@ public class MainActivity extends AppCompatActivity {
         statsText = findViewById(R.id.statsText);
         perfHudText = findViewById(R.id.perfHudText);
         debugInfoText = findViewById(R.id.debugInfoText);
-        preflightTitleText = findViewById(R.id.preflightTitle);
-        preflightBodyText = findViewById(R.id.preflightBody);
-        preflightHintText = findViewById(R.id.preflightHint);
+        startupTitleText    = findViewById(R.id.startupTitle);
+        startupSubtitleText = findViewById(R.id.startupSubtitle);
+        startupStep1Badge   = findViewById(R.id.startupStep1Badge);
+        startupStep1Label   = findViewById(R.id.startupStep1Label);
+        startupStep1Detail  = findViewById(R.id.startupStep1Detail);
+        startupStep1Status  = findViewById(R.id.startupStep1Status);
+        startupStep2Badge   = findViewById(R.id.startupStep2Badge);
+        startupStep2Label   = findViewById(R.id.startupStep2Label);
+        startupStep2Detail  = findViewById(R.id.startupStep2Detail);
+        startupStep2Status  = findViewById(R.id.startupStep2Status);
+        startupStep3Badge   = findViewById(R.id.startupStep3Badge);
+        startupStep3Label   = findViewById(R.id.startupStep3Label);
+        startupStep3Detail  = findViewById(R.id.startupStep3Detail);
+        startupStep3Status  = findViewById(R.id.startupStep3Status);
+        startupInfoText     = findViewById(R.id.startupInfoText);
         liveLogText = findViewById(R.id.liveLogText);
 
         resValueText = findViewById(R.id.resValueText);
@@ -709,7 +809,7 @@ public class MainActivity extends AppCompatActivity {
         settingsCloseButton.setOnClickListener(v -> hideSettingsPanel());
         applySettingsButton.setOnClickListener(v -> applySettings(true));
 
-        startButton.setOnClickListener(v -> sessionController.requestStart(true, true));
+        startButton.setOnClickListener(v -> requestStartGuarded(true, true));
         stopButton.setOnClickListener(v -> sessionController.requestStop(true));
         testButton.setOnClickListener(v -> videoTestController.startBandwidthTest());
         testButton.setOnLongClickListener(v -> {
@@ -717,7 +817,7 @@ public class MainActivity extends AppCompatActivity {
             return true;
         });
         if (quickStartButton != null) {
-            quickStartButton.setOnClickListener(v -> sessionController.requestStart(true, true));
+            quickStartButton.setOnClickListener(v -> requestStartGuarded(true, true));
         }
         if (quickStopButton != null) {
             quickStopButton.setOnClickListener(v -> sessionController.requestStop(true));
@@ -759,8 +859,10 @@ public class MainActivity extends AppCompatActivity {
         }
 
         if (simpleModeH265Button != null) {
+            // Relabel button to match the preferred codec for this device.
+            simpleModeH265Button.setText("h264".equals(PREFERRED_VIDEO) ? "H.264" : "H.265");
             simpleModeH265Button.setOnClickListener(v -> {
-                simpleMode = "h265";
+                simpleMode = PREFERRED_VIDEO;
                 refreshSimpleMenuButtons();
                 scheduleSimpleMenuAutoHide();
             });
@@ -784,7 +886,7 @@ public class MainActivity extends AppCompatActivity {
             simpleApplyButton.setOnClickListener(v -> {
                 applySimpleMenuToSettings();
                 applySettings(true);
-                sessionController.requestStart(false, true);
+                requestStartGuarded(false, true);
                 hideSimpleMenu();
             });
         }
@@ -854,7 +956,7 @@ public class MainActivity extends AppCompatActivity {
         intraOnlyEnabled = s.intraOnly;
         updateIntraOnlyButton();
         updateSettingValueLabels();
-        simpleMode = "raw-png".equals(getSelectedEncoder()) ? "raw-png" : "h265";
+        simpleMode = "raw-png".equals(getSelectedEncoder()) ? "raw-png" : PREFERRED_VIDEO;
         simpleFps = clamp(getSelectedFps(), 30, 144);
         refreshSimpleMenuButtons();
     }
@@ -899,7 +1001,7 @@ public class MainActivity extends AppCompatActivity {
         intraOnlyButton.setAlpha(supportsIntra ? 1.0f : 0.45f);
         intraOnlyButton.setText(intraOnlyEnabled
                 ? "All-Intra: ON  \u2014 zero artifacts (HEVC only)"
-            : (supportsIntra ? "All-Intra: OFF" : "All-Intra: N/A (raw-png)"));
+            : (supportsIntra ? "All-Intra: OFF" : "All-Intra: N/A"));
         int buttonColor = intraOnlyEnabled ? 0xFF16A34A : 0xFF374151;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             intraOnlyButton.setBackgroundTintList(
@@ -912,9 +1014,10 @@ public class MainActivity extends AppCompatActivity {
     private void updateHostHint() {
         int[] sz = computeScaledSize();
         String apiBase = HostApiClient.API_BASE;
+        String daemonStateUi = effectiveDaemonState(daemonState, latestPresentFps, 0, 0);
         String line1 = "Control API " + (daemonReachable ? "connected" : "waiting")
             + ": " + apiBase;
-        String line2 = "Host: " + daemonHostName + " | Daemon: " + daemonState + " (" + daemonService + ")";
+        String line2 = "Host: " + daemonHostName + " | Daemon: " + daemonStateUi + " (" + daemonService + ")";
         String line3 = "Outgoing config: " + getSelectedProfile()
                 + ", " + sz[0] + "x" + sz[1]
                 + ", " + getSelectedFps() + "fps, "
@@ -957,7 +1060,8 @@ public class MainActivity extends AppCompatActivity {
         JSONObject payload = new JSONObject();
         try {
             String uiEncoder = getSelectedEncoder();
-            String encoder = "raw-png".equals(uiEncoder) ? "rawpng" : "h265";
+            // "raw-png" (UI label) → "rawpng" (API name); "h264"/"h265" pass through as-is.
+            String encoder = "raw-png".equals(uiEncoder) ? "rawpng" : uiEncoder;
             boolean intraOnly = "h265".equals(encoder) && intraOnlyEnabled;
             payload.put("profile", getSelectedProfile());
             payload.put("encoder", encoder);
@@ -979,9 +1083,37 @@ public class MainActivity extends AppCompatActivity {
         Log.e(TAG, prefix + ": " + reason, e);
         if (userAction) {
             Toast.makeText(this,
-                    "Host daemon error (" + reason + "). Start host: ./host/rust/scripts/run_wbeamd_rust.sh",
+                    "Host API unreachable (" + reason + "). Check USB tethering/LAN and host IP: " + HostApiClient.API_BASE,
                     Toast.LENGTH_LONG).show();
         }
+    }
+
+    private boolean isBuildMismatch() {
+        if (!daemonReachable || !handshakeResolved) {
+            return false;
+        }
+        if ("local".equalsIgnoreCase(BuildConfig.WBEAM_API_IMPL)) {
+            return false;
+        }
+        String hostRev = daemonBuildRevision == null ? "" : daemonBuildRevision.trim();
+        String appRev = BuildConfig.WBEAM_BUILD_REV == null ? "" : BuildConfig.WBEAM_BUILD_REV.trim();
+        if (hostRev.isEmpty() || "-".equals(hostRev) || appRev.isEmpty()) {
+            return false;
+        }
+        return !hostRev.equals(appRev);
+    }
+
+    private void requestStartGuarded(boolean userAction, boolean ensureViewer) {
+        if (isBuildMismatch()) {
+            String msg = "Build mismatch: app=" + BuildConfig.WBEAM_BUILD_REV
+                    + " host=" + daemonBuildRevision
+                    + " (redeploy APK or rebuild host)";
+            updateStatus(STATE_ERROR, msg, 0);
+            appendLiveLogError(msg);
+            Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+            return;
+        }
+        sessionController.requestStart(userAction, ensureViewer);
     }
 
     private String shortError(Exception e) {
@@ -1150,7 +1282,7 @@ public class MainActivity extends AppCompatActivity {
         if (simpleMenuPanel == null) {
             return;
         }
-        simpleMode = "raw-png".equals(getSelectedEncoder()) ? "raw-png" : "h265";
+        simpleMode = "raw-png".equals(getSelectedEncoder()) ? "raw-png" : PREFERRED_VIDEO;
         simpleFps = clamp(getSelectedFps(), 30, 144);
         simpleMenuVisible = true;
         refreshSimpleMenuButtons();
@@ -1184,7 +1316,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void applySimpleMenuToSettings() {
-        String selectedEncoder = "raw-png".equals(simpleMode) ? "raw-png" : "h265";
+        String selectedEncoder = "raw-png".equals(simpleMode) ? "raw-png" : PREFERRED_VIDEO;
         int selectedFps = clamp(simpleFps, 30, 144);
 
         setSpinnerSelection(encoderSpinner, ENCODER_OPTIONS, selectedEncoder);
@@ -1200,7 +1332,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        setSimpleModeSelected(simpleModeH265Button, "h265".equals(simpleMode));
+        setSimpleModeSelected(simpleModeH265Button, PREFERRED_VIDEO.equals(simpleMode));
         setSimpleModeSelected(simpleModeRawButton, "raw-png".equals(simpleMode));
 
         setSimpleFpsSelected(simpleFps30Button, simpleFps == 30);
@@ -1293,9 +1425,16 @@ public class MainActivity extends AppCompatActivity {
         refreshStatusText();
         refreshDebugInfoOverlay();
         if (STATE_ERROR.equals(lastUiState) && isCriticalUiInfo(lastUiInfo)) {
-            String line = "status=" + lastUiState + " info=" + lastUiInfo + " bps=" + bps;
-            appendLiveLogError(line);
-            Log.e(TAG, line);
+            long now = SystemClock.elapsedRealtime();
+            boolean same = lastUiInfo.equals(lastCriticalErrorInfo);
+            boolean stale = (now - lastCriticalErrorLogAtMs) > 30_000L;
+            if (!same || stale) {
+                lastCriticalErrorInfo = lastUiInfo;
+                lastCriticalErrorLogAtMs = now;
+                String line = "status=" + lastUiState + " info=" + lastUiInfo + " bps=" + bps;
+                appendLiveLogError(line);
+                Log.e(TAG, line);
+            }
         }
     }
 
@@ -1389,9 +1528,10 @@ public class MainActivity extends AppCompatActivity {
     private void refreshStatusText() {
         int color = ledColorForState(lastUiState);
         String host = daemonHostName == null || daemonHostName.trim().isEmpty() ? "-" : daemonHostName;
+        String daemonStateUi = effectiveDaemonState(daemonState, latestPresentFps, 0, 0);
         String transport = "USB:" + (daemonReachable ? "Connected" : "Disconnected")
                 + " | Host:" + host
-                + " | Stream:" + daemonState;
+            + " | Stream:" + daemonStateUi;
 
         statusText.setText(lastUiState.toUpperCase(Locale.US));
         if (lastUiInfo == null || lastUiInfo.trim().isEmpty()) {
@@ -1464,6 +1604,7 @@ public class MainActivity extends AppCompatActivity {
 
         double targetFps = kpi != null ? kpi.optDouble("target_fps", getSelectedFps()) : getSelectedFps();
         double presentFps = kpi != null ? kpi.optDouble("present_fps", 0.0) : 0.0;
+        String daemonStateUi = effectiveDaemonState(daemonState, presentFps, streamUptimeSec, frameOutHost);
         latestTargetFps = targetFps;
         latestPresentFps = presentFps;
         double frametimeP95 = kpi != null ? kpi.optDouble("frametime_ms_p95", 0.0) : 0.0;
@@ -1563,7 +1704,7 @@ public class MainActivity extends AppCompatActivity {
         String compact = String.format(
                 Locale.US,
                 "state=%s run_id=%d up=%ds stream_up=%ds host_in_out=%d/%d fps_target=%.0f fps_present=%.1f frame_p95=%.2f dec_p95=%.2f ren_p95=%.2f e2e_p95=%.2f q=%d/%d/%d qmax=%d/%d/%d adapt=L%d:%s drops=%d bp=%d/%d warmup=%b hp=%s reason=%s host_err=%s",
-                daemonState,
+                daemonStateUi,
                 daemonRunId,
                 daemonUptimeSec,
                 streamUptimeSec,
@@ -1603,6 +1744,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         String state = lastUiState == null ? "IDLE" : lastUiState.toUpperCase(Locale.US);
+        String daemonStateUi = effectiveDaemonState(daemonState, latestPresentFps, 0, 0);
         String host = daemonHostName == null || daemonHostName.trim().isEmpty() ? "-" : daemonHostName;
         double safeTarget = latestTargetFps > 0.0 ? latestTargetFps : 60.0;
         double lossPct = Math.max(0.0, ((safeTarget - latestPresentFps) / safeTarget) * 100.0);
@@ -1611,7 +1753,7 @@ public class MainActivity extends AppCompatActivity {
                 "DBG %s | host:%s | daemon:%s\nFPS %.0f/%.1f (loss %.0f%%)  thresholds: green <=10%% orange >10%% red >50%%\n%s\n%s",
                 state,
                 host,
-                daemonState,
+                daemonStateUi,
                 safeTarget,
                 latestPresentFps,
                 lossPct,
@@ -1619,6 +1761,15 @@ public class MainActivity extends AppCompatActivity {
                 lastHudCompactLine
         );
         debugInfoText.setText(text);
+    }
+
+    private String effectiveDaemonState(String rawState, double presentFps, long streamUptimeSec, long frameOutHost) {
+        String normalized = rawState == null ? "IDLE" : rawState.toUpperCase(Locale.US);
+        if (!"STREAMING".equals(normalized)) {
+            return normalized;
+        }
+        boolean flowing = presentFps >= 1.0 || streamUptimeSec > 0 || frameOutHost > 0;
+        return flowing ? "STREAMING" : "RECONNECTING";
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -1656,98 +1807,337 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updatePreflightOverlay() {
-        if (preflightOverlay == null || preflightTitleText == null || preflightBodyText == null || preflightHintText == null) {
+        if (preflightOverlay == null) {
             return;
         }
 
+        // Video test controller overrides the startup overlay
         if (videoTestController != null && videoTestController.isOverlayActive()) {
-            preflightTitleText.setText(videoTestController.getOverlayTitle());
-            preflightBodyText.setText(videoTestController.getOverlayBody());
-            preflightHintText.setText(videoTestController.getOverlayHint());
-            preflightHintText.setTextColor(Color.parseColor("#FDE68A"));
+            if (startupTitleText != null)    startupTitleText.setText(videoTestController.getOverlayTitle());
+            if (startupSubtitleText != null) startupSubtitleText.setText(videoTestController.getOverlayBody());
+            if (startupInfoText != null) {
+                startupInfoText.setText(videoTestController.getOverlayHint());
+                startupInfoText.setTextColor(Color.parseColor("#FDE68A"));
+            }
             setPreflightVisible(true);
             return;
         }
 
-        boolean usbOk = daemonReachable;
-        boolean hostOk = daemonReachable;
-        boolean surfaceOk = surfaceReady;
-        boolean hwOk = hwAvcDecodeAvailable;
-        boolean streamReady = daemonReachable && (
-            "STREAMING".equals(daemonState)
-                || "STARTING".equals(daemonState)
-                || "RECONNECTING".equals(daemonState)
-        );
+        long elapsedMs = startupBeganAtMs > 0L
+                ? Math.max(0L, SystemClock.elapsedRealtime() - startupBeganAtMs)
+                : 0L;
 
-        boolean ready = usbOk && hostOk && surfaceOk && hwOk && streamReady;
-        String spin = spinnerGlyph();
+        // If we've been waiting > 20s with no response, auto-reset the window
+        // so the overlay cycles back to ACTIVE (endless retry) rather than
+        // permanently showing red ERROR.
+        if (!daemonReachable && elapsedMs > 20_000L) {
+            controlRetryCount++;
+            startupBeganAtMs = SystemClock.elapsedRealtime();
+            elapsedMs = 0L;
+        }
+        // Also reset counter when daemon connects successfully
+        if (daemonReachable && controlRetryCount > 0) {
+            controlRetryCount = 0;
+        }
 
-        String body = String.format(
-                Locale.US,
-                "[%s] usb_link\n[%s] host_api\n[%s] surface\n[%s] hw_decode_avc\n[%s] stream_ready",
-                usbOk ? "OK" : "..",
-                hostOk ? "OK" : "..",
-                surfaceOk ? "OK" : "..",
-                hwOk ? "OK" : "NO",
-                streamReady ? "OK" : ".."
-        );
-        preflightBodyText.setText(body);
+        // ── step 1: control link ──────────────────────────────────────────────
+        int step1 = daemonReachable ? SS_OK : SS_ACTIVE;
 
-        if (!ready) {
+        String step1Detail;
+        if (step1 == SS_OK) {
+            boolean isLocalImpl = "local".equalsIgnoreCase(BuildConfig.WBEAM_API_IMPL);
+            if (isLocalImpl) {
+                step1Detail = "on-device (local api) \u00b7 no host connection needed";
+            } else {
+                step1Detail = "reachable \u00b7 api_impl=" + BuildConfig.WBEAM_API_IMPL
+                        + " \u00b7 " + daemonHostName;
+            }
+        } else if (controlRetryCount == 0) {
+            step1Detail = "polling " + HostApiClient.API_BASE
+                    + " \u2026 (" + (elapsedMs / 1000L) + "s)";
+        } else {
+            step1Detail = "no response \u00b7 retry #" + controlRetryCount
+                    + " \u00b7 polling " + HostApiClient.API_BASE
+                    + " (" + (elapsedMs / 1000L) + "s)";
+        }
+
+        // ── step 2: handshake ─────────────────────────────────────────────────
+        int step2;
+        String step2Detail;
+        if (step1 != SS_OK) {
+            step2 = SS_PENDING;
+            step2Detail = "waiting for control link";
+        } else if (!handshakeResolved) {
+            step2 = SS_ACTIVE;
+            step2Detail = "resolving service / api version\u2026";
+        } else if (isBuildMismatch()) {
+            step2 = SS_ERROR;
+            step2Detail = "build mismatch · app=" + BuildConfig.WBEAM_BUILD_REV
+                    + " · host=" + daemonBuildRevision;
+        } else {
+            step2 = SS_OK;
+            if (requiresTransportProbe()) {
+                maybeStartTransportProbe();
+                if (transportProbeOk) {
+                    step2Detail = "service=" + daemonService + " · transport test OK";
+                } else if (transportProbeInFlight) {
+                    step2Detail = "service=" + daemonService + " · transport test in progress…";
+                } else {
+                    step2Detail = "service=" + daemonService + " · transport test pending";
+                }
+            } else {
+                step2Detail = "service=" + daemonService + " · " + BuildConfig.WBEAM_API_IMPL;
+            }
+        }
+
+        // ── step 3: stream ────────────────────────────────────────────────────
+        String effState = effectiveDaemonState(daemonState, latestPresentFps, 0, 0);
+        boolean streamFlowing = latestPresentFps >= 1.0 || "STREAMING".equals(effState);
+
+        // Parse stream reconnect count from lastStatsLine ("reconnects: N")
+        int streamReconnects = 0;
+        try {
+            int rIdx = lastStatsLine.indexOf("reconnects: ");
+            if (rIdx >= 0) {
+                String rPart = lastStatsLine.substring(rIdx + "reconnects: ".length()).trim();
+                int end = 0;
+                while (end < rPart.length() && Character.isDigit(rPart.charAt(end))) end++;
+                if (end > 0) streamReconnects = Integer.parseInt(rPart.substring(0, end));
+            }
+        } catch (Exception ignored) {}
+
+        // Build the stream address hint once (depends on build config, not runtime)
+        String streamHost = BuildConfig.WBEAM_STREAM_HOST;
+        boolean streamIsLoopback = streamHost == null
+                || streamHost.trim().isEmpty()
+                || streamHost.trim().equals("127.0.0.1")
+                || streamHost.trim().equals("localhost");
+        String streamAddr = (streamHost != null && !streamHost.trim().isEmpty())
+                ? streamHost.trim() : "127.0.0.1";
+        String streamFixHint = streamIsLoopback
+                ? "run: ./wbeam ip up  (adb reverse)"
+            : "check USB tethering / host IP / LAN";
+
+        int step3;
+        String step3Detail;
+        if (step2 != SS_OK) {
+            step3 = SS_PENDING;
+            step3Detail = (step2 == SS_ERROR && isBuildMismatch())
+                    ? "blocked by build mismatch"
+                    : "waiting for handshake";
+        } else if (requiresTransportProbe() && !transportProbeOk) {
+            step3 = SS_ACTIVE;
+            if (transportProbeInFlight) {
+                step3Detail = "testing transport I/O… " + transportProbeInfo;
+            } else {
+                step3Detail = "transport test retrying… " + transportProbeInfo;
+            }
+        } else if (streamFlowing) {
+            step3 = SS_OK;
+            step3Detail = "live \u00b7 fps=" + String.format(Locale.US, "%.0f", latestPresentFps)
+                    + " \u00b7 " + effState.toLowerCase(Locale.US);
+        } else {
+            // Never permanently error — always show ACTIVE so the user sees
+            // endless retry rather than a frozen red badge.
+            step3 = SS_ACTIVE;
+            boolean hasWaited = elapsedMs > 5_000L;
+            if (streamReconnects > 0 && hasWaited) {
+                step3Detail = "retry #" + streamReconnects
+                        + " \u00b7 " + streamAddr + ":5000 unreachable \u00b7 " + streamFixHint;
+            } else if (streamReconnects > 0) {
+                step3Detail = "reconnecting \u00b7 attempt #" + streamReconnects + " \u00b7 awaiting frames\u2026";
+            } else if (hasWaited) {
+                step3Detail = "connecting to " + streamAddr + ":5000 \u00b7 " + streamFixHint;
+            } else {
+                step3Detail = "decoder started \u00b7 awaiting frames\u2026";
+            }
+        }
+
+        applyStepState(step1, "1", startupStep1Badge, startupStep1Label,
+                startupStep1Status, startupStep1Detail, step1Detail);
+        applyStepState(step2, "2", startupStep2Badge, startupStep2Label,
+                startupStep2Status, startupStep2Detail, step2Detail);
+        applyStepState(step3, "3", startupStep3Badge, startupStep3Label,
+                startupStep3Status, startupStep3Detail, step3Detail);
+
+        // subtitle
+        if (startupSubtitleText != null) {
+            String subtitle;
+            if (step1 != SS_OK) {
+                if (elapsedMs < 2000L && controlRetryCount == 0) {
+                    subtitle = "starting up\u2026";
+                } else if (controlRetryCount == 0) {
+                    subtitle = "awaiting control link\u2026";
+                } else {
+                    subtitle = "retrying control link \u00b7 attempt #" + controlRetryCount + "\u2026";
+                }
+            } else if (step2 != SS_OK) {
+                subtitle = (step2 == SS_ERROR && isBuildMismatch())
+                        ? "build mismatch \u00b7 redeploy APK or rebuild host"
+                        : "handshake in progress\u2026";
+            } else if (step3 != SS_OK) {
+                subtitle = streamReconnects > 0
+                        ? "stream reconnecting \u00b7 attempt #" + streamReconnects + "\u2026"
+                        : elapsedMs > 5_000L
+                                ? "stream unreachable \u00b7 retrying\u2026"
+                                : "waiting for video frames\u2026";
+            } else {
+                subtitle = "all systems ready";
+            }
+            startupSubtitleText.setText(subtitle);
+            startupSubtitleText.setTextColor(step3 == SS_OK
+                    ? Color.parseColor("#4ADE80")
+                    : step3 == SS_ERROR ? Color.parseColor("#F87171") : Color.parseColor("#475569"));
+        }
+
+        // info line
+        if (startupInfoText != null) {
+            startupInfoText.setText(
+                    "api=" + HostApiClient.API_BASE
+                    + "  impl=" + BuildConfig.WBEAM_API_IMPL
+                    + "  stream=" + BuildConfig.WBEAM_STREAM_HOST + ":5000"
+                    + "  app=" + BuildConfig.WBEAM_BUILD_REV
+                    + "  host=" + daemonBuildRevision);
+            startupInfoText.setTextColor(Color.parseColor("#334155"));
+        }
+
+        boolean allOk = step1 == SS_OK && step2 == SS_OK && step3 == SS_OK;
+        if (!allOk) {
+            startupDismissed = false;
             preflightComplete = false;
             setPreflightVisible(true);
-            if (!usbOk) {
-                preflightTitleText.setText("WBEAM PRE-FLIGHT " + spin + " WAITING CONTROL LINK");
-                preflightHintText.setText("busy: control api unreachable (adb reverse/tunnel down)");
-                preflightHintText.setTextColor(Color.parseColor("#FCA5A5"));
-            } else if (!surfaceOk) {
-                preflightTitleText.setText("WBEAM PRE-FLIGHT " + spin + " WAITING SURFACE");
-                preflightHintText.setText("busy: waiting for preview surface init");
-                preflightHintText.setTextColor(Color.parseColor("#FDE68A"));
-            } else if (!hwOk) {
-                preflightTitleText.setText("WBEAM PRE-FLIGHT " + spin + " DECODER CHECK");
-                preflightHintText.setText("warning: hardware AVC not detected, fallback may stutter");
-                preflightHintText.setTextColor(Color.parseColor("#FCA5A5"));
-            } else if (!streamReady) {
-                preflightTitleText.setText("WBEAM PRE-FLIGHT " + spin + " WAITING STREAM");
-                if (daemonReachable && "IDLE".equals(daemonState)) {
-                    preflightHintText.setText("busy: host reachable, stream idle (tap Start Live)");
-                } else {
-                    preflightHintText.setText("busy: host state=" + daemonState.toLowerCase(Locale.US));
+        } else if (!startupDismissed) {
+            startupDismissed = true;
+            preflightComplete = true;
+            uiHandler.postDelayed(() -> {
+                if (startupDismissed) {
+                    setPreflightVisible(false);
                 }
-                preflightHintText.setTextColor(Color.parseColor("#FDE68A"));
-            } else {
-                preflightTitleText.setText("WBEAM PRE-FLIGHT " + spin + " RUNNING");
-                preflightHintText.setText("busy: validating startup path");
-                preflightHintText.setTextColor(Color.parseColor("#FDE68A"));
-            }
+            }, 800);
+        }
+    }
+
+    private boolean isLoopbackHost(String host) {
+        if (host == null) {
+            return true;
+        }
+        String trimmed = host.trim();
+        return trimmed.isEmpty()
+                || "127.0.0.1".equals(trimmed)
+                || "localhost".equalsIgnoreCase(trimmed);
+    }
+
+    private boolean requiresTransportProbe() {
+        if (!daemonReachable || !handshakeResolved) {
+            return false;
+        }
+        if ("local".equalsIgnoreCase(BuildConfig.WBEAM_API_IMPL)) {
+            return false;
+        }
+        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.JELLY_BEAN_MR1) {
+            return false;
+        }
+        return !isLoopbackHost(BuildConfig.WBEAM_API_HOST);
+    }
+
+    private void maybeStartTransportProbe() {
+        if (!requiresTransportProbe()) {
+            return;
+        }
+        long now = SystemClock.elapsedRealtime();
+        if (transportProbeOk || transportProbeInFlight || now < transportProbeRetryAfterMs) {
             return;
         }
 
-        if (!preflightComplete) {
-            preflightComplete = true;
-            preflightTitleText.setText("WBEAM PRE-FLIGHT DONE");
-            preflightHintText.setText("ready: starting live pipeline");
-            preflightHintText.setTextColor(Color.parseColor("#BBF7D0"));
-            preflightBodyText.setText(body);
-            uiHandler.postDelayed(() -> {
-                if (preflightComplete) {
-                    setPreflightVisible(false);
-                }
-            }, 500);
+        transportProbeInFlight = true;
+        transportProbeLastAtMs = now;
+        transportProbeInfo = "starting";
+
+        ioExecutor.execute(() -> {
+            try {
+                long elapsed = HostApiClient.runTransportProbeMs(1);
+                uiHandler.post(() -> {
+                    transportProbeOk = true;
+                    transportProbeInFlight = false;
+                    transportProbeRetryAfterMs = 0L;
+                    transportProbeInfo = "1MB in " + elapsed + "ms";
+                    appendLiveLogInfo("transport probe OK: " + transportProbeInfo);
+                    updatePreflightOverlay();
+                });
+            } catch (Exception e) {
+                uiHandler.post(() -> {
+                    transportProbeOk = false;
+                    transportProbeInFlight = false;
+                    transportProbeRetryAfterMs = SystemClock.elapsedRealtime() + 4_000L;
+                    transportProbeInfo = shortError(e);
+                    appendLiveLogWarn("transport probe failed: " + transportProbeInfo);
+                    updatePreflightOverlay();
+                });
+            }
+        });
+    }
+
+    private void applyStepState(int state, String number,
+            TextView badge, TextView label, TextView status, TextView detail,
+            String detailText) {
+        if (badge == null || label == null || status == null || detail == null) {
+            return;
         }
+        int badgeBg, badgeFg, labelColor, statusColor;
+        String statusStr;
+        switch (state) {
+            case SS_OK:
+                badgeBg    = Color.parseColor("#14532D");
+                badgeFg    = Color.parseColor("#4ADE80");
+                labelColor = Color.parseColor("#4ADE80");
+                statusColor= Color.parseColor("#4ADE80");
+                statusStr  = " OK";
+                badge.setText("\u2713");
+                detail.setTextColor(Color.parseColor("#166534"));
+                break;
+            case SS_ERROR:
+                badgeBg    = Color.parseColor("#450A0A");
+                badgeFg    = Color.parseColor("#F87171");
+                labelColor = Color.parseColor("#F87171");
+                statusColor= Color.parseColor("#F87171");
+                statusStr  = "ERR";
+                badge.setText("\u2717");
+                detail.setTextColor(Color.parseColor("#7F1D1D"));
+                break;
+            case SS_ACTIVE:
+                badgeBg    = Color.parseColor("#78350F");
+                badgeFg    = Color.parseColor("#FDE68A");
+                labelColor = Color.parseColor("#F8FAFC");
+                statusColor= Color.parseColor("#FDE68A");
+                final String[] spinChars = {"|", "/", "-", "\\"};
+                statusStr  = " " + spinChars[preflightAnimTick % 4];
+                badge.setText(number);
+                detail.setTextColor(Color.parseColor("#92400E"));
+                break;
+            default: // SS_PENDING
+                badgeBg    = Color.parseColor("#0F172A");
+                badgeFg    = Color.parseColor("#334155");
+                labelColor = Color.parseColor("#334155");
+                statusColor= Color.parseColor("#1E293B");
+                statusStr  = "---";
+                badge.setText(number);
+                detail.setTextColor(Color.parseColor("#1E293B"));
+                break;
+        }
+        badge.setBackgroundColor(badgeBg);
+        badge.setTextColor(badgeFg);
+        label.setTextColor(labelColor);
+        status.setText(statusStr);
+        status.setTextColor(statusColor);
+        detail.setText(detailText != null ? detailText : "");
     }
 
     private String spinnerGlyph() {
         switch (preflightAnimTick) {
-            case 1:
-                return "/";
-            case 2:
-                return "-";
-            case 3:
-                return "\\";
-            default:
-                return "|";
+            case 1:  return "/";
+            case 2:  return "-";
+            case 3:  return "\\";
+            default: return "|";
         }
     }
 

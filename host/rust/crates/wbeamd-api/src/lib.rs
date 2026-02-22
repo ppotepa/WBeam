@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub const VALID_ENCODERS: &[&str] = &["h265", "rawpng"];
+pub const VALID_ENCODERS: &[&str] = &["h264", "h265", "rawpng"];
 pub const VALID_CURSOR_MODES: &[&str] = &["hidden", "embedded", "metadata"];
 pub const VALID_PROFILES: &[&str] = &["lowlatency", "balanced", "ultra"];
 
@@ -342,9 +342,15 @@ pub fn validate_config(patch: ConfigPatch, current: &ActiveConfig) -> Result<Act
         return Err(ValidationError::InvalidProfile);
     }
 
-    let mut cfg = presets()
-        .remove(&base_profile)
-        .ok_or(ValidationError::InvalidProfile)?;
+        let requested_profile = patch.profile.clone();
+        let mut cfg = if requested_profile.is_some() {
+            presets()
+                .remove(&base_profile)
+                .ok_or(ValidationError::InvalidProfile)?
+        } else {
+            current.clone()
+        };
+        cfg.profile = base_profile;
 
     if let Some(encoder) = patch.encoder {
         cfg.encoder = encoder;
@@ -369,9 +375,9 @@ pub fn validate_config(patch: ConfigPatch, current: &ActiveConfig) -> Result<Act
     }
 
     cfg.encoder = match cfg.encoder.as_str() {
-        "h265" | "rawpng" => cfg.encoder,
+        "h264" | "h265" | "rawpng" => cfg.encoder,
         // Backward-compatible migration of old modes to unified h265.
-        "auto" | "nvenc" | "nvenc265" | "x264" | "x265" | "openh264" => "h265".to_string(),
+        "auto" | "nvenc" | "nvenc265" | "x265" | "openh264" => "h265".to_string(),
         _ => cfg.encoder,
     };
 

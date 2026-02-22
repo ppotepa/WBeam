@@ -1,0 +1,2 @@
+rootProject.name = "proto-front"
+include ':app'

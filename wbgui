@@ -21,21 +21,24 @@ MENU_ENTRIES=(
   "  Build APK (release):android:build-release"
   "  Install APK (release):android:install-release"
   "  Deploy APK (release):android:deploy-release"
-  "──── Host ───────────────────────────────────────────"
+  "  Rebuild All  (host + legacy + modern):android:build-all"
+  "──── Host ───────────────────────────────────────────────"
   "  Run Host  (release, foreground):host:run"
   "  Run Host  (debug + coloured logs):host:debug"
   "  Host Status:host:status"
   "──── Service  (systemd) ─────────────────────────────"
-  "  Service Up:service:up"
-  "  Service Down:service:down"
+  "  Service Start  (this session):service:up"
+  "  Service Stop:service:down"
   "  Service Restart:service:restart"
   "  Service Status:service:status"
   "  Service Logs:service:logs"
+  "  Enable auto-start on boot:service:enable"
+  "  Disable auto-start on boot:service:disable"
   "  Service Remove:service:remove"
   "──── Network ────────────────────────────────────────"
-  "  ADB Reverse Up  (USB link):ip:up"
-  "  ADB Reverse Down:ip:down"
-  "  ADB Reverse Status:ip:status"
+  "  Transport Up  (adb reverse / RNDIS auto-detect):ip:up"
+  "  Transport Down  (remove adb reverse):ip:down"
+  "  Transport Status:ip:status"
   "──────────────────────────────────────────────────────"
   "  Quit:__quit__:__quit__"
 )
@@ -64,27 +67,34 @@ collect_android_devices() {
 
   adb start-server >/dev/null 2>&1 || true
 
+  # -l gives transport/product/model fields; tr -d '\r' strips CR from ADB on
+  #  USB firmwares that return CRLF — without it state=="device\r" never matches.
   while IFS= read -r line; do
+    # strip trailing CR
+    line="${line%$'\r'}"
     [[ -z "$line" ]] && continue
-    [[ "$line" == List\ of\ devices* ]] && continue
+    [[ "$line" == "List of devices attached" ]] && continue
+    [[ "$line" == "* daemon"* ]] && continue
 
-    serial="${line%%[[:space:]]*}"
-    rest="${line#"$serial"}"
-    state="$(awk '{print $1}' <<<"$rest")"
+    # first field = serial, second = state; rest are key:value from -l
+    serial="$(awk '{print $1}' <<<"$line")"
+    state="$(awk '{print $2}' <<<"$line")"
 
     [[ -z "$serial" || "$state" != "device" ]] && continue
 
-    api="$(adb -s "$serial" shell getprop ro.build.version.sdk 2>/dev/null | tr -d '\r[:space:]')"
-    release="$(adb -s "$serial" shell getprop ro.build.version.release 2>/dev/null | tr -d '\r[:space:]')"
-    model="$(adb -s "$serial" shell getprop ro.product.model 2>/dev/null | tr -d '\r')"
+    # Use || true on every getprop call — old devices (API 17) may return
+    # non-zero exit codes which would abort the loop under set -euo pipefail.
+    api="$(adb -s "$serial" shell getprop ro.build.version.sdk 2>/dev/null | tr -d '\r[:space:]' || true)"
+    release="$(adb -s "$serial" shell getprop ro.build.version.release 2>/dev/null | tr -d '\r[:space:]' || true)"
+    model="$(adb -s "$serial" shell getprop ro.product.model 2>/dev/null | tr -d '\r\n' || true)"
     model="${model:-unknown-model}"
     api="${api:-?}"
     release="${release:-?}"
 
     ANDROID_SERIALS+=("$serial")
     ANDROID_APIS+=("$api")
-    ANDROID_LABELS+=("$model | android $release | api $api | $serial")
-  done < <(adb devices)
+    ANDROID_LABELS+=("$model  android $release  api $api  $serial")
+  done < <(adb devices -l 2>/dev/null || true)
 
   [[ ${#ANDROID_SERIALS[@]} -gt 0 ]]
 }
@@ -312,6 +322,9 @@ case "$selected_action" in
         if ! pick_android_pipeline "modern"; then
           exit 0
         fi
+      elif [[ "$cmd_" == "build-all" ]]; then
+        # no prompts — always builds both pipelines
+        true
       else
         if collect_android_devices; then
           if ! pick_android_device; then
@@ -330,6 +343,25 @@ case "$selected_action" in
             exit 0
           fi
         fi
+      fi
+
+      # ── build-all: build legacy + modern without any device/pipeline prompt ─
+      if [[ "$cmd_" == "build-all" ]]; then
+        echo "[wbgui] === Build All: host backend (Rust release) ==="
+        "$WBEAM" host build
+        rc_host=$?
+        echo "[wbgui] === Build All: Android legacy (minSdk=17) ==="
+        WBEAM_ANDROID_PIPELINE="legacy" "$WBEAM" android build
+        rc_legacy=$?
+        echo "[wbgui] === Build All: Android modern (minSdk=19) ==="
+        WBEAM_ANDROID_PIPELINE="modern" "$WBEAM" android build
+        rc_modern=$?
+        if (( rc_host != 0 || rc_legacy != 0 || rc_modern != 0 )); then
+          echo "[wbgui] build-all FAILED (host=$rc_host legacy=$rc_legacy modern=$rc_modern)" >&2
+          exit 1
+        fi
+        echo "[wbgui] build-all OK"
+        exit 0
       fi
 
       ALLOW_NO_TRANSPORT="0"

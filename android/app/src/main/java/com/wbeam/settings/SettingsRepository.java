@@ -37,7 +37,9 @@ public final class SettingsRepository {
         String cursor  = prefs.getString(PREF_CURSOR, "embedded");
 
         // Migration v3: collapse legacy encoder names to h265/rawpng.
-        if (!"h265".equals(encoder) && !"raw-png".equals(encoder) && !"rawpng".equals(encoder)) {
+        // h264 is a valid first-class encoder — pass through without migration.
+        if (!"h264".equals(encoder) && !"h265".equals(encoder)
+                && !"raw-png".equals(encoder) && !"rawpng".equals(encoder)) {
             encoder = "h265";
             prefs.edit().putString(PREF_ENCODER, encoder).apply();
         }

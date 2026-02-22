@@ -134,10 +134,12 @@ pub fn make_pipeline(
     let queue_buffer_frames = profile.queue_buffers;
     let buffer_time_ns = profile.queue_time_ns;
     let enc_element = match encoder_name {
+        "nvenc264" => "nvh264enc",
+        "x264"     => "x264enc",
         "nvenc265" => "nvh265enc",
-        "x265" => "x265enc",
-        "rawpng" => "pngenc",
-        _ => "x265enc",
+        "x265"     => "x265enc",
+        "rawpng"   => "pngenc",
+        _          => "x265enc",
     };
     let enc = gst::ElementFactory::make(enc_element)
         .name("enc")
@@ -171,24 +173,25 @@ pub fn make_pipeline(
         configure_queue(qmain);
     }
 
-    let caps_source_hint = gst::Caps::builder("video/x-raw")
-        .field("framerate", gst::Fraction::new(cfg.fps as i32, 1))
-        .build();
+    let caps_source_hint = gst::Caps::builder("video/x-raw").build();
     let _ = caps_src.set_property("caps", &caps_source_hint);
 
+    let mut raw_caps_builder = gst::Caps::builder("video/x-raw");
     let raw_format = if mode_png {
         "RGBA"
-    } else if encoder_name == "nvenc265" {
+    } else if encoder_name == "nvenc264" || encoder_name == "nvenc265" {
         "NV12"
     } else {
         "I420"
     };
-    let caps_raw = gst::Caps::builder("video/x-raw")
+    raw_caps_builder = raw_caps_builder
         .field("format", raw_format)
         .field("width", cfg.width as i32)
-        .field("height", cfg.height as i32)
-        .field("framerate", gst::Fraction::new(cfg.fps as i32, 1))
-        .build();
+        .field("height", cfg.height as i32);
+    if use_videorate {
+        raw_caps_builder = raw_caps_builder.field("framerate", gst::Fraction::new(cfg.fps as i32, 1));
+    }
+    let caps_raw = raw_caps_builder.build();
     let _ = caps1.set_property("caps", &caps_raw);
 
     if !mode_png {
