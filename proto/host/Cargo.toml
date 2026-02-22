@@ -1,0 +1,9 @@
+[package]
+name = "proto-host-image"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tiny_http = "0.12"
+log = "0.4"
+env_logger = "0.11"

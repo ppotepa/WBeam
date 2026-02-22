@@ -1,0 +1,128 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="com.proto.demo"
+4    android:versionCode="1"
+5    android:versionName="1.0" >
+6
+7    <uses-sdk
+8        android:minSdkVersion="17"
+8-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml
+9        android:targetSdkVersion="34" />
+9-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml
+10
+11    <uses-permission android:name="android.permission.INTERNET" />
+11-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:3:5-67
+11-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:3:22-64
+12
+13    <permission
+13-->[androidx.core:core:1.9.0] /home/ppotepa/.gradle/caches/transforms-3/ec4f76f6c0c02de8ba18086e7bd9baf5/transformed/core-1.9.0/AndroidManifest.xml:22:5-24:47
+14        android:name="com.proto.demo.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+14-->[androidx.core:core:1.9.0] /home/ppotepa/.gradle/caches/transforms-3/ec4f76f6c0c02de8ba18086e7bd9baf5/transformed/core-1.9.0/AndroidManifest.xml:23:9-81
+15        android:protectionLevel="signature" />
+15-->[androidx.core:core:1.9.0] /home/ppotepa/.gradle/caches/transforms-3/ec4f76f6c0c02de8ba18086e7bd9baf5/transformed/core-1.9.0/AndroidManifest.xml:24:9-44
+16
+17    <uses-permission android:name="com.proto.demo.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
+17-->[androidx.core:core:1.9.0] /home/ppotepa/.gradle/caches/transforms-3/ec4f76f6c0c02de8ba18086e7bd9baf5/transformed/core-1.9.0/AndroidManifest.xml:26:5-97
+17-->[androidx.core:core:1.9.0] /home/ppotepa/.gradle/caches/transforms-3/ec4f76f6c0c02de8ba18086e7bd9baf5/transformed/core-1.9.0/AndroidManifest.xml:26:22-94
+18
+19    <application
+19-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:5:5-19:19
+20        android:allowBackup="true"
+20-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:6:9-35
+21        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
+21-->[androidx.core:core:1.9.0] /home/ppotepa/.gradle/caches/transforms-3/ec4f76f6c0c02de8ba18086e7bd9baf5/transformed/core-1.9.0/AndroidManifest.xml:28:18-86
+22        android:debuggable="true"
+23        android:label="ProtoDemo"
+23-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:7:9-34
+24        android:networkSecurityConfig="@xml/network_security_config"
+24-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:8:9-69
+25        android:supportsRtl="true"
+25-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:9:9-35
+26        android:theme="@style/Theme.AppCompat.Light.NoActionBar" >
+26-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:10:9-65
+27        <activity
+27-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:11:9-18:20
+28            android:name="com.proto.demo.MainActivity"
+28-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:12:13-41
+29            android:exported="true" >
+29-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:13:13-36
+30            <intent-filter>
+30-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:14:13-17:29
+31                <action android:name="android.intent.action.MAIN" />
+31-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:15:17-69
+31-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:15:25-66
+32
+33                <category android:name="android.intent.category.LAUNCHER" />
+33-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:16:17-77
+33-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:16:27-74
+34            </intent-filter>
+35        </activity>
+36
+37        <provider
+37-->[androidx.emoji2:emoji2:1.2.0] /home/ppotepa/.gradle/caches/transforms-3/27ea2d1fe40306b6a6ebc7514e2ae640/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:24:9-32:20
+38            android:name="androidx.startup.InitializationProvider"
+38-->[androidx.emoji2:emoji2:1.2.0] /home/ppotepa/.gradle/caches/transforms-3/27ea2d1fe40306b6a6ebc7514e2ae640/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:25:13-67
+39            android:authorities="com.proto.demo.androidx-startup"
+39-->[androidx.emoji2:emoji2:1.2.0] /home/ppotepa/.gradle/caches/transforms-3/27ea2d1fe40306b6a6ebc7514e2ae640/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:26:13-68
+40            android:exported="false" >
+40-->[androidx.emoji2:emoji2:1.2.0] /home/ppotepa/.gradle/caches/transforms-3/27ea2d1fe40306b6a6ebc7514e2ae640/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:27:13-37
+41            <meta-data
+41-->[androidx.emoji2:emoji2:1.2.0] /home/ppotepa/.gradle/caches/transforms-3/27ea2d1fe40306b6a6ebc7514e2ae640/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:29:13-31:52
+42                android:name="androidx.emoji2.text.EmojiCompatInitializer"
+42-->[androidx.emoji2:emoji2:1.2.0] /home/ppotepa/.gradle/caches/transforms-3/27ea2d1fe40306b6a6ebc7514e2ae640/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:30:17-75
+43                android:value="androidx.startup" />
+43-->[androidx.emoji2:emoji2:1.2.0] /home/ppotepa/.gradle/caches/transforms-3/27ea2d1fe40306b6a6ebc7514e2ae640/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:31:17-49
+44            <meta-data
+44-->[androidx.lifecycle:lifecycle-process:2.6.1] /home/ppotepa/.gradle/caches/transforms-3/8b2a2d308460b1500c99f49e32990739/transformed/jetified-lifecycle-process-2.6.1/AndroidManifest.xml:29:13-31:52
+45                android:name="androidx.lifecycle.ProcessLifecycleInitializer"
+45-->[androidx.lifecycle:lifecycle-process:2.6.1] /home/ppotepa/.gradle/caches/transforms-3/8b2a2d308460b1500c99f49e32990739/transformed/jetified-lifecycle-process-2.6.1/AndroidManifest.xml:30:17-78
+46                android:value="androidx.startup" />
+46-->[androidx.lifecycle:lifecycle-process:2.6.1] /home/ppotepa/.gradle/caches/transforms-3/8b2a2d308460b1500c99f49e32990739/transformed/jetified-lifecycle-process-2.6.1/AndroidManifest.xml:31:17-49
+47            <meta-data
+47-->[androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:29:13-31:52
+48                android:name="androidx.profileinstaller.ProfileInstallerInitializer"
+48-->[androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:30:17-85
+49                android:value="androidx.startup" />
+49-->[androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:31:17-49
+50        </provider>
+51
+52        <receiver
+52-->[androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:34:9-52:20
+53            android:name="androidx.profileinstaller.ProfileInstallReceiver"
+53-->[androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:35:13-76
+54            android:directBootAware="false"
+54-->[androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:36:13-44
+55            android:enabled="true"
+55-->[androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:37:13-35
+56            android:exported="true"
+56-->[androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:38:13-36
+57            android:permission="android.permission.DUMP" >
+57-->[androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:39:13-57
+58            <intent-filter>
+58-->[androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:40:13-42:29
+59                <action android:name="androidx.profileinstaller.action.INSTALL_PROFILE" />
+59-->[androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:41:17-91
+59-->[androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:41:25-88
+60            </intent-filter>
+61            <intent-filter>
+61-->[androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:43:13-45:29
+62                <action android:name="androidx.profileinstaller.action.SKIP_FILE" />
+62-->[androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:44:17-85
+62-->[androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:44:25-82
+63            </intent-filter>
+64            <intent-filter>
+64-->[androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:46:13-48:29
+65                <action android:name="androidx.profileinstaller.action.SAVE_PROFILE" />
+65-->[androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:47:17-88
+65-->[androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:47:25-85
+66            </intent-filter>
+67            <intent-filter>
+67-->[androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:49:13-51:29
+68                <action android:name="androidx.profileinstaller.action.BENCHMARK_OPERATION" />
+68-->[androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:50:17-95
+68-->[androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:50:25-92
+69            </intent-filter>
+70        </receiver>
+71    </application>
+72
+73</manifest>

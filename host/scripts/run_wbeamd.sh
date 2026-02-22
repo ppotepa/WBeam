@@ -37,14 +37,24 @@ adb_best_effort_reverse() {
 }
 
 # Control plane + media plane over USB tunnel.
-if ! "$SCRIPT_DIR/usb_reverse.sh" "$STREAM_PORT"; then
+stream_reverse_ok=0
+control_reverse_ok=0
+
+if "$SCRIPT_DIR/usb_reverse.sh" "$STREAM_PORT"; then
+  stream_reverse_ok=1
+else
   echo "[wbeam] warning: stream adb reverse setup failed (continuing)" >&2
   echo "[wbeam] info: this is expected on some old Android/adbd versions; daemon startup is not blocked" >&2
 fi
-if ! adb_best_effort_reverse "$CONTROL_PORT"; then
+
+if adb_best_effort_reverse "$CONTROL_PORT"; then
+  control_reverse_ok=1
+else
   echo "[wbeam] warning: control adb reverse setup failed (continuing)" >&2
   echo "[wbeam] info: if reverse stays unavailable, use LAN host/IP fallback for API/stream" >&2
 fi
+
+echo "[wbeam] transport summary: serial=${ANDROID_SERIAL:-default} stream_reverse=${stream_reverse_ok} control_reverse=${control_reverse_ok}" >&2
 
 run_rust() {
   local args=(

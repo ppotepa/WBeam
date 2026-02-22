@@ -1,0 +1,300 @@
+-- Merging decision tree log ---
+manifest
+ADDED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:1:1-21:12
+INJECTED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:1:1-21:12
+INJECTED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:1:1-21:12
+INJECTED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:1:1-21:12
+MERGED from [com.google.android.material:material:1.11.0] /home/ppotepa/.gradle/caches/transforms-3/795c5bc1db68b6884bfeddb816d13ac1/transformed/material-1.11.0/AndroidManifest.xml:17:1-24:12
+MERGED from [androidx.appcompat:appcompat-resources:1.6.1] /home/ppotepa/.gradle/caches/transforms-3/955413b85531504294598a8aedf3347f/transformed/jetified-appcompat-resources-1.6.1/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.constraintlayout:constraintlayout:2.0.1] /home/ppotepa/.gradle/caches/transforms-3/5d71c09e320f59ac02ee86e96c089f7e/transformed/constraintlayout-2.0.1/AndroidManifest.xml:2:1-11:12
+MERGED from [androidx.appcompat:appcompat:1.6.1] /home/ppotepa/.gradle/caches/transforms-3/44fc53ad3ef1477fcc7b5dbdbf1cb4c0/transformed/appcompat-1.6.1/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.viewpager2:viewpager2:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/0ee68bfbd682d7e290626937651372ad/transformed/jetified-viewpager2-1.0.0/AndroidManifest.xml:17:1-24:12
+MERGED from [androidx.fragment:fragment:1.3.6] /home/ppotepa/.gradle/caches/transforms-3/de00681d1b149848a0dab915e4ae741a/transformed/fragment-1.3.6/AndroidManifest.xml:17:1-24:12
+MERGED from [androidx.activity:activity:1.8.0] /home/ppotepa/.gradle/caches/transforms-3/2618d9304ea2b10148a5c12076d7c918/transformed/jetified-activity-1.8.0/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.emoji2:emoji2-views-helper:1.2.0] /home/ppotepa/.gradle/caches/transforms-3/2f4e5cd3c19a22ad658424fbd55db187/transformed/jetified-emoji2-views-helper-1.2.0/AndroidManifest.xml:2:1-7:12
+MERGED from [androidx.emoji2:emoji2:1.2.0] /home/ppotepa/.gradle/caches/transforms-3/27ea2d1fe40306b6a6ebc7514e2ae640/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:17:1-35:12
+MERGED from [androidx.drawerlayout:drawerlayout:1.1.1] /home/ppotepa/.gradle/caches/transforms-3/7bc7a5b48c08c285c7816e5896abfab2/transformed/drawerlayout-1.1.1/AndroidManifest.xml:17:1-24:12
+MERGED from [androidx.coordinatorlayout:coordinatorlayout:1.1.0] /home/ppotepa/.gradle/caches/transforms-3/8255cf8f73e0ec2d884b3aa8102e6cd4/transformed/coordinatorlayout-1.1.0/AndroidManifest.xml:17:1-24:12
+MERGED from [androidx.dynamicanimation:dynamicanimation:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/c49cd9f9e70a62c0cfb6a9c057db283b/transformed/dynamicanimation-1.0.0/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.transition:transition:1.2.0] /home/ppotepa/.gradle/caches/transforms-3/cf7ed2c7db25c1ed83dad3026c9a2688/transformed/transition-1.2.0/AndroidManifest.xml:17:1-24:12
+MERGED from [androidx.vectordrawable:vectordrawable-animated:1.1.0] /home/ppotepa/.gradle/caches/transforms-3/5d6dbb7a2526cb46a310f1fa772a8328/transformed/vectordrawable-animated-1.1.0/AndroidManifest.xml:17:1-24:12
+MERGED from [androidx.vectordrawable:vectordrawable:1.1.0] /home/ppotepa/.gradle/caches/transforms-3/c17573ade799759c56baf884a28f8de6/transformed/vectordrawable-1.1.0/AndroidManifest.xml:17:1-24:12
+MERGED from [androidx.legacy:legacy-support-core-utils:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/bf2a6d46c92d2b1b015ce44f75d834ab/transformed/legacy-support-core-utils-1.0.0/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.loader:loader:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/f4e7914e58ba093567760f9d22f3626d/transformed/loader-1.0.0/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.savedstate:savedstate:1.2.1] /home/ppotepa/.gradle/caches/transforms-3/e1369b329ddf1e789a6b563794bd820e/transformed/jetified-savedstate-1.2.1/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.lifecycle:lifecycle-process:2.6.1] /home/ppotepa/.gradle/caches/transforms-3/8b2a2d308460b1500c99f49e32990739/transformed/jetified-lifecycle-process-2.6.1/AndroidManifest.xml:17:1-35:12
+MERGED from [androidx.lifecycle:lifecycle-livedata-core:2.6.1] /home/ppotepa/.gradle/caches/transforms-3/113526e2f35dfe8e609cb6eb995d2e11/transformed/lifecycle-livedata-core-2.6.1/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.lifecycle:lifecycle-livedata:2.6.1] /home/ppotepa/.gradle/caches/transforms-3/a3baf98b0d086df41fe251371a95edb9/transformed/lifecycle-livedata-2.6.1/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.lifecycle:lifecycle-viewmodel:2.6.1] /home/ppotepa/.gradle/caches/transforms-3/4518eb95b521d47a4aeec2cafd9e96f0/transformed/lifecycle-viewmodel-2.6.1/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.lifecycle:lifecycle-runtime:2.6.1] /home/ppotepa/.gradle/caches/transforms-3/d1064dc9575cef45e08548942bb59423/transformed/lifecycle-runtime-2.6.1/AndroidManifest.xml:2:1-7:12
+MERGED from [androidx.lifecycle:lifecycle-viewmodel-savedstate:2.6.1] /home/ppotepa/.gradle/caches/transforms-3/a07278cde381fdcddb5240165bd94f35/transformed/jetified-lifecycle-viewmodel-savedstate-2.6.1/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.core:core-ktx:1.9.0] /home/ppotepa/.gradle/caches/transforms-3/46167f1523bd689108129b80f4422441/transformed/jetified-core-ktx-1.9.0/AndroidManifest.xml:2:1-7:12
+MERGED from [androidx.viewpager:viewpager:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/064f6efcf72e45025c96c41bb0313fb3/transformed/viewpager-1.0.0/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.recyclerview:recyclerview:1.1.0] /home/ppotepa/.gradle/caches/transforms-3/722cfa06d51a32340f337ac9798393bf/transformed/recyclerview-1.1.0/AndroidManifest.xml:17:1-24:12
+MERGED from [androidx.customview:customview:1.1.0] /home/ppotepa/.gradle/caches/transforms-3/4432a2afdd19fc85814143f134bfa94c/transformed/customview-1.1.0/AndroidManifest.xml:17:1-24:12
+MERGED from [androidx.core:core:1.9.0] /home/ppotepa/.gradle/caches/transforms-3/ec4f76f6c0c02de8ba18086e7bd9baf5/transformed/core-1.9.0/AndroidManifest.xml:17:1-30:12
+MERGED from [androidx.cursoradapter:cursoradapter:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/2365384ad980976d11b4bd9d48d00571/transformed/cursoradapter-1.0.0/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.cardview:cardview:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/1f624a3ec658e1a90eb17b72d8f4e5aa/transformed/cardview-1.0.0/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.versionedparcelable:versionedparcelable:1.1.1] /home/ppotepa/.gradle/caches/transforms-3/4b621581b14be943fef7e9025808a5ef/transformed/versionedparcelable-1.1.1/AndroidManifest.xml:17:1-27:12
+MERGED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:17:1-55:12
+MERGED from [androidx.startup:startup-runtime:1.1.1] /home/ppotepa/.gradle/caches/transforms-3/11719f426e3912cf36f493acb6a06bf9/transformed/jetified-startup-runtime-1.1.1/AndroidManifest.xml:17:1-33:12
+MERGED from [androidx.tracing:tracing:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/6eaf261807bfdfb11a3a18692cc26456/transformed/jetified-tracing-1.0.0/AndroidManifest.xml:17:1-24:12
+MERGED from [androidx.interpolator:interpolator:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/fe726d578f90e61f945e51ad06a99ee0/transformed/interpolator-1.0.0/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.arch.core:core-runtime:2.2.0] /home/ppotepa/.gradle/caches/transforms-3/63166f2e06e790b45e44a8c52ec5b6f3/transformed/core-runtime-2.2.0/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.documentfile:documentfile:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/dc95db927df936e003ea23f2b843af5c/transformed/documentfile-1.0.0/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.localbroadcastmanager:localbroadcastmanager:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/4a128805ae54552b7183634231e39ff5/transformed/localbroadcastmanager-1.0.0/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.print:print:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/ae4109ec1e873f2074e4c3a60211a759/transformed/print-1.0.0/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.annotation:annotation-experimental:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/9c93c0208ca51e60d003bcd86a7f4e2d/transformed/jetified-annotation-experimental-1.3.0/AndroidManifest.xml:17:1-22:12
+INJECTED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:1:1-21:12
+INJECTED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:1:1-21:12
+INJECTED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:1:1-21:12
+	package
+		INJECTED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml
+		ADDED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:1:1-21:12
+		INJECTED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml
+	android:versionName
+		INJECTED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml
+		ADDED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:1:1-21:12
+		INJECTED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml
+	android:versionCode
+		INJECTED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml
+		ADDED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:1:1-21:12
+		INJECTED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml
+	xmlns:android
+		ADDED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:1:11-69
+uses-permission#android.permission.INTERNET
+ADDED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:3:5-67
+	android:name
+		ADDED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:3:22-64
+application
+ADDED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:5:5-19:19
+MERGED from [com.google.android.material:material:1.11.0] /home/ppotepa/.gradle/caches/transforms-3/795c5bc1db68b6884bfeddb816d13ac1/transformed/material-1.11.0/AndroidManifest.xml:22:5-20
+MERGED from [com.google.android.material:material:1.11.0] /home/ppotepa/.gradle/caches/transforms-3/795c5bc1db68b6884bfeddb816d13ac1/transformed/material-1.11.0/AndroidManifest.xml:22:5-20
+MERGED from [androidx.constraintlayout:constraintlayout:2.0.1] /home/ppotepa/.gradle/caches/transforms-3/5d71c09e320f59ac02ee86e96c089f7e/transformed/constraintlayout-2.0.1/AndroidManifest.xml:9:5-20
+MERGED from [androidx.constraintlayout:constraintlayout:2.0.1] /home/ppotepa/.gradle/caches/transforms-3/5d71c09e320f59ac02ee86e96c089f7e/transformed/constraintlayout-2.0.1/AndroidManifest.xml:9:5-20
+MERGED from [androidx.emoji2:emoji2:1.2.0] /home/ppotepa/.gradle/caches/transforms-3/27ea2d1fe40306b6a6ebc7514e2ae640/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:23:5-33:19
+MERGED from [androidx.emoji2:emoji2:1.2.0] /home/ppotepa/.gradle/caches/transforms-3/27ea2d1fe40306b6a6ebc7514e2ae640/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:23:5-33:19
+MERGED from [androidx.lifecycle:lifecycle-process:2.6.1] /home/ppotepa/.gradle/caches/transforms-3/8b2a2d308460b1500c99f49e32990739/transformed/jetified-lifecycle-process-2.6.1/AndroidManifest.xml:23:5-33:19
+MERGED from [androidx.lifecycle:lifecycle-process:2.6.1] /home/ppotepa/.gradle/caches/transforms-3/8b2a2d308460b1500c99f49e32990739/transformed/jetified-lifecycle-process-2.6.1/AndroidManifest.xml:23:5-33:19
+MERGED from [androidx.core:core:1.9.0] /home/ppotepa/.gradle/caches/transforms-3/ec4f76f6c0c02de8ba18086e7bd9baf5/transformed/core-1.9.0/AndroidManifest.xml:28:5-89
+MERGED from [androidx.core:core:1.9.0] /home/ppotepa/.gradle/caches/transforms-3/ec4f76f6c0c02de8ba18086e7bd9baf5/transformed/core-1.9.0/AndroidManifest.xml:28:5-89
+MERGED from [androidx.versionedparcelable:versionedparcelable:1.1.1] /home/ppotepa/.gradle/caches/transforms-3/4b621581b14be943fef7e9025808a5ef/transformed/versionedparcelable-1.1.1/AndroidManifest.xml:24:5-25:19
+MERGED from [androidx.versionedparcelable:versionedparcelable:1.1.1] /home/ppotepa/.gradle/caches/transforms-3/4b621581b14be943fef7e9025808a5ef/transformed/versionedparcelable-1.1.1/AndroidManifest.xml:24:5-25:19
+MERGED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:23:5-53:19
+MERGED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:23:5-53:19
+MERGED from [androidx.startup:startup-runtime:1.1.1] /home/ppotepa/.gradle/caches/transforms-3/11719f426e3912cf36f493acb6a06bf9/transformed/jetified-startup-runtime-1.1.1/AndroidManifest.xml:25:5-31:19
+MERGED from [androidx.startup:startup-runtime:1.1.1] /home/ppotepa/.gradle/caches/transforms-3/11719f426e3912cf36f493acb6a06bf9/transformed/jetified-startup-runtime-1.1.1/AndroidManifest.xml:25:5-31:19
+	android:appComponentFactory
+		ADDED from [androidx.core:core:1.9.0] /home/ppotepa/.gradle/caches/transforms-3/ec4f76f6c0c02de8ba18086e7bd9baf5/transformed/core-1.9.0/AndroidManifest.xml:28:18-86
+	android:supportsRtl
+		ADDED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:9:9-35
+	android:label
+		ADDED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:7:9-34
+	android:allowBackup
+		ADDED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:6:9-35
+	android:theme
+		ADDED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:10:9-65
+	android:networkSecurityConfig
+		ADDED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:8:9-69
+activity#com.proto.demo.MainActivity
+ADDED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:11:9-18:20
+	android:exported
+		ADDED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:13:13-36
+	android:name
+		ADDED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:12:13-41
+intent-filter#action:name:android.intent.action.MAIN+category:name:android.intent.category.LAUNCHER
+ADDED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:14:13-17:29
+action#android.intent.action.MAIN
+ADDED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:15:17-69
+	android:name
+		ADDED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:15:25-66
+category#android.intent.category.LAUNCHER
+ADDED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:16:17-77
+	android:name
+		ADDED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:16:27-74
+uses-sdk
+INJECTED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml reason: use-sdk injection requested
+INJECTED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml
+INJECTED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml
+MERGED from [com.google.android.material:material:1.11.0] /home/ppotepa/.gradle/caches/transforms-3/795c5bc1db68b6884bfeddb816d13ac1/transformed/material-1.11.0/AndroidManifest.xml:20:5-44
+MERGED from [com.google.android.material:material:1.11.0] /home/ppotepa/.gradle/caches/transforms-3/795c5bc1db68b6884bfeddb816d13ac1/transformed/material-1.11.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.appcompat:appcompat-resources:1.6.1] /home/ppotepa/.gradle/caches/transforms-3/955413b85531504294598a8aedf3347f/transformed/jetified-appcompat-resources-1.6.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.appcompat:appcompat-resources:1.6.1] /home/ppotepa/.gradle/caches/transforms-3/955413b85531504294598a8aedf3347f/transformed/jetified-appcompat-resources-1.6.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.constraintlayout:constraintlayout:2.0.1] /home/ppotepa/.gradle/caches/transforms-3/5d71c09e320f59ac02ee86e96c089f7e/transformed/constraintlayout-2.0.1/AndroidManifest.xml:5:5-7:41
+MERGED from [androidx.constraintlayout:constraintlayout:2.0.1] /home/ppotepa/.gradle/caches/transforms-3/5d71c09e320f59ac02ee86e96c089f7e/transformed/constraintlayout-2.0.1/AndroidManifest.xml:5:5-7:41
+MERGED from [androidx.appcompat:appcompat:1.6.1] /home/ppotepa/.gradle/caches/transforms-3/44fc53ad3ef1477fcc7b5dbdbf1cb4c0/transformed/appcompat-1.6.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.appcompat:appcompat:1.6.1] /home/ppotepa/.gradle/caches/transforms-3/44fc53ad3ef1477fcc7b5dbdbf1cb4c0/transformed/appcompat-1.6.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.viewpager2:viewpager2:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/0ee68bfbd682d7e290626937651372ad/transformed/jetified-viewpager2-1.0.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.viewpager2:viewpager2:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/0ee68bfbd682d7e290626937651372ad/transformed/jetified-viewpager2-1.0.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.fragment:fragment:1.3.6] /home/ppotepa/.gradle/caches/transforms-3/de00681d1b149848a0dab915e4ae741a/transformed/fragment-1.3.6/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.fragment:fragment:1.3.6] /home/ppotepa/.gradle/caches/transforms-3/de00681d1b149848a0dab915e4ae741a/transformed/fragment-1.3.6/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.activity:activity:1.8.0] /home/ppotepa/.gradle/caches/transforms-3/2618d9304ea2b10148a5c12076d7c918/transformed/jetified-activity-1.8.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.activity:activity:1.8.0] /home/ppotepa/.gradle/caches/transforms-3/2618d9304ea2b10148a5c12076d7c918/transformed/jetified-activity-1.8.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.emoji2:emoji2-views-helper:1.2.0] /home/ppotepa/.gradle/caches/transforms-3/2f4e5cd3c19a22ad658424fbd55db187/transformed/jetified-emoji2-views-helper-1.2.0/AndroidManifest.xml:5:5-44
+MERGED from [androidx.emoji2:emoji2-views-helper:1.2.0] /home/ppotepa/.gradle/caches/transforms-3/2f4e5cd3c19a22ad658424fbd55db187/transformed/jetified-emoji2-views-helper-1.2.0/AndroidManifest.xml:5:5-44
+MERGED from [androidx.emoji2:emoji2:1.2.0] /home/ppotepa/.gradle/caches/transforms-3/27ea2d1fe40306b6a6ebc7514e2ae640/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:21:5-44
+MERGED from [androidx.emoji2:emoji2:1.2.0] /home/ppotepa/.gradle/caches/transforms-3/27ea2d1fe40306b6a6ebc7514e2ae640/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:21:5-44
+MERGED from [androidx.drawerlayout:drawerlayout:1.1.1] /home/ppotepa/.gradle/caches/transforms-3/7bc7a5b48c08c285c7816e5896abfab2/transformed/drawerlayout-1.1.1/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.drawerlayout:drawerlayout:1.1.1] /home/ppotepa/.gradle/caches/transforms-3/7bc7a5b48c08c285c7816e5896abfab2/transformed/drawerlayout-1.1.1/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.coordinatorlayout:coordinatorlayout:1.1.0] /home/ppotepa/.gradle/caches/transforms-3/8255cf8f73e0ec2d884b3aa8102e6cd4/transformed/coordinatorlayout-1.1.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.coordinatorlayout:coordinatorlayout:1.1.0] /home/ppotepa/.gradle/caches/transforms-3/8255cf8f73e0ec2d884b3aa8102e6cd4/transformed/coordinatorlayout-1.1.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.dynamicanimation:dynamicanimation:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/c49cd9f9e70a62c0cfb6a9c057db283b/transformed/dynamicanimation-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.dynamicanimation:dynamicanimation:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/c49cd9f9e70a62c0cfb6a9c057db283b/transformed/dynamicanimation-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.transition:transition:1.2.0] /home/ppotepa/.gradle/caches/transforms-3/cf7ed2c7db25c1ed83dad3026c9a2688/transformed/transition-1.2.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.transition:transition:1.2.0] /home/ppotepa/.gradle/caches/transforms-3/cf7ed2c7db25c1ed83dad3026c9a2688/transformed/transition-1.2.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.vectordrawable:vectordrawable-animated:1.1.0] /home/ppotepa/.gradle/caches/transforms-3/5d6dbb7a2526cb46a310f1fa772a8328/transformed/vectordrawable-animated-1.1.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.vectordrawable:vectordrawable-animated:1.1.0] /home/ppotepa/.gradle/caches/transforms-3/5d6dbb7a2526cb46a310f1fa772a8328/transformed/vectordrawable-animated-1.1.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.vectordrawable:vectordrawable:1.1.0] /home/ppotepa/.gradle/caches/transforms-3/c17573ade799759c56baf884a28f8de6/transformed/vectordrawable-1.1.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.vectordrawable:vectordrawable:1.1.0] /home/ppotepa/.gradle/caches/transforms-3/c17573ade799759c56baf884a28f8de6/transformed/vectordrawable-1.1.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.legacy:legacy-support-core-utils:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/bf2a6d46c92d2b1b015ce44f75d834ab/transformed/legacy-support-core-utils-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.legacy:legacy-support-core-utils:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/bf2a6d46c92d2b1b015ce44f75d834ab/transformed/legacy-support-core-utils-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.loader:loader:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/f4e7914e58ba093567760f9d22f3626d/transformed/loader-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.loader:loader:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/f4e7914e58ba093567760f9d22f3626d/transformed/loader-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.savedstate:savedstate:1.2.1] /home/ppotepa/.gradle/caches/transforms-3/e1369b329ddf1e789a6b563794bd820e/transformed/jetified-savedstate-1.2.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.savedstate:savedstate:1.2.1] /home/ppotepa/.gradle/caches/transforms-3/e1369b329ddf1e789a6b563794bd820e/transformed/jetified-savedstate-1.2.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.lifecycle:lifecycle-process:2.6.1] /home/ppotepa/.gradle/caches/transforms-3/8b2a2d308460b1500c99f49e32990739/transformed/jetified-lifecycle-process-2.6.1/AndroidManifest.xml:21:5-44
+MERGED from [androidx.lifecycle:lifecycle-process:2.6.1] /home/ppotepa/.gradle/caches/transforms-3/8b2a2d308460b1500c99f49e32990739/transformed/jetified-lifecycle-process-2.6.1/AndroidManifest.xml:21:5-44
+MERGED from [androidx.lifecycle:lifecycle-livedata-core:2.6.1] /home/ppotepa/.gradle/caches/transforms-3/113526e2f35dfe8e609cb6eb995d2e11/transformed/lifecycle-livedata-core-2.6.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.lifecycle:lifecycle-livedata-core:2.6.1] /home/ppotepa/.gradle/caches/transforms-3/113526e2f35dfe8e609cb6eb995d2e11/transformed/lifecycle-livedata-core-2.6.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.lifecycle:lifecycle-livedata:2.6.1] /home/ppotepa/.gradle/caches/transforms-3/a3baf98b0d086df41fe251371a95edb9/transformed/lifecycle-livedata-2.6.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.lifecycle:lifecycle-livedata:2.6.1] /home/ppotepa/.gradle/caches/transforms-3/a3baf98b0d086df41fe251371a95edb9/transformed/lifecycle-livedata-2.6.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.lifecycle:lifecycle-viewmodel:2.6.1] /home/ppotepa/.gradle/caches/transforms-3/4518eb95b521d47a4aeec2cafd9e96f0/transformed/lifecycle-viewmodel-2.6.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.lifecycle:lifecycle-viewmodel:2.6.1] /home/ppotepa/.gradle/caches/transforms-3/4518eb95b521d47a4aeec2cafd9e96f0/transformed/lifecycle-viewmodel-2.6.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.lifecycle:lifecycle-runtime:2.6.1] /home/ppotepa/.gradle/caches/transforms-3/d1064dc9575cef45e08548942bb59423/transformed/lifecycle-runtime-2.6.1/AndroidManifest.xml:5:5-44
+MERGED from [androidx.lifecycle:lifecycle-runtime:2.6.1] /home/ppotepa/.gradle/caches/transforms-3/d1064dc9575cef45e08548942bb59423/transformed/lifecycle-runtime-2.6.1/AndroidManifest.xml:5:5-44
+MERGED from [androidx.lifecycle:lifecycle-viewmodel-savedstate:2.6.1] /home/ppotepa/.gradle/caches/transforms-3/a07278cde381fdcddb5240165bd94f35/transformed/jetified-lifecycle-viewmodel-savedstate-2.6.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.lifecycle:lifecycle-viewmodel-savedstate:2.6.1] /home/ppotepa/.gradle/caches/transforms-3/a07278cde381fdcddb5240165bd94f35/transformed/jetified-lifecycle-viewmodel-savedstate-2.6.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.core:core-ktx:1.9.0] /home/ppotepa/.gradle/caches/transforms-3/46167f1523bd689108129b80f4422441/transformed/jetified-core-ktx-1.9.0/AndroidManifest.xml:5:5-44
+MERGED from [androidx.core:core-ktx:1.9.0] /home/ppotepa/.gradle/caches/transforms-3/46167f1523bd689108129b80f4422441/transformed/jetified-core-ktx-1.9.0/AndroidManifest.xml:5:5-44
+MERGED from [androidx.viewpager:viewpager:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/064f6efcf72e45025c96c41bb0313fb3/transformed/viewpager-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.viewpager:viewpager:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/064f6efcf72e45025c96c41bb0313fb3/transformed/viewpager-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.recyclerview:recyclerview:1.1.0] /home/ppotepa/.gradle/caches/transforms-3/722cfa06d51a32340f337ac9798393bf/transformed/recyclerview-1.1.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.recyclerview:recyclerview:1.1.0] /home/ppotepa/.gradle/caches/transforms-3/722cfa06d51a32340f337ac9798393bf/transformed/recyclerview-1.1.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.customview:customview:1.1.0] /home/ppotepa/.gradle/caches/transforms-3/4432a2afdd19fc85814143f134bfa94c/transformed/customview-1.1.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.customview:customview:1.1.0] /home/ppotepa/.gradle/caches/transforms-3/4432a2afdd19fc85814143f134bfa94c/transformed/customview-1.1.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.core:core:1.9.0] /home/ppotepa/.gradle/caches/transforms-3/ec4f76f6c0c02de8ba18086e7bd9baf5/transformed/core-1.9.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.core:core:1.9.0] /home/ppotepa/.gradle/caches/transforms-3/ec4f76f6c0c02de8ba18086e7bd9baf5/transformed/core-1.9.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.cursoradapter:cursoradapter:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/2365384ad980976d11b4bd9d48d00571/transformed/cursoradapter-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.cursoradapter:cursoradapter:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/2365384ad980976d11b4bd9d48d00571/transformed/cursoradapter-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.cardview:cardview:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/1f624a3ec658e1a90eb17b72d8f4e5aa/transformed/cardview-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.cardview:cardview:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/1f624a3ec658e1a90eb17b72d8f4e5aa/transformed/cardview-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.versionedparcelable:versionedparcelable:1.1.1] /home/ppotepa/.gradle/caches/transforms-3/4b621581b14be943fef7e9025808a5ef/transformed/versionedparcelable-1.1.1/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.versionedparcelable:versionedparcelable:1.1.1] /home/ppotepa/.gradle/caches/transforms-3/4b621581b14be943fef7e9025808a5ef/transformed/versionedparcelable-1.1.1/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:21:5-44
+MERGED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:21:5-44
+MERGED from [androidx.startup:startup-runtime:1.1.1] /home/ppotepa/.gradle/caches/transforms-3/11719f426e3912cf36f493acb6a06bf9/transformed/jetified-startup-runtime-1.1.1/AndroidManifest.xml:21:5-23:41
+MERGED from [androidx.startup:startup-runtime:1.1.1] /home/ppotepa/.gradle/caches/transforms-3/11719f426e3912cf36f493acb6a06bf9/transformed/jetified-startup-runtime-1.1.1/AndroidManifest.xml:21:5-23:41
+MERGED from [androidx.tracing:tracing:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/6eaf261807bfdfb11a3a18692cc26456/transformed/jetified-tracing-1.0.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.tracing:tracing:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/6eaf261807bfdfb11a3a18692cc26456/transformed/jetified-tracing-1.0.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.interpolator:interpolator:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/fe726d578f90e61f945e51ad06a99ee0/transformed/interpolator-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.interpolator:interpolator:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/fe726d578f90e61f945e51ad06a99ee0/transformed/interpolator-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.arch.core:core-runtime:2.2.0] /home/ppotepa/.gradle/caches/transforms-3/63166f2e06e790b45e44a8c52ec5b6f3/transformed/core-runtime-2.2.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.arch.core:core-runtime:2.2.0] /home/ppotepa/.gradle/caches/transforms-3/63166f2e06e790b45e44a8c52ec5b6f3/transformed/core-runtime-2.2.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.documentfile:documentfile:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/dc95db927df936e003ea23f2b843af5c/transformed/documentfile-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.documentfile:documentfile:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/dc95db927df936e003ea23f2b843af5c/transformed/documentfile-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.localbroadcastmanager:localbroadcastmanager:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/4a128805ae54552b7183634231e39ff5/transformed/localbroadcastmanager-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.localbroadcastmanager:localbroadcastmanager:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/4a128805ae54552b7183634231e39ff5/transformed/localbroadcastmanager-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.print:print:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/ae4109ec1e873f2074e4c3a60211a759/transformed/print-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.print:print:1.0.0] /home/ppotepa/.gradle/caches/transforms-3/ae4109ec1e873f2074e4c3a60211a759/transformed/print-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.annotation:annotation-experimental:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/9c93c0208ca51e60d003bcd86a7f4e2d/transformed/jetified-annotation-experimental-1.3.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.annotation:annotation-experimental:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/9c93c0208ca51e60d003bcd86a7f4e2d/transformed/jetified-annotation-experimental-1.3.0/AndroidManifest.xml:20:5-44
+INJECTED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml
+INJECTED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml
+	android:targetSdkVersion
+		INJECTED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml
+		ADDED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml
+		INJECTED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml
+	android:minSdkVersion
+		INJECTED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml
+		ADDED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml
+		INJECTED from /mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml
+provider#androidx.startup.InitializationProvider
+ADDED from [androidx.emoji2:emoji2:1.2.0] /home/ppotepa/.gradle/caches/transforms-3/27ea2d1fe40306b6a6ebc7514e2ae640/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:24:9-32:20
+MERGED from [androidx.lifecycle:lifecycle-process:2.6.1] /home/ppotepa/.gradle/caches/transforms-3/8b2a2d308460b1500c99f49e32990739/transformed/jetified-lifecycle-process-2.6.1/AndroidManifest.xml:24:9-32:20
+MERGED from [androidx.lifecycle:lifecycle-process:2.6.1] /home/ppotepa/.gradle/caches/transforms-3/8b2a2d308460b1500c99f49e32990739/transformed/jetified-lifecycle-process-2.6.1/AndroidManifest.xml:24:9-32:20
+MERGED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:24:9-32:20
+MERGED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:24:9-32:20
+MERGED from [androidx.startup:startup-runtime:1.1.1] /home/ppotepa/.gradle/caches/transforms-3/11719f426e3912cf36f493acb6a06bf9/transformed/jetified-startup-runtime-1.1.1/AndroidManifest.xml:26:9-30:34
+MERGED from [androidx.startup:startup-runtime:1.1.1] /home/ppotepa/.gradle/caches/transforms-3/11719f426e3912cf36f493acb6a06bf9/transformed/jetified-startup-runtime-1.1.1/AndroidManifest.xml:26:9-30:34
+	tools:node
+		ADDED from [androidx.emoji2:emoji2:1.2.0] /home/ppotepa/.gradle/caches/transforms-3/27ea2d1fe40306b6a6ebc7514e2ae640/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:28:13-31
+	android:authorities
+		ADDED from [androidx.emoji2:emoji2:1.2.0] /home/ppotepa/.gradle/caches/transforms-3/27ea2d1fe40306b6a6ebc7514e2ae640/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:26:13-68
+	android:exported
+		ADDED from [androidx.emoji2:emoji2:1.2.0] /home/ppotepa/.gradle/caches/transforms-3/27ea2d1fe40306b6a6ebc7514e2ae640/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:27:13-37
+	android:name
+		ADDED from [androidx.emoji2:emoji2:1.2.0] /home/ppotepa/.gradle/caches/transforms-3/27ea2d1fe40306b6a6ebc7514e2ae640/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:25:13-67
+meta-data#androidx.emoji2.text.EmojiCompatInitializer
+ADDED from [androidx.emoji2:emoji2:1.2.0] /home/ppotepa/.gradle/caches/transforms-3/27ea2d1fe40306b6a6ebc7514e2ae640/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:29:13-31:52
+	android:value
+		ADDED from [androidx.emoji2:emoji2:1.2.0] /home/ppotepa/.gradle/caches/transforms-3/27ea2d1fe40306b6a6ebc7514e2ae640/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:31:17-49
+	android:name
+		ADDED from [androidx.emoji2:emoji2:1.2.0] /home/ppotepa/.gradle/caches/transforms-3/27ea2d1fe40306b6a6ebc7514e2ae640/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:30:17-75
+meta-data#androidx.lifecycle.ProcessLifecycleInitializer
+ADDED from [androidx.lifecycle:lifecycle-process:2.6.1] /home/ppotepa/.gradle/caches/transforms-3/8b2a2d308460b1500c99f49e32990739/transformed/jetified-lifecycle-process-2.6.1/AndroidManifest.xml:29:13-31:52
+	android:value
+		ADDED from [androidx.lifecycle:lifecycle-process:2.6.1] /home/ppotepa/.gradle/caches/transforms-3/8b2a2d308460b1500c99f49e32990739/transformed/jetified-lifecycle-process-2.6.1/AndroidManifest.xml:31:17-49
+	android:name
+		ADDED from [androidx.lifecycle:lifecycle-process:2.6.1] /home/ppotepa/.gradle/caches/transforms-3/8b2a2d308460b1500c99f49e32990739/transformed/jetified-lifecycle-process-2.6.1/AndroidManifest.xml:30:17-78
+permission#${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
+ADDED from [androidx.core:core:1.9.0] /home/ppotepa/.gradle/caches/transforms-3/ec4f76f6c0c02de8ba18086e7bd9baf5/transformed/core-1.9.0/AndroidManifest.xml:22:5-24:47
+	android:protectionLevel
+		ADDED from [androidx.core:core:1.9.0] /home/ppotepa/.gradle/caches/transforms-3/ec4f76f6c0c02de8ba18086e7bd9baf5/transformed/core-1.9.0/AndroidManifest.xml:24:9-44
+	android:name
+		ADDED from [androidx.core:core:1.9.0] /home/ppotepa/.gradle/caches/transforms-3/ec4f76f6c0c02de8ba18086e7bd9baf5/transformed/core-1.9.0/AndroidManifest.xml:23:9-81
+permission#com.proto.demo.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
+ADDED from [androidx.core:core:1.9.0] /home/ppotepa/.gradle/caches/transforms-3/ec4f76f6c0c02de8ba18086e7bd9baf5/transformed/core-1.9.0/AndroidManifest.xml:22:5-24:47
+	android:protectionLevel
+		ADDED from [androidx.core:core:1.9.0] /home/ppotepa/.gradle/caches/transforms-3/ec4f76f6c0c02de8ba18086e7bd9baf5/transformed/core-1.9.0/AndroidManifest.xml:24:9-44
+	android:name
+		ADDED from [androidx.core:core:1.9.0] /home/ppotepa/.gradle/caches/transforms-3/ec4f76f6c0c02de8ba18086e7bd9baf5/transformed/core-1.9.0/AndroidManifest.xml:23:9-81
+uses-permission#${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
+ADDED from [androidx.core:core:1.9.0] /home/ppotepa/.gradle/caches/transforms-3/ec4f76f6c0c02de8ba18086e7bd9baf5/transformed/core-1.9.0/AndroidManifest.xml:26:5-97
+	android:name
+		ADDED from [androidx.core:core:1.9.0] /home/ppotepa/.gradle/caches/transforms-3/ec4f76f6c0c02de8ba18086e7bd9baf5/transformed/core-1.9.0/AndroidManifest.xml:26:22-94
+uses-permission#com.proto.demo.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
+ADDED from [androidx.core:core:1.9.0] /home/ppotepa/.gradle/caches/transforms-3/ec4f76f6c0c02de8ba18086e7bd9baf5/transformed/core-1.9.0/AndroidManifest.xml:26:5-97
+	android:name
+		ADDED from [androidx.core:core:1.9.0] /home/ppotepa/.gradle/caches/transforms-3/ec4f76f6c0c02de8ba18086e7bd9baf5/transformed/core-1.9.0/AndroidManifest.xml:26:22-94
+meta-data#androidx.profileinstaller.ProfileInstallerInitializer
+ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:29:13-31:52
+	android:value
+		ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:31:17-49
+	android:name
+		ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:30:17-85
+receiver#androidx.profileinstaller.ProfileInstallReceiver
+ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:34:9-52:20
+	android:enabled
+		ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:37:13-35
+	android:exported
+		ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:38:13-36
+	android:permission
+		ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:39:13-57
+	android:directBootAware
+		ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:36:13-44
+	android:name
+		ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:35:13-76
+intent-filter#action:name:androidx.profileinstaller.action.INSTALL_PROFILE
+ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:40:13-42:29
+action#androidx.profileinstaller.action.INSTALL_PROFILE
+ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:41:17-91
+	android:name
+		ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:41:25-88
+intent-filter#action:name:androidx.profileinstaller.action.SKIP_FILE
+ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:43:13-45:29
+action#androidx.profileinstaller.action.SKIP_FILE
+ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:44:17-85
+	android:name
+		ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:44:25-82
+intent-filter#action:name:androidx.profileinstaller.action.SAVE_PROFILE
+ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:46:13-48:29
+action#androidx.profileinstaller.action.SAVE_PROFILE
+ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:47:17-88
+	android:name
+		ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:47:25-85
+intent-filter#action:name:androidx.profileinstaller.action.BENCHMARK_OPERATION
+ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:49:13-51:29
+action#androidx.profileinstaller.action.BENCHMARK_OPERATION
+ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:50:17-95
+	android:name
+		ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/ppotepa/.gradle/caches/transforms-3/85aa8c759401da5410967539d533a2ad/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:50:25-92

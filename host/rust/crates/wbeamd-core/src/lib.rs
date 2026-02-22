@@ -12,7 +12,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{mpsc, Mutex};
 use tokio::time::sleep;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 use wbeamd_api::{
     validate_config, valid_values, ActiveConfig, BaseResponse, ClientMetricsRequest, ClientMetricsResponse,
     ConfigPatch, ErrorResponse, HealthResponse, KpiSnapshot, MetricsResponse, MetricsSnapshot, PresetsResponse,
@@ -664,7 +664,19 @@ impl DaemonCore {
             .unwrap_or_else(|| self.root.join("host/rust/target/release/wbeamd-streamer"));
 
         let mut cmd;
-        if use_rust_streamer && rust_streamer_bin.exists() {
+        if use_rust_streamer {
+            if !rust_streamer_bin.exists() {
+                error!(
+                    path = %rust_streamer_bin.display(),
+                    "rust streamer binary not found – run `./wbeam host build` to build it \
+                     (set WBEAM_USE_RUST_STREAMER=false to force legacy python streamer)"
+                );
+                return Err(CoreError::Spawn(format!(
+                    "rust streamer binary not found: {} \
+                     (run `./wbeam host build`; or set WBEAM_USE_RUST_STREAMER=false to use python fallback)",
+                    rust_streamer_bin.display()
+                )));
+            }
             cmd = Command::new(rust_streamer_bin);
             cmd.arg("--profile")
                 .arg(&cfg.profile)
@@ -688,9 +700,7 @@ impl DaemonCore {
                 cmd.arg("--intra-only");
             }
         } else {
-            if use_rust_streamer {
-                warn!(path = %rust_streamer_bin.display(), "rust streamer missing, falling back to python helper");
-            }
+            warn!("WBEAM_USE_RUST_STREAMER=false – using legacy python streamer");
             let stream_script = self.root.join("host/scripts/stream_wayland_portal_h264.py");
             cmd = Command::new("python3");
             cmd.arg("-u")

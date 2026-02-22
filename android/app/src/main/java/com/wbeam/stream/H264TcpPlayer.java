@@ -6,6 +6,8 @@ import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.media.MediaCodec;
+import android.media.MediaCodecInfo;
+import android.media.MediaCodecList;
 import android.media.MediaFormat;
 import android.os.Build;
 import android.os.SystemClock;
@@ -49,7 +51,8 @@ public final class H264TcpPlayer {
     private static final byte FRAME_VERSION           = 0x01;
     private static final int  FRAME_FLAG_KEYFRAME     = 0x02;
     private static final int  FRAME_HEADER_SIZE       = 22;
-    private static final int  SOCKET_RECV_BUFFER_SIZE = 512 * 1024;
+    // 2 MB: headroom for bursty IDR frames at 25 Mbps+ over USB tether
+    private static final int  SOCKET_RECV_BUFFER_SIZE = 2 * 1024 * 1024;
     private static final int  FRAME_PAYLOAD_INITIAL_CAP = 8 * 1024 * 1024;
     private static final int  FRAME_PAYLOAD_HARD_CAP  = 32 * 1024 * 1024;
     private static final int  FRAME_RESYNC_SCAN_LIMIT = 64 * 1024;
@@ -133,6 +136,9 @@ public final class H264TcpPlayer {
     public void start() {
         if (running) return;
         running = true;
+        Log.i(TAG, String.format(Locale.US,
+                "start stream endpoint=tcp://%s:%d decode=%dx%d frameUs=%d",
+                HOST, PORT, decodeWidth, decodeHeight, frameUs));
         thread = new Thread(this::runLoop, "wbeam-h264-player");
         thread.start();
     }
@@ -177,12 +183,13 @@ public final class H264TcpPlayer {
                 // C3: framed-only transport for deterministic frame boundaries and metrics.
                 framedDecodeLoop(new BufferedInputStream(socket.getInputStream(), 256 * 1024), codecHolder);
 
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 if (running) {
                     reconnects++;
                     reconnectDelayMs = Math.min(5000, reconnectDelayMs + 400);
                     String reason = e.getClass().getSimpleName() + ": " + e.getMessage();
-                    if (isExpectedStreamClose(e)) {
+                    boolean isException = (e instanceof Exception);
+                    if (isException && isExpectedStreamClose((Exception) e)) {
                         Log.w(TAG, "stream worker reconnect #" + reconnects
                                 + " delay_ms=" + reconnectDelayMs + " reason=" + reason);
                         statusListener.onStatus(STATE_CONNECTING, "stream reconnecting: " + reason, 0);
@@ -501,6 +508,14 @@ public final class H264TcpPlayer {
 
         final int seqGapBudget = computeSeqGapBudget(frameUs, isUltraMode);
         final boolean dropLateOutput = isUltraMode;
+
+        // ── Capability guard – reject HEVC early on devices without a decoder ──
+        if (isHevc && !codecSupported(videoMime)) {
+            throw new IOException(
+                "HEVC (video/hevc) decoder not available on this device "
+                + "(API " + Build.VERSION.SDK_INT + "). "
+                + "Configure the host to use H.264 (encoder=h264).");
+        }
 
         // ── Create MediaCodec for the codec type signalled in HELLO ───────────
         final MediaCodec codec;
@@ -1167,6 +1182,24 @@ public final class H264TcpPlayer {
     private static boolean isRecoveryNal(byte[] data, int offset, int size) {
         int type = firstNalType(data, offset, size);
         return type == 5 || type == 7 || type == 8; // IDR/SPS/PPS
+    }
+
+    /**
+     * Returns true if this device has a hardware or software decoder for the
+     * given MIME type.  Uses the deprecated static MediaCodecList API that
+     * works on API 16+ (the new instance-based API requires API 21).
+     */
+    @SuppressWarnings("deprecation")
+    private static boolean codecSupported(String mimeType) {
+        int count = MediaCodecList.getCodecCount();
+        for (int i = 0; i < count; i++) {
+            MediaCodecInfo info = MediaCodecList.getCodecInfoAt(i);
+            if (info.isEncoder()) continue;
+            for (String type : info.getSupportedTypes()) {
+                if (type.equalsIgnoreCase(mimeType)) return true;
+            }
+        }
+        return false;
     }
 
     private static boolean containsRecoveryNal(byte[] data, int size, boolean isHevc) {

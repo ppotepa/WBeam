@@ -29,6 +29,7 @@ public final class StatusPoller {
     private long    daemonRunId        = 0L;
     private long    daemonUptimeSec    = 0L;
     private String  daemonService      = "-";
+    private String  daemonBuildRevision = "-";
     private String  daemonStateSnapshot = "";
 
     // ── Poll bookkeeping ──────────────────────────────────────────────────────
@@ -67,6 +68,7 @@ public final class StatusPoller {
                 boolean errorChanged,
                 long    uptimeSec,
                 String  service,
+                String  buildRevision,
                 JSONObject metrics
         );
 
@@ -133,6 +135,7 @@ public final class StatusPoller {
     public long    getDaemonRunId()     { return daemonRunId; }
     public long    getDaemonUptimeSec() { return daemonUptimeSec; }
     public String  getDaemonService()   { return daemonService; }
+    public String  getDaemonBuildRevision() { return daemonBuildRevision; }
 
     // ── Poll logic ────────────────────────────────────────────────────────────
 
@@ -176,18 +179,22 @@ public final class StatusPoller {
         daemonRunId      = status.optLong("run_id", daemonRunId);
         daemonUptimeSec  = status.optLong("uptime", daemonUptimeSec);
         daemonService    = health != null ? health.optString("service", daemonService) : daemonService;
+        daemonBuildRevision = health != null
+            ? health.optString("build_revision", daemonBuildRevision)
+            : daemonBuildRevision;
 
         String newSnapshot = daemonState + "|" + daemonRunId + "|" + daemonLastError;
         if (!newSnapshot.equals(daemonStateSnapshot)) {
             daemonStateSnapshot = newSnapshot;
             Log.i(TAG, "daemon state=" + daemonState + " run_id=" + daemonRunId
+                    + " api=" + HostApiClient.API_BASE
                     + (daemonLastError.isEmpty() ? "" : " last_error=" + daemonLastError));
         }
 
         callbacks.onDaemonStatusUpdate(
                 true, wasReachable,
                 daemonHostName, daemonState, daemonRunId, daemonLastError, errorChanged,
-                daemonUptimeSec, daemonService, metrics
+            daemonUptimeSec, daemonService, daemonBuildRevision, metrics
         );
 
         if ("STREAMING".equals(daemonState)) {
@@ -218,7 +225,7 @@ public final class StatusPoller {
         boolean wasReachable = daemonReachable;
         daemonReachable = false;
         daemonState     = "DISCONNECTED";
-        Log.e(TAG, "daemon poll failed", e);
+        Log.e(TAG, "daemon poll failed api=" + HostApiClient.API_BASE, e);
         callbacks.onDaemonOffline(wasReachable, e);
     }
 }

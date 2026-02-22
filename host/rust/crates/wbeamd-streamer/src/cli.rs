@@ -27,7 +27,7 @@ pub struct Args {
     #[arg(long)]
     pub bitrate_kbps: Option<u32>,
         #[arg(long, default_value = "h265",
-            value_parser = ["h265", "rawpng"])]
+            value_parser = ["h264", "h265", "rawpng"])]
     pub encoder: String,
     #[arg(long, default_value = "embedded", value_parser = ["hidden", "embedded", "metadata"])]
     pub cursor_mode: String,

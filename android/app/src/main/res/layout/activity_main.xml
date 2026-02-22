@@ -211,43 +211,251 @@
             android:textSize="11sp" />
     </LinearLayout>
 
-    <LinearLayout
+    <!-- ── Startup / preflight full-screen modal ─────────────────────────── -->
+    <FrameLayout
         android:id="@+id/preflightOverlay"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:layout_margin="18dp"
-        android:background="#E60B1220"
-        android:orientation="vertical"
-        android:padding="10dp"
+        android:layout_height="match_parent"
+        android:background="#EE020617"
         android:visibility="gone">
 
-        <TextView
-            android:id="@+id/preflightTitle"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="WBEAM PRE-FLIGHT"
-            android:textColor="#F8FAFC"
-            android:textStyle="bold" />
+            android:layout_gravity="center"
+            android:layout_margin="28dp"
+            android:background="#F0111827"
+            android:orientation="vertical"
+            android:padding="24dp">
 
-        <TextView
-            android:id="@+id/preflightBody"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="checking..."
-            android:textColor="#CBD5E1"
-            android:textSize="12sp" />
+            <!-- header -->
+            <TextView
+                android:id="@+id/startupTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:gravity="center"
+                android:text="WBEAM"
+                android:textColor="#F8FAFC"
+                android:textSize="22sp"
+                android:textStyle="bold" />
 
-        <TextView
-            android:id="@+id/preflightHint"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="busy"
-            android:textColor="#FDE68A"
-            android:textSize="11sp" />
-    </LinearLayout>
+            <TextView
+                android:id="@+id/startupSubtitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:fontFamily="monospace"
+                android:gravity="center"
+                android:text="startup sequence"
+                android:textColor="#475569"
+                android:textSize="11sp" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="18dp"
+                android:layout_marginBottom="14dp"
+                android:background="#1E293B" />
+
+            <!-- step 1 -->
+            <LinearLayout
+                android:id="@+id/startupStep1Row"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingBottom="8dp">
+
+                <TextView
+                    android:id="@+id/startupStep1Badge"
+                    android:layout_width="30dp"
+                    android:layout_height="30dp"
+                    android:background="#1E293B"
+                    android:fontFamily="monospace"
+                    android:gravity="center"
+                    android:text="1"
+                    android:textColor="#475569"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="14dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/startupStep1Label"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="monospace"
+                        android:text="CONTROL LINK"
+                        android:textColor="#64748B"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/startupStep1Detail"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:fontFamily="monospace"
+                        android:text="polling control api..."
+                        android:textColor="#334155"
+                        android:textSize="11sp" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/startupStep1Status"
+                    android:layout_width="42dp"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:gravity="end"
+                    android:text="---"
+                    android:textColor="#475569"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <!-- step 2 -->
+            <LinearLayout
+                android:id="@+id/startupStep2Row"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingBottom="8dp">
+
+                <TextView
+                    android:id="@+id/startupStep2Badge"
+                    android:layout_width="30dp"
+                    android:layout_height="30dp"
+                    android:background="#1E293B"
+                    android:fontFamily="monospace"
+                    android:gravity="center"
+                    android:text="2"
+                    android:textColor="#475569"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="14dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/startupStep2Label"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="monospace"
+                        android:text="HANDSHAKE"
+                        android:textColor="#64748B"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/startupStep2Detail"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:fontFamily="monospace"
+                        android:text="waiting for control link"
+                        android:textColor="#334155"
+                        android:textSize="11sp" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/startupStep2Status"
+                    android:layout_width="42dp"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:gravity="end"
+                    android:text="---"
+                    android:textColor="#475569"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <!-- step 3 -->
+            <LinearLayout
+                android:id="@+id/startupStep3Row"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingBottom="4dp">
+
+                <TextView
+                    android:id="@+id/startupStep3Badge"
+                    android:layout_width="30dp"
+                    android:layout_height="30dp"
+                    android:background="#1E293B"
+                    android:fontFamily="monospace"
+                    android:gravity="center"
+                    android:text="3"
+                    android:textColor="#475569"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="14dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/startupStep3Label"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="monospace"
+                        android:text="STREAM"
+                        android:textColor="#64748B"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/startupStep3Detail"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:fontFamily="monospace"
+                        android:text="waiting for handshake"
+                        android:textColor="#334155"
+                        android:textSize="11sp" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/startupStep3Status"
+                    android:layout_width="42dp"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:gravity="end"
+                    android:text="---"
+                    android:textColor="#475569"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="14dp"
+                android:layout_marginBottom="12dp"
+                android:background="#1E293B" />
+
+            <TextView
+                android:id="@+id/startupInfoText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:gravity="center"
+                android:text="api=... impl=..."
+                android:textColor="#334155"
+                android:textSize="10sp" />
+        </LinearLayout>
+    </FrameLayout>
 
     <ScrollView
         android:id="@+id/settingsPanel"

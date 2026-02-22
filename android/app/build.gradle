@@ -27,6 +27,8 @@ def wbeamApiHostRaw = (project.findProperty("WBEAM_API_HOST") ?: System.getenv("
 def wbeamApiHost = wbeamApiHostRaw.isEmpty() ? wbeamHost : wbeamApiHostRaw.replace("\"", "")
 def wbeamStreamHostRaw = (project.findProperty("WBEAM_STREAM_HOST") ?: System.getenv("WBEAM_STREAM_HOST") ?: wbeamHost).toString().trim()
 def wbeamStreamHost = wbeamStreamHostRaw.isEmpty() ? wbeamHost : wbeamStreamHostRaw.replace("\"", "")
+def wbeamApiImplRaw = (project.findProperty("WBEAM_API_IMPL") ?: System.getenv("WBEAM_API_IMPL") ?: "host").toString().trim().toLowerCase()
+def wbeamApiImpl = (wbeamApiImplRaw == "local") ? "local" : "host"
 
 android {
     namespace = 'com.wbeam'
@@ -46,6 +48,7 @@ android {
         buildConfigField "String", "WBEAM_HOST", "\"${wbeamHost}\""
         buildConfigField "String", "WBEAM_API_HOST", "\"${wbeamApiHost}\""
         buildConfigField "String", "WBEAM_STREAM_HOST", "\"${wbeamStreamHost}\""
+        buildConfigField "String", "WBEAM_API_IMPL", "\"${wbeamApiImpl}\""
     }
 
     buildTypes {
