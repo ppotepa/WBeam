@@ -10,12 +10,41 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+usage() {
+  cat <<'USAGE'
+Usage: ./run.sh [fast|balanced|quality]
+  fast      Low latency (default)
+  balanced  Mid quality/latency
+  quality   Highest quality, heaviest
+Environment variables still work (e.g., PROTO_PRESET), but the positional
+argument takes precedence.
+USAGE
+}
+
 # Kill any leftover host process from a previous run (cargo run spawns a grandchild
 # that survives the cargo PID being killed by the old cleanup trap).
 pkill -f proto-host-image >/dev/null 2>&1 || true
 
 HOST_IP="${HOST_IP:-}"
 PROTO_PRESET="${PROTO_PRESET:-fast}"
+if [[ $# -gt 0 ]]; then
+  case "$1" in
+    fast|balanced|quality)
+      PROTO_PRESET="$1"
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      printf '[proto] %s\n' "unknown preset '$1' (expected: fast|balanced|quality)"
+      usage
+      exit 1
+      ;;
+  esac
+fi
+
 PROTO_CAPTURE_SIZE="${PROTO_CAPTURE_SIZE:-}"
 PROTO_CAPTURE_BITRATE_KBPS="${PROTO_CAPTURE_BITRATE_KBPS:-}"
 PROTO_CAPTURE_FPS="${PROTO_CAPTURE_FPS:-}"

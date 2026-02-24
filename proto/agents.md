@@ -62,7 +62,7 @@ Ubuntu KDE Wayland
                                                                       └─ ANativeWindow (blit to screen)
 ```
 
-### Key numbers (measured, start-fast.sh, after stage-1 opts)
+### Key numbers (measured, run.sh fast, after stage-1 opts)
 - Host: ~60fps @ avg 32 KB/frame JPEG through USB
 - Android: receives frames, renders via native turbo path
 - Display: 1280×800 native (after resolution detection fix)
@@ -217,7 +217,7 @@ After auto-detect, all presets use **1280×800** on Lenovo S6000.
 
 ## 6. Portal Pipeline — Deep Detail
 
-The Wayland capture path (always active in start-fast.sh, PROTO_FORCE_PORTAL=1):
+The Wayland capture path (always active in run.sh fast|balanced|quality, PROTO_FORCE_PORTAL=1):
 
 ```
 stream_wayland_portal_h264.py
@@ -325,7 +325,7 @@ The real win is eliminating the H264→JPEG roundtrip entirely.
 ## 9. Known Issues / Gotchas
 
 ### Portal screen picker
-Every `./start-fast.sh` run triggers the KDE Wayland portal dialog asking which
+Every `./run.sh ...` run triggers the KDE Wayland portal dialog asking which
 screen/monitor to share. The user **must** pick the correct output (the extended
 virtual monitor if present, or HDMI-A-1 for now). This is an OS-level dialog —
 WBeam cannot pre-select it. There is no way to persist the selection across runs
@@ -343,7 +343,7 @@ the portal is showing a frozen initial frame. Solutions:
 - `PROTO_PORTAL_JPEG_SOURCE=debug` (reads /dev/shm/proto-portal-frames/*.jpg) — default
 
 ### ADB port 5006 stuck (zero-window-probe sockets)
-If `start-fast.sh` dies uncleanly (Ctrl+C before app force-stop), the next run
+If `run.sh` dies uncleanly (Ctrl+C before app force-stop), the next run
 may get `EADDRINUSE` for 70 seconds. The `run.sh` fix (remove forward before kill)
 prevents accumulation, but existing stuck sockets need 70s to drain or `adb reboot`.
 
@@ -417,10 +417,7 @@ to reduce Nagle algorithm delays. At 30KB/frame you're in Nagle territory.
 ```
 proto/
   run.sh                              — main orchestrator (build, forward, launch)
-  rr                                  — shortcut: ./rr fast | balanced | quality
-  start-fast.sh                       — exec ./rr fast
-  start-balanced.sh                   — exec ./rr balanced
-  start-quality.sh                    — exec ./rr quality
+  run.sh                              — single launcher: run.sh [fast|balanced|quality]
   agents.md                           — THIS FILE
   host/
     src/main.rs                       — Rust host: capture, encode, ADB push sender
@@ -453,7 +450,7 @@ proto/
 cd /mnt/fat_boii/git/WBeam/proto
 
 # Fast preset (60fps, auto-detects device resolution)
-./start-fast.sh
+./run.sh
 
 # When KDE portal dialog appears: pick the screen you want to share
 # Watch logcat for: "ADB: client connected — streaming"

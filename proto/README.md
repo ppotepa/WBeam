@@ -11,14 +11,14 @@
 
 ## Usage
 
-### Script-first start (recommended)
+### Single launcher
 
-- `./start-fast.sh` — lowest latency, lower quality (default for weak machines).
-- `./start-balanced.sh` — middle ground.
-- `./start-quality.sh` — best quality, heavier.
-- `./rr fast|balanced|quality` — same as above, one launcher with preset argument.
+- `./run.sh` — default preset `fast` (low latency).
+- `./run.sh quality` — highest quality, heavier.
+- `./run.sh fast` — explicit low-latency preset.
 
-Current `fast` tuning: `960x540`, `12000 kbps`, `22 capture fps`, `24 mjpeg fps`.
+Presets mirror the old variants; you can still override knobs via env vars
+(`PROTO_CAPTURE_SIZE`, `PROTO_CAPTURE_BITRATE_KBPS`, etc.).
 
 These scripts set JAVA/SDK defaults, build/install app when device is connected, start host, and launch app.
 
