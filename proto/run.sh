@@ -127,6 +127,36 @@ esac
 
   : "${PROTO_ADB_PUSH_FPS:=$PROTO_CAPTURE_FPS}"
 
+# ── Auto-detect native device resolution ─────────────────────────────────────
+# Query the connected Android device for its physical screen size and override
+# PROTO_CAPTURE_SIZE so the host encodes at exactly the tablet's native pixels.
+# This reduces JPEG payload size and eliminates pointless upscale/downscale.
+# Set PROTO_CAPTURE_SIZE_OVERRIDE=1 to keep the preset value instead.
+if [[ "${PROTO_CAPTURE_SIZE_OVERRIDE:-0}" != "1" ]]; then
+  _serial_flag=""
+  [[ -n "${SERIAL:-}" ]] && _serial_flag="-s ${SERIAL}"
+
+  # Method 1: wm size (Android >= 4.3). Output: "Physical size: 1280x800"
+  _dev_size="$(adb ${_serial_flag} shell wm size 2>/dev/null \
+    | grep -oP '(?<=: )\d+x\d+' | tail -1 || true)"
+
+  # Method 2: dumpsys window (API 17+). Output contains: "init=1280x800 160dpi ..."
+  if [[ -z "$_dev_size" ]]; then
+    _dev_size="$(adb ${_serial_flag} shell dumpsys window 2>/dev/null \
+      | grep -oP 'init=\K\d+x\d+' | head -1 || true)"
+  fi
+
+  if [[ -n "$_dev_size" ]]; then
+    log "device native resolution: $_dev_size (overrides preset ${PROTO_CAPTURE_SIZE})"
+    PROTO_CAPTURE_SIZE="$_dev_size"
+  else
+    log "WARNING: could not detect device resolution; keeping preset PROTO_CAPTURE_SIZE=${PROTO_CAPTURE_SIZE}"
+  fi
+else
+  log "PROTO_CAPTURE_SIZE_OVERRIDE=1 — keeping PROTO_CAPTURE_SIZE=${PROTO_CAPTURE_SIZE}"
+fi
+# ─────────────────────────────────────────────────────────────────────────────
+
 FRONT_DIR="$ROOT_DIR/front"
 HOST_DIR="$ROOT_DIR/host"
 GRADLEW="${GRADLEW:-$FRONT_DIR/gradlew}"
