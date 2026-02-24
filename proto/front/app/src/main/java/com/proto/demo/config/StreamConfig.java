@@ -10,8 +10,6 @@ public final class StreamConfig {
 
     public static final int    ADB_PORT        = 5006;
     public static final int    HTTP_PORT       = 5005;
-    public static final int    OUT_W           = 1920;
-    public static final int    OUT_H           = 1080;
     public static final int    MAX_FRAME_BYTES = 12 * 1024 * 1024;
     public static final String DEFAULT_HOST_IP = "192.168.42.129";
 

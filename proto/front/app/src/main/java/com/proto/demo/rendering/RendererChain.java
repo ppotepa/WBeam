@@ -34,8 +34,8 @@ public class RendererChain implements FrameRenderer {
     }
 
     @Override
-    public void onSurfaceChanged(Surface surface) {
-        nativeRenderer.onSurfaceChanged(surface);
+    public void onSurfaceChanged(Surface surface, int w, int h) {
+        nativeRenderer.onSurfaceChanged(surface, w, h);
         // JavaRenderer derives its surface indirectly via SurfaceHolder
     }
 
