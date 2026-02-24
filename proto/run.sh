@@ -51,15 +51,18 @@ PROTO_CAPTURE_FPS="${PROTO_CAPTURE_FPS:-}"
 PROTO_MJPEG_FPS="${PROTO_MJPEG_FPS:-}"
 PROTO_ADB_PUSH_FPS="${PROTO_ADB_PUSH_FPS:-}"
 PROTO_SKIP_SIG_CHECK="${PROTO_SKIP_SIG_CHECK:-1}"
-PROTO_DEBUG_FRAMES="${PROTO_DEBUG_FRAMES:-1}"
+PROTO_DEBUG_FRAMES="${PROTO_DEBUG_FRAMES:-0}"
 PROTO_DEBUG_FRAMES_DIR="${PROTO_DEBUG_FRAMES_DIR:-$ROOT_DIR/debugframes}"
 PROTO_DEBUG_FRAMES_FPS="${PROTO_DEBUG_FRAMES_FPS:-2}"
 PROTO_DEBUG_FRAMES_SLOTS="${PROTO_DEBUG_FRAMES_SLOTS:-180}"
 PROTO_ADB_PUSH="${PROTO_ADB_PUSH:-1}"
 PROTO_ADB_PUSH_ADDR="${PROTO_ADB_PUSH_ADDR:-127.0.0.1:5006}"
+PROTO_MAX_FRAME_BYTES="${PROTO_MAX_FRAME_BYTES:-}"
+PROTO_JPEG_TARGET_KB="${PROTO_JPEG_TARGET_KB:-}"
 PROTO_PORTAL="${PROTO_PORTAL:-1}"
 PROTO_PORTAL_JPEG_SOURCE="${PROTO_PORTAL_JPEG_SOURCE:-debug}"
 PROTO_CURSOR_MODE="${PROTO_CURSOR_MODE:-embedded}"
+WBEAM_VIDEORATE_DROP_ONLY="${WBEAM_VIDEORATE_DROP_ONLY:-1}"
 PROTO_PORTAL_ONLY="${PROTO_PORTAL_ONLY:-0}"
 PROTO_H264="${PROTO_H264:-0}"
 PROTO_WAIT_FOR_FIRST_FRAME_SECS="${PROTO_WAIT_FOR_FIRST_FRAME_SECS:-1}"
@@ -67,6 +70,8 @@ PROTO_WAIT_FOR_FIRST_FRAME_REQUIRED="${PROTO_WAIT_FOR_FIRST_FRAME_REQUIRED:-1}"
 PROTO_ANDROID_BUILD_TYPE="${PROTO_ANDROID_BUILD_TYPE:-debug}"
 PROTO_REQUIRE_TURBO="${PROTO_REQUIRE_TURBO:-1}"
 PROTO_FORCE_JAVA_FALLBACK="${PROTO_FORCE_JAVA_FALLBACK:-0}"
+PROTO_ANDROID_LOGCAT="${PROTO_ANDROID_LOGCAT:-0}"
+PROTO_ANDROID_LOG_POLLER="${PROTO_ANDROID_LOG_POLLER:-0}"
 
 log() { printf '[proto] %s\n' "$*"; }
 
@@ -129,24 +134,38 @@ fi
 
 refresh_serial_flag
 
+if [[ -n "${SERIAL:-}" ]]; then
+  # Stop stale app early so it does not keep showing old "connection refused"
+  # state while the new host/app session is being prepared.
+  adb "${SERIAL_FLAG[@]}" shell am force-stop com.proto.demo >/dev/null 2>&1 || true
+fi
+
 case "$PROTO_PRESET" in
   fast)
-    : "${PROTO_CAPTURE_SIZE:=960x540}"
-    : "${PROTO_CAPTURE_BITRATE_KBPS:=12000}"
-    : "${PROTO_CAPTURE_FPS:=60}"
-    : "${PROTO_MJPEG_FPS:=60}"
+    : "${PROTO_CAPTURE_SIZE:=768x480}"
+    : "${PROTO_CAPTURE_BITRATE_KBPS:=5500}"
+    : "${PROTO_CAPTURE_FPS:=24}"
+    : "${PROTO_MJPEG_FPS:=20}"
+    : "${PROTO_ADB_PUSH_FPS:=20}"
+    : "${PROTO_MAX_FRAME_BYTES:=98304}" # 96 KB
+    : "${PROTO_JPEG_TARGET_KB:=52}"
     ;;
   balanced)
-    : "${PROTO_CAPTURE_SIZE:=1280x720}"
-    : "${PROTO_CAPTURE_BITRATE_KBPS:=16000}"
+    : "${PROTO_CAPTURE_SIZE:=960x600}"
+    : "${PROTO_CAPTURE_BITRATE_KBPS:=9000}"
     : "${PROTO_CAPTURE_FPS:=30}"
-    : "${PROTO_MJPEG_FPS:=30}"
+    : "${PROTO_MJPEG_FPS:=24}"
+    : "${PROTO_ADB_PUSH_FPS:=24}"
+    : "${PROTO_MAX_FRAME_BYTES:=143360}" # 140 KB
+    : "${PROTO_JPEG_TARGET_KB:=72}"
     ;;
   quality)
     : "${PROTO_CAPTURE_SIZE:=1920x1080}"
     : "${PROTO_CAPTURE_BITRATE_KBPS:=26000}"
     : "${PROTO_CAPTURE_FPS:=50}"
     : "${PROTO_MJPEG_FPS:=50}"
+    : "${PROTO_MAX_FRAME_BYTES:=225280}" # 220 KB
+    : "${PROTO_JPEG_TARGET_KB:=120}"
     ;;
   *)
     printf '[proto] %s\n' "unknown PROTO_PRESET=$PROTO_PRESET (expected: fast|balanced|quality)"
@@ -161,7 +180,17 @@ esac
 # PROTO_CAPTURE_SIZE so the host encodes at exactly the tablet's native pixels.
 # This reduces JPEG payload size and eliminates pointless upscale/downscale.
 # Set PROTO_CAPTURE_SIZE_OVERRIDE=1 to keep the preset value instead.
-if [[ "${PROTO_CAPTURE_SIZE_OVERRIDE:-0}" != "1" ]]; then
+if [[ -z "${PROTO_FORCE_NATIVE_SIZE:-}" ]]; then
+  if [[ "$PROTO_PRESET" == "fast" ]]; then
+    PROTO_FORCE_NATIVE_SIZE=0
+  else
+    PROTO_FORCE_NATIVE_SIZE=1
+  fi
+fi
+
+if [[ "${PROTO_FORCE_NATIVE_SIZE:-1}" != "1" ]]; then
+  log "PROTO_FORCE_NATIVE_SIZE=0 — keeping preset PROTO_CAPTURE_SIZE=${PROTO_CAPTURE_SIZE}"
+elif [[ "${PROTO_CAPTURE_SIZE_OVERRIDE:-0}" != "1" ]]; then
   _serial_flag=""
   [[ -n "${SERIAL:-}" ]] && _serial_flag="-s ${SERIAL}"
 
@@ -583,7 +612,7 @@ pkill -f stream_wayland_portal_h264.py >/dev/null 2>&1 || true
 
 # Start host server first, then launch app so auto-start stream has endpoint ready.
 log "starting host server on 0.0.0.0:5005 (desktop stream)…"
-log "preset=$PROTO_PRESET size=$PROTO_CAPTURE_SIZE fps=$PROTO_CAPTURE_FPS bitrate=${PROTO_CAPTURE_BITRATE_KBPS}kbps mjpeg_fps=$PROTO_MJPEG_FPS adb_push_fps=$PROTO_ADB_PUSH_FPS adb_push=$PROTO_ADB_PUSH skip_sig_check=$PROTO_SKIP_SIG_CHECK debug_frames=$PROTO_DEBUG_FRAMES debug_frames_fps=$PROTO_DEBUG_FRAMES_FPS debug_frames_slots=$PROTO_DEBUG_FRAMES_SLOTS portal=$PROTO_PORTAL cursor=$PROTO_CURSOR_MODE jpeg_source=$PROTO_PORTAL_JPEG_SOURCE portal_only=$PROTO_PORTAL_ONLY h264=$PROTO_H264"
+log "preset=$PROTO_PRESET size=$PROTO_CAPTURE_SIZE fps=$PROTO_CAPTURE_FPS bitrate=${PROTO_CAPTURE_BITRATE_KBPS}kbps mjpeg_fps=$PROTO_MJPEG_FPS adb_push_fps=$PROTO_ADB_PUSH_FPS adb_push=$PROTO_ADB_PUSH max_frame_bytes=$PROTO_MAX_FRAME_BYTES jpeg_target_kb=$PROTO_JPEG_TARGET_KB skip_sig_check=$PROTO_SKIP_SIG_CHECK debug_frames=$PROTO_DEBUG_FRAMES drop_only=$WBEAM_VIDEORATE_DROP_ONLY portal=$PROTO_PORTAL cursor=$PROTO_CURSOR_MODE jpeg_source=$PROTO_PORTAL_JPEG_SOURCE portal_only=$PROTO_PORTAL_ONLY h264=$PROTO_H264 android_logcat=$PROTO_ANDROID_LOGCAT android_log_poller=$PROTO_ANDROID_LOG_POLLER"
 
 if [[ "$PROTO_DEBUG_FRAMES" == "1" ]]; then
   mkdir -p "$PROTO_DEBUG_FRAMES_DIR"
@@ -591,9 +620,9 @@ fi
 
 cd "$HOST_DIR"
 if [[ -n "$CARGO_BIN" ]]; then
-  PROTO_FORCE_PORTAL=1 PROTO_SERIAL="${SERIAL:-}" PROTO_ADB_PUSH="$PROTO_ADB_PUSH" PROTO_ADB_PUSH_ADDR="$PROTO_ADB_PUSH_ADDR" PROTO_ADB_PUSH_FPS="$PROTO_ADB_PUSH_FPS" PROTO_SKIP_SIG_CHECK="$PROTO_SKIP_SIG_CHECK" PROTO_DEBUG_FRAMES="$PROTO_DEBUG_FRAMES" PROTO_DEBUG_FRAMES_DIR="$PROTO_DEBUG_FRAMES_DIR" PROTO_DEBUG_FRAMES_FPS="$PROTO_DEBUG_FRAMES_FPS" PROTO_DEBUG_FRAMES_SLOTS="$PROTO_DEBUG_FRAMES_SLOTS" PROTO_PORTAL="$PROTO_PORTAL" PROTO_PORTAL_ONLY="$PROTO_PORTAL_ONLY" PROTO_H264="$PROTO_H264" PROTO_EXTEND_RIGHT_PX=0 PROTO_CAPTURE_SIZE="$PROTO_CAPTURE_SIZE" PROTO_CAPTURE_BITRATE_KBPS="$PROTO_CAPTURE_BITRATE_KBPS" PROTO_CAPTURE_FPS="$PROTO_CAPTURE_FPS" PROTO_MJPEG_FPS="$PROTO_MJPEG_FPS" PROTO_PORTAL_JPEG_SOURCE="$PROTO_PORTAL_JPEG_SOURCE" PROTO_CURSOR_MODE="$PROTO_CURSOR_MODE" "$CARGO_BIN" &
+  WBEAM_VIDEORATE_DROP_ONLY="$WBEAM_VIDEORATE_DROP_ONLY" PROTO_FORCE_PORTAL=1 PROTO_SERIAL="${SERIAL:-}" PROTO_ADB_PUSH="$PROTO_ADB_PUSH" PROTO_ADB_PUSH_ADDR="$PROTO_ADB_PUSH_ADDR" PROTO_ADB_PUSH_FPS="$PROTO_ADB_PUSH_FPS" PROTO_MAX_FRAME_BYTES="$PROTO_MAX_FRAME_BYTES" PROTO_JPEG_TARGET_KB="$PROTO_JPEG_TARGET_KB" PROTO_SKIP_SIG_CHECK="$PROTO_SKIP_SIG_CHECK" PROTO_DEBUG_FRAMES="$PROTO_DEBUG_FRAMES" PROTO_DEBUG_FRAMES_DIR="$PROTO_DEBUG_FRAMES_DIR" PROTO_DEBUG_FRAMES_FPS="$PROTO_DEBUG_FRAMES_FPS" PROTO_DEBUG_FRAMES_SLOTS="$PROTO_DEBUG_FRAMES_SLOTS" PROTO_PORTAL="$PROTO_PORTAL" PROTO_PORTAL_ONLY="$PROTO_PORTAL_ONLY" PROTO_H264="$PROTO_H264" PROTO_EXTEND_RIGHT_PX=0 PROTO_CAPTURE_SIZE="$PROTO_CAPTURE_SIZE" PROTO_CAPTURE_BITRATE_KBPS="$PROTO_CAPTURE_BITRATE_KBPS" PROTO_CAPTURE_FPS="$PROTO_CAPTURE_FPS" PROTO_MJPEG_FPS="$PROTO_MJPEG_FPS" PROTO_PORTAL_JPEG_SOURCE="$PROTO_PORTAL_JPEG_SOURCE" PROTO_CURSOR_MODE="$PROTO_CURSOR_MODE" PROTO_ANDROID_LOG_POLLER="$PROTO_ANDROID_LOG_POLLER" "$CARGO_BIN" &
 else
-  PROTO_FORCE_PORTAL=1 PROTO_SERIAL="${SERIAL:-}" PROTO_ADB_PUSH="$PROTO_ADB_PUSH" PROTO_ADB_PUSH_ADDR="$PROTO_ADB_PUSH_ADDR" PROTO_ADB_PUSH_FPS="$PROTO_ADB_PUSH_FPS" PROTO_SKIP_SIG_CHECK="$PROTO_SKIP_SIG_CHECK" PROTO_DEBUG_FRAMES="$PROTO_DEBUG_FRAMES" PROTO_DEBUG_FRAMES_DIR="$PROTO_DEBUG_FRAMES_DIR" PROTO_DEBUG_FRAMES_FPS="$PROTO_DEBUG_FRAMES_FPS" PROTO_DEBUG_FRAMES_SLOTS="$PROTO_DEBUG_FRAMES_SLOTS" PROTO_PORTAL="$PROTO_PORTAL" PROTO_PORTAL_ONLY="$PROTO_PORTAL_ONLY" PROTO_H264="$PROTO_H264" PROTO_EXTEND_RIGHT_PX=0 PROTO_CAPTURE_SIZE="$PROTO_CAPTURE_SIZE" PROTO_CAPTURE_BITRATE_KBPS="$PROTO_CAPTURE_BITRATE_KBPS" PROTO_CAPTURE_FPS="$PROTO_CAPTURE_FPS" PROTO_MJPEG_FPS="$PROTO_MJPEG_FPS" PROTO_PORTAL_JPEG_SOURCE="$PROTO_PORTAL_JPEG_SOURCE" PROTO_CURSOR_MODE="$PROTO_CURSOR_MODE" cargo run --release &
+  WBEAM_VIDEORATE_DROP_ONLY="$WBEAM_VIDEORATE_DROP_ONLY" PROTO_FORCE_PORTAL=1 PROTO_SERIAL="${SERIAL:-}" PROTO_ADB_PUSH="$PROTO_ADB_PUSH" PROTO_ADB_PUSH_ADDR="$PROTO_ADB_PUSH_ADDR" PROTO_ADB_PUSH_FPS="$PROTO_ADB_PUSH_FPS" PROTO_MAX_FRAME_BYTES="$PROTO_MAX_FRAME_BYTES" PROTO_JPEG_TARGET_KB="$PROTO_JPEG_TARGET_KB" PROTO_SKIP_SIG_CHECK="$PROTO_SKIP_SIG_CHECK" PROTO_DEBUG_FRAMES="$PROTO_DEBUG_FRAMES" PROTO_DEBUG_FRAMES_DIR="$PROTO_DEBUG_FRAMES_DIR" PROTO_DEBUG_FRAMES_FPS="$PROTO_DEBUG_FRAMES_FPS" PROTO_DEBUG_FRAMES_SLOTS="$PROTO_DEBUG_FRAMES_SLOTS" PROTO_PORTAL="$PROTO_PORTAL" PROTO_PORTAL_ONLY="$PROTO_PORTAL_ONLY" PROTO_H264="$PROTO_H264" PROTO_EXTEND_RIGHT_PX=0 PROTO_CAPTURE_SIZE="$PROTO_CAPTURE_SIZE" PROTO_CAPTURE_BITRATE_KBPS="$PROTO_CAPTURE_BITRATE_KBPS" PROTO_CAPTURE_FPS="$PROTO_CAPTURE_FPS" PROTO_MJPEG_FPS="$PROTO_MJPEG_FPS" PROTO_PORTAL_JPEG_SOURCE="$PROTO_PORTAL_JPEG_SOURCE" PROTO_CURSOR_MODE="$PROTO_CURSOR_MODE" PROTO_ANDROID_LOG_POLLER="$PROTO_ANDROID_LOG_POLLER" cargo run --release &
 fi
 HOST_PID=$!
 
@@ -607,6 +636,39 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+wait_for_host_health() {
+  local timeout_s="${1:-12}"
+  local deadline
+  local ok_streak=0
+  deadline=$(( $(date +%s) + timeout_s ))
+
+  while (( $(date +%s) <= deadline )); do
+    if ! kill -0 "$HOST_PID" >/dev/null 2>&1; then
+      return 1
+    fi
+
+    if curl -fsS --max-time 1 "http://127.0.0.1:5005/health" >/dev/null 2>&1; then
+      ok_streak=$((ok_streak + 1))
+      if (( ok_streak >= 2 )); then
+        return 0
+      fi
+    else
+      ok_streak=0
+    fi
+    sleep 0.2
+  done
+  return 1
+}
+
+if [[ "$PROTO_H264" != "1" ]] && command -v curl >/dev/null 2>&1; then
+  if wait_for_host_health 12; then
+    log "host listener is ready (:5005)"
+  else
+    log "ERROR: host listener on :5005 did not come up in time"
+    exit 1
+  fi
+fi
+
 sleep 1
 log "if Wayland prompt appears, pick the virtual/extended screen source"
 
@@ -617,6 +679,21 @@ FRAME_READY_PATH="/tmp/proto-portal-frame.jpg"
 if [[ "$PROTO_PORTAL_JPEG_SOURCE" == "debug" ]]; then
   FRAME_READY_PATH="/dev/shm/proto-portal-frames"
 fi
+FRAME_READY_MIN_EPOCH="$(date +%s)"
+
+portal_frame_is_fresh() {
+  local mtime
+  if [[ "$PROTO_PORTAL_JPEG_SOURCE" == "debug" ]]; then
+    local latest_frame
+    latest_frame="$(ls -t "$FRAME_READY_PATH"/*.jpg 2>/dev/null | head -n 1 || true)"
+    [[ -n "$latest_frame" ]] || return 1
+    mtime="$(stat -c %Y "$latest_frame" 2>/dev/null || echo 0)"
+  else
+    [[ -s "$FRAME_READY_PATH" ]] || return 1
+    mtime="$(stat -c %Y "$FRAME_READY_PATH" 2>/dev/null || echo 0)"
+  fi
+  (( mtime >= FRAME_READY_MIN_EPOCH ))
+}
 
 portal_enabled=0
 if [[ "$PROTO_PORTAL" != "0" && "$PROTO_PORTAL" != "false" && "$PROTO_PORTAL" != "FALSE" && "$PROTO_PORTAL" != "no" && "$PROTO_PORTAL" != "NO" ]]; then
@@ -630,12 +707,7 @@ if [[ "$portal_enabled" -eq 1 && "$PROTO_WAIT_FOR_FIRST_FRAME_REQUIRED" == "1" ]
   log "waiting for first portal frame before launching app (required=1)"
   wait_ticks=0
   while true; do
-    if [[ "$PROTO_PORTAL_JPEG_SOURCE" == "debug" ]]; then
-      if find "$FRAME_READY_PATH" -maxdepth 1 -name '*.jpg' -type f | grep -q .; then
-        FRAME_READY=1
-        break
-      fi
-    elif [[ -s "$FRAME_READY_PATH" ]]; then
+    if portal_frame_is_fresh; then
       FRAME_READY=1
       break
     fi
@@ -647,12 +719,7 @@ if [[ "$portal_enabled" -eq 1 && "$PROTO_WAIT_FOR_FIRST_FRAME_REQUIRED" == "1" ]
   done
 else
   for _ in $(seq 1 $((PROTO_WAIT_FOR_FIRST_FRAME_SECS * 10))); do
-    if [[ "$PROTO_PORTAL_JPEG_SOURCE" == "debug" ]]; then
-      if find "$FRAME_READY_PATH" -maxdepth 1 -name '*.jpg' -type f | grep -q .; then
-        FRAME_READY=1
-        break
-      fi
-    elif [[ -s "$FRAME_READY_PATH" ]]; then
+    if portal_frame_is_fresh; then
       FRAME_READY=1
       break
     fi
@@ -686,9 +753,13 @@ fi
 # Launch app
 if [[ "$ADB_READY" -eq 1 ]]; then
   adb "${SERIAL_FLAG[@]}" logcat -c >/dev/null 2>&1 || true
-  : > "$ANDROID_LOG_FILE"
-  adb "${SERIAL_FLAG[@]}" logcat -v time > "$ANDROID_LOG_FILE" 2>&1 &
-  LOGCAT_PID="$!"
+  if [[ "$PROTO_ANDROID_LOGCAT" == "1" ]]; then
+    : > "$ANDROID_LOG_FILE"
+    adb "${SERIAL_FLAG[@]}" logcat -v time > "$ANDROID_LOG_FILE" 2>&1 &
+    LOGCAT_PID="$!"
+  else
+    LOGCAT_PID=""
+  fi
 
   log "launching app on device…"
   # Remove ADB forward BEFORE force-stop so adbd stops queuing connections to
@@ -734,19 +805,49 @@ if [[ "$ADB_READY" -eq 1 ]]; then
   fi
 
   sleep 3
+  APP_LOG_DUMP=""
+  if [[ "$PROTO_ANDROID_LOGCAT" != "1" ]]; then
+    APP_LOG_DUMP="$(adb "${SERIAL_FLAG[@]}" logcat -d 2>/dev/null || true)"
+  fi
   if app_is_running; then
-    log "android app is running (logs: $ANDROID_LOG_FILE)"
+    if [[ "$PROTO_ANDROID_LOGCAT" == "1" ]]; then
+      log "android app is running (logs: $ANDROID_LOG_FILE)"
+    else
+      log "android app is running"
+    fi
 
     if [[ "$PROTO_REQUIRE_TURBO" == "1" ]]; then
-      if grep -Eq "failed to load libwbeam|failed to load libturbojpeg|turbojpeg unavailable|native renderer unavailable" "$ANDROID_LOG_FILE"; then
+      if [[ "$PROTO_ANDROID_LOGCAT" == "1" ]]; then
+        TURBO_SOURCE="$ANDROID_LOG_FILE"
+        TURBO_FAIL=0
+        if grep -Eq "failed to load libwbeam|failed to load libturbojpeg|turbojpeg unavailable|native renderer unavailable" "$TURBO_SOURCE"; then
+          TURBO_FAIL=1
+        fi
+      else
+        TURBO_SOURCE="logcat -d"
+        TURBO_FAIL=0
+        if grep -Eq "failed to load libwbeam|failed to load libturbojpeg|turbojpeg unavailable|native renderer unavailable" <<<"$APP_LOG_DUMP"; then
+          TURBO_FAIL=1
+        fi
+      fi
+      if [[ "$TURBO_FAIL" -eq 1 ]]; then
         log "turbo runtime check failed; app started without native turbo path"
-        grep -E "failed to load libwbeam|failed to load libturbojpeg|turbojpeg unavailable|native renderer unavailable" "$ANDROID_LOG_FILE" | tail -n 30
+        if [[ "$PROTO_ANDROID_LOGCAT" == "1" ]]; then
+          grep -E "failed to load libwbeam|failed to load libturbojpeg|turbojpeg unavailable|native renderer unavailable" "$TURBO_SOURCE" | tail -n 30
+        else
+          grep -E "failed to load libwbeam|failed to load libturbojpeg|turbojpeg unavailable|native renderer unavailable" <<<"$APP_LOG_DUMP" | tail -n 30
+        fi
         exit 1
       fi
     fi
   else
-    log "android app appears stopped after launch; recent logcat (logs: $ANDROID_LOG_FILE):"
-    grep -E "com\.proto\.demo|AndroidRuntime|FATAL EXCEPTION|Process: com\.proto\.demo" "$ANDROID_LOG_FILE" | tail -n 120 || tail -n 120 "$ANDROID_LOG_FILE"
+    if [[ "$PROTO_ANDROID_LOGCAT" == "1" ]]; then
+      log "android app appears stopped after launch; recent logcat (logs: $ANDROID_LOG_FILE):"
+      grep -E "com\.proto\.demo|AndroidRuntime|FATAL EXCEPTION|Process: com\.proto\.demo" "$ANDROID_LOG_FILE" | tail -n 120 || tail -n 120 "$ANDROID_LOG_FILE"
+    else
+      log "android app appears stopped after launch; recent logcat:"
+      grep -E "com\.proto\.demo|AndroidRuntime|FATAL EXCEPTION|Process: com\.proto\.demo" <<<"$APP_LOG_DUMP" | tail -n 120 || tail -n 120 <<<"$APP_LOG_DUMP"
+    fi
   fi
 fi
 

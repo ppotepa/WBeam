@@ -1,0 +1,274 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$ROOT_DIR"
+
+usage() {
+  cat <<'USAGE'
+Usage: ./start-qemu [fast|balanced|quality]
+
+Environment overrides:
+  QEMU_AVD                 AVD name (default: WBeam_Tablet_API17 or first available)
+  ANDROID_EMULATOR_BIN     Emulator binary path (default: $HOME/Android/Sdk/emulator/emulator)
+  ADB_BIN                  adb binary path (default: adb)
+  QEMU_LOG                 Emulator log path (default: /tmp/proto-emulator.log)
+  QEMU_ARGS                Extra emulator args
+  QEMU_DIAG                1=enable full diagnostics bundle (default: 1)
+  QEMU_DIAG_DIR            Diagnostics root dir (default: /tmp/proto-qemu-logs)
+USAGE
+}
+
+PRESET="${1:-fast}"
+case "$PRESET" in
+  fast|balanced|quality) ;;
+  -h|--help) usage; exit 0 ;;
+  *)
+    echo "[qemu] unknown preset '$PRESET' (expected: fast|balanced|quality)"
+    usage
+    exit 1
+    ;;
+esac
+
+ADB_BIN="${ADB_BIN:-adb}"
+EMULATOR_BIN="${ANDROID_EMULATOR_BIN:-$HOME/Android/Sdk/emulator/emulator}"
+QEMU_LOG="${QEMU_LOG:-/tmp/proto-emulator.log}"
+QEMU_ARGS="${QEMU_ARGS:-}"
+QEMU_DIAG="${QEMU_DIAG:-1}"
+QEMU_DIAG_DIR="${QEMU_DIAG_DIR:-/tmp/proto-qemu-logs}"
+
+DIAG_DIR=""
+RUN_LOG=""
+PROBE_LOG=""
+LOGCAT_FULL_LOG=""
+LOGCAT_PID=""
+PROBE_PID=""
+
+if [[ ! -x "$EMULATOR_BIN" ]]; then
+  echo "[qemu] emulator binary not found: $EMULATOR_BIN"
+  exit 1
+fi
+
+if ! command -v "$ADB_BIN" >/dev/null 2>&1; then
+  echo "[qemu] adb not found in PATH (set ADB_BIN)"
+  exit 1
+fi
+
+pick_avd() {
+  local requested="${QEMU_AVD:-WBeam_Tablet_API17}"
+  local avds
+  avds="$("$EMULATOR_BIN" -list-avds 2>/dev/null || true)"
+  if [[ -z "$avds" ]]; then
+    return 1
+  fi
+  if printf '%s\n' "$avds" | grep -Fxq "$requested"; then
+    printf '%s\n' "$requested"
+    return 0
+  fi
+  printf '%s\n' "$avds" | head -n 1
+}
+
+find_running_emulator() {
+  local target_avd="$1"
+  local serial
+  local avd_name
+  local fallback=""
+
+  while IFS= read -r serial; do
+    [[ -z "$serial" ]] && continue
+    [[ -z "$fallback" ]] && fallback="$serial"
+    avd_name="$("$ADB_BIN" -s "$serial" emu avd name 2>/dev/null | tr -d '\r' || true)"
+    if [[ -n "$avd_name" && "$avd_name" == "$target_avd" ]]; then
+      printf '%s\n' "$serial"
+      return 0
+    fi
+  done < <("$ADB_BIN" devices 2>/dev/null | awk 'NR>1 && $1 ~ /^emulator-/ && $2=="device" {print $1}')
+
+  if [[ -n "$fallback" ]]; then
+    printf '%s\n' "$fallback"
+    return 0
+  fi
+  return 1
+}
+
+wait_for_emulator_serial() {
+  local timeout_s="${1:-180}"
+  local start_ts
+  local serial
+  start_ts="$(date +%s)"
+  while true; do
+    serial="$("$ADB_BIN" devices 2>/dev/null | awk 'NR>1 && $1 ~ /^emulator-/ && $2=="device" {print $1; exit}')"
+    if [[ -n "$serial" ]]; then
+      printf '%s\n' "$serial"
+      return 0
+    fi
+    if (( "$(date +%s)" - start_ts >= timeout_s )); then
+      return 1
+    fi
+    sleep 1
+  done
+}
+
+wait_for_boot_complete() {
+  local serial="$1"
+  local boot=""
+  local anim=""
+  "$ADB_BIN" -s "$serial" wait-for-device >/dev/null 2>&1 || true
+  for _ in $(seq 1 180); do
+    boot="$("$ADB_BIN" -s "$serial" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')"
+    anim="$("$ADB_BIN" -s "$serial" shell getprop init.svc.bootanim 2>/dev/null | tr -d '\r')"
+    if [[ "$boot" == "1" ]] && [[ "$anim" == "stopped" || -z "$anim" ]]; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+"$ADB_BIN" start-server >/dev/null 2>&1 || true
+
+AVD_NAME="$(pick_avd || true)"
+if [[ -z "$AVD_NAME" ]]; then
+  echo "[qemu] no AVDs found. Create one first in Android Studio / avdmanager."
+  exit 1
+fi
+
+if [[ "$QEMU_DIAG" == "1" ]]; then
+  TS="$(date +%Y%m%d-%H%M%S)"
+  SAFE_AVD="$(printf '%s' "$AVD_NAME" | tr ' /' '__')"
+  DIAG_DIR="$QEMU_DIAG_DIR/${TS}-${SAFE_AVD}-${PRESET}"
+  mkdir -p "$DIAG_DIR"
+  if [[ "${QEMU_LOG}" == "/tmp/proto-emulator.log" ]]; then
+    QEMU_LOG="$DIAG_DIR/emulator.log"
+  fi
+fi
+
+if SERIAL="$(find_running_emulator "$AVD_NAME")"; then
+  echo "[qemu] using running emulator $SERIAL (avd target: $AVD_NAME)"
+else
+  echo "[qemu] starting emulator AVD: $AVD_NAME"
+  # Fast, deterministic defaults; keep software renderer explicit for CI/dev machines.
+  nohup "$EMULATOR_BIN" -avd "$AVD_NAME" -netdelay none -netspeed full -gpu swiftshader_indirect -no-snapshot-load $QEMU_ARGS >"$QEMU_LOG" 2>&1 &
+  if ! SERIAL="$(wait_for_emulator_serial 180)"; then
+    echo "[qemu] emulator did not appear in adb within timeout (log: $QEMU_LOG)"
+    exit 1
+  fi
+  echo "[qemu] emulator online: $SERIAL"
+fi
+
+if ! wait_for_boot_complete "$SERIAL"; then
+  echo "[qemu] emulator boot not completed in timeout (serial: $SERIAL, log: $QEMU_LOG)"
+  exit 1
+fi
+
+echo "[qemu] boot completed on $SERIAL; launching proto run.sh ($PRESET)"
+
+export SERIAL
+export PROTO_REQUIRE_TURBO="${PROTO_REQUIRE_TURBO:-0}"
+export PROTO_FORCE_JAVA_FALLBACK="${PROTO_FORCE_JAVA_FALLBACK:-1}"
+export PROTO_H264="${PROTO_H264:-0}"
+export PROTO_FORCE_NATIVE_SIZE="${PROTO_FORCE_NATIVE_SIZE:-0}"
+export PROTO_ADB_PUSH="${PROTO_ADB_PUSH:-1}"
+export PROTO_PORTAL="${PROTO_PORTAL:-1}"
+export PROTO_WAIT_FOR_FIRST_FRAME_REQUIRED="${PROTO_WAIT_FOR_FIRST_FRAME_REQUIRED:-1}"
+
+# Emulator default uses ADB push (works without tethering and avoids guest->host
+# HTTP edge cases). HTTP pull is still available with PROTO_ADB_PUSH=0.
+if [[ "${PROTO_ADB_PUSH}" == "0" ]]; then
+  echo "[qemu] transport: HTTP pull (host alias 10.0.2.2)"
+  export HOST_IP="${HOST_IP:-10.0.2.2}"
+else
+  echo "[qemu] transport: ADB push"
+fi
+
+if [[ "${PROTO_PORTAL}" == "1" ]]; then
+  echo "[qemu] portal capture enabled: select the screen/output in KDE portal prompt"
+fi
+
+start_diag() {
+  [[ "$QEMU_DIAG" == "1" ]] || return 0
+
+  RUN_LOG="$DIAG_DIR/run.log"
+  PROBE_LOG="$DIAG_DIR/probe.log"
+  LOGCAT_FULL_LOG="$DIAG_DIR/logcat-full.log"
+
+  {
+    echo "ts=$(date -Iseconds)"
+    echo "preset=$PRESET"
+    echo "serial=$SERIAL"
+    echo "avd=$AVD_NAME"
+    echo "adb_push=$PROTO_ADB_PUSH"
+    echo "portal=$PROTO_PORTAL"
+    echo "host_ip=${HOST_IP:-}"
+    echo "qemu_log=$QEMU_LOG"
+    echo "emulator_bin=$EMULATOR_BIN"
+  } > "$DIAG_DIR/session.txt"
+
+  "$ADB_BIN" -s "$SERIAL" shell getprop > "$DIAG_DIR/getprop.txt" 2>&1 || true
+  "$ADB_BIN" -s "$SERIAL" shell ip route > "$DIAG_DIR/ip-route.txt" 2>&1 || true
+  "$ADB_BIN" -s "$SERIAL" shell "cat /proc/net/tcp; echo; cat /proc/net/tcp6" > "$DIAG_DIR/proc-net-tcp.txt" 2>&1 || true
+  "$ADB_BIN" -s "$SERIAL" shell "pidof com.proto.demo 2>/dev/null || ps | grep com.proto.demo | grep -v grep" > "$DIAG_DIR/app-proc-start.txt" 2>&1 || true
+
+  "$ADB_BIN" -s "$SERIAL" logcat -v time > "$LOGCAT_FULL_LOG" 2>&1 &
+  LOGCAT_PID="$!"
+
+  (
+    while true; do
+      now="$(date -Iseconds)"
+      echo "=== $now ==="
+      if curl -sS --max-time 2 http://127.0.0.1:5005/health >/tmp/proto-qemu-health.$$ 2>/dev/null; then
+        printf "host_health=%s\n" "$(cat /tmp/proto-qemu-health.$$)"
+      else
+        echo "host_health=FAIL"
+      fi
+      rm -f /tmp/proto-qemu-health.$$ >/dev/null 2>&1 || true
+
+      if curl -sS --max-time 2 http://127.0.0.1:5005/image.jpg -o /tmp/proto-qemu-image.$$ 2>/dev/null; then
+        sz="$(wc -c < /tmp/proto-qemu-image.$$ 2>/dev/null || echo 0)"
+        sig="$(sha1sum /tmp/proto-qemu-image.$$ 2>/dev/null | awk '{print $1}')"
+        echo "host_image_bytes=$sz sha1=$sig"
+      else
+        echo "host_image=FAIL"
+      fi
+      rm -f /tmp/proto-qemu-image.$$ >/dev/null 2>&1 || true
+
+      app_proc="$("$ADB_BIN" -s "$SERIAL" shell "pidof com.proto.demo 2>/dev/null || ps | grep com.proto.demo | grep -v grep" 2>/dev/null | tr -d '\r' || true)"
+      if [[ -n "$app_proc" ]]; then
+        echo "app_proc=$app_proc"
+      else
+        echo "app_proc=missing"
+      fi
+      "$ADB_BIN" -s "$SERIAL" shell "dumpsys meminfo com.proto.demo" 2>/dev/null | tr -d '\r' | sed -n '1,30p'
+      sleep 3
+    done
+  ) > "$PROBE_LOG" 2>&1 &
+  PROBE_PID="$!"
+
+  echo "[qemu] diagnostics enabled: $DIAG_DIR"
+}
+
+stop_diag() {
+  [[ -n "$PROBE_PID" ]] && kill "$PROBE_PID" >/dev/null 2>&1 || true
+  [[ -n "$LOGCAT_PID" ]] && kill "$LOGCAT_PID" >/dev/null 2>&1 || true
+  if [[ "$QEMU_DIAG" == "1" ]]; then
+    if [[ -f /tmp/proto-android.log ]]; then
+      cp /tmp/proto-android.log "$DIAG_DIR/proto-android.log" 2>/dev/null || true
+    fi
+    "$ADB_BIN" -s "$SERIAL" logcat -d > "$DIAG_DIR/logcat-final-dump.txt" 2>&1 || true
+  fi
+}
+
+start_diag
+trap stop_diag EXIT INT TERM
+
+set +e
+if [[ "$QEMU_DIAG" == "1" ]]; then
+  ./run.sh "$PRESET" 2>&1 | tee "$RUN_LOG"
+  RUN_RC="${PIPESTATUS[0]}"
+else
+  ./run.sh "$PRESET"
+  RUN_RC="$?"
+fi
+set -e
+
+exit "$RUN_RC"

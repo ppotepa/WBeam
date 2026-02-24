@@ -35,6 +35,17 @@ public class NativeRenderer implements FrameRenderer {
         return available && handle != 0;
     }
 
+    /** Force-disable native path (used by emulator fallback). */
+    public void disable() {
+        if (handle != 0) {
+            try { NativeBridge.nativeDestroy(handle); }
+            catch (UnsatisfiedLinkError ignored) {}
+            handle = 0;
+        }
+        available = false;
+        Log.i(TAG, "NativeRenderer forced to Java fallback");
+    }
+
     @Override
     public boolean render(byte[] data, int len) {
         if (!isAvailable()) return false;

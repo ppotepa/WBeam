@@ -62,11 +62,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             WindowManager.LayoutParams.FLAG_FULLSCREEN |
             WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
-        config   = new StreamConfig(getIntent());
-        layout   = new ScreenLayout(this);
-        status   = new StatusUpdater(layout.statusView);
+        config = new StreamConfig(getIntent());
+        layout = new ScreenLayout(this);
+        status = new StatusUpdater(layout.statusView);
+        NativeRenderer nativeRenderer = new NativeRenderer();
+        if (config.forceJavaFallback) {
+            nativeRenderer.disable();
+        }
         renderer = new RendererChain(
-            new NativeRenderer(),
+            nativeRenderer,
             new JavaRenderer(layout.surfaceView.getHolder()));
 
         setContentView(layout.root);
