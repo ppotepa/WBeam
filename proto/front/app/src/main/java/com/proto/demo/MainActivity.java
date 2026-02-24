@@ -8,10 +8,11 @@ import android.view.Window;
 import android.view.WindowManager;
 
 import com.proto.demo.config.StreamConfig;
+import com.proto.demo.pipeline.FrameMailbox;
 import com.proto.demo.rendering.JavaRenderer;
 import com.proto.demo.rendering.NativeRenderer;
 import com.proto.demo.rendering.RendererChain;
-import com.proto.demo.stats.FrameStats;
+import com.proto.demo.rendering.RenderLoop;
 import com.proto.demo.transport.AdbPushTransport;
 import com.proto.demo.transport.HttpMjpegTransport;
 import com.proto.demo.transport.Transport;
@@ -45,8 +46,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private StatusUpdater status;
     private RendererChain renderer;
 
-    private Transport activeTransport;
-    private Thread    ioThread;
+    private Transport  activeTransport;
+    private RenderLoop renderLoop;
+    private Thread     ioThread;
+    private Thread     renderThread;
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
     @Override
@@ -102,22 +105,38 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private void startIO() {
         stopIO();
 
-        FrameStats stats = new FrameStats(
-            config.useAdbPush ? "ADB" : "HTTP",
-            (fps, total, transport) ->
-                status.set(String.format("%s  %.1f fps  f=%d", transport, fps, total)));
+        String label = config.useAdbPush ? "ADB" : "HTTP";
 
+        // Mailbox decouples IO (producer) from render (consumer).
+        // Frame buffers are recycled to avoid GC.  Warm capacity = typical JPEG size.
+        FrameMailbox mailbox = new FrameMailbox(64 * 1024);
+
+        // Render loop — dedicated high-priority thread, drains mailbox as fast as possible
+        renderLoop   = new RenderLoop(mailbox, renderer, status, label);
+        renderThread = new Thread(renderLoop, "wbeam-render");
+        renderThread.start();
+
+        // IO listener: copy frame into pool buffer, publish to mailbox (non-blocking).
+        // arraycopy of ~30 KB takes ~100 ns — IO thread never blocks on render latency.
         if (config.useAdbPush) {
-            AdbPushTransport adb = new AdbPushTransport(
-                (data, len) -> { renderer.render(data, len); stats.onFrame(); },
+            activeTransport = new AdbPushTransport(
+                (data, len) -> {
+                    FrameMailbox.Frame buf = mailbox.acquire(len);
+                    System.arraycopy(data, 0, buf.data, 0, len);
+                    buf.len = len;
+                    mailbox.publish(buf);
+                },
                 status);
-            activeTransport = adb;
         } else {
-            HttpMjpegTransport http = new HttpMjpegTransport(
-                (data, len) -> { renderer.render(data, len); stats.onFrame(); },
+            activeTransport = new HttpMjpegTransport(
+                (data, len) -> {
+                    FrameMailbox.Frame buf = mailbox.acquire(len);
+                    System.arraycopy(data, 0, buf.data, 0, len);
+                    buf.len = len;
+                    mailbox.publish(buf);
+                },
                 status,
                 config.hostIp);
-            activeTransport = http;
         }
 
         ioThread = new Thread(activeTransport, "wbeam-io");
@@ -125,6 +144,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     }
 
     private void stopIO() {
+        // Stop transport first so IO thread stops producing
         if (activeTransport != null) {
             activeTransport.stop();
             activeTransport = null;
@@ -133,6 +153,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             ioThread.interrupt();
             try { ioThread.join(2000); } catch (InterruptedException ignored) {}
             ioThread = null;
+        }
+        // Stop render loop after IO so it can drain any last frame in the mailbox
+        if (renderLoop != null) {
+            renderLoop.stop();
+            renderLoop = null;
+        }
+        if (renderThread != null) {
+            renderThread.interrupt();
+            try { renderThread.join(2000); } catch (InterruptedException ignored) {}
+            renderThread = null;
         }
     }
 }

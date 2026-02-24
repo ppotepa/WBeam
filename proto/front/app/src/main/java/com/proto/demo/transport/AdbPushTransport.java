@@ -68,7 +68,11 @@ public class AdbPushTransport implements Transport {
                 status.set("ADB: client connected — streaming");
                 try {
                     client.setTcpNoDelay(true);
-                    receiveWbj1(new BufferedInputStream(client.getInputStream(), 256 * 1024));
+                    // Large kernel receive buffer: keeps the pipe full across JVM GC pauses
+                    client.setReceiveBufferSize(1 * 1024 * 1024);
+                    // Safety timeout: unblock if host disappears without TCP RST
+                    client.setSoTimeout(5_000);
+                    receiveWbj1(new BufferedInputStream(client.getInputStream(), 512 * 1024));
                 } catch (IOException e) {
                     if (running) status.set("ADB: lost connection — waiting…");
                 } finally {
@@ -88,6 +92,8 @@ public class AdbPushTransport implements Transport {
             try {
                 ServerSocket ss = new ServerSocket();
                 ss.setReuseAddress(true);
+                // Hint the kernel to keep a large accept backlog buffer
+                ss.setReceiveBufferSize(1 * 1024 * 1024);
                 ss.bind(new InetSocketAddress(port));
                 return ss;
             } catch (IOException e) {
