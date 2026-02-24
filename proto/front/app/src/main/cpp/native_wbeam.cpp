@@ -135,7 +135,7 @@ static inline void draw_diag_marker(unsigned char* dst, int pitch, int w, int h,
 }
 
 extern "C" JNIEXPORT jlong JNICALL
-Java_com_proto_demo_MainActivity_nativeCreate(JNIEnv* env, jclass, jint outMaxW, jint outMaxH) {
+Java_com_proto_demo_jni_NativeBridge_nativeCreate(JNIEnv* env, jclass, jint outMaxW, jint outMaxH) {
     (void)env;
     auto* s = new WBeamNative();
     s->outMaxW = (int)outMaxW;
@@ -156,7 +156,7 @@ Java_com_proto_demo_MainActivity_nativeCreate(JNIEnv* env, jclass, jint outMaxW,
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_proto_demo_MainActivity_nativeDestroy(JNIEnv* env, jclass, jlong handle) {
+Java_com_proto_demo_jni_NativeBridge_nativeDestroy(JNIEnv* env, jclass, jlong handle) {
     (void)env;
     auto* s = H(handle);
     if (!s) return;
@@ -178,7 +178,7 @@ Java_com_proto_demo_MainActivity_nativeDestroy(JNIEnv* env, jclass, jlong handle
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_proto_demo_MainActivity_nativeSetSurface(JNIEnv* env, jclass, jlong handle, jobject surface) {
+Java_com_proto_demo_jni_NativeBridge_nativeSetSurface(JNIEnv* env, jclass, jlong handle, jobject surface) {
     auto* s = H(handle);
     if (!s) return;
 
@@ -197,7 +197,7 @@ Java_com_proto_demo_MainActivity_nativeSetSurface(JNIEnv* env, jclass, jlong han
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_proto_demo_MainActivity_nativeClearSurface(JNIEnv* env, jclass, jlong handle) {
+Java_com_proto_demo_jni_NativeBridge_nativeClearSurface(JNIEnv* env, jclass, jlong handle) {
     (void)env;
     auto* s = H(handle);
     if (!s) return;
@@ -208,7 +208,7 @@ Java_com_proto_demo_MainActivity_nativeClearSurface(JNIEnv* env, jclass, jlong h
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_proto_demo_MainActivity_nativeTurboAvailable(JNIEnv* env, jclass) {
+Java_com_proto_demo_jni_NativeBridge_nativeTurboAvailable(JNIEnv* env, jclass) {
     (void)env;
 #if WBEAM_USE_TURBOJPEG
     return JNI_TRUE;
@@ -218,7 +218,7 @@ Java_com_proto_demo_MainActivity_nativeTurboAvailable(JNIEnv* env, jclass) {
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_proto_demo_MainActivity_nativeGetDiag(JNIEnv* env, jclass, jlong handle) {
+Java_com_proto_demo_jni_NativeBridge_nativeGetDiag(JNIEnv* env, jclass, jlong handle) {
     auto* s = H(handle);
     if (!s) {
         return env->NewStringUTF("handle=null");
@@ -236,7 +236,7 @@ Java_com_proto_demo_MainActivity_nativeGetDiag(JNIEnv* env, jclass, jlong handle
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_proto_demo_MainActivity_nativeDecodeAndRender(JNIEnv* env, jclass, jlong handle,
+Java_com_proto_demo_jni_NativeBridge_nativeDecodeAndRender(JNIEnv* env, jclass, jlong handle,
                                                       jbyteArray jpegArr, jint len,
                                                       jint outMaxW, jint outMaxH) {
     auto* s = H(handle);
