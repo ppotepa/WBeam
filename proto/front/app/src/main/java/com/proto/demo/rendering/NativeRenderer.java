@@ -3,7 +3,6 @@ package com.proto.demo.rendering;
 import android.util.Log;
 import android.view.Surface;
 
-import com.proto.demo.config.StreamConfig;
 import com.proto.demo.jni.NativeBridge;
 
 /**
@@ -18,6 +17,8 @@ public class NativeRenderer implements FrameRenderer {
 
     private long    handle    = 0;
     private boolean available = false;
+    private int     outMaxW   = 0;
+    private int     outMaxH   = 0;
 
     public NativeRenderer() {
         try {
@@ -25,14 +26,7 @@ public class NativeRenderer implements FrameRenderer {
         } catch (UnsatisfiedLinkError e) {
             available = false;
         }
-        if (available) {
-            try {
-                handle = NativeBridge.nativeCreate(StreamConfig.OUT_W, StreamConfig.OUT_H);
-                if (handle == 0) available = false;
-            } catch (UnsatisfiedLinkError e) {
-                available = false;
-            }
-        }
+        // Handle is created lazily in onSurfaceChanged once we know the actual display size.
         Log.i(TAG, "NativeRenderer available=" + available);
     }
 
@@ -46,7 +40,7 @@ public class NativeRenderer implements FrameRenderer {
         if (!isAvailable()) return false;
         try {
             int rc = NativeBridge.nativeDecodeAndRender(
-                    handle, data, len, StreamConfig.OUT_W, StreamConfig.OUT_H);
+                    handle, data, len, outMaxW, outMaxH);
             if (rc == 0) return true;
             Log.w(TAG, "native rc=" + rc + " diag=" + NativeBridge.nativeGetDiag(handle));
             // surface ownership stays with native; don't fall through to Java
@@ -58,7 +52,27 @@ public class NativeRenderer implements FrameRenderer {
     }
 
     @Override
-    public void onSurfaceChanged(Surface surface) {
+    public void onSurfaceChanged(Surface surface, int w, int h) {
+        if (!available) return;
+        boolean sizeChanged = (w != outMaxW || h != outMaxH) && w > 0 && h > 0;
+        if (sizeChanged) {
+            // Release old handle sized for different dimensions before creating a new one
+            if (handle != 0) {
+                try { NativeBridge.nativeDestroy(handle); }
+                catch (UnsatisfiedLinkError ignored) {}
+                handle = 0;
+            }
+            outMaxW = w;
+            outMaxH = h;
+            try {
+                handle = NativeBridge.nativeCreate(outMaxW, outMaxH);
+                if (handle == 0) { available = false; return; }
+            } catch (UnsatisfiedLinkError e) {
+                available = false;
+                return;
+            }
+            Log.i(TAG, "NativeRenderer resized to " + w + "x" + h);
+        }
         if (handle != 0) {
             try { NativeBridge.nativeSetSurface(handle, surface); }
             catch (UnsatisfiedLinkError ignored) {}

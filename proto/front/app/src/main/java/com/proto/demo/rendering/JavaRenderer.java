@@ -39,7 +39,7 @@ public class JavaRenderer implements FrameRenderer {
     }
 
     /** No-op: Java path derives its surface via the holder reference. */
-    @Override public void onSurfaceChanged(Surface surface) {}
+    @Override public void onSurfaceChanged(Surface surface, int w, int h) {}
 
     /** No-op: Canvas lock/unlock is stateless between frames. */
     @Override public void onSurfaceDestroyed() {}

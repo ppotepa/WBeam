@@ -12,7 +12,7 @@ public interface FrameRenderer {
     boolean render(byte[] data, int len);
 
     /** Called when the Surface becomes available or changes size/format. */
-    void onSurfaceChanged(Surface surface);
+    void onSurfaceChanged(Surface surface, int w, int h);
 
     /** Called when the Surface is about to be destroyed. */
     void onSurfaceDestroyed();

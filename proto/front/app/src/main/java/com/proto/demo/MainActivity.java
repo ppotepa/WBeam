@@ -86,13 +86,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     // ── SurfaceHolder.Callback ────────────────────────────────────────────────
     @Override
     public void surfaceCreated(SurfaceHolder holder) {
-        renderer.onSurfaceChanged(holder.getSurface());
-        startIO();
+        // surfaceChanged is always called immediately after surfaceCreated with actual dims
+        // so no need to start IO here — we do it in surfaceChanged.
     }
 
     @Override
     public void surfaceChanged(SurfaceHolder holder, int fmt, int w, int h) {
-        renderer.onSurfaceChanged(holder.getSurface());
+        renderer.onSurfaceChanged(holder.getSurface(), w, h);
+        // Start (or restart) IO now that we know the real surface dimensions
+        if (ioThread == null || !ioThread.isAlive()) {
+            startIO();
+        }
     }
 
     @Override
