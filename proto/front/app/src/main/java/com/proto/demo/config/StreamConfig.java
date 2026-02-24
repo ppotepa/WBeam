@@ -16,6 +16,7 @@ public final class StreamConfig {
     public final String  hostIp;
     public final boolean useAdbPush;
     public final boolean useH264;
+    public final boolean forceJavaFallback;
     public final String  captureSize; // e.g., "1280x800"
 
     public StreamConfig(Intent intent) {
@@ -23,12 +24,18 @@ public final class StreamConfig {
         hostIp     = (ip != null && !ip.trim().isEmpty()) ? ip.trim() : DEFAULT_HOST_IP;
         useAdbPush = intent.getBooleanExtra("adb_push", true);
         useH264    = intent.getBooleanExtra("h264", false);
+        forceJavaFallback = intent.getBooleanExtra("force_java_fallback", false);
         String sz  = intent.getStringExtra("capture_size");
         captureSize = (sz != null && !sz.trim().isEmpty()) ? sz.trim() : null;
     }
 
     @Override
     public String toString() {
-        return "StreamConfig{hostIp='" + hostIp + "', useAdbPush=" + useAdbPush + '}';
+        return "StreamConfig{hostIp='" + hostIp
+            + "', useAdbPush=" + useAdbPush
+            + ", useH264=" + useH264
+            + ", forceJavaFallback=" + forceJavaFallback
+            + ", captureSize=" + captureSize
+            + '}';
     }
 }

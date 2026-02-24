@@ -160,7 +160,9 @@ fn main() {
         start_adb_push_sender(Arc::clone(&shared), Arc::clone(&current_quality));
     }
 
-    start_android_log_poller();
+    if android_log_poller_enabled() {
+        start_android_log_poller();
+    }
 
     let server = Server::http(LISTEN_ADDR).expect("bind listener");
     info!("serving on http://{LISTEN_ADDR} endpoints: /image(.jpg|.png)?format=png|jpeg /health");
@@ -456,6 +458,13 @@ fn adb_push_enabled() -> bool {
         .unwrap_or(false)
 }
 
+fn android_log_poller_enabled() -> bool {
+    std::env::var("PROTO_ANDROID_LOG_POLLER")
+        .ok()
+        .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+        .unwrap_or(false)
+}
+
 fn start_adb_push_sender(shared: Arc<Mutex<Frames>>, current_quality: Arc<AtomicU8>) {
     let addr = std::env::var("PROTO_ADB_PUSH_ADDR").unwrap_or_else(|_| DEFAULT_ADB_ADDR.to_string());
     let fps = std::env::var("PROTO_ADB_PUSH_FPS")
@@ -470,6 +479,11 @@ fn start_adb_push_sender(shared: Arc<Mutex<Frames>>, current_quality: Arc<Atomic
         .and_then(|v| v.parse::<usize>().ok())
         .map(|v| v.clamp(MAX_FRAME_BYTES_MIN, MAX_FRAME_BYTES_MAX))
         .unwrap_or(DEFAULT_MAX_FRAME_BYTES);
+    let jpeg_target_kb = std::env::var("PROTO_JPEG_TARGET_KB")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .map(|v| v.clamp(24, 240))
+        .unwrap_or(JPEG_Q_TARGET_KB);
     let skip_sig_check = std::env::var("PROTO_SKIP_SIG_CHECK")
         .ok()
         .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE"))
@@ -501,6 +515,10 @@ fn start_adb_push_sender(shared: Arc<Mutex<Frames>>, current_quality: Arc<Atomic
 
     thread::spawn(move || {
         set_thread_realtime_priority();
+        info!(
+            "ADB PUSH tune: fps={} max_frame_bytes={} jpeg_target_kb={} skip_sig_check={}",
+            fps, max_frame_bytes, jpeg_target_kb, skip_sig_check
+        );
         let mut connect_failures: u32 = 0;
         let mut seq: u64 = 1;
         let mut next_tick = Instant::now();
@@ -643,9 +661,9 @@ fn start_adb_push_sender(shared: Arc<Mutex<Frames>>, current_quality: Arc<Atomic
                                 seq
                             );
                             let q = current_quality.load(Ordering::Relaxed);
-                            let new_q = if late_ticks > 0 || avg_kb as usize > JPEG_Q_TARGET_KB {
+                            let new_q = if late_ticks > 0 || avg_kb as usize > jpeg_target_kb {
                                 q.saturating_sub(2).max(JPEG_Q_MIN)
-                            } else if (avg_kb as usize) < JPEG_Q_TARGET_KB * 7 / 10 {
+                            } else if (avg_kb as usize) < jpeg_target_kb * 7 / 10 {
                                 (q + 1).min(JPEG_Q_MAX)
                             } else {
                                 q
@@ -828,24 +846,35 @@ fn capture_desktop_with_quality(jpeg_quality: u8) -> Result<Vec<u8>, String> {
 
     let primary_output = PRIMARY_OUTPUT.get_or_init(detect_primary_output);
     let capture_size = std::env::var("PROTO_CAPTURE_SIZE").ok();
+    let grim_scale = capture_size
+        .as_deref()
+        .and_then(|target| compute_grim_scale(target, primary_output.as_deref()));
 
     let mut grim_cmd = Command::new("grim");
     if let Some(output_name) = primary_output.as_ref() {
         grim_cmd.arg("-o").arg(output_name);
     }
-    if let Some(ref sz) = capture_size {
-        grim_cmd.arg("-s").arg(sz);
+    if let Some(scale) = grim_scale {
+        grim_cmd.arg("-s").arg(format!("{:.3}", scale));
     }
-    grim_cmd.arg("-q").arg(jpeg_quality.to_string());
-    if let Ok(output) = grim_cmd.arg("-t").arg(CAPTURE_FORMAT_JPEG).arg("-").output() {
+    grim_cmd
+        .arg("-t")
+        .arg(CAPTURE_FORMAT_JPEG)
+        .arg("-q")
+        .arg(jpeg_quality.to_string());
+    if let Ok(output) = grim_cmd.arg("-").output() {
         if output.status.success() && !output.stdout.is_empty() {
-            return Ok(output.stdout);
+            // When grim scale is available, avoid extra ffmpeg transcode per frame.
+            if grim_scale.is_some() {
+                return Ok(output.stdout);
+            }
+            return Ok(resize_jpeg_if_requested(output.stdout, capture_size.as_deref(), jpeg_quality));
         }
     }
 
     if let Ok(bytes) = capture_with_spectacle(CAPTURE_FORMAT_JPEG) {
         if !bytes.is_empty() {
-            return Ok(bytes);
+            return Ok(resize_jpeg_if_requested(bytes, capture_size.as_deref(), jpeg_quality));
         }
     }
 
@@ -861,6 +890,142 @@ fn capture_desktop_with_quality(jpeg_quality: u8) -> Result<Vec<u8>, String> {
     }
 
     Err("could not capture desktop (install grim for Wayland or import for X11)".to_string())
+}
+
+fn resize_jpeg_if_requested(input: Vec<u8>, capture_size: Option<&str>, _jpeg_quality: u8) -> Vec<u8> {
+    let Some(sz) = capture_size else {
+        return input;
+    };
+    if !sz.contains('x') {
+        return input;
+    }
+
+    let mut cmd = Command::new("ffmpeg");
+    cmd.arg("-hide_banner")
+        .arg("-loglevel")
+        .arg("error")
+        .arg("-f")
+        .arg("image2pipe")
+        .arg("-i")
+        .arg("-")
+        .arg("-vf")
+        .arg(format!("scale={}:flags=fast_bilinear", sz))
+        .arg("-f")
+        .arg("image2pipe")
+        .arg("-vcodec")
+        .arg("mjpeg")
+        .arg("-q:v")
+        .arg(JPEG_FFMPEG_QSCALE.to_string())
+        .arg("-")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+
+    let Ok(mut child) = cmd.spawn() else {
+        return input;
+    };
+
+    if let Some(stdin) = child.stdin.as_mut() {
+        if stdin.write_all(&input).is_err() {
+            let _ = child.kill();
+            return input;
+        }
+    }
+
+    match child.wait_with_output() {
+        Ok(out) if out.status.success() && !out.stdout.is_empty() => out.stdout,
+        _ => input,
+    }
+}
+
+fn compute_grim_scale(target_size: &str, preferred_output: Option<&str>) -> Option<f64> {
+    let (target_w, target_h) = parse_size_pair(target_size)?;
+    let (src_w, src_h) = detect_output_geometry(preferred_output)?;
+    if src_w == 0 || src_h == 0 {
+        return None;
+    }
+
+    let sw = target_w as f64 / src_w as f64;
+    let sh = target_h as f64 / src_h as f64;
+    let scale = sw.min(sh);
+    if (0.05..=4.0).contains(&scale) {
+        Some(scale)
+    } else {
+        None
+    }
+}
+
+fn parse_size_pair(value: &str) -> Option<(u32, u32)> {
+    let (w, h) = value.split_once('x')?;
+    let w = w.trim().parse::<u32>().ok()?;
+    let h = h.trim().parse::<u32>().ok()?;
+    if w > 0 && h > 0 {
+        Some((w, h))
+    } else {
+        None
+    }
+}
+
+fn detect_output_geometry(preferred_output: Option<&str>) -> Option<(u32, u32)> {
+    let output = Command::new("kscreen-doctor")
+        .arg("-o")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let mut clean = String::with_capacity(output.stdout.len());
+    let mut i = 0usize;
+    let bytes = output.stdout.as_slice();
+    while i < bytes.len() {
+        if bytes[i] == 0x1B && i + 1 < bytes.len() && bytes[i + 1] == b'[' {
+            i += 2;
+            while i < bytes.len() && !(bytes[i] >= b'@' && bytes[i] <= b'~') {
+                i += 1;
+            }
+            i += 1;
+            continue;
+        }
+        clean.push(bytes[i] as char);
+        i += 1;
+    }
+
+    let mut current_output: Option<String> = None;
+    let mut fallback: Option<(u32, u32)> = None;
+
+    for raw in clean.lines() {
+        let line = raw.trim();
+        if line.starts_with("Output:") {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            current_output = if parts.len() >= 3 {
+                Some(parts[2].to_string())
+            } else {
+                None
+            };
+            continue;
+        }
+        if !line.starts_with("Geometry:") {
+            continue;
+        }
+        let Some(size_token) = line.split_whitespace().last() else {
+            continue;
+        };
+        let Some(wh) = parse_size_pair(size_token) else {
+            continue;
+        };
+
+        if fallback.is_none() {
+            fallback = Some(wh);
+        }
+        if let (Some(pref), Some(cur)) = (preferred_output, current_output.as_deref()) {
+            if pref == cur {
+                return Some(wh);
+            }
+        }
+    }
+
+    fallback
 }
 
 fn portal_enabled() -> bool {
