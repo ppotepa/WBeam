@@ -14,6 +14,7 @@ public class RendererChain implements FrameRenderer {
 
     private final NativeRenderer nativeRenderer;
     private final JavaRenderer   javaRenderer;
+    private Surface             surface;
 
     public RendererChain(NativeRenderer nativeRenderer, JavaRenderer javaRenderer) {
         this.nativeRenderer = nativeRenderer;
@@ -23,6 +24,10 @@ public class RendererChain implements FrameRenderer {
     /** Returns {@code true} if the turbo/ANativeWindow path is active. */
     public boolean isNativeActive() {
         return nativeRenderer.isAvailable();
+    }
+
+    public Surface getSurface() {
+        return surface;
     }
 
     @Override
@@ -35,12 +40,14 @@ public class RendererChain implements FrameRenderer {
 
     @Override
     public void onSurfaceChanged(Surface surface, int w, int h) {
+        this.surface = surface;
         nativeRenderer.onSurfaceChanged(surface, w, h);
         // JavaRenderer derives its surface indirectly via SurfaceHolder
     }
 
     @Override
     public void onSurfaceDestroyed() {
+        surface = null;
         nativeRenderer.onSurfaceDestroyed();
     }
 

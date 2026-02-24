@@ -17,7 +17,7 @@ import java.net.Socket;
  * parse WBJ1-framed JPEG payloads, and deliver frames to a {@link FrameListener}.
  *
  * Protocol frame layout (big-endian):
- *   magic(4)  — "WBJ1" or "WBH1" (both carry JPEG payload)
+ *   magic(4)  — "WBJ1" (JPEG) or "WBH1" (H264 NAL)
  *   seq(8)    — frame sequence number
  *   ts_ms(8)  — capture timestamp (ms)
  *   len(4)    — payload length in bytes

@@ -14,6 +14,7 @@ import com.proto.demo.rendering.NativeRenderer;
 import com.proto.demo.rendering.RendererChain;
 import com.proto.demo.rendering.RenderLoop;
 import com.proto.demo.transport.AdbPushTransport;
+import com.proto.demo.transport.H264Transport;
 import com.proto.demo.transport.HttpMjpegTransport;
 import com.proto.demo.transport.Transport;
 import com.proto.demo.ui.ScreenLayout;
@@ -109,7 +110,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private void startIO() {
         stopIO();
 
-        String label = config.useAdbPush ? "ADB" : "HTTP";
+        String label = config.useAdbPush ? (config.useH264 ? "ADB-H264" : "ADB") : "HTTP";
 
         // Mailbox decouples IO (producer) from render (consumer).
         // Frame buffers are recycled to avoid GC.  Warm capacity = typical JPEG size.
@@ -123,14 +124,21 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         // IO listener: copy frame into pool buffer, publish to mailbox (non-blocking).
         // arraycopy of ~30 KB takes ~100 ns — IO thread never blocks on render latency.
         if (config.useAdbPush) {
-            activeTransport = new AdbPushTransport(
-                (data, len) -> {
-                    FrameMailbox.Frame buf = mailbox.acquire(len);
-                    System.arraycopy(data, 0, buf.data, 0, len);
-                    buf.len = len;
-                    mailbox.publish(buf);
-                },
-                status);
+            if (config.useH264) {
+                activeTransport = new H264Transport(
+                    status,
+                    renderer.getSurface(),
+                    config.captureSize);
+            } else {
+                activeTransport = new AdbPushTransport(
+                    (data, len) -> {
+                        FrameMailbox.Frame buf = mailbox.acquire(len);
+                        System.arraycopy(data, 0, buf.data, 0, len);
+                        buf.len = len;
+                        mailbox.publish(buf);
+                    },
+                    status);
+            }
         } else {
             activeTransport = new HttpMjpegTransport(
                 (data, len) -> {
