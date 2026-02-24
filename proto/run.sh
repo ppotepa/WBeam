@@ -611,6 +611,7 @@ sleep 1
 log "if Wayland prompt appears, pick the virtual/extended screen source"
 
 # Wait briefly for first decoded portal frame so app doesn't start on long fallback.
+# Skip wait when using H264 direct path (no JPEG files produced).
 FRAME_READY=0
 FRAME_READY_PATH="/tmp/proto-portal-frame.jpg"
 if [[ "$PROTO_PORTAL_JPEG_SOURCE" == "debug" ]]; then
@@ -622,6 +623,9 @@ if [[ "$PROTO_PORTAL" != "0" && "$PROTO_PORTAL" != "false" && "$PROTO_PORTAL" !=
   portal_enabled=1
 fi
 
+if [[ "$PROTO_H264" == "1" ]]; then
+  log "H264 mode enabled — skipping portal JPEG wait"
+else
 if [[ "$portal_enabled" -eq 1 && "$PROTO_WAIT_FOR_FIRST_FRAME_REQUIRED" == "1" ]]; then
   log "waiting for first portal frame before launching app (required=1)"
   wait_ticks=0
@@ -654,6 +658,7 @@ else
     fi
     sleep 0.1
   done
+fi
 fi
 
 if [[ "$FRAME_READY" -eq 1 ]]; then
@@ -706,10 +711,26 @@ if [[ "$ADB_READY" -eq 1 ]]; then
     EXTRA_STEPS+=(--ez force_java_fallback true)
   fi
 
+  h264_flag=false
+  if [[ "${PROTO_H264:-0}" == "1" ]]; then
+    h264_flag=true
+  fi
+
+  capture_size_extra=()
+  if [[ -n "${PROTO_CAPTURE_SIZE:-}" ]]; then
+    capture_size_extra=(--es capture_size "$PROTO_CAPTURE_SIZE")
+  fi
+
+  # If H264 path is enabled, skip portal JPEG wait and mark Intent
+  if [[ "$PROTO_H264" == "1" ]]; then
+    PROTO_PORTAL_JPEG_SOURCE="${PROTO_PORTAL_JPEG_SOURCE:-h264}"
+    PROTO_WAIT_FOR_FIRST_FRAME_REQUIRED=0
+  fi
+
   if [[ "$PROTO_ADB_PUSH" == "1" ]]; then
-    adb "${SERIAL_FLAG[@]}" shell am start -n com.proto.demo/.MainActivity --es host_ip "$APP_HOST_IP" --ez adb_push true "${EXTRA_STEPS[@]}"
+    adb "${SERIAL_FLAG[@]}" shell am start -n com.proto.demo/.MainActivity --es host_ip "$APP_HOST_IP" --ez adb_push true --ez h264 "$h264_flag" "${capture_size_extra[@]}" "${EXTRA_STEPS[@]}"
   else
-    adb "${SERIAL_FLAG[@]}" shell am start -n com.proto.demo/.MainActivity --es host_ip "$APP_HOST_IP" --ez adb_push false "${EXTRA_STEPS[@]}"
+    adb "${SERIAL_FLAG[@]}" shell am start -n com.proto.demo/.MainActivity --es host_ip "$APP_HOST_IP" --ez adb_push false --ez h264 "$h264_flag" "${capture_size_extra[@]}" "${EXTRA_STEPS[@]}"
   fi
 
   sleep 3
