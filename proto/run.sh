@@ -155,6 +155,31 @@ if [[ "${PROTO_CAPTURE_SIZE_OVERRIDE:-0}" != "1" ]]; then
 else
   log "PROTO_CAPTURE_SIZE_OVERRIDE=1 — keeping PROTO_CAPTURE_SIZE=${PROTO_CAPTURE_SIZE}"
 fi
+
+# ── Set virtual Wayland output to device resolution ───────────────────────────
+# The KDE XDG portal creates a virtual output (e.g. Virtual-virtual-xdp-kde-*)
+# at 1920x1080 by default. If the portal captures from this output at full HD
+# and we only resize during H264 encode, we waste CPU on every frame.
+# Setting the virtual output mode to the device native resolution means the
+# portal captures at exactly the right size — zero wasted pixels.
+# Gated on PROTO_SET_VIRTUAL_RES (default 1); set to 0 to skip.
+if [[ "${PROTO_SET_VIRTUAL_RES:-1}" == "1" ]] && command -v kscreen-doctor &>/dev/null; then
+  _virt_output="$(kscreen-doctor -o 2>/dev/null \
+    | grep -oP 'Output: \d+ \K[^\s]+' \
+    | grep -i 'virtual\|xdp\|xdg' \
+    | head -1 || true)"
+  if [[ -n "$_virt_output" && -n "$_dev_size" ]]; then
+    log "setting virtual output '$_virt_output' to ${_dev_size}@60"
+    if kscreen-doctor "output.${_virt_output}.mode.${_dev_size}@60" 2>/dev/null; then
+      log "virtual output mode set OK — portal will capture at $_dev_size"
+      sleep 0.5   # let KMS settle before portal starts
+    else
+      log "WARNING: kscreen-doctor mode change failed (mode may not exist); portal will still encode at $_dev_size via --size flag"
+    fi
+  else
+    log "no virtual output found or device size unknown — skipping virtual monitor resize"
+  fi
+fi
 # ─────────────────────────────────────────────────────────────────────────────
 
 FRONT_DIR="$ROOT_DIR/front"
