@@ -1,0 +1,1 @@
+/mnt/fat_boii/git/WBeam/proto/front/app/build/intermediates/cxx/Debug/2e234y1a/obj/x86

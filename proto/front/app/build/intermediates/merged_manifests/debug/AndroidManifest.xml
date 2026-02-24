@@ -9,6 +9,7 @@
         android:targetSdkVersion="34" />
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <permission
         android:name="com.proto.demo.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"

@@ -1,0 +1,19 @@
+                        -H/mnt/fat_boii/git/WBeam/proto/front/app/src/main/cpp
+-DCMAKE_SYSTEM_NAME=Android
+-DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+-DCMAKE_SYSTEM_VERSION=17
+-DANDROID_PLATFORM=android-17
+-DANDROID_ABI=x86
+-DCMAKE_ANDROID_ARCH_ABI=x86
+-DANDROID_NDK=/home/ppotepa/Android/Sdk/ndk/23.1.7779620
+-DCMAKE_ANDROID_NDK=/home/ppotepa/Android/Sdk/ndk/23.1.7779620
+-DCMAKE_TOOLCHAIN_FILE=/home/ppotepa/Android/Sdk/ndk/23.1.7779620/build/cmake/android.toolchain.cmake
+-DCMAKE_MAKE_PROGRAM=/home/ppotepa/Android/Sdk/cmake/3.22.1/bin/ninja
+-DCMAKE_CXX_FLAGS=-std=c++17
+-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=/mnt/fat_boii/git/WBeam/proto/front/app/build/intermediates/cxx/Debug/2e234y1a/obj/x86
+-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=/mnt/fat_boii/git/WBeam/proto/front/app/build/intermediates/cxx/Debug/2e234y1a/obj/x86
+-DCMAKE_BUILD_TYPE=Debug
+-B/mnt/fat_boii/git/WBeam/proto/front/app/.cxx/Debug/2e234y1a/x86
+-GNinja
+                        Build command args: []
+                        Version: 2

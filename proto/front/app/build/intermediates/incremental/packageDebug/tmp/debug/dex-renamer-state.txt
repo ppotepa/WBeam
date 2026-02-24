@@ -1,4 +1,4 @@
-#Sun Feb 22 15:57:16 CET 2026
+#Tue Feb 24 17:09:47 CET 2026
 base.0=/mnt/fat_boii/git/WBeam/proto/front/app/build/intermediates/dex/debug/mergeDexDebug/classes.dex
 renamed.0=classes.dex
 path.0=classes.dex

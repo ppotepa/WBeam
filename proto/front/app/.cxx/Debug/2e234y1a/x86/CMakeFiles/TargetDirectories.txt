@@ -1,0 +1,3 @@
+/mnt/fat_boii/git/WBeam/proto/front/app/.cxx/Debug/2e234y1a/x86/CMakeFiles/wbeam.dir
+/mnt/fat_boii/git/WBeam/proto/front/app/.cxx/Debug/2e234y1a/x86/CMakeFiles/edit_cache.dir
+/mnt/fat_boii/git/WBeam/proto/front/app/.cxx/Debug/2e234y1a/x86/CMakeFiles/rebuild_cache.dir
