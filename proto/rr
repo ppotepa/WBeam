@@ -1,4 +1,137 @@
-export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-export ANDROID_HOME=/home/ppotepa/Android/Sdk
-export ANDROID_SDK_ROOT=/home/ppotepa/Android/Sdk
-GRADLEW=/tmp/gradle-7.5/bin/gradle ./run.sh
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$ROOT_DIR"
+
+PRESET="fast"
+PROTO_TEST_STEPS=0
+
+select_serial_noninteractive() {
+	local serial
+	local model
+	local preferred=""
+	local first_physical=""
+	local first_any=""
+
+	adb start-server >/dev/null 2>&1 || true
+
+	while IFS= read -r serial; do
+		[[ -z "$serial" ]] && continue
+
+		if [[ -z "$first_any" ]]; then
+			first_any="$serial"
+		fi
+
+		model=""
+		model="$(adb -s "$serial" shell getprop ro.product.model 2>/dev/null | tr -d '\r' || true)"
+
+		if [[ "$serial" != emulator-* && -z "$first_physical" ]]; then
+			first_physical="$serial"
+		fi
+
+		if [[ "$model" == *S6000* || "$model" == *Lenovo* ]]; then
+			preferred="$serial"
+			break
+		fi
+	done < <(adb devices 2>/dev/null | awk 'NR>1 && $2=="device" {print $1}')
+
+	if [[ -n "$preferred" ]]; then
+		printf '%s\n' "$preferred"
+		return 0
+	fi
+	if [[ -n "$first_physical" ]]; then
+		printf '%s\n' "$first_physical"
+		return 0
+	fi
+	if [[ -n "$first_any" ]]; then
+		printf '%s\n' "$first_any"
+		return 0
+	fi
+	return 1
+}
+
+detect_host_ip_for_serial() {
+	local serial="$1"
+	local route
+	local src
+	local prefix
+	local candidate
+
+	route="$(adb -s "$serial" shell ip route 2>/dev/null | tr -d '\r' | grep ' dev rndis0 ' | head -n 1 || true)"
+	src="$(printf '%s\n' "$route" | sed -n 's/.* src \([0-9.]*\).*/\1/p')"
+	if [[ -n "$src" ]]; then
+		prefix="$(printf '%s' "$src" | awk -F. '{print $1"."$2"."$3}')"
+		candidate="$(ip -4 -o addr show scope global | awk -v pfx="$prefix" '{split($4,a,"/"); if (index(a[1], pfx ".") == 1) {print a[1]; exit}}')"
+		if [[ -n "$candidate" ]]; then
+			printf '%s\n' "$candidate"
+			return 0
+		fi
+	fi
+
+	candidate="$(ip -4 -o addr show scope global | awk '$4 ~ /^192\.168\.42\./ {split($4,a,"/"); print a[1]; exit}')"
+	if [[ -n "$candidate" ]]; then
+		printf '%s\n' "$candidate"
+		return 0
+	fi
+
+	return 1
+}
+
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		fast|balanced|quality)
+			PRESET="$1"
+			;;
+		--steps)
+			PROTO_TEST_STEPS=1
+			;;
+		*)
+			printf '[proto] %s\n' "usage: ./rr [fast|balanced|quality] [--steps]"
+			exit 1
+			;;
+	esac
+	shift
+done
+
+export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-17-openjdk-amd64}"
+export ANDROID_HOME="${ANDROID_HOME:-/home/ppotepa/Android/Sdk}"
+export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-/home/ppotepa/Android/Sdk}"
+
+if [[ -x "$ROOT_DIR/front/gradlew" ]]; then
+	export GRADLEW="$ROOT_DIR/front/gradlew"
+elif [[ -x /tmp/gradle-7.5/bin/gradle ]]; then
+	export GRADLEW=/tmp/gradle-7.5/bin/gradle
+fi
+
+# ── device picker (non-interactive) ─────────────────────────────────────────
+if [[ -z "${SERIAL:-}" ]]; then
+	if ! detected_serial="$(select_serial_noninteractive)"; then
+		printf '[proto] no adb devices found. Connect a device or start an emulator.\n'
+		exit 1
+	fi
+	export SERIAL="$detected_serial"
+	printf '[proto] using device: %s\n' "$SERIAL"
+fi
+
+if [[ -z "${HOST_IP:-}" ]]; then
+	if detected_host_ip="$(detect_host_ip_for_serial "$SERIAL")"; then
+		export HOST_IP="$detected_host_ip"
+		printf '[proto] using host ip: %s\n' "$HOST_IP"
+	fi
+fi
+
+# Emulators use software decode — don't abort on missing turbo
+if [[ "${SERIAL:-}" == emulator-* ]]; then
+	export PROTO_REQUIRE_TURBO="${PROTO_REQUIRE_TURBO:-0}"
+fi
+# ─────────────────────────────────────────────────────────────────────────────
+
+export PROTO_PRESET="$PRESET"
+export PROTO_PORTAL_JPEG_SOURCE="${PROTO_PORTAL_JPEG_SOURCE:-debug}"
+export PROTO_CURSOR_MODE="${PROTO_CURSOR_MODE:-embedded}"
+export PROTO_ADB_PUSH="${PROTO_ADB_PUSH:-1}"
+export PROTO_PORTAL_ONLY="${PROTO_PORTAL_ONLY:-0}"
+export PROTO_TEST_STEPS="$PROTO_TEST_STEPS"
+
+exec ./run.sh
