@@ -15,6 +15,12 @@ android/**/build/
 android/local.properties
 android/captures/
 android/.cxx/
+proto/front/.gradle/
+proto/front/**/build/
+proto/front/local.properties
+proto/front/captures/
+proto/front/.cxx/
+proto/front/.externalNativeBuild/
 *.apk
 *.aab
 *.ap_
@@ -26,6 +32,9 @@ android/.cxx/
 # Rust
 host/rust/target/
 protocol/rust/target/
+proto/host/target/
+proto/host-cs/bin/
+proto/host-cs/obj/
 
 # Python
 __pycache__/
@@ -51,4 +60,6 @@ codebase_concat*.txt
 concat*.txt
 ALL_CODE.txt
 ALL_CODE_CLEAN.txt
+ALL_CODE_CLEAN.zip
 .wbeam_android_pipeline
+ignores

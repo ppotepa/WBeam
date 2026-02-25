@@ -29,6 +29,12 @@ const PORTAL_FFMPEG_LOG: &str = "/tmp/proto-portal-ffmpeg.log";
 const MJPEG_BOUNDARY: &str = "frame";
 const WBJ1_MAGIC: &[u8; 4] = b"WBJ1";
 const WBH1_MAGIC: &[u8; 4] = b"WBH1";
+const WBTP_MAGIC: &[u8; 4] = b"WBTP";
+const WBTP_HEADER_BYTES: usize = 22;
+const WBTP_VERSION: u8 = 1;
+const WBS1_MAGIC: &[u8; 4] = b"WBS1";
+const WBS1_HEADER_BYTES: usize = 16;
+const WBS1_HEADER_MAX_BYTES: usize = 4096;
 const ADB_WRITE_TIMEOUT_MS: u64  = 80;
 const TCP_SNDBUF_BYTES: i32      = 512 * 1024;
 const DEFAULT_ADB_ADDR: &str     = "127.0.0.1:5006";
@@ -54,6 +60,12 @@ const ADB_RECONNECT_MAX_SHIFT: u32     = 2;
 const ADB_KEEPALIVE_MIN_MS: u64        = 250;
 const ADB_KEEPALIVE_MAX_MS: u64        = 5_000;
 const ADB_KEEPALIVE_DEFAULT_MS: u64    = 1_000;
+const H264_RX_BUF_BYTES: usize         = 64 * 1024;
+const H264_PARSE_BUF_INIT_BYTES: usize = 256 * 1024;
+const H264_PARSE_BUF_MAX_BYTES: usize  = 2 * 1024 * 1024;
+const H264_PARSE_BUF_KEEP_BYTES: usize = 256 * 1024;
+const H264_PARSE_COMPACT_BYTES: usize  = 512 * 1024;
+const H264_STARTCODE_TAIL_BYTES: usize = 4;
 const DEBUG_FRAMES_DIR_DEFAULT: &str   = "../debugframes";
 const DEBUG_FRAMES_FPS_MIN: u64        = 1;
 const DEBUG_FRAMES_FPS_MAX: u64        = 30;
@@ -208,10 +220,14 @@ fn main() {
 }
 
 fn h264_mode_enabled() -> bool {
-    std::env::var("PROTO_H264")
+    env_truthy("PROTO_H264", false)
+}
+
+fn env_truthy(name: &str, default: bool) -> bool {
+    std::env::var(name)
         .ok()
         .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
-        .unwrap_or(false)
+        .unwrap_or(default)
 }
 
 fn run_h264_loop() {
@@ -220,6 +236,7 @@ fn run_h264_loop() {
         .ok()
         .and_then(|v| v.parse::<u16>().ok())
         .unwrap_or(PORTAL_STREAM_PORT);
+    let source_framed = env_truthy("PROTO_H264_SOURCE_FRAMED", true);
 
     let started = PORTAL_STARTED.get_or_init(start_portal_pipeline_once);
     if !*started {
@@ -227,9 +244,10 @@ fn run_h264_loop() {
     }
 
     info!(
-        "H264 WBH1 mode enabled: source=tcp://127.0.0.1:{} sink={} magic=WBH1",
+        "H264 WBH1 mode enabled: source=tcp://127.0.0.1:{} sink={} magic=WBH1 source_framed={}",
         source_port,
-        sink_addr
+        sink_addr,
+        source_framed
     );
 
     let mut seq: u64 = 1;
@@ -266,83 +284,26 @@ fn run_h264_loop() {
                 continue;
             }
         };
-        let _ = source.set_read_timeout(Some(Duration::from_millis(1200)));
+        // Keep stream stable across short portal stalls; do not reconnect on minor gaps.
+        let _ = source.set_read_timeout(Some(Duration::from_millis(5000)));
         info!("WBH1 connected to source {}", source_addr);
 
-        let mut rx = [0u8; 64 * 1024];
-        let mut buffer: Vec<u8> = Vec::with_capacity(256 * 1024);
-        let mut sent_units: u64 = 0;
-        let mut sent_bytes: u64 = 0;
-        let mut last_stats = Instant::now();
+        let pump_result = if source_framed {
+            pump_h264_framed_stream(&mut source, &mut sink, &mut seq)
+        } else {
+            pump_h264_stream(&mut source, &mut sink, &mut seq)
+        };
 
-        'stream_loop: loop {
-            match source.read(&mut rx) {
-                Ok(0) => {
-                    info!("WBH1 source EOF");
-                    break 'stream_loop;
-                }
-                Ok(n) => {
-                    buffer.extend_from_slice(&rx[..n]);
-
-                    if let Some((start_idx, _)) = find_start_code(&buffer, 0) {
-                        if start_idx > 0 {
-                            buffer.drain(..start_idx);
-                        }
-                    } else {
-                        if buffer.len() > 4 {
-                            let keep = buffer.split_off(buffer.len() - 4);
-                            buffer = keep;
-                        }
-                        continue;
-                    }
-
-                    while let Some(unit_len) = next_annexb_unit_len(&buffer) {
-                        let unit = &buffer[..unit_len];
-                        if unit.len() > (u32::MAX as usize) {
-                            buffer.drain(..unit_len);
-                            continue;
-                        }
-
-                        let ts_ms = SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .map(|d| d.as_millis() as u64)
-                            .unwrap_or(0);
-
-                        let mut header = [0u8; 24];
-                        header[0..4].copy_from_slice(WBH1_MAGIC);
-                        header[4..12].copy_from_slice(&seq.to_be_bytes());
-                        header[12..20].copy_from_slice(&ts_ms.to_be_bytes());
-                        header[20..24].copy_from_slice(&(unit.len() as u32).to_be_bytes());
-
-                        if write_wbj1_frame(&mut sink, &header, unit).is_err() {
-                            info!("WBH1 sink disconnected from {}", sink_addr);
-                            break 'stream_loop;
-                        }
-
-                        sent_units = sent_units.saturating_add(1);
-                        sent_bytes = sent_bytes.saturating_add(unit.len() as u64);
-                        seq = seq.wrapping_add(1);
-                        buffer.drain(..unit_len);
-                    }
-
-                    if buffer.len() > 2 * 1024 * 1024 {
-                        let keep = buffer.split_off(buffer.len().saturating_sub(256 * 1024));
-                        buffer = keep;
-                    }
-
-                    let elapsed = last_stats.elapsed();
-                    if elapsed >= Duration::from_secs(1) {
-                        let avg = if sent_units > 0 { (sent_bytes / sent_units) / 1024 } else { 0 };
-                        info!("WBH1 stats: units={} avg_kb={} seq={}", sent_units, avg, seq);
-                        sent_units = 0;
-                        sent_bytes = 0;
-                        last_stats = Instant::now();
-                    }
-                }
-                Err(e) => {
-                    info!("WBH1 source read error: {}", e);
-                    break 'stream_loop;
-                }
+        match pump_result {
+            Ok(()) => {}
+            Err(e) if is_sink_disconnect_error(&e) => {
+                info!("WBH1 sink disconnected from {}", sink_addr);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                info!("WBH1 source EOF");
+            }
+            Err(e) => {
+                info!("WBH1 source read error: {}", e);
             }
         }
 
@@ -350,14 +311,382 @@ fn run_h264_loop() {
     }
 }
 
-fn next_annexb_unit_len(buffer: &[u8]) -> Option<usize> {
-    let (_start_idx, start_len) = find_start_code(buffer, 0)?;
-    let next_search_from = start_len;
-    if let Some((next_idx, _)) = find_start_code(buffer, next_search_from) {
-        return Some(next_idx);
+struct H264AnnexBBuffer {
+    bytes: Vec<u8>,
+    start: usize,
+}
+
+impl H264AnnexBBuffer {
+    fn new() -> Self {
+        Self {
+            bytes: Vec::with_capacity(H264_PARSE_BUF_INIT_BYTES),
+            start: 0,
+        }
     }
 
-    None
+    fn push(&mut self, data: &[u8]) {
+        self.bytes.extend_from_slice(data);
+    }
+
+    fn align_to_start_code(&mut self) -> bool {
+        let view = &self.bytes[self.start..];
+        if let Some((idx, _)) = find_start_code(view, 0) {
+            if idx > 0 {
+                self.start += idx;
+                self.compact_if_needed();
+            }
+            return true;
+        }
+
+        if view.len() > H264_STARTCODE_TAIL_BYTES {
+            self.start = self.bytes.len() - H264_STARTCODE_TAIL_BYTES;
+            self.compact_if_needed();
+        }
+        false
+    }
+
+    fn next_unit_range(&self) -> Option<(usize, usize)> {
+        let view = &self.bytes[self.start..];
+        let (first_idx, first_len) = find_start_code(view, 0)?;
+        let search_from = first_idx + first_len;
+        let (next_idx, _) = find_start_code(view, search_from)?;
+        Some((self.start + first_idx, self.start + next_idx))
+    }
+
+    fn unit_slice(&self, start: usize, end: usize) -> &[u8] {
+        &self.bytes[start..end]
+    }
+
+    fn consume_until(&mut self, end: usize) {
+        self.start = end.min(self.bytes.len());
+        self.compact_if_needed();
+    }
+
+    fn trim_overflow(&mut self) {
+        if self.bytes.len() <= H264_PARSE_BUF_MAX_BYTES {
+            return;
+        }
+
+        let keep_bytes = H264_PARSE_BUF_KEEP_BYTES.min(self.bytes.len());
+        let drop_bytes = self.bytes.len().saturating_sub(keep_bytes);
+        if drop_bytes == 0 {
+            return;
+        }
+
+        self.bytes.drain(..drop_bytes);
+        self.start = self.start.saturating_sub(drop_bytes).min(self.bytes.len());
+    }
+
+    fn compact_if_needed(&mut self) {
+        if self.start == 0 {
+            return;
+        }
+        if self.start < H264_PARSE_COMPACT_BYTES && self.start * 2 < self.bytes.len() {
+            return;
+        }
+        self.bytes.drain(..self.start);
+        self.start = 0;
+    }
+}
+
+struct H264UnitStats {
+    sent_units: u64,
+    sent_bytes: u64,
+    last_stats: Instant,
+}
+
+impl H264UnitStats {
+    fn new() -> Self {
+        Self {
+            sent_units: 0,
+            sent_bytes: 0,
+            last_stats: Instant::now(),
+        }
+    }
+
+    fn record_sent(&mut self, bytes: usize) {
+        self.sent_units = self.sent_units.saturating_add(1);
+        self.sent_bytes = self.sent_bytes.saturating_add(bytes as u64);
+    }
+
+    fn maybe_log(&mut self, seq: u64) {
+        if self.last_stats.elapsed() < Duration::from_secs(1) {
+            return;
+        }
+        let avg_kb = if self.sent_units > 0 {
+            (self.sent_bytes / self.sent_units) / 1024
+        } else {
+            0
+        };
+        info!(
+            "WBH1 stats: units={} avg_kb={} seq={}",
+            self.sent_units, avg_kb, seq
+        );
+        self.sent_units = 0;
+        self.sent_bytes = 0;
+        self.last_stats = Instant::now();
+    }
+}
+
+fn pump_h264_stream(
+    source: &mut TcpStream,
+    sink: &mut TcpStream,
+    seq: &mut u64,
+) -> std::io::Result<()> {
+    let mut rx = [0u8; H264_RX_BUF_BYTES];
+    let mut parser = H264AnnexBBuffer::new();
+    let mut stats = H264UnitStats::new();
+
+    loop {
+        let read_n = match source.read(&mut rx) {
+            Ok(0) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "source EOF",
+                ));
+            }
+            Ok(n) => n,
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
+                continue;
+            }
+            Err(e) => return Err(e),
+        };
+
+        parser.push(&rx[..read_n]);
+        if !parser.align_to_start_code() {
+            parser.trim_overflow();
+            continue;
+        }
+
+        while let Some((unit_start, unit_end)) = parser.next_unit_range() {
+            let unit_len = unit_end.saturating_sub(unit_start);
+            if unit_len == 0 {
+                parser.consume_until(unit_end);
+                continue;
+            }
+            if unit_len > (u32::MAX as usize) {
+                parser.consume_until(unit_end);
+                continue;
+            }
+
+            let send_result = {
+                let unit = parser.unit_slice(unit_start, unit_end);
+                send_wbh1_unit(sink, *seq, unit)
+            };
+            if let Err(e) = send_result {
+                return Err(e);
+            }
+
+            parser.consume_until(unit_end);
+            stats.record_sent(unit_len);
+            *seq = seq.wrapping_add(1);
+        }
+
+        parser.trim_overflow();
+        stats.maybe_log(*seq);
+    }
+}
+
+fn pump_h264_framed_stream(
+    source: &mut TcpStream,
+    sink: &mut TcpStream,
+    seq: &mut u64,
+) -> std::io::Result<()> {
+    let mut header = [0u8; WBTP_HEADER_BYTES];
+    let mut payload = vec![0u8; H264_PARSE_BUF_KEEP_BYTES];
+    let mut stats = H264UnitStats::new();
+    read_first_framed_header(source, &mut header)?;
+
+    loop {
+        let (capture_ts_ms, payload_len) = parse_wbtp_header(&header)?;
+        if payload_len > payload.len() {
+            payload.resize(payload_len, 0);
+        }
+        read_exact_retry(source, &mut payload[..payload_len])?;
+
+        let units_sent = send_annexb_access_unit_as_wbh1(
+            sink,
+            seq,
+            capture_ts_ms,
+            &payload[..payload_len],
+            &mut stats,
+        )?;
+        if units_sent == 0 {
+            send_wbh1_unit_with_ts(sink, *seq, capture_ts_ms, &payload[..payload_len])?;
+            stats.record_sent(payload_len);
+            *seq = seq.wrapping_add(1);
+        }
+        stats.maybe_log(*seq);
+        read_exact_retry(source, &mut header)?;
+    }
+}
+
+fn send_annexb_access_unit_as_wbh1(
+    sink: &mut TcpStream,
+    seq: &mut u64,
+    capture_ts_ms: u64,
+    access_unit: &[u8],
+    stats: &mut H264UnitStats,
+) -> std::io::Result<usize> {
+    let mut sent = 0usize;
+    let mut cursor = 0usize;
+
+    while let Some((start_idx, start_len)) = find_start_code(access_unit, cursor) {
+        let search_from = start_idx + start_len;
+        let unit_end = if let Some((next_idx, _)) = find_start_code(access_unit, search_from) {
+            next_idx
+        } else {
+            access_unit.len()
+        };
+
+        if unit_end > start_idx {
+            let unit = &access_unit[start_idx..unit_end];
+            send_wbh1_unit_with_ts(sink, *seq, capture_ts_ms, unit)?;
+            stats.record_sent(unit.len());
+            *seq = seq.wrapping_add(1);
+            sent += 1;
+        }
+
+        if unit_end >= access_unit.len() {
+            break;
+        }
+        cursor = unit_end;
+    }
+
+    Ok(sent)
+}
+
+fn send_wbh1_unit(sink: &mut TcpStream, seq: u64, unit: &[u8]) -> std::io::Result<()> {
+    let ts_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    send_wbh1_unit_with_ts(sink, seq, ts_ms, unit)
+}
+
+fn send_wbh1_unit_with_ts(
+    sink: &mut TcpStream,
+    seq: u64,
+    ts_ms: u64,
+    unit: &[u8],
+) -> std::io::Result<()> {
+    let mut header = [0u8; 24];
+    header[0..4].copy_from_slice(WBH1_MAGIC);
+    header[4..12].copy_from_slice(&seq.to_be_bytes());
+    header[12..20].copy_from_slice(&ts_ms.to_be_bytes());
+    header[20..24].copy_from_slice(&(unit.len() as u32).to_be_bytes());
+    write_wbj1_frame(sink, &header, unit)
+}
+
+fn parse_wbtp_header(header: &[u8; WBTP_HEADER_BYTES]) -> std::io::Result<(u64, usize)> {
+    if &header[0..4] != WBTP_MAGIC {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "bad WBTP magic"));
+    }
+    if header[4] != WBTP_VERSION {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "bad WBTP version"));
+    }
+
+    let capture_ts_us = u64::from_be_bytes([
+        header[10], header[11], header[12], header[13],
+        header[14], header[15], header[16], header[17],
+    ]);
+    let payload_len = u32::from_be_bytes([header[18], header[19], header[20], header[21]]) as usize;
+    if payload_len == 0 || payload_len > H264_PARSE_BUF_MAX_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("bad WBTP payload len={payload_len}"),
+        ));
+    }
+
+    Ok((capture_ts_us / 1000, payload_len))
+}
+
+fn read_first_framed_header(
+    source: &mut TcpStream,
+    header: &mut [u8; WBTP_HEADER_BYTES],
+) -> std::io::Result<()> {
+    let mut prefix = [0u8; 4];
+    read_exact_retry(source, &mut prefix)?;
+
+    if &prefix == WBS1_MAGIC {
+        consume_wbs1_hello_rest(source)?;
+        read_exact_retry(source, header)?;
+        return Ok(());
+    }
+
+    header[0..4].copy_from_slice(&prefix);
+    read_exact_retry(source, &mut header[4..])?;
+    Ok(())
+}
+
+fn consume_wbs1_hello_rest(source: &mut TcpStream) -> std::io::Result<()> {
+    let mut rest = [0u8; WBS1_HEADER_BYTES - 4];
+    read_exact_retry(source, &mut rest)?;
+
+    let version = rest[0];
+    let flags = rest[1];
+    let declared_len = u16::from_be_bytes([rest[2], rest[3]]) as usize;
+    let session_id = u64::from_be_bytes([
+        rest[4], rest[5], rest[6], rest[7],
+        rest[8], rest[9], rest[10], rest[11],
+    ]);
+
+    if declared_len < WBS1_HEADER_BYTES || declared_len > WBS1_HEADER_MAX_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("bad WBS1 len={declared_len}"),
+        ));
+    }
+
+    let extra = declared_len - WBS1_HEADER_BYTES;
+    if extra > 0 {
+        discard_exact(source, extra)?;
+    }
+
+    info!(
+        "WBH1 source hello: magic=WBS1 version={} flags={} len={} session=0x{:016x}",
+        version, flags, declared_len, session_id
+    );
+    Ok(())
+}
+
+fn discard_exact(stream: &mut TcpStream, mut len: usize) -> std::io::Result<()> {
+    let mut scratch = [0u8; 256];
+    while len > 0 {
+        let take = len.min(scratch.len());
+        read_exact_retry(stream, &mut scratch[..take])?;
+        len -= take;
+    }
+    Ok(())
+}
+
+fn read_exact_retry(stream: &mut TcpStream, dst: &mut [u8]) -> std::io::Result<()> {
+    let mut off = 0usize;
+    while off < dst.len() {
+        match stream.read(&mut dst[off..]) {
+            Ok(0) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "EOF",
+                ));
+            }
+            Ok(n) => off += n,
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
+}
+
+fn is_sink_disconnect_error(err: &std::io::Error) -> bool {
+    matches!(
+        err.kind(),
+        std::io::ErrorKind::BrokenPipe
+            | std::io::ErrorKind::ConnectionAborted
+            | std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::NotConnected
+            | std::io::ErrorKind::WriteZero
+    )
 }
 
 fn find_start_code(bytes: &[u8], from: usize) -> Option<(usize, usize)> {
@@ -1104,6 +1433,8 @@ fn start_portal_pipeline_once() -> bool {
     let capture_fps = std::env::var("PROTO_CAPTURE_FPS").unwrap_or_else(|_| DEFAULT_CAPTURE_FPS_STR.to_string());
     let cursor_mode = std::env::var("PROTO_CURSOR_MODE").unwrap_or_else(|_| DEFAULT_CURSOR_MODE.to_string());
     let source_mode = std::env::var("PROTO_PORTAL_JPEG_SOURCE").unwrap_or_else(|_| DEFAULT_PORTAL_SOURCE.to_string());
+    let source_framed = env_truthy("PROTO_H264_SOURCE_FRAMED", h264_mode_enabled());
+    let framed_env = if source_framed { "1" } else { "0" };
 
     let streamer = Command::new("python3")
         .arg(script)
@@ -1124,7 +1455,7 @@ fn start_portal_pipeline_once() -> bool {
         .arg("--debug-fps")
         .arg(&capture_fps)
         .env("PYTHONUNBUFFERED", "1")
-        .env("WBEAM_FRAMED", "0")
+        .env("WBEAM_FRAMED", framed_env)
         .stdin(Stdio::null())
         .stdout(Stdio::from(streamer_log.try_clone().expect("clone streamer log")))
         .stderr(Stdio::from(streamer_log))
@@ -1135,7 +1466,11 @@ fn start_portal_pipeline_once() -> bool {
         return false;
     }
 
-    if source_mode.eq_ignore_ascii_case(PORTAL_SOURCE_FILE) {
+    if source_mode.eq_ignore_ascii_case(PORTAL_SOURCE_FILE) && source_framed {
+        error!(
+            "PROTO_PORTAL_JPEG_SOURCE=file is incompatible with PROTO_H264_SOURCE_FRAMED=1; set PROTO_H264_SOURCE_FRAMED=0 for file mode"
+        );
+    } else if source_mode.eq_ignore_ascii_case(PORTAL_SOURCE_FILE) {
         thread::spawn(move || loop {
             let ffmpeg = Command::new("ffmpeg")
                 .arg("-y")
@@ -1182,7 +1517,8 @@ fn start_portal_pipeline_once() -> bool {
     }
 
     info!(
-        "portal capture started; screen picker should appear (select virtual screen if needed). logs: {PORTAL_STREAMER_LOG}, {PORTAL_FFMPEG_LOG}"
+        "portal capture started; framed_source={} screen picker should appear (select virtual screen if needed). logs: {PORTAL_STREAMER_LOG}, {PORTAL_FFMPEG_LOG}",
+        source_framed
     );
     true
 }

@@ -76,8 +76,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         setContentView(layout.root);
         layout.surfaceView.getHolder().addCallback(this);
 
-        status.set("WBeam — surface loading… ("
-            + (renderer.isNativeActive() ? "turbo" : "java") + ")");
+        if (config.useAdbPush && config.useH264) {
+            status.set("WBeam — H264 surface loading…");
+        } else {
+            status.set("WBeam — surface loading… ("
+                + (renderer.isNativeActive() ? "turbo" : "java") + ")");
+        }
         Log.i(TAG, "onCreate " + config);
     }
 
@@ -97,7 +101,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
 
     @Override
     public void surfaceChanged(SurfaceHolder holder, int fmt, int w, int h) {
-        renderer.onSurfaceChanged(holder.getSurface(), w, h);
+        if (!(config.useAdbPush && config.useH264)) {
+            renderer.onSurfaceChanged(holder.getSurface(), w, h);
+        }
         // Start (or restart) IO now that we know the real surface dimensions
         if (ioThread == null || !ioThread.isAlive()) {
             startIO();
@@ -107,33 +113,37 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     @Override
     public void surfaceDestroyed(SurfaceHolder holder) {
         stopIO();
-        renderer.onSurfaceDestroyed();
+        if (!(config.useAdbPush && config.useH264)) {
+            renderer.onSurfaceDestroyed();
+        }
     }
 
     // ── IO control ────────────────────────────────────────────────────────────
     private void startIO() {
         stopIO();
 
-        String label = config.useAdbPush ? (config.useH264 ? "ADB-H264" : "ADB") : "HTTP";
+        if (config.useAdbPush && config.useH264) {
+            // H264 goes straight into MediaCodec->Surface, bypassing JPEG decode/render loop.
+            activeTransport = new H264Transport(
+                status,
+                layout.surfaceView.getHolder().getSurface(),
+                config.captureSize,
+                config.h264Reorder);
+        } else {
+            String label = config.useAdbPush ? "ADB" : "HTTP";
 
-        // Mailbox decouples IO (producer) from render (consumer).
-        // Frame buffers are recycled to avoid GC.  Warm capacity = typical JPEG size.
-        FrameMailbox mailbox = new FrameMailbox(64 * 1024);
+            // Mailbox decouples IO (producer) from render (consumer).
+            // Frame buffers are recycled to avoid GC.  Warm capacity = typical JPEG size.
+            FrameMailbox mailbox = new FrameMailbox(64 * 1024);
 
-        // Render loop — dedicated high-priority thread, drains mailbox as fast as possible
-        renderLoop   = new RenderLoop(mailbox, renderer, status, label);
-        renderThread = new Thread(renderLoop, "wbeam-render");
-        renderThread.start();
+            // Render loop — dedicated high-priority thread, drains mailbox as fast as possible
+            renderLoop   = new RenderLoop(mailbox, renderer, status, label);
+            renderThread = new Thread(renderLoop, "wbeam-render");
+            renderThread.start();
 
-        // IO listener: copy frame into pool buffer, publish to mailbox (non-blocking).
-        // arraycopy of ~30 KB takes ~100 ns — IO thread never blocks on render latency.
-        if (config.useAdbPush) {
-            if (config.useH264) {
-                activeTransport = new H264Transport(
-                    status,
-                    renderer.getSurface(),
-                    config.captureSize);
-            } else {
+            // IO listener: copy frame into pool buffer, publish to mailbox (non-blocking).
+            // arraycopy of ~30 KB takes ~100 ns — IO thread never blocks on render latency.
+            if (config.useAdbPush) {
                 activeTransport = new AdbPushTransport(
                     (data, len) -> {
                         FrameMailbox.Frame buf = mailbox.acquire(len);
@@ -142,17 +152,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                         mailbox.publish(buf);
                     },
                     status);
+            } else {
+                activeTransport = new HttpMjpegTransport(
+                    (data, len) -> {
+                        FrameMailbox.Frame buf = mailbox.acquire(len);
+                        System.arraycopy(data, 0, buf.data, 0, len);
+                        buf.len = len;
+                        mailbox.publish(buf);
+                    },
+                    status,
+                    config.hostIp);
             }
-        } else {
-            activeTransport = new HttpMjpegTransport(
-                (data, len) -> {
-                    FrameMailbox.Frame buf = mailbox.acquire(len);
-                    System.arraycopy(data, 0, buf.data, 0, len);
-                    buf.len = len;
-                    mailbox.publish(buf);
-                },
-                status,
-                config.hostIp);
         }
 
         ioThread = new Thread(activeTransport, "wbeam-io");

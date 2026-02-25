@@ -19,7 +19,7 @@ def resolveGitShortRev() {
 }
 
 def wbeamBuildRevision = "0.0.${resolveGitShortRev()}-build"
-def wbeamMinSdkRaw = (project.findProperty("WBEAM_MIN_SDK") ?: System.getenv("WBEAM_MIN_SDK") ?: "19").toString()
+def wbeamMinSdkRaw = (project.findProperty("WBEAM_MIN_SDK") ?: System.getenv("WBEAM_MIN_SDK") ?: "17").toString()
 def wbeamMinSdk = Integer.parseInt(wbeamMinSdkRaw)
 def wbeamHostRaw = (project.findProperty("WBEAM_HOST") ?: System.getenv("WBEAM_HOST") ?: "127.0.0.1").toString().trim()
 def wbeamHost = wbeamHostRaw.isEmpty() ? "127.0.0.1" : wbeamHostRaw.replace("\"", "")
