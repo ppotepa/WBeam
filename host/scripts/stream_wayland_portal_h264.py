@@ -259,6 +259,13 @@ def set_if_supported(element, prop_name, value):
         element.set_property(prop_name, value)
 
 
+def env_flag(name, default):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=None, target_fps=60):
     """WBTP/1 framed sender: accept one TCP client; send WBTP/1-framed H264 access units.
 
@@ -483,9 +490,9 @@ def make_pipeline(
     )
 
     configure_encoder(enc, encoder_name, bitrate_kbps, fps, nv_preset)
-    # Make cadence deterministic: videorate is allowed to duplicate frames up to target fps.
-    # Without this, Portal can emit only damage-driven updates (e.g., ~3 fps on static scene).
-    set_if_supported(rate, "drop-only", False)
+    # For low-end Android decoders, synthetic frame duplication can waste USB bandwidth
+    # and increase decode pressure. Keep drop-only enabled by default, configurable by env.
+    set_if_supported(rate, "drop-only", env_flag("WBEAM_VIDEORATE_DROP_ONLY", True))
     set_if_supported(rate, "max-rate", int(fps))
     set_if_supported(rate, "average-period", int(1_000_000_000 / max(1, int(fps))))
 

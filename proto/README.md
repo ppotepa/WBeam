@@ -16,9 +16,11 @@
 - `./run.sh` — default preset `fast` (low latency).
 - `./run.sh quality` — highest quality, heavier.
 - `./run.sh fast` — explicit low-latency preset.
+- `./runcsh` — same flow as `run.sh`, but host backend is C# (`proto/host-cs`).
+- Central config file: `proto/config/proto.conf` (used by both `run.sh` and `runcsh`).
+- Optional custom config: `./run.sh --config /path/to/proto.conf fast`
 
-Presets mirror the old variants; you can still override knobs via env vars
-(`PROTO_CAPTURE_SIZE`, `PROTO_CAPTURE_BITRATE_KBPS`, etc.).
+Preset from CLI overrides config; config overrides built-in defaults.
 
 These scripts set JAVA/SDK defaults, build/install app when device is connected, start host, and launch app.
 
