@@ -31,6 +31,19 @@ public class H264Transport implements Transport {
     private static final String TAG = "WBeamH264";
     private static final int    PORT = StreamConfig.ADB_PORT;
     private static final int    MAX_NAL = 2 * 1024 * 1024; // guard
+    private static final int    MAX_AU = 4 * 1024 * 1024; // one access unit (frame) may contain many NALs
+    private static final int    NAL_NON_IDR = 1;
+    private static final int    NAL_IDR = 5;
+    private static final int    NAL_SPS = 7;
+    private static final int    NAL_PPS = 8;
+    private static final int    NAL_AUD = 9;
+    private static final int    FLUSH_QUEUED = 1;
+    private static final int    FLUSH_NOTHING = 0;
+    private static final int    FLUSH_DROP_SOFT = -1;
+    private static final int    FLUSH_DROP_HARD = -2;
+    private static final int    QUEUE_OK = 1;
+    private static final int    QUEUE_BUSY = 0;
+    private static final int    QUEUE_ERROR = -1;
     private static final int    MAX_REORDER_FRAMES = 5;
     private static final long   REORDER_WAIT_MS = 4;
     private static final long   STAT_INTERVAL_MS = 2_000;
@@ -55,6 +68,26 @@ public class H264Transport implements Transport {
             this.data = data;
             this.len = len;
             this.nalType = nalType;
+        }
+    }
+
+    private static final class AccessUnitAccumulator {
+        long tsMs = -1;
+        int  len = 0;
+        int  lastNalType = -1;
+        boolean hasIdr = false;
+        boolean hasSps = false;
+        boolean hasPps = false;
+        boolean hasSlice = false;
+
+        void reset() {
+            tsMs = -1;
+            len = 0;
+            lastNalType = -1;
+            hasIdr = false;
+            hasSps = false;
+            hasPps = false;
+            hasSlice = false;
         }
     }
 
@@ -135,6 +168,7 @@ public class H264Transport implements Transport {
         MediaCodec codec = null;
         byte[] header = new byte[24]; // WBH1 header
         byte[] nalBuf = new byte[MAX_NAL];
+        byte[] auBuf = new byte[MAX_AU];
 
         try {
             codec = MediaCodec.createDecoderByType("video/avc");
@@ -151,21 +185,42 @@ public class H264Transport implements Transport {
             long decodedFrames = 0;
             long dropCount = 0;
             long statStart = System.currentTimeMillis();
+            long expectedSeq = -1;
+            boolean waitingForIdr = false;
+            AccessUnitAccumulator au = new AccessUnitAccumulator();
 
             while (running && !Thread.currentThread().isInterrupted()) {
                 IoUtils.readFully(in, header, 24);
                 if (!(header[0] == 'W' && header[1] == 'B' && header[2] == 'H' && header[3] == '1')) {
                     throw new IOException("bad magic");
                 }
+                long seq = u64be(header, 4);
                 long tsMs = u64be(header, 12);
                 int nalLen = IoUtils.u32be(header, 20);
                 if (nalLen <= 0 || nalLen > MAX_NAL) throw new IOException("bad len " + nalLen);
                 IoUtils.readFully(in, nalBuf, nalLen);
 
+                if (expectedSeq < 0) {
+                    expectedSeq = seq;
+                }
+                if (seq < expectedSeq) {
+                    // Late/duplicate unit - stale by sequence, skip quickly.
+                    dropCount++;
+                    continue;
+                }
+                if (seq > expectedSeq) {
+                    // Sequence jump indicates missing units; track as drops.
+                    dropCount += (seq - expectedSeq);
+                    // We lost part of the decode chain; wait for next IDR to re-sync cleanly.
+                    waitingForIdr = true;
+                    au.reset();
+                }
+                expectedSeq = seq + 1;
+
                 int nalHdrOff = findNalHeaderOffset(nalBuf, nalLen);
                 int nalType = (nalHdrOff >= 0 && nalHdrOff < nalLen) ? (nalBuf[nalHdrOff] & 0x1F) : -1;
-                if (nalType == 7 && nalHdrOff >= 0) { sawSps = true; sps = Arrays.copyOfRange(nalBuf, nalHdrOff, nalLen); } // SPS
-                if (nalType == 8 && nalHdrOff >= 0) { sawPps = true; pps = Arrays.copyOfRange(nalBuf, nalHdrOff, nalLen); } // PPS
+                if (nalType == NAL_SPS && nalHdrOff >= 0) { sawSps = true; sps = Arrays.copyOfRange(nalBuf, nalHdrOff, nalLen); } // SPS
+                if (nalType == NAL_PPS && nalHdrOff >= 0) { sawPps = true; pps = Arrays.copyOfRange(nalBuf, nalHdrOff, nalLen); } // PPS
 
                 if (!configured && sawSps && sawPps) {
                     configured = configureWithCsd(codec, sps, pps);
@@ -179,26 +234,67 @@ public class H264Transport implements Transport {
                     }
                 }
 
-                if (!configured) continue; // wait for SPS/PPS
-
-                int idx = codec.dequeueInputBuffer(10_000);
-                if (idx < 0) {
-                    dropCount++;
-                    drainOutput(codec);
-                    continue;
+                // Stamp + sequence based frame assembly:
+                // host may split one encoded frame into many WBH1 NAL units.
+                // We batch same-ts units into one codec input buffer (1 queue per frame).
+                if (au.tsMs >= 0 && tsMs != au.tsMs) {
+                    int flush = flushAccessUnit(codec, auBuf, au, configured, waitingForIdr);
+                    if (flush == FLUSH_QUEUED) {
+                        decodedFrames++;
+                        waitingForIdr = false;
+                    } else if (flush == FLUSH_DROP_HARD) {
+                        dropCount++;
+                        waitingForIdr = true;
+                    } else if (flush == FLUSH_DROP_SOFT) {
+                        dropCount++;
+                    }
                 }
-                ByteBuffer buf = inBuf(codec, idx);
-                if (buf == null) {
-                    dropCount++;
-                    continue;
-                }
-                buf.clear();
-                buf.put(nalBuf, 0, nalLen);
-                int flags = (nalType == 5) ? MediaCodec.BUFFER_FLAG_KEY_FRAME : 0; // IDR=5
-                codec.queueInputBuffer(idx, 0, nalLen, tsMs * 1000L, flags);
 
-                drainOutput(codec);
-                decodedFrames++;
+                // If timestamps repeat, detect likely new frame boundary by NAL type to avoid
+                // merging two frames into one corrupted AU.
+                if (isLikelyBoundaryWithinSameTimestamp(au, nalBuf, nalLen, nalHdrOff, nalType)) {
+                    int flush = flushAccessUnit(codec, auBuf, au, configured, waitingForIdr);
+                    if (flush == FLUSH_QUEUED) {
+                        decodedFrames++;
+                        waitingForIdr = false;
+                    } else if (flush == FLUSH_DROP_HARD) {
+                        dropCount++;
+                        waitingForIdr = true;
+                    } else if (flush == FLUSH_DROP_SOFT) {
+                        dropCount++;
+                    }
+                }
+
+                if (au.tsMs < 0 || tsMs != au.tsMs) {
+                    au.tsMs = tsMs;
+                }
+
+                if (nalLen > (auBuf.length - au.len)) {
+                    // AU overflow: flush what we have and start fresh to avoid unbounded memory.
+                    int flush = flushAccessUnit(codec, auBuf, au, configured, waitingForIdr);
+                    if (flush == FLUSH_QUEUED) {
+                        decodedFrames++;
+                        waitingForIdr = false;
+                    } else if (flush == FLUSH_DROP_HARD) {
+                        dropCount++;
+                        waitingForIdr = true;
+                    } else if (flush == FLUSH_DROP_SOFT) {
+                        dropCount++;
+                    }
+                    if (nalLen > auBuf.length) {
+                        dropCount++;
+                        continue;
+                    }
+                    au.tsMs = tsMs;
+                }
+
+                System.arraycopy(nalBuf, 0, auBuf, au.len, nalLen);
+                au.len += nalLen;
+                au.lastNalType = nalType;
+                if (nalType == NAL_IDR) au.hasIdr = true;
+                if (nalType == NAL_SPS) au.hasSps = true;
+                if (nalType == NAL_PPS) au.hasPps = true;
+                if (nalType == NAL_NON_IDR || nalType == NAL_IDR) au.hasSlice = true;
 
                 long now = System.currentTimeMillis();
                 if (now - statStart >= STAT_INTERVAL_MS) {
@@ -208,6 +304,13 @@ public class H264Transport implements Transport {
                     dropCount = 0;
                     statStart = now;
                 }
+            }
+
+            int flush = flushAccessUnit(codec, auBuf, au, configured, waitingForIdr);
+            if (flush == FLUSH_QUEUED) {
+                decodedFrames++;
+            } else if (flush == FLUSH_DROP_HARD || flush == FLUSH_DROP_SOFT) {
+                dropCount++;
             }
         } finally {
             if (codec != null) {
@@ -446,6 +549,161 @@ public class H264Transport implements Transport {
         int outIdx;
         while ((outIdx = codec.dequeueOutputBuffer(info, 0)) >= 0) {
             codec.releaseOutputBuffer(outIdx, true);
+        }
+    }
+
+    private static boolean isLikelyBoundaryWithinSameTimestamp(
+            AccessUnitAccumulator au,
+            byte[] incomingNal,
+            int incomingNalLen,
+            int incomingNalHdrOff,
+            int incomingNalType) {
+        if (au == null || au.len <= 0) return false;
+        // AUD usually starts a new access unit. Also SPS/PPS after slices indicates
+        // next keyframe sequence, so flush previous frame first.
+        if (incomingNalType == NAL_AUD && au.hasSlice) return true;
+        if ((incomingNalType == NAL_SPS || incomingNalType == NAL_PPS) && au.hasSlice) return true;
+        // For VCL slices, first_mb_in_slice == 0 means a new picture starts.
+        // This prevents merging consecutive frames when timestamp granularity is too coarse.
+        if (au.hasSlice && isSliceNalType(incomingNalType)) {
+            int firstMb = parseFirstMbInSlice(incomingNal, incomingNalLen, incomingNalHdrOff);
+            if (firstMb == 0) return true;
+        }
+        return false;
+    }
+
+    // Returns: 1 queued, 0 nothing to flush, -1 dropped.
+    private static int flushAccessUnit(
+            MediaCodec codec,
+            byte[] auBuf,
+            AccessUnitAccumulator au,
+            boolean configured,
+            boolean waitingForIdr) {
+        if (au == null || au.len <= 0) {
+            if (au != null) au.reset();
+            return FLUSH_NOTHING;
+        }
+
+        boolean hasRecoveryPoint = au.hasIdr || (au.hasSps && au.hasPps);
+        if (!configured) {
+            au.reset();
+            return FLUSH_DROP_SOFT;
+        }
+        if (waitingForIdr && !hasRecoveryPoint) {
+            au.reset();
+            return FLUSH_DROP_HARD;
+        }
+
+        int queueResult = queueAccessUnit(codec, auBuf, au.len, au.tsMs, au.lastNalType);
+        au.reset();
+        if (queueResult == QUEUE_OK) return FLUSH_QUEUED;
+        if (queueResult == QUEUE_BUSY) return FLUSH_DROP_SOFT;
+        return FLUSH_DROP_HARD;
+    }
+
+    private static int queueAccessUnit(MediaCodec codec, byte[] auBuf, int auLen, long tsMs, int nalType) {
+        if (codec == null || auBuf == null || auLen <= 0) return QUEUE_ERROR;
+        try {
+            for (int attempt = 0; attempt < 2; attempt++) {
+                int timeoutUs = (attempt == 0) ? 0 : 4_000;
+                int idx = codec.dequeueInputBuffer(timeoutUs);
+                if (idx < 0) {
+                    drainOutput(codec);
+                    continue;
+                }
+                ByteBuffer buf = inBuf(codec, idx);
+                if (buf == null) {
+                    return QUEUE_ERROR;
+                }
+                buf.clear();
+                buf.put(auBuf, 0, auLen);
+                int flags = (nalType == NAL_IDR) ? MediaCodec.BUFFER_FLAG_KEY_FRAME : 0; // IDR=5
+                codec.queueInputBuffer(idx, 0, auLen, tsMs * 1000L, flags);
+                drainOutput(codec);
+                return QUEUE_OK;
+            }
+            return QUEUE_BUSY;
+        } catch (Exception e) {
+            Log.w(TAG, "queueAccessUnit failed", e);
+            return QUEUE_ERROR;
+        }
+    }
+
+    private static boolean isSliceNalType(int nalType) {
+        return nalType == 1 || nalType == 2 || nalType == 5;
+    }
+
+    private static int parseFirstMbInSlice(byte[] nal, int nalLen, int nalHdrOff) {
+        if (nal == null || nalLen <= 0 || nalHdrOff < 0 || nalHdrOff >= nalLen) return -1;
+        int payloadOff = nalHdrOff + 1;
+        if (payloadOff >= nalLen) return -1;
+        RbspBitReader br = new RbspBitReader(nal, payloadOff, nalLen);
+        return br.readUE();
+    }
+
+    private static final class RbspBitReader {
+        private final byte[] src;
+        private final int end;
+        private int idx;
+        private int zeros = 0;
+        private int cur = 0;
+        private int bitsLeft = 0;
+
+        RbspBitReader(byte[] src, int off, int end) {
+            this.src = src;
+            this.idx = off;
+            this.end = end;
+        }
+
+        int readUE() {
+            int leadingZeros = 0;
+            while (true) {
+                int bit = readBit();
+                if (bit < 0) return -1;
+                if (bit == 0) {
+                    leadingZeros++;
+                    if (leadingZeros > 31) return -1;
+                } else {
+                    break;
+                }
+            }
+
+            int codeNum = 1;
+            for (int i = 0; i < leadingZeros; i++) {
+                int bit = readBit();
+                if (bit < 0) return -1;
+                codeNum = (codeNum << 1) | bit;
+            }
+            return codeNum - 1;
+        }
+
+        private int readBit() {
+            if (bitsLeft == 0) {
+                int next = nextRbspByte();
+                if (next < 0) return -1;
+                cur = next;
+                bitsLeft = 8;
+            }
+            bitsLeft--;
+            return (cur >> bitsLeft) & 1;
+        }
+
+        private int nextRbspByte() {
+            while (idx < end) {
+                int b = src[idx++] & 0xFF;
+                if (zeros >= 2 && b == 0x03) {
+                    // Skip emulation prevention byte.
+                    zeros = 0;
+                    continue;
+                }
+                if (b == 0) {
+                    zeros++;
+                } else {
+                    zeros = 0;
+                }
+                return b;
+            }
+            return -1;
         }
     }
 
