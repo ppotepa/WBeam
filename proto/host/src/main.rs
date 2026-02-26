@@ -1,16 +1,17 @@
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::process::Command;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::fs;
-use std::io::{IoSlice, Read, Write};
+use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::process::Stdio;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use env_logger::Env;
+use log::LevelFilter;
 use log::{error, info};
 use tiny_http::{Header, Request, Response, Server};
 
@@ -80,10 +81,14 @@ const FPS_PUSH_MAX: u64                = 60;
 const MAX_FRAME_BYTES_MIN: usize       = 64 * 1024;
 const MAX_FRAME_BYTES_MAX: usize       = 1024 * 1024;
 const DEFAULT_MAX_FRAME_BYTES: usize   = 220 * 1024;
+const MAX_CHUNK_BYTES_MIN: usize       = 1024;
+const MAX_CHUNK_BYTES_MAX: usize       = 256 * 1024;
+const DEFAULT_MAX_CHUNK_BYTES: usize   = 14 * 1024;
 const ANDROID_LOG_POLL_SECS: u64       = 5;
 const ANDROID_LOG_DIR: &str            = "../logs";
 static PRIMARY_OUTPUT: OnceLock<Option<String>> = OnceLock::new();
 static PORTAL_STARTED: OnceLock<bool> = OnceLock::new();
+static CONFIG: OnceLock<HashMap<String, String>> = OnceLock::new();
 
 #[derive(Clone, Default)]
 struct Frames {
@@ -92,13 +97,14 @@ struct Frames {
 }
 
 fn main() {
-    env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
+    env_logger::Builder::new().filter_level(LevelFilter::Info).init();
+    init_config();
     if h264_mode_enabled() {
         run_h264_loop();
         return;
     }
 
-    let target_fps = std::env::var("PROTO_CAPTURE_FPS")
+    let target_fps = cfg_var("PROTO_CAPTURE_FPS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
         .map(|v| v.clamp(FPS_CAPTURE_MIN, FPS_CAPTURE_MAX))
@@ -219,20 +225,75 @@ fn main() {
     }
 }
 
+fn init_config() {
+    let config_path = parse_config_path();
+    let map = load_config_file(&config_path);
+    if map.is_empty() {
+        info!("proto host config is empty or missing: {}", config_path);
+    } else {
+        info!("proto host loaded config: {}", config_path);
+    }
+    let _ = CONFIG.set(map);
+}
+
+fn parse_config_path() -> String {
+    let args: Vec<String> = std::env::args().collect();
+    let mut i = 1usize;
+    while i < args.len() {
+        if args[i] == "--config" && i + 1 < args.len() {
+            return args[i + 1].clone();
+        }
+        i += 1;
+    }
+    "../config/proto.conf".to_string()
+}
+
+fn load_config_file(path: &str) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    let content = match fs::read_to_string(path) {
+        Ok(v) => v,
+        Err(_) => return out,
+    };
+
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((k, v)) = line.split_once('=') else {
+            continue;
+        };
+        let key = k.trim();
+        if key.is_empty() {
+            continue;
+        }
+        let value = v.trim().trim_matches('"').to_string();
+        out.insert(key.to_string(), value);
+    }
+    out
+}
+
 fn h264_mode_enabled() -> bool {
     env_truthy("PROTO_H264", false)
 }
 
+fn cfg_var(name: &str) -> Result<String, ()> {
+    CONFIG
+        .get()
+        .and_then(|m| m.get(name).cloned())
+        .ok_or(())
+}
+
 fn env_truthy(name: &str, default: bool) -> bool {
-    std::env::var(name)
+    cfg_var(name)
         .ok()
         .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
         .unwrap_or(default)
 }
 
 fn run_h264_loop() {
-    let sink_addr = std::env::var("PROTO_ADB_PUSH_ADDR").unwrap_or_else(|_| DEFAULT_ADB_ADDR.to_string());
-    let source_port = std::env::var("PROTO_H264_SOURCE_PORT")
+    let sink_addr = cfg_var("PROTO_ADB_PUSH_ADDR").unwrap_or_else(|_| DEFAULT_ADB_ADDR.to_string());
+    let source_port = cfg_var("PROTO_H264_SOURCE_PORT")
         .ok()
         .and_then(|v| v.parse::<u16>().ok())
         .unwrap_or(PORTAL_STREAM_PORT);
@@ -253,6 +314,7 @@ fn run_h264_loop() {
     let mut seq: u64 = 1;
     let mut reconnects: u64 = 0;
     let mut source_retries: u64 = 0;
+    let source_addr = format!("127.0.0.1:{}", source_port);
 
     loop {
         let mut sink = match TcpStream::connect(&sink_addr) {
@@ -272,16 +334,19 @@ fn run_h264_loop() {
         set_tcp_sndbuf(&sink, TCP_SNDBUF_BYTES);
         info!("WBH1 connected to sink {}", sink_addr);
 
-        let source_addr = format!("127.0.0.1:{}", source_port);
-        let mut source = match TcpStream::connect(&source_addr) {
-            Ok(stream) => stream,
-            Err(e) => {
-                source_retries = source_retries.saturating_add(1);
-                if source_retries % 10 == 1 {
-                    info!("WBH1 waiting for source {} ({})", source_addr, e);
+        let mut source = loop {
+            match TcpStream::connect(&source_addr) {
+                Ok(stream) => {
+                    source_retries = 0;
+                    break stream;
                 }
-                thread::sleep(Duration::from_millis(350));
-                continue;
+                Err(e) => {
+                    source_retries = source_retries.saturating_add(1);
+                    if source_retries % 10 == 1 {
+                        info!("WBH1 waiting for source {} ({})", source_addr, e);
+                    }
+                    thread::sleep(Duration::from_millis(350));
+                }
             }
         };
         // Keep stream stable across short portal stalls; do not reconnect on minor gaps.
@@ -718,7 +783,7 @@ fn serve_mjpeg(req: Request, shared: Arc<Mutex<Frames>>) {
         let mut writer = req.into_writer();
         let mut last_sig: u64 = 0;
         let mut has_last_sig = false;
-        let fps = std::env::var("PROTO_MJPEG_FPS")
+        let fps = cfg_var("PROTO_MJPEG_FPS")
             .ok()
             .and_then(|v| v.parse::<u64>().ok())
             .map(|v| v.clamp(FPS_PUSH_MIN, FPS_PUSH_MAX))
@@ -781,60 +846,60 @@ fn serve_mjpeg(req: Request, shared: Arc<Mutex<Frames>>) {
 }
 
 fn adb_push_enabled() -> bool {
-    std::env::var("PROTO_ADB_PUSH")
+    cfg_var("PROTO_ADB_PUSH")
         .ok()
         .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
         .unwrap_or(false)
 }
 
 fn android_log_poller_enabled() -> bool {
-    std::env::var("PROTO_ANDROID_LOG_POLLER")
+    cfg_var("PROTO_ANDROID_LOG_POLLER")
         .ok()
         .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
         .unwrap_or(false)
 }
 
 fn start_adb_push_sender(shared: Arc<Mutex<Frames>>, current_quality: Arc<AtomicU8>) {
-    let addr = std::env::var("PROTO_ADB_PUSH_ADDR").unwrap_or_else(|_| DEFAULT_ADB_ADDR.to_string());
-    let fps = std::env::var("PROTO_ADB_PUSH_FPS")
+    let addr = cfg_var("PROTO_ADB_PUSH_ADDR").unwrap_or_else(|_| DEFAULT_ADB_ADDR.to_string());
+    let fps = cfg_var("PROTO_ADB_PUSH_FPS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
-        .or_else(|| std::env::var("PROTO_MJPEG_FPS").ok().and_then(|v| v.parse::<u64>().ok()))
+        .or_else(|| cfg_var("PROTO_MJPEG_FPS").ok().and_then(|v| v.parse::<u64>().ok()))
         .map(|v| v.clamp(FPS_PUSH_MIN, FPS_PUSH_MAX))
         .unwrap_or(24);
     let frame_delay = Duration::from_millis(1000 / fps);
-    let max_frame_bytes = std::env::var("PROTO_MAX_FRAME_BYTES")
+    let max_frame_bytes = cfg_var("PROTO_MAX_FRAME_BYTES")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
         .map(|v| v.clamp(MAX_FRAME_BYTES_MIN, MAX_FRAME_BYTES_MAX))
         .unwrap_or(DEFAULT_MAX_FRAME_BYTES);
-    let jpeg_target_kb = std::env::var("PROTO_JPEG_TARGET_KB")
+    let jpeg_target_kb = cfg_var("PROTO_JPEG_TARGET_KB")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
         .map(|v| v.clamp(24, 240))
         .unwrap_or(JPEG_Q_TARGET_KB);
-    let skip_sig_check = std::env::var("PROTO_SKIP_SIG_CHECK")
+    let skip_sig_check = cfg_var("PROTO_SKIP_SIG_CHECK")
         .ok()
         .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE"))
         .unwrap_or(true);
-    let keepalive_ms = std::env::var("PROTO_ADB_KEEPALIVE_MS")
+    let keepalive_ms = cfg_var("PROTO_ADB_KEEPALIVE_MS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
         .map(|v| v.clamp(ADB_KEEPALIVE_MIN_MS, ADB_KEEPALIVE_MAX_MS))
         .unwrap_or(ADB_KEEPALIVE_DEFAULT_MS);
     let keepalive_interval = Duration::from_millis(keepalive_ms);
-    let debug_frames_enabled = std::env::var("PROTO_DEBUG_FRAMES")
+    let debug_frames_enabled = cfg_var("PROTO_DEBUG_FRAMES")
         .ok()
         .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
         .unwrap_or(false);
-    let debug_frames_dir = std::env::var("PROTO_DEBUG_FRAMES_DIR")
+    let debug_frames_dir = cfg_var("PROTO_DEBUG_FRAMES_DIR")
         .unwrap_or_else(|_| DEBUG_FRAMES_DIR_DEFAULT.to_string());
-    let debug_frames_fps = std::env::var("PROTO_DEBUG_FRAMES_FPS")
+    let debug_frames_fps = cfg_var("PROTO_DEBUG_FRAMES_FPS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
         .map(|v| v.clamp(DEBUG_FRAMES_FPS_MIN, DEBUG_FRAMES_FPS_MAX))
         .unwrap_or(DEBUG_FRAMES_FPS_DEFAULT);
-    let debug_frames_slots = std::env::var("PROTO_DEBUG_FRAMES_SLOTS")
+    let debug_frames_slots = cfg_var("PROTO_DEBUG_FRAMES_SLOTS")
         .ok()
         .and_then(|v| v.parse::<u32>().ok())
         .map(|v| v.clamp(DEBUG_FRAMES_SLOTS_MIN, DEBUG_FRAMES_SLOTS_MAX))
@@ -1063,7 +1128,7 @@ fn maybe_dump_sent_frame(
 }
 
 fn start_android_log_poller() {
-    let serial = std::env::var("PROTO_SERIAL").unwrap_or_default();
+    let serial = cfg_var("PROTO_SERIAL").unwrap_or_default();
     let log_dir = PathBuf::from(ANDROID_LOG_DIR);
 
     if let Err(e) = fs::create_dir_all(&log_dir) {
@@ -1174,7 +1239,7 @@ fn capture_desktop_with_quality(jpeg_quality: u8) -> Result<Vec<u8>, String> {
     }
 
     let primary_output = PRIMARY_OUTPUT.get_or_init(detect_primary_output);
-    let capture_size = std::env::var("PROTO_CAPTURE_SIZE").ok();
+    let capture_size = cfg_var("PROTO_CAPTURE_SIZE").ok();
     let grim_scale = capture_size
         .as_deref()
         .and_then(|target| compute_grim_scale(target, primary_output.as_deref()));
@@ -1358,7 +1423,7 @@ fn detect_output_geometry(preferred_output: Option<&str>) -> Option<(u32, u32)> 
 }
 
 fn portal_enabled() -> bool {
-    std::env::var("PROTO_PORTAL")
+    cfg_var("PROTO_PORTAL")
         .ok()
         .map(|v| {
             let value = v.trim();
@@ -1373,7 +1438,7 @@ fn capture_portal_jpeg() -> Result<Vec<u8>, String> {
         return Err("portal pipeline unavailable".to_string());
     }
 
-    let source_mode = std::env::var("PROTO_PORTAL_JPEG_SOURCE")
+    let source_mode = cfg_var("PROTO_PORTAL_JPEG_SOURCE")
         .unwrap_or_else(|_| DEFAULT_PORTAL_SOURCE.to_string());
 
     if source_mode.eq_ignore_ascii_case(PORTAL_SOURCE_DEBUG) {
@@ -1396,16 +1461,20 @@ fn capture_portal_jpeg() -> Result<Vec<u8>, String> {
 }
 
 fn start_portal_pipeline_once() -> bool {
-    let force = std::env::var("PROTO_FORCE_PORTAL")
+    let force = cfg_var("PROTO_FORCE_PORTAL")
         .ok()
         .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes"))
         .unwrap_or(false);
-    let is_wayland = std::env::var("XDG_SESSION_TYPE")
+    let is_wayland = cfg_var("PROTO_SESSION_TYPE")
         .ok()
         .map(|v| v.eq_ignore_ascii_case("wayland"))
         .unwrap_or(false);
 
     if !is_wayland && !force {
+        return false;
+    }
+    if !has_gst_element("pipewiresrc") {
+        error!("missing GStreamer element 'pipewiresrc' (install package: gst-plugin-pipewire)");
         return false;
     }
 
@@ -1428,15 +1497,18 @@ fn start_portal_pipeline_once() -> bool {
         return false;
     };
 
-    let capture_size = std::env::var("PROTO_CAPTURE_SIZE").unwrap_or_else(|_| DEFAULT_CAPTURE_SIZE.to_string());
-    let capture_bitrate = std::env::var("PROTO_CAPTURE_BITRATE_KBPS").unwrap_or_else(|_| DEFAULT_BITRATE_KBPS_STR.to_string());
-    let capture_fps = std::env::var("PROTO_CAPTURE_FPS").unwrap_or_else(|_| DEFAULT_CAPTURE_FPS_STR.to_string());
-    let cursor_mode = std::env::var("PROTO_CURSOR_MODE").unwrap_or_else(|_| DEFAULT_CURSOR_MODE.to_string());
-    let source_mode = std::env::var("PROTO_PORTAL_JPEG_SOURCE").unwrap_or_else(|_| DEFAULT_PORTAL_SOURCE.to_string());
+    let capture_size = cfg_var("PROTO_CAPTURE_SIZE").unwrap_or_else(|_| DEFAULT_CAPTURE_SIZE.to_string());
+    let capture_bitrate = cfg_var("PROTO_CAPTURE_BITRATE_KBPS").unwrap_or_else(|_| DEFAULT_BITRATE_KBPS_STR.to_string());
+    let capture_fps = cfg_var("PROTO_CAPTURE_FPS").unwrap_or_else(|_| DEFAULT_CAPTURE_FPS_STR.to_string());
+    let cursor_mode = cfg_var("PROTO_CURSOR_MODE").unwrap_or_else(|_| DEFAULT_CURSOR_MODE.to_string());
+    let videorate_drop_only = cfg_var("WBEAM_VIDEORATE_DROP_ONLY").unwrap_or_else(|_| "1".to_string());
+    let framed_send_timeout_s = cfg_var("WBEAM_FRAMED_SEND_TIMEOUT_S").unwrap_or_else(|_| "0".to_string());
+    let framed_duplicate_stale = cfg_var("WBEAM_FRAMED_DUPLICATE_STALE").unwrap_or_else(|_| "1".to_string());
+    let source_mode = cfg_var("PROTO_PORTAL_JPEG_SOURCE").unwrap_or_else(|_| DEFAULT_PORTAL_SOURCE.to_string());
     let source_framed = env_truthy("PROTO_H264_SOURCE_FRAMED", h264_mode_enabled());
     let framed_env = if source_framed { "1" } else { "0" };
 
-    let streamer = Command::new("python3")
+    let mut streamer_child = match Command::new("python3")
         .arg(script)
         .arg("--profile")
         .arg(DEFAULT_PORTAL_PROFILE)
@@ -1456,13 +1528,28 @@ fn start_portal_pipeline_once() -> bool {
         .arg(&capture_fps)
         .env("PYTHONUNBUFFERED", "1")
         .env("WBEAM_FRAMED", framed_env)
+        .env("WBEAM_VIDEORATE_DROP_ONLY", videorate_drop_only)
+        .env("WBEAM_FRAMED_SEND_TIMEOUT_S", framed_send_timeout_s)
+        .env("WBEAM_FRAMED_DUPLICATE_STALE", framed_duplicate_stale)
         .stdin(Stdio::null())
         .stdout(Stdio::from(streamer_log.try_clone().expect("clone streamer log")))
         .stderr(Stdio::from(streamer_log))
-        .spawn();
+        .spawn() {
+            Ok(child) => child,
+            Err(_) => {
+                error!("failed to start portal streamer helper");
+                return false;
+            }
+        };
 
-    if streamer.is_err() {
-        error!("failed to start portal streamer helper");
+    // Fail fast on obvious startup issues (missing plugins/deps).
+    thread::sleep(Duration::from_millis(250));
+    if let Ok(Some(status)) = streamer_child.try_wait() {
+        error!(
+            "portal streamer exited immediately with status {} (see {})",
+            status,
+            PORTAL_STREAMER_LOG
+        );
         return false;
     }
 
@@ -1523,6 +1610,17 @@ fn start_portal_pipeline_once() -> bool {
     true
 }
 
+fn has_gst_element(name: &str) -> bool {
+    Command::new("gst-inspect-1.0")
+        .arg(name)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 fn read_latest_portal_debug_jpeg() -> Result<Vec<u8>, String> {
     let dir = PathBuf::from(PORTAL_DEBUG_DIR);
     if !dir.exists() {
@@ -1558,7 +1656,7 @@ fn read_latest_portal_debug_jpeg() -> Result<Vec<u8>, String> {
 }
 
 fn portal_only_mode() -> bool {
-    std::env::var("PROTO_PORTAL_ONLY")
+    cfg_var("PROTO_PORTAL_ONLY")
         .ok()
         .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
         .unwrap_or(false)
@@ -1653,7 +1751,7 @@ fn capture_with_spectacle(format: &str) -> Result<Vec<u8>, String> {
 }
 
 fn maybe_extend_virtual(bytes: &[u8], format: &str) -> Result<Vec<u8>, String> {
-    let extend_right_px = std::env::var("PROTO_EXTEND_RIGHT_PX")
+    let extend_right_px = cfg_var("PROTO_EXTEND_RIGHT_PX")
         .ok()
         .and_then(|v| v.parse::<u32>().ok())
         .unwrap_or(0);
@@ -1724,26 +1822,28 @@ fn frame_signature(bytes: &[u8]) -> u64 {
 
 #[inline(always)]
 fn write_wbj1_frame(stream: &mut TcpStream, header: &[u8], payload: &[u8]) -> std::io::Result<()> {
+    let max_chunk_bytes = cfg_var("PROTO_MAX_CHUNK_BYTES")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .map(|v| v.clamp(MAX_CHUNK_BYTES_MIN, MAX_CHUNK_BYTES_MAX))
+        .unwrap_or(DEFAULT_MAX_CHUNK_BYTES);
     let mut header_off = 0usize;
-    let mut payload_off = 0usize;
-
-    while header_off < header.len() || payload_off < payload.len() {
-        let bufs = [
-            IoSlice::new(&header[header_off..]),
-            IoSlice::new(&payload[payload_off..]),
-        ];
-        let n = stream.write_vectored(&bufs)?;
+    while header_off < header.len() {
+        let n = stream.write(&header[header_off..])?;
         if n == 0 {
-            return Err(std::io::Error::new(std::io::ErrorKind::WriteZero, "write_vectored returned 0"));
+            return Err(std::io::Error::new(std::io::ErrorKind::WriteZero, "header write returned 0"));
         }
+        header_off += n;
+    }
 
-        let header_rem = header.len() - header_off;
-        if n < header_rem {
-            header_off += n;
-        } else {
-            header_off = header.len();
-            payload_off += n - header_rem;
+    let mut payload_off = 0usize;
+    while payload_off < payload.len() {
+        let end = (payload_off + max_chunk_bytes).min(payload.len());
+        let n = stream.write(&payload[payload_off..end])?;
+        if n == 0 {
+            return Err(std::io::Error::new(std::io::ErrorKind::WriteZero, "payload write returned 0"));
         }
+        payload_off += n;
     }
 
     Ok(())

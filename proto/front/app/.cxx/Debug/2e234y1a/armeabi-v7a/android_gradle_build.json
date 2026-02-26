@@ -1,19 +1,19 @@
 {
   "buildFiles": [
-    "/mnt/fat_boii/git/WBeam/proto/front/app/src/main/cpp/CMakeLists.txt"
+    "/home/ppotepa/git/WBeam/proto/front/app/src/main/cpp/CMakeLists.txt"
   ],
   "cleanCommandsComponents": [
     [
       "/home/ppotepa/Android/Sdk/cmake/3.22.1/bin/ninja",
       "-C",
-      "/mnt/fat_boii/git/WBeam/proto/front/app/.cxx/Debug/2e234y1a/armeabi-v7a",
+      "/home/ppotepa/git/WBeam/proto/front/app/.cxx/Debug/2e234y1a/armeabi-v7a",
       "clean"
     ]
   ],
   "buildTargetsCommandComponents": [
     "/home/ppotepa/Android/Sdk/cmake/3.22.1/bin/ninja",
     "-C",
-    "/mnt/fat_boii/git/WBeam/proto/front/app/.cxx/Debug/2e234y1a/armeabi-v7a",
+    "/home/ppotepa/git/WBeam/proto/front/app/.cxx/Debug/2e234y1a/armeabi-v7a",
     "{LIST_OF_TARGETS_TO_BUILD}"
   ],
   "libraries": {
@@ -21,9 +21,9 @@
       "toolchain": "toolchain",
       "abi": "armeabi-v7a",
       "artifactName": "wbeam",
-      "output": "/mnt/fat_boii/git/WBeam/proto/front/app/build/intermediates/cxx/Debug/2e234y1a/obj/armeabi-v7a/libwbeam.so",
+      "output": "/home/ppotepa/git/WBeam/proto/front/app/build/intermediates/cxx/Debug/2e234y1a/obj/armeabi-v7a/libwbeam.so",
       "runtimeFiles": [
-        "/mnt/fat_boii/git/WBeam/proto/front/app/src/main/jniLibs/armeabi-v7a/libturbojpeg.so"
+        "/home/ppotepa/git/WBeam/proto/front/app/src/main/jniLibs/armeabi-v7a/libturbojpeg.so"
       ]
     }
   },

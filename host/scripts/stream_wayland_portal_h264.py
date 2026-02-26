@@ -278,15 +278,19 @@ def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=Non
     srv.bind(("0.0.0.0", port))
     srv.listen(1)
     srv.settimeout(1.0)
-    send_timeout_s = float(os.getenv("WBEAM_FRAMED_SEND_TIMEOUT_S", "0.010"))
+    # Default to blocking send for stability over ADB tunnel; set env >0 to enable timeout.
+    send_timeout_s = float(os.getenv("WBEAM_FRAMED_SEND_TIMEOUT_S", "0"))
+    duplicate_stale = env_flag("WBEAM_FRAMED_DUPLICATE_STALE", False)
     seq = 0
     print(f"[wbeam-framed] listening on :{port}", flush=True)
-    # Track last keyframe so we can duplicate it if capture starves (portal emits only on damage).
+    # Optional fallback: duplicate stale keyframe when capture starves.
+    # Enabled by default to keep visual cadence stable on sparse portal updates.
     last_keyframe = None
     last_keyframe_len = 0
-    # Pull timeout tracks target FPS (e.g. ~16.7 ms @ 60 fps), avoiding a hard 20 ms ceiling.
+    # Pull timeout tracks target FPS with headroom; too-aggressive timeout creates fake
+    # "stale duplicate" bursts even when pipeline is just slightly late.
     fps = max(1, int(target_fps))
-    pull_timeout_ns = max(2_000_000, min(20_000_000, int(1_000_000_000 / fps)))
+    pull_timeout_ns = max(5_000_000, min(80_000_000, int(2_000_000_000 / fps)))
 
     while not stop_event.is_set():
         try:
@@ -305,7 +309,8 @@ def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=Non
             print(f"[wbeam-framed] client connected: {addr}", flush=True)
             print(f"[wbeam-framed] session_id=0x{session_id:016x}", flush=True)
             _stat_frames = 0
-            _stat_dropped = 0
+            _stat_timeout_misses = 0
+            _stat_stale_duplicates = 0
             _stat_partial_writes = 0
             _stat_send_timeouts = 0
             _stat_t0 = _time.monotonic()
@@ -319,9 +324,9 @@ def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=Non
                 map_info = None
 
                 if sample is None:
-                    # No fresh buffer from PipeWire; reuse last keyframe to maintain cadence.
-                    if last_keyframe is None:
-                        _stat_dropped += 1
+                    # No fresh buffer from PipeWire.
+                    if not duplicate_stale or last_keyframe is None:
+                        _stat_timeout_misses += 1
                         elapsed = _time.monotonic() - _stat_t0
                         if elapsed >= 1.0:
                             sent_fps = _stat_frames / elapsed
@@ -331,16 +336,19 @@ def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=Non
                                 pipeline_fps_counter[0] = 0
                             print(
                                 f"[wbeam-framed] pipeline_fps={pipe_fps} sender_fps={sent_fps:.1f}"
-                                f" timeout_misses={_stat_dropped} seq={seq}",
+                                f" timeout_misses={_stat_timeout_misses}"
+                                f" stale_dupe={_stat_stale_duplicates} seq={seq}",
                                 flush=True,
                             )
                             _stat_frames = 0
-                            _stat_dropped = 0
+                            _stat_timeout_misses = 0
+                            _stat_stale_duplicates = 0
                             _stat_t0 = _time.monotonic()
                         continue
 
                     payload_view = memoryview(last_keyframe)
                     payload_len = last_keyframe_len
+                    _stat_stale_duplicates += 1
                 else:
                     buf = sample.get_buffer()
                     pts_us = buf.pts // 1000 if buf.pts != Gst.CLOCK_TIME_NONE else pts_us
@@ -364,7 +372,7 @@ def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=Non
                     send_calls = send_all_iov(conn, [header, payload_view])
                 except socket.timeout:
                     _stat_send_timeouts += 1
-                    _stat_dropped += 1
+                    _stat_timeout_misses += 1
                     continue
                 finally:
                     if buf is not None and map_info is not None:
@@ -383,14 +391,16 @@ def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=Non
                         pipeline_fps_counter[0] = 0
                     print(
                         f"[wbeam-framed] pipeline_fps={pipe_fps} sender_fps={sent_fps:.1f}"
-                        f" timeout_misses={_stat_dropped}"
+                        f" timeout_misses={_stat_timeout_misses}"
+                        f" stale_dupe={_stat_stale_duplicates}"
                         f" partial_writes={_stat_partial_writes}"
                         f" send_timeouts={_stat_send_timeouts}"
                         f" seq={seq}",
                         flush=True,
                     )
                     _stat_frames = 0
-                    _stat_dropped = 0
+                    _stat_timeout_misses = 0
+                    _stat_stale_duplicates = 0
                     _stat_partial_writes = 0
                     _stat_send_timeouts = 0
                     _stat_t0 = _time.monotonic()
@@ -507,8 +517,10 @@ def make_pipeline(
         sink.set_property("emit-signals", False)
         # sync=true keeps pipeline on the clock so videorate can synthesize stable CFR output.
         sink.set_property("sync", True)
-        sink.set_property("max-buffers", 4)  # 4 instead of 2 – gives sender ~2 extra frame slots before drop
-        sink.set_property("drop", True)
+        # Keep a tiny sink queue, but do not drop encoded AUs at appsink level:
+        # dropping inter-coded frames breaks reference chains and creates visual artifacts.
+        sink.set_property("max-buffers", 4)
+        sink.set_property("drop", False)
     else:
         caps2.set_property(
             "caps",

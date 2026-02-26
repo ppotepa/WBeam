@@ -25,7 +25,8 @@ internal static class Program
 
     private static int Main()
     {
-        var cfg = RelayConfig.FromEnvironment();
+        var configPath = ParseConfigPath();
+        var cfg = RelayConfig.FromConfigFile(configPath);
         if (!cfg.H264Enabled)
         {
             Log("PROTO_H264 is not enabled; C# backend currently supports H264 mode only.");
@@ -62,6 +63,19 @@ internal static class Program
                 try { portal.Kill(entireProcessTree: true); } catch { /* ignore */ }
             }
         }
+    }
+
+    private static string ParseConfigPath()
+    {
+        var args = Environment.GetCommandLineArgs();
+        for (var i = 1; i < args.Length; i++)
+        {
+            if (args[i] == "--config" && i + 1 < args.Length)
+            {
+                return args[i + 1];
+            }
+        }
+        return Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "../config/proto.conf"));
     }
 
     private static void RunRelayLoop(RelayConfig cfg, CancellationToken token)
@@ -475,17 +489,18 @@ internal sealed record RelayConfig(
     string CursorMode,
     string PortalScriptPath)
 {
-    public static RelayConfig FromEnvironment()
+    public static RelayConfig FromConfigFile(string configPath)
     {
-        var h264Enabled = EnvTruth("PROTO_H264", defaultValue: false);
-        var portalEnabled = EnvTruth("PROTO_PORTAL", defaultValue: true);
-        var sourceFramed = EnvTruth("PROTO_H264_SOURCE_FRAMED", defaultValue: h264Enabled);
-        var sourcePort = EnvInt("PROTO_H264_SOURCE_PORT", 5500);
-        var sourceReceiveTimeoutMs = EnvInt("PROTO_H264_SOURCE_READ_TIMEOUT_MS", 5000);
+        var config = LoadConfig(configPath);
+        var h264Enabled = ConfigTruth(config, "PROTO_H264", defaultValue: false);
+        var portalEnabled = ConfigTruth(config, "PROTO_PORTAL", defaultValue: true);
+        var sourceFramed = ConfigTruth(config, "PROTO_H264_SOURCE_FRAMED", defaultValue: h264Enabled);
+        var sourcePort = ConfigInt(config, "PROTO_H264_SOURCE_PORT", 5500);
+        var sourceReceiveTimeoutMs = ConfigInt(config, "PROTO_H264_SOURCE_READ_TIMEOUT_MS", 5000);
         // Default 0 = blocking writes; prevents premature disconnects on slow API17 sink.
-        var sinkSendTimeoutMs = EnvInt("PROTO_ADB_WRITE_TIMEOUT_MS", 0);
+        var sinkSendTimeoutMs = ConfigInt(config, "PROTO_ADB_WRITE_TIMEOUT_MS", 0);
         var (sinkHost, sinkPort) = ParseHostPort(
-            Environment.GetEnvironmentVariable("PROTO_ADB_PUSH_ADDR") ?? "127.0.0.1:5006",
+            ConfigString(config, "PROTO_ADB_PUSH_ADDR", "127.0.0.1:5006"),
             5006);
 
         return new RelayConfig(
@@ -498,27 +513,64 @@ internal sealed record RelayConfig(
             SourcePort: sourcePort,
             SourceReceiveTimeoutMs: sourceReceiveTimeoutMs,
             SinkSendTimeoutMs: sinkSendTimeoutMs,
-            CaptureSize: Environment.GetEnvironmentVariable("PROTO_CAPTURE_SIZE") ?? "1280x720",
-            CaptureFps: Environment.GetEnvironmentVariable("PROTO_CAPTURE_FPS") ?? "30",
-            CaptureBitrateKbps: Environment.GetEnvironmentVariable("PROTO_CAPTURE_BITRATE_KBPS") ?? "16000",
-            CursorMode: Environment.GetEnvironmentVariable("PROTO_CURSOR_MODE") ?? "embedded",
-            PortalScriptPath: ResolvePortalScriptPath());
+            CaptureSize: ConfigString(config, "PROTO_CAPTURE_SIZE", "1280x720"),
+            CaptureFps: ConfigString(config, "PROTO_CAPTURE_FPS", "30"),
+            CaptureBitrateKbps: ConfigString(config, "PROTO_CAPTURE_BITRATE_KBPS", "16000"),
+            CursorMode: ConfigString(config, "PROTO_CURSOR_MODE", "embedded"),
+            PortalScriptPath: ResolvePortalScriptPath(config));
     }
 
-    private static string ResolvePortalScriptPath()
+    private static string ResolvePortalScriptPath(Dictionary<string, string> config)
     {
-        var fromEnv = Environment.GetEnvironmentVariable("PROTO_PORTAL_SCRIPT");
-        if (!string.IsNullOrWhiteSpace(fromEnv))
+        var fromConfig = ConfigString(config, "PROTO_PORTAL_SCRIPT", "");
+        if (!string.IsNullOrWhiteSpace(fromConfig))
         {
-            return fromEnv.Trim();
+            return fromConfig.Trim();
         }
         return Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "../../host/scripts/stream_wayland_portal_h264.py"));
     }
 
-    private static bool EnvTruth(string name, bool defaultValue)
+    private static Dictionary<string, string> LoadConfig(string path)
     {
-        var raw = Environment.GetEnvironmentVariable(name);
-        if (raw is null)
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (!File.Exists(path))
+        {
+            return map;
+        }
+
+        foreach (var rawLine in File.ReadAllLines(path))
+        {
+            var line = rawLine.Trim();
+            if (line.Length == 0 || line.StartsWith("#", StringComparison.Ordinal))
+            {
+                continue;
+            }
+            var idx = line.IndexOf('=');
+            if (idx <= 0)
+            {
+                continue;
+            }
+            var key = line[..idx].Trim();
+            if (key.Length == 0)
+            {
+                continue;
+            }
+            var value = line[(idx + 1)..].Trim();
+            map[key] = value.Trim('"');
+        }
+        return map;
+    }
+
+    private static string ConfigString(Dictionary<string, string> config, string name, string defaultValue)
+    {
+        return config.TryGetValue(name, out var raw) && !string.IsNullOrWhiteSpace(raw)
+            ? raw.Trim()
+            : defaultValue;
+    }
+
+    private static bool ConfigTruth(Dictionary<string, string> config, string name, bool defaultValue)
+    {
+        if (!config.TryGetValue(name, out var raw))
         {
             return defaultValue;
         }
@@ -528,9 +580,9 @@ internal sealed record RelayConfig(
             || raw.Equals("on", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static int EnvInt(string name, int defaultValue)
+    private static int ConfigInt(Dictionary<string, string> config, string name, int defaultValue)
     {
-        var raw = Environment.GetEnvironmentVariable(name);
+        config.TryGetValue(name, out var raw);
         return int.TryParse(raw, out var parsed) ? parsed : defaultValue;
     }
 

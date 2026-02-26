@@ -42,7 +42,7 @@ rule CUSTOM_COMMAND
 # Rule for re-running cmake.
 
 rule RERUN_CMAKE
-  command = /home/ppotepa/Android/Sdk/cmake/3.22.1/bin/cmake --regenerate-during-build -S/mnt/fat_boii/git/WBeam/proto/front/app/src/main/cpp -B/mnt/fat_boii/git/WBeam/proto/front/app/.cxx/Debug/2e234y1a/arm64-v8a
+  command = /opt/android-sdk/cmake/3.22.1/bin/cmake --regenerate-during-build -S/home/ppotepa/git/WBeam/proto/front/app/src/main/cpp -B/home/ppotepa/git/WBeam/proto/front/app/.cxx/Debug/2e234y1a/arm64-v8a
   description = Re-running CMake...
   generator = 1
 

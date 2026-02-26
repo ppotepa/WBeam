@@ -6,16 +6,16 @@
 6
 7    <uses-sdk
 8        android:minSdkVersion="17"
-8-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml
+8-->/home/ppotepa/git/WBeam/proto/front/app/src/main/AndroidManifest.xml
 9        android:targetSdkVersion="34" />
-9-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml
+9-->/home/ppotepa/git/WBeam/proto/front/app/src/main/AndroidManifest.xml
 10
 11    <uses-permission android:name="android.permission.INTERNET" />
-11-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:3:5-67
-11-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:3:22-64
+11-->/home/ppotepa/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:3:5-67
+11-->/home/ppotepa/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:3:22-64
 12    <uses-permission android:name="android.permission.WAKE_LOCK" />
-12-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:4:5-68
-12-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:4:22-65
+12-->/home/ppotepa/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:4:5-68
+12-->/home/ppotepa/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:4:22-65
 13
 14    <permission
 14-->[androidx.core:core:1.9.0] /home/ppotepa/.gradle/caches/transforms-3/ec4f76f6c0c02de8ba18086e7bd9baf5/transformed/core-1.9.0/AndroidManifest.xml:22:5-24:47
@@ -29,35 +29,35 @@
 18-->[androidx.core:core:1.9.0] /home/ppotepa/.gradle/caches/transforms-3/ec4f76f6c0c02de8ba18086e7bd9baf5/transformed/core-1.9.0/AndroidManifest.xml:26:22-94
 19
 20    <application
-20-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:6:5-20:19
+20-->/home/ppotepa/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:6:5-20:19
 21        android:allowBackup="true"
-21-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:7:9-35
+21-->/home/ppotepa/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:7:9-35
 22        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
 22-->[androidx.core:core:1.9.0] /home/ppotepa/.gradle/caches/transforms-3/ec4f76f6c0c02de8ba18086e7bd9baf5/transformed/core-1.9.0/AndroidManifest.xml:28:18-86
 23        android:debuggable="true"
 24        android:label="ProtoDemo"
-24-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:8:9-34
+24-->/home/ppotepa/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:8:9-34
 25        android:networkSecurityConfig="@xml/network_security_config"
-25-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:9:9-69
+25-->/home/ppotepa/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:9:9-69
 26        android:supportsRtl="true"
-26-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:10:9-35
+26-->/home/ppotepa/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:10:9-35
 27        android:theme="@style/Theme.AppCompat.Light.NoActionBar" >
-27-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:11:9-65
+27-->/home/ppotepa/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:11:9-65
 28        <activity
-28-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:12:9-19:20
+28-->/home/ppotepa/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:12:9-19:20
 29            android:name="com.proto.demo.MainActivity"
-29-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:13:13-41
+29-->/home/ppotepa/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:13:13-41
 30            android:exported="true" >
-30-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:14:13-36
+30-->/home/ppotepa/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:14:13-36
 31            <intent-filter>
-31-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:15:13-18:29
+31-->/home/ppotepa/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:15:13-18:29
 32                <action android:name="android.intent.action.MAIN" />
-32-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:16:17-69
-32-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:16:25-66
+32-->/home/ppotepa/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:16:17-69
+32-->/home/ppotepa/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:16:25-66
 33
 34                <category android:name="android.intent.category.LAUNCHER" />
-34-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:17:17-77
-34-->/mnt/fat_boii/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:17:27-74
+34-->/home/ppotepa/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:17:17-77
+34-->/home/ppotepa/git/WBeam/proto/front/app/src/main/AndroidManifest.xml:17:27-74
 35            </intent-filter>
 36        </activity>
 37

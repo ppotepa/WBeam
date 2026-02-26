@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Global dependency installer for WBeam (main + proto) on Arch Linux.
+# Idempotent: installs only missing packages/components.
+
+ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SDK_ROOT="${SDK_ROOT:-/opt/android-sdk}"
+
+if [[ ! -f /etc/arch-release ]]; then
+  echo "[deps] unsupported OS: this script currently supports Arch Linux only." >&2
+  exit 1
+fi
+
+as_root() {
+  if [[ "$EUID" -eq 0 ]]; then
+    "$@"
+  else
+    sudo "$@"
+  fi
+}
+
+need_pacman=(
+  rust
+  gcc
+  protobuf
+  cmake
+  pkgconf
+  python
+  python-dbus
+  python-gobject
+  ffmpeg
+  gstreamer
+  gst-plugins-base
+  gst-plugins-good
+  gst-plugins-bad
+  gst-plugins-ugly
+  gst-plugin-pipewire
+  openh264
+  grim
+  kscreen
+  android-tools
+  android-sdk
+  android-sdk-cmdline-tools-latest
+  dotnet-runtime-8.0
+  dotnet-sdk-8.0
+  jdk17-openjdk
+)
+
+missing_pkgs=()
+for p in "${need_pacman[@]}"; do
+  if ! pacman -Q "$p" >/dev/null 2>&1; then
+    missing_pkgs+=("$p")
+  fi
+done
+
+if [[ "${#missing_pkgs[@]}" -gt 0 ]]; then
+  echo "[deps] installing missing pacman packages: ${missing_pkgs[*]}"
+  as_root pacman -S --needed --noconfirm "${missing_pkgs[@]}"
+else
+  echo "[deps] pacman packages already installed."
+fi
+
+SDKMANAGER="${SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"
+if [[ ! -x "$SDKMANAGER" ]]; then
+  echo "[deps] sdkmanager not found at $SDKMANAGER" >&2
+  exit 1
+fi
+
+missing_sdk=()
+[[ -x "${SDK_ROOT}/platform-tools/adb" ]] || missing_sdk+=("platform-tools")
+[[ -x "${SDK_ROOT}/emulator/emulator" ]] || missing_sdk+=("emulator")
+[[ -d "${SDK_ROOT}/platforms/android-34" ]] || missing_sdk+=("platforms;android-34")
+[[ -d "${SDK_ROOT}/build-tools/30.0.3" ]] || missing_sdk+=("build-tools;30.0.3")
+[[ -d "${SDK_ROOT}/ndk/23.1.7779620" ]] || missing_sdk+=("ndk;23.1.7779620")
+[[ -d "${SDK_ROOT}/cmake/3.22.1" ]] || missing_sdk+=("cmake;3.22.1")
+
+if [[ "${#missing_sdk[@]}" -gt 0 ]]; then
+  echo "[deps] installing missing Android SDK components into ${SDK_ROOT}: ${missing_sdk[*]}"
+  as_root bash -lc "yes | \"$SDKMANAGER\" --sdk_root=\"$SDK_ROOT\" ${missing_sdk[*]@Q}"
+else
+  echo "[deps] Android SDK components already installed."
+fi
+
+# Lightweight health checks for key runtime pieces used by proto/main workflows.
+fail=0
+for cmd in cargo rustc protoc adb java dotnet python3 ffmpeg gst-inspect-1.0; do
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "[deps] missing command in PATH: $cmd"
+    fail=1
+  fi
+done
+for el in pipewiresrc openh264enc h264parse videoconvert videoscale videorate appsink jpegenc; do
+  if ! gst-inspect-1.0 "$el" >/dev/null 2>&1; then
+    echo "[deps] missing gstreamer element: $el"
+    fail=1
+  fi
+done
+if ! dotnet --list-runtimes 2>/dev/null | grep -q '^Microsoft\.NETCore\.App 8\.'; then
+  echo "[deps] missing .NET runtime 8.x"
+  fail=1
+fi
+
+if [[ "$fail" -ne 0 ]]; then
+  echo "[deps] dependency install finished with missing items." >&2
+  exit 1
+fi
+
+echo "[deps] OK: dependencies for main + proto are installed."
