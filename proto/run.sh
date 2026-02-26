@@ -148,9 +148,12 @@ PROTO_JPEG_TARGET_KB="${PROTO_JPEG_TARGET_KB:-}"
 PROTO_PORTAL="${PROTO_PORTAL:-1}"
 PROTO_PORTAL_JPEG_SOURCE="${PROTO_PORTAL_JPEG_SOURCE:-debug}"
 PROTO_CURSOR_MODE="${PROTO_CURSOR_MODE:-}"
-WBEAM_VIDEORATE_DROP_ONLY="${WBEAM_VIDEORATE_DROP_ONLY:-1}"
+WBEAM_VIDEORATE_DROP_ONLY="${WBEAM_VIDEORATE_DROP_ONLY:-0}"
 WBEAM_FRAMED_SEND_TIMEOUT_S="${WBEAM_FRAMED_SEND_TIMEOUT_S:-0}"
-WBEAM_FRAMED_DUPLICATE_STALE="${WBEAM_FRAMED_DUPLICATE_STALE:-1}"
+WBEAM_FRAMED_DUPLICATE_STALE="${WBEAM_FRAMED_DUPLICATE_STALE:-0}"
+WBEAM_PIPEWIRE_KEEPALIVE_MS="${WBEAM_PIPEWIRE_KEEPALIVE_MS:-}"
+WBEAM_PIPEWIRE_ALWAYS_COPY="${WBEAM_PIPEWIRE_ALWAYS_COPY:-1}"
+WBEAM_FRAMED_PULL_TIMEOUT_MS="${WBEAM_FRAMED_PULL_TIMEOUT_MS:-}"
 PROTO_PORTAL_ONLY="${PROTO_PORTAL_ONLY:-0}"
 PROTO_H264="${PROTO_H264:-}"
 PROTO_H264_REORDER="${PROTO_H264_REORDER:-0}"
@@ -163,6 +166,7 @@ PROTO_FORCE_JAVA_FALLBACK="${PROTO_FORCE_JAVA_FALLBACK:-0}"
 PROTO_ANDROID_LOGCAT="${PROTO_ANDROID_LOGCAT:-0}"
 PROTO_ANDROID_LOG_POLLER="${PROTO_ANDROID_LOG_POLLER:-0}"
 PROTO_FORCE_PORTAL="${PROTO_FORCE_PORTAL:-1}"
+PROTO_ADB_SHELL_TIMEOUT_SECS="${PROTO_ADB_SHELL_TIMEOUT_SECS:-8}"
 
 prepare_cs_backend() {
   local host_cs_dir="$ROOT_DIR/host-cs"
@@ -339,6 +343,14 @@ refresh_serial_flag() {
   fi
 }
 
+adb_shell_quick() {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "${PROTO_ADB_SHELL_TIMEOUT_SECS}s" adb "${SERIAL_FLAG[@]}" shell "$@"
+  else
+    adb "${SERIAL_FLAG[@]}" shell "$@"
+  fi
+}
+
 select_serial_noninteractive() {
   local allow_emulator="${1:-1}"
   local serial
@@ -402,7 +414,10 @@ refresh_serial_flag
 if [[ -n "${SERIAL:-}" ]]; then
   # Stop stale app early so it does not keep showing old "connection refused"
   # state while the new host/app session is being prepared.
-  adb "${SERIAL_FLAG[@]}" shell am force-stop com.proto.demo >/dev/null 2>&1 || true
+  log "preflight: stopping stale app (timeout=${PROTO_ADB_SHELL_TIMEOUT_SECS}s)"
+  if ! adb_shell_quick am force-stop com.proto.demo >/dev/null 2>&1; then
+    log "WARNING: preflight force-stop timed out or failed; continuing"
+  fi
 fi
 
 case "$PROTO_PRESET" in
@@ -934,6 +949,9 @@ PROTO_CURSOR_MODE=$PROTO_CURSOR_MODE
 WBEAM_VIDEORATE_DROP_ONLY=$WBEAM_VIDEORATE_DROP_ONLY
 WBEAM_FRAMED_SEND_TIMEOUT_S=$WBEAM_FRAMED_SEND_TIMEOUT_S
 WBEAM_FRAMED_DUPLICATE_STALE=$WBEAM_FRAMED_DUPLICATE_STALE
+WBEAM_PIPEWIRE_KEEPALIVE_MS=$WBEAM_PIPEWIRE_KEEPALIVE_MS
+WBEAM_PIPEWIRE_ALWAYS_COPY=$WBEAM_PIPEWIRE_ALWAYS_COPY
+WBEAM_FRAMED_PULL_TIMEOUT_MS=$WBEAM_FRAMED_PULL_TIMEOUT_MS
 PROTO_PORTAL_ONLY=$PROTO_PORTAL_ONLY
 PROTO_H264=$PROTO_H264
 PROTO_H264_REORDER=$PROTO_H264_REORDER
@@ -947,7 +965,7 @@ EOF
 
 # Start host server first, then launch app so auto-start stream has endpoint ready.
 log "starting host server on 0.0.0.0:5005 (desktop stream)…"
-log "preset=$PROTO_PRESET size=$PROTO_CAPTURE_SIZE fps=$PROTO_CAPTURE_FPS bitrate=${PROTO_CAPTURE_BITRATE_KBPS}kbps mjpeg_fps=$PROTO_MJPEG_FPS adb_push_fps=$PROTO_ADB_PUSH_FPS adb_push=$PROTO_ADB_PUSH max_frame_bytes=$PROTO_MAX_FRAME_BYTES max_chunk_bytes=$PROTO_MAX_CHUNK_BYTES jpeg_target_kb=$PROTO_JPEG_TARGET_KB skip_sig_check=$PROTO_SKIP_SIG_CHECK debug_frames=$PROTO_DEBUG_FRAMES drop_only=$WBEAM_VIDEORATE_DROP_ONLY duplicate_stale=$WBEAM_FRAMED_DUPLICATE_STALE send_timeout_s=$WBEAM_FRAMED_SEND_TIMEOUT_S portal=$PROTO_PORTAL cursor=$PROTO_CURSOR_MODE jpeg_source=$PROTO_PORTAL_JPEG_SOURCE portal_only=$PROTO_PORTAL_ONLY h264=$PROTO_H264 h264_source_framed=$PROTO_H264_SOURCE_FRAMED h264_reorder=$PROTO_H264_REORDER android_logcat=$PROTO_ANDROID_LOGCAT android_log_poller=$PROTO_ANDROID_LOG_POLLER"
+log "preset=$PROTO_PRESET size=$PROTO_CAPTURE_SIZE fps=$PROTO_CAPTURE_FPS bitrate=${PROTO_CAPTURE_BITRATE_KBPS}kbps mjpeg_fps=$PROTO_MJPEG_FPS adb_push_fps=$PROTO_ADB_PUSH_FPS adb_push=$PROTO_ADB_PUSH max_frame_bytes=$PROTO_MAX_FRAME_BYTES max_chunk_bytes=$PROTO_MAX_CHUNK_BYTES jpeg_target_kb=$PROTO_JPEG_TARGET_KB skip_sig_check=$PROTO_SKIP_SIG_CHECK debug_frames=$PROTO_DEBUG_FRAMES drop_only=$WBEAM_VIDEORATE_DROP_ONLY duplicate_stale=$WBEAM_FRAMED_DUPLICATE_STALE keepalive_ms=${WBEAM_PIPEWIRE_KEEPALIVE_MS:-auto} always_copy=$WBEAM_PIPEWIRE_ALWAYS_COPY pull_timeout_ms=${WBEAM_FRAMED_PULL_TIMEOUT_MS:-auto} send_timeout_s=$WBEAM_FRAMED_SEND_TIMEOUT_S portal=$PROTO_PORTAL cursor=$PROTO_CURSOR_MODE jpeg_source=$PROTO_PORTAL_JPEG_SOURCE portal_only=$PROTO_PORTAL_ONLY h264=$PROTO_H264 h264_source_framed=$PROTO_H264_SOURCE_FRAMED h264_reorder=$PROTO_H264_REORDER android_logcat=$PROTO_ANDROID_LOGCAT android_log_poller=$PROTO_ANDROID_LOG_POLLER"
 
 if [[ "$PROTO_DEBUG_FRAMES" == "1" ]]; then
   mkdir -p "$PROTO_DEBUG_FRAMES_DIR"
