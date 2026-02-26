@@ -1501,9 +1501,12 @@ fn start_portal_pipeline_once() -> bool {
     let capture_bitrate = cfg_var("PROTO_CAPTURE_BITRATE_KBPS").unwrap_or_else(|_| DEFAULT_BITRATE_KBPS_STR.to_string());
     let capture_fps = cfg_var("PROTO_CAPTURE_FPS").unwrap_or_else(|_| DEFAULT_CAPTURE_FPS_STR.to_string());
     let cursor_mode = cfg_var("PROTO_CURSOR_MODE").unwrap_or_else(|_| DEFAULT_CURSOR_MODE.to_string());
-    let videorate_drop_only = cfg_var("WBEAM_VIDEORATE_DROP_ONLY").unwrap_or_else(|_| "1".to_string());
+    let videorate_drop_only = cfg_var("WBEAM_VIDEORATE_DROP_ONLY").unwrap_or_else(|_| "0".to_string());
     let framed_send_timeout_s = cfg_var("WBEAM_FRAMED_SEND_TIMEOUT_S").unwrap_or_else(|_| "0".to_string());
-    let framed_duplicate_stale = cfg_var("WBEAM_FRAMED_DUPLICATE_STALE").unwrap_or_else(|_| "1".to_string());
+    let framed_duplicate_stale = cfg_var("WBEAM_FRAMED_DUPLICATE_STALE").unwrap_or_else(|_| "0".to_string());
+    let pipewire_keepalive_ms = cfg_var("WBEAM_PIPEWIRE_KEEPALIVE_MS").unwrap_or_default();
+    let pipewire_always_copy = cfg_var("WBEAM_PIPEWIRE_ALWAYS_COPY").unwrap_or_else(|_| "1".to_string());
+    let framed_pull_timeout_ms = cfg_var("WBEAM_FRAMED_PULL_TIMEOUT_MS").unwrap_or_default();
     let source_mode = cfg_var("PROTO_PORTAL_JPEG_SOURCE").unwrap_or_else(|_| DEFAULT_PORTAL_SOURCE.to_string());
     let source_framed = env_truthy("PROTO_H264_SOURCE_FRAMED", h264_mode_enabled());
     let framed_env = if source_framed { "1" } else { "0" };
@@ -1531,6 +1534,9 @@ fn start_portal_pipeline_once() -> bool {
         .env("WBEAM_VIDEORATE_DROP_ONLY", videorate_drop_only)
         .env("WBEAM_FRAMED_SEND_TIMEOUT_S", framed_send_timeout_s)
         .env("WBEAM_FRAMED_DUPLICATE_STALE", framed_duplicate_stale)
+        .env("WBEAM_PIPEWIRE_KEEPALIVE_MS", pipewire_keepalive_ms)
+        .env("WBEAM_PIPEWIRE_ALWAYS_COPY", pipewire_always_copy)
+        .env("WBEAM_FRAMED_PULL_TIMEOUT_MS", framed_pull_timeout_ms)
         .stdin(Stdio::null())
         .stdout(Stdio::from(streamer_log.try_clone().expect("clone streamer log")))
         .stderr(Stdio::from(streamer_log))

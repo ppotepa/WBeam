@@ -294,10 +294,16 @@ Domyślny profil w repo (aktualny `proto.conf`):
 
 - `RUN_BACKEND=rust`
 - `RUN_DEVICE=adb`
-- `PROTO_PRESET=balanced`
+- `PROTO_PRESET=fast`
 - `PROTO_H264=1`
 - `PROTO_H264_SOURCE_FRAMED=1`
 - `PROTO_H264_REORDER=0`
+- `PROTO_FORCE_NATIVE_SIZE=0`
+- `WBEAM_VIDEORATE_DROP_ONLY=0`
+- `WBEAM_FRAMED_DUPLICATE_STALE=1`
+- `WBEAM_PIPEWIRE_KEEPALIVE_MS=33`
+- `WBEAM_PIPEWIRE_ALWAYS_COPY=1`
+- `WBEAM_FRAMED_PULL_TIMEOUT_MS=8`
 
 ## 10) Presety (`run.sh`)
 
@@ -372,3 +378,24 @@ Efekt:
 2. Rozszerzyć telemetry (in/out fps, decode queue depth, reconnect reasons).
 3. Dodać testy integracyjne parserów ramek (`WBJ1/WBH1/WBTP`) na fixture binarnych.
 4. Ujednolicić backend Rust/C# (feature parity, zwłaszcza Annex-B relay w C#).
+
+## 15) Responsiveness - wyniki inwestygacji
+
+Największy bottleneck wykryty w praktyce to nie Android decode/render, tylko niestabilna
+częstotliwość klatek z portal helpera (PipeWire/portal source), co dawało bardzo niskie
+`pipeline_fps` i wtórnie niskie `H264 out`.
+
+Wdrożone zmiany:
+
+1. `drop-only=0` w `videorate` (umożliwia duplikację klatek dla stabilniejszego CFR).
+2. Dynamiczny `pipewiresrc keepalive-time` + domyślnie `33 ms`.
+3. `pipewiresrc always-copy=1` (konfigurowalne).
+4. Krótszy pull-timeout framed sendera (konfigurowalne), żeby fallback duplikacji nie
+   ograniczał maksymalnego FPS.
+5. Domyślna konfiguracja `run.sh` ustawiona na tryb responsiveness-first (`fast`,
+   brak wymuszenia natywnej rozdzielczości).
+
+Efekt (pomiar po zmianach, run na urządzeniu API17):
+
+- Android `H264 out` średnio ~24.9 fps (p50 ~24.8, max ~29.4), `drop=0`.
+- Przed zmianami w praktyce obserwowane było typowo ~0.8-9 fps i odczuwalny lag.
