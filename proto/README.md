@@ -11,18 +11,31 @@
 
 ## Usage
 
+## Fresh Clone Setup (Arch Linux)
+
+From repo root:
+
+```bash
+# Installs missing dependencies only (main + proto)
+./install-deps
+```
+
 ### Single launcher
 
-- `./run.sh` — default preset `fast` (low latency).
-- `./run.sh quality` — highest quality, heavier.
-- `./run.sh fast` — explicit low-latency preset.
-- `./runcsh` — same flow as `run.sh`, but host backend is C# (`proto/host-cs`).
-- Central config file: `proto/config/proto.conf` (used by both `run.sh` and `runcsh`).
-- Optional custom config: `./run.sh --config /path/to/proto.conf fast`
+- `./run.sh` — uruchamia cały flow zgodnie z `proto/config/proto.conf`.
+- Optional custom config path: `./run.sh --config /path/to/proto.conf`.
+- Zmiana backendu/frontu/presetu odbywa się wyłącznie przez `.conf`:
+  - `RUN_BACKEND=rust|cs`
+  - `RUN_DEVICE=adb|qemu`
+  - `PROTO_PRESET=fast|balanced|quality`
 
-Preset from CLI overrides config; config overrides built-in defaults.
+ENV overrides są zablokowane (np. `PROTO_*=... ./run.sh` zakończy się błędem).
 
-These scripts set JAVA/SDK defaults, build/install app when device is connected, start host, and launch app.
+`run.sh` sets JAVA/SDK defaults, builds/installs app when device is connected, starts host, and launches app.
+
+Network note:
+- `RUN_DEVICE=adb` (real hardware) expects Android USB tethering; host/device routing may differ by OS.
+- `RUN_DEVICE=qemu` (emulator) does not use tethering.
 
 1. Start host server
    ```bash

@@ -1,24 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Simple helper to build the prototype APK, install it on a device, and start the host image server.
-# Environment:
-#   HOST_IP         Host IP the device should hit (default 192.168.42.170 — USB tether)
-#   SERIAL          Android serial (optional, defaults to adb default device)
-#   GRADLEW         Path to gradlew (defaults to ./gradlew inside proto/front)
-#   CARGO_BIN       Host server binary (optional, will `cargo run --release` if not provided)
+# Single launcher for proto stack; all runtime knobs come from proto/config/proto.conf.
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 log() { printf '[proto] %s\n' "$*"; }
 
 usage() {
   cat <<'USAGE'
-Usage: ./run.sh [--config path] [fast|balanced|quality]
-  fast      Low latency (default)
-  balanced  Mid quality/latency
-  quality   Highest quality, heaviest
-Config defaults to ./config/proto.conf if present.
-CLI preset takes precedence over config value.
+Usage: ./run.sh [--config path]
+All behavior is configured in proto.conf (backend/device/preset/tuning).
+Runtime ENV overrides are disabled.
 USAGE
 }
 
@@ -32,19 +24,36 @@ load_config_file() {
     return 0
   fi
 
-  set -a
   # shellcheck disable=SC1090
   source "$cfg"
-  set +a
   log "loaded config: $cfg"
+}
+
+# Runtime config must come from proto.conf, not process env.
+assert_no_runtime_env_overrides() {
+  local bad=()
+  while IFS='=' read -r name _; do
+    case "$name" in
+      PROTO_*|RUN_*|WBEAM_*|HOST_IP|SERIAL|GRADLEW|CARGO_BIN|QEMU_*|ANDROID_EMULATOR_BIN|ANDROID_LOG_FILE)
+        bad+=("$name")
+        ;;
+    esac
+  done < <(env)
+
+  if [[ "${#bad[@]}" -gt 0 ]]; then
+    log "runtime environment overrides are not allowed. Move these to proto.conf:"
+    printf '[proto] %s\n' "${bad[@]}"
+    exit 1
+  fi
 }
 
 # Kill any leftover host process from a previous run (cargo run spawns a grandchild
 # that survives the cargo PID being killed by the old cleanup trap).
 pkill -f proto-host-image >/dev/null 2>&1 || true
 
-PROTO_CONFIG_FILE="${PROTO_CONFIG_FILE:-$ROOT_DIR/config/proto.conf}"
-CLI_PRESET=""
+assert_no_runtime_env_overrides
+
+PROTO_CONFIG_FILE="$ROOT_DIR/config/proto.conf"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --config)
@@ -54,10 +63,6 @@ while [[ $# -gt 0 ]]; do
       fi
       PROTO_CONFIG_FILE="$2"
       shift 2
-      ;;
-    fast|balanced|quality)
-      CLI_PRESET="$1"
-      shift
       ;;
     -h|--help)
       usage
@@ -73,11 +78,57 @@ done
 
 load_config_file "$PROTO_CONFIG_FILE"
 
-HOST_IP="${HOST_IP:-}"
-PROTO_PRESET="${PROTO_PRESET:-fast}"
-if [[ -n "$CLI_PRESET" ]]; then
-  PROTO_PRESET="$CLI_PRESET"
+# If run from tty/ssh, infer desktop session endpoints so portal capture can work.
+if [[ -z "${XDG_RUNTIME_DIR:-}" ]]; then
+  _runtime_guess="/run/user/$(id -u)"
+  if [[ -d "$_runtime_guess" ]]; then
+    export XDG_RUNTIME_DIR="$_runtime_guess"
+    log "XDG_RUNTIME_DIR not set; using $XDG_RUNTIME_DIR"
+  fi
 fi
+if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" && -n "${XDG_RUNTIME_DIR:-}" && -S "${XDG_RUNTIME_DIR}/bus" ]]; then
+  export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
+  log "DBUS_SESSION_BUS_ADDRESS not set; using ${DBUS_SESSION_BUS_ADDRESS}"
+fi
+if [[ -z "${WAYLAND_DISPLAY:-}" && -n "${XDG_RUNTIME_DIR:-}" && -S "${XDG_RUNTIME_DIR}/wayland-0" ]]; then
+  export WAYLAND_DISPLAY="wayland-0"
+  log "WAYLAND_DISPLAY not set; using ${WAYLAND_DISPLAY}"
+fi
+
+RUN_BACKEND="${RUN_BACKEND:-rust}"
+RUN_DEVICE="${RUN_DEVICE:-adb}"
+
+HOST_IP="${HOST_IP:-}"
+SERIAL="${SERIAL:-}"
+GRADLEW="${GRADLEW:-$ROOT_DIR/front/gradlew}"
+CARGO_BIN="${CARGO_BIN:-}"
+QEMU_AVD="${QEMU_AVD:-WBeam_Tablet_API17}"
+if [[ -z "${ANDROID_EMULATOR_BIN:-}" ]]; then
+  if [[ -x /opt/android-sdk/emulator/emulator ]]; then
+    ANDROID_EMULATOR_BIN="/opt/android-sdk/emulator/emulator"
+  else
+    ANDROID_EMULATOR_BIN="$HOME/Android/Sdk/emulator/emulator"
+  fi
+fi
+QEMU_LOG="${QEMU_LOG:-/tmp/proto-emulator.log}"
+QEMU_ARGS="${QEMU_ARGS:-}"
+
+RUN_CS_BACKEND=0
+RUN_QEMU_EMULATOR=0
+if [[ "$RUN_BACKEND" == "cs" ]]; then
+  RUN_CS_BACKEND=1
+elif [[ "$RUN_BACKEND" != "rust" ]]; then
+  log "invalid RUN_BACKEND=$RUN_BACKEND (expected: rust|cs)"
+  exit 1
+fi
+if [[ "$RUN_DEVICE" == "qemu" ]]; then
+  RUN_QEMU_EMULATOR=1
+elif [[ "$RUN_DEVICE" != "adb" ]]; then
+  log "invalid RUN_DEVICE=$RUN_DEVICE (expected: adb|qemu)"
+  exit 1
+fi
+
+PROTO_PRESET="${PROTO_PRESET:-fast}"
 
 PROTO_CAPTURE_SIZE="${PROTO_CAPTURE_SIZE:-}"
 PROTO_CAPTURE_BITRATE_KBPS="${PROTO_CAPTURE_BITRATE_KBPS:-}"
@@ -92,11 +143,14 @@ PROTO_DEBUG_FRAMES_SLOTS="${PROTO_DEBUG_FRAMES_SLOTS:-180}"
 PROTO_ADB_PUSH="${PROTO_ADB_PUSH:-1}"
 PROTO_ADB_PUSH_ADDR="${PROTO_ADB_PUSH_ADDR:-127.0.0.1:5006}"
 PROTO_MAX_FRAME_BYTES="${PROTO_MAX_FRAME_BYTES:-}"
+PROTO_MAX_CHUNK_BYTES="${PROTO_MAX_CHUNK_BYTES:-}"
 PROTO_JPEG_TARGET_KB="${PROTO_JPEG_TARGET_KB:-}"
 PROTO_PORTAL="${PROTO_PORTAL:-1}"
 PROTO_PORTAL_JPEG_SOURCE="${PROTO_PORTAL_JPEG_SOURCE:-debug}"
 PROTO_CURSOR_MODE="${PROTO_CURSOR_MODE:-}"
 WBEAM_VIDEORATE_DROP_ONLY="${WBEAM_VIDEORATE_DROP_ONLY:-1}"
+WBEAM_FRAMED_SEND_TIMEOUT_S="${WBEAM_FRAMED_SEND_TIMEOUT_S:-0}"
+WBEAM_FRAMED_DUPLICATE_STALE="${WBEAM_FRAMED_DUPLICATE_STALE:-1}"
 PROTO_PORTAL_ONLY="${PROTO_PORTAL_ONLY:-0}"
 PROTO_H264="${PROTO_H264:-}"
 PROTO_H264_REORDER="${PROTO_H264_REORDER:-0}"
@@ -108,6 +162,175 @@ PROTO_REQUIRE_TURBO="${PROTO_REQUIRE_TURBO:-1}"
 PROTO_FORCE_JAVA_FALLBACK="${PROTO_FORCE_JAVA_FALLBACK:-0}"
 PROTO_ANDROID_LOGCAT="${PROTO_ANDROID_LOGCAT:-0}"
 PROTO_ANDROID_LOG_POLLER="${PROTO_ANDROID_LOG_POLLER:-0}"
+PROTO_FORCE_PORTAL="${PROTO_FORCE_PORTAL:-1}"
+
+prepare_cs_backend() {
+  local host_cs_dir="$ROOT_DIR/host-cs"
+  local project="$host_cs_dir/ProtoHostCs.csproj"
+  local runner="$host_cs_dir/host-cs.sh"
+
+  if ! command -v dotnet >/dev/null 2>&1; then
+    log "RUN_BACKEND=cs, but dotnet is not available in PATH"
+    exit 1
+  fi
+  if [[ ! -f "$project" || ! -x "$runner" ]]; then
+    log "RUN_BACKEND=cs, but proto/host-cs files are missing"
+    exit 1
+  fi
+
+  log "building C# backend (Release)…"
+  dotnet build -c Release "$project"
+  CARGO_BIN="$runner"
+  : "${PROTO_H264:=1}"
+  : "${PROTO_H264_SOURCE_FRAMED:=1}"
+}
+
+pick_qemu_avd() {
+  local emulator_bin="$1"
+  local requested="${QEMU_AVD:-WBeam_Tablet_API17}"
+  local avds
+  avds="$("$emulator_bin" -list-avds 2>/dev/null || true)"
+  if [[ -z "$avds" ]]; then
+    return 1
+  fi
+  if printf '%s\n' "$avds" | grep -Fxq "$requested"; then
+    printf '%s\n' "$requested"
+    return 0
+  fi
+  printf '%s\n' "$avds" | head -n 1
+}
+
+find_running_qemu_serial() {
+  local target_avd="$1"
+  local serial
+  local avd_name
+  local fallback=""
+
+  while IFS= read -r serial; do
+    [[ -z "$serial" ]] && continue
+    [[ -z "$fallback" ]] && fallback="$serial"
+    avd_name="$(adb -s "$serial" emu avd name 2>/dev/null | tr -d '\r' || true)"
+    if [[ -n "$avd_name" && "$avd_name" == "$target_avd" ]]; then
+      printf '%s\n' "$serial"
+      return 0
+    fi
+  done < <(adb devices 2>/dev/null | awk 'NR>1 && $1 ~ /^emulator-/ && $2=="device" {print $1}')
+
+  if [[ -n "$fallback" ]]; then
+    printf '%s\n' "$fallback"
+    return 0
+  fi
+  return 1
+}
+
+wait_for_qemu_serial() {
+  local timeout_s="${1:-180}"
+  local start_ts
+  local serial
+  start_ts="$(date +%s)"
+  while true; do
+    serial="$(adb devices 2>/dev/null | awk 'NR>1 && $1 ~ /^emulator-/ && $2=="device" {print $1; exit}')"
+    if [[ -n "$serial" ]]; then
+      printf '%s\n' "$serial"
+      return 0
+    fi
+    if (( "$(date +%s)" - start_ts >= timeout_s )); then
+      return 1
+    fi
+    sleep 1
+  done
+}
+
+wait_for_qemu_boot_complete() {
+  local serial="$1"
+  local boot=""
+  local anim=""
+  adb -s "$serial" wait-for-device >/dev/null 2>&1 || true
+  for _ in $(seq 1 180); do
+    boot="$(adb -s "$serial" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')"
+    anim="$(adb -s "$serial" shell getprop init.svc.bootanim 2>/dev/null | tr -d '\r')"
+    if [[ "$boot" == "1" ]] && [[ "$anim" == "stopped" || -z "$anim" ]]; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+prepare_qemu_emulator() {
+  local emulator_bin="$ANDROID_EMULATOR_BIN"
+  local qemu_log="$QEMU_LOG"
+  local qemu_args="$QEMU_ARGS"
+  local avd_name
+
+  if ! command -v adb >/dev/null 2>&1; then
+    log "RUN_DEVICE=qemu, but adb is not available in PATH"
+    exit 1
+  fi
+  if [[ ! -x "$emulator_bin" ]]; then
+    log "RUN_DEVICE=qemu, but emulator binary not found at $emulator_bin"
+    log "install emulator tools (Android SDK Emulator) and create AVD (prefer API 17: WBeam_Tablet_API17)"
+    exit 1
+  fi
+
+  adb start-server >/dev/null 2>&1 || true
+
+  if ! avd_name="$(pick_qemu_avd "$emulator_bin")"; then
+    log "RUN_DEVICE=qemu, but no AVDs were found"
+    log "create an emulator image first (prefer API 17 for this project)"
+    exit 1
+  fi
+
+  if SERIAL="$(find_running_qemu_serial "$avd_name")"; then
+    log "using running emulator $SERIAL (avd=$avd_name)"
+  else
+    log "starting emulator AVD: $avd_name"
+    nohup "$emulator_bin" -avd "$avd_name" -netdelay none -netspeed full -gpu swiftshader_indirect -no-snapshot-load $qemu_args >"$qemu_log" 2>&1 &
+    if ! SERIAL="$(wait_for_qemu_serial 180)"; then
+      log "emulator did not appear in adb within timeout (log: $qemu_log)"
+      exit 1
+    fi
+    log "emulator online: $SERIAL"
+  fi
+
+  if ! wait_for_qemu_boot_complete "$SERIAL"; then
+    log "emulator boot not completed in timeout (serial: $SERIAL)"
+    exit 1
+  fi
+
+  if [[ "${PROTO_REQUIRE_TURBO}" == "1" ]]; then
+    PROTO_REQUIRE_TURBO=0
+  fi
+  if [[ "${PROTO_FORCE_JAVA_FALLBACK}" == "0" ]]; then
+    PROTO_FORCE_JAVA_FALLBACK=1
+  fi
+  if [[ -z "${PROTO_H264}" ]]; then
+    PROTO_H264=0
+  fi
+  if [[ -z "${PROTO_FORCE_NATIVE_SIZE:-}" ]]; then
+    PROTO_FORCE_NATIVE_SIZE=0
+  fi
+  if [[ -z "${PROTO_ADB_PUSH}" ]]; then
+    PROTO_ADB_PUSH=1
+  fi
+  if [[ -z "${PROTO_PORTAL}" ]]; then
+    PROTO_PORTAL=1
+  fi
+  if [[ -z "${PROTO_WAIT_FOR_FIRST_FRAME_REQUIRED}" ]]; then
+    PROTO_WAIT_FOR_FIRST_FRAME_REQUIRED=1
+  fi
+  if [[ "${PROTO_ADB_PUSH}" == "0" ]]; then
+    : "${HOST_IP:=10.0.2.2}"
+  fi
+}
+
+if [[ "$RUN_CS_BACKEND" -eq 1 ]]; then
+  prepare_cs_backend
+fi
+
+if [[ "$RUN_QEMU_EMULATOR" -eq 1 ]]; then
+  prepare_qemu_emulator
+fi
 
 refresh_serial_flag() {
   SERIAL_FLAG=()
@@ -117,6 +340,7 @@ refresh_serial_flag() {
 }
 
 select_serial_noninteractive() {
+  local allow_emulator="${1:-1}"
   local serial
   local model
   local preferred=""
@@ -153,7 +377,7 @@ select_serial_noninteractive() {
     printf '%s\n' "$first_physical"
     return 0
   fi
-  if [[ -n "$first_any" ]]; then
+  if [[ "$allow_emulator" == "1" && -n "$first_any" ]]; then
     printf '%s\n' "$first_any"
     return 0
   fi
@@ -162,9 +386,14 @@ select_serial_noninteractive() {
 }
 
 if [[ -z "${SERIAL:-}" ]]; then
-  if SERIAL="$(select_serial_noninteractive)"; then
-    export SERIAL
+  select_any_serial=1
+  if [[ "$RUN_QEMU_EMULATOR" -eq 0 ]]; then
+    select_any_serial=0
+  fi
+  if SERIAL="$(select_serial_noninteractive "$select_any_serial")"; then
     log "SERIAL not set; selected device $SERIAL"
+  elif [[ "$RUN_QEMU_EMULATOR" -eq 0 ]]; then
+    log "SERIAL not set; no physical adb device detected (set RUN_DEVICE=qemu in proto.conf for emulator)"
   fi
 fi
 
@@ -282,7 +511,11 @@ fi
 # portal captures at exactly the right size — zero wasted pixels.
 # Gated on PROTO_SET_VIRTUAL_RES (default 1); set to 0 to skip.
 if [[ "${PROTO_SET_VIRTUAL_RES:-1}" == "1" ]] && command -v kscreen-doctor &>/dev/null; then
-  _virt_output="$(kscreen-doctor -o 2>/dev/null \
+  _kscreen_cmd=(kscreen-doctor -o)
+  if command -v timeout >/dev/null 2>&1; then
+    _kscreen_cmd=(timeout 5s kscreen-doctor -o)
+  fi
+  _virt_output="$("${_kscreen_cmd[@]}" 2>/dev/null \
     | grep -oP 'Output: \d+ \K[^\s]+' \
     | grep -i 'virtual\|xdp\|xdg' \
     | head -1 || true)"
@@ -550,10 +783,16 @@ detect_host_ip_for_device() {
   return 1
 }
 
-if [[ -z "${JAVA_HOME:-}" && -d /usr/lib/jvm/java-17-openjdk-amd64 ]]; then
-  export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-  export PATH="$JAVA_HOME/bin:$PATH"
-  log "JAVA_HOME not set; using $JAVA_HOME"
+if [[ -z "${JAVA_HOME:-}" ]]; then
+  if [[ -d /usr/lib/jvm/java-17-openjdk-amd64 ]]; then
+    JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+  elif [[ -d /usr/lib/jvm/java-17-openjdk ]]; then
+    JAVA_HOME=/usr/lib/jvm/java-17-openjdk
+  fi
+  if [[ -n "${JAVA_HOME:-}" ]]; then
+    PATH="$JAVA_HOME/bin:$PATH"
+    log "JAVA_HOME not set; using $JAVA_HOME"
+  fi
 fi
 
 # Build APK (fallback to system gradle only if wrapper missing)
@@ -670,19 +909,56 @@ fi
 
 pkill -f stream_wayland_portal_h264.py >/dev/null 2>&1 || true
 
+RUNTIME_CONFIG_FILE="/tmp/proto-runtime-${$}.conf"
+write_runtime_config() {
+  cat > "$RUNTIME_CONFIG_FILE" <<EOF
+PROTO_PRESET=$PROTO_PRESET
+PROTO_CAPTURE_SIZE=$PROTO_CAPTURE_SIZE
+PROTO_CAPTURE_BITRATE_KBPS=$PROTO_CAPTURE_BITRATE_KBPS
+PROTO_CAPTURE_FPS=$PROTO_CAPTURE_FPS
+PROTO_MJPEG_FPS=$PROTO_MJPEG_FPS
+PROTO_ADB_PUSH_FPS=$PROTO_ADB_PUSH_FPS
+PROTO_SKIP_SIG_CHECK=$PROTO_SKIP_SIG_CHECK
+PROTO_DEBUG_FRAMES=$PROTO_DEBUG_FRAMES
+PROTO_DEBUG_FRAMES_DIR=$PROTO_DEBUG_FRAMES_DIR
+PROTO_DEBUG_FRAMES_FPS=$PROTO_DEBUG_FRAMES_FPS
+PROTO_DEBUG_FRAMES_SLOTS=$PROTO_DEBUG_FRAMES_SLOTS
+PROTO_ADB_PUSH=$PROTO_ADB_PUSH
+PROTO_ADB_PUSH_ADDR=$PROTO_ADB_PUSH_ADDR
+PROTO_MAX_FRAME_BYTES=$PROTO_MAX_FRAME_BYTES
+PROTO_MAX_CHUNK_BYTES=$PROTO_MAX_CHUNK_BYTES
+PROTO_JPEG_TARGET_KB=$PROTO_JPEG_TARGET_KB
+PROTO_PORTAL=$PROTO_PORTAL
+PROTO_PORTAL_JPEG_SOURCE=$PROTO_PORTAL_JPEG_SOURCE
+PROTO_CURSOR_MODE=$PROTO_CURSOR_MODE
+WBEAM_VIDEORATE_DROP_ONLY=$WBEAM_VIDEORATE_DROP_ONLY
+WBEAM_FRAMED_SEND_TIMEOUT_S=$WBEAM_FRAMED_SEND_TIMEOUT_S
+WBEAM_FRAMED_DUPLICATE_STALE=$WBEAM_FRAMED_DUPLICATE_STALE
+PROTO_PORTAL_ONLY=$PROTO_PORTAL_ONLY
+PROTO_H264=$PROTO_H264
+PROTO_H264_REORDER=$PROTO_H264_REORDER
+PROTO_H264_SOURCE_FRAMED=$PROTO_H264_SOURCE_FRAMED
+PROTO_ANDROID_LOG_POLLER=$PROTO_ANDROID_LOG_POLLER
+PROTO_FORCE_PORTAL=$PROTO_FORCE_PORTAL
+PROTO_EXTEND_RIGHT_PX=0
+PROTO_SERIAL=${SERIAL:-}
+EOF
+}
+
 # Start host server first, then launch app so auto-start stream has endpoint ready.
 log "starting host server on 0.0.0.0:5005 (desktop stream)…"
-log "preset=$PROTO_PRESET size=$PROTO_CAPTURE_SIZE fps=$PROTO_CAPTURE_FPS bitrate=${PROTO_CAPTURE_BITRATE_KBPS}kbps mjpeg_fps=$PROTO_MJPEG_FPS adb_push_fps=$PROTO_ADB_PUSH_FPS adb_push=$PROTO_ADB_PUSH max_frame_bytes=$PROTO_MAX_FRAME_BYTES jpeg_target_kb=$PROTO_JPEG_TARGET_KB skip_sig_check=$PROTO_SKIP_SIG_CHECK debug_frames=$PROTO_DEBUG_FRAMES drop_only=$WBEAM_VIDEORATE_DROP_ONLY portal=$PROTO_PORTAL cursor=$PROTO_CURSOR_MODE jpeg_source=$PROTO_PORTAL_JPEG_SOURCE portal_only=$PROTO_PORTAL_ONLY h264=$PROTO_H264 h264_source_framed=$PROTO_H264_SOURCE_FRAMED h264_reorder=$PROTO_H264_REORDER android_logcat=$PROTO_ANDROID_LOGCAT android_log_poller=$PROTO_ANDROID_LOG_POLLER"
+log "preset=$PROTO_PRESET size=$PROTO_CAPTURE_SIZE fps=$PROTO_CAPTURE_FPS bitrate=${PROTO_CAPTURE_BITRATE_KBPS}kbps mjpeg_fps=$PROTO_MJPEG_FPS adb_push_fps=$PROTO_ADB_PUSH_FPS adb_push=$PROTO_ADB_PUSH max_frame_bytes=$PROTO_MAX_FRAME_BYTES max_chunk_bytes=$PROTO_MAX_CHUNK_BYTES jpeg_target_kb=$PROTO_JPEG_TARGET_KB skip_sig_check=$PROTO_SKIP_SIG_CHECK debug_frames=$PROTO_DEBUG_FRAMES drop_only=$WBEAM_VIDEORATE_DROP_ONLY duplicate_stale=$WBEAM_FRAMED_DUPLICATE_STALE send_timeout_s=$WBEAM_FRAMED_SEND_TIMEOUT_S portal=$PROTO_PORTAL cursor=$PROTO_CURSOR_MODE jpeg_source=$PROTO_PORTAL_JPEG_SOURCE portal_only=$PROTO_PORTAL_ONLY h264=$PROTO_H264 h264_source_framed=$PROTO_H264_SOURCE_FRAMED h264_reorder=$PROTO_H264_REORDER android_logcat=$PROTO_ANDROID_LOGCAT android_log_poller=$PROTO_ANDROID_LOG_POLLER"
 
 if [[ "$PROTO_DEBUG_FRAMES" == "1" ]]; then
   mkdir -p "$PROTO_DEBUG_FRAMES_DIR"
 fi
+write_runtime_config
 
 cd "$HOST_DIR"
 if [[ -n "$CARGO_BIN" ]]; then
-  WBEAM_VIDEORATE_DROP_ONLY="$WBEAM_VIDEORATE_DROP_ONLY" PROTO_FORCE_PORTAL=1 PROTO_SERIAL="${SERIAL:-}" PROTO_ADB_PUSH="$PROTO_ADB_PUSH" PROTO_ADB_PUSH_ADDR="$PROTO_ADB_PUSH_ADDR" PROTO_ADB_PUSH_FPS="$PROTO_ADB_PUSH_FPS" PROTO_MAX_FRAME_BYTES="$PROTO_MAX_FRAME_BYTES" PROTO_JPEG_TARGET_KB="$PROTO_JPEG_TARGET_KB" PROTO_SKIP_SIG_CHECK="$PROTO_SKIP_SIG_CHECK" PROTO_DEBUG_FRAMES="$PROTO_DEBUG_FRAMES" PROTO_DEBUG_FRAMES_DIR="$PROTO_DEBUG_FRAMES_DIR" PROTO_DEBUG_FRAMES_FPS="$PROTO_DEBUG_FRAMES_FPS" PROTO_DEBUG_FRAMES_SLOTS="$PROTO_DEBUG_FRAMES_SLOTS" PROTO_PORTAL="$PROTO_PORTAL" PROTO_PORTAL_ONLY="$PROTO_PORTAL_ONLY" PROTO_H264="$PROTO_H264" PROTO_H264_SOURCE_FRAMED="$PROTO_H264_SOURCE_FRAMED" PROTO_EXTEND_RIGHT_PX=0 PROTO_CAPTURE_SIZE="$PROTO_CAPTURE_SIZE" PROTO_CAPTURE_BITRATE_KBPS="$PROTO_CAPTURE_BITRATE_KBPS" PROTO_CAPTURE_FPS="$PROTO_CAPTURE_FPS" PROTO_MJPEG_FPS="$PROTO_MJPEG_FPS" PROTO_PORTAL_JPEG_SOURCE="$PROTO_PORTAL_JPEG_SOURCE" PROTO_CURSOR_MODE="$PROTO_CURSOR_MODE" PROTO_ANDROID_LOG_POLLER="$PROTO_ANDROID_LOG_POLLER" "$CARGO_BIN" &
+  "$CARGO_BIN" --config "$RUNTIME_CONFIG_FILE" &
 else
-  WBEAM_VIDEORATE_DROP_ONLY="$WBEAM_VIDEORATE_DROP_ONLY" PROTO_FORCE_PORTAL=1 PROTO_SERIAL="${SERIAL:-}" PROTO_ADB_PUSH="$PROTO_ADB_PUSH" PROTO_ADB_PUSH_ADDR="$PROTO_ADB_PUSH_ADDR" PROTO_ADB_PUSH_FPS="$PROTO_ADB_PUSH_FPS" PROTO_MAX_FRAME_BYTES="$PROTO_MAX_FRAME_BYTES" PROTO_JPEG_TARGET_KB="$PROTO_JPEG_TARGET_KB" PROTO_SKIP_SIG_CHECK="$PROTO_SKIP_SIG_CHECK" PROTO_DEBUG_FRAMES="$PROTO_DEBUG_FRAMES" PROTO_DEBUG_FRAMES_DIR="$PROTO_DEBUG_FRAMES_DIR" PROTO_DEBUG_FRAMES_FPS="$PROTO_DEBUG_FRAMES_FPS" PROTO_DEBUG_FRAMES_SLOTS="$PROTO_DEBUG_FRAMES_SLOTS" PROTO_PORTAL="$PROTO_PORTAL" PROTO_PORTAL_ONLY="$PROTO_PORTAL_ONLY" PROTO_H264="$PROTO_H264" PROTO_H264_SOURCE_FRAMED="$PROTO_H264_SOURCE_FRAMED" PROTO_EXTEND_RIGHT_PX=0 PROTO_CAPTURE_SIZE="$PROTO_CAPTURE_SIZE" PROTO_CAPTURE_BITRATE_KBPS="$PROTO_CAPTURE_BITRATE_KBPS" PROTO_CAPTURE_FPS="$PROTO_CAPTURE_FPS" PROTO_MJPEG_FPS="$PROTO_MJPEG_FPS" PROTO_PORTAL_JPEG_SOURCE="$PROTO_PORTAL_JPEG_SOURCE" PROTO_CURSOR_MODE="$PROTO_CURSOR_MODE" PROTO_ANDROID_LOG_POLLER="$PROTO_ANDROID_LOG_POLLER" cargo run --release &
+  cargo run --release -- --config "$RUNTIME_CONFIG_FILE" &
 fi
 HOST_PID=$!
 
@@ -690,6 +966,7 @@ cleanup() {
   if [[ -n "$LOGCAT_PID" ]]; then
     kill "$LOGCAT_PID" >/dev/null 2>&1 || true
   fi
+  rm -f "$RUNTIME_CONFIG_FILE" >/dev/null 2>&1 || true
   # Kill the cargo wrapper and the actual binary (cargo run spawns a grandchild)
   kill "$HOST_PID" >/dev/null 2>&1 || true
   pkill -f proto-host-image >/dev/null 2>&1 || true

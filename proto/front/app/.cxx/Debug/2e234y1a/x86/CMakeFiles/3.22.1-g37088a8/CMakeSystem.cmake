@@ -1,6 +1,6 @@
-set(CMAKE_HOST_SYSTEM "Linux-6.17.0-14-generic")
+set(CMAKE_HOST_SYSTEM "Linux-6.18.9-arch1-2")
 set(CMAKE_HOST_SYSTEM_NAME "Linux")
-set(CMAKE_HOST_SYSTEM_VERSION "6.17.0-14-generic")
+set(CMAKE_HOST_SYSTEM_VERSION "6.18.9-arch1-2")
 set(CMAKE_HOST_SYSTEM_PROCESSOR "x86_64")
 
 include("/home/ppotepa/Android/Sdk/ndk/23.1.7779620/build/cmake/android.toolchain.cmake")

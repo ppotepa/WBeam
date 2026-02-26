@@ -1,7 +1,3 @@
 # ninja log v5
-1	40	1771887547247786400	CMakeFiles/wbeam.dir/native_wbeam.cpp.o	3609be25db9a4a47
-42	68	1771887547276449700	/mnt/fat_boii/git/WBeam/proto/front/app/build/intermediates/cxx/Debug/2e234y1a/obj/x86/libwbeam.so	dea15d194c0361e5
-1	34	1771949386282505000	CMakeFiles/wbeam.dir/native_wbeam.cpp.o	3609be25db9a4a47
-34	63	1771949386312169200	/mnt/fat_boii/git/WBeam/proto/front/app/build/intermediates/cxx/Debug/2e234y1a/obj/x86/libwbeam.so	dea15d194c0361e5
-1	33	1771957577545084000	CMakeFiles/wbeam.dir/native_wbeam.cpp.o	3609be25db9a4a47
-33	70	1771957577582283800	/mnt/fat_boii/git/WBeam/proto/front/app/build/intermediates/cxx/Debug/2e234y1a/obj/x86/libwbeam.so	dea15d194c0361e5
+0	56	1772076484435740026	CMakeFiles/wbeam.dir/native_wbeam.cpp.o	bbc023e98ebef2b3
+56	74	1772076484452740025	/home/ppotepa/git/WBeam/proto/front/app/build/intermediates/cxx/Debug/2e234y1a/obj/x86/libwbeam.so	9ed7017381dd02a2

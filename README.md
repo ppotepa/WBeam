@@ -1,1 +1,3 @@
 wbeam is our try to make android second screen over usb first. host is ubuntu kde wayland and app is android. goal is superdisplay like feel, low lag, stable 60fps when device can do it. right now we run rust daemon on host and android player with hardware decode. we already have framed stream mode, soak scripts, status hud, and bandwidth test over adb tunnel. current focus is less drops, better pacing, no black screen, and cleaner protocol split. run host scripts, open app, wait preflight, stream should start automatic and reconnect if needed. this is mvp and moving fast.
+
+Fresh Arch setup (main + proto): run `./install-deps` from repo root.

@@ -1,9 +1,7 @@
 package com.proto.demo.transport;
 
 import android.media.MediaCodec;
-import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
-import android.os.Build;
 import android.os.Process;
 import android.util.Log;
 import android.view.Surface;
@@ -44,8 +42,8 @@ public class H264Transport implements Transport {
     private static final int    QUEUE_OK = 1;
     private static final int    QUEUE_BUSY = 0;
     private static final int    QUEUE_ERROR = -1;
-    private static final int    MAX_REORDER_FRAMES = 5;
-    private static final long   REORDER_WAIT_MS = 4;
+    private static final int    MAX_REORDER_FRAMES = 8;
+    private static final long   REORDER_WAIT_MS = 12;
     private static final long   STAT_INTERVAL_MS = 2_000;
 
     private final StatusUpdater status;
@@ -128,12 +126,12 @@ public class H264Transport implements Transport {
                     status.set("H264: client connected");
                     decodeStream(new BufferedInputStream(client.getInputStream(), 512 * 1024));
                 } catch (IOException e) {
-                    if (running) status.set("H264: connection lost (" + e.getMessage() + ")");
+                    if (running) status.set("H264: connection lost (" + describeError(e) + ")");
                 }
                 sleep(150);
             }
         } catch (Exception e) {
-            if (running) status.set("H264: error " + e.getMessage());
+            if (running) status.set("H264: error " + describeError(e));
         } finally {
             try { server.close(); } catch (IOException ignore) {}
         }
@@ -148,7 +146,7 @@ public class H264Transport implements Transport {
                 ss.bind(new InetSocketAddress(PORT));
                 return ss;
             } catch (IOException e) {
-                status.set("H264: port busy (" + (70 - i) + "s) " + e.getMessage());
+                status.set("H264: port busy (" + (70 - i) + "s) " + describeError(e));
                 sleep(1000);
             }
         }
@@ -182,7 +180,8 @@ public class H264Transport implements Transport {
             boolean sawPps = false;
             byte[] sps = null;
             byte[] pps = null;
-            long decodedFrames = 0;
+            long queuedFrames = 0;
+            long[] presentedFrames = new long[]{0};
             long dropCount = 0;
             long statStart = System.currentTimeMillis();
             long expectedSeq = -1;
@@ -238,9 +237,9 @@ public class H264Transport implements Transport {
                 // host may split one encoded frame into many WBH1 NAL units.
                 // We batch same-ts units into one codec input buffer (1 queue per frame).
                 if (au.tsMs >= 0 && tsMs != au.tsMs) {
-                    int flush = flushAccessUnit(codec, auBuf, au, configured, waitingForIdr);
+                    int flush = flushAccessUnit(codec, auBuf, au, configured, waitingForIdr, presentedFrames);
                     if (flush == FLUSH_QUEUED) {
-                        decodedFrames++;
+                        queuedFrames++;
                         waitingForIdr = false;
                     } else if (flush == FLUSH_DROP_HARD) {
                         dropCount++;
@@ -253,9 +252,9 @@ public class H264Transport implements Transport {
                 // If timestamps repeat, detect likely new frame boundary by NAL type to avoid
                 // merging two frames into one corrupted AU.
                 if (isLikelyBoundaryWithinSameTimestamp(au, nalBuf, nalLen, nalHdrOff, nalType)) {
-                    int flush = flushAccessUnit(codec, auBuf, au, configured, waitingForIdr);
+                    int flush = flushAccessUnit(codec, auBuf, au, configured, waitingForIdr, presentedFrames);
                     if (flush == FLUSH_QUEUED) {
-                        decodedFrames++;
+                        queuedFrames++;
                         waitingForIdr = false;
                     } else if (flush == FLUSH_DROP_HARD) {
                         dropCount++;
@@ -271,9 +270,9 @@ public class H264Transport implements Transport {
 
                 if (nalLen > (auBuf.length - au.len)) {
                     // AU overflow: flush what we have and start fresh to avoid unbounded memory.
-                    int flush = flushAccessUnit(codec, auBuf, au, configured, waitingForIdr);
+                    int flush = flushAccessUnit(codec, auBuf, au, configured, waitingForIdr, presentedFrames);
                     if (flush == FLUSH_QUEUED) {
-                        decodedFrames++;
+                        queuedFrames++;
                         waitingForIdr = false;
                     } else if (flush == FLUSH_DROP_HARD) {
                         dropCount++;
@@ -295,22 +294,31 @@ public class H264Transport implements Transport {
                 if (nalType == NAL_SPS) au.hasSps = true;
                 if (nalType == NAL_PPS) au.hasPps = true;
                 if (nalType == NAL_NON_IDR || nalType == NAL_IDR) au.hasSlice = true;
+                // MediaCodec output can be drained only after configure()+start().
+                if (configured) {
+                    presentedFrames[0] += drainOutput(codec);
+                }
 
                 long now = System.currentTimeMillis();
                 if (now - statStart >= STAT_INTERVAL_MS) {
-                    double fps = decodedFrames * 1000.0 / (now - statStart);
-                    status.set(String.format(Locale.US, "H264 %.1f fps drop=%d", fps, dropCount));
-                    decodedFrames = 0;
+                    double outFps = presentedFrames[0] * 1000.0 / (now - statStart);
+                    double inFps = queuedFrames * 1000.0 / (now - statStart);
+                    status.set(String.format(Locale.US, "H264 out=%.1f in=%.1f drop=%d", outFps, inFps, dropCount));
+                    queuedFrames = 0;
+                    presentedFrames[0] = 0;
                     dropCount = 0;
                     statStart = now;
                 }
             }
 
-            int flush = flushAccessUnit(codec, auBuf, au, configured, waitingForIdr);
+            int flush = flushAccessUnit(codec, auBuf, au, configured, waitingForIdr, presentedFrames);
             if (flush == FLUSH_QUEUED) {
-                decodedFrames++;
+                queuedFrames++;
             } else if (flush == FLUSH_DROP_HARD || flush == FLUSH_DROP_SOFT) {
                 dropCount++;
+            }
+            if (configured) {
+                presentedFrames[0] += drainOutput(codec);
             }
         } finally {
             if (codec != null) {
@@ -396,7 +404,8 @@ public class H264Transport implements Transport {
             byte[] sps = null;
             byte[] pps = null;
             long nextSeq = -1;
-            long decodedFrames = 0;
+            long queuedFrames = 0;
+            long presentedFrames = 0;
             long statStart = System.currentTimeMillis();
 
             while (running && !Thread.currentThread().isInterrupted()) {
@@ -452,26 +461,22 @@ public class H264Transport implements Transport {
                         buf.put(frame.data, 0, frame.len);
                         int flags = (nalType == 5) ? MediaCodec.BUFFER_FLAG_KEY_FRAME : 0; // IDR=5
                         codec.queueInputBuffer(idx, 0, frame.len, frame.tsMs * 1000L, flags);
+                        queuedFrames++;
                     }
                 }
-
-                MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
-                int outIdx;
-                while ((outIdx = codec.dequeueOutputBuffer(info, 0)) >= 0) {
-                    codec.releaseOutputBuffer(outIdx, true);
-                }
-
-                decodedFrames++;
+                presentedFrames += drainOutput(codec);
                 long now = System.currentTimeMillis();
                 if (now - statStart >= STAT_INTERVAL_MS) {
-                    double fps = decodedFrames * 1000.0 / (now - statStart);
+                    double outFps = presentedFrames * 1000.0 / (now - statStart);
+                    double inFps = queuedFrames * 1000.0 / (now - statStart);
                     long drops;
                     synchronized (queueLock) {
                         drops = reorderDrops[0];
                         reorderDrops[0] = 0;
                     }
-                    status.set(String.format(Locale.US, "H264 %.1f fps drop=%d", fps, drops));
-                    decodedFrames = 0;
+                    status.set(String.format(Locale.US, "H264 out=%.1f in=%.1f drop=%d", outFps, inFps, drops));
+                    queuedFrames = 0;
+                    presentedFrames = 0;
                     statStart = now;
                 }
             }
@@ -510,7 +515,8 @@ public class H264Transport implements Transport {
 
             MediaFormat fmt = MediaFormat.createVideoFormat("video/avc", width, height);
             fmt.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, MAX_NAL);
-            fmt.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
+            // Decoder -> Surface path: forcing KEY_COLOR_FORMAT reduces compatibility on some
+            // legacy devices. Let the codec pick the native output format.
 
             if (sps != null) fmt.setByteBuffer("csd-0", ByteBuffer.wrap(sps));
             if (pps != null) fmt.setByteBuffer("csd-1", ByteBuffer.wrap(pps));
@@ -520,35 +526,45 @@ public class H264Transport implements Transport {
             return true;
         } catch (Exception e) {
             Log.e(TAG, "configureWithCsd failed", e);
-            status.set("H264: configure fail " + e.getMessage());
+            status.set("H264: configure fail " + describeError(e));
             return false;
         }
     }
 
     private void queueConfig(MediaCodec codec, byte[] data, boolean sps) {
         if (data == null) return;
-        int idx = codec.dequeueInputBuffer(5_000);
-        if (idx < 0) return;
-        ByteBuffer buf = inBuf(codec, idx);
-        buf.clear();
-        buf.put(data, 0, data.length);
-        int flags = MediaCodec.BUFFER_FLAG_CODEC_CONFIG | (sps ? 0 : 0);
-        codec.queueInputBuffer(idx, 0, data.length, 0, flags);
+        try {
+            int idx = codec.dequeueInputBuffer(5_000);
+            if (idx < 0) return;
+            ByteBuffer buf = inBuf(codec, idx);
+            if (buf == null) return;
+            buf.clear();
+            buf.put(data, 0, data.length);
+            int flags = MediaCodec.BUFFER_FLAG_CODEC_CONFIG;
+            codec.queueInputBuffer(idx, 0, data.length, 0, flags);
+        } catch (IllegalStateException e) {
+            Log.w(TAG, "queueConfig: codec not ready (" + (sps ? "sps" : "pps") + ")");
+        }
     }
 
     private static ByteBuffer inBuf(MediaCodec codec, int idx) {
-        if (Build.VERSION.SDK_INT >= 21) {
-            return codec.getInputBuffer(idx);
-        }
+        // API17-compatible path: avoids verifier warnings about API21-only methods.
         return codec.getInputBuffers()[idx];
     }
 
-    private static void drainOutput(MediaCodec codec) {
-        if (codec == null) return;
-        MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
-        int outIdx;
-        while ((outIdx = codec.dequeueOutputBuffer(info, 0)) >= 0) {
-            codec.releaseOutputBuffer(outIdx, true);
+    private static int drainOutput(MediaCodec codec) {
+        if (codec == null) return 0;
+        try {
+            MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
+            int outIdx;
+            int released = 0;
+            while ((outIdx = codec.dequeueOutputBuffer(info, 0)) >= 0) {
+                codec.releaseOutputBuffer(outIdx, true);
+                released++;
+            }
+            return released;
+        } catch (IllegalStateException e) {
+            return 0;
         }
     }
 
@@ -578,7 +594,8 @@ public class H264Transport implements Transport {
             byte[] auBuf,
             AccessUnitAccumulator au,
             boolean configured,
-            boolean waitingForIdr) {
+            boolean waitingForIdr,
+            long[] presentedFrames) {
         if (au == null || au.len <= 0) {
             if (au != null) au.reset();
             return FLUSH_NOTHING;
@@ -594,21 +611,27 @@ public class H264Transport implements Transport {
             return FLUSH_DROP_HARD;
         }
 
-        int queueResult = queueAccessUnit(codec, auBuf, au.len, au.tsMs, au.lastNalType);
+        int queueResult = queueAccessUnit(codec, auBuf, au.len, au.tsMs, au.lastNalType, presentedFrames);
         au.reset();
         if (queueResult == QUEUE_OK) return FLUSH_QUEUED;
         if (queueResult == QUEUE_BUSY) return FLUSH_DROP_SOFT;
         return FLUSH_DROP_HARD;
     }
 
-    private static int queueAccessUnit(MediaCodec codec, byte[] auBuf, int auLen, long tsMs, int nalType) {
+    private static int queueAccessUnit(
+            MediaCodec codec,
+            byte[] auBuf,
+            int auLen,
+            long tsMs,
+            int nalType,
+            long[] presentedFrames) {
         if (codec == null || auBuf == null || auLen <= 0) return QUEUE_ERROR;
         try {
             for (int attempt = 0; attempt < 2; attempt++) {
                 int timeoutUs = (attempt == 0) ? 0 : 4_000;
                 int idx = codec.dequeueInputBuffer(timeoutUs);
                 if (idx < 0) {
-                    drainOutput(codec);
+                    presentedFrames[0] += drainOutput(codec);
                     continue;
                 }
                 ByteBuffer buf = inBuf(codec, idx);
@@ -619,7 +642,7 @@ public class H264Transport implements Transport {
                 buf.put(auBuf, 0, auLen);
                 int flags = (nalType == NAL_IDR) ? MediaCodec.BUFFER_FLAG_KEY_FRAME : 0; // IDR=5
                 codec.queueInputBuffer(idx, 0, auLen, tsMs * 1000L, flags);
-                drainOutput(codec);
+                presentedFrames[0] += drainOutput(codec);
                 return QUEUE_OK;
             }
             return QUEUE_BUSY;
@@ -743,5 +766,16 @@ public class H264Transport implements Transport {
         try { Thread.sleep(ms); } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    private static String describeError(Throwable err) {
+        if (err == null) return "unknown";
+        String msg = err.getMessage();
+        if (msg != null) {
+            msg = msg.trim();
+            if (!msg.isEmpty()) return msg;
+        }
+        String name = err.getClass().getSimpleName();
+        return name.isEmpty() ? "unknown" : name;
     }
 }

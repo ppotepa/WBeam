@@ -9,4 +9,4 @@ if [[ ! -f "$DLL" ]]; then
   dotnet build -c Release "$PROJECT" >/dev/null
 fi
 
-exec dotnet "$DLL"
+exec dotnet "$DLL" "$@"
