@@ -323,6 +323,9 @@ def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=Non
     # Default to blocking send for stability over ADB tunnel; set env >0 to enable timeout.
     send_timeout_s = float(os.getenv("WBEAM_FRAMED_SEND_TIMEOUT_S", "0"))
     duplicate_stale = env_flag("WBEAM_FRAMED_DUPLICATE_STALE", False)
+    # Dropping encoded H264 AUs can break inter-frame decode (P/B refs) and look like
+    # "frozen video". Keep disabled by default; q1/qmain already drop raw pre-encode.
+    drop_queued_encoded = env_flag("WBEAM_FRAMED_DROP_QUEUED", False)
     seq = 0
     print(f"[wbeam-framed] listening on :{port}", flush=True)
     # Optional fallback: duplicate stale keyframe when capture starves.
@@ -403,14 +406,15 @@ def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=Non
                     while next_stale_due_ns <= now_ns:
                         next_stale_due_ns += frame_period_ns
                 else:
-                    # Latency guard: if appsink accumulated a backlog, drop stale queued
-                    # samples and keep only the newest one before mapping/sending.
-                    while True:
-                        newer = appsink.emit("try-pull-sample", 0)
-                        if newer is None:
-                            break
-                        sample = newer
-                        _stat_dropped_queued += 1
+                    # Optional latency guard: drop queued encoded frames only when
+                    # explicitly enabled (can cause decode freezes on inter-frame codecs).
+                    if drop_queued_encoded:
+                        while True:
+                            newer = appsink.emit("try-pull-sample", 0)
+                            if newer is None:
+                                break
+                            sample = newer
+                            _stat_dropped_queued += 1
                     buf = sample.get_buffer()
                     pts_us = buf.pts // 1000 if buf.pts != Gst.CLOCK_TIME_NONE else pts_us
                     ok, map_info = buf.map(Gst.MapFlags.READ)
@@ -504,6 +508,17 @@ def make_pipeline(
     scale = Gst.ElementFactory.make("videoscale", "scale")
     rate = Gst.ElementFactory.make("videorate", "rate")
     caps1 = Gst.ElementFactory.make("capsfilter", "caps1")
+    overlay = None
+    overlay_enabled = (
+        env_flag("WBEAM_OVERLAY_ENABLE", False)
+        or bool(os.getenv("WBEAM_OVERLAY_TEXT", "").strip())
+        or bool(os.getenv("WBEAM_OVERLAY_TEXT_FILE", "").strip())
+    )
+    if overlay_enabled:
+        overlay = Gst.ElementFactory.make("textoverlay", "hud")
+        if overlay is None:
+            print("[warn] textoverlay element unavailable; HUD overlay disabled", file=sys.stderr)
+            overlay_enabled = False
     tee = Gst.ElementFactory.make("tee", "tee")
 
     queue_main = Gst.ElementFactory.make("queue", "qmain")
@@ -516,29 +531,32 @@ def make_pipeline(
     else:
         sink = Gst.ElementFactory.make("tcpserversink", "sink")
 
-    elements = [src, queue, convert, scale, rate, caps1, tee, queue_main, enc, parse, caps2, sink]
+    elements = [src, queue, convert, scale, rate, caps1]
+    if overlay is not None:
+        elements.append(overlay)
+    elements.extend([tee, queue_main, enc, parse, caps2, sink])
     if any(e is None for e in elements):
-        missing = [
-            name
-            for name, e in zip(
-                [
-                    "pipewiresrc",
-                    "queue",
-                    "videoconvert",
-                    "videoscale",
-                    "videorate",
-                    "capsfilter",
-                    "tee",
-                    "queue",
-                    "encoder",
-                    "h264parse",
-                    "capsfilter",
-                    "appsink" if framed else "tcpserversink",
-                ],
-                elements,
-            )
-            if e is None
+        element_names = [
+            "pipewiresrc",
+            "queue",
+            "videoconvert",
+            "videoscale",
+            "videorate",
+            "capsfilter",
         ]
+        if overlay_enabled:
+            element_names.append("textoverlay")
+        element_names.extend(
+            [
+                "tee",
+                "queue",
+                "encoder",
+                "h264parse",
+                "capsfilter",
+                "appsink" if framed else "tcpserversink",
+            ]
+        )
+        missing = [name for name, e in zip(element_names, elements) if e is None]
         raise RuntimeError(f"Missing GStreamer elements: {', '.join(missing)}")
 
     # C1: hard queue limits – prevents buffer bloat and unbounded latency growth.
@@ -570,6 +588,18 @@ def make_pipeline(
             f"video/x-raw,format={raw_format},width={width},height={height},framerate={fps}/1"
         ),
     )
+    if overlay is not None:
+        overlay_text = os.getenv("WBEAM_OVERLAY_TEXT", "").strip() or "AUTOTUNE"
+        overlay_font = os.getenv("WBEAM_OVERLAY_FONT_DESC", "Sans 16").strip() or "Sans 16"
+        set_if_supported(overlay, "text", overlay_text)
+        set_if_supported(overlay, "font-desc", overlay_font)
+        set_if_supported(overlay, "shaded-background", True)
+        set_if_supported(overlay, "draw-shadow", True)
+        # left-bottom corner (enums accepted as ints by GI)
+        set_if_supported(overlay, "halignment", 0)
+        set_if_supported(overlay, "valignment", 2)
+        set_if_supported(overlay, "xpad", 8)
+        set_if_supported(overlay, "ypad", 8)
 
     configure_encoder(enc, encoder_name, bitrate_kbps, fps, nv_preset)
     # Responsiveness-first default: allow videorate to duplicate when source is sparse.
@@ -611,7 +641,6 @@ def make_pipeline(
         (convert, scale),
         (scale, rate),
         (rate, caps1),
-        (caps1, tee),
         (tee, queue_main),
         (queue_main, enc),
         (enc, parse),
@@ -620,6 +649,14 @@ def make_pipeline(
     ]:
         if not a.link(b):
             raise RuntimeError(f"Failed to link {a.get_name()} -> {b.get_name()}")
+    if overlay is not None:
+        if not caps1.link(overlay):
+            raise RuntimeError(f"Failed to link {caps1.get_name()} -> {overlay.get_name()}")
+        if not overlay.link(tee):
+            raise RuntimeError(f"Failed to link {overlay.get_name()} -> {tee.get_name()}")
+    else:
+        if not caps1.link(tee):
+            raise RuntimeError(f"Failed to link {caps1.get_name()} -> {tee.get_name()}")
 
     if debug_dir and int(debug_fps) > 0:
         os.makedirs(debug_dir, exist_ok=True)
@@ -813,6 +850,32 @@ def main():
         framed=framed,
     )
     STATE["pipeline"] = pipeline
+
+    overlay_file = os.getenv("WBEAM_OVERLAY_TEXT_FILE", "").strip()
+    if overlay_file:
+        overlay_element = pipeline.get_by_name("hud")
+        if overlay_element is not None:
+            print(f"[wbeam] Overlay text source: {overlay_file}", flush=True)
+            overlay_state = {"last": ""}
+
+            def _refresh_overlay_text():
+                try:
+                    text = Path(overlay_file).read_text(encoding="utf-8", errors="replace").strip()
+                except FileNotFoundError:
+                    return True
+                except Exception as exc:
+                    print(f"[warn] failed to read overlay text {overlay_file}: {exc}", file=sys.stderr)
+                    return True
+                if text and text != overlay_state["last"]:
+                    try:
+                        overlay_element.set_property("text", text)
+                        overlay_state["last"] = text
+                    except Exception as exc:
+                        print(f"[warn] failed to set overlay text: {exc}", file=sys.stderr)
+                return True
+
+            _refresh_overlay_text()
+            GLib.timeout_add(250, _refresh_overlay_text)
 
     bus = pipeline.get_bus()
     bus.add_signal_watch()
