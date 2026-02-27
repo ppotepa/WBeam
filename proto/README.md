@@ -22,10 +22,12 @@ From repo root:
 
 ### Single launcher
 
-- `./run.sh` — Python entrypoint (`proto/run.py`) uruchamiający cały flow.
-- Optional custom config path: `./run.sh --config /path/to/proto.conf`.
-- JSON config is also supported: `./run.sh --config /path/to/proto.json`.
-- Zmiana backendu/frontu/presetu odbywa się wyłącznie przez config file (`.conf` lub `.json`):
+- `./run.sh` - Python entrypoint (`proto/run.py`) uruchamiający cały flow.
+- Domyslny i canonical config: `proto/config/proto.json`.
+- `proto/config/proto.conf` jest teraz plikiem pochodnym (sync z JSON).
+- Optional custom config path: `./run.sh --config /path/to/proto.json`.
+- Optional runtime profile override (bez edycji pliku): `./run.sh --profile safe_60`.
+- Zmiana backendu/frontu odbywa się przez config:
   - `RUN_BACKEND=rust`
   - `RUN_DEVICE=adb`
   - `PROTO_ANDROID_BUILD_TYPE=debug|release`
@@ -33,6 +35,37 @@ From repo root:
 ENV overrides są zablokowane (np. `PROTO_*=... ./run.sh` zakończy się błędem).
 
 `run.sh` robi flow w tej kolejności: build APK -> install APK -> launch Android app -> start backend (`rust`).
+
+### Profiles (versioned presets)
+
+- Profiles file: `proto/config/profiles.json`.
+- Persistent profile apply:
+  ```bash
+  cd proto
+  python apply_profile.py safe_60
+  ```
+- Runtime-only profile apply:
+  ```bash
+  ./run.sh --profile safe_60
+  ```
+- Profile sections are split into `quality` and `latency`, so tuning is cleaner and easier to audit.
+
+### Effective config snapshots
+
+- Runner snapshot: `/tmp/proto-effective-config-runner.json`
+- Host snapshot: `/tmp/proto-effective-config-host.json`
+- Host logs effective runtime keys at startup (capture, transport, stale/queue knobs).
+
+### Regression smoke benchmark
+
+Quick pass/fail benchmark before commit:
+
+```bash
+cd proto
+python regression_smoke.py --prepare --warmup-secs 10 --sample-secs 20
+```
+
+The script reports p50 metrics and fails on low pipeline fps, high stale duplication, high timeout mean, or long low-fps runs.
 
 Network note:
 - `RUN_DEVICE=adb` expects Android USB tethering; host/device routing may differ by OS.
