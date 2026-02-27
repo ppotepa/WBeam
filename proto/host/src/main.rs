@@ -320,22 +320,47 @@ fn load_config_conf(content: &str) -> HashMap<String, String> {
 
 fn load_config_json(content: &str) -> HashMap<String, String> {
     let mut out = HashMap::new();
+    let mut malformed = 0usize;
+    let mut malformed_examples: Vec<String> = Vec::new();
     for raw_line in content.lines() {
         let line = raw_line.trim();
         if line.is_empty() || line == "{" || line == "}" {
             continue;
         }
-        if !line.starts_with('"') {
+        if line.starts_with('"') {
+            let Some((k, v)) = line.split_once(':') else {
+                malformed = malformed.saturating_add(1);
+                if malformed_examples.len() < 3 {
+                    malformed_examples.push(line.to_string());
+                }
+                continue;
+            };
+            let key = k.trim().trim_matches('"');
+            if key.is_empty() {
+                malformed = malformed.saturating_add(1);
+                if malformed_examples.len() < 3 {
+                    malformed_examples.push(line.to_string());
+                }
+                continue;
+            }
+            out.insert(key.to_string(), parse_json_scalar(v));
             continue;
         }
-        let Some((k, v)) = line.split_once(':') else {
-            continue;
-        };
-        let key = k.trim().trim_matches('"');
-        if key.is_empty() {
-            continue;
+        // Fail fast on JSON shapes this simple loader cannot represent reliably.
+        if line.contains(':') || line.starts_with('[') || line.starts_with('{') {
+            malformed = malformed.saturating_add(1);
+            if malformed_examples.len() < 3 {
+                malformed_examples.push(line.to_string());
+            }
         }
-        out.insert(key.to_string(), parse_json_scalar(v));
+    }
+    if malformed > 0 {
+        error!(
+            "unsupported json config shape: {} malformed line(s), examples: {}",
+            malformed,
+            malformed_examples.join(" | ")
+        );
+        return HashMap::new();
     }
     out
 }
@@ -371,6 +396,9 @@ fn write_effective_config_snapshot(source_config: &str, map: &HashMap<String, St
     lines.push(format!("  \"generated_at_unix\": \"{}\",", json_escape(&ts)));
     lines.push(format!("  \"source_config\": \"{}\",", json_escape(source_config)));
     for key in keys {
+        if key == "generated_at_unix" || key == "source_config" {
+            continue;
+        }
         let value = map.get(key).cloned().unwrap_or_default();
         lines.push(format!(
             "  \"{}\": \"{}\",",
@@ -389,7 +417,22 @@ fn write_effective_config_snapshot(source_config: &str, map: &HashMap<String, St
 }
 
 fn json_escape(raw: &str) -> String {
-    raw.replace('\\', "\\\\").replace('"', "\\\"")
+    let mut out = String::with_capacity(raw.len() + 8);
+    for ch in raw.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => {
+                let code = c as u32;
+                out.push_str(&format!("\\u{:04x}", code));
+            }
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 fn log_effective_runtime_settings() {
