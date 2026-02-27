@@ -33,6 +33,7 @@ const WBH1_MAGIC: &[u8; 4] = b"WBH1";
 const WBTP_MAGIC: &[u8; 4] = b"WBTP";
 const WBTP_HEADER_BYTES: usize = 22;
 const WBTP_VERSION: u8 = 1;
+const WBTP_FLAG_KEYFRAME: u8 = 0x02;
 const WBS1_MAGIC: &[u8; 4] = b"WBS1";
 const WBS1_HEADER_BYTES: usize = 16;
 const WBS1_HEADER_MAX_BYTES: usize = 4096;
@@ -526,6 +527,12 @@ impl H264AnnexBBuffer {
 struct H264UnitStats {
     sent_units: u64,
     sent_bytes: u64,
+    sent_key_units: u64,
+    min_unit_bytes: usize,
+    max_unit_bytes: usize,
+    latency_sum_ms: u64,
+    latency_max_ms: u64,
+    latency_samples: u64,
     last_stats: Instant,
 }
 
@@ -534,30 +541,95 @@ impl H264UnitStats {
         Self {
             sent_units: 0,
             sent_bytes: 0,
+            sent_key_units: 0,
+            min_unit_bytes: usize::MAX,
+            max_unit_bytes: 0,
+            latency_sum_ms: 0,
+            latency_max_ms: 0,
+            latency_samples: 0,
             last_stats: Instant::now(),
         }
     }
 
-    fn record_sent(&mut self, bytes: usize) {
+    fn record_sent(&mut self, bytes: usize, keyframe: bool, capture_ts_ms: Option<u64>) {
         self.sent_units = self.sent_units.saturating_add(1);
         self.sent_bytes = self.sent_bytes.saturating_add(bytes as u64);
+        if keyframe {
+            self.sent_key_units = self.sent_key_units.saturating_add(1);
+        }
+        if bytes < self.min_unit_bytes {
+            self.min_unit_bytes = bytes;
+        }
+        if bytes > self.max_unit_bytes {
+            self.max_unit_bytes = bytes;
+        }
+        if let Some(ts_ms) = capture_ts_ms {
+            let now_ms = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(ts_ms);
+            if now_ms >= ts_ms {
+                let age_ms = now_ms - ts_ms;
+                self.latency_sum_ms = self.latency_sum_ms.saturating_add(age_ms);
+                self.latency_max_ms = self.latency_max_ms.max(age_ms);
+                self.latency_samples = self.latency_samples.saturating_add(1);
+            }
+        }
     }
 
     fn maybe_log(&mut self, seq: u64) {
         if self.last_stats.elapsed() < Duration::from_secs(1) {
             return;
         }
+        let elapsed_s = self.last_stats.elapsed().as_secs_f64().max(0.001);
         let avg_kb = if self.sent_units > 0 {
             (self.sent_bytes / self.sent_units) / 1024
         } else {
             0
         };
+        let min_kb = if self.sent_units > 0 {
+            (self.min_unit_bytes as u64) / 1024
+        } else {
+            0
+        };
+        let max_kb = if self.sent_units > 0 {
+            (self.max_unit_bytes as u64) / 1024
+        } else {
+            0
+        };
+        let units_per_s = (self.sent_units as f64) / elapsed_s;
+        let mbps = ((self.sent_bytes as f64) * 8.0) / elapsed_s / 1_000_000.0;
+        let key_pct = if self.sent_units > 0 {
+            (self.sent_key_units as f64) * 100.0 / (self.sent_units as f64)
+        } else {
+            0.0
+        };
+        let latency_ms = if self.latency_samples > 0 {
+            self.latency_sum_ms / self.latency_samples
+        } else {
+            0
+        };
         info!(
-            "WBH1 stats: units={} avg_kb={} seq={}",
-            self.sent_units, avg_kb, seq
+            "WBH1 stats: units={} fps={:.1} mbps={:.2} avg_kb={} min_kb={} max_kb={} key_pct={:.0} lat_ms={} lat_max_ms={} seq={}",
+            self.sent_units,
+            units_per_s,
+            mbps,
+            avg_kb,
+            min_kb,
+            max_kb,
+            key_pct,
+            latency_ms,
+            self.latency_max_ms,
+            seq
         );
         self.sent_units = 0;
         self.sent_bytes = 0;
+        self.sent_key_units = 0;
+        self.min_unit_bytes = usize::MAX;
+        self.max_unit_bytes = 0;
+        self.latency_sum_ms = 0;
+        self.latency_max_ms = 0;
+        self.latency_samples = 0;
         self.last_stats = Instant::now();
     }
 }
@@ -612,7 +684,11 @@ fn pump_h264_stream(
             }
 
             parser.consume_until(unit_end);
-            stats.record_sent(unit_len);
+            let keyframe = {
+                let unit = parser.unit_slice(unit_start, unit_end);
+                h264_is_idr_nal(unit)
+            };
+            stats.record_sent(unit_len, keyframe, None);
             *seq = seq.wrapping_add(1);
         }
 
@@ -632,7 +708,7 @@ fn pump_h264_framed_stream(
     read_first_framed_header(source, &mut header)?;
 
     loop {
-        let (capture_ts_ms, payload_len) = parse_wbtp_header(&header)?;
+        let (capture_ts_ms, payload_len, frame_flags) = parse_wbtp_header(&header)?;
         if payload_len > payload.len() {
             payload.resize(payload_len, 0);
         }
@@ -647,7 +723,8 @@ fn pump_h264_framed_stream(
         )?;
         if units_sent == 0 {
             send_wbh1_unit_with_ts(sink, *seq, capture_ts_ms, &payload[..payload_len])?;
-            stats.record_sent(payload_len);
+            let keyframe = (frame_flags & WBTP_FLAG_KEYFRAME) != 0 || h264_is_idr_nal(&payload[..payload_len]);
+            stats.record_sent(payload_len, keyframe, Some(capture_ts_ms));
             *seq = seq.wrapping_add(1);
         }
         stats.maybe_log(*seq);
@@ -676,7 +753,7 @@ fn send_annexb_access_unit_as_wbh1(
         if unit_end > start_idx {
             let unit = &access_unit[start_idx..unit_end];
             send_wbh1_unit_with_ts(sink, *seq, capture_ts_ms, unit)?;
-            stats.record_sent(unit.len());
+            stats.record_sent(unit.len(), h264_is_idr_nal(unit), Some(capture_ts_ms));
             *seq = seq.wrapping_add(1);
             sent += 1;
         }
@@ -712,13 +789,14 @@ fn send_wbh1_unit_with_ts(
     write_wbj1_frame(sink, &header, unit)
 }
 
-fn parse_wbtp_header(header: &[u8; WBTP_HEADER_BYTES]) -> std::io::Result<(u64, usize)> {
+fn parse_wbtp_header(header: &[u8; WBTP_HEADER_BYTES]) -> std::io::Result<(u64, usize, u8)> {
     if &header[0..4] != WBTP_MAGIC {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "bad WBTP magic"));
     }
     if header[4] != WBTP_VERSION {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "bad WBTP version"));
     }
+    let frame_flags = header[5];
 
     let capture_ts_us = u64::from_be_bytes([
         header[10], header[11], header[12], header[13],
@@ -732,7 +810,20 @@ fn parse_wbtp_header(header: &[u8; WBTP_HEADER_BYTES]) -> std::io::Result<(u64, 
         ));
     }
 
-    Ok((capture_ts_us / 1000, payload_len))
+    Ok((capture_ts_us / 1000, payload_len, frame_flags))
+}
+
+fn h264_is_idr_nal(unit: &[u8]) -> bool {
+    if unit.is_empty() {
+        return false;
+    }
+    if let Some((start, len)) = find_start_code(unit, 0) {
+        let hdr = start + len;
+        if hdr < unit.len() {
+            return (unit[hdr] & 0x1F) == 5;
+        }
+    }
+    (unit[0] & 0x1F) == 5
 }
 
 fn read_first_framed_header(

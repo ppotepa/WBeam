@@ -45,6 +45,11 @@ public class H264Transport implements Transport {
     private static final int    MAX_REORDER_FRAMES = 8;
     private static final long   REORDER_WAIT_MS = 12;
     private static final long   STAT_INTERVAL_MS = 2_000;
+    private static final long   DECODER_STALL_MS = 3_500;
+    private static final long   DECODER_RESTART_COOLDOWN_MS = 8_000;
+    private static final long   DECODER_STALL_MIN_QUEUED = 120;
+    private static final int    DECODER_MAX_RESTARTS_PER_WINDOW = 3;
+    private static final long   DECODER_RESTART_WINDOW_MS = 60_000;
 
     private final StatusUpdater status;
     private final Surface       surface;
@@ -187,6 +192,12 @@ public class H264Transport implements Transport {
             long expectedSeq = -1;
             boolean waitingForIdr = false;
             AccessUnitAccumulator au = new AccessUnitAccumulator();
+            long queuedSinceOutput = 0;
+            long lastOutputWallMs = statStart;
+            long lastDecoderRestartWallMs = 0;
+            long restartCount = 0;
+            int restartsInWindow = 0;
+            long restartWindowStartMs = statStart;
 
             while (running && !Thread.currentThread().isInterrupted()) {
                 IoUtils.readFully(in, header, 24);
@@ -240,6 +251,7 @@ public class H264Transport implements Transport {
                     int flush = flushAccessUnit(codec, auBuf, au, configured, waitingForIdr, presentedFrames);
                     if (flush == FLUSH_QUEUED) {
                         queuedFrames++;
+                        queuedSinceOutput++;
                         waitingForIdr = false;
                     } else if (flush == FLUSH_DROP_HARD) {
                         dropCount++;
@@ -255,6 +267,7 @@ public class H264Transport implements Transport {
                     int flush = flushAccessUnit(codec, auBuf, au, configured, waitingForIdr, presentedFrames);
                     if (flush == FLUSH_QUEUED) {
                         queuedFrames++;
+                        queuedSinceOutput++;
                         waitingForIdr = false;
                     } else if (flush == FLUSH_DROP_HARD) {
                         dropCount++;
@@ -273,6 +286,7 @@ public class H264Transport implements Transport {
                     int flush = flushAccessUnit(codec, auBuf, au, configured, waitingForIdr, presentedFrames);
                     if (flush == FLUSH_QUEUED) {
                         queuedFrames++;
+                        queuedSinceOutput++;
                         waitingForIdr = false;
                     } else if (flush == FLUSH_DROP_HARD) {
                         dropCount++;
@@ -296,14 +310,62 @@ public class H264Transport implements Transport {
                 if (nalType == NAL_NON_IDR || nalType == NAL_IDR) au.hasSlice = true;
                 // MediaCodec output can be drained only after configure()+start().
                 if (configured) {
-                    presentedFrames[0] += drainOutput(codec);
+                    int released = drainOutput(codec);
+                    presentedFrames[0] += released;
+                    if (released > 0) {
+                        queuedSinceOutput = 0;
+                        lastOutputWallMs = System.currentTimeMillis();
+                    }
                 }
 
                 long now = System.currentTimeMillis();
+                if (now - restartWindowStartMs >= DECODER_RESTART_WINDOW_MS) {
+                    restartWindowStartMs = now;
+                    restartsInWindow = 0;
+                }
+                if (configured
+                        && sawSps
+                        && sawPps
+                        && queuedSinceOutput >= DECODER_STALL_MIN_QUEUED
+                        && (now - lastOutputWallMs) >= DECODER_STALL_MS
+                        && (now - lastDecoderRestartWallMs) >= DECODER_RESTART_COOLDOWN_MS
+                        && restartsInWindow < DECODER_MAX_RESTARTS_PER_WINDOW) {
+                    Log.w(TAG, "decoder stall detected: queuedSinceOutput=" + queuedSinceOutput
+                            + " noOutputMs=" + (now - lastOutputWallMs));
+                    status.set("H264: decoder stall, restarting");
+                    MediaCodec restarted = recreateDecoder(codec, sps, pps);
+                    if (restarted != null) {
+                        codec = restarted;
+                        configured = true;
+                        waitingForIdr = true;
+                        au.reset();
+                        queuedSinceOutput = 0;
+                        lastOutputWallMs = now;
+                        lastDecoderRestartWallMs = now;
+                        restartCount++;
+                        restartsInWindow++;
+                    } else {
+                        configured = false;
+                        waitingForIdr = true;
+                        au.reset();
+                        lastDecoderRestartWallMs = now;
+                        restartsInWindow++;
+                    }
+                }
+                if (configured
+                        && sawSps
+                        && sawPps
+                        && queuedSinceOutput >= DECODER_STALL_MIN_QUEUED
+                        && (now - lastOutputWallMs) >= DECODER_STALL_MS
+                        && restartsInWindow >= DECODER_MAX_RESTARTS_PER_WINDOW) {
+                    waitingForIdr = true;
+                    au.reset();
+                    status.set("H264: decoder stalled, waiting for keyframe");
+                }
                 if (now - statStart >= STAT_INTERVAL_MS) {
                     double outFps = presentedFrames[0] * 1000.0 / (now - statStart);
                     double inFps = queuedFrames * 1000.0 / (now - statStart);
-                    status.set(String.format(Locale.US, "H264 out=%.1f in=%.1f drop=%d", outFps, inFps, dropCount));
+                    status.set(String.format(Locale.US, "H264 out=%.1f in=%.1f drop=%d rst=%d", outFps, inFps, dropCount, restartCount));
                     queuedFrames = 0;
                     presentedFrames[0] = 0;
                     dropCount = 0;
@@ -314,6 +376,7 @@ public class H264Transport implements Transport {
             int flush = flushAccessUnit(codec, auBuf, au, configured, waitingForIdr, presentedFrames);
             if (flush == FLUSH_QUEUED) {
                 queuedFrames++;
+                queuedSinceOutput++;
             } else if (flush == FLUSH_DROP_HARD || flush == FLUSH_DROP_SOFT) {
                 dropCount++;
             }
@@ -321,10 +384,7 @@ public class H264Transport implements Transport {
                 presentedFrames[0] += drainOutput(codec);
             }
         } finally {
-            if (codec != null) {
-                try { codec.stop(); } catch (Exception ignore) {}
-                try { codec.release(); } catch (Exception ignore) {}
-            }
+            releaseCodec(codec);
         }
     }
 
@@ -650,6 +710,32 @@ public class H264Transport implements Transport {
             Log.w(TAG, "queueAccessUnit failed", e);
             return QUEUE_ERROR;
         }
+    }
+
+    private MediaCodec recreateDecoder(MediaCodec current, byte[] sps, byte[] pps) {
+        releaseCodec(current);
+        try {
+            MediaCodec fresh = MediaCodec.createDecoderByType("video/avc");
+            if (fresh == null) {
+                return null;
+            }
+            if (!configureWithCsd(fresh, sps, pps)) {
+                releaseCodec(fresh);
+                return null;
+            }
+            queueConfig(fresh, sps, true);
+            queueConfig(fresh, pps, false);
+            return fresh;
+        } catch (Exception e) {
+            Log.w(TAG, "recreateDecoder failed", e);
+            return null;
+        }
+    }
+
+    private static void releaseCodec(MediaCodec codec) {
+        if (codec == null) return;
+        try { codec.stop(); } catch (Exception ignore) {}
+        try { codec.release(); } catch (Exception ignore) {}
     }
 
     private static boolean isSliceNalType(int nalType) {
