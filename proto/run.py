@@ -240,7 +240,7 @@ def apply_profile(
     if not profile_name:
         return cfg, {}, {}, ""
 
-    profile_file_raw = (cfg.get("PROTO_PROFILE_FILE", DEFAULT_PROFILES_REL) or "").strip()
+    profile_file_raw = (cfg.get("PROTO_PROFILE_FILE", DEFAULT_PROFILES_REL) or "").strip() or DEFAULT_PROFILES_REL
     profile_file = Path(profile_file_raw)
     if not profile_file.is_absolute():
         profile_file = (root / profile_file).resolve()
@@ -262,7 +262,8 @@ def apply_profile(
     merged.update(quality_map)
     merged.update(latency_map)
     merged["PROTO_PROFILE"] = profile_name
-    merged["PROTO_PROFILE_FILE"] = str(profile_file)
+    # Keep config portable: preserve relative path in config values.
+    merged["PROTO_PROFILE_FILE"] = profile_file_raw
     return merged, quality_map, latency_map, str(profile_file)
 
 
@@ -770,7 +771,12 @@ def main(argv: list[str]) -> int:
             validate_known_keys(cfg, known_keys | set(profile_quality.keys()) | set(profile_latency.keys()), config_path)
 
         if config_path == (root / CANONICAL_JSON_REL).resolve():
-            sync_conf_from_json(root, loaded_cfg)
+            cfg_for_sync = dict(cfg)
+            # One-off runtime override should not persist as default profile.
+            if args.profile:
+                cfg_for_sync["PROTO_PROFILE"] = loaded_cfg.get("PROTO_PROFILE", "")
+                cfg_for_sync["PROTO_PROFILE_FILE"] = loaded_cfg.get("PROTO_PROFILE_FILE", DEFAULT_PROFILES_REL)
+            sync_conf_from_json(root, cfg_for_sync)
 
         effective_path = (Path("/tmp") / "proto-effective-config-runner.json").resolve()
         write_effective_config(effective_path, cfg, config_path)

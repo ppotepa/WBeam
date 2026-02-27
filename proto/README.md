@@ -65,7 +65,7 @@ cd proto
 python regression_smoke.py --prepare --warmup-secs 10 --sample-secs 20
 ```
 
-The script reports p50 metrics and fails on low pipeline fps, high stale duplication, high timeout mean, or long low-fps runs.
+The script now excludes warmup from scored metrics (sample window only), then fails on low pipeline fps, high stale duplication, high timeout mean, too long low-fps runs, or too few samples.
 
 Network note:
 - `RUN_DEVICE=adb` expects Android USB tethering; host/device routing may differ by OS.

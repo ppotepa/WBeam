@@ -7,6 +7,7 @@ import re
 import signal
 import statistics
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -80,11 +81,13 @@ def main() -> int:
     p.add_argument("--max-stale-p50", type=float, default=6.0)
     p.add_argument("--max-timeout-mean", type=float, default=45.0)
     p.add_argument("--max-low-fps-run-secs", type=int, default=5)
+    p.add_argument("--min-samples", type=int, default=8)
     args = p.parse_args()
 
     root = Path(__file__).resolve().parent
     config = (root / args.config).resolve()
-    total = max(5, int(args.warmup_secs) + int(args.sample_secs))
+    warmup_s = max(0, int(args.warmup_secs))
+    sample_s = max(5, int(args.sample_secs))
 
     if args.prepare:
         cmd = [str((root / "run.sh").resolve()), "--config", str(config), "--prepare-only"]
@@ -121,9 +124,33 @@ def main() -> int:
         start_new_session=True,
     )
     log("backend started for smoke sample")
-    start = time.time()
+    output_lines: list[str] = []
+    output_done = threading.Event()
+
+    def _collect_output() -> None:
+        try:
+            if proc.stdout is None:
+                return
+            for line in proc.stdout:
+                output_lines.append(line.rstrip("\n"))
+        finally:
+            output_done.set()
+
+    threading.Thread(target=_collect_output, daemon=True).start()
+
     try:
-        while time.time() - start < total:
+        # Warmup phase.
+        warmup_start = time.time()
+        while time.time() - warmup_start < warmup_s:
+            if proc.poll() is not None:
+                break
+            time.sleep(1.0)
+
+        # Measure only sample window (exclude warmup from metrics).
+        if proc.poll() is None:
+            PORTAL_LOG.write_text("", encoding="utf-8")
+        sample_start = time.time()
+        while time.time() - sample_start < sample_s:
             if proc.poll() is not None:
                 break
             time.sleep(1.0)
@@ -135,6 +162,7 @@ def main() -> int:
             except subprocess.TimeoutExpired:
                 os_killpg(proc.pid, signal.SIGKILL)
                 proc.wait(timeout=5)
+        output_done.wait(timeout=2.0)
 
     sender_raw, pipeline, timeout_misses, stale = parse_metrics(PORTAL_LOG)
     sender_eff = effective_sender(sender_raw, stale)
@@ -148,6 +176,9 @@ def main() -> int:
         "stale_p50": statistics.median(stale) if stale else 0.0,
         "timeout_mean": statistics.fmean(timeout_misses) if timeout_misses else 0.0,
         "low_fps_run_secs": max_low_run(pipeline, threshold=10.0),
+        "process_rc": proc.returncode,
+        "warmup_secs": warmup_s,
+        "sample_secs": sample_s,
     }
 
     report_path = Path("/tmp") / f"proto-smoke-{time.strftime('%Y%m%d-%H%M%S')}.json"
@@ -156,6 +187,15 @@ def main() -> int:
     log("metrics: " + json.dumps(metrics, separators=(",", ":")))
 
     ok = True
+    if metrics["samples"] < max(1, int(args.min_samples)):
+        ok = False
+        log(f"FAIL samples={metrics['samples']} < {max(1, int(args.min_samples))}")
+    if metrics["process_rc"] not in (0, None):
+        ok = False
+        tail = "\n".join(output_lines[-20:])
+        log(f"FAIL backend exited rc={metrics['process_rc']}")
+        if tail:
+            print(tail)
     if metrics["pipeline_p50"] < args.min_pipeline_p50:
         ok = False
         log(f"FAIL pipeline_p50={metrics['pipeline_p50']:.1f} < {args.min_pipeline_p50:.1f}")
