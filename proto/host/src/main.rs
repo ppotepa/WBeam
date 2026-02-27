@@ -36,17 +36,22 @@ const WBTP_VERSION: u8 = 1;
 const WBS1_MAGIC: &[u8; 4] = b"WBS1";
 const WBS1_HEADER_BYTES: usize = 16;
 const WBS1_HEADER_MAX_BYTES: usize = 4096;
-const ADB_WRITE_TIMEOUT_MS: u64  = 80;
+const ADB_WRITE_TIMEOUT_MS_DEFAULT: u64 = 80;
+const ADB_WRITE_TIMEOUT_MS_MIN: u64 = 10;
+const ADB_WRITE_TIMEOUT_MS_MAX: u64 = 1000;
+const H264_SOURCE_READ_TIMEOUT_MS_DEFAULT: u64 = 5000;
+const H264_SOURCE_READ_TIMEOUT_MS_MIN: u64 = 100;
+const H264_SOURCE_READ_TIMEOUT_MS_MAX: u64 = 20_000;
 const TCP_SNDBUF_BYTES: i32      = 512 * 1024;
 const DEFAULT_ADB_ADDR: &str     = "127.0.0.1:5006";
-const DEFAULT_CAPTURE_SIZE: &str = "1280x720";
+const DEFAULT_CAPTURE_SIZE: &str = "1024x640";
 const DEFAULT_CAPTURE_FPS_STR: &str    = "30";
 const CAPTURE_FORMAT_JPEG: &str        = "jpeg";
 const CAPTURE_FORMAT_PNG: &str         = "png";
 const IMAGEMAGICK_PIPE_JPEG: &str      = "jpeg:-";
 const MIME_JPEG: &str                  = "image/jpeg";
 const MIME_PNG: &str                   = "image/png";
-const DEFAULT_BITRATE_KBPS_STR: &str   = "16000";
+const DEFAULT_BITRATE_KBPS_STR: &str   = "7000";
 const DEFAULT_CURSOR_MODE: &str        = "embedded";
 const PORTAL_SOURCE_DEBUG: &str        = "debug";
 const PORTAL_SOURCE_FILE: &str         = "file";
@@ -245,16 +250,27 @@ fn parse_config_path() -> String {
         }
         i += 1;
     }
-    "../config/proto.conf".to_string()
+    let default_conf = PathBuf::from("../config/proto.conf");
+    if default_conf.exists() {
+        return default_conf.to_string_lossy().to_string();
+    }
+    "../config/proto.json".to_string()
 }
 
 fn load_config_file(path: &str) -> HashMap<String, String> {
-    let mut out = HashMap::new();
     let content = match fs::read_to_string(path) {
         Ok(v) => v,
-        Err(_) => return out,
+        Err(_) => return HashMap::new(),
     };
 
+    if path.to_ascii_lowercase().ends_with(".json") {
+        return load_config_json(&content);
+    }
+    load_config_conf(&content)
+}
+
+fn load_config_conf(content: &str) -> HashMap<String, String> {
+    let mut out = HashMap::new();
     for raw_line in content.lines() {
         let line = raw_line.trim();
         if line.is_empty() || line.starts_with('#') {
@@ -273,6 +289,42 @@ fn load_config_file(path: &str) -> HashMap<String, String> {
     out
 }
 
+fn load_config_json(content: &str) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line == "{" || line == "}" {
+            continue;
+        }
+        let Some((k, v)) = line.split_once(':') else {
+            continue;
+        };
+        let key = k.trim().trim_matches('"');
+        if key.is_empty() {
+            continue;
+        }
+        out.insert(key.to_string(), parse_json_scalar(v));
+    }
+    out
+}
+
+fn parse_json_scalar(raw: &str) -> String {
+    let value = raw.trim().trim_end_matches(',').trim();
+    if value.eq_ignore_ascii_case("true") {
+        return "1".to_string();
+    }
+    if value.eq_ignore_ascii_case("false") {
+        return "0".to_string();
+    }
+    if value.eq_ignore_ascii_case("null") {
+        return String::new();
+    }
+    if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') {
+        return value[1..value.len() - 1].replace(r#"\""#, "\"").replace(r#"\\"#, "\\");
+    }
+    value.to_string()
+}
+
 fn h264_mode_enabled() -> bool {
     env_truthy("PROTO_H264", false)
 }
@@ -280,7 +332,9 @@ fn h264_mode_enabled() -> bool {
 fn cfg_var(name: &str) -> Result<String, ()> {
     CONFIG
         .get()
-        .and_then(|m| m.get(name).cloned())
+        .and_then(|m| m.get(name))
+        .map(|v| v.trim().trim_matches('"').trim_matches('\'').to_string())
+        .filter(|v| !v.is_empty())
         .ok_or(())
 }
 
@@ -297,6 +351,16 @@ fn run_h264_loop() {
         .ok()
         .and_then(|v| v.parse::<u16>().ok())
         .unwrap_or(PORTAL_STREAM_PORT);
+    let sink_write_timeout_ms = cfg_var("PROTO_ADB_WRITE_TIMEOUT_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(|v| v.clamp(ADB_WRITE_TIMEOUT_MS_MIN, ADB_WRITE_TIMEOUT_MS_MAX))
+        .unwrap_or(ADB_WRITE_TIMEOUT_MS_DEFAULT);
+    let source_read_timeout_ms = cfg_var("PROTO_H264_SOURCE_READ_TIMEOUT_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(|v| v.clamp(H264_SOURCE_READ_TIMEOUT_MS_MIN, H264_SOURCE_READ_TIMEOUT_MS_MAX))
+        .unwrap_or(H264_SOURCE_READ_TIMEOUT_MS_DEFAULT);
     let source_framed = env_truthy("PROTO_H264_SOURCE_FRAMED", true);
 
     let started = PORTAL_STARTED.get_or_init(start_portal_pipeline_once);
@@ -305,10 +369,12 @@ fn run_h264_loop() {
     }
 
     info!(
-        "H264 WBH1 mode enabled: source=tcp://127.0.0.1:{} sink={} magic=WBH1 source_framed={}",
+        "H264 WBH1 mode enabled: source=tcp://127.0.0.1:{} sink={} magic=WBH1 source_framed={} sink_write_timeout_ms={} source_read_timeout_ms={}",
         source_port,
         sink_addr,
-        source_framed
+        source_framed,
+        sink_write_timeout_ms,
+        source_read_timeout_ms
     );
 
     let mut seq: u64 = 1;
@@ -330,7 +396,7 @@ fn run_h264_loop() {
         };
 
         let _ = sink.set_nodelay(true);
-        let _ = sink.set_write_timeout(Some(Duration::from_millis(ADB_WRITE_TIMEOUT_MS)));
+        let _ = sink.set_write_timeout(Some(Duration::from_millis(sink_write_timeout_ms)));
         set_tcp_sndbuf(&sink, TCP_SNDBUF_BYTES);
         info!("WBH1 connected to sink {}", sink_addr);
 
@@ -350,7 +416,8 @@ fn run_h264_loop() {
             }
         };
         // Keep stream stable across short portal stalls; do not reconnect on minor gaps.
-        let _ = source.set_read_timeout(Some(Duration::from_millis(5000)));
+        let _ = source.set_read_timeout(Some(Duration::from_millis(source_read_timeout_ms)));
+        let _ = source.set_nodelay(true);
         info!("WBH1 connected to source {}", source_addr);
 
         let pump_result = if source_framed {
@@ -955,7 +1022,7 @@ fn start_adb_push_sender(shared: Arc<Mutex<Frames>>, current_quality: Arc<Atomic
                     let mut last_stats = Instant::now();
                     let mut last_send = Instant::now();
                     let _ = stream.set_nodelay(true);
-                    let _ = stream.set_write_timeout(Some(Duration::from_millis(ADB_WRITE_TIMEOUT_MS)));
+                    let _ = stream.set_write_timeout(Some(Duration::from_millis(ADB_WRITE_TIMEOUT_MS_DEFAULT)));
                     set_tcp_sndbuf(&stream, TCP_SNDBUF_BYTES);
                     info!("ADB PUSH connected to {}", addr);
 
@@ -1484,6 +1551,8 @@ fn start_portal_pipeline_once() -> bool {
         return false;
     }
 
+    kill_stale_portal_helpers();
+
     let _ = fs::remove_file(PORTAL_JPEG_FILE);
     let _ = fs::remove_dir_all(PORTAL_DEBUG_DIR);
     let _ = fs::create_dir_all(PORTAL_DEBUG_DIR);
@@ -1500,6 +1569,10 @@ fn start_portal_pipeline_once() -> bool {
     let capture_size = cfg_var("PROTO_CAPTURE_SIZE").unwrap_or_else(|_| DEFAULT_CAPTURE_SIZE.to_string());
     let capture_bitrate = cfg_var("PROTO_CAPTURE_BITRATE_KBPS").unwrap_or_else(|_| DEFAULT_BITRATE_KBPS_STR.to_string());
     let capture_fps = cfg_var("PROTO_CAPTURE_FPS").unwrap_or_else(|_| DEFAULT_CAPTURE_FPS_STR.to_string());
+    let source_port = cfg_var("PROTO_H264_SOURCE_PORT")
+        .ok()
+        .and_then(|v| v.parse::<u16>().ok())
+        .unwrap_or(PORTAL_STREAM_PORT);
     let cursor_mode = cfg_var("PROTO_CURSOR_MODE").unwrap_or_else(|_| DEFAULT_CURSOR_MODE.to_string());
     let videorate_drop_only = cfg_var("WBEAM_VIDEORATE_DROP_ONLY").unwrap_or_else(|_| "0".to_string());
     let framed_send_timeout_s = cfg_var("WBEAM_FRAMED_SEND_TIMEOUT_S").unwrap_or_else(|_| "0".to_string());
@@ -1519,7 +1592,7 @@ fn start_portal_pipeline_once() -> bool {
         .arg("--profile")
         .arg(DEFAULT_PORTAL_PROFILE)
         .arg("--port")
-        .arg(PORTAL_STREAM_PORT.to_string())
+        .arg(source_port.to_string())
         .arg("--fps")
         .arg(&capture_fps)
         .arg("--bitrate-kbps")
@@ -1590,7 +1663,7 @@ fn start_portal_pipeline_once() -> bool {
                 .arg("-f")
                 .arg("h264")
                 .arg("-i")
-                .arg(format!("tcp://127.0.0.1:{}", PORTAL_STREAM_PORT))
+                .arg(format!("tcp://127.0.0.1:{}", source_port))
                 .arg("-q:v")
                 .arg(JPEG_FFMPEG_QSCALE.to_string())
                 .arg("-update")
@@ -1631,6 +1704,21 @@ fn has_gst_element(name: &str) -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+fn kill_stale_portal_helpers() {
+    let pkill = Command::new("pkill")
+        .arg("-f")
+        .arg("stream_wayland_portal_h264.py")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    if let Ok(status) = pkill {
+        if status.success() {
+            info!("killed stale portal streamer helper process");
+        }
+    }
 }
 
 fn read_latest_portal_debug_jpeg() -> Result<Vec<u8>, String> {

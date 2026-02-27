@@ -213,6 +213,19 @@ def ensure_java_home() -> None:
             return
 
 
+def cleanup_stale_local_helpers() -> None:
+    if which("pkill") is None:
+        return
+    patterns = [
+        "stream_wayland_portal_h264.py",
+        "proto-host-image",
+    ]
+    for pattern in patterns:
+        cp = run_cmd(["pkill", "-f", pattern], capture=True, allow_fail=True)
+        if cp.returncode == 0:
+            log(f"killed stale local helper(s): {pattern}")
+
+
 def adb_prefix(serial: str) -> list[str]:
     return ["adb", "-s", serial] if serial else ["adb"]
 
@@ -563,8 +576,8 @@ def start_app(serial: str, cfg: dict[str, str], app_host_ip: str, shell_timeout_
         raise RunError(f"failed to launch app via am start{': ' + out if out else ''}")
 
 
-def start_rust_backend(root: Path) -> int:
-    cmd = ["cargo", "run", "--release"]
+def start_rust_backend(root: Path, config_path: Path) -> int:
+    cmd = ["cargo", "run", "--release", "--", "--config", str(config_path)]
     log("starting rust backend (backend loads config itself)…")
     log("backend cmd: " + " ".join(shlex.quote(x) for x in cmd))
 
@@ -608,6 +621,7 @@ def main(argv: list[str]) -> int:
 
         ensure_session_env()
         ensure_java_home()
+        cleanup_stale_local_helpers()
 
         cmd_timeout_s = as_int(cfg.get("PROTO_ADB_CMD_TIMEOUT_SECS", "12"), 12)
         shell_timeout_s = as_int(cfg.get("PROTO_ADB_SHELL_TIMEOUT_SECS", "8"), 8)
@@ -642,7 +656,7 @@ def main(argv: list[str]) -> int:
         app_host_ip = prepare_transport(serial, cfg, shell_timeout_s)
         start_app(serial, cfg, app_host_ip, shell_timeout_s)
 
-        return start_rust_backend(root)
+        return start_rust_backend(root, config_path)
 
     except KeyboardInterrupt:
         log("interrupted")
