@@ -148,6 +148,8 @@ class TrialResult:
     timeout_penalty: float
     jitter: float
     sender_p50: float
+    raw_sender_p50: float
+    stale_p50: float
     sender_p20: float
     pipe_p50: float
     timeout_mean: float
@@ -186,14 +188,17 @@ def percentile(values: list[float], q: float) -> float:
     return data[idx]
 
 
-def parse_portal_metrics(path: Path) -> tuple[list[float], list[float], list[float]]:
+def parse_portal_metrics(path: Path) -> tuple[list[float], list[float], list[float], list[float]]:
     sender: list[float] = []
     pipe: list[float] = []
     timeout_misses: list[float] = []
+    stale_dupe: list[float] = []
     if not path.exists():
-        return sender, pipe, timeout_misses
+        return sender, pipe, timeout_misses, stale_dupe
 
-    rx = re.compile(r"pipeline_fps=(\d+)\s+sender_fps=([0-9.]+)\s+timeout_misses=(\d+)")
+    rx = re.compile(
+        r"pipeline_fps=(\d+)\s+sender_fps=([0-9.]+)\s+timeout_misses=(\d+)(?:\s+stale_dupe=(\d+))?"
+    )
     for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
         m = rx.search(raw)
         if not m:
@@ -201,7 +206,16 @@ def parse_portal_metrics(path: Path) -> tuple[list[float], list[float], list[flo
         pipe.append(float(m.group(1)))
         sender.append(float(m.group(2)))
         timeout_misses.append(float(m.group(3)))
-    return sender, pipe, timeout_misses
+        stale_dupe.append(float(m.group(4) or 0.0))
+    return sender, pipe, timeout_misses, stale_dupe
+
+
+def effective_sender_fps(raw_sender: list[float], stale_dupe: list[float]) -> list[float]:
+    if not raw_sender:
+        return []
+    if len(stale_dupe) < len(raw_sender):
+        stale_dupe = stale_dupe + [0.0] * (len(raw_sender) - len(stale_dupe))
+    return [max(0.0, raw_sender[i] - stale_dupe[i]) for i in range(len(raw_sender))]
 
 
 def parse_wbh1_metrics(path: Path) -> tuple[list[float], list[float]]:
@@ -433,8 +447,11 @@ def build_overlay_text(
     cfg: dict[str, Any],
     phase: str,
     current_fps: float | None = None,
+    current_dup_fps: float | None = None,
     live_score: float | None = None,
     sender_p50: float | None = None,
+    raw_sender_p50: float | None = None,
+    stale_p50: float | None = None,
     pipe_p50: float | None = None,
     timeout_mean: float | None = None,
     samples: int | None = None,
@@ -442,15 +459,17 @@ def build_overlay_text(
 ) -> str:
     generation = trial_name.split("_", 1)[0] if "_" in trial_name else trial_name
     fps_text = "--" if current_fps is None else f"{current_fps:.1f}"
+    dup_text = "--" if current_dup_fps is None else f"{current_dup_fps:.1f}"
     line1 = f"{generation} {trial_name}"
-    line2 = f"{phase} fps={fps_text}"
+    line2 = f"{phase} fps={fps_text} dup={dup_text}"
     line3 = f"{overlay_settings_line(cfg)} sc={trend}" if trend else overlay_settings_line(cfg)
     if live_score is None:
-        line4 = "score=... s50=... p50=... t=... n=..."
+        line4 = "score=... s50=... raw=... d50=... p50=... t=... n=..."
     else:
         line4 = (
             f"score={live_score:.1f} "
-            f"s50={(sender_p50 or 0.0):.1f} p50={(pipe_p50 or 0.0):.1f} "
+            f"s50={(sender_p50 or 0.0):.1f} raw={(raw_sender_p50 or 0.0):.1f} "
+            f"d50={(stale_p50 or 0.0):.1f} p50={(pipe_p50 or 0.0):.1f} "
             f"t={(timeout_mean or 0.0):.1f} n={samples or 0}"
         )
     return "\n".join([line1, line2, line3, line4])
@@ -541,6 +560,8 @@ def run_trial(
             timeout_penalty=0.0,
             jitter=0.0,
             sender_p50=0.0,
+            raw_sender_p50=0.0,
+            stale_p50=0.0,
             sender_p20=0.0,
             pipe_p50=0.0,
             timeout_mean=0.0,
@@ -561,9 +582,12 @@ def run_trial(
         if overlay_enabled and time.time() >= next_overlay_update:
             elapsed = time.time() - start
             phase = "warmup" if elapsed < warmup_s else "sample"
-            sender_live, pipe_live, timeout_live = parse_portal_metrics(PORTAL_LOG)
+            sender_live_raw, pipe_live, timeout_live, stale_live = parse_portal_metrics(PORTAL_LOG)
+            sender_live = effective_sender_fps(sender_live_raw, stale_live)
             if sender_live:
                 sender_p50_live = statistics.median(sender_live)
+                raw_sender_p50_live = statistics.median(sender_live_raw)
+                stale_p50_live = statistics.median(stale_live) if stale_live else 0.0
                 sender_p20_live = percentile(sender_live, 0.20)
                 pipe_p50_live = statistics.median(pipe_live)
                 timeout_mean_live = statistics.fmean(timeout_live) if timeout_live else 0.0
@@ -579,8 +603,11 @@ def run_trial(
                     trial_cfg,
                     f"phase={phase} t={int(elapsed)}/{target}s",
                     current_fps=sender_live[-1],
+                    current_dup_fps=stale_live[-1] if stale_live else 0.0,
                     live_score=live_score,
                     sender_p50=sender_p50_live,
+                    raw_sender_p50=raw_sender_p50_live,
+                    stale_p50=stale_p50_live,
                     pipe_p50=pipe_p50_live,
                     timeout_mean=timeout_mean_live,
                     samples=len(sender_live),
@@ -595,14 +622,17 @@ def run_trial(
     rc = stop_process(proc)
     log_done.wait(timeout=2.0)
 
-    sender, pipe, timeout_misses = parse_portal_metrics(PORTAL_LOG)
+    sender_raw, pipe, timeout_misses, stale_dupe = parse_portal_metrics(PORTAL_LOG)
+    sender = effective_sender_fps(sender_raw, stale_dupe)
     using_fallback_metrics = False
     if not sender:
         wbh1_units, _ = parse_wbh1_metrics(run_log)
         if wbh1_units:
+            sender_raw = wbh1_units
             sender = wbh1_units
             pipe = wbh1_units
             timeout_misses = [0.0 for _ in wbh1_units]
+            stale_dupe = [0.0 for _ in wbh1_units]
             using_fallback_metrics = True
             note = "fallback metrics from WBH1 stats (portal fps lines missing)"
         else:
@@ -614,6 +644,8 @@ def run_trial(
                 timeout_penalty=0.0,
                 jitter=0.0,
                 sender_p50=0.0,
+                raw_sender_p50=0.0,
+                stale_p50=0.0,
                 sender_p20=0.0,
                 pipe_p50=0.0,
                 timeout_mean=0.0,
@@ -625,6 +657,8 @@ def run_trial(
             )
 
     sender_p50 = statistics.median(sender)
+    raw_sender_p50 = statistics.median(sender_raw) if sender_raw else sender_p50
+    stale_p50 = statistics.median(stale_dupe) if stale_dupe else 0.0
     sender_p20 = percentile(sender, 0.20)
     pipe_p50 = statistics.median(pipe)
     timeout_mean = statistics.fmean(timeout_misses) if timeout_misses else 0.0
@@ -642,8 +676,11 @@ def run_trial(
                 trial_cfg,
                 "phase=final",
                 current_fps=sender[-1] if sender else None,
+                current_dup_fps=stale_dupe[-1] if stale_dupe else 0.0,
                 live_score=score,
                 sender_p50=sender_p50,
+                raw_sender_p50=raw_sender_p50,
+                stale_p50=stale_p50,
                 pipe_p50=pipe_p50,
                 timeout_mean=timeout_mean,
                 samples=len(sender),
@@ -662,6 +699,8 @@ def run_trial(
             timeout_penalty=timeout_penalty,
             jitter=jitter,
             sender_p50=sender_p50,
+            raw_sender_p50=raw_sender_p50,
+            stale_p50=stale_p50,
             sender_p20=sender_p20,
             pipe_p50=pipe_p50,
             timeout_mean=timeout_mean,
@@ -679,6 +718,8 @@ def run_trial(
             timeout_penalty=timeout_penalty,
             jitter=jitter,
             sender_p50=sender_p50,
+            raw_sender_p50=raw_sender_p50,
+            stale_p50=stale_p50,
             sender_p20=sender_p20,
             pipe_p50=pipe_p50,
             timeout_mean=timeout_mean,
@@ -701,6 +742,8 @@ def run_trial(
             timeout_penalty=timeout_penalty,
             jitter=jitter,
             sender_p50=sender_p50,
+            raw_sender_p50=raw_sender_p50,
+            stale_p50=stale_p50,
             sender_p20=sender_p20,
             pipe_p50=pipe_p50,
             timeout_mean=timeout_mean,
@@ -718,6 +761,8 @@ def run_trial(
         timeout_penalty=timeout_penalty,
         jitter=jitter,
         sender_p50=sender_p50,
+        raw_sender_p50=raw_sender_p50,
+        stale_p50=stale_p50,
         sender_p20=sender_p20,
         pipe_p50=pipe_p50,
         timeout_mean=timeout_mean,
@@ -972,6 +1017,7 @@ def main(argv: list[str]) -> int:
             trial_configs[res.name] = dict(cfg)
             log(
                 f"done trial={res.name} score={res.score:.2f} sender_p50={res.sender_p50:.1f} "
+                f"raw_sender_p50={res.raw_sender_p50:.1f} stale_p50={res.stale_p50:.1f} "
                 f"pipe_p50={res.pipe_p50:.1f} timeout_mean={res.timeout_mean:.1f} "
                 f"tpen={res.timeout_penalty:.1f} jitter={res.jitter:.1f} samples={res.samples} "
                 f"elapsed={format_secs(trial_elapsed)}"
@@ -988,6 +1034,8 @@ def main(argv: list[str]) -> int:
                 "best_name": gen_best.name,
                 "best_score": gen_best.score,
                 "best_sender_p50": gen_best.sender_p50,
+                "best_raw_sender_p50": gen_best.raw_sender_p50,
+                "best_stale_p50": gen_best.stale_p50,
                 "best_pipe_p50": gen_best.pipe_p50,
                 "best_timeout_mean": gen_best.timeout_mean,
                 "best_timeout_penalty": gen_best.timeout_penalty,
@@ -1061,6 +1109,8 @@ def main(argv: list[str]) -> int:
                 "timeout_penalty": r.timeout_penalty,
                 "jitter": r.jitter,
                 "sender_p50": r.sender_p50,
+                "raw_sender_p50": r.raw_sender_p50,
+                "stale_p50": r.stale_p50,
                 "sender_p20": r.sender_p20,
                 "pipe_p50": r.pipe_p50,
                 "timeout_mean": r.timeout_mean,
@@ -1112,6 +1162,8 @@ def main(argv: list[str]) -> int:
                 "timeout_penalty": r.timeout_penalty,
                 "jitter": r.jitter,
                 "sender_p50": r.sender_p50,
+                "raw_sender_p50": r.raw_sender_p50,
+                "stale_p50": r.stale_p50,
                 "sender_p20": r.sender_p20,
                 "pipe_p50": r.pipe_p50,
                 "timeout_mean": r.timeout_mean,
@@ -1127,6 +1179,12 @@ def main(argv: list[str]) -> int:
         "best": {
             "name": best.name,
             "score": best.score,
+            "sender_p50": best.sender_p50,
+            "raw_sender_p50": best.raw_sender_p50,
+            "stale_p50": best.stale_p50,
+            "sender_p20": best.sender_p20,
+            "pipe_p50": best.pipe_p50,
+            "timeout_mean": best.timeout_mean,
             "config_path": str(best.config_path),
             "best_config_out": str(best_config_out),
             "config": best_cfg,
@@ -1158,7 +1216,8 @@ def main(argv: list[str]) -> int:
     for idx, r in enumerate(ranked, start=1):
         print(
             f"{idx:>2}. {r.name:<14} score={r.score:>7.2f} "
-            f"sender_p50={r.sender_p50:>5.1f} sender_p20={r.sender_p20:>5.1f} "
+            f"sender_p50={r.sender_p50:>5.1f} raw_s50={r.raw_sender_p50:>5.1f} "
+            f"dup_s50={r.stale_p50:>5.1f} sender_p20={r.sender_p20:>5.1f} "
             f"pipe_p50={r.pipe_p50:>5.1f} timeout={r.timeout_mean:>6.1f} "
             f"tpen={r.timeout_penalty:>6.1f} jitter={r.jitter:>4.1f} samples={r.samples:>2}"
         )
@@ -1167,7 +1226,8 @@ def main(argv: list[str]) -> int:
     for g in generation_summaries:
         print(
             f"g{g['generation']}: {g['best_name']} score={g['best_score']:.2f} "
-            f"sender_p50={g['best_sender_p50']:.1f} pipe_p50={g['best_pipe_p50']:.1f}"
+            f"sender_p50={g['best_sender_p50']:.1f} raw_s50={g['best_raw_sender_p50']:.1f} "
+            f"dup_s50={g['best_stale_p50']:.1f} pipe_p50={g['best_pipe_p50']:.1f}"
         )
     print("")
     print(f"Best trial: {best.name} (trial config: {best.config_path})")
