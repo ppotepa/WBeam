@@ -1,0 +1,28 @@
+[autotune] results dir: /tmp/proto-autotune-20260227-152531
+[autotune] generation 1/8: population=8
+[autotune] trial=g01_01_stable_30 mode=full-run warmup=12s sample=24s
+[autotune] done trial=g01_01_stable_30 score=1.00 sender_p50=7.9 pipe_p50=8.0 timeout_mean=39.0 tpen=6.9 jitter=0.0 samples=30
+[autotune] trial=g01_02_balanced_45 mode=full-run warmup=12s sample=24s
+[autotune] done trial=g01_02_balanced_45 score=-5.84 sender_p50=8.0 pipe_p50=8.0 timeout_mean=60.5 tpen=13.5 jitter=1.0 samples=32
+[autotune] trial=g01_03_balanced_45_r1 mode=full-run warmup=12s sample=24s
+[autotune] done trial=g01_03_balanced_45_r1 score=-1000000000.00 sender_p50=0.0 pipe_p50=0.0 timeout_mean=0.0 tpen=0.0 jitter=0.0 samples=0
+[autotune] trial=g01_03_balanced_45_r1 note: no portal fps samples
+[autotune] trial=g01_04_balanced_60 mode=full-run warmup=12s sample=24s
+[autotune] done trial=g01_04_balanced_60 score=-12.31 sender_p50=2.0 pipe_p50=2.0 timeout_mean=61.4 tpen=14.0 jitter=1.0 samples=32
+[autotune] trial=g01_05_balanced_60_r1 mode=full-run warmup=12s sample=24s
+[autotune] done trial=g01_05_balanced_60_r1 score=25.79 sender_p50=35.0 pipe_p50=35.0 timeout_mean=45.6 tpen=9.0 jitter=0.6 samples=30
+[autotune] trial=g01_06_tight_60 mode=full-run warmup=12s sample=24s
+[autotune] done trial=g01_06_tight_60 score=5.55 sender_p50=29.6 pipe_p50=30.0 timeout_mean=80.4 tpen=23.9 jitter=0.7 samples=28
+[autotune] trial=g01_07_aggressive_60 mode=full-run warmup=12s sample=24s
+[autotune] done trial=g01_07_aggressive_60 score=5.18 sender_p50=45.7 pipe_p50=46.0 timeout_mean=109.6 tpen=39.9 jitter=2.0 samples=32
+[autotune] trial=g01_08_seed8 mode=full-run warmup=12s sample=24s
+[autotune] done trial=g01_08_seed8 score=18.26 sender_p50=30.0 pipe_p50=31.0 timeout_mean=52.7 tpen=11.4 jitter=1.5 samples=33
+[autotune] generation 2/8: population=8
+[autotune] trial=g02_01_elite1 mode=full-run warmup=12s sample=24s
+[autotune] done trial=g02_01_elite1 score=-1000000000.00 sender_p50=0.0 pipe_p50=0.0 timeout_mean=0.0 tpen=0.0 jitter=0.0 samples=0
+[autotune] trial=g02_01_elite1 note: no portal fps samples
+[autotune] trial=g02_02_elite2 mode=full-run warmup=12s sample=24s
+[autotune] done trial=g02_02_elite2 score=26.46 sender_p50=39.5 pipe_p50=40.0 timeout_mean=59.0 tpen=12.8 jitter=0.8 samples=32
+[autotune] trial=g02_03_child3 mode=full-run warmup=12s sample=24s
+[autotune] done trial=g02_03_child3 score=27.86 sender_p50=40.4 pipe_p50=41.0 timeout_mean=56.7 tpen=12.3 jitter=1.0 samples=33
+[autotune] trial=g02_04_child4 mode=full-run warmup=12s sample=24s

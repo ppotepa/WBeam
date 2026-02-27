@@ -70,3 +70,22 @@ Wprowadzona korekta autotunera:
 - zmieniony scoring w `proto/autotune.py`: dodatkowa, progowa kara za wysokie `timeout_misses` + kara za jitter (`sender_p50 - sender_p20`),
 - ranking i logi rozszerzone o `tpen` (timeout penalty) i `jitter`,
 - cel: wybierac ustawienia stabilne interakcyjnie, a nie tylko maksymalny peak FPS.
+
+## Aktualizacja 2026-02-27 - persistence autotune
+- dodany trwaly storage wynikow i konfiguracji: `proto/autotune-history.json` (zawiera metryki + pelny `config` kazdego triala),
+- kazdy run zapisuje snapshot najlepszego configu do `proto/config/autotune-best.json` (niezaleznie od katalogu `/tmp`),
+- kolejne runy seeduja populacje z historii (`--history-seed-count`, domyslnie 4), co skraca dojscie do dobrych ustawien,
+- `autotune-results.json` zawiera teraz wprost obiekt `config` na trial, nie tylko sciezke do tymczasowego pliku.
+
+## Aktualizacja 2026-02-27 - szybsza petla autotune + HUD
+- dodany tryb `reuse-device` (domyslnie ON): jedno `prepare-only` (build/install/start APK), a potem triale restartuja tylko backend hosta,
+- w `run.py` dodane `--prepare-only` (przygotowanie urządzenia/apki bez uruchamiania backendu),
+- w streamerze portal dodany HUD overlay (`textoverlay`) sterowany przez plik tekstowy,
+- autotune aktualizuje overlay co ~1s i pokazuje: generacje/trial, kluczowe ustawienia i live score (`score/s50/p50/tmo`),
+- cel: mniej recznego przelaczania i natychmiastowy podglad co testujemy na ekranie tabletu.
+
+## Aktualizacja 2026-02-27 - single consent + mniejszy HUD
+- autotune domyslnie wymusza `single-portal-consent`: pierwsza proba wymaga wyboru pulpitu, kolejne triale korzystaja z restore tokena w ramach jednego runu,
+- token jest per-run (`/tmp/proto-autotune-.../portal-restore-token.txt`), wiec unikamy "starego" tokena z poprzednich sesji,
+- HUD przeniesiony do prawego-gornego rogu i zmniejszony (`Sans 16`),
+- dodany prosty mini-wykres trendu score (`sc=...`) aktualizowany na zywo.
