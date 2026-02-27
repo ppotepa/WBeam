@@ -57,6 +57,8 @@ const PORTAL_SOURCE_DEBUG: &str        = "debug";
 const PORTAL_SOURCE_FILE: &str         = "file";
 const DEFAULT_PORTAL_SOURCE: &str      = "debug";
 const DEFAULT_PORTAL_PROFILE: &str     = "lowlatency";
+const DEFAULT_PORTAL_PERSIST_MODE: u32 = 2;
+const DEFAULT_PORTAL_RESTORE_TOKEN_FILE: &str = "/tmp/proto-portal-restore-token";
 const PORTAL_PIPELINE_SETTLE_MS: u64   = 700;
 const FFMPEG_ANALYZEDURATION: &str     = "500000";
 const FFMPEG_PROBESIZE: &str           = "32768";
@@ -1569,6 +1571,10 @@ fn start_portal_pipeline_once() -> bool {
     let capture_size = cfg_var("PROTO_CAPTURE_SIZE").unwrap_or_else(|_| DEFAULT_CAPTURE_SIZE.to_string());
     let capture_bitrate = cfg_var("PROTO_CAPTURE_BITRATE_KBPS").unwrap_or_else(|_| DEFAULT_BITRATE_KBPS_STR.to_string());
     let capture_fps = cfg_var("PROTO_CAPTURE_FPS").unwrap_or_else(|_| DEFAULT_CAPTURE_FPS_STR.to_string());
+    let portal_debug_fps = cfg_var("PROTO_PORTAL_DEBUG_FPS")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(0);
     let source_port = cfg_var("PROTO_H264_SOURCE_PORT")
         .ok()
         .and_then(|v| v.parse::<u16>().ok())
@@ -1585,9 +1591,17 @@ fn start_portal_pipeline_once() -> bool {
     let appsink_max_buffers = cfg_var("WBEAM_APPSINK_MAX_BUFFERS").unwrap_or_else(|_| "2".to_string());
     let source_mode = cfg_var("PROTO_PORTAL_JPEG_SOURCE").unwrap_or_else(|_| DEFAULT_PORTAL_SOURCE.to_string());
     let source_framed = env_truthy("PROTO_H264_SOURCE_FRAMED", h264_mode_enabled());
+    let portal_persist_mode = cfg_var("PROTO_PORTAL_PERSIST_MODE")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .map(|v| v.min(2))
+        .unwrap_or(DEFAULT_PORTAL_PERSIST_MODE);
+    let portal_restore_token_file = cfg_var("PROTO_PORTAL_RESTORE_TOKEN_FILE")
+        .unwrap_or_else(|_| DEFAULT_PORTAL_RESTORE_TOKEN_FILE.to_string());
     let framed_env = if source_framed { "1" } else { "0" };
 
-    let mut streamer_child = match Command::new("python3")
+    let mut streamer_cmd = Command::new("python3");
+    streamer_cmd
         .arg(script)
         .arg("--profile")
         .arg(DEFAULT_PORTAL_PROFILE)
@@ -1601,10 +1615,20 @@ fn start_portal_pipeline_once() -> bool {
         .arg(capture_size)
         .arg("--cursor-mode")
         .arg(cursor_mode)
-        .arg("--debug-dir")
-        .arg(PORTAL_DEBUG_DIR)
-        .arg("--debug-fps")
-        .arg(&capture_fps)
+        .arg("--persist-mode")
+        .arg(portal_persist_mode.to_string())
+        .arg("--restore-token-file")
+        .arg(portal_restore_token_file);
+
+    if portal_debug_fps > 0 {
+        streamer_cmd
+            .arg("--debug-dir")
+            .arg(PORTAL_DEBUG_DIR)
+            .arg("--debug-fps")
+            .arg(portal_debug_fps.to_string());
+    }
+
+    let mut streamer_child = match streamer_cmd
         .env("PYTHONUNBUFFERED", "1")
         .env("WBEAM_FRAMED", framed_env)
         .env("WBEAM_VIDEORATE_DROP_ONLY", videorate_drop_only)
