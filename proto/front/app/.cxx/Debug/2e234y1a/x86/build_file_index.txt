@@ -1,1 +1,0 @@
-/home/ppotepa/git/WBeam/proto/front/app/src/main/cpp/CMakeLists.txt

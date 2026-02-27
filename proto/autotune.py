@@ -143,6 +143,9 @@ TUNABLE_VALUES: dict[str, list[Any]] = {
 class TrialResult:
     name: str
     score: float
+    fps_score: float
+    timeout_penalty: float
+    jitter: float
     sender_p50: float
     sender_p20: float
     pipe_p50: float
@@ -201,6 +204,21 @@ def parse_wbh1_metrics(path: Path) -> tuple[list[float], list[float]]:
         units.append(float(m.group(1)))
         avg_kb.append(float(m.group(2)))
     return units, avg_kb
+
+
+def score_trial(sender_p50: float, sender_p20: float, pipe_p50: float, timeout_mean: float) -> tuple[float, float, float, float]:
+    # Throughput component.
+    fps_score = (sender_p50 * 0.50) + (sender_p20 * 0.35) + (pipe_p50 * 0.15)
+    # Jitter proxy: bigger spread between p50 and p20 usually means less stable pacing.
+    jitter = max(0.0, sender_p50 - sender_p20)
+    # Piecewise timeout penalty: low misses are tolerated, persistent misses are expensive.
+    timeout_penalty = (
+        (timeout_mean * 0.08)
+        + (max(0.0, timeout_mean - 20.0) * 0.20)
+        + (max(0.0, timeout_mean - 60.0) * 0.25)
+    )
+    total_penalty = timeout_penalty + (jitter * 0.40)
+    return fps_score - total_penalty, fps_score, total_penalty, jitter
 
 
 def merge_config(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -340,6 +358,9 @@ def run_trial(
         return TrialResult(
             name=name,
             score=-1e9,
+            fps_score=0.0,
+            timeout_penalty=0.0,
+            jitter=0.0,
             sender_p50=0.0,
             sender_p20=0.0,
             pipe_p50=0.0,
@@ -374,6 +395,9 @@ def run_trial(
             return TrialResult(
                 name=name,
                 score=-1e9,
+                fps_score=0.0,
+                timeout_penalty=0.0,
+                jitter=0.0,
                 sender_p50=0.0,
                 sender_p20=0.0,
                 pipe_p50=0.0,
@@ -389,8 +413,12 @@ def run_trial(
     sender_p20 = percentile(sender, 0.20)
     pipe_p50 = statistics.median(pipe)
     timeout_mean = statistics.fmean(timeout_misses) if timeout_misses else 0.0
-    # Maximize sustained sender fps while penalizing starvation.
-    score = (sender_p50 * 0.55) + (sender_p20 * 0.30) + (pipe_p50 * 0.15) - (timeout_mean * 0.05)
+    score, fps_score, timeout_penalty, jitter = score_trial(
+        sender_p50=sender_p50,
+        sender_p20=sender_p20,
+        pipe_p50=pipe_p50,
+        timeout_mean=timeout_mean,
+    )
 
     notes = ""
     if not parse_portal_metrics(PORTAL_LOG)[0]:
@@ -399,6 +427,9 @@ def run_trial(
         return TrialResult(
             name=name,
             score=-1e8,
+            fps_score=fps_score,
+            timeout_penalty=timeout_penalty,
+            jitter=jitter,
             sender_p50=sender_p50,
             sender_p20=sender_p20,
             pipe_p50=pipe_p50,
@@ -413,6 +444,9 @@ def run_trial(
     return TrialResult(
         name=name,
         score=score,
+        fps_score=fps_score,
+        timeout_penalty=timeout_penalty,
+        jitter=jitter,
         sender_p50=sender_p50,
         sender_p20=sender_p20,
         pipe_p50=pipe_p50,
@@ -516,7 +550,8 @@ def main(argv: list[str]) -> int:
             gen_results.append(res)
             log(
                 f"done trial={res.name} score={res.score:.2f} sender_p50={res.sender_p50:.1f} "
-                f"pipe_p50={res.pipe_p50:.1f} timeout_mean={res.timeout_mean:.1f} samples={res.samples}"
+                f"pipe_p50={res.pipe_p50:.1f} timeout_mean={res.timeout_mean:.1f} "
+                f"tpen={res.timeout_penalty:.1f} jitter={res.jitter:.1f} samples={res.samples}"
             )
             if res.notes:
                 log(f"trial={res.name} note: {res.notes}")
@@ -532,6 +567,7 @@ def main(argv: list[str]) -> int:
                 "best_sender_p50": gen_best.sender_p50,
                 "best_pipe_p50": gen_best.pipe_p50,
                 "best_timeout_mean": gen_best.timeout_mean,
+                "best_timeout_penalty": gen_best.timeout_penalty,
                 "valid_trials": len([r for r in ranked_gen if r.score > -1e7]),
                 "trials": [
                     {
@@ -591,6 +627,9 @@ def main(argv: list[str]) -> int:
             {
                 "name": r.name,
                 "score": r.score,
+                "fps_score": r.fps_score,
+                "timeout_penalty": r.timeout_penalty,
+                "jitter": r.jitter,
                 "sender_p50": r.sender_p50,
                 "sender_p20": r.sender_p20,
                 "pipe_p50": r.pipe_p50,
@@ -620,7 +659,8 @@ def main(argv: list[str]) -> int:
         print(
             f"{idx:>2}. {r.name:<14} score={r.score:>7.2f} "
             f"sender_p50={r.sender_p50:>5.1f} sender_p20={r.sender_p20:>5.1f} "
-            f"pipe_p50={r.pipe_p50:>5.1f} timeout={r.timeout_mean:>6.1f} samples={r.samples:>2}"
+            f"pipe_p50={r.pipe_p50:>5.1f} timeout={r.timeout_mean:>6.1f} "
+            f"tpen={r.timeout_penalty:>6.1f} jitter={r.jitter:>4.1f} samples={r.samples:>2}"
         )
     print("")
     print("Generation best:")

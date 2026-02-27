@@ -7,6 +7,7 @@ import socket
 import struct
 import sys
 import threading
+from pathlib import Path
 
 import dbus
 import dbus.mainloop.glib
@@ -150,16 +151,19 @@ def create_screencast_session(session_bus, iface):
     return str(results["session_handle"])
 
 
-def select_sources(session_bus, iface, session_handle, cursor_mode):
+def select_sources(session_bus, iface, session_handle, cursor_mode, persist_mode=0, restore_token=""):
     token = random.randint(100000, 999999)
-    options = build_variant_dict(
-        {
-            "handle_token": dbus.String(f"wbeam_select_{token}"),
-            "types": dbus.UInt32(1),  # monitor
-            "multiple": dbus.Boolean(False),
-            "cursor_mode": dbus.UInt32(CURSOR_MODE_MAP[cursor_mode]),
-        }
-    )
+    values = {
+        "handle_token": dbus.String(f"wbeam_select_{token}"),
+        "types": dbus.UInt32(1),  # monitor
+        "multiple": dbus.Boolean(False),
+        "cursor_mode": dbus.UInt32(CURSOR_MODE_MAP[cursor_mode]),
+    }
+    if int(persist_mode) > 0:
+        values["persist_mode"] = dbus.UInt32(int(persist_mode))
+    if restore_token:
+        values["restore_token"] = dbus.String(str(restore_token))
+    options = build_variant_dict(values)
     portal_request(session_bus, iface, "SelectSources", dbus.ObjectPath(session_handle), options)
 
 
@@ -178,8 +182,10 @@ def start_session(session_bus, iface, session_handle):
     streams = results.get("streams")
     if not streams:
         raise RuntimeError("Portal start returned no streams")
-
-    return int(streams[0][0])
+    restore_token = results.get("restore_token")
+    if restore_token is not None:
+        restore_token = str(restore_token)
+    return int(streams[0][0]), restore_token
 
 
 def open_pipewire_fd(iface, session_handle):
@@ -202,6 +208,32 @@ def close_session(session_bus, session_handle):
         dbus.Interface(session_obj, SESSION_IFACE).Close()
     except Exception as exc:
         print(f"[warn] failed to close portal session: {exc}", file=sys.stderr)
+
+
+def load_restore_token(path):
+    if not path:
+        return ""
+    p = Path(path).expanduser()
+    try:
+        token = p.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return ""
+    except Exception as exc:
+        print(f"[warn] failed to read restore token from {p}: {exc}", file=sys.stderr)
+        return ""
+    return token
+
+
+def save_restore_token(path, token):
+    if not path or not token:
+        return
+    p = Path(path).expanduser()
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(str(token).strip() + "\n", encoding="utf-8")
+        print(f"[wbeam] saved restore token to {p}", flush=True)
+    except Exception as exc:
+        print(f"[warn] failed to save restore token to {p}: {exc}", file=sys.stderr)
 
 
 def pick_encoder(requested):
@@ -695,6 +727,9 @@ def parse_args():
     parser.add_argument("--cursor-mode", choices=["hidden", "embedded", "metadata"], default="embedded")
     parser.add_argument("--debug-dir", default="/tmp/wbeam-frames")
     parser.add_argument("--debug-fps", type=int, default=0)
+    parser.add_argument("--persist-mode", type=int, default=2,
+                        help="Portal persist_mode for source restore (0=off, 1=session, 2=persistent).")
+    parser.add_argument("--restore-token-file", default="/tmp/proto-portal-restore-token")
     parser.add_argument("--framed", action="store_true", default=False,
                         help="C3: use framed protocol (or set WBEAM_FRAMED=1)")
     return parser.parse_args()
@@ -738,12 +773,27 @@ def main():
     STATE["session_handle"] = session_handle
     STATE["bus"] = session_bus
 
-    print("[wbeam] Select source in KDE prompt")
-    select_sources(session_bus, iface, session_handle, args.cursor_mode)
+    persist_mode = max(0, min(2, int(args.persist_mode)))
+    restore_token = load_restore_token(args.restore_token_file) if persist_mode > 0 else ""
+    if restore_token:
+        print("[wbeam] Attempting source restore via portal token", flush=True)
+    else:
+        print("[wbeam] Select source in KDE prompt", flush=True)
+
+    try:
+        select_sources(session_bus, iface, session_handle, args.cursor_mode, persist_mode, restore_token)
+    except RuntimeError:
+        if restore_token:
+            print("[wbeam] restore token failed; falling back to manual source selection", flush=True)
+            select_sources(session_bus, iface, session_handle, args.cursor_mode, persist_mode, "")
+        else:
+            raise
 
     print("[wbeam] Starting portal session")
-    node_id = start_session(session_bus, iface, session_handle)
+    node_id, new_restore_token = start_session(session_bus, iface, session_handle)
     print(f"[wbeam] Got PipeWire node id: {node_id}")
+    if persist_mode > 0 and new_restore_token:
+        save_restore_token(args.restore_token_file, new_restore_token)
 
     fd = open_pipewire_fd(iface, session_handle)
     print(f"[wbeam] Opened PipeWire fd: {fd}")

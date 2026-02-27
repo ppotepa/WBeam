@@ -7,6 +7,7 @@ Thumbs.db
 
 # IDE
 .idea/
+**/.idea/
 .vscode/
 
 # Android / Gradle
@@ -16,11 +17,14 @@ android/local.properties
 android/captures/
 android/.cxx/
 proto/front/.gradle/
+proto/front/**/.gradle/
 proto/front/**/build/
 proto/front/local.properties
 proto/front/captures/
 proto/front/.cxx/
+proto/front/**/.cxx/
 proto/front/.externalNativeBuild/
+proto/front/**/.externalNativeBuild/
 *.apk
 *.aab
 *.ap_
@@ -56,6 +60,7 @@ protocol/logs/**
 *.cache
 
 # Local generated helper files
+proto/autotune-results*.json
 codebase_concat*.txt
 concat*.txt
 ALL_CODE.txt
