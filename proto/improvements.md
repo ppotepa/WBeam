@@ -1,5 +1,16 @@
 # Proto Improvements
 
+## Stability Framework (Implemented)
+
+| Task | Status | Change |
+|---|---|---|
+| S1 Single source of truth config | Done | `run.py` now defaults to canonical `config/proto.json`, and syncs generated `config/proto.conf` from JSON. |
+| S2 Effective config dump | Done | Runner writes `/tmp/proto-effective-config-runner.json`; host writes `/tmp/proto-effective-config-host.json` and logs effective runtime keys. |
+| S3 Fail-fast config validation | Done | Runner rejects unknown config keys; host rejects unsupported `WBEAM_*` keys not wired to portal pipeline. |
+| S4 Regression benchmark smoke | Done | Added `proto/regression_smoke.py` for pass/fail runtime benchmark with thresholds. |
+| S5 Quality vs latency separation | Done | Versioned profiles split into `quality` and `latency` sections, with explicit logging of applied keys. |
+| S6 Versioned runtime presets | Done | Added `config/profiles.json` and persistent profile tool `proto/apply_profile.py`. |
+
 ## Table 1: Core Optimization Tasks
 
 | Task | Layer | Location | What to optimize | Expected gain | Complexity | Priority |

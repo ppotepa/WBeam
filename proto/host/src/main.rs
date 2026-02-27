@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::process::Command;
@@ -27,6 +27,7 @@ const PORTAL_JPEG_FILE: &str = "/tmp/proto-portal-frame.jpg";
 const PORTAL_DEBUG_DIR: &str = "/dev/shm/proto-portal-frames";
 const PORTAL_STREAMER_LOG: &str = "/tmp/proto-portal-streamer.log";
 const PORTAL_FFMPEG_LOG: &str = "/tmp/proto-portal-ffmpeg.log";
+const HOST_EFFECTIVE_CONFIG_LOG: &str = "/tmp/proto-effective-config-host.json";
 const MJPEG_BOUNDARY: &str = "frame";
 const WBJ1_MAGIC: &[u8; 4] = b"WBJ1";
 const WBH1_MAGIC: &[u8; 4] = b"WBH1";
@@ -94,6 +95,24 @@ const MAX_CHUNK_BYTES_MAX: usize       = 256 * 1024;
 const DEFAULT_MAX_CHUNK_BYTES: usize   = 14 * 1024;
 const ANDROID_LOG_POLL_SECS: u64       = 5;
 const ANDROID_LOG_DIR: &str            = "../logs";
+const PORTAL_WBEAM_ALLOWED_KEYS: &[&str] = &[
+    "WBEAM_FRAMED",
+    "WBEAM_VIDEORATE_DROP_ONLY",
+    "WBEAM_FRAMED_SEND_TIMEOUT_S",
+    "WBEAM_FRAMED_DUPLICATE_STALE",
+    "WBEAM_FRAMED_STALE_START_MS",
+    "WBEAM_FRAMED_STALE_DUP_FPS",
+    "WBEAM_PIPEWIRE_KEEPALIVE_MS",
+    "WBEAM_PIPEWIRE_ALWAYS_COPY",
+    "WBEAM_FRAMED_PULL_TIMEOUT_MS",
+    "WBEAM_QUEUE_MAX_BUFFERS",
+    "WBEAM_QUEUE_MAX_TIME_MS",
+    "WBEAM_APPSINK_MAX_BUFFERS",
+    "WBEAM_OVERLAY_ENABLE",
+    "WBEAM_OVERLAY_TEXT",
+    "WBEAM_OVERLAY_TEXT_FILE",
+    "WBEAM_OVERLAY_FONT_DESC",
+];
 static PRIMARY_OUTPUT: OnceLock<Option<String>> = OnceLock::new();
 static PORTAL_STARTED: OnceLock<bool> = OnceLock::new();
 static CONFIG: OnceLock<HashMap<String, String>> = OnceLock::new();
@@ -241,7 +260,9 @@ fn init_config() {
     } else {
         info!("proto host loaded config: {}", config_path);
     }
-    let _ = CONFIG.set(map);
+    let _ = CONFIG.set(map.clone());
+    write_effective_config_snapshot(&config_path, &map);
+    log_effective_runtime_settings();
 }
 
 fn parse_config_path() -> String {
@@ -252,6 +273,10 @@ fn parse_config_path() -> String {
             return args[i + 1].clone();
         }
         i += 1;
+    }
+    let default_json = PathBuf::from("../config/proto.json");
+    if default_json.exists() {
+        return default_json.to_string_lossy().to_string();
     }
     let default_conf = PathBuf::from("../config/proto.conf");
     if default_conf.exists() {
@@ -299,6 +324,9 @@ fn load_config_json(content: &str) -> HashMap<String, String> {
         if line.is_empty() || line == "{" || line == "}" {
             continue;
         }
+        if !line.starts_with('"') {
+            continue;
+        }
         let Some((k, v)) = line.split_once(':') else {
             continue;
         };
@@ -323,9 +351,72 @@ fn parse_json_scalar(raw: &str) -> String {
         return String::new();
     }
     if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') {
-        return value[1..value.len() - 1].replace(r#"\""#, "\"").replace(r#"\\"#, "\\");
+        return value[1..value.len() - 1]
+            .replace(r#"\""#, "\"")
+            .replace(r#"\\"#, "\\");
     }
     value.to_string()
+}
+
+fn write_effective_config_snapshot(source_config: &str, map: &HashMap<String, String>) {
+    let mut keys: Vec<&String> = map.keys().collect();
+    keys.sort();
+    let mut lines: Vec<String> = Vec::new();
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs().to_string())
+        .unwrap_or_else(|_| "0".to_string());
+    lines.push("{".to_string());
+    lines.push(format!("  \"generated_at_unix\": \"{}\",", json_escape(&ts)));
+    lines.push(format!("  \"source_config\": \"{}\",", json_escape(source_config)));
+    for key in keys {
+        let value = map.get(key).cloned().unwrap_or_default();
+        lines.push(format!(
+            "  \"{}\": \"{}\",",
+            json_escape(key),
+            json_escape(&value)
+        ));
+    }
+    if let Some(last) = lines.last_mut() {
+        if last.ends_with(',') {
+            last.pop();
+        }
+    }
+    lines.push("}".to_string());
+    let _ = fs::write(HOST_EFFECTIVE_CONFIG_LOG, lines.join("\n") + "\n");
+    info!("effective host config snapshot: {}", HOST_EFFECTIVE_CONFIG_LOG);
+}
+
+fn json_escape(raw: &str) -> String {
+    raw.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn log_effective_runtime_settings() {
+    let tracked = [
+        "PROTO_CAPTURE_FPS",
+        "PROTO_CAPTURE_BITRATE_KBPS",
+        "PROTO_CAPTURE_SIZE",
+        "PROTO_H264",
+        "PROTO_H264_SOURCE_FRAMED",
+        "PROTO_H264_SOURCE_PORT",
+        "PROTO_ADB_PUSH_ADDR",
+        "PROTO_ADB_WRITE_TIMEOUT_MS",
+        "PROTO_H264_SOURCE_READ_TIMEOUT_MS",
+        "WBEAM_VIDEORATE_DROP_ONLY",
+        "WBEAM_FRAMED_DUPLICATE_STALE",
+        "WBEAM_FRAMED_STALE_START_MS",
+        "WBEAM_FRAMED_STALE_DUP_FPS",
+        "WBEAM_FRAMED_PULL_TIMEOUT_MS",
+        "WBEAM_QUEUE_MAX_TIME_MS",
+        "WBEAM_APPSINK_MAX_BUFFERS",
+    ];
+    let mut items: Vec<String> = Vec::new();
+    for key in tracked {
+        if let Ok(val) = cfg_var(key) {
+            items.push(format!("{key}={val}"));
+        }
+    }
+    info!("effective runtime settings: {}", items.join(" "));
 }
 
 fn h264_mode_enabled() -> bool {
@@ -1621,6 +1712,11 @@ fn capture_portal_jpeg() -> Result<Vec<u8>, String> {
 }
 
 fn start_portal_pipeline_once() -> bool {
+    if let Err(msg) = validate_known_wbeam_keys() {
+        error!("{msg}");
+        return false;
+    }
+
     let force = cfg_var("PROTO_FORCE_PORTAL")
         .ok()
         .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes"))
@@ -1697,6 +1793,24 @@ fn start_portal_pipeline_once() -> bool {
     let portal_restore_token_file = cfg_var("PROTO_PORTAL_RESTORE_TOKEN_FILE")
         .unwrap_or_else(|_| DEFAULT_PORTAL_RESTORE_TOKEN_FILE.to_string());
     let framed_env = if source_framed { "1" } else { "0" };
+    let portal_env = vec![
+        ("WBEAM_FRAMED", framed_env.to_string()),
+        ("WBEAM_VIDEORATE_DROP_ONLY", videorate_drop_only),
+        ("WBEAM_FRAMED_SEND_TIMEOUT_S", framed_send_timeout_s),
+        ("WBEAM_FRAMED_DUPLICATE_STALE", framed_duplicate_stale),
+        ("WBEAM_FRAMED_STALE_START_MS", framed_stale_start_ms),
+        ("WBEAM_FRAMED_STALE_DUP_FPS", framed_stale_dup_fps),
+        ("WBEAM_PIPEWIRE_KEEPALIVE_MS", pipewire_keepalive_ms),
+        ("WBEAM_PIPEWIRE_ALWAYS_COPY", pipewire_always_copy),
+        ("WBEAM_FRAMED_PULL_TIMEOUT_MS", framed_pull_timeout_ms),
+        ("WBEAM_QUEUE_MAX_BUFFERS", queue_max_buffers),
+        ("WBEAM_QUEUE_MAX_TIME_MS", queue_max_time_ms),
+        ("WBEAM_APPSINK_MAX_BUFFERS", appsink_max_buffers),
+        ("WBEAM_OVERLAY_ENABLE", portal_overlay_enable),
+        ("WBEAM_OVERLAY_TEXT", portal_overlay_text),
+        ("WBEAM_OVERLAY_TEXT_FILE", portal_overlay_text_file),
+        ("WBEAM_OVERLAY_FONT_DESC", portal_overlay_font_desc),
+    ];
 
     let mut streamer_cmd = Command::new("python3");
     streamer_cmd
@@ -1726,24 +1840,20 @@ fn start_portal_pipeline_once() -> bool {
             .arg(portal_debug_fps.to_string());
     }
 
+    streamer_cmd.env("PYTHONUNBUFFERED", "1");
+    for (key, value) in &portal_env {
+        streamer_cmd.env(key, value);
+    }
+    info!(
+        "portal env: {}",
+        portal_env
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
+
     let mut streamer_child = match streamer_cmd
-        .env("PYTHONUNBUFFERED", "1")
-        .env("WBEAM_FRAMED", framed_env)
-        .env("WBEAM_VIDEORATE_DROP_ONLY", videorate_drop_only)
-        .env("WBEAM_FRAMED_SEND_TIMEOUT_S", framed_send_timeout_s)
-        .env("WBEAM_FRAMED_DUPLICATE_STALE", framed_duplicate_stale)
-        .env("WBEAM_FRAMED_STALE_START_MS", framed_stale_start_ms)
-        .env("WBEAM_FRAMED_STALE_DUP_FPS", framed_stale_dup_fps)
-        .env("WBEAM_PIPEWIRE_KEEPALIVE_MS", pipewire_keepalive_ms)
-        .env("WBEAM_PIPEWIRE_ALWAYS_COPY", pipewire_always_copy)
-        .env("WBEAM_FRAMED_PULL_TIMEOUT_MS", framed_pull_timeout_ms)
-        .env("WBEAM_QUEUE_MAX_BUFFERS", queue_max_buffers)
-        .env("WBEAM_QUEUE_MAX_TIME_MS", queue_max_time_ms)
-        .env("WBEAM_APPSINK_MAX_BUFFERS", appsink_max_buffers)
-        .env("WBEAM_OVERLAY_ENABLE", portal_overlay_enable)
-        .env("WBEAM_OVERLAY_TEXT", portal_overlay_text)
-        .env("WBEAM_OVERLAY_TEXT_FILE", portal_overlay_text_file)
-        .env("WBEAM_OVERLAY_FONT_DESC", portal_overlay_font_desc)
         .stdin(Stdio::null())
         .stdout(Stdio::from(streamer_log.try_clone().expect("clone streamer log")))
         .stderr(Stdio::from(streamer_log))
@@ -1821,6 +1931,26 @@ fn start_portal_pipeline_once() -> bool {
         source_framed
     );
     true
+}
+
+fn validate_known_wbeam_keys() -> Result<(), String> {
+    let allowed: HashSet<&str> = PORTAL_WBEAM_ALLOWED_KEYS.iter().copied().collect();
+    let mut unknown: Vec<String> = Vec::new();
+    if let Some(cfg) = CONFIG.get() {
+        for key in cfg.keys() {
+            if key.starts_with("WBEAM_") && !allowed.contains(key.as_str()) {
+                unknown.push(key.clone());
+            }
+        }
+    }
+    if unknown.is_empty() {
+        return Ok(());
+    }
+    unknown.sort();
+    Err(format!(
+        "unsupported WBEAM keys in config (not wired to portal pipeline): {}",
+        unknown.join(", ")
+    ))
 }
 
 fn has_gst_element(name: &str) -> bool {

@@ -16,6 +16,10 @@ from pathlib import Path
 from shutil import which
 from typing import Any
 
+CANONICAL_JSON_REL = "config/proto.json"
+CANONICAL_CONF_REL = "config/proto.conf"
+DEFAULT_PROFILES_REL = "config/profiles.json"
+
 ENV_BLOCK = (
     "PROTO_",
     "RUN_",
@@ -46,6 +50,8 @@ DEFAULTS: dict[str, str] = {
     "PROTO_H264_REORDER": "0",
     "PROTO_FORCE_JAVA_FALLBACK": "0",
     "PROTO_CAPTURE_SIZE": "",
+    "PROTO_PROFILE": "",
+    "PROTO_PROFILE_FILE": DEFAULT_PROFILES_REL,
 }
 
 
@@ -144,6 +150,131 @@ def flatten_json(node: dict[str, Any], out: dict[str, str], prefix: str = "") ->
             flatten_json(raw_v, out, full)
         else:
             out[full] = scalar_to_str(raw_v)
+
+
+def resolve_config_path(root: Path, raw: str | None) -> Path:
+    if raw:
+        return Path(raw).resolve()
+    return (root / CANONICAL_JSON_REL).resolve()
+
+
+def render_conf(cfg: dict[str, str], source_json: Path) -> str:
+    lines = [
+        f"# Generated from {source_json}",
+        "# Do not edit manually; edit proto.json or apply profile and re-run.",
+    ]
+    for key in sorted(cfg):
+        val = cfg[key]
+        if re.search(r"\s", val) or val == "":
+            lines.append(f'{key}="{val}"')
+        else:
+            lines.append(f"{key}={val}")
+    return "\n".join(lines) + "\n"
+
+
+def sync_conf_from_json(root: Path, json_cfg: dict[str, str]) -> None:
+    conf_path = (root / CANONICAL_CONF_REL).resolve()
+    json_path = (root / CANONICAL_JSON_REL).resolve()
+    rendered = render_conf(json_cfg, json_path)
+    old = conf_path.read_text(encoding="utf-8") if conf_path.exists() else ""
+    if old != rendered:
+        conf_path.write_text(rendered, encoding="utf-8")
+        log(f"synced derived conf from canonical json: {conf_path}")
+
+
+def known_keys_from_canonical(root: Path) -> set[str]:
+    known = set(DEFAULTS.keys())
+    canonical = (root / CANONICAL_JSON_REL).resolve()
+    if canonical.exists():
+        raw = load_config(canonical)
+        known.update(raw.keys())
+    known.update({"PROTO_PROFILE", "PROTO_PROFILE_FILE"})
+    return known
+
+
+def validate_known_keys(cfg: dict[str, str], known: set[str], source: Path) -> None:
+    unknown = sorted(k for k in cfg.keys() if k not in known)
+    if not unknown:
+        return
+    preview = ", ".join(unknown[:12])
+    suffix = "" if len(unknown) <= 12 else f" (+{len(unknown) - 12} more)"
+    raise RunError(
+        f"unknown config keys in {source}: {preview}{suffix}. "
+        f"Use canonical {CANONICAL_JSON_REL} and keep keys explicit."
+    )
+
+
+def load_profiles(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        raise RunError(f"profile file not found: {path}")
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RunError(f"invalid profile JSON: {path} ({exc})") from exc
+    if not isinstance(raw, dict):
+        raise RunError(f"profile file root must be object: {path}")
+    profiles = raw.get("profiles")
+    if not isinstance(profiles, dict):
+        raise RunError(f"profile file missing object key 'profiles': {path}")
+    return raw
+
+
+def normalize_profile_mapping(raw: Any, *, section: str) -> dict[str, str]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise RunError(f"profile section '{section}' must be an object")
+    out: dict[str, str] = {}
+    for k, v in raw.items():
+        nk = normalize_key(k)
+        out[nk] = scalar_to_str(v)
+    return out
+
+
+def apply_profile(
+    cfg: dict[str, str],
+    root: Path,
+    explicit_profile: str | None = None,
+) -> tuple[dict[str, str], dict[str, str], dict[str, str], str]:
+    profile_name = (explicit_profile or cfg.get("PROTO_PROFILE", "")).strip()
+    if not profile_name:
+        return cfg, {}, {}, ""
+
+    profile_file_raw = (cfg.get("PROTO_PROFILE_FILE", DEFAULT_PROFILES_REL) or "").strip()
+    profile_file = Path(profile_file_raw)
+    if not profile_file.is_absolute():
+        profile_file = (root / profile_file).resolve()
+
+    profiles_doc = load_profiles(profile_file)
+    profiles = profiles_doc["profiles"]
+    profile = profiles.get(profile_name)
+    if not isinstance(profile, dict):
+        available = ", ".join(sorted(str(k) for k in profiles.keys()))
+        raise RunError(f"profile '{profile_name}' not found in {profile_file}; available: {available}")
+
+    values_map = normalize_profile_mapping(profile.get("values"), section="values")
+    quality_map = normalize_profile_mapping(profile.get("quality"), section="quality")
+    latency_map = normalize_profile_mapping(profile.get("latency"), section="latency")
+
+    merged = dict(cfg)
+    # Apply in deterministic order.
+    merged.update(values_map)
+    merged.update(quality_map)
+    merged.update(latency_map)
+    merged["PROTO_PROFILE"] = profile_name
+    merged["PROTO_PROFILE_FILE"] = str(profile_file)
+    return merged, quality_map, latency_map, str(profile_file)
+
+
+def write_effective_config(path: Path, cfg: dict[str, str], source_path: Path) -> None:
+    payload: dict[str, Any] = {
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "source_config": str(source_path),
+    }
+    for k in sorted(cfg.keys()):
+        payload[k] = cfg[k]
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    log(f"effective runtime config: {path}")
 
 
 def load_config(path: Path) -> dict[str, str]:
@@ -601,6 +732,7 @@ def start_rust_backend(root: Path, config_path: Path) -> int:
 def parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(usage="./run.sh [--config path]")
     p.add_argument("--config", default=None)
+    p.add_argument("--profile", default=None, help="Override profile name for this run.")
     p.add_argument(
         "--prepare-only",
         action="store_true",
@@ -612,12 +744,36 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
     root = Path(__file__).resolve().parent
-    config_path = (Path(args.config) if args.config else root / "config" / "proto.conf").resolve()
+    config_path = resolve_config_path(root, args.config)
 
     try:
         block_runtime_env_overrides()
+        if args.config is None:
+            log(f"using canonical config: {config_path}")
         cfg = dict(DEFAULTS)
-        cfg.update(load_config(config_path))
+        loaded_cfg = load_config(config_path)
+        cfg.update(loaded_cfg)
+
+        known_keys = known_keys_from_canonical(root)
+        validate_known_keys(cfg, known_keys, config_path)
+
+        cfg, profile_quality, profile_latency, profile_file = apply_profile(cfg, root, explicit_profile=args.profile)
+        if cfg.get("PROTO_PROFILE", "").strip():
+            log(
+                f"profile applied: {cfg['PROTO_PROFILE']} "
+                f"(quality={len(profile_quality)} keys, latency={len(profile_latency)} keys, file={profile_file})"
+            )
+            if profile_quality:
+                log("profile quality keys: " + ", ".join(sorted(profile_quality.keys())))
+            if profile_latency:
+                log("profile latency keys: " + ", ".join(sorted(profile_latency.keys())))
+            validate_known_keys(cfg, known_keys | set(profile_quality.keys()) | set(profile_latency.keys()), config_path)
+
+        if config_path == (root / CANONICAL_JSON_REL).resolve():
+            sync_conf_from_json(root, loaded_cfg)
+
+        effective_path = (Path("/tmp") / "proto-effective-config-runner.json").resolve()
+        write_effective_config(effective_path, cfg, config_path)
 
         if str(cfg.get("RUN_DEVICE", "adb")).strip().lower() != "adb":
             raise RunError("run.py supports RUN_DEVICE=adb only")
@@ -665,7 +821,7 @@ def main(argv: list[str]) -> int:
             log("prepare-only: device/app ready; skipping backend start")
             return 0
 
-        return start_rust_backend(root, config_path)
+        return start_rust_backend(root, effective_path)
 
     except KeyboardInterrupt:
         log("interrupted")
