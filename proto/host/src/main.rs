@@ -108,6 +108,7 @@ const PORTAL_WBEAM_ALLOWED_KEYS: &[&str] = &[
     "WBEAM_QUEUE_MAX_BUFFERS",
     "WBEAM_QUEUE_MAX_TIME_MS",
     "WBEAM_APPSINK_MAX_BUFFERS",
+    "WBEAM_H264_GOP",
     "WBEAM_OVERLAY_ENABLE",
     "WBEAM_OVERLAY_TEXT",
     "WBEAM_OVERLAY_TEXT_FILE",
@@ -409,6 +410,7 @@ fn log_effective_runtime_settings() {
         "WBEAM_FRAMED_PULL_TIMEOUT_MS",
         "WBEAM_QUEUE_MAX_TIME_MS",
         "WBEAM_APPSINK_MAX_BUFFERS",
+        "WBEAM_H264_GOP",
     ];
     let mut items: Vec<String> = Vec::new();
     for key in tracked {
@@ -1778,6 +1780,7 @@ fn start_portal_pipeline_once() -> bool {
     let queue_max_buffers = cfg_var("WBEAM_QUEUE_MAX_BUFFERS").unwrap_or_else(|_| "1".to_string());
     let queue_max_time_ms = cfg_var("WBEAM_QUEUE_MAX_TIME_MS").unwrap_or_else(|_| "12".to_string());
     let appsink_max_buffers = cfg_var("WBEAM_APPSINK_MAX_BUFFERS").unwrap_or_else(|_| "2".to_string());
+    let h264_gop = cfg_var("WBEAM_H264_GOP").unwrap_or_default();
     let portal_overlay_enable = cfg_var("PROTO_PORTAL_OVERLAY_ENABLE").unwrap_or_else(|_| "0".to_string());
     let portal_overlay_text = cfg_var("PROTO_PORTAL_OVERLAY_TEXT").unwrap_or_default();
     let portal_overlay_text_file = cfg_var("PROTO_PORTAL_OVERLAY_TEXT_FILE").unwrap_or_default();
@@ -1806,6 +1809,7 @@ fn start_portal_pipeline_once() -> bool {
         ("WBEAM_QUEUE_MAX_BUFFERS", queue_max_buffers),
         ("WBEAM_QUEUE_MAX_TIME_MS", queue_max_time_ms),
         ("WBEAM_APPSINK_MAX_BUFFERS", appsink_max_buffers),
+        ("WBEAM_H264_GOP", h264_gop),
         ("WBEAM_OVERLAY_ENABLE", portal_overlay_enable),
         ("WBEAM_OVERLAY_TEXT", portal_overlay_text),
         ("WBEAM_OVERLAY_TEXT_FILE", portal_overlay_text_file),
