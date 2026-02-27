@@ -45,6 +45,12 @@ Aktualnie pracujemy nad **responsywnoscia aplikacji**:
 - dodany czytelny log preflight i warning zamiast cichego wiszenia.
 - cel: startup nie blokuje sie bez informacji, nawet gdy ADB chwilowo nie odpowiada.
 
+8. Redukcja opoznienia sterowania (target: <100 ms):
+- w `stream_wayland_portal_h264.py` dodane odrzucanie backlogu appsink (wysylka tylko najnowszej probki),
+- zmniejszone domyslne kolejki GStreamer pod low-latency (`WBEAM_QUEUE_MAX_BUFFERS=1`, `WBEAM_QUEUE_MAX_TIME_MS=12`, `WBEAM_APPSINK_MAX_BUFFERS=2`),
+- nowe pokretla przeprowadzone przez caly lancuch `proto.conf -> run.sh -> proto/host/src/main.rs -> env python`.
+- cel: ograniczyc buforowanie klatek i skrócic lag reakcji.
+
 ## Jaki jest cel zadania
 Glowny cel zadania:
 - **stabilna i responsywna aplikacja w prototypie**, kompatybilna z legacy Android API17+, z domyslnym profilem startowym nadajacym sie do realnej interakcji (klikniecia, sterowanie), a nie tylko pasywnego podgladu obrazu.
