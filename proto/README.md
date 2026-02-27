@@ -22,20 +22,20 @@ From repo root:
 
 ### Single launcher
 
-- `./run.sh` — uruchamia cały flow zgodnie z `proto/config/proto.conf`.
+- `./run.sh` — Python entrypoint (`proto/run.py`) uruchamiający cały flow.
 - Optional custom config path: `./run.sh --config /path/to/proto.conf`.
-- Zmiana backendu/frontu/presetu odbywa się wyłącznie przez `.conf`:
-  - `RUN_BACKEND=rust|cs`
-  - `RUN_DEVICE=adb|qemu`
-  - `PROTO_PRESET=fast|balanced|quality`
+- JSON config is also supported: `./run.sh --config /path/to/proto.json`.
+- Zmiana backendu/frontu/presetu odbywa się wyłącznie przez config file (`.conf` lub `.json`):
+  - `RUN_BACKEND=rust`
+  - `RUN_DEVICE=adb`
+  - `PROTO_ANDROID_BUILD_TYPE=debug|release`
 
 ENV overrides są zablokowane (np. `PROTO_*=... ./run.sh` zakończy się błędem).
 
-`run.sh` sets JAVA/SDK defaults, builds/installs app when device is connected, starts host, and launches app.
+`run.sh` robi flow w tej kolejności: build APK -> install APK -> launch Android app -> start backend (`rust`).
 
 Network note:
-- `RUN_DEVICE=adb` (real hardware) expects Android USB tethering; host/device routing may differ by OS.
-- `RUN_DEVICE=qemu` (emulator) does not use tethering.
+- `RUN_DEVICE=adb` expects Android USB tethering; host/device routing may differ by OS.
 
 1. Start host server
    ```bash
