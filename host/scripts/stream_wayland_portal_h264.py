@@ -266,6 +266,16 @@ def env_flag(name, default):
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def env_int(name, default):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value.strip())
+    except Exception:
+        return default
+
+
 def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=None, target_fps=60):
     """WBTP/1 framed sender: accept one TCP client; send WBTP/1-framed H264 access units.
 
@@ -287,10 +297,13 @@ def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=Non
     # Enabled by default to keep visual cadence stable on sparse portal updates.
     last_keyframe = None
     last_keyframe_len = 0
-    # Pull timeout tracks target FPS with headroom; too-aggressive timeout creates fake
-    # "stale duplicate" bursts even when pipeline is just slightly late.
+    # Pull timeout drives how quickly we can observe source stalls.
     fps = max(1, int(target_fps))
-    pull_timeout_ns = max(5_000_000, min(80_000_000, int(2_000_000_000 / fps)))
+    pull_timeout_ms_auto = max(2, min(40, int(round(1000.0 / fps))))
+    pull_timeout_ms = max(1, min(100, env_int("WBEAM_FRAMED_PULL_TIMEOUT_MS", pull_timeout_ms_auto)))
+    pull_timeout_ns = int(pull_timeout_ms * 1_000_000)
+    frame_period_ns = int(1_000_000_000 / fps)
+    next_stale_due_ns = 0
 
     while not stop_event.is_set():
         try:
@@ -313,6 +326,7 @@ def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=Non
             _stat_stale_duplicates = 0
             _stat_partial_writes = 0
             _stat_send_timeouts = 0
+            _stat_dropped_queued = 0
             _stat_t0 = _time.monotonic()
             while not stop_event.is_set():
                 sample = appsink.emit("try-pull-sample", pull_timeout_ns)
@@ -346,10 +360,25 @@ def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=Non
                             _stat_t0 = _time.monotonic()
                         continue
 
+                    now_ns = _time.monotonic_ns()
+                    if next_stale_due_ns == 0:
+                        next_stale_due_ns = now_ns
+                    if now_ns < next_stale_due_ns:
+                        continue
                     payload_view = memoryview(last_keyframe)
                     payload_len = last_keyframe_len
                     _stat_stale_duplicates += 1
+                    while next_stale_due_ns <= now_ns:
+                        next_stale_due_ns += frame_period_ns
                 else:
+                    # Latency guard: if appsink accumulated a backlog, drop stale queued
+                    # samples and keep only the newest one before mapping/sending.
+                    while True:
+                        newer = appsink.emit("try-pull-sample", 0)
+                        if newer is None:
+                            break
+                        sample = newer
+                        _stat_dropped_queued += 1
                     buf = sample.get_buffer()
                     pts_us = buf.pts // 1000 if buf.pts != Gst.CLOCK_TIME_NONE else pts_us
                     ok, map_info = buf.map(Gst.MapFlags.READ)
@@ -362,6 +391,7 @@ def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=Non
                         # Copy to allow reuse if capture stalls.
                         last_keyframe = bytes(map_info.data)
                         last_keyframe_len = payload_len
+                    next_stale_due_ns = _time.monotonic_ns() + frame_period_ns
 
                 header = FRAME_STRUCT.pack(
                     FRAME_MAGIC, FRAME_VERSION, flags,
@@ -393,6 +423,7 @@ def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=Non
                         f"[wbeam-framed] pipeline_fps={pipe_fps} sender_fps={sent_fps:.1f}"
                         f" timeout_misses={_stat_timeout_misses}"
                         f" stale_dupe={_stat_stale_duplicates}"
+                        f" dropped_queued={_stat_dropped_queued}"
                         f" partial_writes={_stat_partial_writes}"
                         f" send_timeouts={_stat_send_timeouts}"
                         f" seq={seq}",
@@ -401,6 +432,7 @@ def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=Non
                     _stat_frames = 0
                     _stat_timeout_misses = 0
                     _stat_stale_duplicates = 0
+                    _stat_dropped_queued = 0
                     _stat_partial_writes = 0
                     _stat_send_timeouts = 0
                     _stat_t0 = _time.monotonic()
@@ -480,16 +512,24 @@ def make_pipeline(
     # C1: hard queue limits – prevents buffer bloat and unbounded latency growth.
     # leaky=2 (downstream) drops oldest frames so encoder always gets the freshest input.
     # max-size-time 40 ms = ~2.4 frames @60fps; max-size-buffers=2 as secondary guard.
+    queue_max_buffers = max(1, min(8, env_int("WBEAM_QUEUE_MAX_BUFFERS", 1)))
+    queue_max_time_ms = max(4, min(200, env_int("WBEAM_QUEUE_MAX_TIME_MS", 16)))
+    queue_max_time_ns = int(queue_max_time_ms * 1_000_000)
     for q, label in [(queue, "q1"), (queue_main, "qmain")]:
-        q.set_property("max-size-buffers", 2)
+        q.set_property("max-size-buffers", queue_max_buffers)
         q.set_property("max-size-bytes", 0)       # disable bytes limit, use time+buf
-        q.set_property("max-size-time", 40_000_000)  # 40 ms in nanoseconds
+        q.set_property("max-size-time", queue_max_time_ns)
         q.set_property("leaky", 2)                # 2 = GST_QUEUE_LEAK_DOWNSTREAM (drop oldest)
 
     src.set_property("fd", int(fd))
     src.set_property("path", str(node_id))
     src.set_property("do-timestamp", True)
-    src.set_property("keepalive-time", 1000)
+    set_if_supported(src, "always-copy", env_flag("WBEAM_PIPEWIRE_ALWAYS_COPY", True))
+    # Lower keepalive improves perceived responsiveness when PipeWire source is
+    # damage-driven and temporarily emits sparse updates.
+    keepalive_default_ms = max(25, int(round(1000.0 / max(1, int(fps)))))
+    keepalive_ms = max(10, min(1000, env_int("WBEAM_PIPEWIRE_KEEPALIVE_MS", keepalive_default_ms)))
+    src.set_property("keepalive-time", keepalive_ms)
 
     raw_format = "NV12" if encoder_name == "nvenc" else "I420"
     caps1.set_property(
@@ -500,9 +540,9 @@ def make_pipeline(
     )
 
     configure_encoder(enc, encoder_name, bitrate_kbps, fps, nv_preset)
-    # For low-end Android decoders, synthetic frame duplication can waste USB bandwidth
-    # and increase decode pressure. Keep drop-only enabled by default, configurable by env.
-    set_if_supported(rate, "drop-only", env_flag("WBEAM_VIDEORATE_DROP_ONLY", True))
+    # Responsiveness-first default: allow videorate to duplicate when source is sparse.
+    # Can be disabled via WBEAM_VIDEORATE_DROP_ONLY=1 for lower bandwidth/CPU.
+    set_if_supported(rate, "drop-only", env_flag("WBEAM_VIDEORATE_DROP_ONLY", False))
     set_if_supported(rate, "max-rate", int(fps))
     set_if_supported(rate, "average-period", int(1_000_000_000 / max(1, int(fps))))
 
@@ -519,7 +559,7 @@ def make_pipeline(
         sink.set_property("sync", True)
         # Keep a tiny sink queue, but do not drop encoded AUs at appsink level:
         # dropping inter-coded frames breaks reference chains and creates visual artifacts.
-        sink.set_property("max-buffers", 4)
+        sink.set_property("max-buffers", max(1, min(8, env_int("WBEAM_APPSINK_MAX_BUFFERS", 2))))
         sink.set_property("drop", False)
     else:
         caps2.set_property(

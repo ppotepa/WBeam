@@ -1507,6 +1507,9 @@ fn start_portal_pipeline_once() -> bool {
     let pipewire_keepalive_ms = cfg_var("WBEAM_PIPEWIRE_KEEPALIVE_MS").unwrap_or_default();
     let pipewire_always_copy = cfg_var("WBEAM_PIPEWIRE_ALWAYS_COPY").unwrap_or_else(|_| "1".to_string());
     let framed_pull_timeout_ms = cfg_var("WBEAM_FRAMED_PULL_TIMEOUT_MS").unwrap_or_default();
+    let queue_max_buffers = cfg_var("WBEAM_QUEUE_MAX_BUFFERS").unwrap_or_else(|_| "1".to_string());
+    let queue_max_time_ms = cfg_var("WBEAM_QUEUE_MAX_TIME_MS").unwrap_or_else(|_| "12".to_string());
+    let appsink_max_buffers = cfg_var("WBEAM_APPSINK_MAX_BUFFERS").unwrap_or_else(|_| "2".to_string());
     let source_mode = cfg_var("PROTO_PORTAL_JPEG_SOURCE").unwrap_or_else(|_| DEFAULT_PORTAL_SOURCE.to_string());
     let source_framed = env_truthy("PROTO_H264_SOURCE_FRAMED", h264_mode_enabled());
     let framed_env = if source_framed { "1" } else { "0" };
@@ -1537,6 +1540,9 @@ fn start_portal_pipeline_once() -> bool {
         .env("WBEAM_PIPEWIRE_KEEPALIVE_MS", pipewire_keepalive_ms)
         .env("WBEAM_PIPEWIRE_ALWAYS_COPY", pipewire_always_copy)
         .env("WBEAM_FRAMED_PULL_TIMEOUT_MS", framed_pull_timeout_ms)
+        .env("WBEAM_QUEUE_MAX_BUFFERS", queue_max_buffers)
+        .env("WBEAM_QUEUE_MAX_TIME_MS", queue_max_time_ms)
+        .env("WBEAM_APPSINK_MAX_BUFFERS", appsink_max_buffers)
         .stdin(Stdio::null())
         .stdout(Stdio::from(streamer_log.try_clone().expect("clone streamer log")))
         .stderr(Stdio::from(streamer_log))
