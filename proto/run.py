@@ -601,6 +601,11 @@ def start_rust_backend(root: Path, config_path: Path) -> int:
 def parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(usage="./run.sh [--config path]")
     p.add_argument("--config", default=None)
+    p.add_argument(
+        "--prepare-only",
+        action="store_true",
+        help="Build/install/launch app and prepare adb transport, then exit without starting backend.",
+    )
     return p.parse_args(argv)
 
 
@@ -655,6 +660,10 @@ def main(argv: list[str]) -> int:
             log("WARNING: adb transport is unstable right after install, continuing")
         app_host_ip = prepare_transport(serial, cfg, shell_timeout_s)
         start_app(serial, cfg, app_host_ip, shell_timeout_s)
+
+        if args.prepare_only:
+            log("prepare-only: device/app ready; skipping backend start")
+            return 0
 
         return start_rust_backend(root, config_path)
 

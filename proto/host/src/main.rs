@@ -45,7 +45,7 @@ const H264_SOURCE_READ_TIMEOUT_MS_MAX: u64 = 20_000;
 const TCP_SNDBUF_BYTES: i32      = 512 * 1024;
 const DEFAULT_ADB_ADDR: &str     = "127.0.0.1:5006";
 const DEFAULT_CAPTURE_SIZE: &str = "1024x640";
-const DEFAULT_CAPTURE_FPS_STR: &str    = "30";
+const DEFAULT_CAPTURE_FPS_STR: &str    = "60";
 const CAPTURE_FORMAT_JPEG: &str        = "jpeg";
 const CAPTURE_FORMAT_PNG: &str         = "png";
 const IMAGEMAGICK_PIPE_JPEG: &str      = "jpeg:-";
@@ -115,7 +115,7 @@ fn main() {
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
         .map(|v| v.clamp(FPS_CAPTURE_MIN, FPS_CAPTURE_MAX))
-        .unwrap_or(30);
+        .unwrap_or(60);
     let frame_interval_ms = 1000 / target_fps;
 
     info!("capturing initial desktop frame");
@@ -1589,6 +1589,11 @@ fn start_portal_pipeline_once() -> bool {
     let queue_max_buffers = cfg_var("WBEAM_QUEUE_MAX_BUFFERS").unwrap_or_else(|_| "1".to_string());
     let queue_max_time_ms = cfg_var("WBEAM_QUEUE_MAX_TIME_MS").unwrap_or_else(|_| "12".to_string());
     let appsink_max_buffers = cfg_var("WBEAM_APPSINK_MAX_BUFFERS").unwrap_or_else(|_| "2".to_string());
+    let portal_overlay_enable = cfg_var("PROTO_PORTAL_OVERLAY_ENABLE").unwrap_or_else(|_| "0".to_string());
+    let portal_overlay_text = cfg_var("PROTO_PORTAL_OVERLAY_TEXT").unwrap_or_default();
+    let portal_overlay_text_file = cfg_var("PROTO_PORTAL_OVERLAY_TEXT_FILE").unwrap_or_default();
+    let portal_overlay_font_desc =
+        cfg_var("PROTO_PORTAL_OVERLAY_FONT_DESC").unwrap_or_else(|_| "Sans Bold 34".to_string());
     let source_mode = cfg_var("PROTO_PORTAL_JPEG_SOURCE").unwrap_or_else(|_| DEFAULT_PORTAL_SOURCE.to_string());
     let source_framed = env_truthy("PROTO_H264_SOURCE_FRAMED", h264_mode_enabled());
     let portal_persist_mode = cfg_var("PROTO_PORTAL_PERSIST_MODE")
@@ -1640,6 +1645,10 @@ fn start_portal_pipeline_once() -> bool {
         .env("WBEAM_QUEUE_MAX_BUFFERS", queue_max_buffers)
         .env("WBEAM_QUEUE_MAX_TIME_MS", queue_max_time_ms)
         .env("WBEAM_APPSINK_MAX_BUFFERS", appsink_max_buffers)
+        .env("WBEAM_OVERLAY_ENABLE", portal_overlay_enable)
+        .env("WBEAM_OVERLAY_TEXT", portal_overlay_text)
+        .env("WBEAM_OVERLAY_TEXT_FILE", portal_overlay_text_file)
+        .env("WBEAM_OVERLAY_FONT_DESC", portal_overlay_font_desc)
         .stdin(Stdio::null())
         .stdout(Stdio::from(streamer_log.try_clone().expect("clone streamer log")))
         .stderr(Stdio::from(streamer_log))
