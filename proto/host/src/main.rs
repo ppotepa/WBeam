@@ -1674,6 +1674,8 @@ fn start_portal_pipeline_once() -> bool {
     let videorate_drop_only = cfg_var("WBEAM_VIDEORATE_DROP_ONLY").unwrap_or_else(|_| "0".to_string());
     let framed_send_timeout_s = cfg_var("WBEAM_FRAMED_SEND_TIMEOUT_S").unwrap_or_else(|_| "0".to_string());
     let framed_duplicate_stale = cfg_var("WBEAM_FRAMED_DUPLICATE_STALE").unwrap_or_else(|_| "0".to_string());
+    let framed_stale_start_ms = cfg_var("WBEAM_FRAMED_STALE_START_MS").unwrap_or_default();
+    let framed_stale_dup_fps = cfg_var("WBEAM_FRAMED_STALE_DUP_FPS").unwrap_or_default();
     let pipewire_keepalive_ms = cfg_var("WBEAM_PIPEWIRE_KEEPALIVE_MS").unwrap_or_default();
     let pipewire_always_copy = cfg_var("WBEAM_PIPEWIRE_ALWAYS_COPY").unwrap_or_else(|_| "1".to_string());
     let framed_pull_timeout_ms = cfg_var("WBEAM_FRAMED_PULL_TIMEOUT_MS").unwrap_or_default();
@@ -1730,6 +1732,8 @@ fn start_portal_pipeline_once() -> bool {
         .env("WBEAM_VIDEORATE_DROP_ONLY", videorate_drop_only)
         .env("WBEAM_FRAMED_SEND_TIMEOUT_S", framed_send_timeout_s)
         .env("WBEAM_FRAMED_DUPLICATE_STALE", framed_duplicate_stale)
+        .env("WBEAM_FRAMED_STALE_START_MS", framed_stale_start_ms)
+        .env("WBEAM_FRAMED_STALE_DUP_FPS", framed_stale_dup_fps)
         .env("WBEAM_PIPEWIRE_KEEPALIVE_MS", pipewire_keepalive_ms)
         .env("WBEAM_PIPEWIRE_ALWAYS_COPY", pipewire_always_copy)
         .env("WBEAM_FRAMED_PULL_TIMEOUT_MS", framed_pull_timeout_ms)
