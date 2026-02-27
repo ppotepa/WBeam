@@ -328,8 +328,9 @@ def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=Non
     drop_queued_encoded = env_flag("WBEAM_FRAMED_DROP_QUEUED", False)
     seq = 0
     print(f"[wbeam-framed] listening on :{port}", flush=True)
-    # Optional fallback: duplicate stale keyframe when capture starves.
-    # Enabled by default to keep visual cadence stable on sparse portal updates.
+    # Optional fallback: duplicate latest keyframe only after prolonged source stall.
+    # Re-sending delta/P-frames can create visible artifacts; keyframe-only duplication
+    # is visually safer (at the cost of less motion smoothness during hard stalls).
     last_keyframe = None
     last_keyframe_len = 0
     # Pull timeout drives how quickly we can observe source stalls.
@@ -338,7 +339,20 @@ def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=Non
     pull_timeout_ms = max(1, min(100, env_int("WBEAM_FRAMED_PULL_TIMEOUT_MS", pull_timeout_ms_auto)))
     pull_timeout_ns = int(pull_timeout_ms * 1_000_000)
     frame_period_ns = int(1_000_000_000 / fps)
+    stale_start_ms = max(40, min(2000, env_int("WBEAM_FRAMED_STALE_START_MS", 180)))
+    stale_start_ns = stale_start_ms * 1_000_000
+    stale_dup_fps = max(1, min(30, env_int("WBEAM_FRAMED_STALE_DUP_FPS", 12)))
+    stale_period_ns = int(1_000_000_000 / stale_dup_fps)
     next_stale_due_ns = 0
+    last_real_sample_ns = _time.monotonic_ns()
+    print(
+        "[wbeam-framed] sender_cfg "
+        f"fps={fps} pull_timeout_ms={pull_timeout_ms} "
+        f"duplicate_stale={int(duplicate_stale)} drop_queued={int(drop_queued_encoded)} "
+        f"send_timeout_s={send_timeout_s} "
+        f"stale_start_ms={stale_start_ms} stale_dup_fps={stale_dup_fps}",
+        flush=True,
+    )
 
     while not stop_event.is_set():
         try:
@@ -368,14 +382,22 @@ def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=Non
                 payload_view = None
                 payload_len = 0
                 flags = FRAME_FLAG_KEYFRAME
+                # Wall-clock capture timestamp used by Rust-side latency stats.
+                # Keep it in epoch microseconds; do not use GStreamer running-time PTS.
                 pts_us = int(_time.time() * 1_000_000)
                 buf = None
                 map_info = None
 
                 if sample is None:
                     # No fresh buffer from PipeWire.
-                    if not duplicate_stale or last_keyframe is None:
-                        _stat_timeout_misses += 1
+                    _stat_timeout_misses += 1
+                    now_ns = _time.monotonic_ns()
+                    stale_age_ns = now_ns - last_real_sample_ns
+                    if (
+                        not duplicate_stale
+                        or last_keyframe is None
+                        or stale_age_ns < stale_start_ns
+                    ):
                         elapsed = _time.monotonic() - _stat_t0
                         if elapsed >= 1.0:
                             sent_fps = _stat_frames / elapsed
@@ -395,16 +417,16 @@ def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=Non
                             _stat_t0 = _time.monotonic()
                         continue
 
-                    now_ns = _time.monotonic_ns()
                     if next_stale_due_ns == 0:
                         next_stale_due_ns = now_ns
                     if now_ns < next_stale_due_ns:
                         continue
                     payload_view = memoryview(last_keyframe)
                     payload_len = last_keyframe_len
+                    flags = FRAME_FLAG_KEYFRAME
                     _stat_stale_duplicates += 1
                     while next_stale_due_ns <= now_ns:
-                        next_stale_due_ns += frame_period_ns
+                        next_stale_due_ns += stale_period_ns
                 else:
                     # Optional latency guard: drop queued encoded frames only when
                     # explicitly enabled (can cause decode freezes on inter-frame codecs).
@@ -416,17 +438,17 @@ def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=Non
                             sample = newer
                             _stat_dropped_queued += 1
                     buf = sample.get_buffer()
-                    pts_us = buf.pts // 1000 if buf.pts != Gst.CLOCK_TIME_NONE else pts_us
                     ok, map_info = buf.map(Gst.MapFlags.READ)
                     if not ok:
                         continue
                     payload_len = map_info.size
                     payload_view = memoryview(map_info.data)
                     flags = 0x00 if buf.has_flags(Gst.BufferFlags.DELTA_UNIT) else FRAME_FLAG_KEYFRAME
+                    # Copy keyframe only for safe stale duplication.
                     if flags & FRAME_FLAG_KEYFRAME:
-                        # Copy to allow reuse if capture stalls.
                         last_keyframe = bytes(map_info.data)
                         last_keyframe_len = payload_len
+                    last_real_sample_ns = _time.monotonic_ns()
                     next_stale_due_ns = _time.monotonic_ns() + frame_period_ns
 
                 header = FRAME_STRUCT.pack(

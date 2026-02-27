@@ -466,6 +466,10 @@ def run_trial(
     sample_s: int,
     startup_timeout_s: int,
     min_samples: int,
+    min_sender_p50: float,
+    min_pipe_p50: float,
+    max_timeout_mean: float,
+    require_portal_metrics: bool,
     host_only: bool,
     out_dir: Path,
     overlay_enabled: bool,
@@ -592,12 +596,14 @@ def run_trial(
     log_done.wait(timeout=2.0)
 
     sender, pipe, timeout_misses = parse_portal_metrics(PORTAL_LOG)
+    using_fallback_metrics = False
     if not sender:
         wbh1_units, _ = parse_wbh1_metrics(run_log)
         if wbh1_units:
             sender = wbh1_units
             pipe = wbh1_units
             timeout_misses = [0.0 for _ in wbh1_units]
+            using_fallback_metrics = True
             note = "fallback metrics from WBH1 stats (portal fps lines missing)"
         else:
             note = "no portal fps samples"
@@ -646,8 +652,47 @@ def run_trial(
         )
 
     notes = ""
-    if not parse_portal_metrics(PORTAL_LOG)[0]:
+    if using_fallback_metrics:
         notes = "fallback metrics from WBH1 stats (portal fps lines missing)"
+    if require_portal_metrics and using_fallback_metrics:
+        return TrialResult(
+            name=name,
+            score=-1e8,
+            fps_score=fps_score,
+            timeout_penalty=timeout_penalty,
+            jitter=jitter,
+            sender_p50=sender_p50,
+            sender_p20=sender_p20,
+            pipe_p50=pipe_p50,
+            timeout_mean=timeout_mean,
+            samples=len(sender),
+            process_rc=rc,
+            config_path=cfg_path,
+            run_log_path=run_log,
+            notes="health gate: missing portal metrics (fallback disabled)",
+        )
+    if sender_p50 < min_sender_p50 or pipe_p50 < min_pipe_p50 or timeout_mean > max_timeout_mean:
+        return TrialResult(
+            name=name,
+            score=-1e8,
+            fps_score=fps_score,
+            timeout_penalty=timeout_penalty,
+            jitter=jitter,
+            sender_p50=sender_p50,
+            sender_p20=sender_p20,
+            pipe_p50=pipe_p50,
+            timeout_mean=timeout_mean,
+            samples=len(sender),
+            process_rc=rc,
+            config_path=cfg_path,
+            run_log_path=run_log,
+            notes=(
+                "health gate: "
+                f"sender_p50={sender_p50:.1f} (<{min_sender_p50:.1f}) or "
+                f"pipe_p50={pipe_p50:.1f} (<{min_pipe_p50:.1f}) or "
+                f"timeout_mean={timeout_mean:.1f} (>{max_timeout_mean:.1f})"
+            ),
+        )
     if len(sender) < max(1, min_samples):
         return TrialResult(
             name=name,
@@ -696,6 +741,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--sample-secs", type=int, default=24)
     p.add_argument("--startup-timeout-secs", type=int, default=180)
     p.add_argument("--min-samples", type=int, default=8)
+    p.add_argument("--gate-min-sender-p50", type=float, default=20.0)
+    p.add_argument("--gate-min-pipe-p50", type=float, default=20.0)
+    p.add_argument("--gate-max-timeout-mean", type=float, default=30.0)
+    p.add_argument(
+        "--require-portal-metrics",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Reject trials when portal_fps metrics are missing (WBH1 fallback only).",
+    )
     p.add_argument("--max-presets", type=int, default=len(PRESETS))
     p.add_argument("--results", default="autotune-results.json")
     p.add_argument("--history-file", default="autotune-history.json")
@@ -772,6 +826,10 @@ def main(argv: list[str]) -> int:
     mutation_rate = min(1.0, max(0.0, float(args.mutation_rate)))
     history_seed_count = max(0, int(args.history_seed_count))
     history_max_entries = max(1, int(args.history_max_entries))
+    gate_min_sender_p50 = max(0.0, float(args.gate_min_sender_p50))
+    gate_min_pipe_p50 = max(0.0, float(args.gate_min_pipe_p50))
+    gate_max_timeout_mean = max(0.0, float(args.gate_max_timeout_mean))
+    require_portal_metrics = bool(args.require_portal_metrics)
     forced_fps = int(args.fps) if args.fps is not None else None
     if forced_fps is not None:
         base_cfg["PROTO_CAPTURE_FPS"] = forced_fps
@@ -783,7 +841,8 @@ def main(argv: list[str]) -> int:
         f"warmup={max(0, args.warmup_secs)}s sample={max(5, args.sample_secs)}s "
         f"reuse_device={bool(args.reuse_device)} host_only={bool(args.host_only)} "
         f"overlay={show_overlay} single_portal_consent={single_portal_consent} "
-        f"forced_fps={forced_fps if forced_fps is not None else 'auto'}"
+        f"forced_fps={forced_fps if forced_fps is not None else 'auto'} "
+        f"gate(sender>={gate_min_sender_p50:.1f},pipe>={gate_min_pipe_p50:.1f},timeout<={gate_max_timeout_mean:.1f},portal={require_portal_metrics})"
     )
 
     benchmark_host_only = bool(args.host_only)
@@ -899,6 +958,10 @@ def main(argv: list[str]) -> int:
                 sample_s=max(5, args.sample_secs),
                 startup_timeout_s=max(30, args.startup_timeout_secs),
                 min_samples=max(1, args.min_samples),
+                min_sender_p50=gate_min_sender_p50,
+                min_pipe_p50=gate_min_pipe_p50,
+                max_timeout_mean=gate_max_timeout_mean,
+                require_portal_metrics=require_portal_metrics,
                 host_only=benchmark_host_only,
                 out_dir=out_dir,
                 overlay_enabled=show_overlay,
@@ -1026,6 +1089,10 @@ def main(argv: list[str]) -> int:
         "population": population,
         "elite_count": elite_count,
         "mutation_rate": mutation_rate,
+        "gate_min_sender_p50": gate_min_sender_p50,
+        "gate_min_pipe_p50": gate_min_pipe_p50,
+        "gate_max_timeout_mean": gate_max_timeout_mean,
+        "require_portal_metrics": require_portal_metrics,
         "forced_fps": forced_fps,
         "seed": args.seed,
         "reuse_device": bool(args.reuse_device),
