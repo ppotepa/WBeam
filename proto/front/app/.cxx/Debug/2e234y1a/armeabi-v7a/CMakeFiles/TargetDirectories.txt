@@ -1,3 +1,0 @@
-/home/ppotepa/git/WBeam/proto/front/app/.cxx/Debug/2e234y1a/armeabi-v7a/CMakeFiles/wbeam.dir
-/home/ppotepa/git/WBeam/proto/front/app/.cxx/Debug/2e234y1a/armeabi-v7a/CMakeFiles/edit_cache.dir
-/home/ppotepa/git/WBeam/proto/front/app/.cxx/Debug/2e234y1a/armeabi-v7a/CMakeFiles/rebuild_cache.dir

@@ -13,7 +13,7 @@ this repo has two active lanes:
 2) `proto/` lane
 - fast iteration sandbox for old hardware (api17 class devices).
 - used to test risky changes quickly: startup flow, reconnect behavior, queue sizing, pacing, decoder compatibility.
-- defaults in `proto/run.sh` are tuned for repeatable real-device runs.
+- defaults in `proto/run.sh` (Python runner) are tuned for repeatable real-device runs.
 
 proto streaming path right now:
 wayland -> xdg-desktop-portal + pipewire -> gstreamer h264 pipeline (`host/scripts/stream_wayland_portal_h264.py`) -> framed bridge (`proto/host/src/main.rs`) -> adb tunnel -> android `MediaCodec` decode/render.
@@ -34,4 +34,4 @@ cut interaction delay further, keep visual stability under portal jitter, and up
 quick start:
 - run `./install-deps` once from repo root.
 - main lane: `./wbeam ...` or `./wbgui`.
-- proto lane: `proto/run.sh`.
+- proto lane: `proto/run.sh` (`--config ...proto.conf` or `--config ...proto.json`).

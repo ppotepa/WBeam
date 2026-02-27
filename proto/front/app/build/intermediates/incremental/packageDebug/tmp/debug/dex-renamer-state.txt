@@ -1,4 +1,0 @@
-#Thu Feb 26 17:11:59 CET 2026
-base.0=/home/ppotepa/git/WBeam/proto/front/app/build/intermediates/dex/debug/mergeDexDebug/classes.dex
-renamed.0=classes.dex
-path.0=classes.dex

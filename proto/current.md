@@ -59,3 +59,14 @@ Glowny cel zadania:
 1. Dalsze profilowanie "end-to-end" (host -> transport -> dekoder -> render) i pomiar opoznien na etapach.
 2. Domkniecie niestabilnych przypadkow startu zrodla (portal/PipeWire), zeby startup byl powtarzalny.
 3. Dalsze strojenie flag domyslnych pod balans: latency vs CPU vs stabilnosc.
+
+## Aktualizacja 2026-02-27 - autotune (5 generacji)
+- Uruchomiony pelny tuning ewolucyjny (`generations=5`, `population=8`, `elite=2`, `mutation=0.35`, `warmup=12s`, `sample=24s`).
+- Kluczowa obserwacja: sam wysoki FPS nie wystarcza; czesc profili miala bardzo dobre `sender_p50`, ale wysoki `timeout_misses` (duzy lag i niestabilnosc).
+- Najlepszy wynik surowy z runu: `g03_05_child5` (`sender_p50=56.5`, ale `timeout_mean=111.7`) - to kandydat szybki, ale ryzykowny interakcyjnie.
+- Profile zblizone FPS (~50) i niskim timeout (`~10-15`) okazaly sie praktycznie lepsze dla responsywnosci.
+
+Wprowadzona korekta autotunera:
+- zmieniony scoring w `proto/autotune.py`: dodatkowa, progowa kara za wysokie `timeout_misses` + kara za jitter (`sender_p50 - sender_p20`),
+- ranking i logi rozszerzone o `tpen` (timeout penalty) i `jitter`,
+- cel: wybierac ustawienia stabilne interakcyjnie, a nie tylko maksymalny peak FPS.

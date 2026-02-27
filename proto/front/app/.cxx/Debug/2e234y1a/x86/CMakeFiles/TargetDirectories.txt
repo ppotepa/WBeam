@@ -1,3 +1,0 @@
-/home/ppotepa/git/WBeam/proto/front/app/.cxx/Debug/2e234y1a/x86/CMakeFiles/wbeam.dir
-/home/ppotepa/git/WBeam/proto/front/app/.cxx/Debug/2e234y1a/x86/CMakeFiles/edit_cache.dir
-/home/ppotepa/git/WBeam/proto/front/app/.cxx/Debug/2e234y1a/x86/CMakeFiles/rebuild_cache.dir

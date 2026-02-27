@@ -1,7 +1,0 @@
-[
-{
-  "directory": "/home/ppotepa/git/WBeam/proto/front/app/.cxx/Debug/2e234y1a/x86",
-  "command": "/home/ppotepa/Android/Sdk/ndk/23.1.7779620/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++ --target=i686-none-linux-android17 --sysroot=/home/ppotepa/Android/Sdk/ndk/23.1.7779620/toolchains/llvm/prebuilt/linux-x86_64/sysroot -DWBEAM_USE_TURBOJPEG=1 -Dwbeam_EXPORTS -I/home/ppotepa/git/WBeam/proto/front/app/src/main/cpp/include -std=c++17 -g  -fno-limit-debug-info -fPIC -o CMakeFiles/wbeam.dir/native_wbeam.cpp.o -c /home/ppotepa/git/WBeam/proto/front/app/src/main/cpp/native_wbeam.cpp",
-  "file": "/home/ppotepa/git/WBeam/proto/front/app/src/main/cpp/native_wbeam.cpp"
-}
-]

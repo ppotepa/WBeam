@@ -1,1 +1,0 @@
-/home/ppotepa/git/WBeam/proto/front/app/build/intermediates/cxx/Debug/2e234y1a/obj/arm64-v8a
