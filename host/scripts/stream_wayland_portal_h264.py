@@ -259,7 +259,10 @@ def pick_encoder(requested):
 
 
 def configure_encoder(enc, encoder_name, bitrate_kbps, fps, nv_preset):
-    gop = max(30, int(fps))
+    # Shorter GOP helps decoder recovery on transient transport damage and reduces
+    # long artifact streaks at the cost of slightly higher bitrate pressure.
+    gop_default = max(15, min(int(fps), 30))
+    gop = max(10, min(240, env_int("WBEAM_H264_GOP", gop_default)))
     if encoder_name == "nvenc":
         enc.set_property("bitrate", int(bitrate_kbps))
         enc.set_property("max-bitrate", int(bitrate_kbps))
