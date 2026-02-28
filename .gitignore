@@ -68,9 +68,7 @@ protocol/logs/**
 
 # Local generated helper files
 all.log
-proto/autotune-results*.json
-proto/autotune-history.json
-proto/config/autotune-best.json
+
 codebase_concat*.txt
 concat*.txt
 ALL_CODE.txt
