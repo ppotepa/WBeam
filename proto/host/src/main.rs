@@ -1828,7 +1828,7 @@ fn start_portal_pipeline_once() -> bool {
     let portal_overlay_text = cfg_var("PROTO_PORTAL_OVERLAY_TEXT").unwrap_or_default();
     let portal_overlay_text_file = cfg_var("PROTO_PORTAL_OVERLAY_TEXT_FILE").unwrap_or_default();
     let portal_overlay_font_desc =
-        cfg_var("PROTO_PORTAL_OVERLAY_FONT_DESC").unwrap_or_else(|_| "Sans Bold 34".to_string());
+        cfg_var("PROTO_PORTAL_OVERLAY_FONT_DESC").unwrap_or_else(|_| "Sans 14".to_string());
     let source_mode = cfg_var("PROTO_PORTAL_JPEG_SOURCE").unwrap_or_else(|_| DEFAULT_PORTAL_SOURCE.to_string());
     let source_framed = env_truthy("PROTO_H264_SOURCE_FRAMED", h264_mode_enabled());
     let portal_persist_mode = cfg_var("PROTO_PORTAL_PERSIST_MODE")

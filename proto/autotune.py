@@ -139,6 +139,56 @@ TUNABLE_VALUES: dict[str, list[Any]] = {
     "PROTO_CAPTURE_BITRATE_KBPS": [5500, 7000, 8500, 10000],
 }
 
+FAST_MODE_TUNABLE_KEYS: set[str] = {
+    # Compression
+    "PROTO_CAPTURE_BITRATE_KBPS",
+    # Transport / pacing
+    "WBEAM_VIDEORATE_DROP_ONLY",
+    "WBEAM_PIPEWIRE_KEEPALIVE_MS",
+    "WBEAM_FRAMED_PULL_TIMEOUT_MS",
+    "WBEAM_QUEUE_MAX_TIME_MS",
+    "WBEAM_APPSINK_MAX_BUFFERS",
+    "PROTO_ADB_WRITE_TIMEOUT_MS",
+    "PROTO_H264_SOURCE_READ_TIMEOUT_MS",
+}
+
+PROFILE_EXPORT_KEYS: list[str] = [
+    "PROTO_CAPTURE_SIZE",
+    "PROTO_CAPTURE_FPS",
+    "PROTO_CAPTURE_BITRATE_KBPS",
+    "PROTO_H264_REORDER",
+    "PROTO_CURSOR_MODE",
+    "PROTO_PORTAL_PERSIST_MODE",
+    "WBEAM_H264_GOP",
+    "WBEAM_VIDEORATE_DROP_ONLY",
+    "WBEAM_FRAMED_DUPLICATE_STALE",
+    "WBEAM_FRAMED_STALE_START_MS",
+    "WBEAM_FRAMED_STALE_DUP_FPS",
+    "WBEAM_PIPEWIRE_KEEPALIVE_MS",
+    "WBEAM_PIPEWIRE_ALWAYS_COPY",
+    "WBEAM_FRAMED_PULL_TIMEOUT_MS",
+    "WBEAM_QUEUE_MAX_BUFFERS",
+    "WBEAM_QUEUE_MAX_TIME_MS",
+    "WBEAM_APPSINK_MAX_BUFFERS",
+    "PROTO_ADB_WRITE_TIMEOUT_MS",
+    "PROTO_H264_SOURCE_READ_TIMEOUT_MS",
+]
+
+PROFILE_VALUE_KEYS: set[str] = {
+    "PROTO_CAPTURE_SIZE",
+    "PROTO_CAPTURE_FPS",
+    "PROTO_CAPTURE_BITRATE_KBPS",
+    "PROTO_H264_REORDER",
+    "PROTO_CURSOR_MODE",
+    "PROTO_PORTAL_PERSIST_MODE",
+}
+
+PROFILE_QUALITY_KEYS: set[str] = {
+    "PROTO_CAPTURE_BITRATE_KBPS",
+    "WBEAM_APPSINK_MAX_BUFFERS",
+    "WBEAM_H264_GOP",
+}
+
 
 @dataclass
 class TrialResult:
@@ -256,6 +306,162 @@ def score_trial(sender_p50: float, sender_p20: float, pipe_p50: float, timeout_m
     )
     total_penalty = timeout_penalty + (jitter * 0.40)
     return fps_score - total_penalty, fps_score, total_penalty, jitter
+
+
+def cfg_int(cfg: dict[str, Any], key: str, default: int = 0) -> int:
+    raw = cfg.get(key, default)
+    try:
+        return int(raw)
+    except Exception:
+        return default
+
+
+def profile_subset_from_cfg(cfg: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key in PROFILE_EXPORT_KEYS:
+        if key in cfg:
+            out[key] = cfg[key]
+    return out
+
+
+def profile_sections_from_cfg(cfg: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    values: dict[str, Any] = {}
+    quality: dict[str, Any] = {}
+    latency: dict[str, Any] = {}
+    for key, value in cfg.items():
+        if key in PROFILE_VALUE_KEYS:
+            values[key] = value
+        if key in PROFILE_QUALITY_KEYS:
+            quality[key] = value
+        if key.startswith("WBEAM_") or key in {"PROTO_ADB_WRITE_TIMEOUT_MS", "PROTO_H264_SOURCE_READ_TIMEOUT_MS"}:
+            latency[key] = value
+    return values, quality, latency
+
+
+def trial_row(result: TrialResult, cfg: dict[str, Any]) -> dict[str, Any]:
+    bitrate = cfg_int(cfg, "PROTO_CAPTURE_BITRATE_KBPS", 0)
+    return {
+        "result": result,
+        "cfg": cfg,
+        "bitrate": float(max(0, bitrate)),
+    }
+
+
+def objective_fast(row: dict[str, Any]) -> float:
+    r = row["result"]
+    return (
+        (r.sender_p50 * 1.00)
+        + (r.sender_p20 * 0.45)
+        + (r.pipe_p50 * 0.20)
+        - (r.timeout_mean * 0.35)
+        - (r.stale_p50 * 1.20)
+        - (r.jitter * 0.35)
+    )
+
+
+def objective_balanced(row: dict[str, Any]) -> float:
+    r = row["result"]
+    return (
+        (r.score * 1.00)
+        - (r.timeout_mean * 0.20)
+        - (r.stale_p50 * 1.00)
+        - (r.jitter * 0.25)
+    )
+
+
+def objective_quality(row: dict[str, Any]) -> float:
+    r = row["result"]
+    bitrate = row["bitrate"]
+    return (
+        (bitrate * 0.004)
+        + (r.sender_p50 * 0.55)
+        + (r.pipe_p50 * 0.25)
+        - (r.timeout_mean * 0.25)
+        - (r.stale_p50 * 1.00)
+        - (r.jitter * 0.20)
+    )
+
+
+def choose_profile_rows(
+    ranked: list[TrialResult],
+    trial_configs: dict[str, dict[str, Any]],
+    profile_min_samples: int,
+    profile_max_timeout_mean: float,
+    profile_max_stale_p50: float,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    rows: list[dict[str, Any]] = []
+    for r in ranked:
+        cfg = trial_configs.get(r.name)
+        if not isinstance(cfg, dict):
+            continue
+        rows.append(trial_row(r, cfg))
+    if not rows:
+        return [], []
+
+    strict: list[dict[str, Any]] = []
+    for row in rows:
+        r = row["result"]
+        if r.score <= -1e7:
+            continue
+        if r.samples < max(1, profile_min_samples):
+            continue
+        if r.timeout_mean > profile_max_timeout_mean:
+            continue
+        if r.stale_p50 > profile_max_stale_p50:
+            continue
+        strict.append(row)
+
+    if strict:
+        return strict, rows
+
+    fallback = [row for row in rows if row["result"].score > -1e7]
+    return (fallback if fallback else rows), rows
+
+
+def pick_unique_profiles(candidates: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    if not candidates:
+        return {}
+
+    used: set[str] = set()
+    picks: dict[str, dict[str, Any]] = {}
+    objectives = [
+        ("fast", objective_fast),
+        ("balanced", objective_balanced),
+        ("quality", objective_quality),
+    ]
+    for name, fn in objectives:
+        pool = [row for row in candidates if row["result"].name not in used]
+        if not pool:
+            pool = list(candidates)
+        pick = max(pool, key=fn)
+        picks[name] = pick
+        used.add(pick["result"].name)
+    return picks
+
+
+def write_profiles_file(
+    path: Path,
+    generated_profiles: dict[str, dict[str, Any]],
+) -> None:
+    if path.exists():
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            doc = {}
+    else:
+        doc = {}
+    if not isinstance(doc, dict):
+        doc = {}
+    profiles = doc.get("profiles")
+    if not isinstance(profiles, dict):
+        profiles = {}
+        doc["profiles"] = profiles
+    if "version" not in doc:
+        doc["version"] = 1
+    for name, payload in generated_profiles.items():
+        profiles[name] = payload
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
 
 
 def config_signature(cfg: dict[str, Any]) -> str:
@@ -460,19 +666,38 @@ def build_overlay_text(
     generation = trial_name.split("_", 1)[0] if "_" in trial_name else trial_name
     fps_text = "--" if current_fps is None else f"{current_fps:.1f}"
     dup_text = "--" if current_dup_fps is None else f"{current_dup_fps:.1f}"
-    line1 = f"{generation} {trial_name}"
-    line2 = f"{phase} fps={fps_text} dup={dup_text}"
-    line3 = f"{overlay_settings_line(cfg)} sc={trend}" if trend else overlay_settings_line(cfg)
+    # Multi-corner HUD payload consumed by streamer:
+    # [TL] phase/time
+    # [TR] generation/trial + settings
+    # [BL] live fps/dup
+    # [BR] score + summary metrics
+    tl = [phase]
+    tr = [f"{generation} {trial_name}", overlay_settings_line(cfg)]
+    if trend:
+        tr.append(f"trend {trend}")
+    bl = [f"fps {fps_text}", f"dup {dup_text}"]
     if live_score is None:
-        line4 = "score=... s50=... raw=... d50=... p50=... t=... n=..."
+        br = ["score ...", "s50 ... raw ...", "d50 ... p50 ...", "t ... n ..."]
     else:
-        line4 = (
-            f"score={live_score:.1f} "
-            f"s50={(sender_p50 or 0.0):.1f} raw={(raw_sender_p50 or 0.0):.1f} "
-            f"d50={(stale_p50 or 0.0):.1f} p50={(pipe_p50 or 0.0):.1f} "
-            f"t={(timeout_mean or 0.0):.1f} n={samples or 0}"
-        )
-    return "\n".join([line1, line2, line3, line4])
+        br = [
+            f"score {live_score:.1f}",
+            f"s50 {(sender_p50 or 0.0):.1f} raw {(raw_sender_p50 or 0.0):.1f}",
+            f"d50 {(stale_p50 or 0.0):.1f} p50 {(pipe_p50 or 0.0):.1f}",
+            f"t {(timeout_mean or 0.0):.1f} n {samples or 0}",
+        ]
+
+    return "\n".join(
+        [
+            "[TL]",
+            *tl,
+            "[TR]",
+            *tr,
+            "[BL]",
+            *bl,
+            "[BR]",
+            *br,
+        ]
+    )
 
 
 def run_trial(
@@ -504,7 +729,7 @@ def run_trial(
     if overlay_enabled:
         trial_cfg["PROTO_PORTAL_OVERLAY_ENABLE"] = 1
         trial_cfg["PROTO_PORTAL_OVERLAY_TEXT_FILE"] = str(overlay_path)
-        trial_cfg["PROTO_PORTAL_OVERLAY_FONT_DESC"] = "Sans 20"
+        trial_cfg["PROTO_PORTAL_OVERLAY_FONT_DESC"] = "Sans 14"
         write_overlay_text(overlay_path, build_overlay_text(name, trial_cfg, "phase=starting"))
     cfg_path.write_text(json.dumps(trial_cfg, indent=2) + "\n", encoding="utf-8")
     try:
@@ -777,6 +1002,11 @@ def run_trial(
 def parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Auto-benchmark proto streaming presets and pick best config")
     p.add_argument("--base-config", default="config/proto.json")
+    p.add_argument(
+        "--capture-size",
+        default=None,
+        help="Override PROTO_CAPTURE_SIZE for this run (example: 1024x640).",
+    )
     p.add_argument("--generations", type=int, default=1)
     p.add_argument("--population", type=int, default=7)
     p.add_argument("--elite-count", type=int, default=2)
@@ -801,6 +1031,26 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--history-seed-count", type=int, default=4)
     p.add_argument("--history-max-entries", type=int, default=300)
     p.add_argument("--best-config-out", default="config/autotune-best.json")
+    p.add_argument("--profiles-out", default="config/profiles.json")
+    p.add_argument(
+        "--export-profiles",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Export 3 auto profiles (fast/balanced/quality) to profiles-out.",
+    )
+    p.add_argument("--profile-fast-name", default="fast_auto")
+    p.add_argument("--profile-balanced-name", default="balanced_auto")
+    p.add_argument("--profile-quality-name", default="quality_auto")
+    p.add_argument(
+        "--profile-name",
+        "--profilename",
+        dest="profile_name",
+        default="",
+        help="Export only one profile with this name (uses best trial).",
+    )
+    p.add_argument("--profile-min-samples", type=int, default=12)
+    p.add_argument("--profile-max-timeout-mean", type=float, default=25.0)
+    p.add_argument("--profile-max-stale-p50", type=float, default=3.0)
     p.add_argument(
         "--fps",
         type=int,
@@ -827,6 +1077,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Reuse portal restore token so source selection is typically needed only once across runs.",
     )
     p.add_argument("--host-only", action="store_true", help="Benchmark host/backend only (skip APK build/install).")
+    p.add_argument(
+        "--fast-mode",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Speed-oriented training mode: lock resolution/FPS and mutate only compression + transport knobs. "
+            "Also forces reuse-device + single-portal-consent."
+        ),
+    )
     p.add_argument("--apply-best", action="store_true")
     return p.parse_args(argv)
 
@@ -863,6 +1122,9 @@ def main(argv: list[str]) -> int:
     log(f"results dir: {out_dir}")
     history_path = (proto_dir / args.history_file).resolve()
     best_config_out = (proto_dir / args.best_config_out).resolve()
+    profiles_out = (proto_dir / args.profiles_out).resolve()
+    capture_size_override = (args.capture_size or "").strip()
+    fast_mode = bool(args.fast_mode)
 
     rng = random.Random(args.seed)
     generations = max(1, int(args.generations))
@@ -874,18 +1136,39 @@ def main(argv: list[str]) -> int:
     gate_min_sender_p50 = max(0.0, float(args.gate_min_sender_p50))
     gate_min_pipe_p50 = max(0.0, float(args.gate_min_pipe_p50))
     gate_max_timeout_mean = max(0.0, float(args.gate_max_timeout_mean))
+    export_profiles = bool(args.export_profiles)
+    profile_fast_name = str(args.profile_fast_name).strip() or "fast_auto"
+    profile_balanced_name = str(args.profile_balanced_name).strip() or "balanced_auto"
+    profile_quality_name = str(args.profile_quality_name).strip() or "quality_auto"
+    profile_name_single = str(args.profile_name).strip()
+    profile_min_samples = max(1, int(args.profile_min_samples))
+    profile_max_timeout_mean = max(0.0, float(args.profile_max_timeout_mean))
+    profile_max_stale_p50 = max(0.0, float(args.profile_max_stale_p50))
     require_portal_metrics = bool(args.require_portal_metrics)
+    if capture_size_override:
+        base_cfg["PROTO_CAPTURE_SIZE"] = capture_size_override
     forced_fps = int(args.fps) if args.fps is not None else None
     if forced_fps is not None:
         base_cfg["PROTO_CAPTURE_FPS"] = forced_fps
     show_overlay = bool(args.overlay)
     single_portal_consent = bool(args.single_portal_consent)
+    requested_reuse_device = bool(args.reuse_device)
+    if fast_mode:
+        if not requested_reuse_device:
+            log("fast-mode: forcing --reuse-device")
+        requested_reuse_device = True
+        if not single_portal_consent:
+            log("fast-mode: forcing --single-portal-consent")
+        single_portal_consent = True
     log(
         "settings: "
         f"gen={generations} pop={population} elite={elite_count} mut={mutation_rate:.2f} "
         f"warmup={max(0, args.warmup_secs)}s sample={max(5, args.sample_secs)}s "
-        f"reuse_device={bool(args.reuse_device)} host_only={bool(args.host_only)} "
+        f"reuse_device={requested_reuse_device} host_only={bool(args.host_only)} "
         f"overlay={show_overlay} single_portal_consent={single_portal_consent} "
+        f"fast_mode={fast_mode} capture_size={base_cfg.get('PROTO_CAPTURE_SIZE', '')} "
+        f"export_profiles={export_profiles} "
+        f"single_profile_name={profile_name_single or '-'} "
         f"forced_fps={forced_fps if forced_fps is not None else 'auto'} "
         f"gate(sender>={gate_min_sender_p50:.1f},pipe>={gate_min_pipe_p50:.1f},timeout<={gate_max_timeout_mean:.1f},portal={require_portal_metrics})"
     )
@@ -894,7 +1177,13 @@ def main(argv: list[str]) -> int:
     frozen_keys: set[str] = set()
     if forced_fps is not None:
         frozen_keys.add("PROTO_CAPTURE_FPS")
-    if not benchmark_host_only and bool(args.reuse_device):
+    if fast_mode:
+        # Keep capture session stable across trials (no resolution/FPS swapping).
+        frozen_keys.add("PROTO_CAPTURE_SIZE")
+        frozen_keys.add("PROTO_CAPTURE_FPS")
+        # Mutate only transport/compression knobs while benchmarking.
+        frozen_keys.update(set(TUNABLE_VALUES.keys()) - set(FAST_MODE_TUNABLE_KEYS))
+    if not benchmark_host_only and requested_reuse_device:
         try:
             prepare_device_once(
                 proto_dir=proto_dir,
@@ -927,6 +1216,8 @@ def main(argv: list[str]) -> int:
 
     limit = max(1, min(args.max_presets, len(PRESETS)))
     tunable_keys = [k for k in TUNABLE_VALUES.keys() if k not in frozen_keys]
+    if fast_mode:
+        log("fast-mode: tunable keys = " + ", ".join(tunable_keys))
     seed_presets = PRESETS[:limit]
     candidates: list[tuple[str, dict[str, Any]]] = []
     seen_sigs: set[str] = set()
@@ -1123,6 +1414,120 @@ def main(argv: list[str]) -> int:
     merged_history = history_entries + run_entries
     save_history(history_path, merged_history, history_max_entries)
 
+    generated_profiles: dict[str, dict[str, Any]] = {}
+    generated_profile_meta: dict[str, dict[str, Any]] = {}
+    if export_profiles:
+        now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        if profile_name_single:
+            subset = profile_subset_from_cfg(best_cfg)
+            values, quality, latency = profile_sections_from_cfg(subset)
+            generated_profiles[profile_name_single] = {
+                "description": (
+                    f"Auto-generated single profile from autotune run {stamp}. "
+                    f"Uses best trial '{best.name}'. Do not edit manually."
+                ),
+                "origin": {
+                    "generated_at": now_iso,
+                    "run_stamp": stamp,
+                    "mode": "single-best",
+                    "trial": best.name,
+                    "score": round(best.score, 4),
+                    "sender_p50": round(best.sender_p50, 4),
+                    "sender_p20": round(best.sender_p20, 4),
+                    "pipe_p50": round(best.pipe_p50, 4),
+                    "timeout_mean": round(best.timeout_mean, 4),
+                    "stale_p50": round(best.stale_p50, 4),
+                    "samples": int(best.samples),
+                },
+                "values": values,
+                "quality": quality,
+                "latency": latency,
+            }
+            generated_profile_meta["single"] = {
+                "profile_name": profile_name_single,
+                "trial": best.name,
+                "score": best.score,
+                "sender_p50": best.sender_p50,
+                "pipe_p50": best.pipe_p50,
+                "timeout_mean": best.timeout_mean,
+                "stale_p50": best.stale_p50,
+                "samples": best.samples,
+            }
+        else:
+            candidates, _all_rows = choose_profile_rows(
+                ranked=ranked,
+                trial_configs=trial_configs,
+                profile_min_samples=profile_min_samples,
+                profile_max_timeout_mean=profile_max_timeout_mean,
+                profile_max_stale_p50=profile_max_stale_p50,
+            )
+            picks = pick_unique_profiles(candidates)
+            objective_map = {
+                "fast": objective_fast,
+                "balanced": objective_balanced,
+                "quality": objective_quality,
+            }
+            output_name_map = {
+                "fast": profile_fast_name,
+                "balanced": profile_balanced_name,
+                "quality": profile_quality_name,
+            }
+            for tier in ("fast", "balanced", "quality"):
+                pick = picks.get(tier)
+                if pick is None:
+                    continue
+                r: TrialResult = pick["result"]
+                cfg: dict[str, Any] = pick["cfg"]
+                subset = profile_subset_from_cfg(cfg)
+                values, quality, latency = profile_sections_from_cfg(subset)
+                objective_value = objective_map[tier](pick)
+                profile_name = output_name_map[tier]
+                generated_profiles[profile_name] = {
+                    "description": (
+                        f"Auto-generated {tier} profile from autotune run {stamp}. "
+                        f"Do not edit manually."
+                    ),
+                    "origin": {
+                        "generated_at": now_iso,
+                        "run_stamp": stamp,
+                        "trial": r.name,
+                        "objective": round(objective_value, 4),
+                        "score": round(r.score, 4),
+                        "sender_p50": round(r.sender_p50, 4),
+                        "sender_p20": round(r.sender_p20, 4),
+                        "pipe_p50": round(r.pipe_p50, 4),
+                        "timeout_mean": round(r.timeout_mean, 4),
+                        "stale_p50": round(r.stale_p50, 4),
+                        "samples": int(r.samples),
+                    },
+                    "values": values,
+                    "quality": quality,
+                    "latency": latency,
+                }
+                generated_profile_meta[tier] = {
+                    "profile_name": profile_name,
+                    "trial": r.name,
+                    "objective": objective_value,
+                    "score": r.score,
+                    "sender_p50": r.sender_p50,
+                    "pipe_p50": r.pipe_p50,
+                    "timeout_mean": r.timeout_mean,
+                    "stale_p50": r.stale_p50,
+                    "samples": r.samples,
+                }
+        if generated_profiles:
+            write_profiles_file(profiles_out, generated_profiles)
+            log(
+                "wrote auto profiles: "
+                + ", ".join(
+                    f"{tier}={meta['profile_name']}({meta['trial']})"
+                    for tier, meta in generated_profile_meta.items()
+                )
+            )
+            log(f"profiles file updated: {profiles_out}")
+        else:
+            log("warning: auto profile export requested but no eligible trials were available")
+
     run_ended_utc = datetime.now(timezone.utc)
     run_duration_sec = time.monotonic() - run_started_mono
 
@@ -1135,6 +1540,18 @@ def main(argv: list[str]) -> int:
         "out_dir": str(out_dir),
         "history_file": str(history_path),
         "best_config_out": str(best_config_out),
+        "profiles_out": str(profiles_out),
+        "export_profiles": export_profiles,
+        "profile_fast_name": profile_fast_name,
+        "profile_balanced_name": profile_balanced_name,
+        "profile_quality_name": profile_quality_name,
+        "profile_name_single": profile_name_single,
+        "profile_min_samples": profile_min_samples,
+        "profile_max_timeout_mean": profile_max_timeout_mean,
+        "profile_max_stale_p50": profile_max_stale_p50,
+        "fast_mode": fast_mode,
+        "capture_size_override": capture_size_override,
+        "fast_mode_tunable_keys": sorted(k for k in tunable_keys if k in FAST_MODE_TUNABLE_KEYS),
         "generations": generations,
         "population": population,
         "elite_count": elite_count,
@@ -1153,6 +1570,7 @@ def main(argv: list[str]) -> int:
         "history_seed_count": history_seed_count,
         "history_entries_loaded": len(history_entries),
         "history_entries_written": min(len(merged_history), history_max_entries),
+        "generated_profiles": generated_profile_meta,
         "generation_summaries": generation_summaries,
         "results": [
             {
@@ -1232,6 +1650,19 @@ def main(argv: list[str]) -> int:
     print("")
     print(f"Best trial: {best.name} (trial config: {best.config_path})")
     print(f"Best config snapshot: {best_config_out}")
+    if generated_profile_meta:
+        print("")
+        print("Auto profiles:")
+        for tier in ("single", "fast", "balanced", "quality"):
+            meta = generated_profile_meta.get(tier)
+            if not meta:
+                continue
+            print(
+                f"- {tier}: {meta['profile_name']} <= {meta['trial']} "
+                f"(s50={meta['sender_p50']:.1f}, p50={meta['pipe_p50']:.1f}, "
+                f"timeout={meta['timeout_mean']:.1f}, stale={meta['stale_p50']:.1f})"
+            )
+        print(f"Profiles file: {profiles_out}")
 
     if args.apply_best:
         base_path.write_text(json.dumps(best_cfg, indent=2) + "\n", encoding="utf-8")
