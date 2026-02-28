@@ -1,4 +1,8 @@
 wbeam is an open-source usb second-screen project.
+the reason i decided to pick it up is that i need a 4th small monitor for terminal outputs,
+and i found bad boi lying around called Lenovo S0000-H with Android API 17 so this is quite challanging
+
+otherwise i would not decide to do it as there are already existing solutions( not necesairly screen extensions but rather more of pen and tablet support via andorid tablet)
 idea is simple: plug an android tablet/phone into linux and use it like an extra display with low lag.
 
 this repo has two active lanes:
