@@ -2,6 +2,7 @@
 import argparse
 import os
 import random
+import re
 import signal
 import socket
 import struct
@@ -533,15 +534,35 @@ def make_pipeline(
     scale = Gst.ElementFactory.make("videoscale", "scale")
     rate = Gst.ElementFactory.make("videorate", "rate")
     caps1 = Gst.ElementFactory.make("capsfilter", "caps1")
-    overlay = None
+    overlays = []
     overlay_enabled = (
         env_flag("WBEAM_OVERLAY_ENABLE", False)
         or bool(os.getenv("WBEAM_OVERLAY_TEXT", "").strip())
         or bool(os.getenv("WBEAM_OVERLAY_TEXT_FILE", "").strip())
     )
     if overlay_enabled:
-        overlay = Gst.ElementFactory.make("textoverlay", "hud")
-        if overlay is None:
+        # 4-corner HUD layout:
+        # - TL: phase/time
+        # - TR: generation/trial/settings
+        # - BL: live fps/dup (separate corner for quick glance)
+        # - BR: score + summary metrics
+        overlay_specs = [
+            ("hud_tl", 0, 0, 8, 8),
+            ("hud_tr", 2, 0, 8, 8),
+            ("hud_bl", 0, 2, 8, 8),
+            ("hud_br", 2, 2, 8, 8),
+        ]
+        for name, halign, valign, xpad, ypad in overlay_specs:
+            ov = Gst.ElementFactory.make("textoverlay", name)
+            if ov is None:
+                overlays = []
+                break
+            set_if_supported(ov, "halignment", halign)
+            set_if_supported(ov, "valignment", valign)
+            set_if_supported(ov, "xpad", xpad)
+            set_if_supported(ov, "ypad", ypad)
+            overlays.append(ov)
+        if not overlays:
             print("[warn] textoverlay element unavailable; HUD overlay disabled", file=sys.stderr)
             overlay_enabled = False
     tee = Gst.ElementFactory.make("tee", "tee")
@@ -557,8 +578,8 @@ def make_pipeline(
         sink = Gst.ElementFactory.make("tcpserversink", "sink")
 
     elements = [src, queue, convert, scale, rate, caps1]
-    if overlay is not None:
-        elements.append(overlay)
+    if overlays:
+        elements.extend(overlays)
     elements.extend([tee, queue_main, enc, parse, caps2, sink])
     if any(e is None for e in elements):
         element_names = [
@@ -570,7 +591,7 @@ def make_pipeline(
             "capsfilter",
         ]
         if overlay_enabled:
-            element_names.append("textoverlay")
+            element_names.extend(["textoverlay(hud_tl)", "textoverlay(hud_tr)", "textoverlay(hud_bl)", "textoverlay(hud_br)"])
         element_names.extend(
             [
                 "tee",
@@ -613,18 +634,17 @@ def make_pipeline(
             f"video/x-raw,format={raw_format},width={width},height={height},framerate={fps}/1"
         ),
     )
-    if overlay is not None:
+    if overlays:
         overlay_text = os.getenv("WBEAM_OVERLAY_TEXT", "").strip() or "AUTOTUNE"
-        overlay_font = os.getenv("WBEAM_OVERLAY_FONT_DESC", "Sans 16").strip() or "Sans 16"
-        set_if_supported(overlay, "text", overlay_text)
-        set_if_supported(overlay, "font-desc", overlay_font)
-        set_if_supported(overlay, "shaded-background", True)
-        set_if_supported(overlay, "draw-shadow", True)
-        # left-bottom corner (enums accepted as ints by GI)
-        set_if_supported(overlay, "halignment", 0)
-        set_if_supported(overlay, "valignment", 2)
-        set_if_supported(overlay, "xpad", 8)
-        set_if_supported(overlay, "ypad", 8)
+        overlay_font = os.getenv("WBEAM_OVERLAY_FONT_DESC", "Sans 14").strip() or "Sans 14"
+        for ov in overlays:
+            set_if_supported(ov, "font-desc", overlay_font)
+            set_if_supported(ov, "shaded-background", True)
+            set_if_supported(ov, "draw-shadow", True)
+            set_if_supported(ov, "text", "")
+        # Backward-compatible fallback when no sectioned text is provided.
+        if overlays:
+            set_if_supported(overlays[1], "text", overlay_text)  # TR
 
     configure_encoder(enc, encoder_name, bitrate_kbps, fps, nv_preset)
     # Responsiveness-first default: allow videorate to duplicate when source is sparse.
@@ -674,11 +694,14 @@ def make_pipeline(
     ]:
         if not a.link(b):
             raise RuntimeError(f"Failed to link {a.get_name()} -> {b.get_name()}")
-    if overlay is not None:
-        if not caps1.link(overlay):
-            raise RuntimeError(f"Failed to link {caps1.get_name()} -> {overlay.get_name()}")
-        if not overlay.link(tee):
-            raise RuntimeError(f"Failed to link {overlay.get_name()} -> {tee.get_name()}")
+    if overlays:
+        prev = caps1
+        for ov in overlays:
+            if not prev.link(ov):
+                raise RuntimeError(f"Failed to link {prev.get_name()} -> {ov.get_name()}")
+            prev = ov
+        if not prev.link(tee):
+            raise RuntimeError(f"Failed to link {prev.get_name()} -> {tee.get_name()}")
     else:
         if not caps1.link(tee):
             raise RuntimeError(f"Failed to link {caps1.get_name()} -> {tee.get_name()}")
@@ -878,25 +901,66 @@ def main():
 
     overlay_file = os.getenv("WBEAM_OVERLAY_TEXT_FILE", "").strip()
     if overlay_file:
-        overlay_element = pipeline.get_by_name("hud")
-        if overlay_element is not None:
+        overlay_elements = {
+            "TL": pipeline.get_by_name("hud_tl"),
+            "TR": pipeline.get_by_name("hud_tr"),
+            "BL": pipeline.get_by_name("hud_bl"),
+            "BR": pipeline.get_by_name("hud_br"),
+        }
+        if any(v is not None for v in overlay_elements.values()):
             print(f"[wbeam] Overlay text source: {overlay_file}", flush=True)
-            overlay_state = {"last": ""}
+            overlay_state = {"TL": "", "TR": "", "BL": "", "BR": ""}
+
+            def _parse_overlay_sections(raw_text: str) -> dict[str, str]:
+                text = raw_text.replace("\r\n", "\n").replace("\r", "\n").strip()
+                out = {"TL": "", "TR": "", "BL": "", "BR": ""}
+                if not text:
+                    return out
+
+                section_rx = re.compile(r"^\[(TL|TR|BL|BR)\]\s*$", re.IGNORECASE)
+                lines = text.split("\n")
+                current = None
+                buckets = {"TL": [], "TR": [], "BL": [], "BR": []}
+                section_count = 0
+                for line in lines:
+                    m = section_rx.match(line.strip())
+                    if m:
+                        current = m.group(1).upper()
+                        section_count += 1
+                        continue
+                    if current is not None:
+                        buckets[current].append(line.rstrip())
+
+                if section_count > 0:
+                    for key in out:
+                        out[key] = "\n".join(buckets[key]).strip()
+                    return out
+
+                # Backward compatibility: old 1-block overlay goes to TR.
+                out["TR"] = text
+                return out
 
             def _refresh_overlay_text():
                 try:
-                    text = Path(overlay_file).read_text(encoding="utf-8", errors="replace").strip()
+                    text = Path(overlay_file).read_text(encoding="utf-8", errors="replace")
                 except FileNotFoundError:
                     return True
                 except Exception as exc:
                     print(f"[warn] failed to read overlay text {overlay_file}: {exc}", file=sys.stderr)
                     return True
-                if text and text != overlay_state["last"]:
+
+                sections = _parse_overlay_sections(text)
+                for key, elem in overlay_elements.items():
+                    if elem is None:
+                        continue
+                    new_text = sections.get(key, "")
+                    if new_text == overlay_state[key]:
+                        continue
                     try:
-                        overlay_element.set_property("text", text)
-                        overlay_state["last"] = text
+                        elem.set_property("text", new_text)
+                        overlay_state[key] = new_text
                     except Exception as exc:
-                        print(f"[warn] failed to set overlay text: {exc}", file=sys.stderr)
+                        print(f"[warn] failed to set overlay text ({key}): {exc}", file=sys.stderr)
                 return True
 
             _refresh_overlay_text()
