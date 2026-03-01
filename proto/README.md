@@ -36,6 +36,27 @@ ENV overrides są zablokowane (np. `PROTO_*=... ./run.sh` zakończy się błęde
 
 `run.sh` robi flow w tej kolejności: build APK -> install APK -> launch Android app -> start backend (`rust`).
 
+### Desktop Control App (tray + dashboard)
+
+- Recommended: run global desktop app from repo root with `./desktop.sh`.
+- Backward-compatible wrapper still works from `proto/`: `./desktop.sh`.
+- Dashboard features:
+  - Detects runtime platform (`windows/linux/macos`) and Linux session (`wayland/x11/unknown`).
+  - Shows connected ADB devices list (serial/state/model/transport).
+  - Shows live streamer stats (`pipeline_fps`, `sender_fps`, `timeout_misses`, `stale_dupe`, `seq`) from `/tmp/proto-portal-streamer.log`.
+  - `Extended stats` mode shows parsed `WBH1 stats` in tabular form (`units/fps/mbps/avg_kb/min_kb/max_kb/key_pct/lat/seq`).
+    - Source priority: `/tmp/proto-runner.log` (when launched from desktop UI), then portal log.
+  - `Status Monitor` is permanently docked in the main window and shows key events (`run/save/manual refresh/low fps/high timeout/stall`) with severity labels.
+  - Lets you edit and save core settings to canonical `config/proto.json`:
+    - `PROTO_CAPTURE_BACKEND`
+    - `PROTO_CAPTURE_FPS`
+    - `PROTO_CAPTURE_BITRATE_KBPS`
+  - Has action buttons to start runtime from desktop:
+    - `Run` (Rust launcher -> `run.py`, with fallback to `run.sh`)
+    - `Run host only (Rust)` (`cargo run` on `proto/host`)
+- Implemented as Rust + `egui` (`desktop/desktop-egui`) for cross-platform desktop support.
+- Current scope is dashboard window first (tray integration can be added on top with `tray-icon` crate).
+
 ### Profiles (versioned presets)
 
 - Profiles file: `proto/config/profiles.json`.
