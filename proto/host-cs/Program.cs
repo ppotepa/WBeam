@@ -527,7 +527,7 @@ internal sealed record RelayConfig(
         {
             return fromConfig.Trim();
         }
-        return Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "../../host/scripts/stream_wayland_portal_h264.py"));
+        return Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "../../src/host/scripts/stream_wayland_portal_h264.py"));
     }
 
     private static Dictionary<string, string> LoadConfig(string path)

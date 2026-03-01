@@ -16,14 +16,14 @@ use wbeamd_api::ActiveConfig;
 
 /// Build the command to launch the streamer for `cfg`.
 ///
-/// Prefers the compiled Rust binary at `<root>/host/rust/target/release/wbeamd-streamer`.
+/// Prefers the compiled Rust binary at `<root>/src/host/rust/target/release/wbeamd-streamer`.
 /// Falls back to the Python helper when the binary is absent.
 pub fn build_streamer_command(
     root: &Path,
     cfg: &ActiveConfig,
     stream_port: u16,
 ) -> (Command, bool) {
-    let rust_bin = root.join("host/rust/target/release/wbeamd-streamer");
+    let rust_bin = root.join("src/host/rust/target/release/wbeamd-streamer");
     let use_rust = rust_bin.exists();
 
     let mut cmd = if use_rust {
@@ -49,7 +49,7 @@ pub fn build_streamer_command(
         }
         c
     } else {
-        let script = root.join("host/scripts/stream_wayland_portal_h264.py");
+        let script = root.join("src/host/scripts/stream_wayland_portal_h264.py");
         let mut c = Command::new("python3");
         c.arg("-u")
             .arg(script)
@@ -112,7 +112,7 @@ pub fn build_revision() -> String {
 
 /// Resolve the path to the Rust streamer binary.
 pub fn rust_streamer_bin(root: &Path) -> PathBuf {
-    root.join("host/rust/target/release/wbeamd-streamer")
+    root.join("src/host/rust/target/release/wbeamd-streamer")
 }
 
 #[cfg(test)]

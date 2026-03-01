@@ -14,7 +14,7 @@ rm -f "$OUT_FILE"
 } >> "$OUT_FILE"
 
 find . -type f \
-  \( -path './android/*' -o -path './host/*' -o -path './protocol/*' \) \
+  \( -path './android/*' -o -path './src/host/*' -o -path './src/protocol/*' \) \
   \( -name '*.rs' -o -name '*.toml' -o -name '*.py' -o -name '*.java' -o -name '*.kt' -o -name '*.kts' -o -name '*.xml' -o -name '*.gradle' -o -name '*.properties' -o -name '*.pro' \) \
   ! -path '*/build/*' \
   ! -path '*/target/*' \

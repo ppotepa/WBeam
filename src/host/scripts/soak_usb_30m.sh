@@ -22,8 +22,8 @@ MAX_STARTING_SEC="${MAX_STARTING_SEC:-60}"
 ACTIVE_SCENE_MIN_BPS="${ACTIVE_SCENE_MIN_BPS:-1500000}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-LOG_DIR="${WBEAM_SOAK_LOG_DIR:-$ROOT_DIR/host/rust/logs/soak}"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+LOG_DIR="${WBEAM_SOAK_LOG_DIR:-$ROOT_DIR/src/host/rust/logs/soak}"
 mkdir -p "$LOG_DIR"
 TS="$(date +%Y%m%d-%H%M%S)"
 LOG_FILE="$LOG_DIR/soak-usb-$TS.log"
@@ -61,7 +61,7 @@ while [[ "$(date +%s)" -lt "$deadline" ]]; do
     metrics_missing_streak=$((metrics_missing_streak + POLL_SEC))
     echo "[soak] WARN metrics unavailable streak=${metrics_missing_streak}s" | tee -a "$LOG_FILE"
     if (( metrics_missing_streak == 3 )); then
-      echo "[soak] hint: daemon API not reachable on :${CONTROL_PORT}; use ./host/scripts/run_soak_local.sh ${DURATION_SEC} ${CONTROL_PORT} ${STREAM_PORT}" \
+      echo "[soak] hint: daemon API not reachable on :${CONTROL_PORT}; use ./src/host/scripts/run_soak_local.sh ${DURATION_SEC} ${CONTROL_PORT} ${STREAM_PORT}" \
         | tee -a "$LOG_FILE"
     fi
     if (( metrics_missing_streak >= MAX_METRICS_MISSING_SEC )); then

@@ -29,7 +29,7 @@ Aktualnie pracujemy nad **responsywnoscia aplikacji**:
 - testy runtime: w udanym przebiegu ~24-29 FPS; nadal wystepuja incydentalne problemy startu zrodla portal/PipeWire.
 
 5. Korekta pod lekka regresje FPS (dzisiaj):
-- ograniczenie "stale duplicate burst" w `host/scripts/stream_wayland_portal_h264.py` (duplikaty sa teraz pace'owane do docelowego FPS zamiast wysylki >100 FPS),
+- ograniczenie "stale duplicate burst" w `src/host/scripts/stream_wayland_portal_h264.py` (duplikaty sa teraz pace'owane do docelowego FPS zamiast wysylki >100 FPS),
 - przekazanie brakujacych flag `WBEAM_PIPEWIRE_*` i `WBEAM_FRAMED_PULL_TIMEOUT_MS` z `proto/host/src/main.rs` do procesu streamera,
 - strojenie domyslne w `proto/config/proto.conf`: `WBEAM_VIDEORATE_DROP_ONLY=1`, `WBEAM_PIPEWIRE_ALWAYS_COPY=0`, `WBEAM_FRAMED_PULL_TIMEOUT_MS=20`.
 - cel: zmniejszyc przeciazenie dekodera i odzyskac stabilny realny FPS.

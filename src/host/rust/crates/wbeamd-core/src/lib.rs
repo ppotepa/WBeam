@@ -167,7 +167,7 @@ impl DaemonCore {
             .and_then(|h| h.into_string().ok())
             .unwrap_or_else(|| "unknown-host".to_string());
 
-        let runtime_config_path = root.join("host/rust/config/runtime_state.json");
+        let runtime_config_path = root.join("src/host/rust/config/runtime_state.json");
         let active_config = config_store::load_runtime_config(&runtime_config_path)
             .unwrap_or_else(ActiveConfig::balanced_default);
 
@@ -685,7 +685,7 @@ impl DaemonCore {
         let rust_streamer_bin = std::env::var("WBEAM_RUST_STREAMER_BIN")
             .ok()
             .map(PathBuf::from)
-            .unwrap_or_else(|| self.root.join("host/rust/target/release/wbeamd-streamer"));
+            .unwrap_or_else(|| self.root.join("src/host/rust/target/release/wbeamd-streamer"));
 
         let mut cmd;
         if use_rust_streamer {
@@ -725,7 +725,7 @@ impl DaemonCore {
             }
         } else {
             warn!("WBEAM_USE_RUST_STREAMER=false – using legacy python streamer");
-            let stream_script = self.root.join("host/scripts/stream_wayland_portal_h264.py");
+            let stream_script = self.root.join("src/host/scripts/stream_wayland_portal_h264.py");
             cmd = Command::new("python3");
             cmd.arg("-u")
                 .arg(stream_script)

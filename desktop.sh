@@ -2,4 +2,4 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-exec cargo run --manifest-path "$ROOT_DIR/desktop/desktop-egui/Cargo.toml" -- "$@"
+exec cargo run --manifest-path "$ROOT_DIR/src/apps/desktop-egui/Cargo.toml" -- "$@"

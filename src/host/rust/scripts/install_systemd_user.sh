@@ -2,8 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-UNIT_TEMPLATE="$ROOT_DIR/host/rust/systemd/wbeamd-rust.service.template"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+UNIT_TEMPLATE="$ROOT_DIR/src/host/rust/systemd/wbeamd-rust.service.template"
 
 CONTROL_PORT="${1:-5001}"
 STREAM_PORT="${2:-5000}"
@@ -22,16 +22,16 @@ UNIT_DIR="$HOME/.config/systemd/user"
 mkdir -p "$BIN_DIR" "$UNIT_DIR"
 
 echo "[wbeam] building release binary..."
-cargo build --release --manifest-path "$ROOT_DIR/host/rust/Cargo.toml" -p wbeamd-server
+cargo build --release --manifest-path "$ROOT_DIR/src/host/rust/Cargo.toml" -p wbeamd-server
 
-install -m 755 "$ROOT_DIR/host/rust/target/release/wbeamd-server" "$BIN_DIR/wbeamd-rust"
+install -m 755 "$ROOT_DIR/src/host/rust/target/release/wbeamd-server" "$BIN_DIR/wbeamd-rust"
 
 cat > "$BIN_DIR/wbeam-usb-reverse.sh" <<USBREV
 #!/usr/bin/env bash
 set -euo pipefail
 STREAM_PORT="\${1:-$STREAM_PORT}"
 CONTROL_PORT="\${2:-$CONTROL_PORT}"
-"$ROOT_DIR/host/scripts/usb_reverse.sh" "\$STREAM_PORT"
+"$ROOT_DIR/src/host/scripts/usb_reverse.sh" "\$STREAM_PORT"
 adb reverse "tcp:\${CONTROL_PORT}" "tcp:\${CONTROL_PORT}"
 USBREV
 chmod +x "$BIN_DIR/wbeam-usb-reverse.sh"

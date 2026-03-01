@@ -41,9 +41,9 @@ Task-IDs: A1, A2
 
 | Queue | Max frames | Policy | Location |
 |-------|-----------|--------|----------|
-| GStreamer q1 | 2 | leaky=downstream | host/scripts/stream_wayland_portal_h264.py |
-| GStreamer qmain | 2 | leaky=downstream | host/scripts/stream_wayland_portal_h264.py |
-| GStreamer qdbg | 1 | leaky=downstream | host/scripts/stream_wayland_portal_h264.py |
+| GStreamer q1 | 2 | leaky=downstream | src/host/scripts/stream_wayland_portal_h264.py |
+| GStreamer qmain | 2 | leaky=downstream | src/host/scripts/stream_wayland_portal_h264.py |
+| GStreamer qdbg | 1 | leaky=downstream | src/host/scripts/stream_wayland_portal_h264.py |
 | Android transport | 3 | drop latest | android/.../MainActivity.java |
 | Android decode | 2 | drop latest | android/.../MainActivity.java |
 | Android render | 1 | latest-frame-wins | android/.../MainActivity.java |

@@ -7,10 +7,10 @@ export LANG=C
 # Starts host daemon via run_wbeamd.sh if /v1/health is not reachable.
 #
 # Usage:
-#   ./host/scripts/run_soak_local.sh [duration_sec] [control_port] [stream_port]
+#   ./src/host/scripts/run_soak_local.sh [duration_sec] [control_port] [stream_port]
 #
 # Example:
-#   ./host/scripts/run_soak_local.sh 1800 5001 5000
+#   ./src/host/scripts/run_soak_local.sh 1800 5001 5000
 
 DURATION_SEC="${1:-1800}"
 CONTROL_PORT="${2:-5001}"
@@ -26,8 +26,8 @@ SOAK_FPS="${SOAK_FPS:-}"
 SOAK_BITRATE_KBPS="${SOAK_BITRATE_KBPS:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-LOG_DIR="${WBEAM_SOAK_LOG_DIR:-$ROOT_DIR/host/rust/logs/soak}"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+LOG_DIR="${WBEAM_SOAK_LOG_DIR:-$ROOT_DIR/src/host/rust/logs/soak}"
 mkdir -p "$LOG_DIR"
 TS="$(date +%Y%m%d-%H%M%S)"
 DAEMON_LOG="$LOG_DIR/wbeamd-local-$TS.log"

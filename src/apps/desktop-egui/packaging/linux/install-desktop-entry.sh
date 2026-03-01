@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "$0")/../../../../.." && pwd)"
 APP_DIR="${HOME}/.local/share/applications"
 ICON_DIR="${HOME}/.local/share/icons/hicolor/512x512/apps"
 
 mkdir -p "$APP_DIR" "$ICON_DIR"
-install -m 0644 "$ROOT_DIR/assets/wbeam.png" "$ICON_DIR/wbeam-desktop.png"
+install -m 0644 "$ROOT_DIR/src/assets/wbeam.png" "$ICON_DIR/wbeam-desktop.png"
 
 cat > "$APP_DIR/wbeam-desktop.desktop" <<DESKTOP
 [Desktop Entry]

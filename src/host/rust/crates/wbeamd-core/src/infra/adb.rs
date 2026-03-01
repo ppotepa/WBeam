@@ -38,7 +38,7 @@ pub fn ensure_stream_port_available(stream_port: u16) -> Result<(), String> {
 pub async fn ensure_usb_reverse(root: &Path, stream_port: u16, control_port: u16, reason: &str) {
     tracing::info!(reason, "refreshing adb reverse mappings");
 
-    let script = root.join("host/scripts/usb_reverse.sh");
+    let script = root.join("src/host/scripts/usb_reverse.sh");
     match Command::new(&script)
         .arg(stream_port.to_string())
         .stdout(Stdio::null())

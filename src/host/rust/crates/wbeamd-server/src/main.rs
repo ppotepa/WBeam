@@ -46,7 +46,7 @@ async fn main() {
     let log_dir = args
         .log_dir
         .map(PathBuf::from)
-        .unwrap_or_else(|| root.join("host/rust/logs"));
+        .unwrap_or_else(|| root.join("src/host/rust/logs"));
 
     if let Err(err) = std::fs::create_dir_all(&log_dir) {
         eprintln!(
