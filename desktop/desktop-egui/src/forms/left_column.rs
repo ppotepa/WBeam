@@ -11,8 +11,14 @@ impl DesktopApp {
                 .num_columns(2)
                 .striped(true)
                 .show(ui, |ui| {
+                    ui.label("platform");
+                    ui.monospace(&self.platform_id);
+                    ui.end_row();
                     ui.label("os");
                     ui.monospace(&self.os_name);
+                    ui.end_row();
+                    ui.label("os_version");
+                    ui.monospace(&self.os_version);
                     ui.end_row();
                     ui.label("session");
                     ui.monospace(&self.session_type);

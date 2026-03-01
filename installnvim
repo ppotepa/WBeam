@@ -1,0 +1,881 @@
+#!/usr/bin/env bash
+# fix-neovim.sh
+# One-shot Neovim reset/fix script for:
+# - broken lazy.nvim installs / permissions
+# - nvim-treesitter "module ... not found"
+# - basic highlighting + autocomplete + LSP (Bash, C#, SQL, YAML/JSON/TOML/XML, Docker, etc.)
+#
+# Usage:
+#   bash fix-neovim.sh
+# Optional:
+#   bash fix-neovim.sh --install-nvim   # try to install/update Neovim + tools via package manager
+
+set -euo pipefail
+
+INSTALL_NVIM=0
+if [[ "${1:-}" == "--install-nvim" ]]; then
+  INSTALL_NVIM=1
+fi
+
+USER_NAME="${SUDO_USER:-$USER}"
+USER_HOME="$(getent passwd "$USER_NAME" | cut -d: -f6 2>/dev/null || true)"
+if [[ -z "${USER_HOME}" ]]; then
+  USER_HOME="$HOME"
+fi
+
+NVIM_CONFIG_DIR="$USER_HOME/.config/nvim"
+NVIM_DATA_DIR="$USER_HOME/.local/share/nvim"
+NVIM_CACHE_DIR="$USER_HOME/.cache/nvim"
+NVIM_STATE_DIR="$USER_HOME/.local/state/nvim"
+
+TS="$(date +%Y%m%d-%H%M%S)"
+BACKUP_ROOT="$USER_HOME/nvim-fix-backup-$TS"
+
+log()  { printf "\n[INFO] %s\n" "$*"; }
+warn() { printf "\n[WARN] %s\n" "$*" >&2; }
+err()  { printf "\n[ERR ] %s\n" "$*" >&2; }
+
+run_as_user() {
+  if [[ "$(id -un)" == "$USER_NAME" ]]; then
+    bash -lc "$*"
+  else
+    sudo -u "$USER_NAME" bash -lc "$*"
+  fi
+}
+
+have_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+version_ge() {
+  # version_ge "0.11.0" "0.10.4" => true if first >= second
+  # uses sort -V
+  [[ "$(printf "%s\n%s\n" "$1" "$2" | sort -V | tail -n1)" == "$1" ]]
+}
+
+install_packages() {
+  log "Attempting to install/update Neovim and required tools (git/curl/unzip/tar/compiler)..."
+  if have_cmd apt-get; then
+    sudo apt-get update
+    sudo apt-get install -y neovim git curl unzip tar gzip build-essential ripgrep fd-find
+  elif have_cmd dnf; then
+    sudo dnf install -y neovim git curl unzip tar gzip gcc gcc-c++ make ripgrep fd-find
+  elif have_cmd yum; then
+    sudo yum install -y neovim git curl unzip tar gzip gcc gcc-c++ make ripgrep fd-find
+  elif have_cmd pacman; then
+    sudo pacman -Sy --noconfirm neovim git curl unzip tar gzip base-devel ripgrep fd
+  elif have_cmd zypper; then
+    sudo zypper --non-interactive install neovim git curl unzip tar gzip gcc gcc-c++ make ripgrep fd
+  elif have_cmd apk; then
+    sudo apk add neovim git curl unzip tar gzip build-base ripgrep fd
+  elif have_cmd brew; then
+    brew install neovim git curl unzip ripgrep fd
+  else
+    warn "No supported package manager detected. Install manually: neovim git curl unzip tar gzip compiler toolchain"
+  fi
+}
+
+fix_permissions() {
+  log "Fixing ownership/permissions on Neovim directories..."
+  sudo mkdir -p "$NVIM_CONFIG_DIR" "$NVIM_DATA_DIR" "$NVIM_CACHE_DIR" "$NVIM_STATE_DIR"
+  sudo chown -R "$USER_NAME:$USER_NAME" "$NVIM_CONFIG_DIR" "$NVIM_DATA_DIR" "$NVIM_CACHE_DIR" "$NVIM_STATE_DIR"
+  sudo chmod -R u+rwX "$NVIM_CONFIG_DIR" "$NVIM_DATA_DIR" "$NVIM_CACHE_DIR" "$NVIM_STATE_DIR"
+}
+
+backup_existing() {
+  log "Backing up existing Neovim config/data to: $BACKUP_ROOT"
+  mkdir -p "$BACKUP_ROOT"
+  for d in "$NVIM_CONFIG_DIR" "$NVIM_DATA_DIR" "$NVIM_CACHE_DIR" "$NVIM_STATE_DIR"; do
+    if [[ -e "$d" ]]; then
+      cp -a "$d" "$BACKUP_ROOT/" || true
+    fi
+  done
+}
+
+clean_broken_state() {
+  log "Cleaning broken plugin/cache state..."
+  run_as_user "mkdir -p '$NVIM_CONFIG_DIR'"
+  run_as_user "rm -rf '$NVIM_DATA_DIR/lazy/nvim-treesitter' '$NVIM_DATA_DIR/lazy' '$NVIM_STATE_DIR/lazy' '$NVIM_CACHE_DIR/luac'"
+  run_as_user "rm -f '$NVIM_CONFIG_DIR/lazy-lock.json' '$NVIM_CONFIG_DIR/.init.lua.swp' '$USER_HOME/.local/state/nvim/swap/.init.lua.swp'"
+}
+
+write_init_lua() {
+  log "Writing a safe, first-install-friendly init.lua (Treesitter + Mason + LSP + autocomplete)..."
+  run_as_user "mkdir -p '$NVIM_CONFIG_DIR'"
+
+  cat > /tmp/init.lua.nvimfix.$$ <<'LUA'
+-- =========================
+-- Safe Neovim starter config (first-install friendly)
+-- =========================
+vim.g.mapleader = " "
+vim.o.number = true
+vim.o.relativenumber = true
+vim.o.termguicolors = true
+vim.o.updatetime = 250
+vim.o.completeopt = "menu,menuone,noselect"
+
+-- Optional better filetype guesses for docker compose variants
+pcall(function()
+  vim.filetype.add({
+    pattern = {
+      [".*docker%-compose%.ya?ml"] = "yaml",
+      [".*compose%.ya?ml"] = "yaml",
+    },
+  })
+end)
+
+-- =========================
+-- lazy.nvim bootstrap
+-- =========================
+local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
+local uv = vim.uv or vim.loop
+if not uv.fs_stat(lazypath) then
+  vim.fn.system({
+    "git", "clone", "--filter=blob:none", "--branch=stable",
+    "https://github.com/folke/lazy.nvim.git", lazypath
+  })
+end
+vim.opt.rtp:prepend(lazypath)
+
+require("lazy").setup({
+  -- Treesitter (syntax highlighting)
+  {
+    "nvim-treesitter/nvim-treesitter",
+    build = ":TSUpdate",
+    config = function()
+      local ok, ts = pcall(require, "nvim-treesitter.configs")
+      if not ok then
+        vim.schedule(function()
+          vim.notify("nvim-treesitter not ready yet. Run :Lazy sync and restart.", vim.log.levels.WARN)
+        end)
+        return
+      end
+
+      ts.setup({
+        ensure_installed = {
+          "bash", "c", "cpp", "c_sharp", "lua", "python", "powershell",
+          "sql", "json", "json5", "yaml", "toml", "xml", "dockerfile",
+          "html", "css", "javascript", "typescript", "tsx",
+          "markdown", "markdown_inline", "vim", "vimdoc", "regex"
+        },
+        auto_install = true,
+        highlight = { enable = true },
+        indent = { enable = true },
+      })
+    end,
+  },
+
+  -- LSP/tool package manager
+  { "mason-org/mason.nvim", opts = {} },
+
+  -- Mason <-> lspconfig bridge
+  {
+    "mason-org/mason-lspconfig.nvim",
+    dependencies = {
+      "mason-org/mason.nvim",
+      "neovim/nvim-lspconfig",
+    },
+    opts = {
+      ensure_installed = {
+        "bashls",
+        "csharp_ls",
+        "lua_ls",
+        "pyright",
+        "jsonls",
+        "yamlls",
+        "taplo",
+        "lemminx",
+        "dockerls",
+        "docker_compose_language_service",
+        "sqls",
+        "marksman",
+        "powershell_es",
+      },
+      automatic_enable = false,
+    },
+  },
+
+  -- Snippets + completion
+  { "L3MON4D3/LuaSnip" },
+  { "rafamadriz/friendly-snippets" },
+
+  {
+    "hrsh7th/nvim-cmp",
+    dependencies = {
+      "hrsh7th/cmp-nvim-lsp",
+      "hrsh7th/cmp-buffer",
+      "hrsh7th/cmp-path",
+      "saadparwaiz1/cmp_luasnip",
+      "L3MON4D3/LuaSnip",
+      "rafamadriz/friendly-snippets",
+    },
+    config = function()
+      local ok_cmp, cmp = pcall(require, "cmp")
+      local ok_snip, luasnip = pcall(require, "luasnip")
+      if not (ok_cmp and ok_snip) then
+        vim.schedule(function()
+          vim.notify("nvim-cmp / LuaSnip not ready yet. Run :Lazy sync and restart.", vim.log.levels.WARN)
+        end)
+        return
+      end
+
+      pcall(function()
+        require("luasnip.loaders.from_vscode").lazy_load()
+      end)
+
+      cmp.setup({
+        snippet = {
+          expand = function(args)
+            luasnip.lsp_expand(args.body)
+          end,
+        },
+        mapping = cmp.mapping.preset.insert({
+          ["<C-Space>"] = cmp.mapping.complete(),
+          ["<C-e>"] = cmp.mapping.abort(),
+          ["<CR>"] = cmp.mapping.confirm({ select = true }),
+          ["<C-n>"] = cmp.mapping.select_next_item(),
+          ["<C-p>"] = cmp.mapping.select_prev_item(),
+          ["<Tab>"] = cmp.mapping(function(fallback)
+            if cmp.visible() then
+              cmp.select_next_item()
+            elseif luasnip.expand_or_jumpable() then
+              luasnip.expand_or_jump()
+            else
+              fallback()
+            end
+          end, { "i", "s" }),
+          ["<S-Tab>"] = cmp.mapping(function(fallback)
+            if cmp.visible() then
+              cmp.select_prev_item()
+            elseif luasnip.jumpable(-1) then
+              luasnip.jump(-1)
+            else
+              fallback()
+            end
+          end, { "i", "s" }),
+        }),
+        sources = cmp.config.sources({
+          { name = "nvim_lsp" },
+          { name = "luasnip" },
+          { name = "path" },
+        }, {
+          { name = "buffer" },
+        }),
+      })
+
+      local ok_cmp_lsp, cmp_lsp = pcall(require, "cmp_nvim_lsp")
+      local capabilities = ok_cmp_lsp and cmp_lsp.default_capabilities() or vim.lsp.protocol.make_client_capabilities()
+
+      vim.api.nvim_create_autocmd("LspAttach", {
+        callback = function(ev)
+          local opts = { buffer = ev.buf, silent = true }
+          vim.keymap.set("n", "K", vim.lsp.buf.hover, opts)
+          vim.keymap.set("n", "gd", vim.lsp.buf.definition, opts)
+          vim.keymap.set("n", "gr", vim.lsp.buf.references, opts)
+          vim.keymap.set("n", "gi", vim.lsp.buf.implementation, opts)
+          vim.keymap.set("n", "<leader>rn", vim.lsp.buf.rename, opts)
+          vim.keymap.set("n", "<leader>ca", vim.lsp.buf.code_action, opts)
+          vim.keymap.set("n", "<leader>f", function() vim.lsp.buf.format({ async = true }) end, opts)
+        end,
+      })
+
+      local function setup_lsp(server, cfg)
+        cfg = cfg or {}
+        cfg.capabilities = vim.tbl_deep_extend("force", {}, capabilities, cfg.capabilities or {})
+        local has_new = type(vim.lsp) == "table" and type(vim.lsp.config) == "function" and type(vim.lsp.enable) == "function"
+        if has_new then
+          vim.lsp.config(server, cfg)
+          vim.lsp.enable(server)
+        else
+          local ok_lspconfig, lspconfig = pcall(require, "lspconfig")
+          if ok_lspconfig and lspconfig[server] then
+            lspconfig[server].setup(cfg)
+          end
+        end
+      end
+
+      -- Generic servers
+      local servers = {
+        "bashls",
+        "csharp_ls",
+        "pyright",
+        "jsonls",
+        "yamlls",
+        "taplo",
+        "lemminx",
+        "dockerls",
+        "docker_compose_language_service",
+        "sqls",
+        "marksman",
+      }
+      for _, s in ipairs(servers) do
+        setup_lsp(s)
+      end
+
+      -- Lua (Neovim globals)
+      setup_lsp("lua_ls", {
+        settings = {
+          Lua = {
+            diagnostics = { globals = { "vim" } },
+            workspace = { checkThirdParty = false },
+            telemetry = { enable = false },
+          },
+        },
+      })
+
+      -- PowerShell (works when Mason installs package)
+      local ps_bundle = vim.fn.stdpath("data") .. "/mason/packages/powershell-editor-services"
+      if vim.fn.isdirectory(ps_bundle) == 1 then
+        setup_lsp("powershell_es", {
+          bundle_path = ps_bundle,
+          filetypes = { "ps1", "psm1", "psd1" },
+          init_options = { enableProfileLoading = false },
+        })
+      end
+    end,
+  },
+})
+LUA
+
+  install -m 0644 /tmp/init.lua.nvimfix.$$ "$NVIM_CONFIG_DIR/init.lua"
+  rm -f /tmp/init.lua.nvimfix.$$
+  chown "$USER_NAME:$USER_NAME" "$NVIM_CONFIG_DIR/init.lua" || true
+}
+
+check_nvim() {
+  if ! have_cmd nvim; then
+    if [[ "$INSTALL_NVIM" -eq 1 ]]; then
+      install_packages
+    else
+      err "Neovim (nvim) is not installed."
+      err "Re-run with: bash fix-neovim.sh --install-nvim"
+      exit 1
+    fi
+  fi
+
+  local ver_line ver
+  ver_line="$(nvim --version | head -n1 || true)"
+  ver="$(echo "$ver_line" | sed -E 's/.*NVIM v([0-9]+\.[0-9]+\.[0-9]+).*/\1/' || true)"
+  log "Detected: ${ver_line:-unknown}"
+  if [[ -n "$ver" ]] && ! version_ge "$ver" "0.9.0"; then
+    warn "Neovim $ver is quite old. 0.10+ (ideally 0.11+) is recommended."
+    if [[ "$INSTALL_NVIM" -eq 1 ]]; then
+      install_packages || true
+    fi
+  fi
+}
+
+install_plugins_headless() {
+  log "Installing/updating plugins headlessly with Lazy..."
+  run_as_user "nvim --headless '+Lazy! sync' +qa" || true
+
+  log "Updating Tree-sitter parsers..."
+  run_as_user "nvim --headless '+TSUpdateSync' +qa" || true
+}
+
+final_checks() {
+  log "Verifying plugin folders..."
+  run_as_user "ls -la '$NVIM_DATA_DIR/lazy' || true"
+  run_as_user "ls -la '$NVIM_DATA_DIR/lazy/nvim-treesitter' || true"
+
+  cat <<EOF
+
+================ DONE ================
+Try this now:
+
+  nvim
+
+Then inside Neovim run:
+  :Lazy
+  :Mason
+  :LspInfo
+  :checkhealth
+  :TSUpdate
+
+Test files:
+  test.sh      (bash)
+  Program.cs   (C#)
+  schema.sql   (SQL)
+  docker-compose.yml
+  appsettings.json
+  config.yaml
+
+Autocomplete:
+  Ctrl-Space   open suggestions
+  Ctrl-n/p     next/prev
+  Enter        confirm
+
+If something still fails, paste:
+  nvim --version | head -n1
+  ls -la ~/.local/share/nvim/lazy/
+  ls -la ~/.local/share/nvim/lazy/nvim-treesitter
+
+Backup created at:
+  $BACKUP_ROOT
+======================================
+EOF
+}
+
+main() {
+  log "Starting Neovim repair/reset..."
+  if [[ "$(id -u)" -ne 0 ]] && ! have_cmd sudo; then
+    err "This script needs sudo available to fix ownership/permissions."
+    exit 1
+  fi
+
+  if [[ "$(id -u)" -eq 0 ]]; then
+    warn "Running as root. That's okay, but it will repair files for user: $USER_NAME"
+  fi
+
+  if [[ "$INSTALL_NVIM" -eq 1 ]]; then
+    install_packages || true
+  fi
+
+  check_nvim
+  fix_permissions
+  backup_existing
+  clean_broken_state
+  write_init_lua
+  fix_permissions
+  install_plugins_headless
+  final_checks
+}
+
+main "$@"#!/usr/bin/env bash
+# fix-neovim.sh
+# One-shot Neovim reset/fix script for:
+# - broken lazy.nvim installs / permissions
+# - nvim-treesitter "module ... not found"
+# - basic highlighting + autocomplete + LSP (Bash, C#, SQL, YAML/JSON/TOML/XML, Docker, etc.)
+#
+# Usage:
+#   bash fix-neovim.sh
+# Optional:
+#   bash fix-neovim.sh --install-nvim   # try to install/update Neovim + tools via package manager
+
+set -euo pipefail
+
+INSTALL_NVIM=0
+if [[ "${1:-}" == "--install-nvim" ]]; then
+  INSTALL_NVIM=1
+fi
+
+USER_NAME="${SUDO_USER:-$USER}"
+USER_HOME="$(getent passwd "$USER_NAME" | cut -d: -f6 2>/dev/null || true)"
+if [[ -z "${USER_HOME}" ]]; then
+  USER_HOME="$HOME"
+fi
+
+NVIM_CONFIG_DIR="$USER_HOME/.config/nvim"
+NVIM_DATA_DIR="$USER_HOME/.local/share/nvim"
+NVIM_CACHE_DIR="$USER_HOME/.cache/nvim"
+NVIM_STATE_DIR="$USER_HOME/.local/state/nvim"
+
+TS="$(date +%Y%m%d-%H%M%S)"
+BACKUP_ROOT="$USER_HOME/nvim-fix-backup-$TS"
+
+log()  { printf "\n[INFO] %s\n" "$*"; }
+warn() { printf "\n[WARN] %s\n" "$*" >&2; }
+err()  { printf "\n[ERR ] %s\n" "$*" >&2; }
+
+run_as_user() {
+  if [[ "$(id -un)" == "$USER_NAME" ]]; then
+    bash -lc "$*"
+  else
+    sudo -u "$USER_NAME" bash -lc "$*"
+  fi
+}
+
+have_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+version_ge() {
+  # version_ge "0.11.0" "0.10.4" => true if first >= second
+  # uses sort -V
+  [[ "$(printf "%s\n%s\n" "$1" "$2" | sort -V | tail -n1)" == "$1" ]]
+}
+
+install_packages() {
+  log "Attempting to install/update Neovim and required tools (git/curl/unzip/tar/compiler)..."
+  if have_cmd apt-get; then
+    sudo apt-get update
+    sudo apt-get install -y neovim git curl unzip tar gzip build-essential ripgrep fd-find
+  elif have_cmd dnf; then
+    sudo dnf install -y neovim git curl unzip tar gzip gcc gcc-c++ make ripgrep fd-find
+  elif have_cmd yum; then
+    sudo yum install -y neovim git curl unzip tar gzip gcc gcc-c++ make ripgrep fd-find
+  elif have_cmd pacman; then
+    sudo pacman -Sy --noconfirm neovim git curl unzip tar gzip base-devel ripgrep fd
+  elif have_cmd zypper; then
+    sudo zypper --non-interactive install neovim git curl unzip tar gzip gcc gcc-c++ make ripgrep fd
+  elif have_cmd apk; then
+    sudo apk add neovim git curl unzip tar gzip build-base ripgrep fd
+  elif have_cmd brew; then
+    brew install neovim git curl unzip ripgrep fd
+  else
+    warn "No supported package manager detected. Install manually: neovim git curl unzip tar gzip compiler toolchain"
+  fi
+}
+
+fix_permissions() {
+  log "Fixing ownership/permissions on Neovim directories..."
+  sudo mkdir -p "$NVIM_CONFIG_DIR" "$NVIM_DATA_DIR" "$NVIM_CACHE_DIR" "$NVIM_STATE_DIR"
+  sudo chown -R "$USER_NAME:$USER_NAME" "$NVIM_CONFIG_DIR" "$NVIM_DATA_DIR" "$NVIM_CACHE_DIR" "$NVIM_STATE_DIR"
+  sudo chmod -R u+rwX "$NVIM_CONFIG_DIR" "$NVIM_DATA_DIR" "$NVIM_CACHE_DIR" "$NVIM_STATE_DIR"
+}
+
+backup_existing() {
+  log "Backing up existing Neovim config/data to: $BACKUP_ROOT"
+  mkdir -p "$BACKUP_ROOT"
+  for d in "$NVIM_CONFIG_DIR" "$NVIM_DATA_DIR" "$NVIM_CACHE_DIR" "$NVIM_STATE_DIR"; do
+    if [[ -e "$d" ]]; then
+      cp -a "$d" "$BACKUP_ROOT/" || true
+    fi
+  done
+}
+
+clean_broken_state() {
+  log "Cleaning broken plugin/cache state..."
+  run_as_user "mkdir -p '$NVIM_CONFIG_DIR'"
+  run_as_user "rm -rf '$NVIM_DATA_DIR/lazy/nvim-treesitter' '$NVIM_DATA_DIR/lazy' '$NVIM_STATE_DIR/lazy' '$NVIM_CACHE_DIR/luac'"
+  run_as_user "rm -f '$NVIM_CONFIG_DIR/lazy-lock.json' '$NVIM_CONFIG_DIR/.init.lua.swp' '$USER_HOME/.local/state/nvim/swap/.init.lua.swp'"
+}
+
+write_init_lua() {
+  log "Writing a safe, first-install-friendly init.lua (Treesitter + Mason + LSP + autocomplete)..."
+  run_as_user "mkdir -p '$NVIM_CONFIG_DIR'"
+
+  cat > /tmp/init.lua.nvimfix.$$ <<'LUA'
+-- =========================
+-- Safe Neovim starter config (first-install friendly)
+-- =========================
+vim.g.mapleader = " "
+vim.o.number = true
+vim.o.relativenumber = true
+vim.o.termguicolors = true
+vim.o.updatetime = 250
+vim.o.completeopt = "menu,menuone,noselect"
+
+-- Optional better filetype guesses for docker compose variants
+pcall(function()
+  vim.filetype.add({
+    pattern = {
+      [".*docker%-compose%.ya?ml"] = "yaml",
+      [".*compose%.ya?ml"] = "yaml",
+    },
+  })
+end)
+
+-- =========================
+-- lazy.nvim bootstrap
+-- =========================
+local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
+local uv = vim.uv or vim.loop
+if not uv.fs_stat(lazypath) then
+  vim.fn.system({
+    "git", "clone", "--filter=blob:none", "--branch=stable",
+    "https://github.com/folke/lazy.nvim.git", lazypath
+  })
+end
+vim.opt.rtp:prepend(lazypath)
+
+require("lazy").setup({
+  -- Treesitter (syntax highlighting)
+  {
+    "nvim-treesitter/nvim-treesitter",
+    build = ":TSUpdate",
+    config = function()
+      local ok, ts = pcall(require, "nvim-treesitter.configs")
+      if not ok then
+        vim.schedule(function()
+          vim.notify("nvim-treesitter not ready yet. Run :Lazy sync and restart.", vim.log.levels.WARN)
+        end)
+        return
+      end
+
+      ts.setup({
+        ensure_installed = {
+          "bash", "c", "cpp", "c_sharp", "lua", "python", "powershell",
+          "sql", "json", "json5", "yaml", "toml", "xml", "dockerfile",
+          "html", "css", "javascript", "typescript", "tsx",
+          "markdown", "markdown_inline", "vim", "vimdoc", "regex"
+        },
+        auto_install = true,
+        highlight = { enable = true },
+        indent = { enable = true },
+      })
+    end,
+  },
+
+  -- LSP/tool package manager
+  { "mason-org/mason.nvim", opts = {} },
+
+  -- Mason <-> lspconfig bridge
+  {
+    "mason-org/mason-lspconfig.nvim",
+    dependencies = {
+      "mason-org/mason.nvim",
+      "neovim/nvim-lspconfig",
+    },
+    opts = {
+      ensure_installed = {
+        "bashls",
+        "csharp_ls",
+        "lua_ls",
+        "pyright",
+        "jsonls",
+        "yamlls",
+        "taplo",
+        "lemminx",
+        "dockerls",
+        "docker_compose_language_service",
+        "sqls",
+        "marksman",
+        "powershell_es",
+      },
+      automatic_enable = false,
+    },
+  },
+
+  -- Snippets + completion
+  { "L3MON4D3/LuaSnip" },
+  { "rafamadriz/friendly-snippets" },
+
+  {
+    "hrsh7th/nvim-cmp",
+    dependencies = {
+      "hrsh7th/cmp-nvim-lsp",
+      "hrsh7th/cmp-buffer",
+      "hrsh7th/cmp-path",
+      "saadparwaiz1/cmp_luasnip",
+      "L3MON4D3/LuaSnip",
+      "rafamadriz/friendly-snippets",
+    },
+    config = function()
+      local ok_cmp, cmp = pcall(require, "cmp")
+      local ok_snip, luasnip = pcall(require, "luasnip")
+      if not (ok_cmp and ok_snip) then
+        vim.schedule(function()
+          vim.notify("nvim-cmp / LuaSnip not ready yet. Run :Lazy sync and restart.", vim.log.levels.WARN)
+        end)
+        return
+      end
+
+      pcall(function()
+        require("luasnip.loaders.from_vscode").lazy_load()
+      end)
+
+      cmp.setup({
+        snippet = {
+          expand = function(args)
+            luasnip.lsp_expand(args.body)
+          end,
+        },
+        mapping = cmp.mapping.preset.insert({
+          ["<C-Space>"] = cmp.mapping.complete(),
+          ["<C-e>"] = cmp.mapping.abort(),
+          ["<CR>"] = cmp.mapping.confirm({ select = true }),
+          ["<C-n>"] = cmp.mapping.select_next_item(),
+          ["<C-p>"] = cmp.mapping.select_prev_item(),
+          ["<Tab>"] = cmp.mapping(function(fallback)
+            if cmp.visible() then
+              cmp.select_next_item()
+            elseif luasnip.expand_or_jumpable() then
+              luasnip.expand_or_jump()
+            else
+              fallback()
+            end
+          end, { "i", "s" }),
+          ["<S-Tab>"] = cmp.mapping(function(fallback)
+            if cmp.visible() then
+              cmp.select_prev_item()
+            elseif luasnip.jumpable(-1) then
+              luasnip.jump(-1)
+            else
+              fallback()
+            end
+          end, { "i", "s" }),
+        }),
+        sources = cmp.config.sources({
+          { name = "nvim_lsp" },
+          { name = "luasnip" },
+          { name = "path" },
+        }, {
+          { name = "buffer" },
+        }),
+      })
+
+      local ok_cmp_lsp, cmp_lsp = pcall(require, "cmp_nvim_lsp")
+      local capabilities = ok_cmp_lsp and cmp_lsp.default_capabilities() or vim.lsp.protocol.make_client_capabilities()
+
+      vim.api.nvim_create_autocmd("LspAttach", {
+        callback = function(ev)
+          local opts = { buffer = ev.buf, silent = true }
+          vim.keymap.set("n", "K", vim.lsp.buf.hover, opts)
+          vim.keymap.set("n", "gd", vim.lsp.buf.definition, opts)
+          vim.keymap.set("n", "gr", vim.lsp.buf.references, opts)
+          vim.keymap.set("n", "gi", vim.lsp.buf.implementation, opts)
+          vim.keymap.set("n", "<leader>rn", vim.lsp.buf.rename, opts)
+          vim.keymap.set("n", "<leader>ca", vim.lsp.buf.code_action, opts)
+          vim.keymap.set("n", "<leader>f", function() vim.lsp.buf.format({ async = true }) end, opts)
+        end,
+      })
+
+      local function setup_lsp(server, cfg)
+        cfg = cfg or {}
+        cfg.capabilities = vim.tbl_deep_extend("force", {}, capabilities, cfg.capabilities or {})
+        local has_new = type(vim.lsp) == "table" and type(vim.lsp.config) == "function" and type(vim.lsp.enable) == "function"
+        if has_new then
+          vim.lsp.config(server, cfg)
+          vim.lsp.enable(server)
+        else
+          local ok_lspconfig, lspconfig = pcall(require, "lspconfig")
+          if ok_lspconfig and lspconfig[server] then
+            lspconfig[server].setup(cfg)
+          end
+        end
+      end
+
+      -- Generic servers
+      local servers = {
+        "bashls",
+        "csharp_ls",
+        "pyright",
+        "jsonls",
+        "yamlls",
+        "taplo",
+        "lemminx",
+        "dockerls",
+        "docker_compose_language_service",
+        "sqls",
+        "marksman",
+      }
+      for _, s in ipairs(servers) do
+        setup_lsp(s)
+      end
+
+      -- Lua (Neovim globals)
+      setup_lsp("lua_ls", {
+        settings = {
+          Lua = {
+            diagnostics = { globals = { "vim" } },
+            workspace = { checkThirdParty = false },
+            telemetry = { enable = false },
+          },
+        },
+      })
+
+      -- PowerShell (works when Mason installs package)
+      local ps_bundle = vim.fn.stdpath("data") .. "/mason/packages/powershell-editor-services"
+      if vim.fn.isdirectory(ps_bundle) == 1 then
+        setup_lsp("powershell_es", {
+          bundle_path = ps_bundle,
+          filetypes = { "ps1", "psm1", "psd1" },
+          init_options = { enableProfileLoading = false },
+        })
+      end
+    end,
+  },
+})
+LUA
+
+  install -m 0644 /tmp/init.lua.nvimfix.$$ "$NVIM_CONFIG_DIR/init.lua"
+  rm -f /tmp/init.lua.nvimfix.$$
+  chown "$USER_NAME:$USER_NAME" "$NVIM_CONFIG_DIR/init.lua" || true
+}
+
+check_nvim() {
+  if ! have_cmd nvim; then
+    if [[ "$INSTALL_NVIM" -eq 1 ]]; then
+      install_packages
+    else
+      err "Neovim (nvim) is not installed."
+      err "Re-run with: bash fix-neovim.sh --install-nvim"
+      exit 1
+    fi
+  fi
+
+  local ver_line ver
+  ver_line="$(nvim --version | head -n1 || true)"
+  ver="$(echo "$ver_line" | sed -E 's/.*NVIM v([0-9]+\.[0-9]+\.[0-9]+).*/\1/' || true)"
+  log "Detected: ${ver_line:-unknown}"
+  if [[ -n "$ver" ]] && ! version_ge "$ver" "0.9.0"; then
+    warn "Neovim $ver is quite old. 0.10+ (ideally 0.11+) is recommended."
+    if [[ "$INSTALL_NVIM" -eq 1 ]]; then
+      install_packages || true
+    fi
+  fi
+}
+
+install_plugins_headless() {
+  log "Installing/updating plugins headlessly with Lazy..."
+  run_as_user "nvim --headless '+Lazy! sync' +qa" || true
+
+  log "Updating Tree-sitter parsers..."
+  run_as_user "nvim --headless '+TSUpdateSync' +qa" || true
+}
+
+final_checks() {
+  log "Verifying plugin folders..."
+  run_as_user "ls -la '$NVIM_DATA_DIR/lazy' || true"
+  run_as_user "ls -la '$NVIM_DATA_DIR/lazy/nvim-treesitter' || true"
+
+  cat <<EOF
+
+================ DONE ================
+Try this now:
+
+  nvim
+
+Then inside Neovim run:
+  :Lazy
+  :Mason
+  :LspInfo
+  :checkhealth
+  :TSUpdate
+
+Test files:
+  test.sh      (bash)
+  Program.cs   (C#)
+  schema.sql   (SQL)
+  docker-compose.yml
+  appsettings.json
+  config.yaml
+
+Autocomplete:
+  Ctrl-Space   open suggestions
+  Ctrl-n/p     next/prev
+  Enter        confirm
+
+If something still fails, paste:
+  nvim --version | head -n1
+  ls -la ~/.local/share/nvim/lazy/
+  ls -la ~/.local/share/nvim/lazy/nvim-treesitter
+
+Backup created at:
+  $BACKUP_ROOT
+======================================
+EOF
+}
+
+main() {
+  log "Starting Neovim repair/reset..."
+  if [[ "$(id -u)" -ne 0 ]] && ! have_cmd sudo; then
+    err "This script needs sudo available to fix ownership/permissions."
+    exit 1
+  fi
+
+  if [[ "$(id -u)" -eq 0 ]]; then
+    warn "Running as root. That's okay, but it will repair files for user: $USER_NAME"
+  fi
+
+  if [[ "$INSTALL_NVIM" -eq 1 ]]; then
+    install_packages || true
+  fi
+
+  check_nvim
+  fix_permissions
+  backup_existing
+  clean_broken_state
+  write_init_lua
+  fix_permissions
+  install_plugins_headless
+  final_checks
+}

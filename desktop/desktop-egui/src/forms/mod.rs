@@ -1,3 +1,6 @@
+mod advanced_form;
+mod base_form;
+mod basic_form;
 mod left_column;
 mod main_form;
 mod right_column;

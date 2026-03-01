@@ -64,3 +64,19 @@ pub(crate) struct StatusEvent {
     pub(crate) level: EventLevel,
     pub(crate) message: String,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub(crate) enum UiMode {
+    #[default]
+    Basic,
+    Advanced,
+}
+
+impl UiMode {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Basic => "Basic",
+            Self::Advanced => "Advanced",
+        }
+    }
+}
