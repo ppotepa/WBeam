@@ -29,6 +29,35 @@ pub(crate) fn detect_runtime() -> (String, String) {
     (os_name, session)
 }
 
+pub(crate) fn detect_os_version() -> String {
+    if env::consts::OS == "linux" {
+        if let Ok(text) = fs::read_to_string("/etc/os-release") {
+            for line in text.lines() {
+                if let Some(v) = line.strip_prefix("PRETTY_NAME=") {
+                    return v.trim_matches('"').to_string();
+                }
+            }
+            let mut name = String::new();
+            let mut version = String::new();
+            for line in text.lines() {
+                if let Some(v) = line.strip_prefix("NAME=") {
+                    name = v.trim_matches('"').to_string();
+                }
+                if let Some(v) = line.strip_prefix("VERSION=") {
+                    version = v.trim_matches('"').to_string();
+                }
+            }
+            if !name.is_empty() && !version.is_empty() {
+                return format!("{name} {version}");
+            }
+            if !name.is_empty() {
+                return name;
+            }
+        }
+    }
+    env::var("OS").unwrap_or_else(|_| env::consts::OS.to_string())
+}
+
 pub(crate) fn hostname() -> String {
     env::var("HOSTNAME").unwrap_or_else(|_| "unknown".to_string())
 }
@@ -112,6 +141,10 @@ pub(crate) fn read_adb_devices() -> anyhow::Result<Vec<DeviceInfo>> {
         });
     }
     Ok(out)
+}
+
+pub(crate) fn adb_available() -> bool {
+    which("adb").is_some()
 }
 
 pub(crate) fn read_stream_stats(
