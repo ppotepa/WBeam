@@ -12,7 +12,10 @@ pub enum StreamMode {
 }
 
 #[derive(Debug, Parser, Clone)]
-#[command(name = "wbeamd-streamer", about = "Wayland portal screencast -> WBTP framed sender")]
+#[command(
+    name = "wbeamd-streamer",
+    about = "Wayland portal screencast -> WBTP framed sender"
+)]
 pub struct Args {
     #[arg(long, default_value = "balanced", value_parser = ["lowlatency", "balanced", "ultra"])]
     pub profile: String,
@@ -26,7 +29,7 @@ pub struct Args {
     pub debug_fps: u32,
     #[arg(long)]
     pub bitrate_kbps: Option<u32>,
-        #[arg(long, default_value = "h265",
+    #[arg(long, default_value = "h265",
             value_parser = ["h264", "h265", "rawpng"])]
     pub encoder: String,
     #[arg(long, default_value = "embedded", value_parser = ["hidden", "embedded", "metadata"])]
@@ -68,9 +71,9 @@ pub fn resolve_profile(args: &Args) -> Result<ResolvedConfig> {
         // With 300 Mbps USB bandwidth available, raise defaults so bitrate is
         // never the constraint.  HEVC at 100 Mbps / 1080p is near-lossless;
         // no quantisation banding even on cursor-heavy or fast-moving content.
-        "lowlatency" => ("1280x720",  60,  60_000u32, "p4"),
-        "balanced"   => ("1920x1080", 60, 100_000u32, "p6"),
-        _            => ("2560x1440", 60, 150_000u32, "p7"),
+        "lowlatency" => ("1280x720", 60, 60_000u32, "p4"),
+        "balanced" => ("1920x1080", 60, 100_000u32, "p6"),
+        _ => ("2560x1440", 60, 150_000u32, "p7"),
     };
 
     let size = args.size.as_deref().unwrap_or(default_size);
@@ -80,7 +83,10 @@ pub fn resolve_profile(args: &Args) -> Result<ResolvedConfig> {
         .saturating_add(default_fps as u64 - 1)
         / default_fps as u64)
         .clamp(4_000, 300_000) as u32;
-    let bitrate_kbps = args.bitrate_kbps.unwrap_or(default_scaled_bitrate).clamp(4_000, 300_000);
+    let bitrate_kbps = args
+        .bitrate_kbps
+        .unwrap_or(default_scaled_bitrate)
+        .clamp(4_000, 300_000);
     let (w, h) = size
         .to_lowercase()
         .split_once('x')

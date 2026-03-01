@@ -43,13 +43,28 @@ impl Flags {
     /// Sender signals graceful end-of-stream.
     pub const END_OF_STREAM: u8 = 0b0000_0100;
 
-    pub fn has_checksum(self) -> bool { self.0 & Self::HAS_CHECKSUM != 0 }
-    pub fn is_keyframe(self) -> bool  { self.0 & Self::KEYFRAME != 0 }
-    pub fn is_eos(self) -> bool       { self.0 & Self::END_OF_STREAM != 0 }
+    pub fn has_checksum(self) -> bool {
+        self.0 & Self::HAS_CHECKSUM != 0
+    }
+    pub fn is_keyframe(self) -> bool {
+        self.0 & Self::KEYFRAME != 0
+    }
+    pub fn is_eos(self) -> bool {
+        self.0 & Self::END_OF_STREAM != 0
+    }
 
-    pub fn set_checksum(mut self) -> Self { self.0 |= Self::HAS_CHECKSUM; self }
-    pub fn set_keyframe(mut self) -> Self { self.0 |= Self::KEYFRAME; self }
-    pub fn set_eos(mut self) -> Self      { self.0 |= Self::END_OF_STREAM; self }
+    pub fn set_checksum(mut self) -> Self {
+        self.0 |= Self::HAS_CHECKSUM;
+        self
+    }
+    pub fn set_keyframe(mut self) -> Self {
+        self.0 |= Self::KEYFRAME;
+        self
+    }
+    pub fn set_eos(mut self) -> Self {
+        self.0 |= Self::END_OF_STREAM;
+        self
+    }
 }
 
 // ── error ────────────────────────────────────────────────────────────────────
@@ -75,17 +90,21 @@ pub const MAX_PAYLOAD: u32 = 16 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FrameHeader {
-    pub flags:          Flags,
-    pub sequence:       u32,
+    pub flags: Flags,
+    pub sequence: u32,
     /// Capture timestamp in microseconds since UNIX epoch.
-    pub capture_ts_us:  u64,
-    pub payload_len:    u32,
+    pub capture_ts_us: u64,
+    pub payload_len: u32,
 }
 
 impl FrameHeader {
     /// Total header wire size including optional CRC32.
     pub fn wire_len(&self) -> usize {
-        if self.flags.has_checksum() { HEADER_MAX_LEN } else { HEADER_BASE_LEN }
+        if self.flags.has_checksum() {
+            HEADER_MAX_LEN
+        } else {
+            HEADER_BASE_LEN
+        }
     }
 
     /// Serialize into `dst`, optionally appending CRC32 over the payload.
@@ -121,7 +140,10 @@ impl FrameHeader {
     pub fn decode(src: &[u8]) -> Result<(Self, usize), FrameError> {
         // We need at least the fixed base first.
         if src.len() < HEADER_BASE_LEN {
-            return Err(FrameError::TooShort { need: HEADER_BASE_LEN, have: src.len() });
+            return Err(FrameError::TooShort {
+                need: HEADER_BASE_LEN,
+                have: src.len(),
+            });
         }
 
         let magic: [u8; 4] = src[0..4].try_into().unwrap();
@@ -134,21 +156,33 @@ impl FrameHeader {
             return Err(FrameError::UnsupportedVersion(version));
         }
 
-        let flags         = Flags(src[5]);
-        let sequence      = u32::from_be_bytes(src[6..10].try_into().unwrap());
+        let flags = Flags(src[5]);
+        let sequence = u32::from_be_bytes(src[6..10].try_into().unwrap());
         let capture_ts_us = u64::from_be_bytes(src[10..18].try_into().unwrap());
-        let payload_len   = u32::from_be_bytes(src[18..22].try_into().unwrap());
+        let payload_len = u32::from_be_bytes(src[18..22].try_into().unwrap());
 
         if payload_len > MAX_PAYLOAD {
             return Err(FrameError::PayloadTooLarge(payload_len));
         }
 
-        let header_len = if flags.has_checksum() { HEADER_MAX_LEN } else { HEADER_BASE_LEN };
+        let header_len = if flags.has_checksum() {
+            HEADER_MAX_LEN
+        } else {
+            HEADER_BASE_LEN
+        };
         if src.len() < header_len {
-            return Err(FrameError::TooShort { need: header_len, have: src.len() });
+            return Err(FrameError::TooShort {
+                need: header_len,
+                have: src.len(),
+            });
         }
 
-        let header = FrameHeader { flags, sequence, capture_ts_us, payload_len };
+        let header = FrameHeader {
+            flags,
+            sequence,
+            capture_ts_us,
+            payload_len,
+        };
         Ok((header, header_len))
     }
 
@@ -159,7 +193,10 @@ impl FrameHeader {
     pub fn verify_crc(expected_crc: u32, payload: &[u8]) -> Result<(), FrameError> {
         let actual = crc32fast::hash(payload);
         if actual != expected_crc {
-            return Err(FrameError::CrcMismatch { expected: expected_crc, actual });
+            return Err(FrameError::CrcMismatch {
+                expected: expected_crc,
+                actual,
+            });
         }
         Ok(())
     }
@@ -178,8 +215,12 @@ mod tests {
 
     fn make_header(seq: u32, keyframe: bool, checksum: bool) -> FrameHeader {
         let mut flags = Flags::default();
-        if keyframe  { flags = flags.set_keyframe(); }
-        if checksum  { flags = flags.set_checksum(); }
+        if keyframe {
+            flags = flags.set_keyframe();
+        }
+        if checksum {
+            flags = flags.set_checksum();
+        }
         FrameHeader {
             flags,
             sequence: seq,
@@ -222,7 +263,10 @@ mod tests {
     fn bad_magic_rejected() {
         let mut data = vec![0u8; HEADER_BASE_LEN];
         data[0..4].copy_from_slice(b"NOPE");
-        assert!(matches!(FrameHeader::decode(&data), Err(FrameError::BadMagic(_))));
+        assert!(matches!(
+            FrameHeader::decode(&data),
+            Err(FrameError::BadMagic(_))
+        ));
     }
 
     #[test]

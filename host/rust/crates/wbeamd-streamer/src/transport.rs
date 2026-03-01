@@ -27,7 +27,8 @@ use crate::cli::StreamMode;
 // ── Protocol constants ────────────────────────────────────────────────────────
 
 const HELLO_MAGIC: &[u8; 4] = b"WBS1";
-const HELLO_VERSION: u8 = 0x01;/// HELLO byte[5] codec flag — signals HEVC/H.265 stream to the Android client.
+const HELLO_VERSION: u8 = 0x01;
+/// HELLO byte[5] codec flag — signals HEVC/H.265 stream to the Android client.
 pub const HELLO_CODEC_HEVC: u8 = 0x01;
 pub const HELLO_CODEC_PNG: u8 = 0x02;
 pub const HELLO_MODE_ULTRA: u8 = 0x10;
@@ -172,8 +173,8 @@ pub fn spawn_sender(
         let queue_peak = Arc::new(AtomicU64::new(0));
         let producer_peak = queue_peak.clone();
 
-        let listener = TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port)))
-            .expect("bind tcp listener");
+        let listener =
+            TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port))).expect("bind tcp listener");
         listener.set_nonblocking(true).ok();
         println!("[wbeam-framed] listening on :{port}");
         let fps = fps.max(1);
@@ -287,11 +288,9 @@ pub fn spawn_sender(
                             };
                             s.set_write_timeout(Some(Duration::from_millis(timeout_ms)))
                         }
-                        StreamMode::Stable => {
-                            s.set_write_timeout(Some(Duration::from_millis(
-                                (frame_budget_ms.saturating_mul(4)).clamp(40, 200),
-                            )))
-                        }
+                        StreamMode::Stable => s.set_write_timeout(Some(Duration::from_millis(
+                            (frame_budget_ms.saturating_mul(4)).clamp(40, 200),
+                        ))),
                         StreamMode::Quality => s.set_write_timeout(None),
                     };
                     println!("[wbeam-framed] client connected: {addr}");
@@ -319,7 +318,9 @@ pub fn spawn_sender(
                     drained += 1;
                 }
                 if drained > 0 {
-                    println!("[wbeam-framed] ultra reconnect: dropped stale queued frames={drained}");
+                    println!(
+                        "[wbeam-framed] ultra reconnect: dropped stale queued frames={drained}"
+                    );
                 }
             }
 
@@ -401,8 +402,7 @@ pub fn spawn_sender(
                                     }
                                     Err(ref retry_err)
                                         if retry_err.kind() == std::io::ErrorKind::WouldBlock
-                                            || retry_err.kind() == std::io::ErrorKind::TimedOut =>
-                                    {
+                                            || retry_err.kind() == std::io::ErrorKind::TimedOut => {
                                     }
                                     Err(retry_err) => {
                                         println!("[wbeam-framed] keyframe retry failed hard: {retry_err}");

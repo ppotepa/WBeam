@@ -11,7 +11,7 @@ use tokio::sync::Notify;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
-use wbtp_sender::{FrameSender, OutFrame, SenderConfig, spawn_sender};
+use wbtp_sender::{spawn_sender, FrameSender, OutFrame, SenderConfig};
 
 #[derive(Parser, Debug)]
 #[command(version, about = "WBTP/1 synthetic sender")]
@@ -62,12 +62,16 @@ async fn main() {
     });
 
     let cfg = SenderConfig {
-        remote_addr:     args.addr,
-        queue_capacity:  args.queue,
+        remote_addr: args.addr,
+        queue_capacity: args.queue,
         enable_checksum: !args.no_checksum,
     };
 
-    info!(fps = args.fps, payload_bytes = args.payload_bytes, "starting synthetic sender");
+    info!(
+        fps = args.fps,
+        payload_bytes = args.payload_bytes,
+        "starting synthetic sender"
+    );
     let sender: FrameSender = spawn_sender(cfg, Arc::clone(&shutdown));
 
     // Pre-allocate a synthetic payload once, reuse as Bytes (O(1) clone).
@@ -89,9 +93,9 @@ async fn main() {
         }
 
         let frame = OutFrame {
-            payload:       Bytes::clone(&payload),
+            payload: Bytes::clone(&payload),
             capture_ts_us: now_us(),
-            is_keyframe:   seq % 60 == 0,
+            is_keyframe: seq % 60 == 0,
         };
 
         if sender.send(frame) {
@@ -104,9 +108,7 @@ async fn main() {
         if now >= report_at {
             info!(
                 sent_fps = sent_since_report,
-                dropped_total,
-                seq,
-                "sender stats"
+                dropped_total, seq, "sender stats"
             );
             sent_since_report = 0;
             report_at = now + Duration::from_secs(1);

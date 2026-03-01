@@ -54,6 +54,26 @@ pub struct ClientMetricsRequest {
     pub trace_id: Option<u64>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ClientHelloRequest {
+    pub sdk_int: u32,
+    pub device_model: String,
+    pub device_manufacturer: String,
+    pub abi: String,
+    pub policy: String,
+    pub preferred_fps: u32,
+    pub preferred_codec: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResolverDecisionResponse {
+    pub selected_profile: String,
+    pub selected_backend: String,
+    pub selected_codec: String,
+    pub reason: String,
+    pub sdk_tier: String,
+}
+
 impl Default for ClientMetricsRequest {
     fn default() -> Self {
         Self {
@@ -332,7 +352,10 @@ pub fn presets() -> BTreeMap<String, ActiveConfig> {
     map
 }
 
-pub fn validate_config(patch: ConfigPatch, current: &ActiveConfig) -> Result<ActiveConfig, ValidationError> {
+pub fn validate_config(
+    patch: ConfigPatch,
+    current: &ActiveConfig,
+) -> Result<ActiveConfig, ValidationError> {
     let base_profile = patch
         .profile
         .as_deref()
@@ -342,15 +365,15 @@ pub fn validate_config(patch: ConfigPatch, current: &ActiveConfig) -> Result<Act
         return Err(ValidationError::InvalidProfile);
     }
 
-        let requested_profile = patch.profile.clone();
-        let mut cfg = if requested_profile.is_some() {
-            presets()
-                .remove(&base_profile)
-                .ok_or(ValidationError::InvalidProfile)?
-        } else {
-            current.clone()
-        };
-        cfg.profile = base_profile;
+    let requested_profile = patch.profile.clone();
+    let mut cfg = if requested_profile.is_some() {
+        presets()
+            .remove(&base_profile)
+            .ok_or(ValidationError::InvalidProfile)?
+    } else {
+        current.clone()
+    };
+    cfg.profile = base_profile;
 
     if let Some(encoder) = patch.encoder {
         cfg.encoder = encoder;

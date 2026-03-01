@@ -34,15 +34,13 @@ pub async fn request_portal_stream(cfg: &ResolvedConfig) -> Result<PortalStream>
             &session,
             cfg.cursor_mode,
             SourceType::Monitor.into(),
-            false,          // multiple=false: single monitor, no extra allocations
+            false, // multiple=false: single monitor, no extra allocations
             None,
             PersistMode::DoNot, // explicit: skip portal persistence metadata write
         )
         .await?;
 
-    let start = proxy
-        .start(&session, &WindowIdentifier::default())
-        .await?;
+    let start = proxy.start(&session, &WindowIdentifier::default()).await?;
 
     let results = start.response()?;
     // Extract node_id directly from the reference — no .cloned() heap copy.

@@ -39,11 +39,11 @@ struct Args {
 
 #[derive(Default, Debug)]
 struct WindowMetrics {
-    frames:      u64,
-    crc_errors:  u64,
-    magic_errors:u64,
+    frames: u64,
+    crc_errors: u64,
+    magic_errors: u64,
     late_frames: u64,
-    bytes_recv:  u64,
+    bytes_recv: u64,
 
     /// Sum of |inter-arrival – expected_interval| in µs (for mean jitter).
     jitter_sum_us: u64,
@@ -53,7 +53,7 @@ struct WindowMetrics {
 
 impl WindowMetrics {
     fn report(&self, window_secs: f64) {
-        let fps  = self.frames as f64 / window_secs;
+        let fps = self.frames as f64 / window_secs;
         let mbps = (self.bytes_recv as f64 * 8.0) / (window_secs * 1e6);
         let jitter_mean_us = if self.jitter_samples > 0 {
             self.jitter_sum_us / self.jitter_samples
@@ -61,13 +61,13 @@ impl WindowMetrics {
             0
         };
         info!(
-            recv_fps        = format!("{fps:.1}"),
-            mbps            = format!("{mbps:.2}"),
-            crc_errors      = self.crc_errors,
-            magic_errors    = self.magic_errors,
-            late_frames     = self.late_frames,
+            recv_fps = format!("{fps:.1}"),
+            mbps = format!("{mbps:.2}"),
+            crc_errors = self.crc_errors,
+            magic_errors = self.magic_errors,
+            late_frames = self.late_frames,
             jitter_mean_us,
-            jitter_max_us   = self.jitter_max_us,
+            jitter_max_us = self.jitter_max_us,
             "metrics"
         );
     }
@@ -85,11 +85,11 @@ fn now_us() -> u64 {
 // ── connection handler ────────────────────────────────────────────────────────
 
 async fn handle_conn(
-    mut stream:          TcpStream,
-    peer:                std::net::SocketAddr,
-    late_threshold_us:   u64,
-    verify_crc:          bool,
-    shutdown:            Arc<Notify>,
+    mut stream: TcpStream,
+    peer: std::net::SocketAddr,
+    late_threshold_us: u64,
+    verify_crc: bool,
+    shutdown: Arc<Notify>,
 ) {
     info!(%peer, "accepted connection");
 
@@ -98,11 +98,11 @@ async fn handle_conn(
 
     let mut metrics = WindowMetrics::default();
     let mut report_deadline = tokio::time::Instant::now() + Duration::from_secs(1);
-    let mut window_start    = tokio::time::Instant::now();
+    let mut window_start = tokio::time::Instant::now();
 
     // Jitter tracking
-    let mut last_arrival_us:  Option<u64> = None;
-    let mut last_capture_us:  Option<u64> = None;
+    let mut last_arrival_us: Option<u64> = None;
+    let mut last_capture_us: Option<u64> = None;
 
     loop {
         // ── report metrics every second ───────────────────────────────────
@@ -110,8 +110,8 @@ async fn handle_conn(
         if now >= report_deadline {
             let elapsed = (now - window_start).as_secs_f64();
             metrics.report(elapsed);
-            metrics         = WindowMetrics::default();
-            window_start    = now;
+            metrics = WindowMetrics::default();
+            window_start = now;
             report_deadline = now + Duration::from_secs(1);
         }
 
@@ -135,7 +135,7 @@ async fn handle_conn(
             }
 
             let (header, hdr_len) = match FrameHeader::decode(&buf) {
-                Ok(v)  => v,
+                Ok(v) => v,
                 Err(wbtp_core::FrameError::TooShort { .. }) => break, // need more data
                 Err(e) => {
                     warn!(%peer, "header error: {e}, dropping byte");
@@ -157,7 +157,7 @@ async fn handle_conn(
 
             // ── frame complete ────────────────────────────────────────────
             let recv_us = now_us();
-            metrics.frames     += 1;
+            metrics.frames += 1;
             metrics.bytes_recv += total_needed as u64;
 
             // CRC verification
@@ -178,16 +178,18 @@ async fn handle_conn(
 
             // Jitter (inter-frame arrival vs inter-frame capture delta)
             if let (Some(la), Some(lc)) = (last_arrival_us, last_capture_us) {
-                let arrival_delta  = recv_us.saturating_sub(la);
-                let capture_delta  = header.capture_ts_us.saturating_sub(lc);
+                let arrival_delta = recv_us.saturating_sub(la);
+                let capture_delta = header.capture_ts_us.saturating_sub(lc);
                 let jitter = if arrival_delta > capture_delta {
                     arrival_delta - capture_delta
                 } else {
                     capture_delta - arrival_delta
                 };
-                metrics.jitter_sum_us    += jitter;
-                metrics.jitter_samples   += 1;
-                if jitter > metrics.jitter_max_us { metrics.jitter_max_us = jitter; }
+                metrics.jitter_sum_us += jitter;
+                metrics.jitter_samples += 1;
+                if jitter > metrics.jitter_max_us {
+                    metrics.jitter_max_us = jitter;
+                }
             }
             last_arrival_us = Some(recv_us);
             last_capture_us = Some(header.capture_ts_us);
@@ -237,12 +239,13 @@ async fn main() {
         .with_ansi(false)
         .init();
 
-    let listener = TcpListener::bind(&args.bind).await
+    let listener = TcpListener::bind(&args.bind)
+        .await
         .unwrap_or_else(|e| panic!("cannot bind {}: {e}", args.bind));
     info!(bind = %args.bind, "WBTP/1 null receiver listening");
 
     let shutdown = Arc::new(Notify::new());
-    let sh2      = Arc::clone(&shutdown);
+    let sh2 = Arc::clone(&shutdown);
 
     tokio::spawn(async move {
         tokio::signal::ctrl_c().await.ok();
@@ -251,7 +254,7 @@ async fn main() {
     });
 
     let late_threshold_us = args.late_threshold_ms * 1_000;
-    let verify_crc        = !args.no_verify_crc;
+    let verify_crc = !args.no_verify_crc;
 
     loop {
         tokio::select! {

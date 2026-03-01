@@ -12,7 +12,7 @@ use clap::Parser;
 use serde::Deserialize;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
-use wbeamd_api::{ClientMetricsRequest, ConfigPatch, ErrorResponse};
+use wbeamd_api::{ClientHelloRequest, ClientMetricsRequest, ConfigPatch, ErrorResponse};
 use wbeamd_core::{CoreError, DaemonCore};
 
 #[derive(Debug, Parser)]
@@ -49,7 +49,10 @@ async fn main() {
         .unwrap_or_else(|| root.join("host/rust/logs"));
 
     if let Err(err) = std::fs::create_dir_all(&log_dir) {
-        eprintln!("failed to create log directory {}: {err}", log_dir.display());
+        eprintln!(
+            "failed to create log directory {}: {err}",
+            log_dir.display()
+        );
         std::process::exit(1);
     }
 
@@ -71,7 +74,11 @@ async fn main() {
         }
     };
 
-    let core = Arc::new(DaemonCore::new(root.clone(), args.stream_port, args.control_port));
+    let core = Arc::new(DaemonCore::new(
+        root.clone(),
+        args.stream_port,
+        args.control_port,
+    ));
     let app_state = AppState { core: core.clone() };
 
     let app = Router::new()
@@ -84,6 +91,7 @@ async fn main() {
         .route("/stop", post(post_stop))
         .route("/apply", post(post_apply))
         .route("/client-metrics", post(post_client_metrics))
+        .route("/client-hello", post(post_client_hello))
         .route("/v1/status", get(get_status))
         .route("/v1/health", get(get_health))
         .route("/v1/presets", get(get_presets))
@@ -93,6 +101,7 @@ async fn main() {
         .route("/v1/stop", post(post_stop))
         .route("/v1/apply", post(post_apply))
         .route("/v1/client-metrics", post(post_client_metrics))
+        .route("/v1/client-hello", post(post_client_hello))
         .with_state(app_state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], args.control_port));
@@ -112,8 +121,8 @@ async fn main() {
     );
 
     let shutdown_core = core.clone();
-    let server = axum::serve(listener, app.into_make_service())
-        .with_graceful_shutdown(async move {
+    let server =
+        axum::serve(listener, app.into_make_service()).with_graceful_shutdown(async move {
             shutdown_signal().await;
             let _ = shutdown_core.stop().await;
         });
@@ -199,6 +208,15 @@ async fn post_client_metrics(
     }
 }
 
+async fn post_client_hello(
+    State(_state): State<AppState>,
+    body: Option<Json<ClientHelloRequest>>,
+) -> impl IntoResponse {
+    let payload = body.map(|Json(v)| v).unwrap_or_default();
+    let resp = wbeamd_core::resolver::resolve_profile_for_client(&payload);
+    (StatusCode::OK, Json(resp)).into_response()
+}
+
 async fn core_error_response(core: Arc<DaemonCore>, err: CoreError) -> axum::response::Response {
     let status = match err {
         CoreError::Validation(_) => StatusCode::BAD_REQUEST,
@@ -230,7 +248,9 @@ async fn shutdown_signal() {
 fn workspace_root_from_manifest(manifest_dir: &str) -> PathBuf {
     let path = Path::new(manifest_dir);
     // host/rust/crates/wbeamd-server -> repo root is 4 levels up.
-    path.join("../../../../").canonicalize().unwrap_or_else(|_| PathBuf::from("."))
+    path.join("../../../../")
+        .canonicalize()
+        .unwrap_or_else(|_| PathBuf::from("."))
 }
 
 fn fill_pseudorandom(buf: &mut [u8]) {

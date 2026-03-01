@@ -35,7 +35,20 @@ what is already working:
 current focus:
 cut interaction delay further, keep visual stability under portal jitter, and upstream proto learnings into the root lane.
 
+compat/resolver scaffold (new):
+- `compat/` holds API-level policy packs (`api17`, `api21`, `api29`) and shared resolver rules.
+- android side has `com.wbeam.compat.*` + `com.wbeam.resolver.*` for API-aware policy selection and `client-hello` payload building.
+- rust host side has resolver modules in `host/rust/crates/wbeamd-core/src/resolver/` and a new endpoint:
+  - `POST /v1/client-hello` (also `/client-hello`)
+  - resolves profile/backend/codec based on client capabilities (including Android SDK/API level).
+
+profile learning note:
+- `proto/autotune.py` uses hyperparameter optimization (HPO) with evolutionary/genetic search.
+- this is machine-learning style black-box optimization of streaming params (fps/bitrate/queue/transport), not neural-network training.
+- i was gonna do it in trackmania, but that would be cheating.
+
 quick start:
 - run `./install-deps` once from repo root.
 - main lane: `./wbeam ...` or `./wbgui`.
+- desktop control app (global): `./desktop.sh`.
 - proto lane: `proto/run.sh` (`--config ...proto.conf` or `--config ...proto.json`).
