@@ -9,9 +9,9 @@ this repo has two active lanes:
 
 1) root/main lane
 - `android/` has the main app (`com.wbeam`) with preflight checks, status overlay, live metrics, and framed h264 playback.
-- `host/rust/` has the rust daemon crates: `wbeamd-server`, `wbeamd-core`, `wbeamd-streamer`, `wbeamd-api`.
-- `host/daemon/wbeamd.py` is a python fallback daemon when rust is not available.
-- `protocol/rust/` has transport crates (`wbtp-core`, `wbtp-sender`, `wbtp-host`, receivers) used for framing and protocol tests.
+- `src/host/rust/` has the rust daemon crates: `wbeamd-server`, `wbeamd-core`, `wbeamd-streamer`, `wbeamd-api`.
+- `src/host/daemon/wbeamd.py` is a python fallback daemon when rust is not available.
+- `src/protocol/rust/` has transport crates (`wbtp-core`, `wbtp-sender`, `wbtp-host`, receivers) used for framing and protocol tests.
 - `wbeam` and `wbgui` are repo-level runners for host/android/service flows.
 
 2) `proto/` lane
@@ -20,7 +20,7 @@ this repo has two active lanes:
 - defaults in `proto/run.sh` (Python runner) are tuned for repeatable real-device runs.
 
 proto streaming path right now:
-wayland -> xdg-desktop-portal + pipewire -> gstreamer h264 pipeline (`host/scripts/stream_wayland_portal_h264.py`) -> framed bridge (`proto/host/src/main.rs`) -> adb tunnel -> android `MediaCodec` decode/render.
+wayland -> xdg-desktop-portal + pipewire -> gstreamer h264 pipeline (`src/host/scripts/stream_wayland_portal_h264.py`) -> framed bridge (`proto/host/src/main.rs`) -> adb tunnel -> android `MediaCodec` decode/render.
 frames are carried with explicit headers (magic/seq/timestamp/len) so parsing and stats are deterministic.
 
 what is already working:
@@ -36,9 +36,9 @@ current focus:
 cut interaction delay further, keep visual stability under portal jitter, and upstream proto learnings into the root lane.
 
 compat/resolver scaffold (new):
-- `compat/` holds API-level policy packs (`api17`, `api21`, `api29`) and shared resolver rules.
+- `src/compat/` holds API-level policy packs (`api17`, `api21`, `api29`) and shared resolver rules.
 - android side has `com.wbeam.compat.*` + `com.wbeam.resolver.*` for API-aware policy selection and `client-hello` payload building.
-- rust host side has resolver modules in `host/rust/crates/wbeamd-core/src/resolver/` and a new endpoint:
+- rust host side has resolver modules in `src/host/rust/crates/wbeamd-core/src/resolver/` and a new endpoint:
   - `POST /v1/client-hello` (also `/client-hello`)
   - resolves profile/backend/codec based on client capabilities (including Android SDK/API level).
 

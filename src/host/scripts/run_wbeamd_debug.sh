@@ -7,7 +7,7 @@ LOCK_FILE="${WBEAM_LOCK_FILE:-/tmp/wbeamd.lock}"
 ANDROID_SERIAL="${WBEAM_ANDROID_SERIAL:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
 adb_device_cmd() {
   if [[ -n "$ANDROID_SERIAL" ]]; then
@@ -17,7 +17,7 @@ adb_device_cmd() {
   fi
 }
 
-LOG_DIR="${WBEAM_DEBUG_LOG_DIR:-$ROOT_DIR/host/rust/logs}"
+LOG_DIR="${WBEAM_DEBUG_LOG_DIR:-$ROOT_DIR/src/host/rust/logs}"
 mkdir -p "$LOG_DIR"
 TS="$(date +%Y%m%d-%H%M%S)"
 LOG_FILE="${WBEAM_DEBUG_LOG_FILE:-$LOG_DIR/wbeamd-debug-$TS.log}"

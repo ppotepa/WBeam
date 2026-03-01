@@ -54,7 +54,7 @@ ENV overrides są zablokowane (np. `PROTO_*=... ./run.sh` zakończy się błęde
   - Has action buttons to start runtime from desktop:
     - `Run` (Rust launcher -> `run.py`, with fallback to `run.sh`)
     - `Run host only (Rust)` (`cargo run` on `proto/host`)
-- Implemented as Rust + `egui` (`desktop/desktop-egui`) for cross-platform desktop support.
+- Implemented as Rust + `egui` (`src/apps/desktop-egui`) for cross-platform desktop support.
 - Current scope is dashboard window first (tray integration can be added on top with `tray-icon` crate).
 
 ### Profiles (versioned presets)

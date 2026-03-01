@@ -2206,7 +2206,7 @@ fn start_portal_pipeline_once() -> bool {
         return false;
     }
 
-    let script = PathBuf::from("../../host/scripts/stream_wayland_portal_h264.py");
+    let script = PathBuf::from("../../src/host/scripts/stream_wayland_portal_h264.py");
     if !script.exists() {
         error!("portal helper script not found at {}", script.display());
         return false;

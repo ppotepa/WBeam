@@ -27,7 +27,7 @@ fn main() {
             viewport = viewport.with_icon(icon);
         }
         Err(err) => {
-            eprintln!("warning: failed to load app icon from assets/wbeam.png: {err}");
+            eprintln!("warning: failed to load app icon from src/assets/wbeam.png: {err}");
         }
     }
 

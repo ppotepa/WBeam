@@ -7,7 +7,7 @@ DAEMON_IMPL="${WBEAM_DAEMON_IMPL:-auto}" # auto|rust|python
 ANDROID_SERIAL="${WBEAM_ANDROID_SERIAL:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
 adb_device_cmd() {
   if [[ -n "$ANDROID_SERIAL" ]]; then
@@ -72,13 +72,13 @@ run_rust() {
   fi
 
   exec cargo run \
-    --manifest-path "$ROOT_DIR/host/rust/Cargo.toml" \
+    --manifest-path "$ROOT_DIR/src/host/rust/Cargo.toml" \
     -p wbeamd-server -- \
     "${args[@]}"
 }
 
 run_python() {
-  exec "$ROOT_DIR/host/daemon/wbeamd.py" --control-port "$CONTROL_PORT" --stream-port "$STREAM_PORT" --root "$ROOT_DIR"
+  exec "$ROOT_DIR/src/host/daemon/wbeamd.py" --control-port "$CONTROL_PORT" --stream-port "$STREAM_PORT" --root "$ROOT_DIR"
 }
 
 if [[ "$DAEMON_IMPL" == "python" ]]; then
@@ -96,7 +96,7 @@ if [[ "$DAEMON_IMPL" == "rust" ]]; then
 fi
 
 # auto mode: prefer Rust, fallback to Python.
-if command -v cargo >/dev/null 2>&1 && [[ -f "$ROOT_DIR/host/rust/Cargo.toml" ]]; then
+if command -v cargo >/dev/null 2>&1 && [[ -f "$ROOT_DIR/src/host/rust/Cargo.toml" ]]; then
   echo "[wbeam] daemon impl=auto -> rust"
   run_rust
 fi

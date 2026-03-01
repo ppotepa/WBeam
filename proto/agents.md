@@ -15,7 +15,7 @@ end-to-end latency, no Wi-Fi.
 Think SuperDisplay or spacedesk over ADB, but open-source, wired, and fast.
 
 **Scope of proto:** prove the full pipeline works on API 17 hardware. Production
-quality (`android/`, `host/rust/`) is a separate codebase — do not confuse them.
+quality (`android/`, `src/host/rust/`) is a separate codebase — do not confuse them.
 
 ---
 
@@ -36,7 +36,7 @@ quality (`android/`, `host/rust/`) is a separate codebase — do not confuse the
 Ubuntu KDE Wayland
   └─ XDG Desktop Portal (ScreenCast)
        └─ PipeWire node (captures selected output, e.g. HDMI-A-1 @ 1920×1080)
-            └─ stream_wayland_portal_h264.py  (host/scripts/)
+            └─ stream_wayland_portal_h264.py  (src/host/scripts/)
                  ├─ GStreamer pipeline:
                  │    pipewiresrc → videoconvert → videoscale(→1280×800)
                  │    → videorate → openh264enc → h264parse → appsink
@@ -437,7 +437,7 @@ proto/
       build_turbojpeg_android.sh      — cross-compile libturbojpeg for Android
     build.gradle
     app/build.gradle
-../../host/scripts/
+../../src/host/scripts/
   stream_wayland_portal_h264.py       — GStreamer + Portal + H264 pipeline
 ```
 

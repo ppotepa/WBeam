@@ -2,8 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-LOG_DIR="${WBEAM_DEBUG_LOG_DIR:-$ROOT_DIR/host/rust/logs}"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+LOG_DIR="${WBEAM_DEBUG_LOG_DIR:-$ROOT_DIR/src/host/rust/logs}"
 mkdir -p "$LOG_DIR"
 
 TS="$(date +%Y%m%d-%H%M%S)"
