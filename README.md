@@ -52,3 +52,8 @@ quick start:
 - main lane: `./wbeam ...` or `./wbgui`.
 - desktop control app (global): `./desktop.sh`.
 - proto lane: `proto/run.sh` (`--config ...proto.conf` or `--config ...proto.json`).
+
+repo structure roadmap:
+- target is `src/`-first layout with thin root wrappers only.
+- proposed final tree and migration phases are documented in:
+  - `docs/repo_tree_src_layout.md`
