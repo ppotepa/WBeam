@@ -4,19 +4,22 @@ mod encoder;
 mod pipeline;
 mod transport;
 
-use std::sync::{atomic::{AtomicBool, Ordering}, Arc};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use gstreamer as gst;
 use gst::glib;
 use gst::prelude::*;
+use gstreamer as gst;
 
-use cli::{Args, resolve_profile};
 use capture::request_portal_stream;
+use cli::{resolve_profile, Args};
+use encoder::{is_hevc, is_png};
 use pipeline::make_pipeline;
 use transport::{hello_mode_bits, spawn_sender, HELLO_CODEC_HEVC, HELLO_CODEC_PNG};
-use encoder::{is_hevc, is_png};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
@@ -33,8 +36,14 @@ async fn main() -> Result<()> {
     let portal = request_portal_stream(&cfg).await?;
     println!("[wbeam] Got PipeWire node id: {}", portal.node_id);
 
-    let (pipeline, appsink, fps_counter) =
-        make_pipeline(&portal, &cfg, args.port, &args.debug_dir, args.debug_fps, args.framed)?;
+    let (pipeline, appsink, fps_counter) = make_pipeline(
+        &portal,
+        &cfg,
+        args.port,
+        &args.debug_dir,
+        args.debug_fps,
+        args.framed,
+    )?;
 
     let bus = pipeline.bus().context("pipeline bus")?;
 

@@ -56,8 +56,8 @@ impl Default for SenderConfig {
 // ── internal bounded queue ───────────────────────────────────────────────────
 
 struct Inner {
-    queue:    Mutex<VecDeque<OutFrame>>,
-    notify:   Notify,
+    queue: Mutex<VecDeque<OutFrame>>,
+    notify: Notify,
     capacity: usize,
 }
 
@@ -104,8 +104,8 @@ impl FrameReceiver {
 
 fn bounded_queue(capacity: usize) -> (FrameSender, FrameReceiver) {
     let inner = Arc::new(Inner {
-        queue:    Mutex::new(VecDeque::with_capacity(capacity)),
-        notify:   Notify::new(),
+        queue: Mutex::new(VecDeque::with_capacity(capacity)),
+        notify: Notify::new(),
         capacity,
     });
     (FrameSender(Arc::clone(&inner)), FrameReceiver(inner))
@@ -117,15 +117,14 @@ fn bounded_queue(capacity: usize) -> (FrameSender, FrameReceiver) {
 /// `rx`, and writes framed WBTP/1 packets to the TCP socket.
 ///
 /// Returns when the connection drops or `shutdown` is notified.
-pub(crate) async fn run_sender(
-    cfg: SenderConfig,
-    rx:  FrameReceiver,
-    shutdown: Arc<Notify>,
-) {
+pub(crate) async fn run_sender(cfg: SenderConfig, rx: FrameReceiver, shutdown: Arc<Notify>) {
     loop {
         info!(addr = %cfg.remote_addr, "connecting…");
         let mut stream = match TcpStream::connect(&cfg.remote_addr).await {
-            Ok(s)  => { info!("connected"); s }
+            Ok(s) => {
+                info!("connected");
+                s
+            }
             Err(e) => {
                 warn!("connect failed: {e}, retrying in 1 s");
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -148,14 +147,18 @@ pub(crate) async fn run_sender(
             };
 
             let mut flags = Flags::default();
-            if frame.is_keyframe        { flags = flags.set_keyframe(); }
-            if cfg.enable_checksum      { flags = flags.set_checksum(); }
+            if frame.is_keyframe {
+                flags = flags.set_keyframe();
+            }
+            if cfg.enable_checksum {
+                flags = flags.set_checksum();
+            }
 
             let header = FrameHeader {
                 flags,
-                sequence:      seq,
+                sequence: seq,
                 capture_ts_us: frame.capture_ts_us,
-                payload_len:   frame.payload.len() as u32,
+                payload_len: frame.payload.len() as u32,
             };
             seq = seq.wrapping_add(1);
 
@@ -172,7 +175,11 @@ pub(crate) async fn run_sender(
                 break;
             }
 
-            debug!(seq = seq - 1, bytes = hdr_buf.len() + frame.payload.len(), "sent frame");
+            debug!(
+                seq = seq - 1,
+                bytes = hdr_buf.len() + frame.payload.len(),
+                "sent frame"
+            );
         }
 
         info!("disconnected, will reconnect");

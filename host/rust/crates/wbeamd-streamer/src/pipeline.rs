@@ -5,7 +5,10 @@
 //! branch when `debug_fps > 0`.
 
 use std::os::unix::io::AsRawFd;
-use std::sync::{atomic::{AtomicU64, Ordering}, Arc};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 
 use anyhow::{Context, Result};
 use gstreamer as gst;
@@ -102,22 +105,36 @@ pub fn make_pipeline(
     // ── Transform chain ──────────────────────────────────────────────────────
     let debug_enabled = debug_fps > 0;
     let q1 = gst::ElementFactory::make("queue").name("q1").build()?;
-    let caps_src = gst::ElementFactory::make("capsfilter").name("caps_src").build()?;
-    let convert = gst::ElementFactory::make("videoconvert").name("conv").build()?;
+    let caps_src = gst::ElementFactory::make("capsfilter")
+        .name("caps_src")
+        .build()?;
+    let convert = gst::ElementFactory::make("videoconvert")
+        .name("conv")
+        .build()?;
     let scale = if cfg.skip_videoscale {
-        gst::ElementFactory::make("identity").name("scale_passthrough").build()?
+        gst::ElementFactory::make("identity")
+            .name("scale_passthrough")
+            .build()?
     } else {
-        let s = gst::ElementFactory::make("videoscale").name("scale").build()?;
+        let s = gst::ElementFactory::make("videoscale")
+            .name("scale")
+            .build()?;
         let _ = s.set_property_from_str("method", "lanczos");
         s
     };
     let use_videorate = profile.use_videorate;
     let rate = if use_videorate {
-        Some(gst::ElementFactory::make("videorate").name("rate").build()?)
+        Some(
+            gst::ElementFactory::make("videorate")
+                .name("rate")
+                .build()?,
+        )
     } else {
         None
     };
-    let caps1 = gst::ElementFactory::make("capsfilter").name("caps1").build()?;
+    let caps1 = gst::ElementFactory::make("capsfilter")
+        .name("caps1")
+        .build()?;
     let tee = if debug_enabled {
         Some(gst::ElementFactory::make("tee").name("tee").build()?)
     } else {
@@ -135,11 +152,11 @@ pub fn make_pipeline(
     let buffer_time_ns = profile.queue_time_ns;
     let enc_element = match encoder_name {
         "nvenc264" => "nvh264enc",
-        "x264"     => "x264enc",
+        "x264" => "x264enc",
         "nvenc265" => "nvh265enc",
-        "x265"     => "x265enc",
-        "rawpng"   => "pngenc",
-        _          => "x265enc",
+        "x265" => "x265enc",
+        "rawpng" => "pngenc",
+        _ => "x265enc",
     };
     let enc = gst::ElementFactory::make(enc_element)
         .name("enc")
@@ -158,10 +175,7 @@ pub fn make_pipeline(
 
     // configure drop queues
     let configure_queue = |q: &gst::Element| {
-        let _ = q.set_property(
-            "max-size-buffers",
-            queue_buffer_frames,
-        );
+        let _ = q.set_property("max-size-buffers", queue_buffer_frames);
         let _ = q.set_property("max-size-bytes", 0u32);
         let _ = q.set_property("flush-on-eos", true);
         let _ = q.set_property("silent", true);
@@ -189,13 +203,21 @@ pub fn make_pipeline(
         .field("width", cfg.width as i32)
         .field("height", cfg.height as i32);
     if use_videorate {
-        raw_caps_builder = raw_caps_builder.field("framerate", gst::Fraction::new(cfg.fps as i32, 1));
+        raw_caps_builder =
+            raw_caps_builder.field("framerate", gst::Fraction::new(cfg.fps as i32, 1));
     }
     let caps_raw = raw_caps_builder.build();
     let _ = caps1.set_property("caps", &caps_raw);
 
     if !mode_png {
-        configure_encoder(&enc, encoder_name, cfg.bitrate_kbps, cfg.fps, &cfg.nv_preset, cfg.intra_only);
+        configure_encoder(
+            &enc,
+            encoder_name,
+            cfg.bitrate_kbps,
+            cfg.fps,
+            &cfg.nv_preset,
+            cfg.intra_only,
+        );
     }
     if let Some(rate) = &rate {
         // drop-only=true: videorate only drops frames to hit target fps; it never
@@ -235,19 +257,30 @@ pub fn make_pipeline(
     // ── Link main path ───────────────────────────────────────────────────────
     if debug_enabled {
         let tee = tee.as_ref().context("tee missing while debug enabled")?;
-        let qmain = qmain.as_ref().context("qmain missing while debug enabled")?;
+        let qmain = qmain
+            .as_ref()
+            .context("qmain missing while debug enabled")?;
 
         if let Some(parse) = &parse {
             if let Some(rate) = &rate {
-                pipeline.add_many([&src, &q1, &caps_src, &convert, &scale, rate, &caps1, tee, qmain, &enc, parse, &sink])?;
+                pipeline.add_many([
+                    &src, &q1, &caps_src, &convert, &scale, rate, &caps1, tee, qmain, &enc, parse,
+                    &sink,
+                ])?;
             } else {
-                pipeline.add_many([&src, &q1, &caps_src, &convert, &scale, &caps1, tee, qmain, &enc, parse, &sink])?;
+                pipeline.add_many([
+                    &src, &q1, &caps_src, &convert, &scale, &caps1, tee, qmain, &enc, parse, &sink,
+                ])?;
             }
         } else {
             if let Some(rate) = &rate {
-                pipeline.add_many([&src, &q1, &caps_src, &convert, &scale, rate, &caps1, tee, qmain, &enc, &sink])?;
+                pipeline.add_many([
+                    &src, &q1, &caps_src, &convert, &scale, rate, &caps1, tee, qmain, &enc, &sink,
+                ])?;
             } else {
-                pipeline.add_many([&src, &q1, &caps_src, &convert, &scale, &caps1, tee, qmain, &enc, &sink])?;
+                pipeline.add_many([
+                    &src, &q1, &caps_src, &convert, &scale, &caps1, tee, qmain, &enc, &sink,
+                ])?;
             }
         }
         if let Some(rate) = &rate {
@@ -256,7 +289,9 @@ pub fn make_pipeline(
             gst::Element::link_many([&src, &q1, &caps_src, &convert, &scale, &caps1, tee])?;
         }
 
-        let tee_pad_main = tee.request_pad_simple("src_%u").context("tee src pad (main)")?;
+        let tee_pad_main = tee
+            .request_pad_simple("src_%u")
+            .context("tee src pad (main)")?;
         let qmain_sink = qmain.static_pad("sink").context("qmain sink pad")?;
         tee_pad_main.link(&qmain_sink)?;
         if let Some(parse) = &parse {
@@ -267,19 +302,33 @@ pub fn make_pipeline(
     } else {
         if let Some(parse) = &parse {
             if let Some(rate) = &rate {
-                pipeline.add_many([&src, &q1, &caps_src, &convert, &scale, rate, &caps1, &enc, parse, &sink])?;
-                gst::Element::link_many([&src, &q1, &caps_src, &convert, &scale, rate, &caps1, &enc, parse, &sink])?;
+                pipeline.add_many([
+                    &src, &q1, &caps_src, &convert, &scale, rate, &caps1, &enc, parse, &sink,
+                ])?;
+                gst::Element::link_many([
+                    &src, &q1, &caps_src, &convert, &scale, rate, &caps1, &enc, parse, &sink,
+                ])?;
             } else {
-                pipeline.add_many([&src, &q1, &caps_src, &convert, &scale, &caps1, &enc, parse, &sink])?;
-                gst::Element::link_many([&src, &q1, &caps_src, &convert, &scale, &caps1, &enc, parse, &sink])?;
+                pipeline.add_many([
+                    &src, &q1, &caps_src, &convert, &scale, &caps1, &enc, parse, &sink,
+                ])?;
+                gst::Element::link_many([
+                    &src, &q1, &caps_src, &convert, &scale, &caps1, &enc, parse, &sink,
+                ])?;
             }
         } else {
             if let Some(rate) = &rate {
-                pipeline.add_many([&src, &q1, &caps_src, &convert, &scale, rate, &caps1, &enc, &sink])?;
-                gst::Element::link_many([&src, &q1, &caps_src, &convert, &scale, rate, &caps1, &enc, &sink])?;
+                pipeline.add_many([
+                    &src, &q1, &caps_src, &convert, &scale, rate, &caps1, &enc, &sink,
+                ])?;
+                gst::Element::link_many([
+                    &src, &q1, &caps_src, &convert, &scale, rate, &caps1, &enc, &sink,
+                ])?;
             } else {
                 pipeline.add_many([&src, &q1, &caps_src, &convert, &scale, &caps1, &enc, &sink])?;
-                gst::Element::link_many([&src, &q1, &caps_src, &convert, &scale, &caps1, &enc, &sink])?;
+                gst::Element::link_many([
+                    &src, &q1, &caps_src, &convert, &scale, &caps1, &enc, &sink,
+                ])?;
             }
         }
     }
@@ -289,10 +338,18 @@ pub fn make_pipeline(
         let tee = tee.as_ref().context("tee missing for debug branch")?;
         std::fs::create_dir_all(debug_dir).ok();
         let qdbg = gst::ElementFactory::make("queue").name("qdbg").build()?;
-        let vrdbg = gst::ElementFactory::make("videorate").name("vrdbg").build()?;
-        let capsdbg = gst::ElementFactory::make("capsfilter").name("capsdbg").build()?;
-        let jpeg = gst::ElementFactory::make("jpegenc").name("jpegdbg").build()?;
-        let multi = gst::ElementFactory::make("multifilesink").name("filesdbg").build()?;
+        let vrdbg = gst::ElementFactory::make("videorate")
+            .name("vrdbg")
+            .build()?;
+        let capsdbg = gst::ElementFactory::make("capsfilter")
+            .name("capsdbg")
+            .build()?;
+        let jpeg = gst::ElementFactory::make("jpegenc")
+            .name("jpegdbg")
+            .build()?;
+        let multi = gst::ElementFactory::make("multifilesink")
+            .name("filesdbg")
+            .build()?;
 
         let _ = qdbg.set_property("max-size-buffers", 1u32);
         let _ = qdbg.set_property("max-size-bytes", 0u32);
@@ -312,7 +369,9 @@ pub fn make_pipeline(
         let _ = jpeg.set_property("quality", 70i32);
 
         pipeline.add_many([&qdbg, &vrdbg, &capsdbg, &jpeg, &multi])?;
-        let tee_pad_dbg = tee.request_pad_simple("src_%u").context("tee src pad (debug)")?;
+        let tee_pad_dbg = tee
+            .request_pad_simple("src_%u")
+            .context("tee src pad (debug)")?;
         let qdbg_sink = qdbg.static_pad("sink").context("qdbg sink pad")?;
         tee_pad_dbg.link(&qdbg_sink)?;
         gst::Element::link_many([&qdbg, &vrdbg, &capsdbg, &jpeg, &multi])?;

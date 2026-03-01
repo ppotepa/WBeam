@@ -14,13 +14,14 @@ use tokio::sync::{mpsc, Mutex};
 use tokio::time::sleep;
 use tracing::{error, info, warn};
 use wbeamd_api::{
-    validate_config, valid_values, ActiveConfig, BaseResponse, ClientMetricsRequest, ClientMetricsResponse,
-    ConfigPatch, ErrorResponse, HealthResponse, KpiSnapshot, MetricsResponse, MetricsSnapshot, PresetsResponse,
-    StatusResponse, ValidationError,
+    valid_values, validate_config, ActiveConfig, BaseResponse, ClientMetricsRequest,
+    ClientMetricsResponse, ConfigPatch, ErrorResponse, HealthResponse, KpiSnapshot,
+    MetricsResponse, MetricsSnapshot, PresetsResponse, StatusResponse, ValidationError,
 };
 
 pub mod domain;
 pub mod infra;
+pub mod resolver;
 
 use domain::policy::{
     adaptation_reason, config_for_level, is_high_pressure, is_low_pressure,
@@ -35,8 +36,7 @@ use infra::{adb, config_store, telemetry};
 
 const DEFAULT_START_TIMEOUT: Duration = Duration::from_secs(45);
 const DUPLICATE_START_GUARD: Duration = Duration::from_secs(3);
-const ADAPTATION_COOLDOWN: Duration =
-    Duration::from_secs(domain::policy::ADAPTATION_COOLDOWN_SECS);
+const ADAPTATION_COOLDOWN: Duration = Duration::from_secs(domain::policy::ADAPTATION_COOLDOWN_SECS);
 const NO_PRESENT_RESTART_STREAK_REQUIRED: u8 = 4;
 const NO_PRESENT_RESTART_COOLDOWN: Duration = Duration::from_secs(15);
 const NO_PRESENT_MIN_RECV_FPS: f64 = 10.0;
@@ -278,13 +278,20 @@ impl DaemonCore {
     pub async fn start(&self, patch: ConfigPatch) -> Result<StatusResponse, CoreError> {
         let (current_cfg, current_pid, current_state) = {
             let inner = self.inner.lock().await;
-            (inner.active_config.clone(), inner.current_pid, inner.state.clone())
+            (
+                inner.active_config.clone(),
+                inner.current_pid,
+                inner.state.clone(),
+            )
         };
 
         let cfg = validate_config(patch, &current_cfg)?;
         let already_running = current_pid.is_some()
             && cfg == current_cfg
-            && matches!(current_state.as_str(), STATE_STARTING | STATE_STREAMING | STATE_RECONNECTING);
+            && matches!(
+                current_state.as_str(),
+                STATE_STARTING | STATE_STREAMING | STATE_RECONNECTING
+            );
 
         if already_running {
             return Ok(self.status().await);
@@ -308,7 +315,11 @@ impl DaemonCore {
         let (cfg, prev_cfg, was_running) = {
             let inner = self.inner.lock().await;
             let cfg = validate_config(patch, &inner.active_config)?;
-            (cfg, inner.active_config.clone(), inner.current_pid.is_some())
+            (
+                cfg,
+                inner.active_config.clone(),
+                inner.current_pid.is_some(),
+            )
         };
 
         if cfg == prev_cfg {
@@ -347,7 +358,10 @@ impl DaemonCore {
         // P2.2: log trace_id so host logs can be correlated with Android logcat
         info!(
             "client-metrics trace_id={} present={:.1}fps decode_p95={:.1}ms e2e_p95={:.1}ms",
-            client.trace_id.map(|t| format!("{:#018x}", t)).unwrap_or_else(|| "-".to_string()),
+            client
+                .trace_id
+                .map(|t| format!("{:#018x}", t))
+                .unwrap_or_else(|| "-".to_string()),
             client.present_fps,
             client.decode_time_ms_p95,
             client.e2e_latency_ms_p95,
@@ -392,8 +406,7 @@ impl DaemonCore {
                 let elapsed = started.elapsed().as_secs_f64().max(1.0);
                 inner.metrics.frame_in = (client.recv_fps * elapsed) as u64;
                 inner.metrics.frame_out = (client.present_fps * elapsed) as u64;
-                inner.metrics.drops =
-                    client.dropped_frames.saturating_add(client.too_late_frames);
+                inner.metrics.drops = client.dropped_frames.saturating_add(client.too_late_frames);
             }
 
             if client.recv_bps > 0 {
@@ -405,7 +418,10 @@ impl DaemonCore {
             if let Some(ref mut f) = inner.telemetry_file {
                 let mut rec = serde_json::to_value(&client).unwrap_or_default();
                 if let serde_json::Value::Object(ref mut m) = rec {
-                    m.insert("run_id".to_string(), serde_json::Value::from(telemetry_run_id));
+                    m.insert(
+                        "run_id".to_string(),
+                        serde_json::Value::from(telemetry_run_id),
+                    );
                 }
                 let _ = writeln!(f, "{rec}");
             }
@@ -423,8 +439,8 @@ impl DaemonCore {
                 .last_no_present_recovery_at
                 .map(|t| now.duration_since(t) >= NO_PRESENT_RESTART_COOLDOWN)
                 .unwrap_or(true);
-            let forced_no_present_restart =
-                no_present_restart_ready && inner.no_present_streak >= NO_PRESENT_RESTART_STREAK_REQUIRED;
+            let forced_no_present_restart = no_present_restart_ready
+                && inner.no_present_streak >= NO_PRESENT_RESTART_STREAK_REQUIRED;
 
             if forced_no_present_restart {
                 inner.no_present_streak = 0;
@@ -489,7 +505,9 @@ impl DaemonCore {
                         inner.metrics.adaptive_action = "degrade-clamped".to_string();
                     }
                     inner.high_pressure_streak = 0;
-                } else if cooldown_ready && inner.low_pressure_streak >= LOW_PRESSURE_STREAK_REQUIRED {
+                } else if cooldown_ready
+                    && inner.low_pressure_streak >= LOW_PRESSURE_STREAK_REQUIRED
+                {
                     if inner.adaptation_level > 0 {
                         inner.adaptation_level = inner.adaptation_level.saturating_sub(1);
                         adapted = true;
@@ -514,14 +532,17 @@ impl DaemonCore {
                         inner.metrics.adaptive_action, inner.adaptation_level, reason
                     );
 
-                    let target_cfg = config_for_level(&inner.baseline_config, inner.adaptation_level);
+                    let target_cfg =
+                        config_for_level(&inner.baseline_config, inner.adaptation_level);
                     if target_cfg != inner.active_config && inner.current_pid.is_some() {
                         if self.allow_live_adaptive_restart {
                             inner.active_config = target_cfg.clone();
-                            inner.metrics.restart_count = inner.metrics.restart_count.saturating_add(1);
+                            inner.metrics.restart_count =
+                                inner.metrics.restart_count.saturating_add(1);
                             restart_cfg = Some(target_cfg);
                         } else {
-                            inner.metrics.adaptive_action = format!("{}-pending", inner.metrics.adaptive_action);
+                            inner.metrics.adaptive_action =
+                                format!("{}-pending", inner.metrics.adaptive_action);
                             inner.metrics.adaptive_reason = format!(
                                 "{} | pending size={} fps={} bitrate={}",
                                 reason, target_cfg.size, target_cfg.fps, target_cfg.bitrate_kbps
@@ -616,7 +637,10 @@ impl DaemonCore {
             if inner.current_pid.is_some()
                 && cfg == inner.active_config
                 && recent_start
-                && matches!(inner.state.as_str(), STATE_STARTING | STATE_STREAMING | STATE_RECONNECTING)
+                && matches!(
+                    inner.state.as_str(),
+                    STATE_STARTING | STATE_STREAMING | STATE_RECONNECTING
+                )
             {
                 info!(state = %inner.state, "suppressing duplicate start request");
                 return Ok(());
@@ -735,9 +759,7 @@ impl DaemonCore {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| CoreError::Spawn(e.to_string()))?;
+        let mut child = cmd.spawn().map_err(|e| CoreError::Spawn(e.to_string()))?;
 
         let pid = child
             .id()
@@ -839,9 +861,8 @@ impl DaemonCore {
 
             if !had_streaming_session {
                 inner.state = STATE_IDLE.to_string();
-                inner.last_error = format!(
-                    "stream start aborted (code={exit_code}); waiting for explicit /start"
-                );
+                inner.last_error =
+                    format!("stream start aborted (code={exit_code}); waiting for explicit /start");
                 info!(
                     run_id,
                     exit_code,
@@ -910,7 +931,8 @@ impl DaemonCore {
                     if let Some(started) = inner.run_started_at {
                         if now.duration_since(started) > self.start_timeout {
                             inner.state = STATE_ERROR.to_string();
-                            inner.last_error = "start timeout waiting for streaming signal".to_string();
+                            inner.last_error =
+                                "start timeout waiting for streaming signal".to_string();
                             inner.metrics.drops = inner.metrics.drops.saturating_add(1);
                             kill_pid = Some(pid);
                         }
@@ -945,7 +967,6 @@ impl DaemonCore {
         self.base_from_inner(&inner)
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -988,11 +1009,7 @@ mod tests {
     /// Build a DaemonCore whose inner state looks like it's been streaming
     /// for 10 seconds (satisfies can_adapt) with adaptation cooldown cleared.
     async fn streaming_core_ready() -> DaemonCore {
-        let core = DaemonCore::new(
-            PathBuf::from("/tmp/test-wbeam-b2"),
-            15000,
-            15001,
-        );
+        let core = DaemonCore::new(PathBuf::from("/tmp/test-wbeam-b2"), 15000, 15001);
         {
             let mut inner = core.inner.lock().await;
             inner.state = STATE_STREAMING.to_string();
@@ -1047,9 +1064,9 @@ mod tests {
     fn test_not_high_pressure_healthy() {
         let inner = default_inner();
         let client = ClientMetricsRequest {
-            decode_time_ms_p95: 8.0,  // ≤ 12.0
-            render_time_ms_p95: 5.0,  // ≤ 7.0
-            present_fps: 59.0,        // 59 >= 60 * 0.90 = 54
+            decode_time_ms_p95: 8.0, // ≤ 12.0
+            render_time_ms_p95: 5.0, // ≤ 7.0
+            present_fps: 59.0,       // 59 >= 60 * 0.90 = 54
             ..Default::default()
         };
         assert!(!is_high_pressure(inner.active_config.fps, &client));
@@ -1060,7 +1077,10 @@ mod tests {
     #[test]
     fn test_low_pressure_all_healthy() {
         let inner = default_inner();
-        assert!(is_low_pressure(inner.active_config.fps, &low_pressure_client()));
+        assert!(is_low_pressure(
+            inner.active_config.fps,
+            &low_pressure_client()
+        ));
     }
 
     #[test]
@@ -1094,8 +1114,12 @@ mod tests {
     async fn test_adaptation_degrade_after_streak() {
         let core = streaming_core_ready().await;
         // Two consecutive high-pressure samples should push level 0 → 1
-        core.ingest_client_metrics(high_pressure_client()).await.expect("ingest");
-        core.ingest_client_metrics(high_pressure_client()).await.expect("ingest");
+        core.ingest_client_metrics(high_pressure_client())
+            .await
+            .expect("ingest");
+        core.ingest_client_metrics(high_pressure_client())
+            .await
+            .expect("ingest");
         let inner = core.inner.lock().await;
         assert_eq!(inner.adaptation_level, 1, "level should degrade to 1");
     }
@@ -1104,7 +1128,9 @@ mod tests {
     async fn test_adaptation_single_high_no_degrade() {
         // Only one high-pressure sample (streak < HIGH_PRESSURE_STREAK_REQUIRED=2)
         let core = streaming_core_ready().await;
-        core.ingest_client_metrics(high_pressure_client()).await.expect("ingest");
+        core.ingest_client_metrics(high_pressure_client())
+            .await
+            .expect("ingest");
         let inner = core.inner.lock().await;
         assert_eq!(inner.adaptation_level, 0, "one sample should not degrade");
     }
@@ -1113,14 +1139,25 @@ mod tests {
     async fn test_adaptation_cooldown_blocks_rapid_degrade() {
         let core = streaming_core_ready().await;
         // First degrade: level 0 → 1
-        core.ingest_client_metrics(high_pressure_client()).await.expect("ingest");
-        core.ingest_client_metrics(high_pressure_client()).await.expect("ingest");
+        core.ingest_client_metrics(high_pressure_client())
+            .await
+            .expect("ingest");
+        core.ingest_client_metrics(high_pressure_client())
+            .await
+            .expect("ingest");
         // Immediately after degrade, cooldown should block further degrade
         // (last_adaptation_at = Some(Instant::now()), delta < 4s)
-        core.ingest_client_metrics(high_pressure_client()).await.expect("ingest");
-        core.ingest_client_metrics(high_pressure_client()).await.expect("ingest");
+        core.ingest_client_metrics(high_pressure_client())
+            .await
+            .expect("ingest");
+        core.ingest_client_metrics(high_pressure_client())
+            .await
+            .expect("ingest");
         let inner = core.inner.lock().await;
-        assert_eq!(inner.adaptation_level, 1, "cooldown should block second degrade");
+        assert_eq!(
+            inner.adaptation_level, 1,
+            "cooldown should block second degrade"
+        );
     }
 
     #[tokio::test]
@@ -1135,10 +1172,17 @@ mod tests {
             inner.high_pressure_streak = 0;
         }
         // Two more high-pressure → level 1 → 2
-        core.ingest_client_metrics(high_pressure_client()).await.expect("ingest");
-        core.ingest_client_metrics(high_pressure_client()).await.expect("ingest");
+        core.ingest_client_metrics(high_pressure_client())
+            .await
+            .expect("ingest");
+        core.ingest_client_metrics(high_pressure_client())
+            .await
+            .expect("ingest");
         let inner = core.inner.lock().await;
-        assert_eq!(inner.adaptation_level, 2, "back-dated cooldown should allow degrade 1→2");
+        assert_eq!(
+            inner.adaptation_level, 2,
+            "back-dated cooldown should allow degrade 1→2"
+        );
     }
 
     #[tokio::test]
@@ -1150,10 +1194,17 @@ mod tests {
             inner.adaptation_level = MAX_ADAPTATION_LEVEL;
             inner.last_adaptation_at = Some(Instant::now() - Duration::from_secs(5));
         }
-        core.ingest_client_metrics(high_pressure_client()).await.expect("ingest");
-        core.ingest_client_metrics(high_pressure_client()).await.expect("ingest");
+        core.ingest_client_metrics(high_pressure_client())
+            .await
+            .expect("ingest");
+        core.ingest_client_metrics(high_pressure_client())
+            .await
+            .expect("ingest");
         let inner = core.inner.lock().await;
-        assert_eq!(inner.adaptation_level, MAX_ADAPTATION_LEVEL, "must not exceed MAX (3)");
+        assert_eq!(
+            inner.adaptation_level, MAX_ADAPTATION_LEVEL,
+            "must not exceed MAX (3)"
+        );
     }
 
     #[tokio::test]
@@ -1166,10 +1217,15 @@ mod tests {
             inner.last_adaptation_at = Some(Instant::now() - Duration::from_secs(5));
         }
         for _ in 0..LOW_PRESSURE_STREAK_REQUIRED {
-            core.ingest_client_metrics(low_pressure_client()).await.expect("ingest");
+            core.ingest_client_metrics(low_pressure_client())
+                .await
+                .expect("ingest");
         }
         let inner = core.inner.lock().await;
-        assert_eq!(inner.adaptation_level, 0, "8 low-pressure samples should recover level 1→0");
+        assert_eq!(
+            inner.adaptation_level, 0,
+            "8 low-pressure samples should recover level 1→0"
+        );
     }
 
     #[tokio::test]
@@ -1182,7 +1238,9 @@ mod tests {
             inner.last_adaptation_at = Some(Instant::now() - Duration::from_secs(5));
         }
         for _ in 0..LOW_PRESSURE_STREAK_REQUIRED {
-            core.ingest_client_metrics(low_pressure_client()).await.expect("ingest");
+            core.ingest_client_metrics(low_pressure_client())
+                .await
+                .expect("ingest");
         }
         let inner = core.inner.lock().await;
         assert_eq!(inner.adaptation_level, 0, "cannot recover below 0");
@@ -1191,21 +1249,25 @@ mod tests {
     #[tokio::test]
     async fn test_adaptation_hold_during_warmup() {
         // stream_started_at < 8s → can_adapt = false → level stays 0
-        let core = DaemonCore::new(
-            PathBuf::from("/tmp/test-wbeam-b2"),
-            15002,
-            15003,
-        );
+        let core = DaemonCore::new(PathBuf::from("/tmp/test-wbeam-b2"), 15002, 15003);
         {
             let mut inner = core.inner.lock().await;
             inner.state = STATE_STREAMING.to_string();
             inner.current_pid = Some(99999);
-            inner.stream_started_at = Some(Instant::now() - Duration::from_secs(3)); // < 8s
+            inner.stream_started_at = Some(Instant::now() - Duration::from_secs(3));
+            // < 8s
         }
-        core.ingest_client_metrics(high_pressure_client()).await.expect("ingest");
-        core.ingest_client_metrics(high_pressure_client()).await.expect("ingest");
+        core.ingest_client_metrics(high_pressure_client())
+            .await
+            .expect("ingest");
+        core.ingest_client_metrics(high_pressure_client())
+            .await
+            .expect("ingest");
         let inner = core.inner.lock().await;
-        assert_eq!(inner.adaptation_level, 0, "warmup guard must block early adaptation");
+        assert_eq!(
+            inner.adaptation_level, 0,
+            "warmup guard must block early adaptation"
+        );
     }
 
     // ── telemetry (unit tests are in infra::telemetry) ─────────────────────

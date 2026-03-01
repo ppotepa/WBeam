@@ -18,19 +18,19 @@
 //!     // Push a synthetic frame from any thread:
 //!     let payload = bytes::Bytes::from_static(b"\x00\x00\x00\x01test");
 //!     sender.push(payload, 0, true);
-//!     // … later … 
+//!     // … later …
 //!     shutdown.notify_waiters();
 //! }
 //! ```
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use bytes::Bytes;
 use tokio::sync::Notify;
 use tracing::warn;
 
-use wbtp_sender::{FrameSender, OutFrame, SenderConfig, spawn_sender};
+use wbtp_sender::{spawn_sender, FrameSender, OutFrame, SenderConfig};
 
 // ── config ────────────────────────────────────────────────────────────────────
 
@@ -60,20 +60,20 @@ impl Default for HostSenderConfig {
 /// Cumulative counters updated on every [`HostSender::push`] call.
 #[derive(Debug, Default)]
 pub struct HostStats {
-    pub frames_sent:    u64,
+    pub frames_sent: u64,
     pub frames_dropped: u64,
 }
 
 #[derive(Default)]
 struct AtomicStats {
-    frames_sent:    AtomicU64,
+    frames_sent: AtomicU64,
     frames_dropped: AtomicU64,
 }
 
 impl AtomicStats {
     fn snapshot(&self) -> HostStats {
         HostStats {
-            frames_sent:    self.frames_sent.load(Ordering::Relaxed),
+            frames_sent: self.frames_sent.load(Ordering::Relaxed),
             frames_dropped: self.frames_dropped.load(Ordering::Relaxed),
         }
     }
@@ -91,7 +91,7 @@ pub struct HostSender {
 }
 
 struct Inner {
-    tx:    FrameSender,
+    tx: FrameSender,
     stats: AtomicStats,
 }
 
@@ -101,8 +101,8 @@ impl HostSender {
     /// Must be called from within a Tokio async context.
     pub fn spawn(cfg: HostSenderConfig, shutdown: Arc<Notify>) -> Self {
         let sender_cfg = SenderConfig {
-            remote_addr:     cfg.remote_addr,
-            queue_capacity:  cfg.queue_capacity,
+            remote_addr: cfg.remote_addr,
+            queue_capacity: cfg.queue_capacity,
             enable_checksum: cfg.enable_checksum,
         };
         let tx = spawn_sender(sender_cfg, shutdown);
@@ -129,7 +129,10 @@ impl HostSender {
             is_keyframe,
         });
         if dropped {
-            self.inner.stats.frames_dropped.fetch_add(1, Ordering::Relaxed);
+            self.inner
+                .stats
+                .frames_dropped
+                .fetch_add(1, Ordering::Relaxed);
             warn!("wbtp-host: queue full, dropped oldest frame");
         }
         self.inner.stats.frames_sent.fetch_add(1, Ordering::Relaxed);
