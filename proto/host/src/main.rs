@@ -1,19 +1,26 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex, OnceLock};
-use std::sync::atomic::{AtomicU8, Ordering};
-use std::process::Command;
-use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use std::process::Stdio;
 use std::path::PathBuf;
+use std::process::Command;
+use std::process::Stdio;
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::thread;
 use std::time::Instant;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use log::LevelFilter;
 use log::{error, info};
 use tiny_http::{Header, Request, Response, Server};
+
+#[allow(dead_code)]
+mod application;
+#[allow(dead_code)]
+mod domain;
+#[allow(dead_code)]
+mod infrastructure;
 
 const LISTEN_ADDR: &str = "0.0.0.0:5005";
 const JPEG_QUALITY: u8 = 95;
@@ -27,6 +34,7 @@ const PORTAL_JPEG_FILE: &str = "/tmp/proto-portal-frame.jpg";
 const PORTAL_DEBUG_DIR: &str = "/dev/shm/proto-portal-frames";
 const PORTAL_STREAMER_LOG: &str = "/tmp/proto-portal-streamer.log";
 const PORTAL_FFMPEG_LOG: &str = "/tmp/proto-portal-ffmpeg.log";
+const KMS_FFMPEG_LOG: &str = "/tmp/proto-kms-ffmpeg.log";
 const HOST_EFFECTIVE_CONFIG_LOG: &str = "/tmp/proto-effective-config-host.json";
 const MJPEG_BOUNDARY: &str = "frame";
 const WBJ1_MAGIC: &[u8; 4] = b"WBJ1";
@@ -44,57 +52,61 @@ const ADB_WRITE_TIMEOUT_MS_MAX: u64 = 1000;
 const H264_SOURCE_READ_TIMEOUT_MS_DEFAULT: u64 = 5000;
 const H264_SOURCE_READ_TIMEOUT_MS_MIN: u64 = 100;
 const H264_SOURCE_READ_TIMEOUT_MS_MAX: u64 = 20_000;
-const TCP_SNDBUF_BYTES: i32      = 512 * 1024;
-const DEFAULT_ADB_ADDR: &str     = "127.0.0.1:5006";
+const TCP_SNDBUF_BYTES: i32 = 512 * 1024;
+const DEFAULT_ADB_ADDR: &str = "127.0.0.1:5006";
 const DEFAULT_CAPTURE_SIZE: &str = "1024x640";
-const DEFAULT_CAPTURE_FPS_STR: &str    = "60";
-const CAPTURE_FORMAT_JPEG: &str        = "jpeg";
-const CAPTURE_FORMAT_PNG: &str         = "png";
-const IMAGEMAGICK_PIPE_JPEG: &str      = "jpeg:-";
-const MIME_JPEG: &str                  = "image/jpeg";
-const MIME_PNG: &str                   = "image/png";
-const DEFAULT_BITRATE_KBPS_STR: &str   = "7000";
-const DEFAULT_CURSOR_MODE: &str        = "embedded";
-const PORTAL_SOURCE_DEBUG: &str        = "debug";
-const PORTAL_SOURCE_FILE: &str         = "file";
-const DEFAULT_PORTAL_SOURCE: &str      = "debug";
-const DEFAULT_PORTAL_PROFILE: &str     = "lowlatency";
+const DEFAULT_CAPTURE_FPS_STR: &str = "60";
+const CAPTURE_FORMAT_JPEG: &str = "jpeg";
+const CAPTURE_FORMAT_PNG: &str = "png";
+const IMAGEMAGICK_PIPE_JPEG: &str = "jpeg:-";
+const MIME_JPEG: &str = "image/jpeg";
+const MIME_PNG: &str = "image/png";
+const DEFAULT_BITRATE_KBPS_STR: &str = "7000";
+const DEFAULT_CURSOR_MODE: &str = "embedded";
+const PORTAL_SOURCE_DEBUG: &str = "debug";
+const PORTAL_SOURCE_FILE: &str = "file";
+const DEFAULT_PORTAL_SOURCE: &str = "debug";
+const DEFAULT_PORTAL_PROFILE: &str = "lowlatency";
 const DEFAULT_PORTAL_PERSIST_MODE: u32 = 2;
 const DEFAULT_PORTAL_RESTORE_TOKEN_FILE: &str = "/tmp/proto-portal-restore-token";
-const PORTAL_PIPELINE_SETTLE_MS: u64   = 700;
-const FFMPEG_ANALYZEDURATION: &str     = "500000";
-const FFMPEG_PROBESIZE: &str           = "32768";
-const ADB_RECONNECT_BASE_MS: u64       = 500;
-const ADB_RECONNECT_MAX_MS: u64        = 2_000;
-const ADB_RECONNECT_MAX_SHIFT: u32     = 2;
-const ADB_KEEPALIVE_MIN_MS: u64        = 250;
-const ADB_KEEPALIVE_MAX_MS: u64        = 5_000;
-const ADB_KEEPALIVE_DEFAULT_MS: u64    = 1_000;
-const H264_RX_BUF_BYTES: usize         = 64 * 1024;
+const DEFAULT_CAPTURE_BACKEND: &str = "auto";
+const DEFAULT_KMS_DEVICE: &str = "/dev/dri/card0";
+const DEFAULT_KMS_JPEG_FILTER: &str = "hwdownload,format=bgr0";
+const DEFAULT_KMS_H264_FILTER: &str = "hwdownload,format=bgr0,format=yuv420p";
+const PORTAL_PIPELINE_SETTLE_MS: u64 = 700;
+const FFMPEG_ANALYZEDURATION: &str = "500000";
+const FFMPEG_PROBESIZE: &str = "32768";
+const ADB_RECONNECT_BASE_MS: u64 = 500;
+const ADB_RECONNECT_MAX_MS: u64 = 2_000;
+const ADB_RECONNECT_MAX_SHIFT: u32 = 2;
+const ADB_KEEPALIVE_MIN_MS: u64 = 250;
+const ADB_KEEPALIVE_MAX_MS: u64 = 5_000;
+const ADB_KEEPALIVE_DEFAULT_MS: u64 = 1_000;
+const H264_RX_BUF_BYTES: usize = 64 * 1024;
 const H264_PARSE_BUF_INIT_BYTES: usize = 256 * 1024;
-const H264_PARSE_BUF_MAX_BYTES: usize  = 2 * 1024 * 1024;
+const H264_PARSE_BUF_MAX_BYTES: usize = 2 * 1024 * 1024;
 const H264_PARSE_BUF_KEEP_BYTES: usize = 256 * 1024;
-const H264_PARSE_COMPACT_BYTES: usize  = 512 * 1024;
+const H264_PARSE_COMPACT_BYTES: usize = 512 * 1024;
 const H264_STARTCODE_TAIL_BYTES: usize = 4;
-const DEBUG_FRAMES_DIR_DEFAULT: &str   = "../debugframes";
-const DEBUG_FRAMES_FPS_MIN: u64        = 1;
-const DEBUG_FRAMES_FPS_MAX: u64        = 30;
-const DEBUG_FRAMES_FPS_DEFAULT: u64    = 2;
-const DEBUG_FRAMES_SLOTS_MIN: u32      = 8;
-const DEBUG_FRAMES_SLOTS_MAX: u32      = 2000;
-const DEBUG_FRAMES_SLOTS_DEFAULT: u32  = 120;
-const FPS_CAPTURE_MIN: u64             = 5;
-const FPS_CAPTURE_MAX: u64             = 60;
-const FPS_PUSH_MIN: u64                = 1;
-const FPS_PUSH_MAX: u64                = 60;
-const MAX_FRAME_BYTES_MIN: usize       = 64 * 1024;
-const MAX_FRAME_BYTES_MAX: usize       = 1024 * 1024;
-const DEFAULT_MAX_FRAME_BYTES: usize   = 220 * 1024;
-const MAX_CHUNK_BYTES_MIN: usize       = 1024;
-const MAX_CHUNK_BYTES_MAX: usize       = 256 * 1024;
-const DEFAULT_MAX_CHUNK_BYTES: usize   = 14 * 1024;
-const ANDROID_LOG_POLL_SECS: u64       = 5;
-const ANDROID_LOG_DIR: &str            = "../logs";
+const DEBUG_FRAMES_DIR_DEFAULT: &str = "../debugframes";
+const DEBUG_FRAMES_FPS_MIN: u64 = 1;
+const DEBUG_FRAMES_FPS_MAX: u64 = 30;
+const DEBUG_FRAMES_FPS_DEFAULT: u64 = 2;
+const DEBUG_FRAMES_SLOTS_MIN: u32 = 8;
+const DEBUG_FRAMES_SLOTS_MAX: u32 = 2000;
+const DEBUG_FRAMES_SLOTS_DEFAULT: u32 = 120;
+const FPS_CAPTURE_MIN: u64 = 5;
+const FPS_CAPTURE_MAX: u64 = 60;
+const FPS_PUSH_MIN: u64 = 1;
+const FPS_PUSH_MAX: u64 = 60;
+const MAX_FRAME_BYTES_MIN: usize = 64 * 1024;
+const MAX_FRAME_BYTES_MAX: usize = 1024 * 1024;
+const DEFAULT_MAX_FRAME_BYTES: usize = 220 * 1024;
+const MAX_CHUNK_BYTES_MIN: usize = 1024;
+const MAX_CHUNK_BYTES_MAX: usize = 256 * 1024;
+const DEFAULT_MAX_CHUNK_BYTES: usize = 14 * 1024;
+const ANDROID_LOG_POLL_SECS: u64 = 5;
+const ANDROID_LOG_DIR: &str = "../logs";
 const PORTAL_WBEAM_ALLOWED_KEYS: &[&str] = &[
     "WBEAM_FRAMED",
     "WBEAM_VIDEORATE_DROP_ONLY",
@@ -116,7 +128,19 @@ const PORTAL_WBEAM_ALLOWED_KEYS: &[&str] = &[
 ];
 static PRIMARY_OUTPUT: OnceLock<Option<String>> = OnceLock::new();
 static PORTAL_STARTED: OnceLock<bool> = OnceLock::new();
+static KMS_STARTED: OnceLock<bool> = OnceLock::new();
+static CAPTURE_BACKEND: OnceLock<CaptureBackend> = OnceLock::new();
 static CONFIG: OnceLock<HashMap<String, String>> = OnceLock::new();
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CaptureBackend {
+    Auto,
+    Portal,
+    KmsDrm,
+    Grim,
+    Spectacle,
+    Import,
+}
 
 #[derive(Clone, Default)]
 struct Frames {
@@ -125,7 +149,9 @@ struct Frames {
 }
 
 fn main() {
-    env_logger::Builder::new().filter_level(LevelFilter::Info).init();
+    env_logger::Builder::new()
+        .filter_level(LevelFilter::Info)
+        .init();
     init_config();
     if h264_mode_enabled() {
         run_h264_loop();
@@ -147,7 +173,11 @@ fn main() {
             Vec::new()
         });
     let initial_png = fallback_png().to_vec();
-    info!("captured initial frame jpeg={} png={}", initial_jpeg.len(), initial_png.len());
+    info!(
+        "captured initial frame jpeg={} png={}",
+        initial_jpeg.len(),
+        initial_png.len()
+    );
 
     let current_quality = Arc::new(AtomicU8::new(JPEG_Q_DEFAULT));
 
@@ -169,7 +199,8 @@ fn main() {
             }
             next_capture = Instant::now() + Duration::from_millis(frame_interval_ms);
             let q = refresh_quality.load(Ordering::Relaxed);
-            let jpeg_result = capture_desktop_with_quality(q).and_then(|bytes| maybe_extend_virtual(&bytes, CAPTURE_FORMAT_JPEG));
+            let jpeg_result = capture_desktop_with_quality(q)
+                .and_then(|bytes| maybe_extend_virtual(&bytes, CAPTURE_FORMAT_JPEG));
 
             if let Ok(mut guard) = refresh_shared.lock() {
                 let jpeg_ok = jpeg_result.is_ok();
@@ -196,7 +227,11 @@ fn main() {
 
                 frame_counter += 1;
                 if frame_counter % target_fps == 0 {
-                    info!("refreshed desktop frame jpeg={} fps={}", guard.jpeg.len(), target_fps);
+                    info!(
+                        "refreshed desktop frame jpeg={} fps={}",
+                        guard.jpeg.len(),
+                        target_fps
+                    );
                 }
             }
         }
@@ -239,10 +274,10 @@ fn main() {
             };
 
             let mut resp = Response::from_data(body);
-            let content_type = Header::from_bytes(&b"Content-Type"[..], mime.as_bytes())
-                .expect("valid header");
-            let cache_control = Header::from_bytes(&b"Cache-Control"[..], &b"no-store"[..])
-                .expect("valid header");
+            let content_type =
+                Header::from_bytes(&b"Content-Type"[..], mime.as_bytes()).expect("valid header");
+            let cache_control =
+                Header::from_bytes(&b"Cache-Control"[..], &b"no-store"[..]).expect("valid header");
             resp.add_header(content_type);
             resp.add_header(cache_control);
             let _ = req.respond(resp);
@@ -393,8 +428,14 @@ fn write_effective_config_snapshot(source_config: &str, map: &HashMap<String, St
         .map(|d| d.as_secs().to_string())
         .unwrap_or_else(|_| "0".to_string());
     lines.push("{".to_string());
-    lines.push(format!("  \"generated_at_unix\": \"{}\",", json_escape(&ts)));
-    lines.push(format!("  \"source_config\": \"{}\",", json_escape(source_config)));
+    lines.push(format!(
+        "  \"generated_at_unix\": \"{}\",",
+        json_escape(&ts)
+    ));
+    lines.push(format!(
+        "  \"source_config\": \"{}\",",
+        json_escape(source_config)
+    ));
     for key in keys {
         if key == "generated_at_unix" || key == "source_config" {
             continue;
@@ -413,7 +454,10 @@ fn write_effective_config_snapshot(source_config: &str, map: &HashMap<String, St
     }
     lines.push("}".to_string());
     let _ = fs::write(HOST_EFFECTIVE_CONFIG_LOG, lines.join("\n") + "\n");
-    info!("effective host config snapshot: {}", HOST_EFFECTIVE_CONFIG_LOG);
+    info!(
+        "effective host config snapshot: {}",
+        HOST_EFFECTIVE_CONFIG_LOG
+    );
 }
 
 fn json_escape(raw: &str) -> String {
@@ -440,9 +484,11 @@ fn log_effective_runtime_settings() {
         "PROTO_CAPTURE_FPS",
         "PROTO_CAPTURE_BITRATE_KBPS",
         "PROTO_CAPTURE_SIZE",
+        "PROTO_CAPTURE_BACKEND",
         "PROTO_H264",
         "PROTO_H264_SOURCE_FRAMED",
         "PROTO_H264_SOURCE_PORT",
+        "PROTO_KMS_DEVICE",
         "PROTO_ADB_PUSH_ADDR",
         "PROTO_ADB_WRITE_TIMEOUT_MS",
         "PROTO_H264_SOURCE_READ_TIMEOUT_MS",
@@ -484,6 +530,40 @@ fn env_truthy(name: &str, default: bool) -> bool {
         .unwrap_or(default)
 }
 
+fn selected_capture_backend() -> CaptureBackend {
+    *CAPTURE_BACKEND.get_or_init(|| {
+        let raw = cfg_var("PROTO_CAPTURE_BACKEND")
+            .unwrap_or_else(|_| DEFAULT_CAPTURE_BACKEND.to_string())
+            .to_ascii_lowercase();
+        match raw.as_str() {
+            "auto" => CaptureBackend::Auto,
+            "portal" | "wayland_portal" => CaptureBackend::Portal,
+            "kms_drm" | "kms" => CaptureBackend::KmsDrm,
+            "grim" => CaptureBackend::Grim,
+            "spectacle" => CaptureBackend::Spectacle,
+            "import" | "x11_import" => CaptureBackend::Import,
+            unknown => {
+                error!("unknown PROTO_CAPTURE_BACKEND='{}'; using auto", unknown);
+                CaptureBackend::Auto
+            }
+        }
+    })
+}
+
+fn h264_source_backend() -> CaptureBackend {
+    match selected_capture_backend() {
+        CaptureBackend::Auto | CaptureBackend::Portal => CaptureBackend::Portal,
+        CaptureBackend::KmsDrm => CaptureBackend::KmsDrm,
+        CaptureBackend::Grim | CaptureBackend::Spectacle | CaptureBackend::Import => {
+            info!(
+                "capture backend {:?} does not provide H264 source; falling back to portal source",
+                selected_capture_backend()
+            );
+            CaptureBackend::Portal
+        }
+    }
+}
+
 fn run_h264_loop() {
     let sink_addr = cfg_var("PROTO_ADB_PUSH_ADDR").unwrap_or_else(|_| DEFAULT_ADB_ADDR.to_string());
     let source_port = cfg_var("PROTO_H264_SOURCE_PORT")
@@ -498,17 +578,51 @@ fn run_h264_loop() {
     let source_read_timeout_ms = cfg_var("PROTO_H264_SOURCE_READ_TIMEOUT_MS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
-        .map(|v| v.clamp(H264_SOURCE_READ_TIMEOUT_MS_MIN, H264_SOURCE_READ_TIMEOUT_MS_MAX))
+        .map(|v| {
+            v.clamp(
+                H264_SOURCE_READ_TIMEOUT_MS_MIN,
+                H264_SOURCE_READ_TIMEOUT_MS_MAX,
+            )
+        })
         .unwrap_or(H264_SOURCE_READ_TIMEOUT_MS_DEFAULT);
-    let source_framed = env_truthy("PROTO_H264_SOURCE_FRAMED", true);
+    let source_backend = h264_source_backend();
+    let source_framed_cfg = env_truthy("PROTO_H264_SOURCE_FRAMED", true);
+    let source_framed = if source_backend == CaptureBackend::KmsDrm {
+        if source_framed_cfg {
+            info!("forcing PROTO_H264_SOURCE_FRAMED=0 for kms_drm source backend");
+        }
+        false
+    } else {
+        source_framed_cfg
+    };
 
-    let started = PORTAL_STARTED.get_or_init(start_portal_pipeline_once);
-    if !*started {
-        error!("PROTO_H264=1 but portal pipeline is unavailable; set PROTO_PORTAL=1 on Wayland");
+    let started = match source_backend {
+        CaptureBackend::Portal => {
+            let started = PORTAL_STARTED.get_or_init(start_portal_pipeline_once);
+            if !*started {
+                error!("PROTO_H264=1 but portal pipeline is unavailable; set PROTO_PORTAL=1 on Wayland");
+            }
+            *started
+        }
+        CaptureBackend::KmsDrm => {
+            let started = KMS_STARTED.get_or_init(start_kms_pipeline_once);
+            if !*started {
+                error!(
+                    "PROTO_H264=1 but kms_drm source failed; check {}",
+                    KMS_FFMPEG_LOG
+                );
+            }
+            *started
+        }
+        _ => false,
+    };
+    if !started {
+        thread::sleep(Duration::from_millis(500));
     }
 
     info!(
-        "H264 WBH1 mode enabled: source=tcp://127.0.0.1:{} sink={} magic=WBH1 source_framed={} sink_write_timeout_ms={} source_read_timeout_ms={}",
+        "H264 WBH1 mode enabled: source_backend={:?} source=tcp://127.0.0.1:{} sink={} magic=WBH1 source_framed={} sink_write_timeout_ms={} source_read_timeout_ms={}",
+        source_backend,
         source_port,
         sink_addr,
         source_framed,
@@ -788,7 +902,12 @@ fn pump_h264_stream(
                 ));
             }
             Ok(n) => n,
-            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
                 continue;
             }
             Err(e) => return Err(e),
@@ -859,7 +978,8 @@ fn pump_h264_framed_stream(
         )?;
         if units_sent == 0 {
             send_wbh1_unit_with_ts(sink, *seq, capture_ts_ms, &payload[..payload_len])?;
-            let keyframe = (frame_flags & WBTP_FLAG_KEYFRAME) != 0 || h264_is_idr_nal(&payload[..payload_len]);
+            let keyframe =
+                (frame_flags & WBTP_FLAG_KEYFRAME) != 0 || h264_is_idr_nal(&payload[..payload_len]);
             stats.record_sent(payload_len, keyframe, Some(capture_ts_ms));
             *seq = seq.wrapping_add(1);
         }
@@ -927,16 +1047,22 @@ fn send_wbh1_unit_with_ts(
 
 fn parse_wbtp_header(header: &[u8; WBTP_HEADER_BYTES]) -> std::io::Result<(u64, usize, u8)> {
     if &header[0..4] != WBTP_MAGIC {
-        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "bad WBTP magic"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "bad WBTP magic",
+        ));
     }
     if header[4] != WBTP_VERSION {
-        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "bad WBTP version"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "bad WBTP version",
+        ));
     }
     let frame_flags = header[5];
 
     let capture_ts_us = u64::from_be_bytes([
-        header[10], header[11], header[12], header[13],
-        header[14], header[15], header[16], header[17],
+        header[10], header[11], header[12], header[13], header[14], header[15], header[16],
+        header[17],
     ]);
     let payload_len = u32::from_be_bytes([header[18], header[19], header[20], header[21]]) as usize;
     if payload_len == 0 || payload_len > H264_PARSE_BUF_MAX_BYTES {
@@ -988,8 +1114,7 @@ fn consume_wbs1_hello_rest(source: &mut TcpStream) -> std::io::Result<()> {
     let flags = rest[1];
     let declared_len = u16::from_be_bytes([rest[2], rest[3]]) as usize;
     let session_id = u64::from_be_bytes([
-        rest[4], rest[5], rest[6], rest[7],
-        rest[8], rest[9], rest[10], rest[11],
+        rest[4], rest[5], rest[6], rest[7], rest[8], rest[9], rest[10], rest[11],
     ]);
 
     if declared_len < WBS1_HEADER_BYTES || declared_len > WBS1_HEADER_MAX_BYTES {
@@ -1032,7 +1157,14 @@ fn read_exact_retry(stream: &mut TcpStream, dst: &mut [u8]) -> std::io::Result<(
                 ));
             }
             Ok(n) => off += n,
-            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => continue,
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                continue
+            }
             Err(e) => return Err(e),
         }
     }
@@ -1160,7 +1292,11 @@ fn start_adb_push_sender(shared: Arc<Mutex<Frames>>, current_quality: Arc<Atomic
     let fps = cfg_var("PROTO_ADB_PUSH_FPS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
-        .or_else(|| cfg_var("PROTO_MJPEG_FPS").ok().and_then(|v| v.parse::<u64>().ok()))
+        .or_else(|| {
+            cfg_var("PROTO_MJPEG_FPS")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+        })
         .map(|v| v.clamp(FPS_PUSH_MIN, FPS_PUSH_MAX))
         .unwrap_or(24);
     let frame_delay = Duration::from_millis(1000 / fps);
@@ -1188,8 +1324,8 @@ fn start_adb_push_sender(shared: Arc<Mutex<Frames>>, current_quality: Arc<Atomic
         .ok()
         .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
         .unwrap_or(false);
-    let debug_frames_dir = cfg_var("PROTO_DEBUG_FRAMES_DIR")
-        .unwrap_or_else(|_| DEBUG_FRAMES_DIR_DEFAULT.to_string());
+    let debug_frames_dir =
+        cfg_var("PROTO_DEBUG_FRAMES_DIR").unwrap_or_else(|_| DEBUG_FRAMES_DIR_DEFAULT.to_string());
     let debug_frames_fps = cfg_var("PROTO_DEBUG_FRAMES_FPS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
@@ -1251,7 +1387,9 @@ fn start_adb_push_sender(shared: Arc<Mutex<Frames>>, current_quality: Arc<Atomic
                     let mut last_stats = Instant::now();
                     let mut last_send = Instant::now();
                     let _ = stream.set_nodelay(true);
-                    let _ = stream.set_write_timeout(Some(Duration::from_millis(ADB_WRITE_TIMEOUT_MS_DEFAULT)));
+                    let _ = stream.set_write_timeout(Some(Duration::from_millis(
+                        ADB_WRITE_TIMEOUT_MS_DEFAULT,
+                    )));
                     set_tcp_sndbuf(&stream, TCP_SNDBUF_BYTES);
                     info!("ADB PUSH connected to {}", addr);
 
@@ -1293,10 +1431,17 @@ fn start_adb_push_sender(shared: Arc<Mutex<Frames>>, current_quality: Arc<Atomic
                             continue;
                         }
 
-                        let sig = if skip_sig_check { seq } else { frame_signature(&jpeg) };
+                        let sig = if skip_sig_check {
+                            seq
+                        } else {
+                            frame_signature(&jpeg)
+                        };
                         // Periodic keepalive re-send avoids idle timeout disconnects
                         // when desktop content is unchanged.
-                        if has_last_sig && sig == last_sig && last_send.elapsed() < keepalive_interval {
+                        if has_last_sig
+                            && sig == last_sig
+                            && last_send.elapsed() < keepalive_interval
+                        {
                             skip_same_sig = skip_same_sig.saturating_add(1);
                             continue;
                         }
@@ -1360,7 +1505,10 @@ fn start_adb_push_sender(shared: Arc<Mutex<Frames>>, current_quality: Arc<Atomic
                             };
                             if new_q != q {
                                 current_quality.store(new_q, Ordering::Relaxed);
-                                info!("Quality governor: q={} -> {} avg_kb={} late_ticks={}", q, new_q, avg_kb, late_ticks);
+                                info!(
+                                    "Quality governor: q={} -> {} avg_kb={} late_ticks={}",
+                                    q, new_q, avg_kb, late_ticks
+                                );
                             }
 
                             sent_frames = 0;
@@ -1378,7 +1526,9 @@ fn start_adb_push_sender(shared: Arc<Mutex<Frames>>, current_quality: Arc<Atomic
                     if connect_failures % 10 == 1 {
                         info!("ADB PUSH waiting for {} ({})", addr, e);
                     }
-                    let backoff_ms = (ADB_RECONNECT_BASE_MS * (1u64 << connect_failures.min(ADB_RECONNECT_MAX_SHIFT))).min(ADB_RECONNECT_MAX_MS);
+                    let backoff_ms = (ADB_RECONNECT_BASE_MS
+                        * (1u64 << connect_failures.min(ADB_RECONNECT_MAX_SHIFT)))
+                    .min(ADB_RECONNECT_MAX_MS);
                     thread::sleep(Duration::from_millis(backoff_ms));
                 }
             }
@@ -1428,7 +1578,11 @@ fn start_android_log_poller() {
     let log_dir = PathBuf::from(ANDROID_LOG_DIR);
 
     if let Err(e) = fs::create_dir_all(&log_dir) {
-        error!("android log poller: could not create log dir {}: {}", log_dir.display(), e);
+        error!(
+            "android log poller: could not create log dir {}: {}",
+            log_dir.display(),
+            e
+        );
         return;
     }
 
@@ -1446,17 +1600,40 @@ fn start_android_log_poller() {
         let mut y = 1970u32;
         let mut d = days as u32;
         loop {
-            let dy = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) { 366 } else { 365 };
-            if d < dy { break; }
+            let dy = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) {
+                366
+            } else {
+                365
+            };
+            if d < dy {
+                break;
+            }
             d -= dy;
             y += 1;
         }
-        let month_days: [u32; 12] = [31,
-            if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) { 29 } else { 28 },
-            31,30,31,30,31,31,30,31,30,31];
+        let month_days: [u32; 12] = [
+            31,
+            if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) {
+                29
+            } else {
+                28
+            },
+            31,
+            30,
+            31,
+            30,
+            31,
+            31,
+            30,
+            31,
+            30,
+            31,
+        ];
         let mut mo = 1u32;
         for md in &month_days {
-            if d < *md { break; }
+            if d < *md {
+                break;
+            }
             d -= md;
             mo += 1;
         }
@@ -1468,7 +1645,9 @@ fn start_android_log_poller() {
 
     // Clear stale logcat buffer once at startup so the first poll is fresh.
     let mut clear_cmd = Command::new("adb");
-    if !serial.is_empty() { clear_cmd.arg("-s").arg(&serial); }
+    if !serial.is_empty() {
+        clear_cmd.arg("-s").arg(&serial);
+    }
     let _ = clear_cmd.args(["logcat", "-c"]).output();
 
     thread::spawn(move || {
@@ -1477,7 +1656,9 @@ fn start_android_log_poller() {
 
             // Dump current buffer.
             let mut dump_cmd = Command::new("adb");
-            if !serial.is_empty() { dump_cmd.arg("-s").arg(&serial); }
+            if !serial.is_empty() {
+                dump_cmd.arg("-s").arg(&serial);
+            }
             let dump = dump_cmd
                 .args(["logcat", "-d"])
                 .stderr(Stdio::null())
@@ -1490,8 +1671,13 @@ fn start_android_log_poller() {
 
             // Clear immediately after dump so next poll is incremental.
             let mut clear_cmd = Command::new("adb");
-            if !serial.is_empty() { clear_cmd.arg("-s").arg(&serial); }
-            let _ = clear_cmd.args(["logcat", "-c"]).stderr(Stdio::null()).output();
+            if !serial.is_empty() {
+                clear_cmd.arg("-s").arg(&serial);
+            }
+            let _ = clear_cmd
+                .args(["logcat", "-c"])
+                .stderr(Stdio::null())
+                .output();
 
             // Append to session log file.
             if let Ok(mut f) = fs::OpenOptions::new()
@@ -1520,25 +1706,53 @@ fn capture_desktop(format: &str) -> Result<Vec<u8>, String> {
 }
 
 fn capture_desktop_with_quality(jpeg_quality: u8) -> Result<Vec<u8>, String> {
+    let capture_size = cfg_var("PROTO_CAPTURE_SIZE").ok();
     let portal_only = portal_only_mode();
 
+    match selected_capture_backend() {
+        CaptureBackend::Auto => capture_auto(capture_size.as_deref(), jpeg_quality, portal_only),
+        CaptureBackend::Portal => capture_with_portal_backend(),
+        CaptureBackend::KmsDrm => capture_with_kms_jpeg(capture_size.as_deref()),
+        CaptureBackend::Grim => capture_with_grim(capture_size.as_deref(), jpeg_quality),
+        CaptureBackend::Spectacle => {
+            capture_with_spectacle_jpeg(capture_size.as_deref(), jpeg_quality)
+        }
+        CaptureBackend::Import => capture_with_import_jpeg(capture_size.as_deref(), jpeg_quality),
+    }
+}
+
+fn capture_auto(
+    capture_size: Option<&str>,
+    jpeg_quality: u8,
+    portal_only: bool,
+) -> Result<Vec<u8>, String> {
     if portal_enabled() {
-        if let Ok(bytes) = capture_portal_jpeg() {
-            if !bytes.is_empty() {
-                return Ok(bytes);
-            }
+        if let Ok(bytes) = capture_with_portal_backend() {
+            return Ok(bytes);
         }
     }
-
     if portal_only {
         return Err("portal-only mode enabled; waiting for selected portal source".to_string());
     }
 
+    capture_with_grim(capture_size, jpeg_quality)
+        .or_else(|_| capture_with_spectacle_jpeg(capture_size, jpeg_quality))
+        .or_else(|_| capture_with_import_jpeg(capture_size, jpeg_quality))
+        .or_else(|_| Err("could not capture desktop (install grim for Wayland, kmsgrab for DRM, or import for X11)".to_string()))
+}
+
+fn capture_with_portal_backend() -> Result<Vec<u8>, String> {
+    let bytes = capture_portal_jpeg()?;
+    if bytes.is_empty() {
+        return Err("portal frame is empty".to_string());
+    }
+    Ok(bytes)
+}
+
+fn capture_with_grim(capture_size: Option<&str>, jpeg_quality: u8) -> Result<Vec<u8>, String> {
     let primary_output = PRIMARY_OUTPUT.get_or_init(detect_primary_output);
-    let capture_size = cfg_var("PROTO_CAPTURE_SIZE").ok();
-    let grim_scale = capture_size
-        .as_deref()
-        .and_then(|target| compute_grim_scale(target, primary_output.as_deref()));
+    let grim_scale =
+        capture_size.and_then(|target| compute_grim_scale(target, primary_output.as_deref()));
 
     let mut grim_cmd = Command::new("grim");
     if let Some(output_name) = primary_output.as_ref() {
@@ -1551,38 +1765,117 @@ fn capture_desktop_with_quality(jpeg_quality: u8) -> Result<Vec<u8>, String> {
         .arg("-t")
         .arg(CAPTURE_FORMAT_JPEG)
         .arg("-q")
-        .arg(jpeg_quality.to_string());
-    if let Ok(output) = grim_cmd.arg("-").output() {
-        if output.status.success() && !output.stdout.is_empty() {
-            // When grim scale is available, avoid extra ffmpeg transcode per frame.
-            if grim_scale.is_some() {
-                return Ok(output.stdout);
-            }
-            return Ok(resize_jpeg_if_requested(output.stdout, capture_size.as_deref(), jpeg_quality));
-        }
+        .arg(jpeg_quality.to_string())
+        .arg("-");
+    let output = grim_cmd.output().map_err(|e| e.to_string())?;
+    if !output.status.success() || output.stdout.is_empty() {
+        return Err("grim capture failed".to_string());
     }
-
-    if let Ok(bytes) = capture_with_spectacle(CAPTURE_FORMAT_JPEG) {
-        if !bytes.is_empty() {
-            return Ok(resize_jpeg_if_requested(bytes, capture_size.as_deref(), jpeg_quality));
-        }
+    // When grim scaling is available, avoid extra ffmpeg transcode per frame.
+    if grim_scale.is_some() {
+        return Ok(output.stdout);
     }
-
-    let mut import_cmd = Command::new("import");
-    import_cmd.arg("-window").arg("root").arg("-quality").arg(jpeg_quality.to_string());
-    if let Some(ref sz) = capture_size {
-        import_cmd.arg("-resize").arg(format!("{}!", sz));
-    }
-    if let Ok(output) = import_cmd.arg(IMAGEMAGICK_PIPE_JPEG).output() {
-        if output.status.success() && !output.stdout.is_empty() {
-            return Ok(output.stdout);
-        }
-    }
-
-    Err("could not capture desktop (install grim for Wayland or import for X11)".to_string())
+    Ok(resize_jpeg_if_requested(
+        output.stdout,
+        capture_size,
+        jpeg_quality,
+    ))
 }
 
-fn resize_jpeg_if_requested(input: Vec<u8>, capture_size: Option<&str>, _jpeg_quality: u8) -> Vec<u8> {
+fn capture_with_spectacle_jpeg(
+    capture_size: Option<&str>,
+    jpeg_quality: u8,
+) -> Result<Vec<u8>, String> {
+    let bytes = capture_with_spectacle(CAPTURE_FORMAT_JPEG)?;
+    if bytes.is_empty() {
+        return Err("spectacle returned empty jpeg".to_string());
+    }
+    Ok(resize_jpeg_if_requested(bytes, capture_size, jpeg_quality))
+}
+
+fn capture_with_import_jpeg(
+    capture_size: Option<&str>,
+    jpeg_quality: u8,
+) -> Result<Vec<u8>, String> {
+    let mut import_cmd = Command::new("import");
+    import_cmd
+        .arg("-window")
+        .arg("root")
+        .arg("-quality")
+        .arg(jpeg_quality.to_string());
+    if let Some(sz) = capture_size {
+        import_cmd.arg("-resize").arg(format!("{}!", sz));
+    }
+    let output = import_cmd
+        .arg(IMAGEMAGICK_PIPE_JPEG)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() || output.stdout.is_empty() {
+        return Err("ImageMagick import capture failed".to_string());
+    }
+    Ok(output.stdout)
+}
+
+fn capture_with_kms_jpeg(capture_size: Option<&str>) -> Result<Vec<u8>, String> {
+    let ffmpeg_filter = kms_filter_for_jpeg(capture_size);
+    let kms_device = cfg_var("PROTO_KMS_DEVICE").unwrap_or_else(|_| DEFAULT_KMS_DEVICE.to_string());
+    let mut cmd = Command::new("ffmpeg");
+    cmd.arg("-hide_banner")
+        .arg("-loglevel")
+        .arg("error")
+        .arg("-f")
+        .arg("kmsgrab")
+        .arg("-device")
+        .arg(kms_device);
+    if let Ok(crtc_id) = cfg_var("PROTO_KMS_CRTC_ID") {
+        cmd.arg("-crtc_id").arg(crtc_id);
+    }
+    if let Ok(plane_id) = cfg_var("PROTO_KMS_PLANE_ID") {
+        cmd.arg("-plane_id").arg(plane_id);
+    }
+    if let Ok(format) = cfg_var("PROTO_KMS_FORMAT") {
+        cmd.arg("-format").arg(format);
+    }
+    cmd.arg("-i")
+        .arg("-")
+        .arg("-vf")
+        .arg(ffmpeg_filter)
+        .arg("-frames:v")
+        .arg("1")
+        .arg("-f")
+        .arg("image2pipe")
+        .arg("-vcodec")
+        .arg("mjpeg")
+        .arg("-q:v")
+        .arg(JPEG_FFMPEG_QSCALE.to_string())
+        .arg("-")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let out = cmd.output().map_err(|e| e.to_string())?;
+    if out.status.success() && !out.stdout.is_empty() {
+        return Ok(out.stdout);
+    }
+    let reason = String::from_utf8_lossy(&out.stderr);
+    Err(format!("kmsgrab jpeg capture failed: {}", reason.trim()))
+}
+
+fn kms_filter_for_jpeg(capture_size: Option<&str>) -> String {
+    let mut filter =
+        cfg_var("PROTO_KMS_JPEG_FILTER").unwrap_or_else(|_| DEFAULT_KMS_JPEG_FILTER.to_string());
+    if let Some(size) = capture_size {
+        if parse_size_pair(size).is_some() {
+            filter.push_str(&format!(",scale={}:flags=fast_bilinear", size));
+        }
+    }
+    filter
+}
+
+fn resize_jpeg_if_requested(
+    input: Vec<u8>,
+    capture_size: Option<&str>,
+    _jpeg_quality: u8,
+) -> Vec<u8> {
     let Some(sz) = capture_size else {
         return input;
     };
@@ -1657,10 +1950,7 @@ fn parse_size_pair(value: &str) -> Option<(u32, u32)> {
 }
 
 fn detect_output_geometry(preferred_output: Option<&str>) -> Option<(u32, u32)> {
-    let output = Command::new("kscreen-doctor")
-        .arg("-o")
-        .output()
-        .ok()?;
+    let output = Command::new("kscreen-doctor").arg("-o").output().ok()?;
     if !output.status.success() {
         return None;
     }
@@ -1734,8 +2024,8 @@ fn capture_portal_jpeg() -> Result<Vec<u8>, String> {
         return Err("portal pipeline unavailable".to_string());
     }
 
-    let source_mode = cfg_var("PROTO_PORTAL_JPEG_SOURCE")
-        .unwrap_or_else(|_| DEFAULT_PORTAL_SOURCE.to_string());
+    let source_mode =
+        cfg_var("PROTO_PORTAL_JPEG_SOURCE").unwrap_or_else(|_| DEFAULT_PORTAL_SOURCE.to_string());
 
     if source_mode.eq_ignore_ascii_case(PORTAL_SOURCE_DEBUG) {
         if let Ok(bytes) = read_latest_portal_debug_jpeg() {
@@ -1754,6 +2044,143 @@ fn capture_portal_jpeg() -> Result<Vec<u8>, String> {
     }
 
     Err("portal frame file not ready yet".to_string())
+}
+
+fn start_kms_pipeline_once() -> bool {
+    let ffmpeg = Command::new("ffmpeg")
+        .arg("-version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    if !matches!(ffmpeg, Ok(status) if status.success()) {
+        error!("ffmpeg is required for kms_drm backend but not available");
+        return false;
+    }
+
+    let _ = fs::remove_file(KMS_FFMPEG_LOG);
+    let ffmpeg_log = match fs::File::create(KMS_FFMPEG_LOG) {
+        Ok(f) => f,
+        Err(e) => {
+            error!("failed to create kms ffmpeg log {}: {}", KMS_FFMPEG_LOG, e);
+            return false;
+        }
+    };
+
+    let source_port = cfg_var("PROTO_H264_SOURCE_PORT")
+        .ok()
+        .and_then(|v| v.parse::<u16>().ok())
+        .unwrap_or(PORTAL_STREAM_PORT);
+    let capture_fps =
+        cfg_var("PROTO_CAPTURE_FPS").unwrap_or_else(|_| DEFAULT_CAPTURE_FPS_STR.to_string());
+    let bitrate = cfg_var("PROTO_CAPTURE_BITRATE_KBPS")
+        .unwrap_or_else(|_| DEFAULT_BITRATE_KBPS_STR.to_string());
+    let gop = cfg_var("WBEAM_H264_GOP").unwrap_or_else(|_| "30".to_string());
+    let kms_device = cfg_var("PROTO_KMS_DEVICE").unwrap_or_else(|_| DEFAULT_KMS_DEVICE.to_string());
+    let capture_size =
+        cfg_var("PROTO_CAPTURE_SIZE").unwrap_or_else(|_| DEFAULT_CAPTURE_SIZE.to_string());
+    let filter = kms_filter_for_h264(&capture_size);
+    let listen_url = format!("tcp://0.0.0.0:{}?listen=1", source_port);
+
+    let mut cmd = Command::new("ffmpeg");
+    cmd.arg("-hide_banner")
+        .arg("-loglevel")
+        .arg("warning")
+        .arg("-fflags")
+        .arg("nobuffer")
+        .arg("-flags")
+        .arg("low_delay")
+        .arg("-f")
+        .arg("kmsgrab")
+        .arg("-device")
+        .arg(kms_device)
+        .arg("-framerate")
+        .arg(capture_fps);
+    if let Ok(crtc_id) = cfg_var("PROTO_KMS_CRTC_ID") {
+        cmd.arg("-crtc_id").arg(crtc_id);
+    }
+    if let Ok(plane_id) = cfg_var("PROTO_KMS_PLANE_ID") {
+        cmd.arg("-plane_id").arg(plane_id);
+    }
+    if let Ok(format) = cfg_var("PROTO_KMS_FORMAT") {
+        cmd.arg("-format").arg(format);
+    }
+    cmd.arg("-i")
+        .arg("-")
+        .arg("-vf")
+        .arg(filter)
+        .arg("-an")
+        .arg("-c:v")
+        .arg("libx264")
+        .arg("-preset")
+        .arg("ultrafast")
+        .arg("-tune")
+        .arg("zerolatency")
+        .arg("-profile:v")
+        .arg("baseline")
+        .arg("-pix_fmt")
+        .arg("yuv420p")
+        .arg("-b:v")
+        .arg(format!("{}k", bitrate))
+        .arg("-maxrate")
+        .arg(format!("{}k", bitrate))
+        .arg("-bufsize")
+        .arg(format!(
+            "{}k",
+            bitrate.parse::<u32>().unwrap_or(7000).saturating_mul(2)
+        ))
+        .arg("-g")
+        .arg(&gop)
+        .arg("-keyint_min")
+        .arg(gop)
+        .arg("-bf")
+        .arg("0")
+        .arg("-f")
+        .arg("h264")
+        .arg(listen_url)
+        .stdout(Stdio::from(
+            ffmpeg_log.try_clone().expect("clone kms ffmpeg log"),
+        ))
+        .stderr(Stdio::from(
+            ffmpeg_log.try_clone().expect("clone kms ffmpeg log"),
+        ));
+
+    let spawned = cmd.spawn();
+    let Ok(mut child) = spawned else {
+        error!("failed to spawn ffmpeg kmsgrab source helper");
+        return false;
+    };
+
+    thread::sleep(Duration::from_millis(PORTAL_PIPELINE_SETTLE_MS));
+    match child.try_wait() {
+        Ok(Some(status)) => {
+            error!(
+                "kms ffmpeg source exited immediately with status {} (see {})",
+                status, KMS_FFMPEG_LOG
+            );
+            false
+        }
+        Ok(None) => {
+            info!(
+                "kms_drm source started: {} (log: {})",
+                source_port, KMS_FFMPEG_LOG
+            );
+            true
+        }
+        Err(e) => {
+            error!("failed to check kms ffmpeg source status: {}", e);
+            false
+        }
+    }
+}
+
+fn kms_filter_for_h264(capture_size: &str) -> String {
+    let mut filter =
+        cfg_var("PROTO_KMS_H264_FILTER").unwrap_or_else(|_| DEFAULT_KMS_H264_FILTER.to_string());
+    if parse_size_pair(capture_size).is_some() {
+        filter.push_str(&format!(",scale={}:flags=fast_bilinear", capture_size));
+    }
+    filter
 }
 
 fn start_portal_pipeline_once() -> bool {
@@ -1800,9 +2227,12 @@ fn start_portal_pipeline_once() -> bool {
         return false;
     };
 
-    let capture_size = cfg_var("PROTO_CAPTURE_SIZE").unwrap_or_else(|_| DEFAULT_CAPTURE_SIZE.to_string());
-    let capture_bitrate = cfg_var("PROTO_CAPTURE_BITRATE_KBPS").unwrap_or_else(|_| DEFAULT_BITRATE_KBPS_STR.to_string());
-    let capture_fps = cfg_var("PROTO_CAPTURE_FPS").unwrap_or_else(|_| DEFAULT_CAPTURE_FPS_STR.to_string());
+    let capture_size =
+        cfg_var("PROTO_CAPTURE_SIZE").unwrap_or_else(|_| DEFAULT_CAPTURE_SIZE.to_string());
+    let capture_bitrate = cfg_var("PROTO_CAPTURE_BITRATE_KBPS")
+        .unwrap_or_else(|_| DEFAULT_BITRATE_KBPS_STR.to_string());
+    let capture_fps =
+        cfg_var("PROTO_CAPTURE_FPS").unwrap_or_else(|_| DEFAULT_CAPTURE_FPS_STR.to_string());
     let portal_debug_fps = cfg_var("PROTO_PORTAL_DEBUG_FPS")
         .ok()
         .and_then(|v| v.parse::<u32>().ok())
@@ -1811,25 +2241,33 @@ fn start_portal_pipeline_once() -> bool {
         .ok()
         .and_then(|v| v.parse::<u16>().ok())
         .unwrap_or(PORTAL_STREAM_PORT);
-    let cursor_mode = cfg_var("PROTO_CURSOR_MODE").unwrap_or_else(|_| DEFAULT_CURSOR_MODE.to_string());
-    let videorate_drop_only = cfg_var("WBEAM_VIDEORATE_DROP_ONLY").unwrap_or_else(|_| "0".to_string());
-    let framed_send_timeout_s = cfg_var("WBEAM_FRAMED_SEND_TIMEOUT_S").unwrap_or_else(|_| "0".to_string());
-    let framed_duplicate_stale = cfg_var("WBEAM_FRAMED_DUPLICATE_STALE").unwrap_or_else(|_| "0".to_string());
+    let cursor_mode =
+        cfg_var("PROTO_CURSOR_MODE").unwrap_or_else(|_| DEFAULT_CURSOR_MODE.to_string());
+    let videorate_drop_only =
+        cfg_var("WBEAM_VIDEORATE_DROP_ONLY").unwrap_or_else(|_| "0".to_string());
+    let framed_send_timeout_s =
+        cfg_var("WBEAM_FRAMED_SEND_TIMEOUT_S").unwrap_or_else(|_| "0".to_string());
+    let framed_duplicate_stale =
+        cfg_var("WBEAM_FRAMED_DUPLICATE_STALE").unwrap_or_else(|_| "0".to_string());
     let framed_stale_start_ms = cfg_var("WBEAM_FRAMED_STALE_START_MS").unwrap_or_default();
     let framed_stale_dup_fps = cfg_var("WBEAM_FRAMED_STALE_DUP_FPS").unwrap_or_default();
     let pipewire_keepalive_ms = cfg_var("WBEAM_PIPEWIRE_KEEPALIVE_MS").unwrap_or_default();
-    let pipewire_always_copy = cfg_var("WBEAM_PIPEWIRE_ALWAYS_COPY").unwrap_or_else(|_| "1".to_string());
+    let pipewire_always_copy =
+        cfg_var("WBEAM_PIPEWIRE_ALWAYS_COPY").unwrap_or_else(|_| "1".to_string());
     let framed_pull_timeout_ms = cfg_var("WBEAM_FRAMED_PULL_TIMEOUT_MS").unwrap_or_default();
     let queue_max_buffers = cfg_var("WBEAM_QUEUE_MAX_BUFFERS").unwrap_or_else(|_| "1".to_string());
     let queue_max_time_ms = cfg_var("WBEAM_QUEUE_MAX_TIME_MS").unwrap_or_else(|_| "12".to_string());
-    let appsink_max_buffers = cfg_var("WBEAM_APPSINK_MAX_BUFFERS").unwrap_or_else(|_| "2".to_string());
+    let appsink_max_buffers =
+        cfg_var("WBEAM_APPSINK_MAX_BUFFERS").unwrap_or_else(|_| "2".to_string());
     let h264_gop = cfg_var("WBEAM_H264_GOP").unwrap_or_default();
-    let portal_overlay_enable = cfg_var("PROTO_PORTAL_OVERLAY_ENABLE").unwrap_or_else(|_| "0".to_string());
+    let portal_overlay_enable =
+        cfg_var("PROTO_PORTAL_OVERLAY_ENABLE").unwrap_or_else(|_| "0".to_string());
     let portal_overlay_text = cfg_var("PROTO_PORTAL_OVERLAY_TEXT").unwrap_or_default();
     let portal_overlay_text_file = cfg_var("PROTO_PORTAL_OVERLAY_TEXT_FILE").unwrap_or_default();
     let portal_overlay_font_desc =
         cfg_var("PROTO_PORTAL_OVERLAY_FONT_DESC").unwrap_or_else(|_| "Sans 14".to_string());
-    let source_mode = cfg_var("PROTO_PORTAL_JPEG_SOURCE").unwrap_or_else(|_| DEFAULT_PORTAL_SOURCE.to_string());
+    let source_mode =
+        cfg_var("PROTO_PORTAL_JPEG_SOURCE").unwrap_or_else(|_| DEFAULT_PORTAL_SOURCE.to_string());
     let source_framed = env_truthy("PROTO_H264_SOURCE_FRAMED", h264_mode_enabled());
     let portal_persist_mode = cfg_var("PROTO_PORTAL_PERSIST_MODE")
         .ok()
@@ -1902,23 +2340,25 @@ fn start_portal_pipeline_once() -> bool {
 
     let mut streamer_child = match streamer_cmd
         .stdin(Stdio::null())
-        .stdout(Stdio::from(streamer_log.try_clone().expect("clone streamer log")))
+        .stdout(Stdio::from(
+            streamer_log.try_clone().expect("clone streamer log"),
+        ))
         .stderr(Stdio::from(streamer_log))
-        .spawn() {
-            Ok(child) => child,
-            Err(_) => {
-                error!("failed to start portal streamer helper");
-                return false;
-            }
-        };
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(_) => {
+            error!("failed to start portal streamer helper");
+            return false;
+        }
+    };
 
     // Fail fast on obvious startup issues (missing plugins/deps).
     thread::sleep(Duration::from_millis(250));
     if let Ok(Some(status)) = streamer_child.try_wait() {
         error!(
             "portal streamer exited immediately with status {} (see {})",
-            status,
-            PORTAL_STREAMER_LOG
+            status, PORTAL_STREAMER_LOG
         );
         return false;
     }
@@ -1957,8 +2397,12 @@ fn start_portal_pipeline_once() -> bool {
                 .arg("image2")
                 .arg(PORTAL_JPEG_FILE)
                 .stdin(Stdio::null())
-                .stdout(Stdio::from(ffmpeg_log.try_clone().expect("clone ffmpeg log")))
-                .stderr(Stdio::from(ffmpeg_log.try_clone().expect("clone ffmpeg log")))
+                .stdout(Stdio::from(
+                    ffmpeg_log.try_clone().expect("clone ffmpeg log"),
+                ))
+                .stderr(Stdio::from(
+                    ffmpeg_log.try_clone().expect("clone ffmpeg log"),
+                ))
                 .spawn();
 
             match ffmpeg {
@@ -2073,8 +2517,11 @@ fn set_tcp_sndbuf(stream: &std::net::TcpStream, size: i32) {
     use std::os::unix::io::AsRawFd;
     extern "C" {
         fn setsockopt(
-            sockfd: i32, level: i32, optname: i32,
-            optval: *const std::ffi::c_void, optlen: u32,
+            sockfd: i32,
+            level: i32,
+            optname: i32,
+            optval: *const std::ffi::c_void,
+            optlen: u32,
         ) -> i32;
     }
     unsafe {
@@ -2098,7 +2545,9 @@ fn precise_sleep(duration: Duration) {
         thread::sleep(duration - SPIN_WINDOW);
     }
     let deadline = Instant::now() + SPIN_WINDOW.min(duration);
-    while Instant::now() < deadline { std::hint::spin_loop(); }
+    while Instant::now() < deadline {
+        std::hint::spin_loop();
+    }
 }
 
 #[cfg(unix)]
@@ -2111,7 +2560,9 @@ fn set_thread_realtime_priority() {
     let sched_param: [u8; 4] = 1u32.to_ne_bytes();
     let ret = unsafe { sched_setscheduler(0, 1, sched_param.as_ptr()) };
     if ret != 0 {
-        unsafe { nice(-10); }
+        unsafe {
+            nice(-10);
+        }
     }
 }
 #[cfg(not(unix))]
@@ -2135,7 +2586,11 @@ fn detect_primary_output() -> Option<String> {
 }
 
 fn capture_with_spectacle(format: &str) -> Result<Vec<u8>, String> {
-    let ext = if format == CAPTURE_FORMAT_JPEG { "jpg" } else { CAPTURE_FORMAT_PNG };
+    let ext = if format == CAPTURE_FORMAT_JPEG {
+        "jpg"
+    } else {
+        CAPTURE_FORMAT_PNG
+    };
     let path = format!("/dev/shm/proto-wbeam.{}", ext);
 
     let status = Command::new("spectacle")
@@ -2165,7 +2620,11 @@ fn maybe_extend_virtual(bytes: &[u8], format: &str) -> Result<Vec<u8>, String> {
         return Ok(bytes.to_vec());
     }
 
-    let codec = if format == CAPTURE_FORMAT_PNG { CAPTURE_FORMAT_PNG } else { "mjpeg" };
+    let codec = if format == CAPTURE_FORMAT_PNG {
+        CAPTURE_FORMAT_PNG
+    } else {
+        "mjpeg"
+    };
     let mut cmd = Command::new("ffmpeg");
     cmd.arg("-hide_banner")
         .arg("-loglevel")
@@ -2236,7 +2695,10 @@ fn write_wbj1_frame(stream: &mut TcpStream, header: &[u8], payload: &[u8]) -> st
     while header_off < header.len() {
         let n = stream.write(&header[header_off..])?;
         if n == 0 {
-            return Err(std::io::Error::new(std::io::ErrorKind::WriteZero, "header write returned 0"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::WriteZero,
+                "header write returned 0",
+            ));
         }
         header_off += n;
     }
@@ -2246,7 +2708,10 @@ fn write_wbj1_frame(stream: &mut TcpStream, header: &[u8], payload: &[u8]) -> st
         let end = (payload_off + max_chunk_bytes).min(payload.len());
         let n = stream.write(&payload[payload_off..end])?;
         if n == 0 {
-            return Err(std::io::Error::new(std::io::ErrorKind::WriteZero, "payload write returned 0"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::WriteZero,
+                "payload write returned 0",
+            ));
         }
         payload_off += n;
     }
@@ -2256,11 +2721,10 @@ fn write_wbj1_frame(stream: &mut TcpStream, header: &[u8], payload: &[u8]) -> st
 
 fn fallback_png() -> &'static [u8] {
     &[
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
-        0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-        0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00,
-        0x0D, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0xF8, 0xCF, 0xC0, 0xF0,
-        0x1F, 0x00, 0x05, 0x00, 0x01, 0xFF, 0x89, 0x99, 0x3D, 0x1D, 0x00, 0x00,
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F,
+        0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0xF8,
+        0xCF, 0xC0, 0xF0, 0x1F, 0x00, 0x05, 0x00, 0x01, 0xFF, 0x89, 0x99, 0x3D, 0x1D, 0x00, 0x00,
         0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
     ]
 }
