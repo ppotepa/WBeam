@@ -1,0 +1,9 @@
+androidx.lifecycle.EmptyActivityLifecycleCallbacks
+androidx.lifecycle.LifecycleDispatcher
+androidx.lifecycle.LifecycleDispatcher$DispatcherActivityCallback
+androidx.lifecycle.ProcessLifecycleInitializer
+androidx.lifecycle.ProcessLifecycleOwner
+androidx.lifecycle.ProcessLifecycleOwner$1
+androidx.lifecycle.ProcessLifecycleOwner$2
+androidx.lifecycle.ProcessLifecycleOwner$3
+androidx.lifecycle.ProcessLifecycleOwner$3$1

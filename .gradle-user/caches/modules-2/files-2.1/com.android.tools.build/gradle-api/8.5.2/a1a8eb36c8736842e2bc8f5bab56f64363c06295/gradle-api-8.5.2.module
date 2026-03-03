@@ -1,0 +1,143 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "com.android.tools.build",
+    "module": "gradle-api",
+    "version": "8.5.2",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "8.7"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 11,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "org.ow2.asm",
+          "module": "asm",
+          "version": {
+            "requires": "9.6"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "gradle-api-8.5.2.jar",
+          "url": "gradle-api-8.5.2.jar",
+          "size": 340460,
+          "sha512": "35f96490b420e1b9005c59b3653c6366430dd1f8c1e4be32ba1a61e5889452063ff677cd4424dc4602c0b9745566c26800bfcff6bab6022c5d9b9cb4fe8b2daf",
+          "sha256": "3aad984ecdd58f19c34ce8c5fe7ec1118eed364fd5e912beb191c805436f22b8",
+          "sha1": "9f0a20b53860a0f6ec1d6f23cda3b32a8333c433",
+          "md5": "b12114b48f7d96967ce506afc80ba9e4"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 11,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "com.android.tools.build",
+          "module": "builder-test-api",
+          "version": {
+            "requires": "8.5.2"
+          }
+        },
+        {
+          "group": "com.google.guava",
+          "module": "guava",
+          "version": {
+            "requires": "32.0.1-jre"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib-jdk8",
+          "version": {
+            "requires": "1.9.20"
+          }
+        },
+        {
+          "group": "org.ow2.asm",
+          "module": "asm",
+          "version": {
+            "requires": "9.6"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "gradle-api-8.5.2.jar",
+          "url": "gradle-api-8.5.2.jar",
+          "size": 340460,
+          "sha512": "35f96490b420e1b9005c59b3653c6366430dd1f8c1e4be32ba1a61e5889452063ff677cd4424dc4602c0b9745566c26800bfcff6bab6022c5d9b9cb4fe8b2daf",
+          "sha256": "3aad984ecdd58f19c34ce8c5fe7ec1118eed364fd5e912beb191c805436f22b8",
+          "sha1": "9f0a20b53860a0f6ec1d6f23cda3b32a8333c433",
+          "md5": "b12114b48f7d96967ce506afc80ba9e4"
+        }
+      ]
+    },
+    {
+      "name": "javadocElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "javadoc",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "gradle-api-8.5.2-javadoc.jar",
+          "url": "gradle-api-8.5.2-javadoc.jar",
+          "size": 151132,
+          "sha512": "d6e07bf383d10cc5741b0e29996b0b553686dca931634ada24d051a6e97d6db0d33fdd10f10e39313df448b43766eaaa7d1d7633f7d1e242a2bb627ee3e46028",
+          "sha256": "71a28561a49b8ba74f921b39f7db68eab77e867c175e79e5d4be7314983ccb42",
+          "sha1": "0577d01cefa6cf3905c0ecdedb04ea714cb98183",
+          "md5": "bca2899256416785e0878d0acb22065e"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "gradle-api-8.5.2-sources.jar",
+          "url": "gradle-api-8.5.2-sources.jar",
+          "size": 344806,
+          "sha512": "dfd5c9d13d854d42a57c78a70dff27880d3583531b858def078dddc2c2340775f2521a4dfd0a9c4a4a37954107c5b3d4fcc1c86512ccca6476910e2c4607ba4f",
+          "sha256": "ecdd0e0684bd6dc301d02f6dc113556e36b2a68847d783628aec25fa63267a10",
+          "sha1": "f69e59ee131c19bf92f1829fef9b6636afa04aa0",
+          "md5": "6d7eebf71ba8b1f46b54727889a4e5be"
+        }
+      ]
+    }
+  ]
+}

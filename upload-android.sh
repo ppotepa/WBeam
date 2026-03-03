@@ -21,14 +21,16 @@ echo "Build type: $BUILD_TYPE"
 echo ""
 
 cd "$(dirname "$0")/android"
+GRADLE_USER_HOME="$(cd .. && pwd)/.gradle-user"
+mkdir -p "$GRADLE_USER_HOME"
 
 # Build APK
 echo "🔨 Building $BUILD_TYPE APK..."
 if [[ "$BUILD_TYPE" == "debug" ]]; then
-    ./gradlew assembleDebug
+    GRADLE_USER_HOME="$GRADLE_USER_HOME" bash ./gradlew assembleDebug
     APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
 else
-    ./gradlew assembleRelease
+    GRADLE_USER_HOME="$GRADLE_USER_HOME" bash ./gradlew assembleRelease
     APK_PATH="app/build/outputs/apk/release/app-release.apk"
 fi
 

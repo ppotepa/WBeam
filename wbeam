@@ -35,7 +35,7 @@ Groups:
   ip        up | down | status
   host      build | run | debug | status | down
   daemon    up | down | status   (alias for host)
-  android   build | install | launch | deploy | build-release | install-release | deploy-release
+  android   build | install | launch | deploy | deploy-all | build-release | install-release | deploy-release
   debug     up | watch           (alias for host debug)
   logs      live | daemon | host
 
@@ -45,6 +45,7 @@ Examples:
   ./wbeam host run               # release binary, foreground
   ./wbeam host debug             # debug build + coloured logs + ADB sidecar
   ./wbeam android deploy         # build + install + launch in one step
+  ./wbeam android deploy-all     # build once, install + launch on all connected devices
   ./wbeam android build          # ./gradlew assembleDebug only
   ./wbeam android install        # adb install only (uses existing debug APK)
   ./wbeam android launch         # adb shell am start only
@@ -490,14 +491,16 @@ daemon_status() {
 }
 
 android_build() {
-  local pipeline_mode min_sdk build_api_host build_stream_host
+  local pipeline_mode min_sdk build_api_host build_stream_host gradle_user_home
   pipeline_mode="$(android_pipeline_mode)"
   min_sdk="$(android_pipeline_min_sdk "$pipeline_mode")"
   build_api_host="${WBEAM_ANDROID_API_HOST:-${WBEAM_ANDROID_HOST:-$(android_build_host "$pipeline_mode")}}"
   build_stream_host="${WBEAM_ANDROID_STREAM_HOST:-${WBEAM_ANDROID_HOST:-$(android_build_host "$pipeline_mode")}}"
+  gradle_user_home="$ROOT_DIR/.gradle-user"
+  mkdir -p "$gradle_user_home"
 
   echo "[android] Building debug APK (pipeline=${pipeline_mode}, minSdk=${min_sdk}, api_host=${build_api_host}, stream_host=${build_stream_host})…"
-  cd "$ANDROID_DIR" && ./gradlew -PWBEAM_MIN_SDK="$min_sdk" -PWBEAM_HOST="$build_stream_host" -PWBEAM_API_HOST="$build_api_host" -PWBEAM_STREAM_HOST="$build_stream_host" :app:assembleDebug
+  cd "$ANDROID_DIR" && GRADLE_USER_HOME="$gradle_user_home" bash ./gradlew -PWBEAM_MIN_SDK="$min_sdk" -PWBEAM_HOST="$build_stream_host" -PWBEAM_API_HOST="$build_api_host" -PWBEAM_STREAM_HOST="$build_stream_host" :app:assembleDebug
   echo "[android] APK: $ANDROID_APK"
   # Record the baked config so android_should_skip_install can detect host changes.
   printf 'api=%s|stream=%s|pipeline=%s' "$build_api_host" "$build_stream_host" "$pipeline_mode" \
@@ -552,15 +555,67 @@ android_deploy() {
   android_launch
 }
 
+android_connected_serials() {
+  require_cmd adb
+  adb start-server >/dev/null
+  adb devices | awk 'NR>1 && $2=="device"{print $1}'
+}
+
+android_deploy_all() {
+  local serials=()
+  local serial=""
+  local ok_count=0
+  local fail_count=0
+  local skip_build="${WBEAM_ANDROID_SKIP_BUILD:-0}"
+  local serial_backup="$ANDROID_SERIAL"
+
+  mapfile -t serials < <(android_connected_serials)
+  if [[ "${#serials[@]}" -eq 0 ]]; then
+    echo "[android] No connected adb devices in 'device' state." >&2
+    echo "[android] Run 'adb devices' and authorize at least one device." >&2
+    exit 1
+  fi
+
+  echo "[android] Deploying to ${#serials[@]} device(s): ${serials[*]}"
+
+  if [[ "$skip_build" =~ ^(1|true|TRUE|yes|on)$ ]]; then
+    echo "[android] Skipping build (WBEAM_ANDROID_SKIP_BUILD=$skip_build)"
+  else
+    android_build
+  fi
+
+  for serial in "${serials[@]}"; do
+    ANDROID_SERIAL="$serial"
+    echo
+    echo "[android][$serial] install + reverse + launch"
+    if android_install && ip_up && android_launch; then
+      echo "[android][$serial] OK"
+      ((ok_count += 1))
+    else
+      echo "[android][$serial] FAILED" >&2
+      ((fail_count += 1))
+    fi
+  done
+
+  ANDROID_SERIAL="$serial_backup"
+  echo
+  echo "[android] Deploy summary: ok=${ok_count} failed=${fail_count}"
+  if (( fail_count > 0 )); then
+    exit 1
+  fi
+}
+
 android_build_release() {
-  local pipeline_mode min_sdk build_api_host build_stream_host
+  local pipeline_mode min_sdk build_api_host build_stream_host gradle_user_home
   pipeline_mode="$(android_pipeline_mode)"
   min_sdk="$(android_pipeline_min_sdk "$pipeline_mode")"
   build_api_host="${WBEAM_ANDROID_API_HOST:-${WBEAM_ANDROID_HOST:-$(android_build_host "$pipeline_mode")}}"
   build_stream_host="${WBEAM_ANDROID_STREAM_HOST:-${WBEAM_ANDROID_HOST:-$(android_build_host "$pipeline_mode")}}"
+  gradle_user_home="$ROOT_DIR/.gradle-user"
+  mkdir -p "$gradle_user_home"
 
   echo "[android] Building release APK (pipeline=${pipeline_mode}, minSdk=${min_sdk}, api_host=${build_api_host}, stream_host=${build_stream_host})…"
-  cd "$ANDROID_DIR" && ./gradlew -PWBEAM_MIN_SDK="$min_sdk" -PWBEAM_HOST="$build_stream_host" -PWBEAM_API_HOST="$build_api_host" -PWBEAM_STREAM_HOST="$build_stream_host" :app:assembleRelease
+  cd "$ANDROID_DIR" && GRADLE_USER_HOME="$gradle_user_home" bash ./gradlew -PWBEAM_MIN_SDK="$min_sdk" -PWBEAM_HOST="$build_stream_host" -PWBEAM_API_HOST="$build_api_host" -PWBEAM_STREAM_HOST="$build_stream_host" :app:assembleRelease
   if [[ -f "$ANDROID_APK_RELEASE" ]]; then
     echo "[android] APK: $ANDROID_APK_RELEASE"
   elif [[ -f "$ANDROID_APK_RELEASE_UNSIGNED" ]]; then
@@ -689,6 +744,7 @@ case "$group" in
       install)        android_install ;;
       launch)         android_launch ;;
       deploy|run)     android_deploy ;;
+      deploy-all|run-all) android_deploy_all ;;
       build-release|release-build)    android_build_release ;;
       install-release|release-install) android_install_release ;;
       deploy-release|release-deploy)   android_deploy_release ;;

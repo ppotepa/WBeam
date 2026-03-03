@@ -33,6 +33,7 @@ def wbeamApiImpl = (wbeamApiImplRaw == "local") ? "local" : "host"
 android {
     namespace = 'com.wbeam'
     compileSdk = 35
+    buildToolsVersion = "35.0.0"
 
     buildFeatures {
         buildConfig = true
