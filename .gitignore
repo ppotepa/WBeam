@@ -41,8 +41,8 @@ proto/front/**/.externalNativeBuild/
 *.class
 
 # Rust
-host/rust/target/
-protocol/rust/target/
+src/host/rust/target/
+src/protocol/rust/target/
 proto/host/target/
 proto/host-cs/bin/
 proto/host-cs/obj/
@@ -57,11 +57,10 @@ venv/
 
 # Logs and runtime output
 *.log
-host/logs/**
-host/rust/logs/**
-protocol/logs/**
-!host/logs/.gitkeep
-!host/rust/logs/.gitkeep
+src/host/logs/**
+src/host/rust/logs/**
+src/protocol/logs/**
+!src/host/rust/logs/.gitkeep
 *.pid
 *.tmp
 *.cache

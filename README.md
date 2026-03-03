@@ -1,59 +1,96 @@
+# wbeam
+
 wbeam is an open-source usb second-screen project.
-the reason i decided to pick it up is that i need a 4th small monitor for terminal outputs,
-and i found bad boi lying around called Lenovo S0000-H with Android API 17 so this is quite challanging
 
-otherwise i would not decide to do it as there are already existing solutions( not necesairly screen extensions but rather more of pen and tablet support via andorid tablet)
-idea is simple: plug an android tablet/phone into linux and use it like an extra display with low lag.
+main reason: i needed one more small display for terminals, and i had an old lenovo s6000-h tablet (android api 17), so this repo became both a real tool and a compatibility lab.
 
-this repo has two active lanes:
+idea is simple: plug android phone/tablet into linux and use it as an extra display with low lag.
 
-1) root/main lane
-- `android/` has the main app (`com.wbeam`) with preflight checks, status overlay, live metrics, and framed h264 playback.
-- `src/host/rust/` has the rust daemon crates: `wbeamd-server`, `wbeamd-core`, `wbeamd-streamer`, `wbeamd-api`.
-- `src/host/daemon/wbeamd.py` is a python fallback daemon when rust is not available.
-- `src/protocol/rust/` has transport crates (`wbtp-core`, `wbtp-sender`, `wbtp-host`, receivers) used for framing and protocol tests.
-- `wbeam` and `wbgui` are repo-level runners for host/android/service flows.
+## current lanes
 
-2) `proto/` lane
-- fast iteration sandbox for old hardware (api17 class devices).
-- used to test risky changes quickly: startup flow, reconnect behavior, queue sizing, pacing, decoder compatibility.
-- defaults in `proto/run.sh` (Python runner) are tuned for repeatable real-device runs.
+1) main lane (production-ish path)
+- `android/` -> main app (`com.wbeam`)
+- `src/host/rust/` -> rust daemon + streamer crates
+- `src/host/daemon/wbeamd.py` -> python fallback daemon
+- `src/protocol/rust/` -> protocol/transport crates
+- root runners: `./wbeam`, `./wbgui`
 
-proto streaming path right now:
+2) `proto/` lane (fast iteration sandbox)
+- tuned for older devices (api17 class)
+- used for risky changes: startup flow, reconnect, queue sizing, pacing, decoder behavior
+- main entrypoint: `proto/run.sh`
+
+## repo layout (after src migration)
+
+- `src/apps/desktop-egui/` -> desktop control app (rust + egui)
+- `src/assets/` -> shared app assets/icons
+- `src/host/` -> host daemon/runtime/scripts
+- `src/protocol/` -> protocol crates/scripts
+- `src/compat/` -> api-level policy packs (`api17`, `api21`, `api29`)
+- `proto/` -> sandbox lane kept separate on purpose
+
+full migration notes: `docs/repo_tree_src_layout.md`
+
+## quick start
+
+- install deps once:
+
+```bash
+./install-deps
+```
+
+- start main lane (menu):
+
+```bash
+./wbgui
+```
+
+- start main lane (cli):
+
+```bash
+./wbeam host run
+```
+
+- start desktop control app:
+
+```bash
+./desktop.sh
+```
+
+- run proto lane:
+
+```bash
+cd proto
+./run.sh
+```
+
+## current proto streaming path
+
 wayland -> xdg-desktop-portal + pipewire -> gstreamer h264 pipeline (`src/host/scripts/stream_wayland_portal_h264.py`) -> framed bridge (`proto/host/src/main.rs`) -> adb tunnel -> android `MediaCodec` decode/render.
-frames are carried with explicit headers (magic/seq/timestamp/len) so parsing and stats are deterministic.
 
-what is already working:
-- usb second-screen flow runs end-to-end on real devices.
-- framed h264 transport with reconnect/watchdog logic.
-- host daemon control api (`/v1/status`, `/v1/start`, `/v1/stop`, metrics/config paths).
-- android preflight + runtime diagnostics.
-- `run.sh` startup hardening (no more silent hangs on early adb shell calls).
-- pipewire/portal/queue tuning: less flicker, fewer stale-frame bursts, lower buffer lag.
-- host/app observability for fps, drops, transport health.
+frames are wrapped with explicit headers (magic/seq/timestamp/len), so parsing and stats are deterministic.
 
-current focus:
-cut interaction delay further, keep visual stability under portal jitter, and upstream proto learnings into the root lane.
+## resolver / compatibility
 
-compat/resolver scaffold (new):
-- `src/compat/` holds API-level policy packs (`api17`, `api21`, `api29`) and shared resolver rules.
-- android side has `com.wbeam.compat.*` + `com.wbeam.resolver.*` for API-aware policy selection and `client-hello` payload building.
-- rust host side has resolver modules in `src/host/rust/crates/wbeamd-core/src/resolver/` and a new endpoint:
+- `src/compat/` stores policy packs and resolver rules.
+- android builds `client-hello` capability payloads (`com.wbeam.compat.*`, `com.wbeam.resolver.*`).
+- rust host resolver lives in `src/host/rust/crates/wbeamd-core/src/resolver/`.
+- host endpoint:
   - `POST /v1/client-hello` (also `/client-hello`)
-  - resolves profile/backend/codec based on client capabilities (including Android SDK/API level).
 
-profile learning note:
-- `proto/autotune.py` uses hyperparameter optimization (HPO) with evolutionary/genetic search.
-- this is machine-learning style black-box optimization of streaming params (fps/bitrate/queue/transport), not neural-network training.
-- i was gonna do it in trackmania, but that would be cheating.
+## profile learning note
 
-quick start:
-- run `./install-deps` once from repo root.
-- main lane: `./wbeam ...` or `./wbgui`.
-- desktop control app (global): `./desktop.sh`.
-- proto lane: `proto/run.sh` (`--config ...proto.conf` or `--config ...proto.json`).
+`proto/autotune.py` uses hyperparameter optimization (evolutionary/genetic search).
 
-repo structure roadmap:
-- target is `src/`-first layout with thin root wrappers only.
-- proposed final tree and migration phases are documented in:
-  - `docs/repo_tree_src_layout.md`
+this is ml-style black-box optimization of streaming params (fps/bitrate/queue/transport), not neural network training.
+
+i was gonna do it in trackmania, but that would be cheating.
+
+## what works now
+
+- end-to-end usb second-screen on real devices
+- framed h264 transport with reconnect/watchdog logic
+- host control api (`/v1/status`, `/v1/start`, `/v1/stop`, metrics/config)
+- android preflight + runtime diagnostics
+- portal/pipewire queue tuning with better stability and lower lag spikes
+- desktop app for runtime monitoring + settings
