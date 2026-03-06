@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800" role="img" aria-label="WBeam Desktop UI Wireframe">
+  <defs>
+    <style>
+      .bg { fill: #0f1116; }
+      .panel { fill: #171b22; stroke: #2a3240; stroke-width: 1; }
+      .header { fill: #121720; stroke: #2a3240; stroke-width: 1; }
+      .card { fill: #1b212b; stroke: #334056; stroke-width: 1; }
+      .cardSelected { fill: #243754; stroke: #63b3ff; stroke-width: 1.5; }
+      .title { fill: #dbe7ff; font: 700 16px "Segoe UI", "Noto Sans", sans-serif; }
+      .text { fill: #b8c6e0; font: 12px "Segoe UI", "Noto Sans", sans-serif; }
+      .muted { fill: #7f90ae; font: 12px "Segoe UI", "Noto Sans", sans-serif; }
+      .ok { fill: #7ad17a; font: 12px "Segoe UI", "Noto Sans", sans-serif; }
+      .warn { fill: #ffd36e; font: 12px "Segoe UI", "Noto Sans", sans-serif; }
+      .btn { fill: #253146; stroke: #3b4f71; stroke-width: 1; rx: 6; }
+      .btnPrimary { fill: #24518a; stroke: #63b3ff; stroke-width: 1; rx: 6; }
+      .btnText { fill: #dbe7ff; font: 600 12px "Segoe UI", "Noto Sans", sans-serif; }
+      .chip { fill: #212c3d; stroke: #3b4f71; stroke-width: 1; rx: 10; }
+      .chipOn { fill: #25466f; stroke: #63b3ff; stroke-width: 1; rx: 10; }
+      .divider { stroke: #2a3240; stroke-width: 1; }
+      .subhead { fill: #8fd0ff; font: 700 12px "Segoe UI", "Noto Sans", sans-serif; letter-spacing: 0.4px; }
+      .field { fill: #151b25; stroke: #32435f; stroke-width: 1; rx: 5; }
+      .switchOn { fill: #2b6fb3; }
+      .switchOff { fill: #1e2a3a; }
+      .switchText { fill: #dbe7ff; font: 700 12px "Segoe UI", "Noto Sans", sans-serif; }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1200" height="800"/>
+
+  <!-- Top Header -->
+  <rect class="header" x="16" y="12" width="1168" height="44" rx="8"/>
+  <text class="title" x="32" y="39">WBeam Desktop</text>
+  <text class="text" x="190" y="39">ADB: OK</text>
+  <text class="text" x="255" y="39">LAN: idle</text>
+  <text class="text" x="325" y="39">Wi-Fi: idle</text>
+  <text class="text" x="410" y="39">Discovered: 3</text>
+  <text class="muted" x="1015" y="39">advanced preview (windows)</text>
+
+  <!-- Panel Containers -->
+  <rect class="panel" x="16" y="70" width="384" height="714" rx="10"/>
+  <rect class="panel" x="408" y="70" width="384" height="714" rx="10"/>
+  <rect class="panel" x="800" y="70" width="384" height="714" rx="10"/>
+
+  <!-- Panel 1: Discovery -->
+  <text class="subhead" x="32" y="100">1. DISCOVERY</text>
+  <rect class="chipOn" x="32" y="108" width="52" height="20"/>
+  <text class="btnText" x="44" y="123">ADB</text>
+  <rect class="chip" x="92" y="108" width="52" height="20"/>
+  <text class="btnText" x="102" y="123">LAN</text>
+  <rect class="chip" x="152" y="108" width="56" height="20"/>
+  <text class="btnText" x="160" y="123">Wi-Fi</text>
+  <text class="muted" x="218" y="123">Last probe: 12:03:17</text>
+  <line class="divider" x1="32" y1="132" x2="384" y2="132"/>
+
+  <rect class="cardSelected" x="32" y="142" width="352" height="100" rx="8"/>
+  <text class="text" x="44" y="172">[PHONE]</text>
+  <text class="muted" x="100" y="172">ADB</text>
+  <text class="text" x="130" y="168">SAMSUNG SM-G991B</text>
+  <text class="text" x="290" y="168">Android 14 (API 34)</text>
+  <text class="muted" x="130" y="188">ID: R58N123456A</text>
+  <text class="muted" x="130" y="208">state: device | abi: arm64-v8a</text>
+  <text class="muted" x="130" y="228">Click to select, double-click for details</text>
+
+  <rect class="card" x="32" y="250" width="352" height="100" rx="8"/>
+  <text class="text" x="44" y="280">[TABLET]</text>
+  <text class="muted" x="100" y="280">ADB</text>
+  <text class="text" x="130" y="276">LENOVO TB-X606F</text>
+  <text class="text" x="286" y="276">Android 11 (API 30)</text>
+  <text class="muted" x="130" y="296">ID: HA1A2B3C4D</text>
+  <text class="muted" x="130" y="316">state: device | abi: armeabi-v7a</text>
+
+  <rect class="card" x="32" y="358" width="352" height="100" rx="8"/>
+  <text class="text" x="44" y="388">[PHONE]</text>
+  <text class="muted" x="100" y="388">ADB</text>
+  <text class="text" x="130" y="384">XIAOMI M2012K11AG</text>
+  <text class="text" x="286" y="384">Android 13 (API 33)</text>
+  <text class="muted" x="130" y="404">ID: 72f0ab12</text>
+  <text class="muted" x="130" y="424">state: unauthorized | abi: arm64-v8a</text>
+
+  <rect x="386" y="142" width="6" height="560" fill="#212a38" rx="3"/>
+  <rect x="386" y="180" width="6" height="120" fill="#5a7199" rx="3"/>
+
+  <!-- Panel 2: Properties & Options (scrollable) -->
+  <text class="subhead" x="424" y="100">2. DEVICE PROPERTIES &amp; OPTIONS</text>
+  <text class="ok" x="424" y="122">Selected: SAMSUNG SM-G991B (R58N123456A)</text>
+  <line class="divider" x1="424" y1="132" x2="776" y2="132"/>
+
+  <text class="subhead" x="424" y="156">DEVICE / HOST INFO</text>
+  <text class="muted" x="424" y="176">Manufacturer: Samsung</text>
+  <text class="muted" x="424" y="194">Model: SM-G991B</text>
+  <text class="muted" x="424" y="212">Android: 14 (API 34)</text>
+  <text class="muted" x="424" y="230">ABI: arm64-v8a | Battery: 78% (Charging)</text>
+
+  <line class="divider" x1="424" y1="246" x2="776" y2="246"/>
+  <text class="text" x="424" y="268">Host Context</text>
+  <text class="muted" x="424" y="288">Host OS: Windows</text>
+  <text class="muted" x="520" y="288">Desktop: N/A</text>
+  <text class="muted" x="610" y="288">Session: N/A</text>
+  <text class="muted" x="424" y="306">Windows only view: no compositor/session selector</text>
+
+  <line class="divider" x1="424" y1="322" x2="776" y2="322"/>
+  <text class="subhead" x="424" y="344">PROFILE</text>
+  <rect class="switchOff" x="408" y="354" width="192" height="28"/>
+  <text class="switchText" x="466" y="372">AUTOMATIC</text>
+  <rect class="switchOn" x="600" y="354" width="192" height="28"/>
+  <text class="switchText" x="665" y="372">MANUAL</text>
+
+  <text class="muted" x="424" y="390">Profile</text>
+  <rect class="field" x="486" y="377" width="170" height="24"/>
+  <text class="muted" x="496" y="394">modern (auto-selected)</text>
+
+  <text class="muted" x="424" y="420">Bitrate</text>
+  <rect class="field" x="486" y="407" width="170" height="24"/>
+  <text class="muted" x="496" y="424">15000 kbps</text>
+
+  <text class="muted" x="424" y="446">Target FPS</text>
+  <rect class="field" x="486" y="433" width="170" height="24"/>
+  <text class="muted" x="496" y="450">60</text>
+
+  <text class="muted" x="424" y="474">Keyframe Interval</text>
+  <rect class="field" x="536" y="461" width="120" height="24"/>
+  <text class="muted" x="546" y="478">2s</text>
+
+  <line class="divider" x1="424" y1="500" x2="776" y2="500"/>
+  <text class="subhead" x="424" y="522">ACTIONS</text>
+
+  <rect class="btn" x="424" y="534" width="110" height="30"/>
+  <text class="btnText" x="438" y="554">Refresh</text>
+  <rect class="btn" x="542" y="534" width="110" height="30"/>
+  <text class="btnText" x="559" y="554">Details</text>
+  <rect class="btn" x="660" y="534" width="110" height="30"/>
+  <text class="btnText" x="672" y="554">Screenshot</text>
+
+  <rect class="btn" x="424" y="572" width="110" height="30"/>
+  <text class="btnText" x="434" y="592">ADB Reverse</text>
+  <rect class="btn" x="542" y="572" width="110" height="30"/>
+  <text class="btnText" x="552" y="592">ADB Forward</text>
+  <rect class="btn" x="660" y="572" width="110" height="30"/>
+  <text class="btnText" x="677" y="592">Install APK</text>
+
+  <!-- Panel 2 scrollbar -->
+  <rect x="778" y="142" width="6" height="560" fill="#212a38" rx="3"/>
+  <rect x="778" y="332" width="6" height="150" fill="#5a7199" rx="3"/>
+
+  <!-- Panel 3 -->
+  <text class="subhead" x="816" y="100">3. SESSION CONTROL &amp; TELEMETRY</text>
+  <text class="muted" x="816" y="122">Device: R58N123456A</text>
+  <line class="divider" x1="816" y1="132" x2="1168" y2="132"/>
+
+  <rect class="btnPrimary" x="816" y="146" width="130" height="36"/>
+  <text class="btnText" x="849" y="169">Start Session</text>
+  <rect class="btn" x="954" y="146" width="130" height="36"/>
+  <text class="btnText" x="996" y="169">Stop Session</text>
+
+  <text class="subhead" x="816" y="210">SESSION STATUS</text>
+  <text class="muted" x="816" y="230">State: Running</text>
+  <text class="muted" x="816" y="248">Uptime: 00:04:21</text>
+  <text class="muted" x="816" y="266">Transport: ADB reverse + forward</text>
+
+  <line class="divider" x1="816" y1="282" x2="1168" y2="282"/>
+  <text class="subhead" x="816" y="304">LIVE TELEMETRY</text>
+  <text class="muted" x="816" y="324">FPS: 59.8</text>
+  <text class="muted" x="940" y="324">Latency: 23 ms</text>
+  <text class="muted" x="1060" y="324">Drops: 2</text>
+  <text class="muted" x="816" y="344">Bitrate: 14.2 Mbps</text>
+  <text class="muted" x="940" y="344">Decoder restarts: 0</text>
+
+  <line class="divider" x1="816" y1="360" x2="1168" y2="360"/>
+  <text class="subhead" x="816" y="382">RECENT EVENTS</text>
+  <text class="muted" x="816" y="402">12:03:19 session started</text>
+  <text class="muted" x="816" y="420">12:03:17 selected device R58N123456A</text>
+  <text class="muted" x="816" y="438">12:03:12 probe: 3 devices</text>
+</svg>

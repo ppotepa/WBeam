@@ -17,7 +17,7 @@ fi
 
 if [[ -z "$HOST_FILE" ]]; then
   echo "[live] no host debug log found in $LOG_DIR" >&2
-  echo "[live] start daemon first: ./wbeam debug up" >&2
+  echo "[live] start daemon first: ./devtool service up" >&2
   exit 1
 fi
 
@@ -27,7 +27,7 @@ if [[ -f "$HOST_FILE" ]]; then
   age_s=$((now_ts - file_ts))
   if (( age_s > 300 )); then
     echo "[live] warning: host log looks stale (${age_s}s old): $HOST_FILE" >&2
-    echo "[live] run fresh daemon first: ./wbeam debug up" >&2
+    echo "[live] run fresh daemon first: ./devtool service up" >&2
   fi
 fi
 

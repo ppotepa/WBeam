@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WBeam Desktop (Tauri Preview)</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div class="brand-block">
+          <div class="brand">WBeam Desktop</div>
+          <div class="build-tag" id="build-tag">TAURI PREVIEW</div>
+        </div>
+        <div class="status-row" id="status-row">
+          <span class="pill ok">ADB: READY</span>
+          <span class="pill warn">LAN: SCAN</span>
+          <span class="pill idle">WI-FI: OFF</span>
+        </div>
+        <div class="count" id="device-count">DISCOVERED: 0</div>
+      </header>
+
+      <section class="panels">
+        <article class="panel">
+          <h2>1. Discovery</h2>
+          <div class="chips" id="discovery-filters">
+            <button class="chip chip-on" data-source="adb">ADB</button>
+            <button class="chip" data-source="lan">LAN</button>
+            <button class="chip" data-source="wifi">WI-FI</button>
+          </div>
+          <div class="scroll" id="device-list"></div>
+          <div class="footer-row">
+            <button id="refresh-probe">Run Probe</button>
+            <button id="install-all">Deploy APK</button>
+          </div>
+        </article>
+
+        <article class="panel">
+          <h2>2. Device Options</h2>
+          <div class="selected-label" id="selected-device-label">SELECTED: NONE</div>
+          <div class="scroll" id="device-details">
+            <p class="placeholder">Select a device from Discovery.</p>
+          </div>
+        </article>
+
+        <article class="panel">
+          <h2>3. Session & Telemetry</h2>
+          <div class="controls">
+            <button class="primary" id="start-session">Start Session</button>
+            <button id="stop-session">Stop Session</button>
+          </div>
+          <div class="scroll">
+            <h3>Session Status</h3>
+            <p id="session-state">State: Idle</p>
+            <p id="extended-view-status">Extended View: BLOCKED</p>
+            <p id="extended-view-reason">Reason: waiting for checks</p>
+            <p id="session-mode">Mode: n/a</p>
+            <p id="session-uptime">Uptime: 0s</p>
+
+            <h3>Host Control</h3>
+            <div class="controls host-controls">
+              <button id="host-status-btn">Host Status</button>
+            </div>
+            <p id="host-state">Host: managed by desktop app</p>
+
+            <h3>Session Preflight</h3>
+            <p id="preflight-summary">Preflight not evaluated yet.</p>
+            <div id="preflight-list"></div>
+
+            <h3>Live Telemetry</h3>
+            <p id="metric-fps">FPS: 0</p>
+            <p id="metric-latency">Latency: 0 ms</p>
+            <p id="metric-drops">Drops: 0</p>
+            <p id="metric-bitrate">Bitrate: 0 Mbps</p>
+            <p id="metric-health">Metrics: n/a</p>
+          </div>
+        </article>
+
+        <article class="panel">
+          <h2>4. Logs & Events</h2>
+          <div class="scroll">
+            <h3>Recent Events</h3>
+            <div id="event-log"></div>
+
+            <h3>Command Output</h3>
+            <div class="output-toolbar">
+              <button id="clear-output">Clear</button>
+              <span id="command-output-meta">No command executed yet.</span>
+            </div>
+            <pre id="command-output" class="command-output">No command output yet.</pre>
+          </div>
+        </article>
+      </section>
+    </main>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

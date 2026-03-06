@@ -1,0 +1,262 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DAEMON_BIN="$ROOT_DIR/src/host/rust/target/release/wbeamd-server"
+CONTROL_PORT="${WBEAM_CONTROL_PORT:-5001}"
+STREAM_PORT="${WBEAM_STREAM_PORT:-5000}"
+DIAG_SECS="${WBEAM_DIAG_SECS:-60}"
+RESTART_BACKEND="${WBEAM_DIAG_RESTART_BACKEND:-1}"
+
+RUN_ID="$(date +%Y%m%d-%H%M%S)"
+OUT_DIR="$ROOT_DIR/src/host/rust/logs/diagnose/$RUN_ID"
+mkdir -p "$OUT_DIR"
+
+log() { echo "[audodaignose] $*"; }
+warn() { echo "[audodaignose] WARN: $*" >&2; }
+
+cleanup() {
+  if [[ -n "${BACKEND_PID:-}" ]]; then
+    if kill -0 "$BACKEND_PID" >/dev/null 2>&1; then
+      log "stopping backend pid=$BACKEND_PID"
+      kill "$BACKEND_PID" >/dev/null 2>&1 || true
+      wait "$BACKEND_PID" 2>/dev/null || true
+    fi
+  fi
+}
+trap cleanup EXIT INT TERM
+
+finalize_summary() {
+  if [[ -f "$OUT_DIR/context.txt" ]]; then
+    build_summary || true
+  fi
+}
+trap finalize_summary EXIT
+
+require_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "Missing required command: $1" >&2
+    exit 1
+  fi
+}
+
+first_connected_serial() {
+  adb devices | awk 'NR>1 && $2=="device" {print $1; exit}'
+}
+
+detect_host_ip() {
+  local ip_candidate
+  ip_candidate="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++){if($i=="src"){print $(i+1); exit}}}')"
+  if [[ -n "$ip_candidate" ]]; then
+    echo "$ip_candidate"
+    return 0
+  fi
+  ip_candidate="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  if [[ -n "$ip_candidate" ]]; then
+    echo "$ip_candidate"
+    return 0
+  fi
+  return 1
+}
+
+start_backend_if_needed() {
+  if [[ "$RESTART_BACKEND" =~ ^(1|true|TRUE|yes|on)$ ]]; then
+    log "forcing dedicated backend for diagnosis"
+    pkill -f wbeamd-server >/dev/null 2>&1 || true
+    rm -f /tmp/wbeamd.lock
+    sleep 0.5
+  else
+    if ss -tln | grep -q ":${CONTROL_PORT} "; then
+      log "backend already listening on :$CONTROL_PORT (reusing existing process)"
+      return 0
+    fi
+  fi
+
+  if [[ ! -x "$DAEMON_BIN" ]]; then
+    log "release daemon missing, building..."
+    (cd "$ROOT_DIR/src/host/rust" && cargo build --release -p wbeamd-server -p wbeamd-streamer) \
+      >"$OUT_DIR/build_backend.log" 2>&1
+  fi
+
+  log "starting backend daemon"
+  (
+    cd "$ROOT_DIR"
+    RUST_LOG="${RUST_LOG:-info}" WBEAM_USE_RUST_STREAMER=1 \
+      "$DAEMON_BIN" \
+      --control-port "$CONTROL_PORT" \
+      --stream-port "$STREAM_PORT" \
+      --root "$ROOT_DIR" \
+      --lock-file /tmp/wbeamd.lock
+  ) >"$OUT_DIR/backend.log" 2>&1 &
+  BACKEND_PID=$!
+  echo "backend_pid=$BACKEND_PID" >> "$OUT_DIR/context.txt"
+
+  for _ in $(seq 1 20); do
+    if curl -s --max-time 1 "http://127.0.0.1:${CONTROL_PORT}/status" >/dev/null 2>&1; then
+      log "backend is up"
+      return 0
+    fi
+    sleep 0.5
+  done
+
+  warn "backend did not come up in time"
+  return 1
+}
+
+capture_status_samples() {
+  local samples=$(( DIAG_SECS / 2 ))
+  : > "$OUT_DIR/status_samples.jsonl"
+  for _ in $(seq 1 "$samples"); do
+    local ts
+    ts="$(date -Iseconds)"
+    {
+      printf '{"ts":"%s","status":' "$ts"
+      curl -s --max-time 1 "http://127.0.0.1:${CONTROL_PORT}/status" || printf 'null'
+      printf ',"metrics":'
+      curl -s --max-time 1 "http://127.0.0.1:${CONTROL_PORT}/metrics" || printf 'null'
+      printf '}\n'
+    } >> "$OUT_DIR/status_samples.jsonl"
+    sleep 2
+  done
+}
+
+build_summary() {
+  {
+    echo "run_id=$RUN_ID"
+    echo "out_dir=$OUT_DIR"
+    echo "serial=$ANDROID_SERIAL"
+    echo "api_level=$ANDROID_API"
+    echo "pipeline=$ANDROID_PIPELINE"
+    echo "host_ip=$ANDROID_HOST"
+    echo "diag_secs=$DIAG_SECS"
+    echo "restart_backend=$RESTART_BACKEND"
+    echo
+    echo "== last daemon status =="
+    curl -s --max-time 2 "http://127.0.0.1:${CONTROL_PORT}/status" || true
+    echo
+    echo
+    echo "== quick findings =="
+    grep -E "decoder init failed|video/hevc|video/avc|Host API unreachable|start failed|transport probe failed|transport probe OK" \
+      "$OUT_DIR/android_logcat.log" 2>/dev/null | tail -40 || true
+    echo
+    grep -E "stream process exited|failed|error|No supported|panic" \
+      "$OUT_DIR/backend.log" 2>/dev/null | tail -40 || true
+    echo
+    grep -E "Portal request|pipewiresrc|not-negotiated|Internal data stream error|watchdog terminating|stream process exited|Error:" \
+      "$OUT_DIR/backend.log" 2>/dev/null | tail -80 || true
+    echo
+    echo "== host start probe =="
+    cat "$OUT_DIR/host_start_probe.txt" 2>/dev/null || true
+  } > "$OUT_DIR/summary.txt"
+}
+
+run_host_start_probe() {
+  local start_body start_err start_code http_code
+  start_body="$OUT_DIR/host_start_probe_start_body.json"
+  start_err="$OUT_DIR/host_start_probe_start_err.txt"
+
+  {
+    echo "before="
+    curl -s --max-time 2 "http://127.0.0.1:${CONTROL_PORT}/status" || true
+    echo
+    echo "start_response="
+    http_code="$(curl -sS --max-time 8 -o "$start_body" -w "%{http_code}" \
+      -X POST "http://127.0.0.1:${CONTROL_PORT}/start" \
+      -H "Content-Type: application/json" -d '{}' 2>"$start_err" || true)"
+    start_code=$?
+    echo "curl_exit=$start_code http_code=${http_code:-none}"
+    if [[ -s "$start_body" ]]; then
+      cat "$start_body"
+    else
+      echo "(empty body)"
+    fi
+    if [[ -s "$start_err" ]]; then
+      echo "stderr="
+      cat "$start_err"
+    fi
+    echo
+    sleep 2
+    echo "after="
+    curl -s --max-time 2 "http://127.0.0.1:${CONTROL_PORT}/status" || true
+    echo
+  } > "$OUT_DIR/host_start_probe.txt"
+}
+
+main() {
+  require_cmd adb
+  require_cmd curl
+  require_cmd timeout
+  require_cmd ss
+
+  adb start-server >/dev/null 2>&1 || true
+
+  ANDROID_SERIAL="${WBEAM_ANDROID_SERIAL:-$(first_connected_serial)}"
+  if [[ -z "$ANDROID_SERIAL" ]]; then
+    echo "No connected Android device. Connect tablet (ADB device state=\"device\") and rerun." >&2
+    echo "Expected output folder would be: $OUT_DIR" >&2
+    exit 2
+  fi
+
+  ANDROID_API="$(adb -s "$ANDROID_SERIAL" shell getprop ro.build.version.sdk 2>/dev/null | tr -cd '0-9')"
+  if [[ -z "$ANDROID_API" ]]; then
+    ANDROID_API="?"
+  fi
+
+  if [[ -n "${WBEAM_ANDROID_PIPELINE:-}" ]]; then
+    ANDROID_PIPELINE="$WBEAM_ANDROID_PIPELINE"
+  else
+    if [[ "$ANDROID_API" == "?" ]]; then
+      ANDROID_PIPELINE="legacy"
+    elif [[ "$ANDROID_API" =~ ^[0-9]+$ ]] && (( ANDROID_API <= 17 )); then
+      ANDROID_PIPELINE="legacy"
+    else
+      ANDROID_PIPELINE="modern"
+    fi
+  fi
+
+  ANDROID_HOST="${WBEAM_ANDROID_HOST:-$(detect_host_ip || echo 127.0.0.1)}"
+
+  {
+    echo "serial=$ANDROID_SERIAL"
+    echo "api=$ANDROID_API"
+    echo "pipeline=$ANDROID_PIPELINE"
+    echo "host=$ANDROID_HOST"
+    echo "control_port=$CONTROL_PORT"
+    echo "stream_port=$STREAM_PORT"
+    echo "diag_secs=$DIAG_SECS"
+  } > "$OUT_DIR/context.txt"
+
+  log "context: serial=$ANDROID_SERIAL api=$ANDROID_API pipeline=$ANDROID_PIPELINE host=$ANDROID_HOST"
+  log "output: $OUT_DIR"
+
+  start_backend_if_needed || true
+
+  log "deploying APK + launching app"
+  (
+    cd "$ROOT_DIR"
+    WBEAM_ANDROID_SERIAL="$ANDROID_SERIAL" \
+    WBEAM_ANDROID_PIPELINE="$ANDROID_PIPELINE" \
+    WBEAM_ANDROID_HOST="$ANDROID_HOST" \
+      ./devtool deploy
+  ) >"$OUT_DIR/deploy.log" 2>&1 || warn "android deploy returned non-zero"
+
+  log "clearing logcat buffer"
+  adb -s "$ANDROID_SERIAL" logcat -c >/dev/null 2>&1 || true
+
+  log "collecting logs for ${DIAG_SECS}s"
+  timeout "$DIAG_SECS" adb -s "$ANDROID_SERIAL" logcat -v time > "$OUT_DIR/android_logcat.log" 2>&1 || true
+
+  log "collecting daemon/status samples"
+  capture_status_samples || true
+
+  log "running explicit host /start probe"
+  run_host_start_probe || true
+
+  build_summary
+
+  log "done"
+  log "summary: $OUT_DIR/summary.txt"
+  log "artifacts: deploy.log backend.log android_logcat.log status_samples.jsonl"
+}
+
+main "$@"

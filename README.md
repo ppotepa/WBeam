@@ -13,7 +13,7 @@ idea is simple: plug android phone/tablet into linux and use it as an extra disp
 - `src/host/rust/` -> rust daemon + streamer crates
 - `src/host/daemon/wbeamd.py` -> python fallback daemon
 - `src/protocol/rust/` -> protocol/transport crates
-- root runners: `./wbeam`, `./wbgui`
+- root runner: `./devtool` (GUI + CLI)
 
 2) `proto/` lane (fast iteration sandbox)
 - tuned for older devices (api17 class)
@@ -36,25 +36,25 @@ full migration notes: `docs/repo_tree_src_layout.md`
 - install deps once:
 
 ```bash
-./install-deps
+./devtool deps install
 ```
 
-- start main lane (menu):
+- start main lane (GUI):
 
 ```bash
-./wbgui
+./devtool
 ```
 
-- start main lane (cli):
+- start main lane (cli build/deploy):
 
 ```bash
-./wbeam host run
+./devtool build
+./devtool deploy
 ```
 
-- start desktop control app:
-
+- run remote desktop GUI on another user session:
 ```bash
-./desktop.sh
+./runas-remote <user> ./devtool -- gui
 ```
 
 - run proto lane:

@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  runas-remote <desktop_user> <script_or_app_path> [-- app_args...]
+
+Examples:
+  ./runas-remote alice ./devtool -- gui
+  ./runas-remote alice devtool -- build
+  ./runas-remote alice /home/alice/bin/myapp -- --flag
+USAGE
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+resolve_active_user_from_loginctl() {
+  local sid name type state active
+  while read -r sid _; do
+    [[ -n "$sid" ]] || continue
+    name="$(loginctl show-session "$sid" -p Name --value 2>/dev/null || true)"
+    type="$(loginctl show-session "$sid" -p Type --value 2>/dev/null || true)"
+    state="$(loginctl show-session "$sid" -p State --value 2>/dev/null || true)"
+    active="$(loginctl show-session "$sid" -p Active --value 2>/dev/null || true)"
+
+    if [[ -n "$name" && "$name" != "root" && "$active" == "yes" && "$state" == "active" ]]; then
+      if [[ "$type" == "x11" || "$type" == "wayland" ]]; then
+        echo "$name"
+        return 0
+      fi
+    fi
+  done < <(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1" "$2}')
+
+  return 1
+}
+
+resolve_desktop_session_id() {
+  local sid name type state active
+  while read -r sid _; do
+    [[ -n "$sid" ]] || continue
+    name="$(loginctl show-session "$sid" -p Name --value 2>/dev/null || true)"
+    type="$(loginctl show-session "$sid" -p Type --value 2>/dev/null || true)"
+    state="$(loginctl show-session "$sid" -p State --value 2>/dev/null || true)"
+    active="$(loginctl show-session "$sid" -p Active --value 2>/dev/null || true)"
+
+    if [[ "$name" == "$TARGET_USER" && "$active" == "yes" && "$state" == "active" ]]; then
+      if [[ "$type" == "x11" || "$type" == "wayland" ]]; then
+        echo "$sid"
+        return 0
+      fi
+    fi
+  done < <(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1" "$2}')
+
+  return 1
+}
+
+session_env_var() {
+  local sid="$1"
+  local key="$2"
+  local leader
+
+  leader="$(loginctl show-session "$sid" -p Leader --value 2>/dev/null || true)"
+  [[ -n "$leader" && -r "/proc/$leader/environ" ]] || return 1
+
+  tr '\0' '\n' < "/proc/$leader/environ" | awk -F= -v k="$key" '$1==k{print substr($0, length(k)+2); exit}'
+}
+
+if [[ $# -lt 2 ]]; then
+  usage >&2
+  exit 1
+fi
+
+TARGET_USER="$1"
+APP_SPEC="$2"
+shift 2
+
+if [[ "${1:-}" == "--" ]]; then
+  shift
+fi
+
+if ! id "$TARGET_USER" >/dev/null 2>&1; then
+  echo "[runas-remote] user not found: $TARGET_USER" >&2
+  exit 1
+fi
+
+if [[ "$APP_SPEC" == */* ]]; then
+  if [[ "$APP_SPEC" != /* ]]; then
+    TARGET_SCRIPT="$PWD/$APP_SPEC"
+  else
+    TARGET_SCRIPT="$APP_SPEC"
+  fi
+elif [[ "$APP_SPEC" == "desktop" ]]; then
+  echo "[runas-remote] 'desktop' target alias was removed." >&2
+  echo "[runas-remote] run devtool directly, e.g.: ./runas-remote $TARGET_USER ./devtool -- gui" >&2
+  exit 1
+elif [[ -x "$ROOT_DIR/$APP_SPEC" ]]; then
+  TARGET_SCRIPT="$ROOT_DIR/$APP_SPEC"
+elif [[ -x "$PWD/$APP_SPEC" ]]; then
+  TARGET_SCRIPT="$PWD/$APP_SPEC"
+elif command -v "$APP_SPEC" >/dev/null 2>&1; then
+  TARGET_SCRIPT="$APP_SPEC"
+else
+  echo "[runas-remote] app/script not found: $APP_SPEC" >&2
+  echo "[runas-remote] pass an executable path or command name." >&2
+  exit 1
+fi
+
+if [[ "$TARGET_SCRIPT" == */* && ! -x "$TARGET_SCRIPT" ]]; then
+  echo "[runas-remote] missing or not executable: $TARGET_SCRIPT" >&2
+  exit 1
+fi
+
+TARGET_UID="$(id -u "$TARGET_USER")"
+TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
+XDG_RUNTIME_DIR="/run/user/$TARGET_UID"
+
+if ! SESSION_ID="$(resolve_desktop_session_id)"; then
+  echo "[runas-remote] could not detect a graphical session for $TARGET_USER." >&2
+  exit 1
+fi
+
+SESSION_TYPE="$(loginctl show-session "$SESSION_ID" -p Type --value 2>/dev/null || true)"
+[[ -n "$SESSION_TYPE" ]] || SESSION_TYPE="wayland"
+
+DISPLAY_VAL="$(loginctl show-session "$SESSION_ID" -p Display --value 2>/dev/null || true)"
+if [[ -z "$DISPLAY_VAL" ]]; then
+  DISPLAY_VAL="$(session_env_var "$SESSION_ID" DISPLAY || true)"
+fi
+if [[ -z "$DISPLAY_VAL" && "$SESSION_TYPE" == "x11" ]]; then
+  for sock in /tmp/.X11-unix/X*; do
+    [[ -S "$sock" ]] || continue
+    DISPLAY_VAL=":${sock##*X}"
+    break
+  done
+fi
+[[ -n "$DISPLAY_VAL" ]] || DISPLAY_VAL=":0"
+
+WAYLAND_DISPLAY_VAL=""
+if [[ "$SESSION_TYPE" == "wayland" ]]; then
+  for wsock in "$XDG_RUNTIME_DIR"/wayland-*; do
+    [[ -S "$wsock" ]] || continue
+    WAYLAND_DISPLAY_VAL="$(basename "$wsock")"
+    break
+  done
+  [[ -n "$WAYLAND_DISPLAY_VAL" ]] || WAYLAND_DISPLAY_VAL="wayland-0"
+fi
+
+DBUS_ADDR="unix:path=$XDG_RUNTIME_DIR/bus"
+XAUTHORITY_VAL="${TARGET_HOME:-/home/$TARGET_USER}/.Xauthority"
+if [[ "$SESSION_TYPE" == "x11" ]]; then
+  XAUTHORITY_VAL="$(session_env_var "$SESSION_ID" XAUTHORITY || true)"
+  [[ -n "$XAUTHORITY_VAL" ]] || XAUTHORITY_VAL="${TARGET_HOME:-/home/$TARGET_USER}/.Xauthority"
+fi
+
+echo "[runas-remote] user=$TARGET_USER uid=$TARGET_UID sid=$SESSION_ID session=$SESSION_TYPE display=$DISPLAY_VAL app=$APP_SPEC"
+
+env_args=(
+  "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
+  "DBUS_SESSION_BUS_ADDRESS=$DBUS_ADDR"
+)
+
+if [[ -n "$DISPLAY_VAL" ]]; then
+  env_args+=("DISPLAY=$DISPLAY_VAL")
+fi
+
+if [[ "$SESSION_TYPE" == "x11" && -f "$XAUTHORITY_VAL" ]]; then
+  env_args+=("XAUTHORITY=$XAUTHORITY_VAL")
+fi
+
+if [[ "$SESSION_TYPE" == "wayland" ]]; then
+  env_args+=("WAYLAND_DISPLAY=$WAYLAND_DISPLAY_VAL")
+fi
+
+exec sudo -u "$TARGET_USER" env "${env_args[@]}" "$TARGET_SCRIPT" "$@"
