@@ -1915,7 +1915,7 @@ public class MainActivity extends AppCompatActivity {
         String streamAddr = (streamHost != null && !streamHost.trim().isEmpty())
                 ? streamHost.trim() : "127.0.0.1";
         String streamFixHint = streamIsLoopback
-                ? "run: ./wbeam ip up  (adb reverse)"
+                ? "run: ./devtool ip up  (adb reverse)"
             : "check USB tethering / host IP / LAN";
 
         int step3;

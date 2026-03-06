@@ -1,0 +1,553 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+TARGET_DIR="$ROOT_DIR/.build/devtool"
+TAURI_MANIFEST="$ROOT_DIR/src/apps/desktop-tauri/src-tauri/Cargo.toml"
+HOST_WORKSPACE_DIR="$ROOT_DIR/src/host/rust"
+HOST_DAEMON_BIN_DEFAULT="$HOST_WORKSPACE_DIR/target/release/wbeamd-server"
+HOST_DAEMON_BIN="${WBEAM_DAEMON_BIN:-$HOST_DAEMON_BIN_DEFAULT}"
+CONTROL_PORT="${WBEAM_CONTROL_PORT:-5001}"
+STREAM_PORT="${WBEAM_STREAM_PORT:-5000}"
+HOST_PID_FILE="$TARGET_DIR/wbeamd.pid"
+HOST_STDOUT_LOG="$TARGET_DIR/wbeamd.stdout.log"
+
+mkdir -p "$TARGET_DIR"
+
+print_help() {
+  cat <<'EOF'
+WBeam Devtool
+
+Usage:
+  ./devtool                          # desktop GUI (tauri)
+  ./devtool gui                      # desktop GUI (tauri)
+  ./devtool deps install             # install host/build/runtime dependencies (Arch)
+  ./devtool build                    # build host + desktop + android
+  ./devtool deploy                   # deploy android app to all adb devices
+  ./devtool service status|up|down   # host daemon lifecycle
+  ./devtool service logs [live]      # host daemon log path or tail
+  ./devtool host build               # build host daemon binaries
+
+Compatibility aliases:
+  ./devtool project build
+  ./devtool project deploy
+  ./devtool android build
+  ./devtool android deploy
+  ./devtool android deploy-all
+  ./devtool ip up|down|status         # adb reverse tunnel helper
+EOF
+}
+
+log() {
+  printf '[devtool] %s\n' "$*"
+}
+
+run_gui() {
+  exec cargo run \
+    --manifest-path "$TAURI_MANIFEST" \
+    --target-dir "$TARGET_DIR" \
+    --package wbeam-desktop-tauri \
+    -- "$@"
+}
+
+as_root() {
+  if [[ "$EUID" -eq 0 ]]; then
+    "$@"
+  else
+    sudo "$@"
+  fi
+}
+
+run_deps_install() {
+  local sdk_root="${SDK_ROOT:-/opt/android-sdk}"
+  if [[ ! -f /etc/arch-release ]]; then
+    echo "[deps] unsupported OS: this command currently supports Arch Linux only." >&2
+    return 1
+  fi
+
+  local need_pacman=(
+    rust gcc protobuf cmake pkgconf python python-dbus python-gobject
+    ffmpeg gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly
+    gst-plugin-pipewire openh264 grim kscreen android-tools android-sdk
+    android-sdk-cmdline-tools-latest dotnet-runtime-8.0 dotnet-sdk-8.0 jdk17-openjdk
+  )
+  local missing_pkgs=()
+  local p
+  for p in "${need_pacman[@]}"; do
+    if ! pacman -Q "$p" >/dev/null 2>&1; then
+      missing_pkgs+=("$p")
+    fi
+  done
+  if [[ "${#missing_pkgs[@]}" -gt 0 ]]; then
+    echo "[deps] installing missing pacman packages: ${missing_pkgs[*]}"
+    as_root pacman -S --needed --noconfirm "${missing_pkgs[@]}"
+  else
+    echo "[deps] pacman packages already installed."
+  fi
+
+  local sdkmanager="${sdk_root}/cmdline-tools/latest/bin/sdkmanager"
+  if [[ ! -x "$sdkmanager" ]]; then
+    echo "[deps] sdkmanager not found at $sdkmanager" >&2
+    return 1
+  fi
+
+  local missing_sdk=()
+  [[ -x "${sdk_root}/platform-tools/adb" ]] || missing_sdk+=("platform-tools")
+  [[ -x "${sdk_root}/emulator/emulator" ]] || missing_sdk+=("emulator")
+  [[ -d "${sdk_root}/platforms/android-34" ]] || missing_sdk+=("platforms;android-34")
+  [[ -d "${sdk_root}/build-tools/30.0.3" ]] || missing_sdk+=("build-tools;30.0.3")
+  [[ -d "${sdk_root}/ndk/23.1.7779620" ]] || missing_sdk+=("ndk;23.1.7779620")
+  [[ -d "${sdk_root}/cmake/3.22.1" ]] || missing_sdk+=("cmake;3.22.1")
+
+  if [[ "${#missing_sdk[@]}" -gt 0 ]]; then
+    echo "[deps] installing missing Android SDK components into ${sdk_root}: ${missing_sdk[*]}"
+    as_root bash -lc "yes | \"$sdkmanager\" --sdk_root=\"$sdk_root\" ${missing_sdk[*]@Q}"
+  else
+    echo "[deps] Android SDK components already installed."
+  fi
+
+  local fail=0
+  local cmd
+  for cmd in cargo rustc protoc adb java dotnet python3 ffmpeg gst-inspect-1.0; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+      echo "[deps] missing command in PATH: $cmd"
+      fail=1
+    fi
+  done
+
+  local el
+  for el in pipewiresrc openh264enc h264parse videoconvert videoscale videorate appsink jpegenc; do
+    if ! gst-inspect-1.0 "$el" >/dev/null 2>&1; then
+      echo "[deps] missing gstreamer element: $el"
+      fail=1
+    fi
+  done
+  if ! dotnet --list-runtimes 2>/dev/null | grep -q '^Microsoft\.NETCore\.App 8\.'; then
+    echo "[deps] missing .NET runtime 8.x"
+    fail=1
+  fi
+  if [[ "$fail" -ne 0 ]]; then
+    echo "[deps] dependency install finished with missing items." >&2
+    return 1
+  fi
+  echo "[deps] OK: dependencies for main + proto are installed."
+}
+
+run_host_build() {
+  log "build host runtime"
+  cargo build --release -p wbeamd-server -p wbeamd-streamer --manifest-path "$HOST_WORKSPACE_DIR/Cargo.toml"
+}
+
+run_desktop_build() {
+  log "build desktop-tauri backend"
+  cargo build --manifest-path "$TAURI_MANIFEST"
+}
+
+run_android_build() {
+  local min_sdk="$1"
+  local host="${WBEAM_HOST:-127.0.0.1}"
+  local api_host="${WBEAM_API_HOST:-$host}"
+  local stream_host="${WBEAM_STREAM_HOST:-$host}"
+  log "build android debug (minSdk=$min_sdk)"
+  (
+    cd "$ROOT_DIR/android"
+    bash ./gradlew \
+      "-PWBEAM_MIN_SDK=$min_sdk" \
+      "-PWBEAM_HOST=$host" \
+      "-PWBEAM_API_HOST=$api_host" \
+      "-PWBEAM_STREAM_HOST=$stream_host" \
+      :app:assembleDebug
+  )
+}
+
+run_build_all() {
+  run_host_build
+  run_desktop_build
+  run_android_build 17
+  run_android_build 19
+  log "build complete"
+}
+
+adb_connected_serials() {
+  adb devices | awk 'NR>1 && $2=="device" { print $1 }'
+}
+
+adb_api_level() {
+  local serial="$1"
+  local api
+  api="$(adb -s "$serial" shell getprop ro.build.version.sdk 2>/dev/null | tr -cd '0-9' || true)"
+  if [[ "$api" =~ ^[0-9]+$ ]]; then
+    echo "$api"
+    return 0
+  fi
+  return 1
+}
+
+required_min_sdk_for_device() {
+  local api="$1"
+  if (( api <= 17 )); then
+    echo "17"
+  else
+    echo "19"
+  fi
+}
+
+build_android_apk_variant() {
+  local min_sdk="$1"
+  local out_apk="$TARGET_DIR/apk/app-debug-min${min_sdk}.apk"
+  mkdir -p "$TARGET_DIR/apk"
+  if [[ -f "$out_apk" ]]; then
+    echo "$out_apk"
+    return 0
+  fi
+  run_android_build "$min_sdk"
+  local built_apk="$ROOT_DIR/android/app/build/outputs/apk/debug/app-debug.apk"
+  if [[ ! -f "$built_apk" ]]; then
+    echo "APK not found after build: $built_apk" >&2
+    return 1
+  fi
+  cp "$built_apk" "$out_apk"
+  echo "$out_apk"
+}
+
+run_deploy_all() {
+  if ! command -v adb >/dev/null 2>&1; then
+    echo "adb not found on PATH." >&2
+    return 1
+  fi
+
+  local serial_filter=""
+  local skip_build=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --serial)
+        serial_filter="${2:-}"
+        if [[ -z "$serial_filter" ]]; then
+          echo "missing value for --serial" >&2
+          return 1
+        fi
+        shift 2
+        ;;
+      --skip-build)
+        skip_build=1
+        shift
+        ;;
+      *)
+        echo "unknown deploy option: $1" >&2
+        return 1
+        ;;
+    esac
+  done
+
+  mapfile -t serials < <(adb_connected_serials)
+  if [[ -n "$serial_filter" ]]; then
+    local filtered=()
+    local s
+    for s in "${serials[@]}"; do
+      if [[ "$s" == "$serial_filter" ]]; then
+        filtered+=("$s")
+      fi
+    done
+    serials=("${filtered[@]}")
+  fi
+
+  if [[ "${#serials[@]}" -eq 0 ]]; then
+    echo "no connected adb devices in 'device' state" >&2
+    return 1
+  fi
+
+  declare -A apk_by_min_sdk=()
+  local serial
+  for serial in "${serials[@]}"; do
+    local api min_sdk apk
+    if ! api="$(adb_api_level "$serial")"; then
+      echo "[$serial] cannot resolve API level" >&2
+      return 1
+    fi
+    min_sdk="$(required_min_sdk_for_device "$api")"
+
+    if [[ "$skip_build" -eq 1 ]]; then
+      apk="$ROOT_DIR/android/app/build/outputs/apk/debug/app-debug.apk"
+      if [[ ! -f "$apk" ]]; then
+        echo "APK not found: $apk (skip-build mode)." >&2
+        return 1
+      fi
+    else
+      if [[ -z "${apk_by_min_sdk[$min_sdk]:-}" ]]; then
+        apk_by_min_sdk[$min_sdk]="$(build_android_apk_variant "$min_sdk")"
+      fi
+      apk="${apk_by_min_sdk[$min_sdk]}"
+    fi
+
+    if (( api <= 20 )) && [[ "${WBEAM_STREAM_HOST:-127.0.0.1}" == "127.0.0.1" ]]; then
+      log "[$serial] api=$api uses legacy transport mode; loopback host may require tether/LAN host override (WBEAM_STREAM_HOST/WBEAM_API_HOST)."
+    fi
+
+    log "[$serial] api=$api minSdk=$min_sdk install + reverse + launch"
+    adb -s "$serial" install -r "$apk"
+    adb -s "$serial" reverse "tcp:$STREAM_PORT" "tcp:$STREAM_PORT" || true
+    adb -s "$serial" reverse "tcp:$CONTROL_PORT" "tcp:$CONTROL_PORT" || true
+    adb -s "$serial" shell am start -n "com.wbeam/.MainActivity"
+  done
+  log "deploy complete for ${#serials[@]} device(s)"
+}
+
+run_ip_up() {
+  local serial_filter="${1:-}"
+  if ! command -v adb >/dev/null 2>&1; then
+    echo "adb not found on PATH." >&2
+    return 1
+  fi
+
+  mapfile -t serials < <(adb_connected_serials)
+  if [[ -n "$serial_filter" ]]; then
+    local filtered=()
+    local s
+    for s in "${serials[@]}"; do
+      [[ "$s" == "$serial_filter" ]] && filtered+=("$s")
+    done
+    serials=("${filtered[@]}")
+  fi
+  if [[ "${#serials[@]}" -eq 0 ]]; then
+    echo "no connected adb devices in 'device' state" >&2
+    return 1
+  fi
+
+  local serial
+  for serial in "${serials[@]}"; do
+    log "[$serial] adb reverse tcp:$STREAM_PORT tcp:$STREAM_PORT"
+    adb -s "$serial" reverse "tcp:$STREAM_PORT" "tcp:$STREAM_PORT"
+    log "[$serial] adb reverse tcp:$CONTROL_PORT tcp:$CONTROL_PORT"
+    adb -s "$serial" reverse "tcp:$CONTROL_PORT" "tcp:$CONTROL_PORT"
+  done
+}
+
+run_ip_down() {
+  local serial_filter="${1:-}"
+  if ! command -v adb >/dev/null 2>&1; then
+    echo "adb not found on PATH." >&2
+    return 1
+  fi
+
+  mapfile -t serials < <(adb_connected_serials)
+  if [[ -n "$serial_filter" ]]; then
+    local filtered=()
+    local s
+    for s in "${serials[@]}"; do
+      [[ "$s" == "$serial_filter" ]] && filtered+=("$s")
+    done
+    serials=("${filtered[@]}")
+  fi
+  if [[ "${#serials[@]}" -eq 0 ]]; then
+    echo "no connected adb devices in 'device' state" >&2
+    return 1
+  fi
+
+  local serial
+  for serial in "${serials[@]}"; do
+    log "[$serial] adb reverse --remove tcp:$STREAM_PORT"
+    adb -s "$serial" reverse --remove "tcp:$STREAM_PORT" || true
+    log "[$serial] adb reverse --remove tcp:$CONTROL_PORT"
+    adb -s "$serial" reverse --remove "tcp:$CONTROL_PORT" || true
+  done
+}
+
+run_ip_status() {
+  local serial_filter="${1:-}"
+  if ! command -v adb >/dev/null 2>&1; then
+    echo "adb not found on PATH." >&2
+    return 1
+  fi
+
+  mapfile -t serials < <(adb_connected_serials)
+  if [[ -n "$serial_filter" ]]; then
+    local filtered=()
+    local s
+    for s in "${serials[@]}"; do
+      [[ "$s" == "$serial_filter" ]] && filtered+=("$s")
+    done
+    serials=("${filtered[@]}")
+  fi
+  if [[ "${#serials[@]}" -eq 0 ]]; then
+    echo "no connected adb devices in 'device' state" >&2
+    return 1
+  fi
+
+  local serial
+  for serial in "${serials[@]}"; do
+    echo "[$serial]"
+    adb -s "$serial" reverse --list | sed 's/^/  /'
+  done
+}
+
+host_api_ok() {
+  curl -fsS --max-time 2 "http://127.0.0.1:${CONTROL_PORT}/v1/status" >/dev/null 2>&1
+}
+
+host_pid_running() {
+  if [[ ! -f "$HOST_PID_FILE" ]]; then
+    return 1
+  fi
+  local pid
+  pid="$(cat "$HOST_PID_FILE" 2>/dev/null || true)"
+  [[ -n "$pid" ]] || return 1
+  kill -0 "$pid" >/dev/null 2>&1
+}
+
+run_service_status() {
+  local api_state="down"
+  if host_api_ok; then
+    api_state="up"
+  fi
+
+  local proc_state="stopped"
+  local pid="n/a"
+  if [[ -f "$HOST_PID_FILE" ]]; then
+    pid="$(cat "$HOST_PID_FILE" 2>/dev/null || echo "n/a")"
+  fi
+  if host_pid_running; then
+    proc_state="running"
+  fi
+
+  printf 'api=%s process=%s pid=%s control_port=%s stream_port=%s\n' \
+    "$api_state" "$proc_state" "$pid" "$CONTROL_PORT" "$STREAM_PORT"
+}
+
+run_service_up() {
+  if host_api_ok; then
+    log "host already reachable at http://127.0.0.1:${CONTROL_PORT}/v1/status"
+    return 0
+  fi
+
+  if [[ ! -x "$HOST_DAEMON_BIN" ]]; then
+    run_host_build
+  fi
+  if [[ ! -x "$HOST_DAEMON_BIN" ]]; then
+    echo "host daemon binary not found/executable: $HOST_DAEMON_BIN" >&2
+    return 1
+  fi
+
+  if host_pid_running; then
+    log "pid file already points to running process, waiting for API..."
+  else
+    log "starting host daemon"
+    nohup "$HOST_DAEMON_BIN" \
+      --control-port "$CONTROL_PORT" \
+      --stream-port "$STREAM_PORT" \
+      --root "$ROOT_DIR" \
+      >>"$HOST_STDOUT_LOG" 2>&1 &
+    echo "$!" > "$HOST_PID_FILE"
+  fi
+
+  local i
+  for i in $(seq 1 30); do
+    if host_api_ok; then
+      log "host is up"
+      return 0
+    fi
+    sleep 0.2
+  done
+  echo "host daemon did not become ready in time; check: $HOST_STDOUT_LOG" >&2
+  return 1
+}
+
+run_service_down() {
+  curl -fsS -X POST --max-time 2 "http://127.0.0.1:${CONTROL_PORT}/v1/stop" >/dev/null 2>&1 || true
+
+  if host_pid_running; then
+    local pid
+    pid="$(cat "$HOST_PID_FILE")"
+    kill "$pid" >/dev/null 2>&1 || true
+    wait "$pid" 2>/dev/null || true
+    rm -f "$HOST_PID_FILE"
+    log "stopped host process pid=$pid"
+  else
+    rm -f "$HOST_PID_FILE"
+    log "no local host pid to stop"
+  fi
+}
+
+run_service_logs() {
+  local mode="${1:-path}"
+  if [[ "$mode" == "live" ]]; then
+    touch "$HOST_STDOUT_LOG"
+    exec tail -n 120 -F "$HOST_STDOUT_LOG"
+  fi
+  echo "$HOST_STDOUT_LOG"
+}
+
+if [[ $# -eq 0 ]]; then
+  run_gui
+fi
+
+case "${1:-}" in
+  gui)
+    shift
+    run_gui "$@"
+    ;;
+  build)
+    shift
+    run_build_all "$@"
+    ;;
+  deps)
+    case "${2:-}" in
+      install) run_deps_install ;;
+      *) print_help; exit 1 ;;
+    esac
+    ;;
+  deploy|deploy-all)
+    shift
+    run_deploy_all "$@"
+    ;;
+  service)
+    case "${2:-}" in
+      status) run_service_status ;;
+      up) run_service_up ;;
+      down) run_service_down ;;
+      logs) run_service_logs "${3:-}" ;;
+      *) print_help; exit 1 ;;
+    esac
+    ;;
+  host)
+    case "${2:-}" in
+      build) run_host_build ;;
+      *) print_help; exit 1 ;;
+    esac
+    ;;
+  logs)
+    case "${2:-}" in
+      live) run_service_logs live ;;
+      *) print_help; exit 1 ;;
+    esac
+    ;;
+  project)
+    case "${2:-}" in
+      build) run_build_all ;;
+      deploy) run_deploy_all ;;
+      *) print_help; exit 1 ;;
+    esac
+    ;;
+  android)
+    case "${2:-}" in
+      build) run_build_all ;;
+      deploy|deploy-all) run_deploy_all ;;
+      *) print_help; exit 1 ;;
+    esac
+    ;;
+  ip)
+    case "${2:-}" in
+      up) run_ip_up "${3:-}" ;;
+      down) run_ip_down "${3:-}" ;;
+      status) run_ip_status "${3:-}" ;;
+      *) print_help; exit 1 ;;
+    esac
+    ;;
+  help|-h|--help)
+    print_help
+    ;;
+  *)
+    print_help
+    exit 1
+    ;;
+esac

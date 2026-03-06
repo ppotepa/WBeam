@@ -10,40 +10,29 @@ Thumbs.db
 **/.idea/
 .vscode/
 
-# Android / Gradle
-android/.gradle/
-android/**/build/
-android/local.properties
-android/captures/
-android/.cxx/
-proto/front/.gradle/
-proto/front/**/.gradle/
-proto/front/**/build/
-proto/front/local.properties
-proto/front/captures/
-proto/front/.cxx/
-proto/front/**/.cxx/
-proto/front/.externalNativeBuild/
-proto/front/**/.externalNativeBuild/
+# Generic build artifacts
+**/build/
+**/target/
+**/.gradle/
+**/.cxx/
+**/.externalNativeBuild/
+.build/
+.gradle-user/
+
+# Android packages / bytecode
 *.apk
 *.aab
 *.ap_
 *.dex
-
-# Generic build artifacts (all modules)
-**/.gradle/
-**/.cxx/
-**/.externalNativeBuild/
-**/target/
-**/build/
-
-# Java / Kotlin
 *.class
 
-# Rust
-src/host/rust/target/
-src/protocol/rust/target/
-proto/host/target/
+# Android local config
+android/local.properties
+android/captures/
+proto/front/local.properties
+proto/front/captures/
+
+# .NET
 proto/host-cs/bin/
 proto/host-cs/obj/
 
@@ -57,21 +46,23 @@ venv/
 
 # Logs and runtime output
 *.log
+*.pid
+*.tmp
+*.cache
+all.log
 src/host/logs/**
 src/host/rust/logs/**
 src/protocol/logs/**
 !src/host/rust/logs/.gitkeep
-*.pid
-*.tmp
-*.cache
 
 # Local generated helper files
-all.log
-
 codebase_concat*.txt
 concat*.txt
-ALL_CODE.txt
-ALL_CODE_CLEAN.txt
-ALL_CODE_CLEAN.zip
+ALL_CODE*
 .wbeam_android_pipeline
 ignores
+buildlog
+*.bak
+proto/autotune-results-*.json
+proto/debugframes/
+delivery.md

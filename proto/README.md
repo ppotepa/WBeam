@@ -17,7 +17,7 @@ From repo root:
 
 ```bash
 # Installs missing dependencies only (main + proto)
-./install-deps
+./devtool deps install
 ```
 
 ### Single launcher
@@ -38,8 +38,9 @@ ENV overrides są zablokowane (np. `PROTO_*=... ./run.sh` zakończy się błęde
 
 ### Desktop Control App (tray + dashboard)
 
-- Recommended: run global desktop app from repo root with `./desktop.sh`.
-- Backward-compatible wrapper still works from `proto/`: `./desktop.sh`.
+- Recommended: run global desktop app from repo root with `./devtool gui`.
+- For remote desktop session testing use:
+  - `./runas-remote <user> ./devtool -- gui`
 - Dashboard features:
   - Detects runtime platform (`windows/linux/macos`) and Linux session (`wayland/x11/unknown`).
   - Shows connected ADB devices list (serial/state/model/transport).

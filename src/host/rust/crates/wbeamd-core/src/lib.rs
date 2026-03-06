@@ -692,12 +692,12 @@ impl DaemonCore {
             if !rust_streamer_bin.exists() {
                 error!(
                     path = %rust_streamer_bin.display(),
-                    "rust streamer binary not found – run `./wbeam host build` to build it \
+                    "rust streamer binary not found – run `./devtool host build` to build it \
                      (set WBEAM_USE_RUST_STREAMER=false to force legacy python streamer)"
                 );
                 return Err(CoreError::Spawn(format!(
                     "rust streamer binary not found: {} \
-                     (run `./wbeam host build`; or set WBEAM_USE_RUST_STREAMER=false to use python fallback)",
+                     (run `./devtool host build`; or set WBEAM_USE_RUST_STREAMER=false to use python fallback)",
                     rust_streamer_bin.display()
                 )));
             }

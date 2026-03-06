@@ -29,7 +29,7 @@ WBeam/
     assets/                    # shared assets (migrated in phase 1)
     tools/
       scripts/                 # current: scripts/
-      diagnostics/             # current: audodaignose, related helpers
+      diagnostics/             # current: scripts/diagnostics/audodaignose, related helpers
   docs/
   scripts/                     # top-level wrappers only (stable UX)
     desktop.sh
