@@ -441,3 +441,15 @@ Status: active
 - Validation:
   - `bash -n start-remote` -> OK
   - `./start-remote --help` -> shows new mode flags
+
+## In Progress (2026-03-07) - frontend managers for session/connection state
+- Introduced manager layer in desktop frontend:
+  - `HostApiManager` for host command/invoke calls and error normalization,
+  - `SessionManager` for component/session state, polling, device actions and service actions.
+- Refactored `App.tsx` to use managers instead of inline imperative state logic.
+- Improved connect/disconnect diagnostics from Tauri backend:
+  - `device_connect`/`device_disconnect` now parse daemon HTTP status explicitly,
+  - avoid raw opaque curl failures in UI and return clearer action errors.
+- Validation:
+  - `cd src/apps/desktop-tauri && npm run build` -> OK
+  - `cargo check --manifest-path src/apps/desktop-tauri/src-tauri/Cargo.toml` -> OK
