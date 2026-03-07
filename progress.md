@@ -11,6 +11,12 @@ Status: active
 - Service lifecycle is now controllable from desktop UI (install/uninstall/start/stop + status probe).
 
 ## Latest Completed Commits
+- `2928bdcd` - `feat(versioning): switch local version source to file-based buildno (0.1.N)`
+  - Added file-based build number source: `.wbeam_buildno` (ignored in git).
+  - `wbeam` build version generation now uses `0.1.<buildno>` instead of git-sha timestamp.
+  - Added `WBEAM_VERSION_BASE` support (default `0.1`) to keep future branch/version lanes simple.
+  - `devtool` build/deploy path now uses the same file-based build number logic.
+  - `version doctor` now reports `.wbeam_buildno` value alongside `.wbeam_build_version`.
 - `81162863` - `fix(versioning): unify host/android build rev and add version doctor`
   - Added `./wbeam version doctor` with structured diagnostics and log output (`logs/YYYYMMDD-HHMMSS.version.NNNN.log`):
     - host `/health` build revision
