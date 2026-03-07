@@ -11,6 +11,10 @@ Status: active
 - Service lifecycle is now controllable from desktop UI (install/uninstall/start/stop + status probe).
 
 ## Latest Completed Commits
+- `6010890e` - `fix(wbeam): auto-select adb serial to avoid multi-device deploy ambiguity`
+  - Auto-selects a concrete serial when multiple `adb` devices are connected and `WBEAM_ANDROID_SERIAL` is not set.
+  - Prevents `more than one device/emulator` failures in single-device flows (`./wbeam android deploy`, `start-remote`).
+  - Prints warning with selected serial and override hint.
 - `e5d81d48` - `feat(versioning): unify build version across deploy lanes`
   - Added shared build version source file: `.wbeam_build_version` (ignored in git).
   - `wbeam` now generates a fresh build version for build actions and uses it as expected Android version.
@@ -46,6 +50,7 @@ Status: active
 - `3d632425` - `refactor: drop service scripts and reset desktop-tauri to Solid/TS baseline`
 
 ## Runtime Verification (2026-03-07)
+- `bash -n wbeam` -> OK
 - `bash -n wbeam devtool` -> OK
 - `cargo check --manifest-path src/host/rust/Cargo.toml -p wbeamd-core` -> OK
 - `cd src/apps/desktop-tauri && npm run build` -> OK
