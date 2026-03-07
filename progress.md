@@ -11,6 +11,11 @@ Status: active
 - Service lifecycle is now controllable from desktop UI (install/uninstall/start/stop + status probe).
 
 ## Latest Completed Commits
+- `5e811955` - `fix(remote): fresh start flow and robust multi-device deploy-all`
+  - `start-remote` now performs full fresh cycle: host down, remove desktop user service, uninstall APK on all connected adb devices, host build, host start in remote user session, deploy-all, GUI launch.
+  - `start-remote` wait logic hardened: longer control API wait and explicit host-probe readiness check (`supported=true` best effort).
+  - `android deploy-all` no longer fails legacy devices when `adb reverse` is unavailable; reverse is now best-effort per device and launch determines success.
+  - Verified on mixed API lane (API17 + API34): deploy summary `ok=2 failed=0`.
 - `d1a3e321` - `fix(versioning): align host/app revision sources and host build stamping`
   - Host Rust build now receives `WBEAM_BUILD_REV` during compile in both `wbeam host build` and `devtool host build`.
   - Desktop Tauri expected host/APK version now first reads daemon `/health` `build_revision` (runtime source), then env/file fallback.
@@ -75,6 +80,8 @@ Status: active
 - `bash -n start-remote wbeam` -> OK
 - `bash -n wbeam` -> OK
 - `bash -n wbeam devtool` -> OK
+- `timeout 220 env WBEAM_ANDROID_FORCE_INSTALL=1 ./wbeam android deploy-all` -> OK (`ok=2 failed=0`)
+- `timeout 240 ./start-remote ppotepa` -> OK through host up + deploy + desktop launch path
 - `cargo check --manifest-path src/host/rust/Cargo.toml -p wbeamd-core` -> OK
 - `cd src/apps/desktop-tauri && npm run build` -> OK
 - `cargo check --manifest-path src/apps/desktop-tauri/src-tauri/Cargo.toml` -> OK
