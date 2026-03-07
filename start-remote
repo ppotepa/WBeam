@@ -14,11 +14,13 @@ Defaults:
   desktop_user = ppotepa
 
 Flow:
-  1) build host binaries
-  2) restart host (local process)
-  3) full Android deploy-all (build + force install + launch on all adb devices)
-  4) launch desktop GUI via runas-remote
-  5) print host-probe and daemon status
+  1) remove desktop user service (fresh start)
+  2) uninstall APK from all adb devices (fresh deploy)
+  3) build host binaries
+  4) restart host (in remote user session)
+  5) full Android deploy-all (build + force install + launch on all adb devices)
+  6) launch desktop GUI via runas-remote
+  7) print host-probe and daemon status
 USAGE
 }
 
@@ -54,9 +56,12 @@ if [[ ! -x "$ROOT_DIR/runas-remote" ]]; then
 fi
 
 run_step "host stop (cleanup stale processes)" ./wbeam host down
+run_step "desktop service remove (user=${DESKTOP_USER})" ./runas-remote "$DESKTOP_USER" bash -- -lc "systemctl --user stop wbeam-daemon >/dev/null 2>&1 || true; systemctl --user disable wbeam-daemon >/dev/null 2>&1 || true; rm -f ~/.config/systemd/user/wbeam-daemon.service; systemctl --user daemon-reload >/dev/null 2>&1 || true"
+run_step "android uninstall APK on all adb devices" bash -lc 'adb start-server >/dev/null 2>&1 || true; for s in $(adb devices | awk '"'"'NR>1 && $2=="device"{print $1}'"'"'); do echo "[start-remote][$s] uninstall com.wbeam"; adb -s "$s" uninstall com.wbeam >/dev/null 2>&1 || true; done'
 run_step "host build (release)" ./wbeam host build
-run_step "host start (debug, background)" bash -lc "nohup ./src/host/scripts/run_wbeamd_debug.sh 5001 5000 >/dev/null 2>&1 & disown"
-run_step "wait for control API" bash -lc 'for i in $(seq 1 50); do curl -fsS --max-time 1 http://127.0.0.1:5001/v1/status >/dev/null 2>&1 && exit 0; sleep 0.2; done; exit 1'
+run_step "host start (debug, background in remote session user=${DESKTOP_USER})" ./runas-remote "$DESKTOP_USER" bash -- -lc "cd '$ROOT_DIR' && nohup ./src/host/scripts/run_wbeamd_debug.sh 5001 5000 >/dev/null 2>&1 & disown"
+run_step "wait for control API" bash -lc 'for i in $(seq 1 180); do curl -fsS --max-time 1 http://127.0.0.1:5001/v1/status >/dev/null 2>&1 && exit 0; sleep 0.5; done; exit 1'
+run_step "wait for supported host-probe" bash -lc 'for i in $(seq 1 60); do probe="$(curl -fsS --max-time 1 http://127.0.0.1:5001/v1/host-probe 2>/dev/null || true)"; if [[ "$probe" == *"\"supported\":true"* ]]; then exit 0; fi; sleep 0.5; done; echo "[start-remote] WARN: host-probe not yet supported=true (continuing)" >&2; exit 0'
 deploy_failed=0
 if ! run_step "android deploy-all" env WBEAM_ANDROID_FORCE_INSTALL=1 ./wbeam android deploy-all; then
   deploy_failed=1
