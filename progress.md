@@ -69,6 +69,44 @@ Focus: Main lane stabilization (API17 path), host abstraction, deploy/runtime re
 - `2058d5f9` - `runas-remote` secure env passthrough (`RUNAS_REMOTE_PASSTHROUGH_ENV`, `RUNAS_REMOTE_ENV_FILE`, quiet mode) + README note.
 - `c04f7986` - main integration batch: proto profile migration, host probe/backends, deploy/start/logging flow, API17 path.
 
+## Fast Context Index (Date + Key Files)
+- `2026-03-07` `9ccfb110` docs ledger completion:
+  - `progress.md`
+- `2026-03-07` `a3e6802a` progress policy enforcement:
+  - `progress.md`
+- `2026-03-07` `ed85be41` full integration status note:
+  - `progress.md`
+- `2026-03-07` `2058d5f9` secure remote env passthrough:
+  - `runas-remote`
+  - `README.md`
+- `2026-03-07` `c04f7986` core integration batch:
+  - Android:
+    - `android/app/src/main/java/com/wbeam/MainActivity.java`
+    - `android/app/src/main/java/com/wbeam/stream/H264TcpPlayer.java`
+    - `android/app/build.gradle`
+  - Host API/core/server:
+    - `src/host/rust/crates/wbeamd-api/src/lib.rs`
+    - `src/host/rust/crates/wbeamd-core/src/lib.rs`
+    - `src/host/rust/crates/wbeamd-core/src/infra/config_store.rs`
+    - `src/host/rust/crates/wbeamd-core/src/infra/host_probe.rs`
+    - `src/host/rust/crates/wbeamd-server/src/main.rs`
+  - Streamer/backend split:
+    - `src/host/rust/crates/wbeamd-streamer/src/backend/mod.rs`
+    - `src/host/rust/crates/wbeamd-streamer/src/backend/x11.rs`
+    - `src/host/rust/crates/wbeamd-streamer/src/backend/wayland.rs`
+    - `src/host/rust/crates/wbeamd-streamer/src/{cli.rs,pipeline.rs,transport.rs,encoder.rs,main.rs}`
+  - Ops/scripts:
+    - `wbeam`
+    - `runas-remote`
+    - `start-remote`
+    - `src/host/scripts/run_wbeamd.sh`
+    - `src/host/scripts/run_wbeamd_debug.sh`
+    - `src/host/scripts/watch_live_debug_logs.sh`
+    - `wbgui`
+- `2026-03-06` `1d1d5b21` baseline consolidation:
+  - primary product files across `android/`, `src/host/`, root launchers (`wbeam`, `wbgui`, `devtool` lane)
+  - note: commit contains large `.gradle-user` noise; use this index instead of raw file list for fast context
+
 ## Commit Ledger (Rolling)
 - `a3e6802a` - docs: enforce progress.md update policy and latest changelog
 - `ed85be41` - docs: update progress log for 2026-03-07 integration work
