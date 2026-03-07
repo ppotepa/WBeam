@@ -4,19 +4,15 @@ fn main() {
     println!("cargo:rerun-if-env-changed=WBEAM_BUILD_REV");
     println!("cargo:rerun-if-changed=../../.git/HEAD");
 
-    let revision_suffix = std::env::var("WBEAM_BUILD_REV")
+    let revision = std::env::var("WBEAM_BUILD_REV")
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| git_short_rev().unwrap_or_else(|| "dev0".to_string()));
+        .unwrap_or_else(|| format!("0.1.0.0.{}", git_short_rev().unwrap_or_else(|| "dev0".to_string())));
 
-    let normalized = if revision_suffix.starts_with("0.0.") {
-        revision_suffix
-    } else {
-        format!("0.0.{revision_suffix}-build")
-    };
-
-    println!("cargo:rustc-env=WBEAM_BUILD_REV={normalized}");
+    // Keep revision as a direct pass-through. Any normalization here breaks
+    // host/APK version parity and causes false mismatch diagnostics.
+    println!("cargo:rustc-env=WBEAM_BUILD_REV={revision}");
 }
 
 fn git_short_rev() -> Option<String> {

@@ -15,12 +15,11 @@ Defaults:
 
 Flow:
   1) remove desktop user service (fresh start)
-  2) uninstall APK from all adb devices (fresh deploy)
-  3) build host binaries
-  4) restart host (in remote user session)
-  5) full Android deploy-all (build + force install + launch on all adb devices)
-  6) launch desktop GUI via runas-remote
-  7) print host-probe and daemon status
+  2) build + restart host (remote user session)
+  3) launch desktop GUI first (remote user session)
+  4) snapshot adb devices + start USB udev probe logging
+  5) uninstall APK + full Android deploy-all (all adb devices)
+  6) print host-probe and daemon status
 USAGE
 }
 
@@ -43,6 +42,66 @@ run_step() {
   "$@"
 }
 
+next_log_file() {
+  local domain="$1"
+  local stamp last idx
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  mkdir -p "$ROOT_DIR/logs"
+  last="$(
+    ls -1 "$ROOT_DIR/logs" 2>/dev/null \
+      | sed -n "s/.*\\.${domain}\\.\\([0-9]\\+\\)\\.log$/\\1/p" \
+      | sort -n \
+      | tail -n1
+  )"
+  if [[ -n "$last" ]]; then
+    idx=$((10#$last + 1))
+  else
+    idx=1
+  fi
+  printf '%s/logs/%s.%s.%04d.log\n' "$ROOT_DIR" "$stamp" "$domain" "$idx"
+}
+
+adb_snapshot_log() {
+  local logfile="$1"
+  local api model batt serial
+  local -a serials
+  {
+    echo "[adb-snapshot] ts=$(date -Iseconds)"
+    echo "[adb-snapshot] adb devices -l:"
+    adb devices -l || true
+    echo
+    mapfile -t serials < <(adb devices | awk 'NR>1 && $2=="device" {print $1}')
+    for serial in "${serials[@]}"; do
+      api="$(adb -s "$serial" shell getprop ro.build.version.sdk 2>/dev/null | tr -d '\r' || true)"
+      model="$(adb -s "$serial" shell getprop ro.product.model 2>/dev/null | tr -d '\r' || true)"
+      batt="$(adb -s "$serial" shell dumpsys battery 2>/dev/null | awk -F': ' '/level:/{print $2; exit}' | tr -d '\r' || true)"
+      echo "[adb-snapshot][$serial] model=${model:-unknown} api=${api:-unknown} battery=${batt:-unknown}"
+    done
+  } >>"$logfile" 2>&1
+}
+
+start_usb_probe_logger() {
+  local logfile="$1"
+  local pidfile="$ROOT_DIR/logs/udev-monitor.pid"
+  local old_pid
+  if [[ -f "$pidfile" ]]; then
+    old_pid="$(cat "$pidfile" 2>/dev/null || true)"
+    if [[ -n "${old_pid:-}" ]] && kill -0 "$old_pid" >/dev/null 2>&1; then
+      kill "$old_pid" >/dev/null 2>&1 || true
+    fi
+    rm -f "$pidfile"
+  fi
+
+  if ! command -v udevadm >/dev/null 2>&1; then
+    echo "[start-remote] WARN: udevadm not found, USB probe monitor disabled." >&2
+    return 0
+  fi
+
+  nohup bash -lc "stdbuf -oL udevadm monitor --udev --subsystem-match=usb >>'$logfile' 2>&1" >/dev/null 2>&1 &
+  echo "$!" > "$pidfile"
+  echo "[start-remote] USB probe logger started pid=$(cat "$pidfile") file=$logfile"
+}
+
 cd "$ROOT_DIR"
 
 if [[ ! -x "$ROOT_DIR/wbeam" ]]; then
@@ -57,19 +116,34 @@ fi
 
 run_step "host stop (cleanup stale processes)" ./wbeam host down
 run_step "desktop service remove (user=${DESKTOP_USER})" ./runas-remote "$DESKTOP_USER" bash -- -lc "systemctl --user stop wbeam-daemon >/dev/null 2>&1 || true; systemctl --user disable wbeam-daemon >/dev/null 2>&1 || true; rm -f ~/.config/systemd/user/wbeam-daemon.service; systemctl --user daemon-reload >/dev/null 2>&1 || true"
-run_step "android uninstall APK on all adb devices" bash -lc 'adb start-server >/dev/null 2>&1 || true; for s in $(adb devices | awk '"'"'NR>1 && $2=="device"{print $1}'"'"'); do echo "[start-remote][$s] uninstall com.wbeam"; adb -s "$s" uninstall com.wbeam >/dev/null 2>&1 || true; done'
+run_step "desktop GUI cleanup (stale tauri/vite for user=${DESKTOP_USER})" bash -lc "fuser -k 1420/tcp >/dev/null 2>&1 || true; pkill -u '$DESKTOP_USER' -x wbeam-desktop-t >/dev/null 2>&1 || true"
 BUILD_REV="$(./wbeam version new)"
 run_step "shared build version" bash -lc "echo [start-remote] build_rev=${BUILD_REV}"
 run_step "host build (release)" env WBEAM_BUILD_REV="$BUILD_REV" ./wbeam host build
-run_step "host start (debug, background in remote session user=${DESKTOP_USER})" ./runas-remote "$DESKTOP_USER" bash -- -lc "cd '$ROOT_DIR' && WBEAM_BUILD_REV='$BUILD_REV' nohup ./src/host/scripts/run_wbeamd_debug.sh 5001 5000 >/dev/null 2>&1 & disown"
+run_step "host start (debug, background in remote GUI session user=${DESKTOP_USER})" ./runas-remote "$DESKTOP_USER" bash -- -lc "cd '$ROOT_DIR' && WBEAM_BUILD_REV='$BUILD_REV' setsid -f nohup ./src/host/scripts/run_wbeamd_debug.sh 5001 5000 >/dev/null 2>&1"
 run_step "wait for control API" bash -lc 'for i in $(seq 1 180); do curl -fsS --max-time 1 http://127.0.0.1:5001/v1/status >/dev/null 2>&1 && exit 0; sleep 0.5; done; exit 1'
 run_step "wait for supported host-probe" bash -lc 'for i in $(seq 1 60); do probe="$(curl -fsS --max-time 1 http://127.0.0.1:5001/v1/host-probe 2>/dev/null || true)"; if [[ "$probe" == *"\"supported\":true"* ]]; then exit 0; fi; sleep 0.5; done; echo "[start-remote] WARN: host-probe not yet supported=true (continuing)" >&2; exit 0'
+
+DESKTOP_LOG="$(next_log_file desktop)"
+run_step "launch desktop GUI first (background, user=${DESKTOP_USER})" ./runas-remote "$DESKTOP_USER" bash -- -lc "cd '$ROOT_DIR' && nohup ./devtool >'$DESKTOP_LOG' 2>&1 & disown"
+run_step "wait for desktop process" bash -lc "for i in \$(seq 1 120); do pgrep -u '$DESKTOP_USER' -x wbeam-desktop-t >/dev/null 2>&1 && exit 0; sleep 0.5; done; echo '[start-remote] WARN: desktop process did not become ready (continuing).' >&2; exit 0"
+
+ADB_LOG="$(next_log_file adb)"
+bash -lc "adb start-server >/dev/null 2>&1 || true"
+: > "$ADB_LOG"
+run_step "adb snapshot (startup)" adb_snapshot_log "$ADB_LOG"
+
+UDEV_LOG="$(next_log_file udev)"
+run_step "USB probe monitor start (udev)" start_usb_probe_logger "$UDEV_LOG"
+
+run_step "android uninstall APK on all adb devices" bash -lc 'adb start-server >/dev/null 2>&1 || true; for s in $(adb devices | awk '"'"'NR>1 && $2=="device"{print $1}'"'"'); do echo "[start-remote][$s] uninstall com.wbeam"; adb -s "$s" uninstall com.wbeam >/dev/null 2>&1 || true; done'
 deploy_failed=0
-if ! run_step "android deploy-all" env WBEAM_BUILD_REV="$BUILD_REV" WBEAM_ANDROID_FORCE_INSTALL=1 ./wbeam android deploy-all; then
+if ! run_step "android deploy-all" env WBEAM_BUILD_REV="$BUILD_REV" WBEAM_ANDROID_FORCE_INSTALL=1 WBEAM_ANDROID_SKIP_LAUNCH=1 ./wbeam android deploy-all; then
   deploy_failed=1
-  echo "[start-remote] WARN: android deploy-all failed; continuing to launch desktop GUI." >&2
+  echo "[start-remote] WARN: android deploy-all failed; desktop is already running for diagnostics." >&2
 fi
 
+run_step "adb snapshot (post-deploy)" adb_snapshot_log "$ADB_LOG"
 run_step "version doctor" ./wbeam version doctor
 
 echo
@@ -81,8 +155,11 @@ curl -sS http://127.0.0.1:5001/v1/status || true
 echo
 
 echo
-echo "[start-remote] launching devtool gui as $DESKTOP_USER"
+echo "[start-remote] desktop already launched in background (user=$DESKTOP_USER)"
+echo "[start-remote] logs:"
+echo "  desktop: $DESKTOP_LOG"
+echo "  adb:     $ADB_LOG"
+echo "  udev:    $UDEV_LOG"
 if [[ "$deploy_failed" -eq 1 ]]; then
-  echo "[start-remote] NOTE: desktop is launching with last known android state (deploy failed)." >&2
+  exit 1
 fi
-exec ./runas-remote "$DESKTOP_USER" ./devtool

@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createSignal, onMount } from "solid-js";
+import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
@@ -51,6 +51,15 @@ type ServiceStatus = {
   summary: string;
 };
 
+type HostProbeBrief = {
+  reachable: boolean;
+  os: string;
+  session: string;
+  desktop: string;
+  captureMode: string;
+  supported: boolean;
+};
+
 function BatteryIcon(props: { level: number | null; charging: boolean }) {
   if (props.charging) return <BatteryCharging size={14} />;
   if (props.level === null) return <BatteryMedium size={14} />;
@@ -79,9 +88,22 @@ export default function App() {
   const [serviceBusy, setServiceBusy] = createSignal(false);
   const [error, setError] = createSignal<string>("");
   const [updatedAt, setUpdatedAt] = createSignal<string>("-");
+  const [hostProbe, setHostProbe] = createSignal<HostProbeBrief>({
+    reachable: false,
+    os: "unknown",
+    session: "unknown",
+    desktop: "unknown",
+    captureMode: "unknown",
+    supported: false,
+  });
 
   const tabletCount = createMemo(() => devices().filter((d) => d.deviceClass === "Tablet").length);
   const phoneCount = createMemo(() => devices().filter((d) => d.deviceClass === "Phone").length);
+  const serviceState = createMemo<"running" | "stopped" | "missing">(() => {
+    if (!service().installed) return "missing";
+    if (!service().active) return "stopped";
+    return "running";
+  });
 
   async function loadServiceStatus() {
     try {
@@ -109,6 +131,27 @@ export default function App() {
     }
   }
 
+  async function refreshSnapshot() {
+    await Promise.all([loadServiceStatus(), loadHostProbe()]);
+    await loadDevices();
+  }
+
+  async function loadHostProbe() {
+    try {
+      const probe = await invoke<HostProbeBrief>("host_probe_brief");
+      setHostProbe(probe);
+    } catch {
+      setHostProbe({
+        reachable: false,
+        os: "unknown",
+        session: "unknown",
+        desktop: "unknown",
+        captureMode: "unknown",
+        supported: false,
+      });
+    }
+  }
+
   async function callServiceAction(action: "service_install" | "service_uninstall" | "service_start" | "service_stop") {
     setServiceBusy(true);
     setError("");
@@ -119,8 +162,18 @@ export default function App() {
       setError(String(err));
       await loadServiceStatus();
     } finally {
+      await loadHostProbe();
       setServiceBusy(false);
     }
+  }
+
+  function deviceVersionStatus(device: DeviceBasic): { cls: "ok" | "warn" | "bad"; label: string } {
+    if (!device.apkInstalled) return { cls: "warn", label: "APK missing" };
+    if (!service().installed) return { cls: "warn", label: "Install desktop service first" };
+    if (!service().active) return { cls: "warn", label: "Start desktop service to verify" };
+    return device.apkMatchesHost
+      ? { cls: "ok", label: "Version match" }
+      : { cls: "bad", label: "Version mismatch" };
   }
 
   onMount(async () => {
@@ -133,7 +186,12 @@ export default function App() {
       // ignore title update errors
     }
 
-    await Promise.all([loadDevices(), loadServiceStatus()]);
+    await refreshSnapshot();
+
+    const timer = window.setInterval(() => {
+      void refreshSnapshot();
+    }, 1000);
+    onCleanup(() => window.clearInterval(timer));
   });
 
   return (
@@ -153,7 +211,7 @@ export default function App() {
             >
               <Settings size={16} />
             </button>
-            <button class="refresh-btn" onClick={() => Promise.all([loadDevices(), loadServiceStatus()])} disabled={loading()}>
+            <button class="refresh-btn" onClick={() => refreshSnapshot()} disabled={loading()}>
               {loading() ? "..." : "Refresh"}
             </button>
           </div>
@@ -164,9 +222,12 @@ export default function App() {
         <Show when={error()}>
           <p class="error-line">{error()}</p>
         </Show>
-
         <Show when={!loading() && devices().length === 0 && !error()}>
-          <p class="empty-line">No connected ADB devices.</p>
+          <p class="empty-line">
+            {service().active
+              ? "No connected ADB devices."
+              : "Probing paused until desktop service is running."}
+          </p>
         </Show>
 
         <ul class="device-list" aria-label="Connected devices">
@@ -215,15 +276,24 @@ export default function App() {
                 </div>
 
                 <div class="line end-line">
+                  {(() => {
+                    const st = deviceVersionStatus(device);
+                    return (
                   <span
-                    class={device.apkMatchesHost ? "status ok" : "status bad"}
-                    title="APK version must match host version"
+                    class={`status ${st.cls}`}
+                    title={
+                      service().active
+                        ? "APK version should match host build revision"
+                        : "Version check is paused until desktop service is running"
+                    }
                   >
-                    <Show when={device.apkMatchesHost} fallback={<AlertTriangle size={14} />}>
+                    <Show when={st.cls === "ok"} fallback={<AlertTriangle size={14} />}>
                       <ShieldCheck size={14} />
                     </Show>
-                    {device.apkMatchesHost ? "Version match" : "Version mismatch"}
+                    {st.label}
                   </span>
+                    );
+                  })()}
                 </div>
               </li>
             )}
@@ -266,8 +336,22 @@ export default function App() {
         </section>
 
         <footer class="status-bar" title={service().summary}>
+          <div class={`service-status-strip ${serviceState()}`}>
+            <span class="service-status-main">
+              service: {service().active ? "running" : service().installed ? "stopped" : "not installed"}
+            </span>
+            <span class="service-status-hint">
+              {service().active
+                ? "Service active: device probing enabled."
+                : service().installed
+                  ? "Service installed but stopped. Click Start."
+                  : "Install + Start service to enable probing and streaming."}
+            </span>
+          </div>
           <span>{devices().length} devices ({tabletCount()} tablet, {phoneCount()} phone)</span>
-          <span>service: {service().active ? "running" : service().installed ? "stopped" : "not installed"}</span>
+          <span>
+            host: {hostProbe().os}/{hostProbe().session}/{hostProbe().desktop} · capture={hostProbe().captureMode} · {hostProbe().supported ? "supported" : "unsupported"}
+          </span>
           <span>updated: {updatedAt()}</span>
         </footer>
       </section>

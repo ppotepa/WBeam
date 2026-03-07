@@ -131,6 +131,10 @@ pub struct BaseResponse {
     pub uptime: u64,
     pub run_id: u64,
     pub last_error: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_serial: Option<String>,
+    pub stream_port: u16,
+    pub control_port: u16,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]

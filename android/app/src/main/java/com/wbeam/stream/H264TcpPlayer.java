@@ -40,7 +40,7 @@ public final class H264TcpPlayer {
 
     // ── Network ───────────────────────────────────────────────────────────────
     private static final String HOST = resolveHost();
-    private static final int    PORT = 5000;
+    private static final int    PORT = BuildConfig.WBEAM_STREAM_PORT;
 
     // ── State strings ─────────────────────────────────────────────────────────
     private static final String STATE_CONNECTING = "connecting";

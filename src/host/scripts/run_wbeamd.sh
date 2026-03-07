@@ -76,9 +76,6 @@ run_rust() {
   if [[ -z "$build_rev" && -f "$build_rev_file" ]]; then
     build_rev="$(tr -d '\r[:space:]' < "$build_rev_file" 2>/dev/null || true)"
   fi
-  if [[ -n "$build_rev" && "$build_rev" != 0.0.* ]]; then
-    build_rev="0.0.${build_rev}"
-  fi
 
   if [[ -n "$build_rev" ]]; then
     exec env WBEAM_BUILD_REV="$build_rev" cargo run \

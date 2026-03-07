@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -10,6 +11,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use clap::Parser;
 use serde::Deserialize;
+use tokio::sync::Mutex;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 use wbeamd_api::{ClientHelloRequest, ClientMetricsRequest, ConfigPatch, ErrorResponse};
@@ -32,7 +34,88 @@ struct Args {
 
 #[derive(Clone)]
 struct AppState {
+    sessions: Arc<SessionRegistry>,
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
+struct SessionQuery {
+    serial: Option<String>,
+    stream_port: Option<u16>,
+}
+
+struct SessionCore {
     core: Arc<DaemonCore>,
+}
+
+struct SessionRegistry {
+    root: PathBuf,
+    control_port: u16,
+    base_stream_port: u16,
+    default_core: Arc<DaemonCore>,
+    serial_cores: Mutex<HashMap<String, SessionCore>>,
+}
+
+impl SessionRegistry {
+    fn new(root: PathBuf, base_stream_port: u16, control_port: u16, default_core: Arc<DaemonCore>) -> Self {
+        Self {
+            root,
+            control_port,
+            base_stream_port,
+            default_core,
+            serial_cores: Mutex::new(HashMap::new()),
+        }
+    }
+
+    async fn resolve_core(&self, serial: Option<&str>, requested_stream_port: Option<u16>) -> Arc<DaemonCore> {
+        let Some(raw) = serial else {
+            return self.default_core.clone();
+        };
+        let normalized = raw.trim();
+        if normalized.is_empty() {
+            return self.default_core.clone();
+        }
+
+        {
+            let guard = self.serial_cores.lock().await;
+            if let Some(existing) = guard.get(normalized) {
+                return existing.core.clone();
+            }
+        }
+
+        let mut guard = self.serial_cores.lock().await;
+        if let Some(existing) = guard.get(normalized) {
+            return existing.core.clone();
+        }
+
+        let stream_port = requested_stream_port
+            .filter(|p| *p > 0)
+            .unwrap_or_else(|| self.base_stream_port.saturating_add(1 + guard.len() as u16));
+        let session_label = Some(format!("serial-{normalized}"));
+        let target_serial = Some(normalized.to_string());
+        let core = Arc::new(DaemonCore::new_for_session(
+            self.root.clone(),
+            stream_port,
+            self.control_port,
+            session_label,
+            target_serial,
+        ));
+        guard.insert(normalized.to_string(), SessionCore { core: core.clone() });
+        info!(serial = normalized, stream_port, "created daemon session core");
+        core
+    }
+
+    async fn stop_all(&self) {
+        let mut cores = vec![self.default_core.clone()];
+        {
+            let guard = self.serial_cores.lock().await;
+            for entry in guard.values() {
+                cores.push(entry.core.clone());
+            }
+        }
+        for core in cores {
+            let _ = core.stop().await;
+        }
+    }
 }
 
 #[tokio::main]
@@ -79,7 +162,13 @@ async fn main() {
         args.stream_port,
         args.control_port,
     ));
-    let app_state = AppState { core: core.clone() };
+    let sessions = Arc::new(SessionRegistry::new(
+        root.clone(),
+        args.stream_port,
+        args.control_port,
+        core.clone(),
+    ));
+    let app_state = AppState { sessions };
 
     let app = Router::new()
         .route("/status", get(get_status))
@@ -104,7 +193,7 @@ async fn main() {
         .route("/v1/apply", post(post_apply))
         .route("/v1/client-metrics", post(post_client_metrics))
         .route("/v1/client-hello", post(post_client_hello))
-        .with_state(app_state);
+        .with_state(app_state.clone());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], args.control_port));
     let listener = match tokio::net::TcpListener::bind(addr).await {
@@ -122,11 +211,11 @@ async fn main() {
         "wbeamd-rust started"
     );
 
-    let shutdown_core = core.clone();
+    let shutdown_sessions = app_state.sessions.clone();
     let server =
         axum::serve(listener, app.into_make_service()).with_graceful_shutdown(async move {
             shutdown_signal().await;
-            let _ = shutdown_core.stop().await;
+            shutdown_sessions.stop_all().await;
         });
 
     if let Err(err) = server.await {
@@ -134,24 +223,49 @@ async fn main() {
     }
 }
 
-async fn get_status(State(state): State<AppState>) -> impl IntoResponse {
-    Json(state.core.status().await)
+async fn get_status(
+    State(state): State<AppState>,
+    Query(query): Query<SessionQuery>,
+) -> impl IntoResponse {
+    let serial = query.serial.as_deref();
+    let core = state.sessions.resolve_core(serial, query.stream_port).await;
+    Json(core.status().await)
 }
 
-async fn get_host_probe(State(state): State<AppState>) -> impl IntoResponse {
-    Json(state.core.host_probe().await)
+async fn get_host_probe(
+    State(state): State<AppState>,
+    Query(query): Query<SessionQuery>,
+) -> impl IntoResponse {
+    let serial = query.serial.as_deref();
+    let core = state.sessions.resolve_core(serial, query.stream_port).await;
+    Json(core.host_probe().await)
 }
 
-async fn get_health(State(state): State<AppState>) -> impl IntoResponse {
-    Json(state.core.health().await)
+async fn get_health(
+    State(state): State<AppState>,
+    Query(query): Query<SessionQuery>,
+) -> impl IntoResponse {
+    let serial = query.serial.as_deref();
+    let core = state.sessions.resolve_core(serial, query.stream_port).await;
+    Json(core.health().await)
 }
 
-async fn get_presets(State(state): State<AppState>) -> impl IntoResponse {
-    Json(state.core.presets().await)
+async fn get_presets(
+    State(state): State<AppState>,
+    Query(query): Query<SessionQuery>,
+) -> impl IntoResponse {
+    let serial = query.serial.as_deref();
+    let core = state.sessions.resolve_core(serial, query.stream_port).await;
+    Json(core.presets().await)
 }
 
-async fn get_metrics(State(state): State<AppState>) -> impl IntoResponse {
-    Json(state.core.metrics().await)
+async fn get_metrics(
+    State(state): State<AppState>,
+    Query(query): Query<SessionQuery>,
+) -> impl IntoResponse {
+    let serial = query.serial.as_deref();
+    let core = state.sessions.resolve_core(serial, query.stream_port).await;
+    Json(core.metrics().await)
 }
 
 #[derive(Debug, Deserialize)]
@@ -176,41 +290,55 @@ async fn get_speedtest(Query(query): Query<SpeedtestQuery>) -> impl IntoResponse
 
 async fn post_start(
     State(state): State<AppState>,
+    Query(query): Query<SessionQuery>,
     body: Option<Json<ConfigPatch>>,
 ) -> impl IntoResponse {
+    let serial = query.serial.as_deref();
+    let core = state.sessions.resolve_core(serial, query.stream_port).await;
     let patch = body.map(|Json(v)| v).unwrap_or_default();
-    match state.core.start(patch).await {
+    match core.start(patch).await {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
-        Err(err) => core_error_response(state.core.clone(), err).await,
+        Err(err) => core_error_response(core, err).await,
     }
 }
 
-async fn post_stop(State(state): State<AppState>) -> impl IntoResponse {
-    match state.core.stop().await {
+async fn post_stop(
+    State(state): State<AppState>,
+    Query(query): Query<SessionQuery>,
+) -> impl IntoResponse {
+    let serial = query.serial.as_deref();
+    let core = state.sessions.resolve_core(serial, query.stream_port).await;
+    match core.stop().await {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
-        Err(err) => core_error_response(state.core.clone(), err).await,
+        Err(err) => core_error_response(core, err).await,
     }
 }
 
 async fn post_apply(
     State(state): State<AppState>,
+    Query(query): Query<SessionQuery>,
     body: Option<Json<ConfigPatch>>,
 ) -> impl IntoResponse {
+    let serial = query.serial.as_deref();
+    let core = state.sessions.resolve_core(serial, query.stream_port).await;
     let patch = body.map(|Json(v)| v).unwrap_or_default();
-    match state.core.apply(patch).await {
+    match core.apply(patch).await {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
-        Err(err) => core_error_response(state.core.clone(), err).await,
+        Err(err) => core_error_response(core, err).await,
     }
 }
 
 async fn post_client_metrics(
     State(state): State<AppState>,
+    Query(query): Query<SessionQuery>,
     body: Option<Json<ClientMetricsRequest>>,
 ) -> impl IntoResponse {
+    let serial = query.serial.as_deref();
+    let core = state.sessions.resolve_core(serial, query.stream_port).await;
     let payload = body.map(|Json(v)| v).unwrap_or_default();
-    match state.core.ingest_client_metrics(payload).await {
+    match core.ingest_client_metrics(payload).await {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
-        Err(err) => core_error_response(state.core.clone(), err).await,
+        Err(err) => core_error_response(core, err).await,
     }
 }
 

@@ -20,8 +20,8 @@ def resolveGitShortRev() {
 
 def wbeamBuildRevisionRaw = (project.findProperty("WBEAM_BUILD_REV") ?: System.getenv("WBEAM_BUILD_REV") ?: "").toString().trim()
 def wbeamBuildRevision = wbeamBuildRevisionRaw.isEmpty()
-    ? "0.0.${resolveGitShortRev()}-build"
-    : (wbeamBuildRevisionRaw.startsWith("0.0.") ? wbeamBuildRevisionRaw : "0.0.${wbeamBuildRevisionRaw}")
+    ? "0.1.0.0.${resolveGitShortRev()}"
+    : wbeamBuildRevisionRaw
 def wbeamMinSdkRaw = (project.findProperty("WBEAM_MIN_SDK") ?: System.getenv("WBEAM_MIN_SDK") ?: "17").toString()
 def wbeamMinSdk = Integer.parseInt(wbeamMinSdkRaw)
 def wbeamHostRaw = (project.findProperty("WBEAM_HOST") ?: System.getenv("WBEAM_HOST") ?: "127.0.0.1").toString().trim()
@@ -32,6 +32,12 @@ def wbeamStreamHostRaw = (project.findProperty("WBEAM_STREAM_HOST") ?: System.ge
 def wbeamStreamHost = wbeamStreamHostRaw.isEmpty() ? wbeamHost : wbeamStreamHostRaw.replace("\"", "")
 def wbeamApiImplRaw = (project.findProperty("WBEAM_API_IMPL") ?: System.getenv("WBEAM_API_IMPL") ?: "host").toString().trim().toLowerCase()
 def wbeamApiImpl = (wbeamApiImplRaw == "local") ? "local" : "host"
+def wbeamAndroidSerialRaw = (project.findProperty("WBEAM_ANDROID_SERIAL") ?: System.getenv("WBEAM_ANDROID_SERIAL") ?: "").toString().trim()
+def wbeamAndroidSerial = wbeamAndroidSerialRaw.replace("\"", "")
+def wbeamControlPortRaw = (project.findProperty("WBEAM_CONTROL_PORT") ?: System.getenv("WBEAM_CONTROL_PORT") ?: "5001").toString().trim()
+def wbeamControlPort = Integer.parseInt(wbeamControlPortRaw)
+def wbeamStreamPortRaw = (project.findProperty("WBEAM_STREAM_PORT") ?: System.getenv("WBEAM_STREAM_PORT") ?: "5000").toString().trim()
+def wbeamStreamPort = Integer.parseInt(wbeamStreamPortRaw)
 
 android {
     namespace = 'com.wbeam'
@@ -53,6 +59,9 @@ android {
         buildConfigField "String", "WBEAM_API_HOST", "\"${wbeamApiHost}\""
         buildConfigField "String", "WBEAM_STREAM_HOST", "\"${wbeamStreamHost}\""
         buildConfigField "String", "WBEAM_API_IMPL", "\"${wbeamApiImpl}\""
+        buildConfigField "String", "WBEAM_ANDROID_SERIAL", "\"${wbeamAndroidSerial}\""
+        buildConfigField "int", "WBEAM_CONTROL_PORT", "${wbeamControlPort}"
+        buildConfigField "int", "WBEAM_STREAM_PORT", "${wbeamStreamPort}"
     }
 
     buildTypes {
