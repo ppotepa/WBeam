@@ -823,7 +823,7 @@ android_build_release() {
   fi
 }
 
-android_rotate_gradle_transform_cache() {
+android_rotate_gradle_workspace_cache() {
   local gradle_user_home="$1"
   local cache_dir="${gradle_user_home}/caches/9.0-milestone-1"
   local ts
@@ -832,6 +832,10 @@ android_rotate_gradle_transform_cache() {
   if [[ -d "${cache_dir}/transforms" ]]; then
     mv "${cache_dir}/transforms" "${cache_dir}/transforms.bak-${ts}"
     echo "[android] Rotated Gradle transforms cache -> ${cache_dir}/transforms.bak-${ts}" >&2
+  fi
+  if [[ -d "${cache_dir}/groovy-dsl" ]]; then
+    mv "${cache_dir}/groovy-dsl" "${cache_dir}/groovy-dsl.bak-${ts}"
+    echo "[android] Rotated Gradle groovy-dsl cache -> ${cache_dir}/groovy-dsl.bak-${ts}" >&2
   fi
 }
 
@@ -887,7 +891,7 @@ android_gradle_build_retry_once() {
 
   if grep -q "Could not read workspace metadata" "$tmp_log"; then
     echo "[android] WARN: detected Gradle workspace metadata corruption; retrying once after cache rotation..." >&2
-    android_rotate_gradle_transform_cache "$gradle_user_home"
+    android_rotate_gradle_workspace_cache "$gradle_user_home"
     rm -f "$tmp_log"
     cd "$ANDROID_DIR" && env "${gradle_env[@]}" bash ./gradlew --no-daemon \
       -PWBEAM_MIN_SDK="$min_sdk" \
