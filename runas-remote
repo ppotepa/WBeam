@@ -15,7 +15,7 @@ Examples:
   ./runas-remote alice ./devtool -- gui
   ./runas-remote alice devtool -- build
   ./runas-remote alice /home/alice/bin/myapp -- --flag
-  ./runas-remote ./start-remote ppotepa
+  ./runas-remote ./start-remote alice
 
 Security env options:
   RUNAS_REMOTE_PASSTHROUGH_ENV="NAME1,NAME2"  # copy selected env vars to target app
@@ -131,8 +131,16 @@ load_extra_env_passthrough() {
   done
 }
 
-DEFAULT_USER="${WBEAM_DEV_REMOTE_USER:-ppotepa}"
+DEFAULT_USER="${WBEAM_DEV_REMOTE_USER:-}"
 DEFAULT_APP="./devtool"
+
+if [[ -z "$DEFAULT_USER" ]]; then
+  DEFAULT_USER="$(resolve_active_user_from_loginctl || true)"
+fi
+if [[ -z "$DEFAULT_USER" ]]; then
+  echo "[runas-remote] default user not found. Provide <desktop_user> or set WBEAM_DEV_REMOTE_USER." >&2
+  exit 1
+fi
 
 if [[ $# -eq 0 ]]; then
   TARGET_USER="$DEFAULT_USER"
@@ -270,7 +278,7 @@ if [[ "$SESSION_TYPE" == "wayland" ]]; then
 fi
 
 if [[ "${RUNAS_REMOTE_QUIET:-0}" != "1" ]]; then
-  echo "[runas-remote] user=$TARGET_USER uid=$TARGET_UID sid=$SESSION_ID session=$SESSION_TYPE display=$DISPLAY_VAL app=$APP_SPEC"
+  echo "[runas-remote] uid=$TARGET_UID sid=$SESSION_ID session=$SESSION_TYPE display=$DISPLAY_VAL app=$APP_SPEC"
 fi
 
 exec sudo -u "$TARGET_USER" env "${env_args[@]}" "$TARGET_SCRIPT" "$@"
