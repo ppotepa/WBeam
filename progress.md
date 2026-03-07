@@ -430,3 +430,14 @@ Status: active
   - `Update required` (when APK != daemon).
 - Validation:
   - `cd src/apps/desktop-tauri && npm run build` -> OK
+
+## In Progress (2026-03-07) - start-remote mode polish for faster loops
+- `start-remote` now supports explicit startup modes for faster iteration:
+  - `--quick` (default): no host rebuild, no Android deploy,
+  - `--redeploy`: full host rebuild + force APK deploy-all,
+  - `--rebuild-host`: rebuild host only,
+  - `--no-host-restart`: keep current daemon process and relaunch desktop side only.
+- Improved usage/help output and final mode summary line.
+- Validation:
+  - `bash -n start-remote` -> OK
+  - `./start-remote --help` -> shows new mode flags

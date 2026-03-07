@@ -7,7 +7,7 @@ ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 usage() {
   cat <<'USAGE'
 Usage:
-  ./start-remote [desktop_user]
+  ./start-remote [desktop_user] [--quick] [--redeploy] [--rebuild-host] [--no-host-restart]
   WBEAM_DEV_REMOTE_USER=<user> ./start-remote
 
 Defaults:
@@ -15,20 +15,65 @@ Defaults:
 
 Flow:
   1) remove desktop user service (fresh start)
-  2) build + restart host (remote user session)
+  2) restart host (remote user session)
   3) launch desktop GUI first (remote user session)
   4) snapshot adb devices + start USB udev probe logging
-  5) uninstall APK + full Android deploy-all (all adb devices)
+  5) optional full Android deploy-all only with --redeploy
   6) print host-probe and daemon status
+
+Modes:
+  --quick           explicit fast startup (no Android deploy, no host rebuild)
+  default           same as --quick
+  --rebuild-host    rebuild host binary before startup
+  --no-host-restart keep currently running host daemon (skip host down/start)
+  --redeploy        full cycle: rebuild host + force uninstall/install APK on all devices
 USAGE
 }
 
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  usage
-  exit 0
-fi
+REDEPLOY=0
+REBUILD_HOST=0
+HOST_RESTART=1
+DESKTOP_USER="${WBEAM_DEV_REMOTE_USER:-ppotepa}"
 
-DESKTOP_USER="${1:-${WBEAM_DEV_REMOTE_USER:-ppotepa}}"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --redeploy|--deploy)
+      REDEPLOY=1
+      REBUILD_HOST=1
+      shift
+      ;;
+    --quick)
+      REDEPLOY=0
+      REBUILD_HOST=0
+      shift
+      ;;
+    --rebuild-host)
+      REBUILD_HOST=1
+      shift
+      ;;
+    --no-host-restart)
+      HOST_RESTART=0
+      shift
+      ;;
+    --no-deploy)
+      REDEPLOY=0
+      shift
+      ;;
+    --*)
+      echo "[start-remote] unknown flag: $1" >&2
+      usage
+      exit 1
+      ;;
+    *)
+      DESKTOP_USER="$1"
+      shift
+      ;;
+  esac
+done
 
 # Drop legacy env names and stale deploy overrides from the parent shell.
 unset WBEAM_REMOTE_HOST_IP WBEAM_REMOTE_USER || true
@@ -114,13 +159,29 @@ if [[ ! -x "$ROOT_DIR/runas-remote" ]]; then
   exit 1
 fi
 
-run_step "host stop (cleanup stale processes)" ./wbeam host down
+if [[ "$HOST_RESTART" -eq 1 ]]; then
+  run_step "host stop (cleanup stale processes)" ./wbeam host down
+else
+  run_step "host stop (cleanup stale processes)" bash -lc "echo '[start-remote] skipped (--no-host-restart)'"
+fi
 run_step "desktop service remove (user=${DESKTOP_USER})" ./runas-remote "$DESKTOP_USER" bash -- -lc "systemctl --user stop wbeam-daemon >/dev/null 2>&1 || true; systemctl --user disable wbeam-daemon >/dev/null 2>&1 || true; rm -f ~/.config/systemd/user/wbeam-daemon.service; systemctl --user daemon-reload >/dev/null 2>&1 || true"
 run_step "desktop GUI cleanup (stale tauri/vite for user=${DESKTOP_USER})" bash -lc "fuser -k 1420/tcp >/dev/null 2>&1 || true; pkill -u '$DESKTOP_USER' -x wbeam-desktop-t >/dev/null 2>&1 || true"
-BUILD_REV="$(./wbeam version new)"
+if [[ "$REDEPLOY" -eq 1 || "$REBUILD_HOST" -eq 1 ]]; then
+  BUILD_REV="$(./wbeam version new)"
+else
+  BUILD_REV="$(./wbeam version current)"
+fi
 run_step "shared build version" bash -lc "echo [start-remote] build_rev=${BUILD_REV}"
-run_step "host build (release)" env WBEAM_BUILD_REV="$BUILD_REV" ./wbeam host build
-run_step "host start (debug, background in remote GUI session user=${DESKTOP_USER})" ./runas-remote "$DESKTOP_USER" bash -- -lc "cd '$ROOT_DIR' && WBEAM_BUILD_REV='$BUILD_REV' setsid -f nohup ./src/host/scripts/run_wbeamd_debug.sh 5001 5000 >/dev/null 2>&1"
+if [[ "$REBUILD_HOST" -eq 1 ]]; then
+  run_step "host build (release)" env WBEAM_BUILD_REV="$BUILD_REV" ./wbeam host build
+else
+  run_step "host build (release)" bash -lc "echo '[start-remote] skipped (fast mode, use --rebuild-host or --redeploy)'"
+fi
+if [[ "$HOST_RESTART" -eq 1 ]]; then
+  run_step "host start (debug, background in remote GUI session user=${DESKTOP_USER})" ./runas-remote "$DESKTOP_USER" bash -- -lc "cd '$ROOT_DIR' && WBEAM_BUILD_REV='$BUILD_REV' setsid -f nohup ./src/host/scripts/run_wbeamd_debug.sh 5001 5000 >/dev/null 2>&1"
+else
+  run_step "host start (debug, background in remote GUI session user=${DESKTOP_USER})" bash -lc "echo '[start-remote] skipped (--no-host-restart)'"
+fi
 run_step "wait for control API" bash -lc 'for i in $(seq 1 180); do curl -fsS --max-time 1 http://127.0.0.1:5001/v1/status >/dev/null 2>&1 && exit 0; sleep 0.5; done; exit 1'
 run_step "wait for supported host-probe" bash -lc 'for i in $(seq 1 60); do probe="$(curl -fsS --max-time 1 http://127.0.0.1:5001/v1/host-probe 2>/dev/null || true)"; if [[ "$probe" == *"\"supported\":true"* ]]; then exit 0; fi; sleep 0.5; done; echo "[start-remote] WARN: host-probe not yet supported=true (continuing)" >&2; exit 0'
 
@@ -136,11 +197,15 @@ run_step "adb snapshot (startup)" adb_snapshot_log "$ADB_LOG"
 UDEV_LOG="$(next_log_file udev)"
 run_step "USB probe monitor start (udev)" start_usb_probe_logger "$UDEV_LOG"
 
-run_step "android uninstall APK on all adb devices" bash -lc 'adb start-server >/dev/null 2>&1 || true; for s in $(adb devices | awk '"'"'NR>1 && $2=="device"{print $1}'"'"'); do echo "[start-remote][$s] uninstall com.wbeam"; adb -s "$s" uninstall com.wbeam >/dev/null 2>&1 || true; done'
 deploy_failed=0
-if ! run_step "android deploy-all" env WBEAM_BUILD_REV="$BUILD_REV" WBEAM_ANDROID_FORCE_INSTALL=1 WBEAM_ANDROID_SKIP_LAUNCH=1 ./wbeam android deploy-all; then
-  deploy_failed=1
-  echo "[start-remote] WARN: android deploy-all failed; desktop is already running for diagnostics." >&2
+if [[ "$REDEPLOY" -eq 1 ]]; then
+  run_step "android uninstall APK on all adb devices" bash -lc 'adb start-server >/dev/null 2>&1 || true; for s in $(adb devices | awk '"'"'NR>1 && $2=="device"{print $1}'"'"'); do echo "[start-remote][$s] uninstall com.wbeam"; adb -s "$s" uninstall com.wbeam >/dev/null 2>&1 || true; done'
+  if ! run_step "android deploy-all" env WBEAM_BUILD_REV="$BUILD_REV" WBEAM_ANDROID_FORCE_INSTALL=1 WBEAM_ANDROID_SKIP_LAUNCH=1 ./wbeam android deploy-all; then
+    deploy_failed=1
+    echo "[start-remote] WARN: android deploy-all failed; desktop is already running for diagnostics." >&2
+  fi
+else
+  run_step "android deploy-all" bash -lc "echo '[start-remote] skipped (fast mode, use --redeploy)'"
 fi
 
 run_step "adb snapshot (post-deploy)" adb_snapshot_log "$ADB_LOG"
@@ -156,6 +221,7 @@ echo
 
 echo
 echo "[start-remote] desktop already launched in background (user=$DESKTOP_USER)"
+echo "[start-remote] mode: redeploy=${REDEPLOY} rebuild_host=${REBUILD_HOST} host_restart=${HOST_RESTART}"
 echo "[start-remote] logs:"
 echo "  desktop: $DESKTOP_LOG"
 echo "  adb:     $ADB_LOG"
