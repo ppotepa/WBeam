@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use serde::Serialize;
+use serde_json::Value;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -122,6 +123,12 @@ fn list_devices_basic() -> DevicesBasicResponse {
 }
 
 fn host_expected_apk_version() -> String {
+    if let Some(from_health) = host_build_revision_from_health() {
+        if !from_health.trim().is_empty() && from_health.trim() != "-" {
+            return from_health.trim().to_string();
+        }
+    }
+
     if let Ok(explicit) = std::env::var("WBEAM_HOST_APK_VERSION") {
         let trimmed = explicit.trim();
         if !trimmed.is_empty() {
@@ -138,6 +145,23 @@ fn host_expected_apk_version() -> String {
     }
 
     String::new()
+}
+
+fn host_build_revision_from_health() -> Option<String> {
+    let control_port = std::env::var("WBEAM_CONTROL_PORT").unwrap_or_else(|_| "5001".to_string());
+    let url = format!("http://127.0.0.1:{control_port}/health");
+    let output = Command::new("curl")
+        .args(["-fsS", "--max-time", "1", &url])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let body = String::from_utf8_lossy(&output.stdout);
+    let json: Value = serde_json::from_str(&body).ok()?;
+    json.get("build_revision")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }
 
 #[tauri::command]

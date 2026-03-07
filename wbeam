@@ -485,7 +485,7 @@ host_build() {
   build_version="$(build_version_for_build)"
   echo "[host] Build version: $build_version"
   echo "[host] Building Rust backend (release)…"
-  cd "$rust_dir" && cargo build --release -p wbeamd-server -p wbeamd-streamer
+  cd "$rust_dir" && WBEAM_BUILD_REV="$build_version" cargo build --release -p wbeamd-server -p wbeamd-streamer
   echo "[host] Build OK → $DAEMON_BIN"
 }
 

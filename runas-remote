@@ -9,7 +9,7 @@ usage() {
 Usage:
   runas-remote <desktop_user> <script_or_app_path> [-- app_args...]
   runas-remote [script_or_app_path] [-- app_args...]               # default user
-  runas-remote [desktop_user]                                       # default app: desktop.sh
+  runas-remote [desktop_user]                                       # default app: ./devtool
 
 Examples:
   ./runas-remote alice ./devtool -- gui
@@ -132,7 +132,7 @@ load_extra_env_passthrough() {
 }
 
 DEFAULT_USER="${WBEAM_DEV_REMOTE_USER:-ppotepa}"
-DEFAULT_APP="desktop.sh"
+DEFAULT_APP="./devtool"
 
 if [[ $# -eq 0 ]]; then
   TARGET_USER="$DEFAULT_USER"
