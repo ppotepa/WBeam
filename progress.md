@@ -11,12 +11,15 @@ Status: active
 - Log naming in debug host scripts uses host domains (`*.host.*.log`, `*.host-rust.*.d`).
 
 ## Latest Completed Commit
+- `1060a3f5` - `chore: track logs directory sentinel`
+- `8b8db0c8` - `docs: refresh progress.md to current baseline and verified state`
 - `3d632425` - `refactor: drop service scripts and reset desktop-tauri to Solid/TS baseline`
 - Scope:
   - scripts cleanup: `wbeam`, `wbgui`, `devtool`, `start-remote`, `src/host/scripts/run_wbeamd_debug.sh`, `src/host/scripts/watch_live_debug_logs.sh`
   - desktop reset: `src/apps/desktop-tauri/*` (new Solid/TS scaffold), minimal Tauri backend in `src-tauri/src/main.rs`
   - cleanup: removed legacy static UI files under `src/apps/desktop-tauri/ui/`
   - gitignore update for Tauri frontend artifacts (`node_modules`, `dist`)
+  - repo hygiene: `logs/.gitkeep` tracked to keep logs directory stable and avoid accidental log commits
 
 ## Runtime Verification (2026-03-07)
 - `bash -n wbeam devtool wbgui start-remote src/host/scripts/run_wbeamd_debug.sh src/host/scripts/watch_live_debug_logs.sh` -> OK
