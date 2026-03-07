@@ -18,6 +18,9 @@ import {
   Square,
   Download,
   Trash2,
+  RefreshCw,
+  Link2,
+  Unlink2,
 } from "lucide-solid";
 
 type DeviceBasic = {
@@ -35,10 +38,14 @@ type DeviceBasic = {
   apkInstalled: boolean;
   apkVersion: string;
   apkMatchesHost: boolean;
+  apkMatchesDaemon: boolean;
+  streamPort: number;
+  streamState: string;
 };
 
 type DevicesBasicResponse = {
   hostApkVersion: string;
+  daemonApkVersion: string;
   devices: DeviceBasic[];
   error: string | null;
 };
@@ -77,6 +84,7 @@ export default function App() {
   const [hostName, setHostName] = createSignal("unknown-host");
   const [devices, setDevices] = createSignal<DeviceBasic[]>([]);
   const [hostVersion, setHostVersion] = createSignal<string>("");
+  const [daemonVersion, setDaemonVersion] = createSignal<string>("");
   const [service, setService] = createSignal<ServiceStatus>({
     available: false,
     installed: false,
@@ -88,6 +96,7 @@ export default function App() {
   const [serviceBusy, setServiceBusy] = createSignal(false);
   const [error, setError] = createSignal<string>("");
   const [updatedAt, setUpdatedAt] = createSignal<string>("-");
+  const [deviceActionBusy, setDeviceActionBusy] = createSignal<string>("");
   const [hostProbe, setHostProbe] = createSignal<HostProbeBrief>({
     reachable: false,
     os: "unknown",
@@ -121,6 +130,7 @@ export default function App() {
       const response = await invoke<DevicesBasicResponse>("list_devices_basic");
       setDevices(response.devices || []);
       setHostVersion(response.hostApkVersion || "");
+      setDaemonVersion(response.daemonApkVersion || "");
       setUpdatedAt(new Date().toLocaleTimeString());
       if (response.error) setError(response.error);
     } catch (err) {
@@ -128,6 +138,32 @@ export default function App() {
       setDevices([]);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function deviceConnect(device: DeviceBasic) {
+    setDeviceActionBusy(`${device.serial}:connect`);
+    setError("");
+    try {
+      await invoke<string>("device_connect", { serial: device.serial, streamPort: device.streamPort });
+      await refreshSnapshot();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setDeviceActionBusy("");
+    }
+  }
+
+  async function deviceDisconnect(device: DeviceBasic) {
+    setDeviceActionBusy(`${device.serial}:disconnect`);
+    setError("");
+    try {
+      await invoke<string>("device_disconnect", { serial: device.serial, streamPort: device.streamPort });
+      await refreshSnapshot();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setDeviceActionBusy("");
     }
   }
 
@@ -171,7 +207,7 @@ export default function App() {
     if (!device.apkInstalled) return { cls: "warn", label: "APK missing" };
     if (!service().installed) return { cls: "warn", label: "Install desktop service first" };
     if (!service().active) return { cls: "warn", label: "Start desktop service to verify" };
-    return device.apkMatchesHost
+    return device.apkMatchesDaemon
       ? { cls: "ok", label: "Version match" }
       : { cls: "bad", label: "Version mismatch" };
   }
@@ -217,7 +253,7 @@ export default function App() {
           </div>
         </header>
 
-        <p class="meta-line">Host APK: <strong>{hostVersion() || "not set"}</strong></p>
+        <p class="meta-line">Daemon APK: <strong>{daemonVersion() || hostVersion() || "not set"}</strong></p>
 
         <Show when={error()}>
           <p class="error-line">{error()}</p>
@@ -275,6 +311,15 @@ export default function App() {
                   </span>
                 </div>
 
+                <div class="line split-line">
+                  <span title="Assigned stream port">
+                    Port {device.streamPort}
+                  </span>
+                  <span title="Current daemon stream state">
+                    State {device.streamState}
+                  </span>
+                </div>
+
                 <div class="line end-line">
                   {(() => {
                     const st = deviceVersionStatus(device);
@@ -283,7 +328,7 @@ export default function App() {
                     class={`status ${st.cls}`}
                     title={
                       service().active
-                        ? "APK version should match host build revision"
+                        ? "APK version should match daemon build revision"
                         : "Version check is paused until desktop service is running"
                     }
                   >
@@ -294,6 +339,44 @@ export default function App() {
                   </span>
                     );
                   })()}
+                </div>
+
+                <div class="device-actions">
+                  <button
+                    class="device-btn"
+                    title="Refresh this device state"
+                    disabled={loading() || deviceActionBusy() !== ""}
+                    onClick={() => refreshSnapshot()}
+                  >
+                    <RefreshCw size={13} /> Refresh
+                  </button>
+                  <button
+                    class="device-btn"
+                    title="Start stream for this device"
+                    disabled={
+                      deviceActionBusy() !== ""
+                      || !service().active
+                      || !device.apkInstalled
+                      || !device.apkMatchesDaemon
+                      || device.streamState === "STREAMING"
+                      || device.streamState === "CONNECTING"
+                    }
+                    onClick={() => deviceConnect(device)}
+                  >
+                    <Link2 size={13} /> Connect
+                  </button>
+                  <button
+                    class="device-btn"
+                    title="Stop stream for this device"
+                    disabled={
+                      deviceActionBusy() !== ""
+                      || !service().active
+                      || (device.streamState !== "STREAMING" && device.streamState !== "CONNECTING")
+                    }
+                    onClick={() => deviceDisconnect(device)}
+                  >
+                    <Unlink2 size={13} /> Disconnect
+                  </button>
                 </div>
               </li>
             )}
