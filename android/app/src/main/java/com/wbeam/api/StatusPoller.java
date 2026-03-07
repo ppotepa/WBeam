@@ -4,6 +4,8 @@ import android.os.Handler;
 import android.os.SystemClock;
 import android.util.Log;
 
+import com.wbeam.BuildConfig;
+
 import org.json.JSONObject;
 
 import java.util.Locale;
@@ -31,6 +33,7 @@ public final class StatusPoller {
     private String  daemonService      = "-";
     private String  daemonBuildRevision = "-";
     private String  daemonStateSnapshot = "";
+    private String  buildMismatchSnapshot = "";
 
     // ── Poll bookkeeping ──────────────────────────────────────────────────────
     private volatile boolean statusPollInFlight = false;
@@ -182,6 +185,7 @@ public final class StatusPoller {
         daemonBuildRevision = health != null
             ? health.optString("build_revision", daemonBuildRevision)
             : daemonBuildRevision;
+        maybeLogBuildMismatch();
 
         String newSnapshot = daemonState + "|" + daemonRunId + "|" + daemonLastError;
         if (!newSnapshot.equals(daemonStateSnapshot)) {
@@ -218,6 +222,29 @@ public final class StatusPoller {
         }
         if ("IDLE".equals(daemonState)) {
             callbacks.onAutoStartRequired();
+        }
+    }
+
+    private void maybeLogBuildMismatch() {
+        String hostRev = daemonBuildRevision == null ? "" : daemonBuildRevision.trim();
+        String appRev = BuildConfig.WBEAM_BUILD_REV == null ? "" : BuildConfig.WBEAM_BUILD_REV.trim();
+        boolean hostKnown = !hostRev.isEmpty() && !"-".equals(hostRev);
+        boolean appKnown = !appRev.isEmpty();
+        boolean mismatch = daemonReachable && hostKnown && appKnown && !hostRev.equals(appRev);
+        String snapshot = mismatch
+                ? "mismatch|" + appRev + "|" + hostRev + "|" + HostApiClient.API_BASE
+                : "ok|" + appRev + "|" + hostRev;
+
+        if (!snapshot.equals(buildMismatchSnapshot)) {
+            buildMismatchSnapshot = snapshot;
+            if (mismatch) {
+                Log.e(TAG, "build mismatch app=" + appRev + " host=" + hostRev
+                        + " api=" + HostApiClient.API_BASE
+                        + " hint=rebuild host and redeploy APK with same WBEAM_BUILD_REV");
+            } else if (daemonReachable && hostKnown && appKnown) {
+                Log.i(TAG, "build match restored app=" + appRev + " host=" + hostRev
+                        + " api=" + HostApiClient.API_BASE);
+            }
         }
     }
 

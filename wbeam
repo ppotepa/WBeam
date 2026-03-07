@@ -36,6 +36,7 @@ Groups:
   host      build | run | debug | status | down
   daemon    up | down | status   (alias for host)
   android   build | install | launch | deploy | deploy-all | build-release | install-release | deploy-release
+  version   new | current | doctor
   debug     up | watch           (alias for host debug)
   logs      live | host | adb (start|stop|status|tail)
 
@@ -52,6 +53,7 @@ Examples:
   ./wbeam android build-release  # ./gradlew assembleRelease
   ./wbeam android install-release
   ./wbeam android deploy-release
+  ./wbeam version doctor         # diagnose host/APK version mismatch
   ./wbeam debug up
   ./wbeam logs live
   ./wbeam logs adb start
@@ -282,6 +284,117 @@ build_version_for_runtime() {
     return 0
   fi
   normalize_build_version "$(build_version_generate)"
+}
+
+version_new() {
+  build_version_write_new
+}
+
+version_current() {
+  build_version_for_runtime
+}
+
+version_log_file() {
+  local ts day counter_file n run_id
+  mkdir -p "$LOG_DIR"
+  ts="$(date +%Y%m%d-%H%M%S)"
+  day="$(date +%Y%m%d)"
+  counter_file="$LOG_DIR/.run.${day}.counter"
+  n=0
+  if [[ -f "$counter_file" ]]; then
+    n="$(tr -d '[:space:]' < "$counter_file" 2>/dev/null || echo 0)"
+  fi
+  if [[ ! "$n" =~ ^[0-9]+$ ]]; then
+    n=0
+  fi
+  n=$((n + 1))
+  printf '%s' "$n" > "$counter_file"
+  run_id="$(printf '%04d' "$n")"
+  echo "$LOG_DIR/${ts}.version.${run_id}.log"
+}
+
+host_health_raw() {
+  local url
+  url="http://127.0.0.1:${CONTROL_PORT}/health"
+  curl -fsS --max-time 1 "$url" 2>/dev/null || return 1
+}
+
+json_string_field() {
+  local json="$1"
+  local field="$2"
+  printf '%s\n' "$json" \
+    | sed -n "s/.*\"${field}\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" \
+    | head -n 1
+}
+
+version_doctor() {
+  local log_file now host_health="" host_build="" host_service="" file_build="" host_status=""
+  local serials=()
+  now="$(date -Iseconds)"
+  log_file="$(version_log_file)"
+
+  {
+    echo "[version-doctor] time=$now"
+    echo "[version-doctor] control_api=http://127.0.0.1:${CONTROL_PORT}"
+
+    if host_health="$(host_health_raw)"; then
+      host_build="$(json_string_field "$host_health" "build_revision")"
+      host_service="$(json_string_field "$host_health" "service")"
+      host_status="reachable"
+      echo "[version-doctor] host_health=$host_status service=${host_service:-unknown} build_revision=${host_build:-unknown}"
+    else
+      host_status="unreachable"
+      echo "[version-doctor] host_health=$host_status"
+    fi
+
+    file_build="$(build_version_read_file || true)"
+    echo "[version-doctor] build_file=${BUILD_VERSION_FILE} value=${file_build:-<empty>}"
+
+    if [[ -n "${WBEAM_BUILD_REV:-}" ]]; then
+      echo "[version-doctor] env_WBEAM_BUILD_REV=${WBEAM_BUILD_REV}"
+    else
+      echo "[version-doctor] env_WBEAM_BUILD_REV=<unset>"
+    fi
+
+    if ! command -v adb >/dev/null 2>&1; then
+      echo "[version-doctor] adb=missing"
+      exit 0
+    fi
+
+    mapfile -t serials < <(android_connected_serials)
+    if [[ "${#serials[@]}" -eq 0 ]]; then
+      echo "[version-doctor] adb_devices=none"
+      exit 0
+    fi
+
+    echo "[version-doctor] adb_devices=${serials[*]}"
+    for serial in "${serials[@]}"; do
+      local api model apk_version expected reason
+      api="$(adb -s "$serial" shell getprop ro.build.version.sdk 2>/dev/null | tr -d '\r[:space:]' || true)"
+      model="$(adb -s "$serial" shell getprop ro.product.model 2>/dev/null | tr -d '\r' || true)"
+      apk_version="$(adb -s "$serial" shell dumpsys package "$ANDROID_PACKAGE" 2>/dev/null \
+        | sed -n 's/^[[:space:]]*versionName=//p' | head -n 1 | tr -d '\r' || true)"
+
+      expected="$host_build"
+      if [[ -z "$expected" ]]; then
+        expected="$file_build"
+      fi
+
+      if [[ -z "$apk_version" ]]; then
+        reason="apk_not_installed"
+      elif [[ -z "$expected" ]]; then
+        reason="missing_expected_version"
+      elif [[ "$apk_version" == "$expected" ]]; then
+        reason="match"
+      else
+        reason="mismatch"
+      fi
+
+      echo "[version-doctor][$serial] model=${model:-unknown} api=${api:-unknown} apk=${apk_version:-<none>} expected=${expected:-<none>} result=$reason"
+    done
+  } | tee "$log_file"
+
+  echo "[version-doctor] log=$log_file"
 }
 
 android_expected_version_name() {
@@ -1053,6 +1166,14 @@ case "$group" in
       build-release|release-build)    android_build_release ;;
       install-release|release-install) android_install_release ;;
       deploy-release|release-deploy)   android_deploy_release ;;
+      *)              print_help; exit 1 ;;
+    esac
+    ;;
+  version)
+    case "$cmd" in
+      new)            version_new ;;
+      current)        version_current ;;
+      doctor|diag|diagnose) version_doctor ;;
       *)              print_help; exit 1 ;;
     esac
     ;;

@@ -58,15 +58,19 @@ fi
 run_step "host stop (cleanup stale processes)" ./wbeam host down
 run_step "desktop service remove (user=${DESKTOP_USER})" ./runas-remote "$DESKTOP_USER" bash -- -lc "systemctl --user stop wbeam-daemon >/dev/null 2>&1 || true; systemctl --user disable wbeam-daemon >/dev/null 2>&1 || true; rm -f ~/.config/systemd/user/wbeam-daemon.service; systemctl --user daemon-reload >/dev/null 2>&1 || true"
 run_step "android uninstall APK on all adb devices" bash -lc 'adb start-server >/dev/null 2>&1 || true; for s in $(adb devices | awk '"'"'NR>1 && $2=="device"{print $1}'"'"'); do echo "[start-remote][$s] uninstall com.wbeam"; adb -s "$s" uninstall com.wbeam >/dev/null 2>&1 || true; done'
-run_step "host build (release)" ./wbeam host build
-run_step "host start (debug, background in remote session user=${DESKTOP_USER})" ./runas-remote "$DESKTOP_USER" bash -- -lc "cd '$ROOT_DIR' && nohup ./src/host/scripts/run_wbeamd_debug.sh 5001 5000 >/dev/null 2>&1 & disown"
+BUILD_REV="$(./wbeam version new)"
+run_step "shared build version" bash -lc "echo [start-remote] build_rev=${BUILD_REV}"
+run_step "host build (release)" env WBEAM_BUILD_REV="$BUILD_REV" ./wbeam host build
+run_step "host start (debug, background in remote session user=${DESKTOP_USER})" ./runas-remote "$DESKTOP_USER" bash -- -lc "cd '$ROOT_DIR' && WBEAM_BUILD_REV='$BUILD_REV' nohup ./src/host/scripts/run_wbeamd_debug.sh 5001 5000 >/dev/null 2>&1 & disown"
 run_step "wait for control API" bash -lc 'for i in $(seq 1 180); do curl -fsS --max-time 1 http://127.0.0.1:5001/v1/status >/dev/null 2>&1 && exit 0; sleep 0.5; done; exit 1'
 run_step "wait for supported host-probe" bash -lc 'for i in $(seq 1 60); do probe="$(curl -fsS --max-time 1 http://127.0.0.1:5001/v1/host-probe 2>/dev/null || true)"; if [[ "$probe" == *"\"supported\":true"* ]]; then exit 0; fi; sleep 0.5; done; echo "[start-remote] WARN: host-probe not yet supported=true (continuing)" >&2; exit 0'
 deploy_failed=0
-if ! run_step "android deploy-all" env WBEAM_ANDROID_FORCE_INSTALL=1 ./wbeam android deploy-all; then
+if ! run_step "android deploy-all" env WBEAM_BUILD_REV="$BUILD_REV" WBEAM_ANDROID_FORCE_INSTALL=1 ./wbeam android deploy-all; then
   deploy_failed=1
   echo "[start-remote] WARN: android deploy-all failed; continuing to launch desktop GUI." >&2
 fi
+
+run_step "version doctor" ./wbeam version doctor
 
 echo
 echo "[start-remote] host-probe:"
