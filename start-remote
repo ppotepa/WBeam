@@ -8,9 +8,11 @@ usage() {
   cat <<'USAGE'
 Usage:
   ./start-remote [desktop_user]
+  WBEAM_DEV_REMOTE_USER=<user> WBEAM_DEV_REMOTE_HOST_IP=<ip> [WBEAM_DEV_REMOTE_SERIAL=<serial>] ./start-remote
 
 Defaults:
   desktop_user = ppotepa
+  remote_host_ip = 192.168.100.208
 
 Flow:
   1) restart host (local process)
@@ -25,7 +27,13 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   exit 0
 fi
 
-DESKTOP_USER="${1:-ppotepa}"
+DESKTOP_USER="${1:-${WBEAM_DEV_REMOTE_USER:-ppotepa}}"
+REMOTE_HOST_IP="${WBEAM_DEV_REMOTE_HOST_IP:-192.168.100.208}"
+REMOTE_SERIAL="${WBEAM_DEV_REMOTE_SERIAL:-}"
+
+# Drop legacy env names and stale deploy overrides from the parent shell.
+unset WBEAM_REMOTE_HOST_IP WBEAM_REMOTE_USER || true
+unset WBEAM_ANDROID_HOST WBEAM_ANDROID_API_HOST WBEAM_ANDROID_STREAM_HOST || true
 
 run_step() {
   local title="$1"
@@ -50,7 +58,20 @@ fi
 run_step "host stop (cleanup stale processes)" ./wbeam host down
 run_step "host start (debug, background)" bash -lc "nohup ./src/host/scripts/run_wbeamd_debug.sh 5001 5000 >/dev/null 2>&1 & disown"
 run_step "wait for control API" bash -lc 'for i in $(seq 1 50); do curl -fsS --max-time 1 http://127.0.0.1:5001/v1/status >/dev/null 2>&1 && exit 0; sleep 0.2; done; exit 1'
-run_step "android deploy" ./wbeam android deploy
+if [[ -n "$REMOTE_SERIAL" ]]; then
+  run_step "android deploy (host=${REMOTE_HOST_IP}, serial=${REMOTE_SERIAL})" env \
+    WBEAM_ANDROID_SERIAL="$REMOTE_SERIAL" \
+    WBEAM_ANDROID_HOST="$REMOTE_HOST_IP" \
+    WBEAM_ANDROID_API_HOST="$REMOTE_HOST_IP" \
+    WBEAM_ANDROID_STREAM_HOST="$REMOTE_HOST_IP" \
+    ./wbeam android deploy
+else
+  run_step "android deploy (host=${REMOTE_HOST_IP})" env \
+    WBEAM_ANDROID_HOST="$REMOTE_HOST_IP" \
+    WBEAM_ANDROID_API_HOST="$REMOTE_HOST_IP" \
+    WBEAM_ANDROID_STREAM_HOST="$REMOTE_HOST_IP" \
+    ./wbeam android deploy
+fi
 
 echo
 echo "[start-remote] host-probe:"
