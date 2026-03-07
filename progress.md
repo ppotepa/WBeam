@@ -11,6 +11,11 @@ Status: active
 - Service lifecycle is now controllable from desktop UI (install/uninstall/start/stop + status probe).
 
 ## Latest Completed Commits
+- `c2a6f683` - `refactor(remote): align runas-remote UX with start-remote user-driven flow`
+  - `start-remote` is now user-only oriented (no remote host IP forcing), while still doing full `deploy-all`.
+  - `runas-remote` now supports default user (`WBEAM_DEV_REMOTE_USER` fallback to `ppotepa`) and default app (`desktop.sh`).
+  - Added compatibility parser for common app-first typo (`./runas-remote ./start-remote <user>`), with warning.
+  - Both scripts now follow the same user/session-first model; `start-remote` remains the full-deploy wrapper.
 - `0c3dbee8` - `fix(remote): enforce dev-remote host/serial and harden gradle metadata cache recovery`
   - `start-remote` now clears legacy env keys and stale host override vars before deploy.
   - Added `WBEAM_DEV_REMOTE_SERIAL` support to force specific target when multiple devices are connected.
