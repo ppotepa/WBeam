@@ -418,3 +418,15 @@ Status: active
 - Validation:
   - `cargo check --manifest-path src/apps/desktop-tauri/src-tauri/Cargo.toml` -> OK
   - `cd src/apps/desktop-tauri && npm run build` -> OK
+
+## In Progress (2026-03-07) - device tile UX polish (disabled reasons + update wording)
+- Device action buttons now expose explicit disabled reasons via tooltips:
+  - service inactive,
+  - APK missing,
+  - APK/daemon version mismatch,
+  - already connecting/streaming,
+  - another action in progress.
+- Version badge wording changed from generic mismatch to user action:
+  - `Update required` (when APK != daemon).
+- Validation:
+  - `cd src/apps/desktop-tauri && npm run build` -> OK

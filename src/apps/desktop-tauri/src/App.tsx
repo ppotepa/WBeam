@@ -209,7 +209,26 @@ export default function App() {
     if (!service().active) return { cls: "warn", label: "Start desktop service to verify" };
     return device.apkMatchesDaemon
       ? { cls: "ok", label: "Version match" }
-      : { cls: "bad", label: "Version mismatch" };
+      : { cls: "bad", label: "Update required" };
+  }
+
+  function connectDisabledReason(device: DeviceBasic): string {
+    if (deviceActionBusy() !== "") return "Another device action is in progress";
+    if (!service().active) return "Desktop service must be running";
+    if (!device.apkInstalled) return "APK is not installed on this device";
+    if (!device.apkMatchesDaemon) return "APK version must match daemon version";
+    if (device.streamState === "STREAMING") return "Device is already streaming";
+    if (device.streamState === "CONNECTING") return "Device is already connecting";
+    return "";
+  }
+
+  function disconnectDisabledReason(device: DeviceBasic): string {
+    if (deviceActionBusy() !== "") return "Another device action is in progress";
+    if (!service().active) return "Desktop service must be running";
+    if (device.streamState !== "STREAMING" && device.streamState !== "CONNECTING") {
+      return "Device is not streaming";
+    }
+    return "";
   }
 
   onMount(async () => {
@@ -342,6 +361,13 @@ export default function App() {
                 </div>
 
                 <div class="device-actions">
+                  {(() => {
+                    const connectReason = connectDisabledReason(device);
+                    const disconnectReason = disconnectDisabledReason(device);
+                    const connectDisabled = connectReason.length > 0;
+                    const disconnectDisabled = disconnectReason.length > 0;
+                    return (
+                      <>
                   <button
                     class="device-btn"
                     title="Refresh this device state"
@@ -352,31 +378,23 @@ export default function App() {
                   </button>
                   <button
                     class="device-btn"
-                    title="Start stream for this device"
-                    disabled={
-                      deviceActionBusy() !== ""
-                      || !service().active
-                      || !device.apkInstalled
-                      || !device.apkMatchesDaemon
-                      || device.streamState === "STREAMING"
-                      || device.streamState === "CONNECTING"
-                    }
+                    title={connectDisabled ? connectReason : "Start stream for this device"}
+                    disabled={connectDisabled}
                     onClick={() => deviceConnect(device)}
                   >
                     <Link2 size={13} /> Connect
                   </button>
                   <button
                     class="device-btn"
-                    title="Stop stream for this device"
-                    disabled={
-                      deviceActionBusy() !== ""
-                      || !service().active
-                      || (device.streamState !== "STREAMING" && device.streamState !== "CONNECTING")
-                    }
+                    title={disconnectDisabled ? disconnectReason : "Stop stream for this device"}
+                    disabled={disconnectDisabled}
                     onClick={() => deviceDisconnect(device)}
                   >
                     <Unlink2 size={13} /> Disconnect
                   </button>
+                      </>
+                    );
+                  })()}
                 </div>
               </li>
             )}
