@@ -288,7 +288,7 @@ fn daemon_post_action(action: &str, serial: &str, stream_port: u16) -> Result<St
     Ok(payload.trim().to_string())
 }
 
-fn adb_prepare_connect(serial: &str, stream_port: u16) {
+fn adb_prepare_connect(serial: &str, stream_port: u16) -> Result<(), String> {
     let control_port = std::env::var("WBEAM_CONTROL_PORT")
         .ok()
         .and_then(|v| v.trim().parse::<u16>().ok())
@@ -296,19 +296,41 @@ fn adb_prepare_connect(serial: &str, stream_port: u16) {
     let stream = stream_port.to_string();
     let control = control_port.to_string();
 
-    let _ = Command::new("adb").args(["start-server"]).output();
-    let _ = Command::new("adb")
+    let _ = Command::new("adb").args(["start-server"]).output()
+        .map_err(|e| format!("adb start-server failed: {e}"))?;
+
+    let wait = Command::new("adb")
         .args(["-s", serial, "wait-for-device"])
-        .output();
-    let _ = Command::new("adb")
+        .output()
+        .map_err(|e| format!("adb wait-for-device failed: {e}"))?;
+    if !wait.status.success() {
+        return Err("ADB device is not ready. Reconnect USB / authorize device.".to_string());
+    }
+
+    let rev_stream = Command::new("adb")
         .args(["-s", serial, "reverse", &format!("tcp:{stream}"), &format!("tcp:{stream}")])
-        .output();
-    let _ = Command::new("adb")
+        .output()
+        .map_err(|e| format!("adb reverse(stream) failed: {e}"))?;
+    let rev_control = Command::new("adb")
         .args(["-s", serial, "reverse", &format!("tcp:{control}"), &format!("tcp:{control}")])
-        .output();
-    let _ = Command::new("adb")
+        .output()
+        .map_err(|e| format!("adb reverse(control) failed: {e}"))?;
+    if !rev_stream.status.success() || !rev_control.status.success() {
+        return Err(
+            "ADB reverse failed. Run full redeploy or check USB transport permissions."
+                .to_string(),
+        );
+    }
+
+    let launch = Command::new("adb")
         .args(["-s", serial, "shell", "am", "start", "-n", "com.wbeam/.MainActivity"])
-        .output();
+        .output()
+        .map_err(|e| format!("adb launch failed: {e}"))?;
+    if !launch.status.success() {
+        return Err("Failed to launch Android app via adb.".to_string());
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -476,7 +498,7 @@ fn host_probe_brief() -> HostProbeBrief {
 
 #[tauri::command]
 fn device_connect(serial: String, stream_port: u16) -> Result<String, String> {
-    adb_prepare_connect(&serial, stream_port);
+    adb_prepare_connect(&serial, stream_port)?;
     daemon_post_action("start", &serial, stream_port)
 }
 
