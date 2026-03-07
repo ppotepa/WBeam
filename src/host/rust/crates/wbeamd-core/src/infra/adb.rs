@@ -39,29 +39,80 @@ pub async fn ensure_usb_reverse(root: &Path, stream_port: u16, control_port: u16
     tracing::info!(reason, "refreshing adb reverse mappings");
 
     let script = root.join("src/host/scripts/usb_reverse.sh");
-    match Command::new(&script)
-        .arg(stream_port.to_string())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .await
-    {
-        Ok(s) if s.success() => {}
-        Ok(s) => warn!(reason, code = ?s.code(), "usb_reverse.sh failed"),
-        Err(e) => warn!(reason, error = %e, "failed to execute usb_reverse.sh"),
+    let serials = adb_target_serials().await;
+
+    if serials.is_empty() {
+        warn!(reason, "no adb devices in 'device' state for reverse mapping");
+        return;
     }
 
-    match Command::new("adb")
-        .arg("reverse")
-        .arg(format!("tcp:{control_port}"))
-        .arg(format!("tcp:{control_port}"))
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .await
-    {
-        Ok(s) if s.success() => {}
-        Ok(s) => warn!(reason, code = ?s.code(), "adb reverse for control port failed"),
-        Err(e) => warn!(reason, error = %e, "failed to execute adb reverse for control port"),
+    for serial in serials {
+        match Command::new(&script)
+            .arg(stream_port.to_string())
+            .env("WBEAM_ANDROID_SERIAL", &serial)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await
+        {
+            Ok(s) if s.success() => {}
+            Ok(s) => warn!(reason, %serial, code = ?s.code(), "usb_reverse.sh failed"),
+            Err(e) => warn!(reason, %serial, error = %e, "failed to execute usb_reverse.sh"),
+        }
+
+        match Command::new("adb")
+            .arg("-s")
+            .arg(&serial)
+            .arg("reverse")
+            .arg(format!("tcp:{control_port}"))
+            .arg(format!("tcp:{control_port}"))
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await
+        {
+            Ok(s) if s.success() => {}
+            Ok(s) => warn!(reason, %serial, code = ?s.code(), "adb reverse for control port failed"),
+            Err(e) => warn!(reason, %serial, error = %e, "failed to execute adb reverse for control port"),
+        }
     }
+}
+
+async fn adb_target_serials() -> Vec<String> {
+    if let Ok(forced) = std::env::var("WBEAM_ANDROID_SERIAL") {
+        let trimmed = forced.trim();
+        if !trimmed.is_empty() {
+            return vec![trimmed.to_string()];
+        }
+    }
+
+    let output = Command::new("adb")
+        .arg("devices")
+        .output()
+        .await;
+
+    let Ok(out) = output else {
+        return Vec::new();
+    };
+    if !out.status.success() {
+        return Vec::new();
+    }
+
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with("List of devices attached") {
+                return None;
+            }
+            let mut parts = trimmed.split_whitespace();
+            let serial = parts.next()?;
+            let state = parts.next().unwrap_or_default();
+            if state == "device" {
+                Some(serial.to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
 }
