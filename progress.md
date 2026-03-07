@@ -11,6 +11,10 @@ Status: active
 - Service lifecycle is now controllable from desktop UI (install/uninstall/start/stop + status probe).
 
 ## Latest Completed Commits
+- `0b2bb174` - `fix(android): make deploy-all build and resolve hosts per device serial`
+  - `android deploy-all` now resolves pipeline/hosts per serial (instead of one shared build for all devices).
+  - For each device: selects serial, resolves deploy hosts, builds APK with per-device config, installs, applies reverse, and launches.
+  - Prevents mixed-device misdeploy (e.g., API17 + API34 receiving incompatible baked host/pipeline).
 - `9bb5a393` - `fix(start-remote): launch desktop even when android deploy-all fails`
   - Root-cause for “desktop app not visible” in `start-remote`: deploy failure aborted script before GUI launch.
   - `start-remote` now continues to `runas-remote ./devtool` even when `android deploy-all` fails.
