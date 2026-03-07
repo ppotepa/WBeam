@@ -57,7 +57,11 @@ run_step "host stop (cleanup stale processes)" ./wbeam host down
 run_step "host build (release)" ./wbeam host build
 run_step "host start (debug, background)" bash -lc "nohup ./src/host/scripts/run_wbeamd_debug.sh 5001 5000 >/dev/null 2>&1 & disown"
 run_step "wait for control API" bash -lc 'for i in $(seq 1 50); do curl -fsS --max-time 1 http://127.0.0.1:5001/v1/status >/dev/null 2>&1 && exit 0; sleep 0.2; done; exit 1'
-run_step "android deploy-all" env WBEAM_ANDROID_FORCE_INSTALL=1 ./wbeam android deploy-all
+deploy_failed=0
+if ! run_step "android deploy-all" env WBEAM_ANDROID_FORCE_INSTALL=1 ./wbeam android deploy-all; then
+  deploy_failed=1
+  echo "[start-remote] WARN: android deploy-all failed; continuing to launch desktop GUI." >&2
+fi
 
 echo
 echo "[start-remote] host-probe:"
@@ -68,5 +72,8 @@ curl -sS http://127.0.0.1:5001/v1/status || true
 echo
 
 echo
-echo "[start-remote] launching desktop.sh as $DESKTOP_USER"
-exec ./runas-remote "$DESKTOP_USER" desktop.sh
+echo "[start-remote] launching devtool gui as $DESKTOP_USER"
+if [[ "$deploy_failed" -eq 1 ]]; then
+  echo "[start-remote] NOTE: desktop is launching with last known android state (deploy failed)." >&2
+fi
+exec ./runas-remote "$DESKTOP_USER" ./devtool
