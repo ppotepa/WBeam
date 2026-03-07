@@ -28,12 +28,16 @@ struct DeviceBasic {
     apk_installed: bool,
     apk_version: String,
     apk_matches_host: bool,
+    apk_matches_daemon: bool,
+    stream_port: u16,
+    stream_state: String,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DevicesBasicResponse {
     host_apk_version: String,
+    daemon_apk_version: String,
     devices: Vec<DeviceBasic>,
     error: Option<String>,
 }
@@ -77,19 +81,26 @@ fn host_name() -> String {
 #[tauri::command]
 fn list_devices_basic() -> DevicesBasicResponse {
     let host_apk_version = host_expected_apk_version();
+    let daemon_apk_version = host_build_revision_from_health().unwrap_or_default();
     let svc = service_status();
     if !svc.available || !svc.installed || !svc.active {
         return DevicesBasicResponse {
             host_apk_version,
+            daemon_apk_version,
             devices: Vec::new(),
             error: None,
         };
     }
 
+    let base_stream_port = std::env::var("WBEAM_STREAM_PORT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u16>().ok())
+        .unwrap_or(5000);
+
     match adb_devices() {
         Ok(serials) => {
             let mut devices = Vec::new();
-            for serial in serials {
+            for (idx, serial) in serials.into_iter().enumerate() {
                 let model = adb_getprop(&serial, "ro.product.model");
                 let manufacturer = adb_getprop(&serial, "ro.product.manufacturer").unwrap_or_default();
                 let os_version = adb_getprop(&serial, "ro.build.version.release");
@@ -111,6 +122,9 @@ fn list_devices_basic() -> DevicesBasicResponse {
                     String::new()
                 };
                 let apk_matches_host = !host_apk_version.is_empty() && apk_version == host_apk_version;
+                let apk_matches_daemon = !daemon_apk_version.is_empty() && apk_version == daemon_apk_version;
+                let stream_port = base_stream_port.saturating_add(1 + idx as u16);
+                let stream_state = daemon_stream_state(&serial, stream_port);
 
                 devices.push(DeviceBasic {
                     serial,
@@ -127,17 +141,22 @@ fn list_devices_basic() -> DevicesBasicResponse {
                     apk_installed,
                     apk_version,
                     apk_matches_host,
+                    apk_matches_daemon,
+                    stream_port,
+                    stream_state,
                 });
             }
 
             DevicesBasicResponse {
                 host_apk_version,
+                daemon_apk_version,
                 devices,
                 error: None,
             }
         }
         Err(err) => DevicesBasicResponse {
             host_apk_version,
+            daemon_apk_version,
             devices: Vec::new(),
             error: Some(err),
         },
@@ -184,6 +203,48 @@ fn host_build_revision_from_health() -> Option<String> {
     json.get("build_revision")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
+}
+
+fn daemon_stream_state(serial: &str, stream_port: u16) -> String {
+    let control_port = std::env::var("WBEAM_CONTROL_PORT").unwrap_or_else(|_| "5001".to_string());
+    let url = format!(
+        "http://127.0.0.1:{control_port}/v1/status?serial={serial}&stream_port={stream_port}"
+    );
+    let output = Command::new("curl")
+        .args(["-fsS", "--max-time", "1", &url])
+        .output();
+    let Ok(output) = output else {
+        return "unknown".to_string();
+    };
+    if !output.status.success() {
+        return "unknown".to_string();
+    }
+    let body = String::from_utf8_lossy(&output.stdout);
+    let json: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+    json.get("state")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string()
+}
+
+fn daemon_post_action(action: &str, serial: &str, stream_port: u16) -> Result<String, String> {
+    let control_port = std::env::var("WBEAM_CONTROL_PORT").unwrap_or_else(|_| "5001".to_string());
+    let url = format!(
+        "http://127.0.0.1:{control_port}/v1/{action}?serial={serial}&stream_port={stream_port}"
+    );
+    let output = Command::new("curl")
+        .args(["-fsS", "--max-time", "3", "-X", "POST", &url])
+        .output()
+        .map_err(|e| format!("curl failed: {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            format!("daemon action failed: {action}")
+        } else {
+            stderr
+        });
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 #[tauri::command]
@@ -347,6 +408,16 @@ fn host_probe_brief() -> HostProbeBrief {
             .to_string(),
         supported: json.get("supported").and_then(|v| v.as_bool()).unwrap_or(false),
     }
+}
+
+#[tauri::command]
+fn device_connect(serial: String, stream_port: u16) -> Result<String, String> {
+    daemon_post_action("start", &serial, stream_port)
+}
+
+#[tauri::command]
+fn device_disconnect(serial: String, stream_port: u16) -> Result<String, String> {
+    daemon_post_action("stop", &serial, stream_port)
 }
 
 #[tauri::command]
@@ -678,6 +749,8 @@ fn main() {
             list_devices_basic,
             service_status,
             host_probe_brief,
+            device_connect,
+            device_disconnect,
             service_install,
             service_uninstall,
             service_start,

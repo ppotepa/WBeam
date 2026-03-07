@@ -228,6 +228,35 @@ h1 {
   justify-content: flex-end;
 }
 
+.device-actions {
+  margin-top: 0.15rem;
+  padding-top: 0.35rem;
+  border-top: 1px dashed #32445a;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.device-btn {
+  border: 1px solid #3a506a;
+  background: #1a2738;
+  color: #d7e4f5;
+  border-radius: 7px;
+  height: 28px;
+  font-size: 0.69rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  cursor: pointer;
+}
+
+.device-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+  filter: grayscale(0.5);
+}
+
 .version-pill {
   font-family: "IBM Plex Mono", "Consolas", monospace;
   font-size: 0.7rem;

@@ -402,3 +402,19 @@ Status: active
   - host daemon `/health.build_revision` no longer gets rewritten to legacy `0.0.*-build`.
 - Validation:
   - `cargo check --manifest-path src/host/rust/Cargo.toml -p wbeamd-core -p wbeamd-server` -> OK
+
+## In Progress (2026-03-07) - per-device tile actions + daemon-based version gating
+- Desktop Tauri device tiles now include per-device action footer:
+  - `Refresh`, `Connect`, `Disconnect` buttons.
+- Added backend commands:
+  - `device_connect(serial, stream_port)` -> POST `/v1/start`
+  - `device_disconnect(serial, stream_port)` -> POST `/v1/stop`
+- Device data now includes:
+  - `stream_port` (session-assigned),
+  - `stream_state` (from `/v1/status`),
+  - `apk_matches_daemon` (APK compared to daemon `build_revision`).
+- Version gating in GUI updated:
+  - connect/mismatch logic now checks `APK vs daemon` compatibility (not GUI build).
+- Validation:
+  - `cargo check --manifest-path src/apps/desktop-tauri/src-tauri/Cargo.toml` -> OK
+  - `cd src/apps/desktop-tauri && npm run build` -> OK
