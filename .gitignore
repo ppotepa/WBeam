@@ -75,6 +75,7 @@ codebase_concat*.txt
 concat*.txt
 ALL_CODE*
 .wbeam_android_pipeline
+.wbeam_build_version
 ignores
 buildlog
 *.bak

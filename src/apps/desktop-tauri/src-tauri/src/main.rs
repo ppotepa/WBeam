@@ -61,7 +61,7 @@ fn host_name() -> String {
 
 #[tauri::command]
 fn list_devices_basic() -> DevicesBasicResponse {
-    let host_apk_version = std::env::var("WBEAM_HOST_APK_VERSION").unwrap_or_default();
+    let host_apk_version = host_expected_apk_version();
 
     match adb_devices() {
         Ok(serials) => {
@@ -119,6 +119,25 @@ fn list_devices_basic() -> DevicesBasicResponse {
             error: Some(err),
         },
     }
+}
+
+fn host_expected_apk_version() -> String {
+    if let Ok(explicit) = std::env::var("WBEAM_HOST_APK_VERSION") {
+        let trimmed = explicit.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+
+    let file_path = repo_root().join(".wbeam_build_version");
+    if let Ok(content) = std::fs::read_to_string(file_path) {
+        let v = content.trim().to_string();
+        if !v.is_empty() {
+            return v;
+        }
+    }
+
+    String::new()
 }
 
 #[tauri::command]

@@ -18,7 +18,10 @@ def resolveGitShortRev() {
     return "dev0"
 }
 
-def wbeamBuildRevision = "0.0.${resolveGitShortRev()}-build"
+def wbeamBuildRevisionRaw = (project.findProperty("WBEAM_BUILD_REV") ?: System.getenv("WBEAM_BUILD_REV") ?: "").toString().trim()
+def wbeamBuildRevision = wbeamBuildRevisionRaw.isEmpty()
+    ? "0.0.${resolveGitShortRev()}-build"
+    : (wbeamBuildRevisionRaw.startsWith("0.0.") ? wbeamBuildRevisionRaw : "0.0.${wbeamBuildRevisionRaw}")
 def wbeamMinSdkRaw = (project.findProperty("WBEAM_MIN_SDK") ?: System.getenv("WBEAM_MIN_SDK") ?: "17").toString()
 def wbeamMinSdk = Integer.parseInt(wbeamMinSdkRaw)
 def wbeamHostRaw = (project.findProperty("WBEAM_HOST") ?: System.getenv("WBEAM_HOST") ?: "127.0.0.1").toString().trim()

@@ -19,6 +19,7 @@ ANDROID_SERIAL="${WBEAM_ANDROID_SERIAL:-}"
 ANDROID_PIPELINE_FILE="$ROOT_DIR/.wbeam_android_pipeline"
 LOG_DIR="$ROOT_DIR/logs"
 ADB_LOGCAT_PID_FILE="$LOG_DIR/adb-logcat.pid"
+BUILD_VERSION_FILE="$ROOT_DIR/.wbeam_build_version"
 
 
 
@@ -196,23 +197,67 @@ android_build_host() {
   echo "127.0.0.1"
 }
 
-android_expected_version_name() {
+normalize_build_version() {
+  local raw="${1:-}"
+  if [[ -z "$raw" ]]; then
+    return 1
+  fi
+  if [[ "$raw" == 0.0.* ]]; then
+    echo "$raw"
+  else
+    echo "0.0.${raw}"
+  fi
+}
+
+build_version_generate() {
+  local rev ts
+  rev="$(git -C "$ROOT_DIR" rev-parse --short=6 HEAD 2>/dev/null || true)"
+  if [[ -z "$rev" ]]; then
+    rev="dev000"
+  fi
+  ts="$(date +%Y%m%d%H%M%S)"
+  echo "0.0.${rev}.${ts}"
+}
+
+build_version_write_new() {
+  local v
+  v="$(build_version_generate)"
+  printf '%s\n' "$v" > "$BUILD_VERSION_FILE"
+  echo "$v"
+}
+
+build_version_read_file() {
+  if [[ -f "$BUILD_VERSION_FILE" ]]; then
+    tr -d '\r[:space:]' < "$BUILD_VERSION_FILE" 2>/dev/null || true
+  fi
+}
+
+build_version_for_build() {
   local explicit="${WBEAM_BUILD_REV:-}"
   if [[ -n "$explicit" ]]; then
-    if [[ "$explicit" == 0.0.* ]]; then
-      echo "$explicit"
-    else
-      echo "0.0.${explicit}-build"
-    fi
+    normalize_build_version "$explicit"
     return 0
   fi
+  build_version_write_new
+}
 
-  local rev
-  rev="$(git -C "$ROOT_DIR" rev-parse --short=4 HEAD 2>/dev/null || true)"
-  if [[ -z "$rev" ]]; then
-    rev="dev0"
+build_version_for_runtime() {
+  local explicit="${WBEAM_BUILD_REV:-}"
+  if [[ -n "$explicit" ]]; then
+    normalize_build_version "$explicit"
+    return 0
   fi
-  echo "0.0.${rev}-build"
+  local from_file
+  from_file="$(build_version_read_file)"
+  if [[ -n "$from_file" ]]; then
+    normalize_build_version "$from_file"
+    return 0
+  fi
+  normalize_build_version "$(build_version_generate)"
+}
+
+android_expected_version_name() {
+  build_version_for_runtime
 }
 
 android_installed_version_name() {
@@ -407,6 +452,9 @@ require_cmd() {
 host_build() {
   require_cmd cargo
   local rust_dir="$ROOT_DIR/src/host/rust"
+  local build_version
+  build_version="$(build_version_for_build)"
+  echo "[host] Build version: $build_version"
   echo "[host] Building Rust backend (release)…"
   cd "$rust_dir" && cargo build --release -p wbeamd-server -p wbeamd-streamer
   echo "[host] Build OK → $DAEMON_BIN"
@@ -612,19 +660,20 @@ daemon_status() {
 }
 
 android_build() {
-  local pipeline_mode min_sdk build_api_host build_stream_host gradle_user_home
+  local pipeline_mode min_sdk build_api_host build_stream_host gradle_user_home build_version
   pipeline_mode="$(android_pipeline_mode)"
   min_sdk="$(android_pipeline_min_sdk "$pipeline_mode")"
   build_api_host="${WBEAM_ANDROID_API_HOST:-${WBEAM_ANDROID_HOST:-$(android_build_host "$pipeline_mode")}}"
   build_stream_host="${WBEAM_ANDROID_STREAM_HOST:-${WBEAM_ANDROID_HOST:-$(android_build_host "$pipeline_mode")}}"
+  build_version="$(build_version_for_build)"
   gradle_user_home="$ROOT_DIR/.gradle-user"
   mkdir -p "$gradle_user_home"
 
-  echo "[android] Building debug APK (pipeline=${pipeline_mode}, minSdk=${min_sdk}, api_host=${build_api_host}, stream_host=${build_stream_host})…"
-  android_gradle_build_retry_once ":app:assembleDebug" "$min_sdk" "$build_api_host" "$build_stream_host" "$gradle_user_home"
+  echo "[android] Building debug APK (version=${build_version}, pipeline=${pipeline_mode}, minSdk=${min_sdk}, api_host=${build_api_host}, stream_host=${build_stream_host})…"
+  android_gradle_build_retry_once ":app:assembleDebug" "$min_sdk" "$build_api_host" "$build_stream_host" "$gradle_user_home" "$build_version"
   echo "[android] APK: $ANDROID_APK"
   # Record the baked config so android_should_skip_install can detect host changes.
-  printf 'api=%s|stream=%s|pipeline=%s' "$build_api_host" "$build_stream_host" "$pipeline_mode" \
+  printf 'version=%s|api=%s|stream=%s|pipeline=%s' "$build_version" "$build_api_host" "$build_stream_host" "$pipeline_mode" \
     > "$(android_build_stamp_path "$ANDROID_APK")" 2>/dev/null || true
 }
 
@@ -729,23 +778,24 @@ android_deploy_all() {
 }
 
 android_build_release() {
-  local pipeline_mode min_sdk build_api_host build_stream_host gradle_user_home
+  local pipeline_mode min_sdk build_api_host build_stream_host gradle_user_home build_version
   pipeline_mode="$(android_pipeline_mode)"
   min_sdk="$(android_pipeline_min_sdk "$pipeline_mode")"
   build_api_host="${WBEAM_ANDROID_API_HOST:-${WBEAM_ANDROID_HOST:-$(android_build_host "$pipeline_mode")}}"
   build_stream_host="${WBEAM_ANDROID_STREAM_HOST:-${WBEAM_ANDROID_HOST:-$(android_build_host "$pipeline_mode")}}"
+  build_version="$(build_version_for_build)"
   gradle_user_home="$ROOT_DIR/.gradle-user"
   mkdir -p "$gradle_user_home"
 
-  echo "[android] Building release APK (pipeline=${pipeline_mode}, minSdk=${min_sdk}, api_host=${build_api_host}, stream_host=${build_stream_host})…"
-  android_gradle_build_retry_once ":app:assembleRelease" "$min_sdk" "$build_api_host" "$build_stream_host" "$gradle_user_home"
+  echo "[android] Building release APK (version=${build_version}, pipeline=${pipeline_mode}, minSdk=${min_sdk}, api_host=${build_api_host}, stream_host=${build_stream_host})…"
+  android_gradle_build_retry_once ":app:assembleRelease" "$min_sdk" "$build_api_host" "$build_stream_host" "$gradle_user_home" "$build_version"
   if [[ -f "$ANDROID_APK_RELEASE" ]]; then
     echo "[android] APK: $ANDROID_APK_RELEASE"
-    printf 'api=%s|stream=%s|pipeline=%s' "$build_api_host" "$build_stream_host" "$pipeline_mode" \
+    printf 'version=%s|api=%s|stream=%s|pipeline=%s' "$build_version" "$build_api_host" "$build_stream_host" "$pipeline_mode" \
       > "$(android_build_stamp_path "$ANDROID_APK_RELEASE")" 2>/dev/null || true
   elif [[ -f "$ANDROID_APK_RELEASE_UNSIGNED" ]]; then
     echo "[android] APK: $ANDROID_APK_RELEASE_UNSIGNED"
-    printf 'api=%s|stream=%s|pipeline=%s' "$build_api_host" "$build_stream_host" "$pipeline_mode" \
+    printf 'version=%s|api=%s|stream=%s|pipeline=%s' "$build_version" "$build_api_host" "$build_stream_host" "$pipeline_mode" \
       > "$(android_build_stamp_path "$ANDROID_APK_RELEASE_UNSIGNED")" 2>/dev/null || true
   fi
 }
@@ -780,6 +830,7 @@ android_gradle_build_retry_once() {
   local build_api_host="$3"
   local build_stream_host="$4"
   local gradle_user_home="$5"
+  local build_version="$6"
   local gradle_java_home=""
   local -a gradle_env
   local tmp_log
@@ -802,6 +853,7 @@ android_gradle_build_retry_once() {
 
   if (cd "$ANDROID_DIR" && env "${gradle_env[@]}" bash ./gradlew --no-daemon \
       -PWBEAM_MIN_SDK="$min_sdk" \
+      -PWBEAM_BUILD_REV="$build_version" \
       -PWBEAM_HOST="$build_stream_host" \
       -PWBEAM_API_HOST="$build_api_host" \
       -PWBEAM_STREAM_HOST="$build_stream_host" \
@@ -816,6 +868,7 @@ android_gradle_build_retry_once() {
     rm -f "$tmp_log"
     cd "$ANDROID_DIR" && env "${gradle_env[@]}" bash ./gradlew --no-daemon \
       -PWBEAM_MIN_SDK="$min_sdk" \
+      -PWBEAM_BUILD_REV="$build_version" \
       -PWBEAM_HOST="$build_stream_host" \
       -PWBEAM_API_HOST="$build_api_host" \
       -PWBEAM_STREAM_HOST="$build_stream_host" \
