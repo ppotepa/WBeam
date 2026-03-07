@@ -171,7 +171,7 @@ run_host_build() {
   fi
   log "build version: $build_version"
   log "build host runtime"
-  cargo build --release -p wbeamd-server -p wbeamd-streamer --manifest-path "$HOST_WORKSPACE_DIR/Cargo.toml"
+  WBEAM_BUILD_REV="$build_version" cargo build --release -p wbeamd-server -p wbeamd-streamer --manifest-path "$HOST_WORKSPACE_DIR/Cargo.toml"
 }
 
 run_desktop_build() {
