@@ -14,9 +14,16 @@
       {
         "label": "main",
         "title": "WBeam Desktop",
-        "width": 1200,
-        "height": 760,
-        "resizable": true
+        "width": 400,
+        "height": 800,
+        "minWidth": 400,
+        "minHeight": 800,
+        "decorations": true,
+        "resizable": true,
+        "maximizable": true,
+        "minimizable": true,
+        "closable": true,
+        "center": true
       }
     ],
     "security": {

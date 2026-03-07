@@ -3885,6 +3885,7 @@ dependencies = [
 name = "wbeam-desktop-tauri"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "tauri",
  "tauri-build",
 ]

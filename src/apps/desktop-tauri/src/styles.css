@@ -1,8 +1,8 @@
 :root {
-  color-scheme: light;
+  color-scheme: dark;
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
-  background: radial-gradient(circle at top left, #f6f9ff, #f0f4fa 45%, #e7ecf4 100%);
-  color: #0f172a;
+  background: radial-gradient(circle at top left, #182235, #101722 48%, #0a1018 100%);
+  color: #e5edf8;
 }
 
 * {
@@ -18,24 +18,190 @@ body {
   min-height: 100vh;
   display: grid;
   place-items: center;
-  padding: 2rem;
+  padding: 0.5rem;
 }
 
 .panel {
-  width: min(680px, 100%);
-  background: #ffffffd9;
-  border: 1px solid #c9d4e5;
-  border-radius: 16px;
-  padding: 2rem;
-  box-shadow: 0 20px 50px -35px rgba(20, 30, 50, 0.6);
+  background: #101826ee;
+  border: 1px solid #253447;
+  border-radius: 14px;
+  box-shadow: 0 24px 48px -34px rgba(0, 0, 0, 0.8);
+}
+
+.basic-400 {
+  width: min(400px, calc(100vw - 1rem));
+  min-width: min(400px, calc(100vw - 1rem));
+  max-width: min(400px, calc(100vw - 1rem));
+  height: min(800px, calc(100vh - 1rem));
+  min-height: min(800px, calc(100vh - 1rem));
+  max-height: min(800px, calc(100vh - 1rem));
+  padding: 0.8rem;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  gap: 0.45rem;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex: 0 0 auto;
 }
 
 h1 {
-  margin: 0 0 0.75rem;
-  font-size: clamp(1.6rem, 2.4vw, 2.2rem);
+  margin: 0;
+  font-size: 1.05rem;
 }
 
-p {
+.mode-line {
+  margin: 0.1rem 0 0;
+  font-size: 0.74rem;
+  color: #8fa3bd;
+}
+
+.header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.icon-btn,
+.refresh-btn,
+.svc-btn {
+  border: 1px solid #33485f;
+  background: #172233;
+  color: #dce8f6;
+  border-radius: 8px;
+  font-size: 0.72rem;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  gap: 0.28rem;
+}
+
+.icon-btn {
+  width: 30px;
+}
+
+.refresh-btn,
+.svc-btn {
+  padding: 0 0.55rem;
+}
+
+.refresh-btn:disabled,
+.icon-btn:disabled,
+.svc-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.meta-line,
+.error-line,
+.empty-line {
   margin: 0;
-  color: #334155;
+  font-size: 0.75rem;
+  flex: 0 0 auto;
+}
+
+.error-line {
+  color: #f87171;
+}
+
+.device-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 0.2rem;
+}
+
+.device-row {
+  border: 1px solid #2b3c52;
+  border-radius: 10px;
+  background: #131f30;
+  padding: 0.5rem;
+  display: grid;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+}
+
+.line {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.76rem;
+  color: #b4c3d8;
+}
+
+.model-line {
+  color: #f4f8ff;
+  font-weight: 600;
+}
+
+.model-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.split-line {
+  justify-content: space-between;
+}
+
+.split-line > span,
+.end-line > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.end-line {
+  justify-content: flex-end;
+}
+
+.version-pill {
+  font-family: "IBM Plex Mono", "Consolas", monospace;
+  font-size: 0.7rem;
+  color: #d4dfef;
+}
+
+.status {
+  font-weight: 600;
+}
+
+.status.ok {
+  color: #34d399;
+}
+
+.status.bad {
+  color: #f87171;
+}
+
+.service-controls {
+  border-top: 1px solid #26384e;
+  padding-top: 0.45rem;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+  flex: 0 0 auto;
+}
+
+.status-bar {
+  border-top: 1px solid #26384e;
+  padding-top: 0.45rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.72rem;
+  color: #8fa3bd;
+  flex: 0 0 auto;
 }
