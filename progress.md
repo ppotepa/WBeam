@@ -11,6 +11,10 @@ Status: active
 - Service lifecycle is now controllable from desktop UI (install/uninstall/start/stop + status probe).
 
 ## Latest Completed Commits
+- `9bb5a393` - `fix(start-remote): launch desktop even when android deploy-all fails`
+  - Root-cause for “desktop app not visible” in `start-remote`: deploy failure aborted script before GUI launch.
+  - `start-remote` now continues to `runas-remote ./devtool` even when `android deploy-all` fails.
+  - Adds explicit warning/note that GUI starts with last known Android state when deploy failed.
 - `c2a6f683` - `refactor(remote): align runas-remote UX with start-remote user-driven flow`
   - `start-remote` is now user-only oriented (no remote host IP forcing), while still doing full `deploy-all`.
   - `runas-remote` now supports default user (`WBEAM_DEV_REMOTE_USER` fallback to `ppotepa`) and default app (`desktop.sh`).
