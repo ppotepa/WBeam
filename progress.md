@@ -11,6 +11,10 @@ Status: active
 - Service lifecycle is now controllable from desktop UI (install/uninstall/start/stop + status probe).
 
 ## Latest Completed Commits
+- `d1a3e321` - `fix(versioning): align host/app revision sources and host build stamping`
+  - Host Rust build now receives `WBEAM_BUILD_REV` during compile in both `wbeam host build` and `devtool host build`.
+  - Desktop Tauri expected host/APK version now first reads daemon `/health` `build_revision` (runtime source), then env/file fallback.
+  - Fixes false “match” in desktop when Android HUD reports host mismatch.
 - `0b2bb174` - `fix(android): make deploy-all build and resolve hosts per device serial`
   - `android deploy-all` now resolves pipeline/hosts per serial (instead of one shared build for all devices).
   - For each device: selects serial, resolves deploy hosts, builds APK with per-device config, installs, applies reverse, and launches.
