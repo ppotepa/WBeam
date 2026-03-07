@@ -13,6 +13,11 @@ Examples:
   ./runas-remote alice ./devtool -- gui
   ./runas-remote alice devtool -- build
   ./runas-remote alice /home/alice/bin/myapp -- --flag
+
+Security env options:
+  RUNAS_REMOTE_PASSTHROUGH_ENV="NAME1,NAME2"  # copy selected env vars to target app
+  RUNAS_REMOTE_ENV_FILE=/path/to/env.file      # KEY=VALUE lines, mode 600 recommended
+  RUNAS_REMOTE_QUIET=1                         # suppress startup metadata line
 USAGE
 }
 
@@ -70,6 +75,53 @@ session_env_var() {
   [[ -n "$leader" && -r "/proc/$leader/environ" ]] || return 1
 
   tr '\0' '\n' < "/proc/$leader/environ" | awk -F= -v k="$key" '$1==k{print substr($0, length(k)+2); exit}'
+}
+
+append_extra_env_pair() {
+  local key="$1"
+  local val="$2"
+  [[ -n "$key" ]] || return 0
+  env_args+=("${key}=${val}")
+}
+
+load_extra_env_file() {
+  local file="$1"
+  local line key val
+  [[ -f "$file" ]] || {
+    echo "[runas-remote] env file not found: $file" >&2
+    exit 1
+  }
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -n "$line" ]] || continue
+    [[ "$line" == \#* ]] && continue
+    if [[ "$line" != *=* ]]; then
+      echo "[runas-remote] invalid env line (missing '='): $line" >&2
+      exit 1
+    fi
+    key="${line%%=*}"
+    val="${line#*=}"
+    if [[ ! "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+      echo "[runas-remote] invalid env key in file: $key" >&2
+      exit 1
+    fi
+    append_extra_env_pair "$key" "$val"
+  done < "$file"
+}
+
+load_extra_env_passthrough() {
+  local names_raw="$1"
+  local name
+  names_raw="${names_raw//,/ }"
+  for name in $names_raw; do
+    [[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || {
+      echo "[runas-remote] invalid passthrough env name: $name" >&2
+      exit 1
+    }
+    if [[ -v "$name" ]]; then
+      append_extra_env_pair "$name" "${!name}"
+    fi
+  done
 }
 
 if [[ $# -lt 2 ]]; then
@@ -159,12 +211,17 @@ if [[ "$SESSION_TYPE" == "x11" ]]; then
   [[ -n "$XAUTHORITY_VAL" ]] || XAUTHORITY_VAL="${TARGET_HOME:-/home/$TARGET_USER}/.Xauthority"
 fi
 
-echo "[runas-remote] user=$TARGET_USER uid=$TARGET_UID sid=$SESSION_ID session=$SESSION_TYPE display=$DISPLAY_VAL app=$APP_SPEC"
-
 env_args=(
   "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
   "DBUS_SESSION_BUS_ADDRESS=$DBUS_ADDR"
 )
+
+if [[ -n "${RUNAS_REMOTE_PASSTHROUGH_ENV:-}" ]]; then
+  load_extra_env_passthrough "${RUNAS_REMOTE_PASSTHROUGH_ENV}"
+fi
+if [[ -n "${RUNAS_REMOTE_ENV_FILE:-}" ]]; then
+  load_extra_env_file "${RUNAS_REMOTE_ENV_FILE}"
+fi
 
 if [[ -n "$DISPLAY_VAL" ]]; then
   env_args+=("DISPLAY=$DISPLAY_VAL")
@@ -176,6 +233,10 @@ fi
 
 if [[ "$SESSION_TYPE" == "wayland" ]]; then
   env_args+=("WAYLAND_DISPLAY=$WAYLAND_DISPLAY_VAL")
+fi
+
+if [[ "${RUNAS_REMOTE_QUIET:-0}" != "1" ]]; then
+  echo "[runas-remote] user=$TARGET_USER uid=$TARGET_UID sid=$SESSION_ID session=$SESSION_TYPE display=$DISPLAY_VAL app=$APP_SPEC"
 fi
 
 exec sudo -u "$TARGET_USER" env "${env_args[@]}" "$TARGET_SCRIPT" "$@"
