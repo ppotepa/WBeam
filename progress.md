@@ -1,5 +1,16 @@
 # WBeam Progress Log
 
+## Progress Update Policy (Required)
+- `progress.md` is a mandatory source-of-truth file.
+- After every code/docs commit, append/update:
+  - date,
+  - scope/focus,
+  - commit hash + one-line reason,
+  - runtime verification status (if executed),
+  - known follow-ups/risks.
+- No commit should be left without a matching progress note.
+- Keep entries chronological and concise, but include enough context to recover workstream after interruption.
+
 Date: 2026-03-07
 Focus: Main lane stabilization (API17 path), host abstraction, deploy/runtime reliability
 
@@ -48,6 +59,11 @@ Focus: Main lane stabilization (API17 path), host abstraction, deploy/runtime re
   - keep Linux `x11/wayland` as primary
   - add Windows backend lane next
 - Improve final cleanup around local cache/log artifacts in working tree during long debug sessions.
+
+## Incremental Changelog (Latest)
+- `ed85be41` - updated `progress.md` with full 2026-03-07 integration status.
+- `2058d5f9` - `runas-remote` secure env passthrough (`RUNAS_REMOTE_PASSTHROUGH_ENV`, `RUNAS_REMOTE_ENV_FILE`, quiet mode) + README note.
+- `c04f7986` - main integration batch: proto profile migration, host probe/backends, deploy/start/logging flow, API17 path.
 
 Date: 2026-03-05
 Focus: Desktop Tauri lane + Android/Host delivery wiring
