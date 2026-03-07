@@ -761,8 +761,8 @@ android_deploy_all() {
   local serial=""
   local ok_count=0
   local fail_count=0
-  local skip_build="${WBEAM_ANDROID_SKIP_BUILD:-0}"
   local serial_backup="$ANDROID_SERIAL"
+  local pipeline_mode build_hosts build_api_host build_stream_host
 
   mapfile -t serials < <(android_connected_serials)
   if [[ "${#serials[@]}" -eq 0 ]]; then
@@ -773,17 +773,25 @@ android_deploy_all() {
 
   echo "[android] Deploying to ${#serials[@]} device(s): ${serials[*]}"
 
-  if [[ "$skip_build" =~ ^(1|true|TRUE|yes|on)$ ]]; then
-    echo "[android] Skipping build (WBEAM_ANDROID_SKIP_BUILD=$skip_build)"
-  else
-    android_build
-  fi
-
   for serial in "${serials[@]}"; do
     ANDROID_SERIAL="$serial"
     echo
-    echo "[android][$serial] install + reverse + launch"
-    if android_install && ip_up && android_launch; then
+    pipeline_mode="$(android_pipeline_mode)"
+    build_hosts="$(android_resolve_deploy_hosts "$pipeline_mode")" || {
+      echo "[android][$serial] FAILED resolving hosts" >&2
+      ((fail_count += 1))
+      continue
+    }
+    build_api_host="${build_hosts%%|*}"
+    build_stream_host="${build_hosts##*|}"
+    echo "[android][$serial] pipeline=${pipeline_mode} api_host=${build_api_host} stream_host=${build_stream_host}"
+    if WBEAM_ANDROID_PIPELINE="$pipeline_mode" \
+       WBEAM_ANDROID_API_HOST="$build_api_host" \
+       WBEAM_ANDROID_STREAM_HOST="$build_stream_host" \
+       android_build \
+       && android_install \
+       && android_try_reverse_setup \
+       && android_launch; then
       echo "[android][$serial] OK"
       ((ok_count += 1))
     else
