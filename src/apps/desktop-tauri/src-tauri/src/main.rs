@@ -233,18 +233,31 @@ fn daemon_post_action(action: &str, serial: &str, stream_port: u16) -> Result<St
         "http://127.0.0.1:{control_port}/v1/{action}?serial={serial}&stream_port={stream_port}"
     );
     let output = Command::new("curl")
-        .args(["-fsS", "--max-time", "3", "-X", "POST", &url])
+        .args(["-sS", "--max-time", "3", "-X", "POST", "-w", "\nHTTP_STATUS:%{http_code}", &url])
         .output()
         .map_err(|e| format!("curl failed: {e}"))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if stderr.is_empty() {
-            format!("daemon action failed: {action}")
+            "Host API unreachable. Verify desktop service is running.".to_string()
         } else {
             stderr
         });
     }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+
+    let body = String::from_utf8_lossy(&output.stdout).to_string();
+    let (payload, status_line) = body
+        .rsplit_once("\nHTTP_STATUS:")
+        .unwrap_or((body.as_str(), "000"));
+    let status_code = status_line.trim();
+    if !status_code.starts_with('2') {
+        let trimmed = payload.trim();
+        if trimmed.is_empty() {
+            return Err(format!("daemon action failed: {action} (http={status_code})"));
+        }
+        return Err(trimmed.to_string());
+    }
+    Ok(payload.trim().to_string())
 }
 
 #[tauri::command]

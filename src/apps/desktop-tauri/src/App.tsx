@@ -1,5 +1,4 @@
-import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
-import { invoke } from "@tauri-apps/api/core";
+import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   AlertTriangle,
@@ -22,50 +21,9 @@ import {
   Link2,
   Unlink2,
 } from "lucide-solid";
-
-type DeviceBasic = {
-  serial: string;
-  model: string;
-  platform: string;
-  osVersion: string;
-  deviceClass: string;
-  resolution: string;
-  maxResolution: string;
-  apiLevel: string;
-  batteryPercent: string;
-  batteryLevel: number | null;
-  batteryCharging: boolean;
-  apkInstalled: boolean;
-  apkVersion: string;
-  apkMatchesHost: boolean;
-  apkMatchesDaemon: boolean;
-  streamPort: number;
-  streamState: string;
-};
-
-type DevicesBasicResponse = {
-  hostApkVersion: string;
-  daemonApkVersion: string;
-  devices: DeviceBasic[];
-  error: string | null;
-};
-
-type ServiceStatus = {
-  available: boolean;
-  installed: boolean;
-  active: boolean;
-  enabled: boolean;
-  summary: string;
-};
-
-type HostProbeBrief = {
-  reachable: boolean;
-  os: string;
-  session: string;
-  desktop: string;
-  captureMode: string;
-  supported: boolean;
-};
+import type { DeviceBasic } from "./types";
+import { HostApiManager } from "./managers/hostApiManager";
+import { createSessionManager } from "./managers/sessionManager";
 
 function BatteryIcon(props: { level: number | null; charging: boolean }) {
   if (props.charging) return <BatteryCharging size={14} />;
@@ -80,141 +38,23 @@ function DeviceTypeIcon(props: { type: string }) {
 }
 
 export default function App() {
+  const api = new HostApiManager();
+  const session = createSessionManager(api);
   const [mode, setMode] = createSignal<"basic" | "advanced">("basic");
   const [hostName, setHostName] = createSignal("unknown-host");
-  const [devices, setDevices] = createSignal<DeviceBasic[]>([]);
-  const [hostVersion, setHostVersion] = createSignal<string>("");
-  const [daemonVersion, setDaemonVersion] = createSignal<string>("");
-  const [service, setService] = createSignal<ServiceStatus>({
-    available: false,
-    installed: false,
-    active: false,
-    enabled: false,
-    summary: "not checked",
-  });
-  const [loading, setLoading] = createSignal(true);
-  const [serviceBusy, setServiceBusy] = createSignal(false);
-  const [error, setError] = createSignal<string>("");
-  const [updatedAt, setUpdatedAt] = createSignal<string>("-");
-  const [deviceActionBusy, setDeviceActionBusy] = createSignal<string>("");
-  const [hostProbe, setHostProbe] = createSignal<HostProbeBrief>({
-    reachable: false,
-    os: "unknown",
-    session: "unknown",
-    desktop: "unknown",
-    captureMode: "unknown",
-    supported: false,
-  });
-
-  const tabletCount = createMemo(() => devices().filter((d) => d.deviceClass === "Tablet").length);
-  const phoneCount = createMemo(() => devices().filter((d) => d.deviceClass === "Phone").length);
-  const serviceState = createMemo<"running" | "stopped" | "missing">(() => {
-    if (!service().installed) return "missing";
-    if (!service().active) return "stopped";
-    return "running";
-  });
-
-  async function loadServiceStatus() {
-    try {
-      const status = await invoke<ServiceStatus>("service_status");
-      setService(status);
-    } catch (err) {
-      setError(String(err));
-    }
-  }
-
-  async function loadDevices() {
-    setLoading(true);
-    setError("");
-    try {
-      const response = await invoke<DevicesBasicResponse>("list_devices_basic");
-      setDevices(response.devices || []);
-      setHostVersion(response.hostApkVersion || "");
-      setDaemonVersion(response.daemonApkVersion || "");
-      setUpdatedAt(new Date().toLocaleTimeString());
-      if (response.error) setError(response.error);
-    } catch (err) {
-      setError(String(err));
-      setDevices([]);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function deviceConnect(device: DeviceBasic) {
-    setDeviceActionBusy(`${device.serial}:connect`);
-    setError("");
-    try {
-      await invoke<string>("device_connect", { serial: device.serial, streamPort: device.streamPort });
-      await refreshSnapshot();
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setDeviceActionBusy("");
-    }
-  }
-
-  async function deviceDisconnect(device: DeviceBasic) {
-    setDeviceActionBusy(`${device.serial}:disconnect`);
-    setError("");
-    try {
-      await invoke<string>("device_disconnect", { serial: device.serial, streamPort: device.streamPort });
-      await refreshSnapshot();
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setDeviceActionBusy("");
-    }
-  }
-
-  async function refreshSnapshot() {
-    await Promise.all([loadServiceStatus(), loadHostProbe()]);
-    await loadDevices();
-  }
-
-  async function loadHostProbe() {
-    try {
-      const probe = await invoke<HostProbeBrief>("host_probe_brief");
-      setHostProbe(probe);
-    } catch {
-      setHostProbe({
-        reachable: false,
-        os: "unknown",
-        session: "unknown",
-        desktop: "unknown",
-        captureMode: "unknown",
-        supported: false,
-      });
-    }
-  }
-
-  async function callServiceAction(action: "service_install" | "service_uninstall" | "service_start" | "service_stop") {
-    setServiceBusy(true);
-    setError("");
-    try {
-      const status = await invoke<ServiceStatus>(action);
-      setService(status);
-    } catch (err) {
-      setError(String(err));
-      await loadServiceStatus();
-    } finally {
-      await loadHostProbe();
-      setServiceBusy(false);
-    }
-  }
 
   function deviceVersionStatus(device: DeviceBasic): { cls: "ok" | "warn" | "bad"; label: string } {
     if (!device.apkInstalled) return { cls: "warn", label: "APK missing" };
-    if (!service().installed) return { cls: "warn", label: "Install desktop service first" };
-    if (!service().active) return { cls: "warn", label: "Start desktop service to verify" };
+    if (!session.service().installed) return { cls: "warn", label: "Install desktop service first" };
+    if (!session.service().active) return { cls: "warn", label: "Start desktop service to verify" };
     return device.apkMatchesDaemon
       ? { cls: "ok", label: "Version match" }
       : { cls: "bad", label: "Update required" };
   }
 
   function connectDisabledReason(device: DeviceBasic): string {
-    if (deviceActionBusy() !== "") return "Another device action is in progress";
-    if (!service().active) return "Desktop service must be running";
+    if (session.deviceActionBusy() !== "") return "Another device action is in progress";
+    if (!session.service().active) return "Desktop service must be running";
     if (!device.apkInstalled) return "APK is not installed on this device";
     if (!device.apkMatchesDaemon) return "APK version must match daemon version";
     if (device.streamState === "STREAMING") return "Device is already streaming";
@@ -223,8 +63,8 @@ export default function App() {
   }
 
   function disconnectDisabledReason(device: DeviceBasic): string {
-    if (deviceActionBusy() !== "") return "Another device action is in progress";
-    if (!service().active) return "Desktop service must be running";
+    if (session.deviceActionBusy() !== "") return "Another device action is in progress";
+    if (!session.service().active) return "Desktop service must be running";
     if (device.streamState !== "STREAMING" && device.streamState !== "CONNECTING") {
       return "Device is not streaming";
     }
@@ -233,7 +73,7 @@ export default function App() {
 
   onMount(async () => {
     try {
-      const name = await invoke<string>("host_name");
+      const name = await api.getHostName();
       const safe = name || "unknown-host";
       setHostName(safe);
       await getCurrentWindow().setTitle(`WBeam - ${safe}`);
@@ -241,10 +81,10 @@ export default function App() {
       // ignore title update errors
     }
 
-    await refreshSnapshot();
+    await session.refreshSnapshot();
 
     const timer = window.setInterval(() => {
-      void refreshSnapshot();
+      void session.refreshSnapshot();
     }, 1000);
     onCleanup(() => window.clearInterval(timer));
   });
@@ -266,27 +106,27 @@ export default function App() {
             >
               <Settings size={16} />
             </button>
-            <button class="refresh-btn" onClick={() => refreshSnapshot()} disabled={loading()}>
-              {loading() ? "..." : "Refresh"}
+            <button class="refresh-btn" onClick={() => session.refreshSnapshot()} disabled={session.loading()}>
+              {session.loading() ? "..." : "Refresh"}
             </button>
           </div>
         </header>
 
-        <p class="meta-line">Daemon APK: <strong>{daemonVersion() || hostVersion() || "not set"}</strong></p>
+        <p class="meta-line">Daemon APK: <strong>{session.daemonVersion() || session.hostVersion() || "not set"}</strong></p>
 
-        <Show when={error()}>
-          <p class="error-line">{error()}</p>
+        <Show when={session.error()}>
+          <p class="error-line">{session.error()}</p>
         </Show>
-        <Show when={!loading() && devices().length === 0 && !error()}>
+        <Show when={!session.loading() && session.devices().length === 0 && !session.error()}>
           <p class="empty-line">
-            {service().active
+            {session.service().active
               ? "No connected ADB devices."
               : "Probing paused until desktop service is running."}
           </p>
         </Show>
 
         <ul class="device-list" aria-label="Connected devices">
-          <For each={devices()}>
+          <For each={session.devices()}>
             {(device) => (
               <li class="device-row">
                 <div class="line model-line" title={`serial: ${device.serial}`}>
@@ -346,7 +186,7 @@ export default function App() {
                   <span
                     class={`status ${st.cls}`}
                     title={
-                      service().active
+                      session.service().active
                         ? "APK version should match daemon build revision"
                         : "Version check is paused until desktop service is running"
                     }
@@ -371,8 +211,8 @@ export default function App() {
                   <button
                     class="device-btn"
                     title="Refresh this device state"
-                    disabled={loading() || deviceActionBusy() !== ""}
-                    onClick={() => refreshSnapshot()}
+                    disabled={session.loading() || session.deviceActionBusy() !== ""}
+                    onClick={() => session.refreshSnapshot()}
                   >
                     <RefreshCw size={13} /> Refresh
                   </button>
@@ -380,7 +220,7 @@ export default function App() {
                     class="device-btn"
                     title={connectDisabled ? connectReason : "Start stream for this device"}
                     disabled={connectDisabled}
-                    onClick={() => deviceConnect(device)}
+                    onClick={() => session.connectDevice(device)}
                   >
                     <Link2 size={13} /> Connect
                   </button>
@@ -388,7 +228,7 @@ export default function App() {
                     class="device-btn"
                     title={disconnectDisabled ? disconnectReason : "Stop stream for this device"}
                     disabled={disconnectDisabled}
-                    onClick={() => deviceDisconnect(device)}
+                    onClick={() => session.disconnectDevice(device)}
                   >
                     <Unlink2 size={13} /> Disconnect
                   </button>
@@ -404,56 +244,56 @@ export default function App() {
         <section class="service-controls">
           <button
             class="svc-btn"
-            disabled={serviceBusy() || !service().available || service().installed}
-            onClick={() => callServiceAction("service_install")}
+            disabled={session.serviceBusy() || !session.service().available || session.service().installed}
+            onClick={() => session.callServiceAction("service_install")}
             title="Install user service"
           >
             <Download size={14} /> Install service
           </button>
           <button
             class="svc-btn"
-            disabled={serviceBusy() || !service().available || !service().installed}
-            onClick={() => callServiceAction("service_uninstall")}
+            disabled={session.serviceBusy() || !session.service().available || !session.service().installed}
+            onClick={() => session.callServiceAction("service_uninstall")}
             title="Uninstall user service"
           >
             <Trash2 size={14} /> Uninstall
           </button>
           <button
             class="svc-btn"
-            disabled={serviceBusy() || !service().available || !service().installed || service().active}
-            onClick={() => callServiceAction("service_start")}
+            disabled={session.serviceBusy() || !session.service().available || !session.service().installed || session.service().active}
+            onClick={() => session.callServiceAction("service_start")}
             title="Start service"
           >
             <Play size={14} /> Start
           </button>
           <button
             class="svc-btn"
-            disabled={serviceBusy() || !service().available || !service().installed || !service().active}
-            onClick={() => callServiceAction("service_stop")}
+            disabled={session.serviceBusy() || !session.service().available || !session.service().installed || !session.service().active}
+            onClick={() => session.callServiceAction("service_stop")}
             title="Stop service"
           >
             <Square size={14} /> Stop
           </button>
         </section>
 
-        <footer class="status-bar" title={service().summary}>
-          <div class={`service-status-strip ${serviceState()}`}>
+        <footer class="status-bar" title={session.service().summary}>
+          <div class={`service-status-strip ${session.serviceState()}`}>
             <span class="service-status-main">
-              service: {service().active ? "running" : service().installed ? "stopped" : "not installed"}
+              service: {session.service().active ? "running" : session.service().installed ? "stopped" : "not installed"}
             </span>
             <span class="service-status-hint">
-              {service().active
+              {session.service().active
                 ? "Service active: device probing enabled."
-                : service().installed
+                : session.service().installed
                   ? "Service installed but stopped. Click Start."
                   : "Install + Start service to enable probing and streaming."}
             </span>
           </div>
-          <span>{devices().length} devices ({tabletCount()} tablet, {phoneCount()} phone)</span>
+          <span>{session.devices().length} devices ({session.tabletCount()} tablet, {session.phoneCount()} phone)</span>
           <span>
-            host: {hostProbe().os}/{hostProbe().session}/{hostProbe().desktop} · capture={hostProbe().captureMode} · {hostProbe().supported ? "supported" : "unsupported"}
+            host: {session.hostProbe().os}/{session.hostProbe().session}/{session.hostProbe().desktop} · capture={session.hostProbe().captureMode} · {session.hostProbe().supported ? "supported" : "unsupported"}
           </span>
-          <span>updated: {updatedAt()}</span>
+          <span>updated: {session.updatedAt()}</span>
         </footer>
       </section>
     </main>
