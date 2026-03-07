@@ -11,6 +11,14 @@ Status: active
 - Service lifecycle is now controllable from desktop UI (install/uninstall/start/stop + status probe).
 
 ## Latest Completed Commits
+- `e5d81d48` - `feat(versioning): unify build version across deploy lanes`
+  - Added shared build version source file: `.wbeam_build_version` (ignored in git).
+  - `wbeam` now generates a fresh build version for build actions and uses it as expected Android version.
+  - `wbeam` now passes `-PWBEAM_BUILD_REV=<version>` to Gradle debug/release builds.
+  - Android build stamp now records version together with host/pipeline config.
+  - `android/app/build.gradle` now accepts `WBEAM_BUILD_REV` from Gradle/env as `versionName`.
+  - `devtool` now uses the same build version flow for Android deploy/build variants.
+  - Desktop Tauri backend now reads expected host/APK version from `.wbeam_build_version` (fallback when env is not set), so UI can show mismatch state reliably.
 - `7f8bb6de` - `fix(host): handle adb reverse per-serial for multi-device setups`
   - Root cause fixed for multi-device ADB environments (`more than one emulator/device`).
   - Host reverse mapping now targets explicit serials instead of global `adb reverse`.
@@ -38,6 +46,7 @@ Status: active
 - `3d632425` - `refactor: drop service scripts and reset desktop-tauri to Solid/TS baseline`
 
 ## Runtime Verification (2026-03-07)
+- `bash -n wbeam devtool` -> OK
 - `cargo check --manifest-path src/host/rust/Cargo.toml -p wbeamd-core` -> OK
 - `cd src/apps/desktop-tauri && npm run build` -> OK
 - `cargo check --manifest-path src/apps/desktop-tauri/src-tauri/Cargo.toml` -> OK
