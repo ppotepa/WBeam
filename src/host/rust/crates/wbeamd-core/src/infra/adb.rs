@@ -35,11 +35,17 @@ pub fn ensure_stream_port_available(stream_port: u16) -> Result<(), String> {
 }
 
 /// Run `usb_reverse.sh` and `adb reverse` to expose host ports on the device.
-pub async fn ensure_usb_reverse(root: &Path, stream_port: u16, control_port: u16, reason: &str) {
+pub async fn ensure_usb_reverse(
+    root: &Path,
+    stream_port: u16,
+    control_port: u16,
+    reason: &str,
+    target_serial: Option<&str>,
+) {
     tracing::info!(reason, "refreshing adb reverse mappings");
 
     let script = root.join("src/host/scripts/usb_reverse.sh");
-    let serials = adb_target_serials().await;
+    let serials = adb_target_serials(target_serial).await;
 
     if serials.is_empty() {
         warn!(reason, "no adb devices in 'device' state for reverse mapping");
@@ -78,7 +84,14 @@ pub async fn ensure_usb_reverse(root: &Path, stream_port: u16, control_port: u16
     }
 }
 
-async fn adb_target_serials() -> Vec<String> {
+async fn adb_target_serials(target_serial: Option<&str>) -> Vec<String> {
+    if let Some(serial) = target_serial {
+        let trimmed = serial.trim();
+        if !trimmed.is_empty() {
+            return vec![trimmed.to_string()];
+        }
+    }
+
     if let Ok(forced) = std::env::var("WBEAM_ANDROID_SERIAL") {
         let trimmed = forced.trim();
         if !trimmed.is_empty() {

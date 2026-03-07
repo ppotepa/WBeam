@@ -45,6 +45,26 @@ const NO_PRESENT_MIN_RECV_FPS: f64 = 10.0;
 const NO_PRESENT_MAX_PRESENT_FPS: f64 = 1.0;
 const REVERSE_REFRESH_BACKSTOP: Duration = Duration::from_secs(120);
 
+fn runtime_config_path_for_session(root: &Path, session_label: Option<&str>) -> PathBuf {
+    let config_dir = root.join("src/host/rust/config");
+    if let Some(label) = session_label {
+        let normalized = label
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>();
+        if !normalized.is_empty() {
+            return config_dir.join(format!("runtime_state.{normalized}.json"));
+        }
+    }
+    config_dir.join("runtime_state.json")
+}
+
 fn load_presets_from_proto_file(root: &Path) -> Option<BTreeMap<String, ActiveConfig>> {
     let path = root.join("proto/config/profiles.json");
     let raw = match std::fs::read_to_string(&path) {
@@ -208,6 +228,7 @@ pub struct DaemonCore {
     host_probe: host_probe::HostProbe,
     stream_port: u16,
     control_port: u16,
+    target_serial: Option<String>,
     exit_tx: mpsc::UnboundedSender<(u64, i32)>,
     auto_start: bool,
     allow_live_adaptive_restart: bool,
@@ -239,12 +260,22 @@ impl DaemonCore {
     }
 
     pub fn new(root: PathBuf, stream_port: u16, control_port: u16) -> Self {
+        Self::new_for_session(root, stream_port, control_port, None, None)
+    }
+
+    pub fn new_for_session(
+        root: PathBuf,
+        stream_port: u16,
+        control_port: u16,
+        session_label: Option<String>,
+        target_serial: Option<String>,
+    ) -> Self {
         let host_name = hostname::get()
             .ok()
             .and_then(|h| h.into_string().ok())
             .unwrap_or_else(|| "unknown-host".to_string());
 
-        let runtime_config_path = root.join("src/host/rust/config/runtime_state.json");
+        let runtime_config_path = runtime_config_path_for_session(&root, session_label.as_deref());
         let presets = load_presets_from_proto_file(&root).unwrap_or_else(wbeamd_api::presets);
         let active_config =
             config_store::load_runtime_config_with_presets(&runtime_config_path, &presets)
@@ -276,6 +307,7 @@ impl DaemonCore {
             host_probe,
             stream_port,
             control_port,
+            target_serial,
             exit_tx,
             auto_start: true,
             allow_live_adaptive_restart: std::env::var("WBEAM_ALLOW_LIVE_ADAPTIVE_RESTART")
@@ -756,8 +788,16 @@ impl DaemonCore {
             let root = self.root.clone();
             let stream_port = self.stream_port;
             let control_port = self.control_port;
+            let target_serial = self.target_serial.clone();
             tokio::spawn(async move {
-                adb::ensure_usb_reverse(&root, stream_port, control_port, "start").await;
+                adb::ensure_usb_reverse(
+                    &root,
+                    stream_port,
+                    control_port,
+                    "start",
+                    target_serial.as_deref(),
+                )
+                .await;
             });
         }
 
@@ -1107,7 +1147,14 @@ impl DaemonCore {
         }
 
         if let Some(reason) = refresh_reverse_reason {
-            adb::ensure_usb_reverse(&self.root, self.stream_port, self.control_port, reason).await;
+            adb::ensure_usb_reverse(
+                &self.root,
+                self.stream_port,
+                self.control_port,
+                reason,
+                self.target_serial.as_deref(),
+            )
+            .await;
         }
 
         if let Some(pid) = kill_pid {
@@ -1124,6 +1171,9 @@ impl DaemonCore {
             uptime: inner.started_at.elapsed().as_secs(),
             run_id: inner.run_id,
             last_error: inner.last_error.clone(),
+            target_serial: self.target_serial.clone(),
+            stream_port: self.stream_port,
+            control_port: self.control_port,
         }
     }
 

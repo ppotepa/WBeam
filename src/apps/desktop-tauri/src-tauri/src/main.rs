@@ -5,6 +5,9 @@ use serde_json::Value;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use std::thread;
+use std::time::Duration;
+use tauri::Manager;
 
 const SERVICE_NAME: &str = "wbeam-daemon";
 
@@ -45,6 +48,17 @@ struct ServiceStatus {
     summary: String,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HostProbeBrief {
+    reachable: bool,
+    os: String,
+    session: String,
+    desktop: String,
+    capture_mode: String,
+    supported: bool,
+}
+
 #[tauri::command]
 fn ping() -> &'static str {
     "pong"
@@ -63,6 +77,14 @@ fn host_name() -> String {
 #[tauri::command]
 fn list_devices_basic() -> DevicesBasicResponse {
     let host_apk_version = host_expected_apk_version();
+    let svc = service_status();
+    if !svc.available || !svc.installed || !svc.active {
+        return DevicesBasicResponse {
+            host_apk_version,
+            devices: Vec::new(),
+            error: None,
+        };
+    }
 
     match adb_devices() {
         Ok(serials) => {
@@ -123,9 +145,11 @@ fn list_devices_basic() -> DevicesBasicResponse {
 }
 
 fn host_expected_apk_version() -> String {
-    if let Some(from_health) = host_build_revision_from_health() {
-        if !from_health.trim().is_empty() && from_health.trim() != "-" {
-            return from_health.trim().to_string();
+    let file_path = repo_root().join(".wbeam_build_version");
+    if let Ok(content) = std::fs::read_to_string(file_path) {
+        let v = content.trim().to_string();
+        if !v.is_empty() {
+            return v;
         }
     }
 
@@ -136,11 +160,9 @@ fn host_expected_apk_version() -> String {
         }
     }
 
-    let file_path = repo_root().join(".wbeam_build_version");
-    if let Ok(content) = std::fs::read_to_string(file_path) {
-        let v = content.trim().to_string();
-        if !v.is_empty() {
-            return v;
+    if let Some(from_health) = host_build_revision_from_health() {
+        if !from_health.trim().is_empty() && from_health.trim() != "-" {
+            return from_health.trim().to_string();
         }
     }
 
@@ -180,15 +202,150 @@ fn service_status() -> ServiceStatus {
     let active = systemctl_state("is-active").as_deref() == Some("active");
     let enabled = systemctl_state("is-enabled").as_deref() == Some("enabled");
 
+    let mut summary = format!(
+        "installed={} active={} enabled={}",
+        installed, active, enabled
+    );
+    if !active {
+        if let Some(lock_hint) = daemon_lock_hint() {
+            summary.push_str(&format!("; {lock_hint}"));
+        }
+    }
+
     ServiceStatus {
         available: true,
         installed,
         active,
         enabled,
-        summary: format!(
-            "installed={} active={} enabled={}",
-            installed, active, enabled
-        ),
+        summary,
+    }
+}
+
+fn daemon_lock_hint() -> Option<String> {
+    let lock_path = PathBuf::from("/tmp/wbeamd.lock");
+    let pid_text = fs::read_to_string(lock_path).ok()?;
+    let pid = pid_text.trim().parse::<u32>().ok()?;
+
+    let output = Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "comm="])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let comm = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if comm.contains("wbeamd-server") {
+        return Some(format!("lock held by pid={pid} ({comm})"));
+    }
+    None
+}
+
+fn stop_conflicting_lock_holder() {
+    let lock_path = PathBuf::from("/tmp/wbeamd.lock");
+    let Ok(pid_text) = fs::read_to_string(&lock_path) else {
+        return;
+    };
+    let Ok(pid) = pid_text.trim().parse::<u32>() else {
+        return;
+    };
+    if !process_name_matches(pid, "wbeamd-server") {
+        return;
+    }
+
+    let pid_s = pid.to_string();
+    let _ = Command::new("kill").args(["-TERM", &pid_s]).status();
+    for _ in 0..10 {
+        if !process_exists(pid) {
+            let _ = fs::remove_file(&lock_path);
+            return;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+
+    let _ = Command::new("kill").args(["-KILL", &pid_s]).status();
+    for _ in 0..10 {
+        if !process_exists(pid) {
+            let _ = fs::remove_file(&lock_path);
+            return;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn process_exists(pid: u32) -> bool {
+    Command::new("ps")
+        .args(["-p", &pid.to_string()])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+fn process_name_matches(pid: u32, needle: &str) -> bool {
+    let output = Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "comm="])
+        .output();
+    let Ok(output) = output else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .contains(needle)
+}
+
+#[tauri::command]
+fn host_probe_brief() -> HostProbeBrief {
+    let control_port = std::env::var("WBEAM_CONTROL_PORT").unwrap_or_else(|_| "5001".to_string());
+    let url = format!("http://127.0.0.1:{control_port}/host-probe");
+    let output = Command::new("curl")
+        .args(["-fsS", "--max-time", "1", &url])
+        .output();
+
+    let Ok(output) = output else {
+        return HostProbeBrief {
+            reachable: false,
+            os: "unknown".to_string(),
+            session: "unknown".to_string(),
+            desktop: "unknown".to_string(),
+            capture_mode: "unknown".to_string(),
+            supported: false,
+        };
+    };
+
+    if !output.status.success() {
+        return HostProbeBrief {
+            reachable: false,
+            os: "unknown".to_string(),
+            session: "unknown".to_string(),
+            desktop: "unknown".to_string(),
+            capture_mode: "unknown".to_string(),
+            supported: false,
+        };
+    }
+
+    let body = String::from_utf8_lossy(&output.stdout);
+    let json: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+    HostProbeBrief {
+        reachable: true,
+        os: json.get("os").and_then(|v| v.as_str()).unwrap_or("unknown").to_string(),
+        session: json
+            .get("session")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string(),
+        desktop: json
+            .get("desktop")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string(),
+        capture_mode: json
+            .get("capture_mode")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string(),
+        supported: json.get("supported").and_then(|v| v.as_bool()).unwrap_or(false),
     }
 }
 
@@ -226,6 +383,7 @@ fn service_start() -> Result<ServiceStatus, String> {
     if !unit_file_path().exists() {
         return Err("service is not installed".to_string());
     }
+    stop_conflicting_lock_holder();
     systemctl_user(&["start", SERVICE_NAME])?;
     Ok(service_status())
 }
@@ -304,7 +462,7 @@ fn service_unit_content() -> String {
     let root = repo_root().to_string_lossy().to_string();
 
     format!(
-        "[Unit]\nDescription=WBeam Screen Streaming Daemon\nAfter=graphical-session.target\n\n[Service]\nType=simple\nExecStart={daemon_bin} --control-port {control_port} --stream-port {stream_port} --root {root}\nRestart=on-failure\nRestartSec=3\nEnvironment=RUST_LOG=info\nEnvironment=WBEAM_USE_RUST_STREAMER=1\n\n[Install]\nWantedBy=default.target\n"
+        "[Unit]\nDescription=WBeam Screen Streaming Daemon\nAfter=graphical-session.target\n\n[Service]\nType=simple\nExecStart={daemon_bin} --control-port {control_port} --stream-port {stream_port} --root {root}\nRestart=on-failure\nRestartSec=3\nEnvironment=RUST_LOG=info\nEnvironment=WBEAM_USE_RUST_STREAMER=1\nEnvironment=WBEAM_ROOT={root}\n\n[Install]\nWantedBy=default.target\n"
     )
 }
 
@@ -507,11 +665,19 @@ fn or_unknown(value: Option<String>) -> String {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
         .invoke_handler(tauri::generate_handler![
             ping,
             host_name,
             list_devices_basic,
             service_status,
+            host_probe_brief,
             service_install,
             service_uninstall,
             service_start,

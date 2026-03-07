@@ -312,7 +312,7 @@ public class MainActivity extends AppCompatActivity {
         hwAvcDecodeAvailable = hasHardwareAvcDecoder();
         Log.i(TAG, "startup transport api_impl=" + BuildConfig.WBEAM_API_IMPL
             + " api=" + HostApiClient.API_BASE
-            + " stream=tcp://" + BuildConfig.WBEAM_STREAM_HOST + ":5000");
+            + " stream=tcp://" + BuildConfig.WBEAM_STREAM_HOST + ":" + BuildConfig.WBEAM_STREAM_PORT);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                 ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
@@ -1874,11 +1874,13 @@ public class MainActivity extends AppCompatActivity {
             }
         } else if (controlRetryCount == 0) {
             step1Detail = "polling " + HostApiClient.API_BASE
-                    + " \u2026 (" + (elapsedMs / 1000L) + "s)";
+                    + " \u2026 (" + (elapsedMs / 1000L) + "s)"
+                    + " \u00b7 install/start desktop service if this does not recover";
         } else {
             step1Detail = "no response \u00b7 retry #" + controlRetryCount
                     + " \u00b7 polling " + HostApiClient.API_BASE
-                    + " (" + (elapsedMs / 1000L) + "s)";
+                    + " (" + (elapsedMs / 1000L) + "s)"
+                    + " \u00b7 check desktop service status";
         }
 
         // ── step 2: handshake ─────────────────────────────────────────────────
@@ -1935,8 +1937,8 @@ public class MainActivity extends AppCompatActivity {
         String streamAddr = (streamHost != null && !streamHost.trim().isEmpty())
                 ? streamHost.trim() : "127.0.0.1";
         String streamFixHint = streamIsLoopback
-                ? "run: ./devtool ip up  (adb reverse)"
-            : "check USB tethering / host IP / LAN";
+                ? "run: ./devtool ip up (adb reverse) \u00b7 ensure desktop service is running"
+                : "check USB tethering / host IP / LAN \u00b7 ensure desktop service is running";
 
         int step3;
         String step3Detail;
@@ -1963,11 +1965,13 @@ public class MainActivity extends AppCompatActivity {
             boolean hasWaited = elapsedMs > 5_000L;
             if (streamReconnects > 0 && hasWaited) {
                 step3Detail = "retry #" + streamReconnects
-                        + " \u00b7 " + streamAddr + ":5000 unreachable \u00b7 " + streamFixHint;
+                        + " \u00b7 " + streamAddr + ":" + BuildConfig.WBEAM_STREAM_PORT
+                        + " unreachable \u00b7 " + streamFixHint;
             } else if (streamReconnects > 0) {
                 step3Detail = "reconnecting \u00b7 attempt #" + streamReconnects + " \u00b7 awaiting frames\u2026";
             } else if (hasWaited) {
-                step3Detail = "connecting to " + streamAddr + ":5000 \u00b7 " + streamFixHint;
+                step3Detail = "connecting to " + streamAddr + ":" + BuildConfig.WBEAM_STREAM_PORT
+                        + " \u00b7 " + streamFixHint;
             } else {
                 step3Detail = "decoder started \u00b7 awaiting frames\u2026";
             }
@@ -1987,9 +1991,10 @@ public class MainActivity extends AppCompatActivity {
                 if (elapsedMs < 2000L && controlRetryCount == 0) {
                     subtitle = "starting up\u2026";
                 } else if (controlRetryCount == 0) {
-                    subtitle = "awaiting control link\u2026";
+                    subtitle = "awaiting control link \u00b7 start desktop service if needed\u2026";
                 } else {
-                    subtitle = "retrying control link \u00b7 attempt #" + controlRetryCount + "\u2026";
+                    subtitle = "retrying control link \u00b7 attempt #" + controlRetryCount
+                            + " \u00b7 check desktop service\u2026";
                 }
             } else if (step2 != SS_OK) {
                 subtitle = (step2 == SS_ERROR && isBuildMismatch())
@@ -2015,7 +2020,7 @@ public class MainActivity extends AppCompatActivity {
             startupInfoText.setText(
                     "api=" + HostApiClient.API_BASE
                     + "  impl=" + BuildConfig.WBEAM_API_IMPL
-                    + "  stream=" + BuildConfig.WBEAM_STREAM_HOST + ":5000"
+                    + "  stream=" + BuildConfig.WBEAM_STREAM_HOST + ":" + BuildConfig.WBEAM_STREAM_PORT
                     + "  app=" + BuildConfig.WBEAM_BUILD_REV
                     + "  host=" + daemonBuildRevision);
             startupInfoText.setTextColor(Color.parseColor("#334155"));

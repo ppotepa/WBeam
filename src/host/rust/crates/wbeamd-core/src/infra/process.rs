@@ -105,8 +105,25 @@ pub fn parse_kbps_line_to_bps(line: &str) -> Option<u64> {
 /// Return a build revision string (injected via `WBEAM_BUILD_REV` env var at
 /// compile time, or a default placeholder).
 pub fn build_revision() -> String {
+    if let Ok(runtime) = std::env::var("WBEAM_BUILD_REV") {
+        let trimmed = runtime.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+
+    if let Ok(root) = std::env::var("WBEAM_ROOT") {
+        let path = Path::new(&root).join(".wbeam_build_version");
+        if let Ok(content) = std::fs::read_to_string(path) {
+            let trimmed = content.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+    }
+
     option_env!("WBEAM_BUILD_REV")
-        .unwrap_or("0.0.dev0-build")
+        .unwrap_or("0.1.0.0.dev")
         .to_string()
 }
 

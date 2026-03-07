@@ -33,6 +33,7 @@ public class StreamService extends Service {
     private static final String TAG = "WBeamService";
     private static final String CHANNEL_ID = "wbeam_stream";
     private static final String HOST = resolveHost();
+    private static final int STREAM_PORT = BuildConfig.WBEAM_STREAM_PORT;
 
     private volatile boolean running;
     private Thread worker;
@@ -50,7 +51,7 @@ public class StreamService extends Service {
 
         emitStatus(STATE_CONNECTING, "opening usb tunnel stream", 0);
         try {
-            startForeground(1, buildNotification("connecting to " + HOST + ":5000"));
+            startForeground(1, buildNotification("connecting to " + HOST + ":" + STREAM_PORT));
         } catch (Exception e) {
             Log.e(TAG, "failed to enter foreground", e);
             emitStatus(STATE_ERROR, "foreground start failed: " + e.getClass().getSimpleName(), 0);
@@ -70,8 +71,8 @@ public class StreamService extends Service {
         running = true;
         worker = new Thread(() -> {
             while (running) {
-                 emitStatus(STATE_CONNECTING, "connecting to " + HOST + ":5000", 0);
-                 try (Socket socket = new Socket(HOST, 5000);
+                 emitStatus(STATE_CONNECTING, "connecting to " + HOST + ":" + STREAM_PORT, 0);
+                 try (Socket socket = new Socket(HOST, STREAM_PORT);
                      InputStream input = socket.getInputStream()) {
                     Log.i(TAG, "connected to stream");
                     emitStatus(STATE_STREAMING, "connected", 0);

@@ -63,6 +63,7 @@ logs/.*
 .gradle-build.*.log
 src/host/logs/**
 src/host/rust/logs/**
+src/src/
 src/protocol/logs/**
 !src/host/rust/logs/.gitkeep
 *.pid

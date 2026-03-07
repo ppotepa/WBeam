@@ -32,9 +32,11 @@ public final class HostApiClient {
             : BuildConfig.WBEAM_API_IMPL.trim().toLowerCase(Locale.US);
     private static final boolean API_IMPL_LOCAL = "local".equals(API_IMPL);
 
-    private static final String  HOST         = resolveHost();
-    private static final int     CONTROL_PORT = 5001;
-    public  static final String  API_BASE     = "http://" + HOST + ":" + CONTROL_PORT;
+    private static final String HOST = resolveHost();
+    private static final int CONTROL_PORT = BuildConfig.WBEAM_CONTROL_PORT;
+    private static final int STREAM_PORT = BuildConfig.WBEAM_STREAM_PORT;
+    private static final String TARGET_SERIAL = resolveTargetSerial();
+    public static final String API_BASE = "http://" + HOST + ":" + CONTROL_PORT;
 
     public  static final int  API_RETRY_ATTEMPTS      = 2;
     public  static final long API_RETRY_BASE_DELAY_MS = 300L;
@@ -72,6 +74,24 @@ public final class HostApiClient {
         }
         String trimmed = configured.trim();
         return trimmed.isEmpty() ? "127.0.0.1" : trimmed;
+    }
+
+    private static String resolveTargetSerial() {
+        String configured = BuildConfig.WBEAM_ANDROID_SERIAL;
+        if (configured == null) {
+            return "";
+        }
+        String trimmed = configured.trim();
+        return trimmed.isEmpty() ? "" : trimmed;
+    }
+
+    private static String appendSessionQuery(String path) {
+        String normalized = normalizePath(path);
+        if (TARGET_SERIAL.isEmpty()) {
+            return normalized;
+        }
+        String separator = normalized.contains("?") ? "&" : "?";
+        return normalized + separator + "serial=" + TARGET_SERIAL + "&stream_port=" + STREAM_PORT;
     }
 
     /**
@@ -122,8 +142,9 @@ public final class HostApiClient {
         RequestBody body = payload != null
             ? RequestBody.create(JSON_MEDIA_TYPE, payload.toString())
                 : null;
+        String sessionPath = appendSessionQuery(path);
         Request request = new Request.Builder()
-                .url(API_BASE + path)
+                .url(API_BASE + sessionPath)
                 .header("Accept", "application/json")
                 .method(method, body)
                 .build();
@@ -145,7 +166,7 @@ public final class HostApiClient {
      */
     public static long runTransportProbeMs(int mb) throws IOException {
         int sizeMb = Math.max(1, Math.min(8, mb));
-        String url = API_BASE + "/v1/speedtest?mb=" + sizeMb;
+        String url = API_BASE + appendSessionQuery("/v1/speedtest?mb=" + sizeMb);
 
         Request request = new Request.Builder()
                 .url(url)
@@ -211,7 +232,9 @@ public final class HostApiClient {
             JSONObject payload
     ) throws JSONException {
         final String m = method == null ? "GET" : method.toUpperCase(Locale.US);
-        final String p = normalizePath(path);
+        final String p0 = normalizePath(path);
+        final int q = p0.indexOf('?');
+        final String p = q > 0 ? p0.substring(0, q) : p0;
         final long nowSec = System.currentTimeMillis() / 1000L;
         final long nowMs = System.currentTimeMillis();
 
