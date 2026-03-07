@@ -789,13 +789,21 @@ android_deploy_all() {
        WBEAM_ANDROID_API_HOST="$build_api_host" \
        WBEAM_ANDROID_STREAM_HOST="$build_stream_host" \
        android_build \
-       && android_install \
-       && android_try_reverse_setup \
-       && android_launch; then
-      echo "[android][$serial] OK"
-      ((ok_count += 1))
+       && android_install; then
+      if android_try_reverse_setup; then
+        echo "[android][$serial] adb reverse OK (control:${CONTROL_PORT} stream:${STREAM_PORT})"
+      else
+        echo "[android][$serial] WARN: adb reverse not available — app will use baked-in host ${build_api_host}" >&2
+      fi
+      if android_launch; then
+        echo "[android][$serial] OK"
+        ((ok_count += 1))
+      else
+        echo "[android][$serial] FAILED launch" >&2
+        ((fail_count += 1))
+      fi
     else
-      echo "[android][$serial] FAILED" >&2
+      echo "[android][$serial] FAILED build/install" >&2
       ((fail_count += 1))
     fi
   done
