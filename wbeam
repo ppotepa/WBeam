@@ -22,6 +22,7 @@ LOG_DIR="$ROOT_DIR/logs"
 ADB_LOGCAT_PID_FILE="$LOG_DIR/adb-logcat.pid"
 BUILD_VERSION_FILE="$ROOT_DIR/.wbeam_build_version"
 BUILD_NUMBER_FILE="$ROOT_DIR/.wbeam_buildno"
+DEVICE_PORTS_FILE="$ROOT_DIR/.wbeam_device_ports"
 VERSION_BASE="${WBEAM_VERSION_BASE:-0.1.0}"
 
 
@@ -974,6 +975,7 @@ android_deploy_all() {
   echo "[android] Deploying to ${#serials[@]} device(s): ${serials[*]}"
   shared_build_version="$(build_version_for_build)"
   echo "[android] Shared build version for this deploy-all run: ${shared_build_version}"
+  : > "$DEVICE_PORTS_FILE"
 
   local idx=0
   for serial in "${serials[@]}"; do
@@ -1001,6 +1003,7 @@ android_deploy_all() {
        WBEAM_CONTROL_PORT="$serial_control_port" \
        android_build \
        && android_install; then
+      printf '%s %s\n' "$serial" "$serial_stream_port" >> "$DEVICE_PORTS_FILE"
       if android_try_reverse_setup "$serial_stream_port" "$serial_control_port"; then
         echo "[android][$serial] adb reverse OK (control:${serial_control_port} stream:${serial_stream_port})"
       else

@@ -92,6 +92,12 @@ h1 {
   padding: 0 0.55rem;
 }
 
+.svc-btn.svc-upgrade {
+  border-color: #2f7a50;
+  background: #1b3a2a;
+  color: #b9f2d2;
+}
+
 .refresh-btn:disabled,
 .icon-btn:disabled,
 .svc-btn:disabled {
@@ -249,12 +255,37 @@ h1 {
   justify-content: center;
   gap: 0.25rem;
   cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, transform 80ms ease;
+}
+
+.device-btn:hover:not(:disabled) {
+  background: #24364b;
+  border-color: #5f7a98;
+  transform: translateY(-1px);
+}
+
+.device-btn:active:not(:disabled) {
+  transform: translateY(0);
+  background: #1f2f42;
 }
 
 .device-btn:disabled {
   opacity: 0.4;
   cursor: default;
   filter: grayscale(0.5);
+}
+
+.spinning {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .version-pill {

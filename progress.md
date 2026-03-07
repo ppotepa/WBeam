@@ -453,3 +453,18 @@ Status: active
 - Validation:
   - `cd src/apps/desktop-tauri && npm run build` -> OK
   - `cargo check --manifest-path src/apps/desktop-tauri/src-tauri/Cargo.toml` -> OK
+
+## In Progress (2026-03-07) - connect reliability + button interactivity polish
+- Stream connect reliability improvements:
+  - `wbeam android deploy-all` now writes persistent serial->stream_port map to `.wbeam_device_ports`.
+  - desktop-tauri backend resolves per-device stream port from this map (fallback to index-based ports).
+  - `device_connect` now runs ADB preflight (`wait-for-device`, reverse control/stream ports, app launch) before daemon start.
+- UI interaction polish:
+  - stronger hover/active feedback for device action buttons,
+  - per-button busy indication with spinner and contextual labels (`Connecting...`, `Stopping...`).
+- Runtime artifacts:
+  - `.wbeam_device_ports` added to `.gitignore`.
+- Validation:
+  - `cd src/apps/desktop-tauri && npm run build` -> OK
+  - `cargo check --manifest-path src/apps/desktop-tauri/src-tauri/Cargo.toml` -> OK
+  - `bash -n wbeam start-remote runas-remote` -> OK

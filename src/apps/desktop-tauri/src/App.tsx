@@ -20,6 +20,7 @@ import {
   RefreshCw,
   Link2,
   Unlink2,
+  Loader2,
 } from "lucide-solid";
 import type { DeviceBasic } from "./types";
 import { HostApiManager } from "./managers/hostApiManager";
@@ -42,6 +43,12 @@ export default function App() {
   const session = createSessionManager(api);
   const [mode, setMode] = createSignal<"basic" | "advanced">("basic");
   const [hostName, setHostName] = createSignal("unknown-host");
+  const upgradeAvailable = () =>
+    session.service().active
+    && session.service().installed
+    && session.daemonVersion().length > 0
+    && session.hostVersion().length > 0
+    && session.daemonVersion() !== session.hostVersion();
 
   function deviceVersionStatus(device: DeviceBasic): { cls: "ok" | "warn" | "bad"; label: string } {
     if (!device.apkInstalled) return { cls: "warn", label: "APK missing" };
@@ -69,6 +76,10 @@ export default function App() {
       return "Device is not streaming";
     }
     return "";
+  }
+
+  function isDeviceActionBusy(device: DeviceBasic, action: "connect" | "disconnect"): boolean {
+    return session.deviceActionBusy() === `${device.serial}:${action}`;
   }
 
   onMount(async () => {
@@ -206,6 +217,8 @@ export default function App() {
                     const disconnectReason = disconnectDisabledReason(device);
                     const connectDisabled = connectReason.length > 0;
                     const disconnectDisabled = disconnectReason.length > 0;
+                    const connectBusy = isDeviceActionBusy(device, "connect");
+                    const disconnectBusy = isDeviceActionBusy(device, "disconnect");
                     return (
                       <>
                   <button
@@ -218,19 +231,25 @@ export default function App() {
                   </button>
                   <button
                     class="device-btn"
-                    title={connectDisabled ? connectReason : "Start stream for this device"}
+                    title={connectBusy ? "Connecting..." : (connectDisabled ? connectReason : "Start stream for this device")}
                     disabled={connectDisabled}
                     onClick={() => session.connectDevice(device)}
                   >
-                    <Link2 size={13} /> Connect
+                    <Show when={connectBusy} fallback={<Link2 size={13} />}>
+                      <Loader2 size={13} class="spinning" />
+                    </Show>
+                    {connectBusy ? "Connecting..." : "Connect"}
                   </button>
                   <button
                     class="device-btn"
-                    title={disconnectDisabled ? disconnectReason : "Stop stream for this device"}
+                    title={disconnectBusy ? "Disconnecting..." : (disconnectDisabled ? disconnectReason : "Stop stream for this device")}
                     disabled={disconnectDisabled}
                     onClick={() => session.disconnectDevice(device)}
                   >
-                    <Unlink2 size={13} /> Disconnect
+                    <Show when={disconnectBusy} fallback={<Unlink2 size={13} />}>
+                      <Loader2 size={13} class="spinning" />
+                    </Show>
+                    {disconnectBusy ? "Stopping..." : "Disconnect"}
                   </button>
                       </>
                     );
@@ -243,12 +262,16 @@ export default function App() {
 
         <section class="service-controls">
           <button
-            class="svc-btn"
-            disabled={session.serviceBusy() || !session.service().available || session.service().installed}
-            onClick={() => session.callServiceAction("service_install")}
-            title="Install user service"
+            class={`svc-btn ${upgradeAvailable() ? "svc-upgrade" : ""}`}
+            disabled={
+              session.serviceBusy()
+              || !session.service().available
+              || (!upgradeAvailable() && session.service().installed)
+            }
+            onClick={() => (upgradeAvailable() ? session.upgradeService() : session.callServiceAction("service_install"))}
+            title={upgradeAvailable() ? "Upgrade service to current host build" : "Install user service"}
           >
-            <Download size={14} /> Install service
+            <Download size={14} /> {upgradeAvailable() ? "Upgrade" : "Install service"}
           </button>
           <button
             class="svc-btn"

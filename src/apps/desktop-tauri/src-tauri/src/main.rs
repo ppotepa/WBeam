@@ -96,6 +96,7 @@ fn list_devices_basic() -> DevicesBasicResponse {
         .ok()
         .and_then(|v| v.trim().parse::<u16>().ok())
         .unwrap_or(5000);
+    let port_map = load_device_port_map();
 
     match adb_devices() {
         Ok(serials) => {
@@ -123,7 +124,10 @@ fn list_devices_basic() -> DevicesBasicResponse {
                 };
                 let apk_matches_host = !host_apk_version.is_empty() && apk_version == host_apk_version;
                 let apk_matches_daemon = !daemon_apk_version.is_empty() && apk_version == daemon_apk_version;
-                let stream_port = base_stream_port.saturating_add(1 + idx as u16);
+                let stream_port = port_map
+                    .get(&serial)
+                    .copied()
+                    .unwrap_or_else(|| base_stream_port.saturating_add(1 + idx as u16));
                 let stream_state = daemon_stream_state(&serial, stream_port);
 
                 devices.push(DeviceBasic {
@@ -161,6 +165,30 @@ fn list_devices_basic() -> DevicesBasicResponse {
             error: Some(err),
         },
     }
+}
+
+fn load_device_port_map() -> std::collections::HashMap<String, u16> {
+    let path = repo_root().join(".wbeam_device_ports");
+    let mut map = std::collections::HashMap::new();
+    let Ok(content) = fs::read_to_string(path) else {
+        return map;
+    };
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let mut parts = trimmed.split_whitespace();
+        let serial = parts.next().unwrap_or_default().trim();
+        let port_s = parts.next().unwrap_or_default().trim();
+        if serial.is_empty() {
+            continue;
+        }
+        if let Ok(port) = port_s.parse::<u16>() {
+            map.insert(serial.to_string(), port);
+        }
+    }
+    map
 }
 
 fn host_expected_apk_version() -> String {
@@ -258,6 +286,29 @@ fn daemon_post_action(action: &str, serial: &str, stream_port: u16) -> Result<St
         return Err(trimmed.to_string());
     }
     Ok(payload.trim().to_string())
+}
+
+fn adb_prepare_connect(serial: &str, stream_port: u16) {
+    let control_port = std::env::var("WBEAM_CONTROL_PORT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u16>().ok())
+        .unwrap_or(5001);
+    let stream = stream_port.to_string();
+    let control = control_port.to_string();
+
+    let _ = Command::new("adb").args(["start-server"]).output();
+    let _ = Command::new("adb")
+        .args(["-s", serial, "wait-for-device"])
+        .output();
+    let _ = Command::new("adb")
+        .args(["-s", serial, "reverse", &format!("tcp:{stream}"), &format!("tcp:{stream}")])
+        .output();
+    let _ = Command::new("adb")
+        .args(["-s", serial, "reverse", &format!("tcp:{control}"), &format!("tcp:{control}")])
+        .output();
+    let _ = Command::new("adb")
+        .args(["-s", serial, "shell", "am", "start", "-n", "com.wbeam/.MainActivity"])
+        .output();
 }
 
 #[tauri::command]
@@ -425,6 +476,7 @@ fn host_probe_brief() -> HostProbeBrief {
 
 #[tauri::command]
 fn device_connect(serial: String, stream_port: u16) -> Result<String, String> {
+    adb_prepare_connect(&serial, stream_port);
     daemon_post_action("start", &serial, stream_port)
 }
 
