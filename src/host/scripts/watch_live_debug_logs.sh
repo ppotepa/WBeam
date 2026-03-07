@@ -29,12 +29,12 @@ COMBINED_OUT="$LOG_DIR/${TS}.live.${RUN_ID}.log"
 
 HOST_FILE="${1:-}"
 if [[ -z "$HOST_FILE" ]]; then
-  HOST_FILE="$(ls -1t "$LOG_DIR"/*.service.*.log 2>/dev/null | head -n 1 || true)"
+  HOST_FILE="$(ls -1t "$LOG_DIR"/*.host.*.log 2>/dev/null | head -n 1 || true)"
 fi
 
 if [[ -z "$HOST_FILE" ]]; then
   echo "[live] no host debug log found in $LOG_DIR" >&2
-  echo "[live] start daemon first: ./devtool service up" >&2
+  echo "[live] start host first: ./wbeam host debug" >&2
   exit 1
 fi
 
@@ -44,7 +44,7 @@ if [[ -f "$HOST_FILE" ]]; then
   age_s=$((now_ts - file_ts))
   if (( age_s > 300 )); then
     echo "[live] warning: host log looks stale (${age_s}s old): $HOST_FILE" >&2
-    echo "[live] run fresh daemon first: ./devtool service up" >&2
+    echo "[live] run fresh host first: ./wbeam host debug" >&2
   fi
 fi
 

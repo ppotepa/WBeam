@@ -38,14 +38,9 @@ next_run_id() {
 }
 
 RUN_ID="$(next_run_id)"
-LOG_FILE="${WBEAM_DEBUG_LOG_FILE:-$LOG_DIR/${TS}.service.${RUN_ID}.log}"
-SESSION_RUST_LOG_DIR="$LOG_DIR/${TS}.service-rust.${RUN_ID}.d"
+LOG_FILE="${WBEAM_DEBUG_LOG_FILE:-$LOG_DIR/${TS}.host.${RUN_ID}.log}"
+SESSION_RUST_LOG_DIR="$LOG_DIR/${TS}.host-rust.${RUN_ID}.d"
 mkdir -p "$SESSION_RUST_LOG_DIR"
-
-if command -v systemctl >/dev/null 2>&1; then
-  systemctl --user stop wbeamd-rust.service >/dev/null 2>&1 || true
-  systemctl --user stop wbeam-daemon.service >/dev/null 2>&1 || true
-fi
 
 export WBEAM_DAEMON_IMPL="${WBEAM_DAEMON_IMPL:-rust}"
 export RUST_LOG="${RUST_LOG:-debug}"

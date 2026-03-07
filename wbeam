@@ -7,8 +7,6 @@ HOST_SCRIPTS_DIR="$ROOT_DIR/src/host/scripts"
 CONTROL_PORT="${WBEAM_CONTROL_PORT:-5001}"
 STREAM_PORT="${WBEAM_STREAM_PORT:-5000}"
 
-SERVICE_NAME="wbeam-daemon"
-SERVICE_FILE="$HOME/.config/systemd/user/${SERVICE_NAME}.service"
 DAEMON_BIN="$ROOT_DIR/src/host/rust/target/release/wbeamd-server"
 
 ANDROID_DIR="$ROOT_DIR/android"
@@ -33,13 +31,12 @@ Usage:
   ./wbgui                        # interactive TUI menu (arrow keys)
 
 Groups:
-  service   up | down | restart | status | remove | logs
   ip        up | down | status
   host      build | run | debug | status | down
   daemon    up | down | status   (alias for host)
   android   build | install | launch | deploy | deploy-all | build-release | install-release | deploy-release
   debug     up | watch           (alias for host debug)
-  logs      live | daemon | host | adb (start|stop|status|tail)
+  logs      live | host | adb (start|stop|status|tail)
 
 Examples:
   ./wbgui
@@ -543,120 +540,15 @@ print_control_unreachable_diagnostics() {
 
   echo "Control API not reachable on 127.0.0.1:${CONTROL_PORT}"
 
-  if command -v systemctl >/dev/null 2>&1; then
-    echo
-    echo "systemd user state (${SERVICE_NAME}):"
-    systemctl --user is-active "$SERVICE_NAME" 2>&1 || true
-    systemctl --user status "$SERVICE_NAME" --no-pager --full 2>&1 | sed -n '1,20p' || true
-  fi
-
-  if command -v journalctl >/dev/null 2>&1; then
-    echo
-    echo "Recent ${SERVICE_NAME} logs (last ${lines} lines):"
-    journalctl --user -u "$SERVICE_NAME" -n "$lines" --no-pager 2>&1 || true
-  fi
-
   mkdir -p "$diag_dir"
   {
     echo "[$ts] control API unreachable on 127.0.0.1:${CONTROL_PORT}"
     echo "user=$(id -un) uid=${UID}"
-    if command -v systemctl >/dev/null 2>&1; then
-      echo "is-active: $(systemctl --user is-active "$SERVICE_NAME" 2>&1 || true)"
-    fi
-    if command -v journalctl >/dev/null 2>&1; then
-      journalctl --user -u "$SERVICE_NAME" -n "$lines" --no-pager 2>&1 || true
-    fi
     echo
   } >> "$diag_file"
 
   echo
   echo "Diagnostics saved to: $diag_file"
-  echo "Hint: run './wbeam service up' when service is inactive."
-}
-
-service_write_unit() {
-  mkdir -p "$HOME/.config/systemd/user"
-  cat > "$SERVICE_FILE" <<EOF
-[Unit]
-Description=WBeam Screen Streaming Daemon
-After=graphical-session.target
-
-[Service]
-Type=simple
-ExecStart=$DAEMON_BIN --control-port $CONTROL_PORT --stream-port $STREAM_PORT --root $ROOT_DIR
-Restart=on-failure
-RestartSec=5
-Environment="RUST_LOG=info"
-Environment="WBEAM_USE_RUST_STREAMER=1"
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=default.target
-EOF
-}
-
-service_up() {
-  require_cmd systemctl
-  ensure_daemon_binary
-  # Stop managed service first to avoid restart-on-failure churn when
-  # cleaning up stale manually launched processes.
-  systemctl --user stop "$SERVICE_NAME" >/dev/null 2>&1 || true
-  stop_local_processes
-
-  if [[ ! -f "$SERVICE_FILE" ]]; then
-    service_write_unit
-  fi
-
-  systemctl --user daemon-reload
-  systemctl --user enable "$SERVICE_NAME" >/dev/null 2>&1 || true
-  systemctl --user restart "$SERVICE_NAME"
-  sleep 1
-  service_status
-}
-
-service_down() {
-  require_cmd systemctl
-  systemctl --user stop "$SERVICE_NAME" >/dev/null 2>&1 || true
-  stop_local_processes
-  echo "Service stopped."
-}
-
-service_restart() {
-  service_down
-  service_up
-}
-
-service_remove() {
-  require_cmd systemctl
-  systemctl --user stop "$SERVICE_NAME" >/dev/null 2>&1 || true
-  systemctl --user disable "$SERVICE_NAME" >/dev/null 2>&1 || true
-  rm -f "$SERVICE_FILE"
-  systemctl --user daemon-reload
-  stop_local_processes
-  echo "Service removed: $SERVICE_FILE"
-}
-
-service_status() {
-  if command -v systemctl >/dev/null 2>&1; then
-    if [[ -f "$SERVICE_FILE" ]]; then
-      systemctl --user status "$SERVICE_NAME" --no-pager --full || true
-    else
-      echo "Service file not installed: $SERVICE_FILE"
-    fi
-  fi
-  echo
-  if control_api_status >/dev/null 2>&1; then
-    control_api_status
-    echo
-  else
-    print_control_unreachable_diagnostics
-  fi
-}
-
-service_logs() {
-  require_cmd journalctl
-  journalctl --user -u "$SERVICE_NAME" -f
 }
 
 ip_up() {
@@ -996,13 +888,9 @@ logs_live() {
   debug_watch
 }
 
-logs_daemon() {
-  service_logs
-}
-
 logs_host() {
   local host_log
-  host_log="$(ls -1t "$ROOT_DIR"/logs/*.service.*.log 2>/dev/null | head -n 1 || true)"
+  host_log="$(ls -1t "$ROOT_DIR"/logs/*.host.*.log 2>/dev/null | head -n 1 || true)"
   if [[ -z "$host_log" ]]; then
     host_log="$(ls -1t "$ROOT_DIR"/src/host/rust/logs/wbeamd-debug-*.log 2>/dev/null | head -n 1 || true)"
   fi
@@ -1032,17 +920,6 @@ if [[ -z "$group" ]]; then
 fi
 
 case "$group" in
-  service)
-    case "$cmd" in
-      up|start)       service_up ;;
-      down|stop)      service_down ;;
-      restart)        service_restart ;;
-      status)         service_status ;;
-      remove|rm)      service_remove ;;
-      logs)           service_logs ;;
-      *)              print_help; exit 1 ;;
-    esac
-    ;;
   ip)
     case "$cmd" in
       up)             ip_up ;;
@@ -1093,7 +970,6 @@ case "$group" in
   logs)
     case "$cmd" in
       live)           logs_live ;;
-      daemon)         logs_daemon ;;
       host)           logs_host ;;
       adb)            logs_adb "${3:-status}" ;;
       *)              print_help; exit 1 ;;

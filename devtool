@@ -4,14 +4,11 @@ set -euo pipefail
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 TARGET_DIR="$ROOT_DIR/.build/devtool"
-TAURI_MANIFEST="$ROOT_DIR/src/apps/desktop-tauri/src-tauri/Cargo.toml"
+TAURI_DIR="$ROOT_DIR/src/apps/desktop-tauri"
+TAURI_MANIFEST="$TAURI_DIR/src-tauri/Cargo.toml"
 HOST_WORKSPACE_DIR="$ROOT_DIR/src/host/rust"
-HOST_DAEMON_BIN_DEFAULT="$HOST_WORKSPACE_DIR/target/release/wbeamd-server"
-HOST_DAEMON_BIN="${WBEAM_DAEMON_BIN:-$HOST_DAEMON_BIN_DEFAULT}"
 CONTROL_PORT="${WBEAM_CONTROL_PORT:-5001}"
 STREAM_PORT="${WBEAM_STREAM_PORT:-5000}"
-HOST_PID_FILE="$TARGET_DIR/wbeamd.pid"
-HOST_STDOUT_LOG="$TARGET_DIR/wbeamd.stdout.log"
 
 mkdir -p "$TARGET_DIR"
 
@@ -25,8 +22,6 @@ Usage:
   ./devtool deps install             # install host/build/runtime dependencies (Arch)
   ./devtool build                    # build host + desktop + android
   ./devtool deploy                   # deploy android app to all adb devices
-  ./devtool service status|up|down   # host daemon lifecycle
-  ./devtool service logs [live]      # host daemon log path or tail
   ./devtool host build               # build host daemon binaries
 
 Compatibility aliases:
@@ -44,11 +39,13 @@ log() {
 }
 
 run_gui() {
-  exec cargo run \
-    --manifest-path "$TAURI_MANIFEST" \
-    --target-dir "$TARGET_DIR" \
-    --package wbeam-desktop-tauri \
-    -- "$@"
+  (
+    cd "$TAURI_DIR"
+    if [[ ! -d node_modules ]]; then
+      npm install
+    fi
+    exec npm run tauri dev -- "$@"
+  )
 }
 
 as_root() {
@@ -140,7 +137,14 @@ run_host_build() {
 }
 
 run_desktop_build() {
-  log "build desktop-tauri backend"
+  log "build desktop-tauri frontend + backend"
+  (
+    cd "$TAURI_DIR"
+    if [[ ! -d node_modules ]]; then
+      npm install
+    fi
+    npm run build
+  )
   cargo build --manifest-path "$TAURI_MANIFEST"
 }
 
@@ -381,102 +385,6 @@ run_ip_status() {
   done
 }
 
-host_api_ok() {
-  curl -fsS --max-time 2 "http://127.0.0.1:${CONTROL_PORT}/v1/status" >/dev/null 2>&1
-}
-
-host_pid_running() {
-  if [[ ! -f "$HOST_PID_FILE" ]]; then
-    return 1
-  fi
-  local pid
-  pid="$(cat "$HOST_PID_FILE" 2>/dev/null || true)"
-  [[ -n "$pid" ]] || return 1
-  kill -0 "$pid" >/dev/null 2>&1
-}
-
-run_service_status() {
-  local api_state="down"
-  if host_api_ok; then
-    api_state="up"
-  fi
-
-  local proc_state="stopped"
-  local pid="n/a"
-  if [[ -f "$HOST_PID_FILE" ]]; then
-    pid="$(cat "$HOST_PID_FILE" 2>/dev/null || echo "n/a")"
-  fi
-  if host_pid_running; then
-    proc_state="running"
-  fi
-
-  printf 'api=%s process=%s pid=%s control_port=%s stream_port=%s\n' \
-    "$api_state" "$proc_state" "$pid" "$CONTROL_PORT" "$STREAM_PORT"
-}
-
-run_service_up() {
-  if host_api_ok; then
-    log "host already reachable at http://127.0.0.1:${CONTROL_PORT}/v1/status"
-    return 0
-  fi
-
-  if [[ ! -x "$HOST_DAEMON_BIN" ]]; then
-    run_host_build
-  fi
-  if [[ ! -x "$HOST_DAEMON_BIN" ]]; then
-    echo "host daemon binary not found/executable: $HOST_DAEMON_BIN" >&2
-    return 1
-  fi
-
-  if host_pid_running; then
-    log "pid file already points to running process, waiting for API..."
-  else
-    log "starting host daemon"
-    nohup "$HOST_DAEMON_BIN" \
-      --control-port "$CONTROL_PORT" \
-      --stream-port "$STREAM_PORT" \
-      --root "$ROOT_DIR" \
-      >>"$HOST_STDOUT_LOG" 2>&1 &
-    echo "$!" > "$HOST_PID_FILE"
-  fi
-
-  local i
-  for i in $(seq 1 30); do
-    if host_api_ok; then
-      log "host is up"
-      return 0
-    fi
-    sleep 0.2
-  done
-  echo "host daemon did not become ready in time; check: $HOST_STDOUT_LOG" >&2
-  return 1
-}
-
-run_service_down() {
-  curl -fsS -X POST --max-time 2 "http://127.0.0.1:${CONTROL_PORT}/v1/stop" >/dev/null 2>&1 || true
-
-  if host_pid_running; then
-    local pid
-    pid="$(cat "$HOST_PID_FILE")"
-    kill "$pid" >/dev/null 2>&1 || true
-    wait "$pid" 2>/dev/null || true
-    rm -f "$HOST_PID_FILE"
-    log "stopped host process pid=$pid"
-  else
-    rm -f "$HOST_PID_FILE"
-    log "no local host pid to stop"
-  fi
-}
-
-run_service_logs() {
-  local mode="${1:-path}"
-  if [[ "$mode" == "live" ]]; then
-    touch "$HOST_STDOUT_LOG"
-    exec tail -n 120 -F "$HOST_STDOUT_LOG"
-  fi
-  echo "$HOST_STDOUT_LOG"
-}
-
 if [[ $# -eq 0 ]]; then
   run_gui
 fi
@@ -500,15 +408,6 @@ case "${1:-}" in
     shift
     run_deploy_all "$@"
     ;;
-  service)
-    case "${2:-}" in
-      status) run_service_status ;;
-      up) run_service_up ;;
-      down) run_service_down ;;
-      logs) run_service_logs "${3:-}" ;;
-      *) print_help; exit 1 ;;
-    esac
-    ;;
   host)
     case "${2:-}" in
       build) run_host_build ;;
@@ -517,7 +416,7 @@ case "${1:-}" in
     ;;
   logs)
     case "${2:-}" in
-      live) run_service_logs live ;;
+      live) ./wbeam logs host ;;
       *) print_help; exit 1 ;;
     esac
     ;;
