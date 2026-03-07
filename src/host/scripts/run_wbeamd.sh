@@ -62,19 +62,35 @@ run_rust() {
     --stream-port "$STREAM_PORT"
     --root "$ROOT_DIR"
   )
+  local build_rev="${WBEAM_BUILD_REV:-}"
+  local build_rev_file="$ROOT_DIR/.wbeam_build_version"
 
   if [[ -n "${WBEAM_LOCK_FILE:-}" ]]; then
     args+=(--lock-file "$WBEAM_LOCK_FILE")
   fi
 
-   if [[ -n "${WBEAM_RUST_LOG_DIR:-}" ]]; then
+  if [[ -n "${WBEAM_RUST_LOG_DIR:-}" ]]; then
     args+=(--log-dir "$WBEAM_RUST_LOG_DIR")
   fi
 
+  if [[ -z "$build_rev" && -f "$build_rev_file" ]]; then
+    build_rev="$(tr -d '\r[:space:]' < "$build_rev_file" 2>/dev/null || true)"
+  fi
+  if [[ -n "$build_rev" && "$build_rev" != 0.0.* ]]; then
+    build_rev="0.0.${build_rev}"
+  fi
+
+  if [[ -n "$build_rev" ]]; then
+    exec env WBEAM_BUILD_REV="$build_rev" cargo run \
+      --manifest-path "$ROOT_DIR/src/host/rust/Cargo.toml" \
+      -p wbeamd-server -- \
+      "${args[@]}"
+  fi
+
   exec cargo run \
-    --manifest-path "$ROOT_DIR/src/host/rust/Cargo.toml" \
-    -p wbeamd-server -- \
-    "${args[@]}"
+      --manifest-path "$ROOT_DIR/src/host/rust/Cargo.toml" \
+      -p wbeamd-server -- \
+      "${args[@]}"
 }
 
 run_python() {
