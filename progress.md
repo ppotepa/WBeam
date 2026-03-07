@@ -17,8 +17,11 @@ Focus: Main lane stabilization (API17 path), host abstraction, deploy/runtime re
 ## Current Branch State
 - Branch: `master`
 - Latest pushed commits:
-  - `c04f7986` - proto profile integration + host probing + remote/start/logging flow
+  - `a3e6802a` - enforce progress update policy + latest changelog in `progress.md`
+  - `ed85be41` - full 2026-03-07 integration status added to `progress.md`
   - `2058d5f9` - `runas-remote` secure env passthrough + README note
+  - `c04f7986` - proto profile integration + host probing + remote/start/logging flow
+  - `1d1d5b21` - baseline consolidation into devtool-centric main lane
 
 ## Delivery Milestones Completed (Chronological)
 1. Android API17 decoder bootstrap path integrated in main app:
@@ -61,9 +64,22 @@ Focus: Main lane stabilization (API17 path), host abstraction, deploy/runtime re
 - Improve final cleanup around local cache/log artifacts in working tree during long debug sessions.
 
 ## Incremental Changelog (Latest)
+- `a3e6802a` - enforced mandatory `progress.md` update policy and changelog block.
 - `ed85be41` - updated `progress.md` with full 2026-03-07 integration status.
 - `2058d5f9` - `runas-remote` secure env passthrough (`RUNAS_REMOTE_PASSTHROUGH_ENV`, `RUNAS_REMOTE_ENV_FILE`, quiet mode) + README note.
 - `c04f7986` - main integration batch: proto profile migration, host probe/backends, deploy/start/logging flow, API17 path.
+
+## Commit Ledger (Rolling)
+- `a3e6802a` - docs: enforce progress.md update policy and latest changelog
+- `ed85be41` - docs: update progress log for 2026-03-07 integration work
+- `2058d5f9` - runas-remote: add secure env passthrough and usage note
+- `c04f7986` - Integrate proto profiles, host probing, and remote startup/logging flow
+- `1d1d5b21` - feat: consolidate post-blank-ui migration into single devtool-centric baseline
+- `f1472156` - add full deploy script
+- `31c5479b` - move repo to src-first layout (phase 1+2)
+- `e155d481` - update repo structure
+- `348f1073` - desktop app cleanup keep simple ui + mode print
+- `82033f2d` - add svg assets, split forms into SRP
 
 Date: 2026-03-05
 Focus: Desktop Tauri lane + Android/Host delivery wiring
