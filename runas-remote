@@ -8,11 +8,14 @@ usage() {
   cat <<'USAGE'
 Usage:
   runas-remote <desktop_user> <script_or_app_path> [-- app_args...]
+  runas-remote [script_or_app_path] [-- app_args...]               # default user
+  runas-remote [desktop_user]                                       # default app: desktop.sh
 
 Examples:
   ./runas-remote alice ./devtool -- gui
   ./runas-remote alice devtool -- build
   ./runas-remote alice /home/alice/bin/myapp -- --flag
+  ./runas-remote ./start-remote ppotepa
 
 Security env options:
   RUNAS_REMOTE_PASSTHROUGH_ENV="NAME1,NAME2"  # copy selected env vars to target app
@@ -25,6 +28,10 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   usage
   exit 0
 fi
+
+user_exists() {
+  id "$1" >/dev/null 2>&1
+}
 
 resolve_active_user_from_loginctl() {
   local sid name type state active
@@ -124,17 +131,44 @@ load_extra_env_passthrough() {
   done
 }
 
-if [[ $# -lt 2 ]]; then
-  usage >&2
-  exit 1
-fi
+DEFAULT_USER="${WBEAM_DEV_REMOTE_USER:-ppotepa}"
+DEFAULT_APP="desktop.sh"
 
-TARGET_USER="$1"
-APP_SPEC="$2"
-shift 2
-
-if [[ "${1:-}" == "--" ]]; then
-  shift
+if [[ $# -eq 0 ]]; then
+  TARGET_USER="$DEFAULT_USER"
+  APP_SPEC="$DEFAULT_APP"
+  set --
+elif [[ $# -eq 1 ]]; then
+  if user_exists "$1"; then
+    TARGET_USER="$1"
+    APP_SPEC="$DEFAULT_APP"
+  else
+    TARGET_USER="$DEFAULT_USER"
+    APP_SPEC="$1"
+  fi
+  set --
+else
+  # Normal mode: user first, app second.
+  if user_exists "$1"; then
+    TARGET_USER="$1"
+    APP_SPEC="$2"
+    shift 2
+    if [[ "${1:-}" == "--" ]]; then
+      shift
+    fi
+  # Compatibility mode for common typo: app first, user second.
+  elif user_exists "$2"; then
+    TARGET_USER="$2"
+    APP_SPEC="$1"
+    shift 2
+    if [[ "${1:-}" == "--" ]]; then
+      shift
+    fi
+    echo "[runas-remote] WARN: detected app-first argument order; expected: <user> <app>." >&2
+  else
+    usage >&2
+    exit 1
+  fi
 fi
 
 if ! id "$TARGET_USER" >/dev/null 2>&1; then
