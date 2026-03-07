@@ -39,6 +39,8 @@ proto/front/**/.externalNativeBuild/
 **/.cxx/
 **/.externalNativeBuild/
 .build/
+src/apps/desktop-tauri/node_modules/
+src/apps/desktop-tauri/dist/
 
 # .NET
 proto/host-cs/bin/

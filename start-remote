@@ -13,7 +13,7 @@ Defaults:
   desktop_user = ppotepa
 
 Flow:
-  1) restart daemon service
+  1) restart host (local process)
   2) deploy Android app
   3) launch desktop GUI via runas-remote
   4) print host-probe and daemon status
@@ -47,7 +47,9 @@ if [[ ! -x "$ROOT_DIR/runas-remote" ]]; then
   exit 1
 fi
 
-run_step "service restart" ./wbeam service restart
+run_step "host stop (cleanup stale processes)" ./wbeam host down
+run_step "host start (debug, background)" bash -lc "nohup ./src/host/scripts/run_wbeamd_debug.sh 5001 5000 >/dev/null 2>&1 & disown"
+run_step "wait for control API" bash -lc 'for i in $(seq 1 50); do curl -fsS --max-time 1 http://127.0.0.1:5001/v1/status >/dev/null 2>&1 && exit 0; sleep 0.2; done; exit 1'
 run_step "android deploy" ./wbeam android deploy
 
 echo
@@ -61,4 +63,3 @@ echo
 echo
 echo "[start-remote] launching desktop.sh as $DESKTOP_USER"
 exec ./runas-remote "$DESKTOP_USER" desktop.sh
-

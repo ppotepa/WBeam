@@ -1,20 +1,22 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "WBeam Desktop Tauri",
+  "productName": "WBeam Desktop",
   "version": "0.1.0",
-  "identifier": "com.wbeam.desktop.tauri",
+  "identifier": "com.wbeam.desktop",
   "build": {
-    "frontendDist": "../ui"
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
   },
   "app": {
     "windows": [
       {
         "label": "main",
-        "title": "WBeam Desktop (Tauri Preview)",
-        "width": 1540,
-        "height": 800,
-        "resizable": true,
-        "decorations": true
+        "title": "WBeam Desktop",
+        "width": 1200,
+        "height": 760,
+        "resizable": true
       }
     ],
     "security": {
