@@ -60,11 +60,39 @@ EOF
 
 adb_device_cmd() {
   require_cmd adb
+  android_select_serial_if_needed || true
   if [[ -n "$ANDROID_SERIAL" ]]; then
     adb -s "$ANDROID_SERIAL" "$@"
   else
     adb "$@"
   fi
+}
+
+android_connected_serials() {
+  require_cmd adb
+  adb start-server >/dev/null 2>&1 || true
+  adb devices | awk 'NR>1 && $2=="device"{print $1}'
+}
+
+android_select_serial_if_needed() {
+  if [[ -n "$ANDROID_SERIAL" ]]; then
+    return 0
+  fi
+
+  local serials=()
+  mapfile -t serials < <(android_connected_serials)
+  if [[ "${#serials[@]}" -eq 0 ]]; then
+    return 1
+  fi
+  if [[ "${#serials[@]}" -eq 1 ]]; then
+    ANDROID_SERIAL="${serials[0]}"
+    return 0
+  fi
+
+  ANDROID_SERIAL="${serials[0]}"
+  echo "[android] WARN: multiple adb devices detected (${serials[*]})." >&2
+  echo "[android] WARN: auto-selecting serial=$ANDROID_SERIAL; set WBEAM_ANDROID_SERIAL to override." >&2
+  return 0
 }
 
 android_pipeline_mode() {
@@ -332,6 +360,7 @@ android_try_reverse_setup() {
 android_probe_control_api_from_device() {
   local host="$1"
   local -a adb_base
+  android_select_serial_if_needed || true
   adb_base=(adb)
   if [[ -n "$ANDROID_SERIAL" ]]; then
     adb_base+=(-s "$ANDROID_SERIAL")
@@ -725,12 +754,6 @@ android_deploy() {
     echo "[android] WARN: adb reverse not available — app will use baked-in host ${build_api_host}" >&2
   fi
   android_launch
-}
-
-android_connected_serials() {
-  require_cmd adb
-  adb start-server >/dev/null
-  adb devices | awk 'NR>1 && $2=="device"{print $1}'
 }
 
 android_deploy_all() {
