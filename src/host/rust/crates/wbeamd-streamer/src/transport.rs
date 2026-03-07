@@ -22,6 +22,7 @@ use gstreamer_app as gst_app;
 use rand::Rng;
 use wbtp_core::{Flags, MAGIC, VERSION};
 
+use crate::cli::ResolvedConfig;
 use crate::cli::StreamMode;
 
 // ── Protocol constants ────────────────────────────────────────────────────────
@@ -156,6 +157,7 @@ pub fn spawn_sender(
     appsink: gst_app::AppSink,
     port: u16,
     fps: u32,
+    cfg: ResolvedConfig,
     stream_mode: StreamMode,
     stop: Arc<AtomicBool>,
     fps_counter: Arc<AtomicU64>,
@@ -180,19 +182,23 @@ pub fn spawn_sender(
         let fps = fps.max(1);
         let is_png_stream = (codec_flags & HELLO_CODEC_PNG) != 0;
         let frame_budget_ms = ((1_000u64 + (fps as u64 - 1)) / fps as u64).max(1);
-        let pull_timeout_ms = match stream_mode {
-            StreamMode::Ultra => {
-                if is_png_stream {
-                    frame_budget_ms.clamp(10, 80)
-                } else {
-                    frame_budget_ms.clamp(2, 20)
+        let pull_timeout_ms = if cfg.pull_timeout_ms > 0 {
+            cfg.pull_timeout_ms as u64
+        } else {
+            match stream_mode {
+                StreamMode::Ultra => {
+                    if is_png_stream {
+                        frame_budget_ms.clamp(10, 80)
+                    } else {
+                        frame_budget_ms.clamp(2, 20)
+                    }
                 }
+                StreamMode::Stable => frame_budget_ms.clamp(10, 50),
+                StreamMode::Quality => frame_budget_ms.clamp(20, 120),
             }
-            StreamMode::Stable => frame_budget_ms.clamp(10, 50),
-            StreamMode::Quality => frame_budget_ms.clamp(20, 120),
         };
         let pull_timeout = Some(gst::ClockTime::from_mseconds(pull_timeout_ms));
-        let disconnect_on_timeout = !matches!(stream_mode, StreamMode::Ultra);
+        let disconnect_on_timeout = cfg.disconnect_on_timeout;
         let producer_stop = stop.clone();
         let producer_handle = thread::spawn(move || {
             while !producer_stop.load(Ordering::Acquire) {
@@ -274,7 +280,9 @@ pub fn spawn_sender(
                 Ok((s, addr)) => {
                     let _ = s.set_nodelay(true);
                     let _ = s.set_nonblocking(false);
-                    let write_timeout_ms = if is_png_stream {
+                    let write_timeout_ms = if cfg.write_timeout_ms > 0 {
+                        cfg.write_timeout_ms as u64
+                    } else if is_png_stream {
                         (frame_budget_ms.saturating_mul(4)).clamp(80, 500)
                     } else {
                         (frame_budget_ms.saturating_mul(2)).clamp(20, 120)

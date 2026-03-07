@@ -1,0 +1,1109 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HOST_SCRIPTS_DIR="$ROOT_DIR/src/host/scripts"
+
+CONTROL_PORT="${WBEAM_CONTROL_PORT:-5001}"
+STREAM_PORT="${WBEAM_STREAM_PORT:-5000}"
+
+SERVICE_NAME="wbeam-daemon"
+SERVICE_FILE="$HOME/.config/systemd/user/${SERVICE_NAME}.service"
+DAEMON_BIN="$ROOT_DIR/src/host/rust/target/release/wbeamd-server"
+
+ANDROID_DIR="$ROOT_DIR/android"
+ANDROID_PACKAGE="com.wbeam"
+ANDROID_ACTIVITY=".MainActivity"
+ANDROID_APK="$ANDROID_DIR/app/build/outputs/apk/debug/app-debug.apk"
+ANDROID_APK_RELEASE="$ANDROID_DIR/app/build/outputs/apk/release/app-release.apk"
+ANDROID_APK_RELEASE_UNSIGNED="$ANDROID_DIR/app/build/outputs/apk/release/app-release-unsigned.apk"
+ANDROID_SERIAL="${WBEAM_ANDROID_SERIAL:-}"
+ANDROID_PIPELINE_FILE="$ROOT_DIR/.wbeam_android_pipeline"
+LOG_DIR="$ROOT_DIR/logs"
+ADB_LOGCAT_PID_FILE="$LOG_DIR/adb-logcat.pid"
+
+
+
+print_help() {
+  cat <<'EOF'
+WBeam command runner
+
+Usage:
+  ./wbeam <group> <command>
+  ./wbgui                        # interactive TUI menu (arrow keys)
+
+Groups:
+  service   up | down | restart | status | remove | logs
+  ip        up | down | status
+  host      build | run | debug | status | down
+  daemon    up | down | status   (alias for host)
+  android   build | install | launch | deploy | deploy-all | build-release | install-release | deploy-release
+  debug     up | watch           (alias for host debug)
+  logs      live | daemon | host | adb (start|stop|status|tail)
+
+Examples:
+  ./wbgui
+  ./wbeam host build             # cargo build --release wbeamd-server + wbeamd-streamer
+  ./wbeam host run               # release binary, foreground
+  ./wbeam host debug             # debug build + coloured logs + ADB sidecar
+  ./wbeam android deploy         # build + install + launch in one step
+  ./wbeam android deploy-all     # build once, install + launch on all connected devices
+  ./wbeam android build          # ./gradlew assembleDebug only
+  ./wbeam android install        # adb install only (uses existing debug APK)
+  ./wbeam android launch         # adb shell am start only
+  ./wbeam android build-release  # ./gradlew assembleRelease
+  ./wbeam android install-release
+  ./wbeam android deploy-release
+  ./wbeam debug up
+  ./wbeam logs live
+  ./wbeam logs adb start
+EOF
+}
+
+adb_device_cmd() {
+  require_cmd adb
+  if [[ -n "$ANDROID_SERIAL" ]]; then
+    adb -s "$ANDROID_SERIAL" "$@"
+  else
+    adb "$@"
+  fi
+}
+
+android_pipeline_mode() {
+  local mode="${WBEAM_ANDROID_PIPELINE:-}"
+  if [[ -z "$mode" && -f "$ANDROID_PIPELINE_FILE" ]]; then
+    mode="$(tr -d '[:space:]' < "$ANDROID_PIPELINE_FILE" 2>/dev/null || true)"
+  fi
+
+  if [[ -z "$mode" ]]; then
+    mode="auto"
+  fi
+
+  case "$mode" in
+    legacy|modern)
+      echo "$mode"
+      ;;
+    auto)
+      android_auto_pipeline_mode
+      ;;
+    *)
+      android_auto_pipeline_mode
+      ;;
+  esac
+}
+
+android_connected_api_level() {
+  local api
+  require_cmd adb
+  adb start-server >/dev/null 2>&1 || true
+  api="$(adb_device_cmd shell getprop ro.build.version.sdk 2>/dev/null | tr -d '\r[:space:]' || true)"
+  if [[ "$api" =~ ^[0-9]+$ ]]; then
+    echo "$api"
+    return 0
+  fi
+  return 1
+}
+
+android_auto_pipeline_mode() {
+  local api
+  api="$(android_connected_api_level || true)"
+  # modern pipeline requires minSdk=19, so API <=18 must use legacy.
+  if [[ "$api" =~ ^[0-9]+$ ]] && (( api <= 18 )); then
+    echo "legacy"
+  else
+    if [[ "$api" =~ ^[0-9]+$ ]]; then
+      echo "modern"
+    else
+      # When API detection is flaky (USB mode flips/race with adb), default to
+      # legacy for compatibility so old tablets do not get unreachable LAN hosts.
+      echo "[android] WARN: could not detect Android API level; defaulting pipeline=legacy for safety" >&2
+      echo "legacy"
+    fi
+  fi
+}
+
+android_pipeline_min_sdk() {
+  case "$1" in
+    legacy) echo "17" ;;
+    *) echo "19" ;;
+  esac
+}
+
+detect_tether_ip() {
+  # Android USB tethering always uses 192.168.42.0/24 or 192.168.43.0/24
+  # (AOSP hardcoded).  Three ways to find the host's tether-side IP:
+  #
+  # Priority 1 — ask the connected device for its default gateway.
+  #   On USB tether this is the host address. We trust device route first,
+  #   because host-side interface state can flap during reconnect and a strict
+  #   host-IP cross-check can incorrectly fall back to LAN.
+  local gw
+  if command -v adb >/dev/null 2>&1; then
+    gw="$(adb_device_cmd shell ip route 2>/dev/null \
+          | awk '/^default/{for(i=1;i<=NF;i++){if($i=="via"){print $(i+1); exit}}}' \
+          | tr -d '\r' || true)"
+    if [[ -n "$gw" && "$gw" != "127."* ]]; then
+      echo "$gw"; return 0
+    fi
+  fi
+  # Priority 2 — look for a host interface in the AOSP tether subnets.
+  local ip
+  ip="$(ip -4 addr show 2>/dev/null \
+        | awk '/inet 192\.168\.4[23]\./{gsub(/\/.*/, "", $2); print $2; exit}')"
+  if [[ -n "$ip" ]]; then echo "$ip"; return 0; fi
+  # Priority 3 — USB gadget interface names: usb*, rndis*, enx*
+  ip="$(ip -4 addr show 2>/dev/null \
+        | awk '/^[0-9]+: (usb|rndis|enx)/{iface=1} iface && /inet /{gsub(/\/.*/, "", $2); print $2; iface=0; exit}')"
+  if [[ -n "$ip" ]]; then echo "$ip"; return 0; fi
+  return 1
+}
+
+detect_host_ip() {
+  # For tethered Android (legacy path) we prefer the tether interface IP.
+  local tether_ip
+  tether_ip="$(detect_tether_ip 2>/dev/null || true)"
+  if [[ -n "$tether_ip" ]]; then
+    echo "$tether_ip"; return 0
+  fi
+  # Fallback: IP of the interface used to reach the internet (LAN).
+  local ip_candidate=""
+  ip_candidate="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++){if($i=="src"){print $(i+1); exit}}}')"
+  if [[ -n "$ip_candidate" ]]; then
+    echo "$ip_candidate"
+    return 0
+  fi
+  ip_candidate="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  if [[ -n "$ip_candidate" ]]; then
+    echo "$ip_candidate"
+    return 0
+  fi
+  return 1
+}
+
+android_build_host() {
+  local pipeline_mode="$1"
+  if [[ -n "${WBEAM_ANDROID_HOST:-}" ]]; then
+    echo "$WBEAM_ANDROID_HOST"
+    return 0
+  fi
+
+  if [[ "$pipeline_mode" == "legacy" ]]; then
+    local detected
+    detected="$(detect_host_ip || true)"
+    if [[ -n "$detected" ]]; then
+      echo "$detected"
+      return 0
+    fi
+  fi
+
+  echo "127.0.0.1"
+}
+
+android_expected_version_name() {
+  local explicit="${WBEAM_BUILD_REV:-}"
+  if [[ -n "$explicit" ]]; then
+    if [[ "$explicit" == 0.0.* ]]; then
+      echo "$explicit"
+    else
+      echo "0.0.${explicit}-build"
+    fi
+    return 0
+  fi
+
+  local rev
+  rev="$(git -C "$ROOT_DIR" rev-parse --short=4 HEAD 2>/dev/null || true)"
+  if [[ -z "$rev" ]]; then
+    rev="dev0"
+  fi
+  echo "0.0.${rev}-build"
+}
+
+android_installed_version_name() {
+  adb_device_cmd shell dumpsys package "$ANDROID_PACKAGE" 2>/dev/null \
+    | sed -n 's/^[[:space:]]*versionName=//p' \
+    | head -n 1 \
+    | tr -d '\r' \
+    || true
+}
+
+android_build_stamp_path() {
+  local apk_path="$1"
+  echo "${apk_path}.wbeam-config"
+}
+
+android_install_stamp_path() {
+  local apk_path="$1"
+  echo "${apk_path}.wbeam-installed"
+}
+
+android_should_skip_install() {
+  local apk_path="${1:-$ANDROID_APK}"
+  local force_install="${WBEAM_ANDROID_FORCE_INSTALL:-0}"
+  if [[ "$force_install" =~ ^(1|true|TRUE|yes|on)$ ]]; then
+    return 1
+  fi
+
+  local expected installed
+  expected="$(android_expected_version_name)"
+  installed="$(android_installed_version_name)"
+  if [[ -z "$installed" || "$installed" != "$expected" ]]; then
+    return 1  # version mismatch — must install
+  fi
+
+  # Also force reinstall when the baked-in host/pipeline changed since last
+  # install (covers: same git SHA but different host IP or pipeline variant).
+  local build_stamp install_stamp
+  build_stamp="$(android_build_stamp_path "$apk_path")"
+  install_stamp="$(android_install_stamp_path "$apk_path")"
+  if [[ -f "$build_stamp" && -f "$install_stamp" ]]; then
+    if ! diff -q "$build_stamp" "$install_stamp" >/dev/null 2>&1; then
+      return 1  # config changed since last install
+    fi
+  elif [[ -f "$build_stamp" && ! -f "$install_stamp" ]]; then
+    return 1  # never recorded as installed with this config
+  fi
+
+  return 0  # version + config match — safe to skip
+}
+
+android_device_has_ipv4() {
+  local ips line ip
+  # Try modern 'ip addr' first; fall back to 'ifconfig' and 'netcfg' for API<21
+  # Android (busybox) where 'ip' is absent or the GNU sed pattern fails.
+  ips="$(adb_device_cmd shell 'ip -f inet addr show 2>/dev/null | grep inet || ifconfig 2>/dev/null | grep -Eo "addr:[0-9.]+" | sed s/addr:// || netcfg 2>/dev/null | awk "{print \$3}" | grep -v "^0\.0\.0\.0"' 2>/dev/null | tr -d '\r')"
+  while IFS= read -r line; do
+    ip="${line%%/*}"
+    ip="${ip##addr:}"
+    if [[ -n "$ip" && "$ip" != "127.0.0.1" && "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      return 0
+    fi
+  done <<< "$ips"
+  return 1
+}
+
+android_try_reverse_setup() {
+  adb_device_cmd reverse "tcp:${STREAM_PORT}" "tcp:${STREAM_PORT}" >/dev/null 2>&1 || return 1
+  adb_device_cmd reverse "tcp:${CONTROL_PORT}" "tcp:${CONTROL_PORT}" >/dev/null 2>&1 || return 1
+  return 0
+}
+
+android_probe_control_api_from_device() {
+  local host="$1"
+  local -a adb_base
+  adb_base=(adb)
+  if [[ -n "$ANDROID_SERIAL" ]]; then
+    adb_base+=(-s "$ANDROID_SERIAL")
+  fi
+  # On legacy Android (API 17), busybox wget is typically available.
+  # We force a short timeout to avoid hanging deploy.
+  if command -v timeout >/dev/null 2>&1; then
+    if timeout 6 "${adb_base[@]}" shell "busybox wget -q -O - http://${host}:${CONTROL_PORT}/status" >/dev/null 2>&1; then
+      return 0
+    fi
+    if timeout 6 "${adb_base[@]}" shell "wget -q -O - http://${host}:${CONTROL_PORT}/status" >/dev/null 2>&1; then
+      return 0
+    fi
+    return 1
+  fi
+  "${adb_base[@]}" shell "busybox wget -q -O - http://${host}:${CONTROL_PORT}/status" >/dev/null 2>&1 \
+    || "${adb_base[@]}" shell "wget -q -O - http://${host}:${CONTROL_PORT}/status" >/dev/null 2>&1
+}
+
+android_echo_hosts() {
+  local api_host="$1"
+  local stream_host="$2"
+  printf '%s|%s\n' "$api_host" "$stream_host"
+}
+
+android_resolve_deploy_hosts() {
+  local pipeline_mode="$1"
+  local allow_no_transport="${WBEAM_ANDROID_ALLOW_NO_TRANSPORT:-0}"
+  local api_only_fallback="${WBEAM_ANDROID_API_ONLY_FALLBACK:-0}"
+
+  if [[ -n "${WBEAM_ANDROID_API_HOST:-}" || -n "${WBEAM_ANDROID_STREAM_HOST:-}" || -n "${WBEAM_ANDROID_HOST:-}" ]]; then
+    local explicit_api="${WBEAM_ANDROID_API_HOST:-${WBEAM_ANDROID_HOST:-127.0.0.1}}"
+    local explicit_stream="${WBEAM_ANDROID_STREAM_HOST:-${WBEAM_ANDROID_HOST:-127.0.0.1}}"
+    android_echo_hosts "$explicit_api" "$explicit_stream"
+    return 0
+  fi
+
+  require_cmd adb
+  adb start-server >/dev/null
+  adb_device_cmd wait-for-device
+
+  if android_try_reverse_setup; then
+    android_echo_hosts "127.0.0.1" "127.0.0.1"
+    return 0
+  fi
+
+  if [[ "$pipeline_mode" != "legacy" ]]; then
+    # Modern pipeline: adb reverse failed — fall back to LAN IP so the app can
+    # still reach the host when connected on Wi-Fi.
+    local host_ip_mod
+    host_ip_mod="$(detect_host_ip || true)"
+    if [[ -n "$host_ip_mod" ]]; then
+      echo "[android] WARN: adb reverse failed; using LAN IP ${host_ip_mod} for modern pipeline" >&2
+      android_echo_hosts "$host_ip_mod" "$host_ip_mod"
+      return 0
+    fi
+    echo "[android] WARN: adb reverse failed and no LAN IP detected; falling back to 127.0.0.1" >&2
+    android_echo_hosts "127.0.0.1" "127.0.0.1"
+    return 0
+  fi
+
+  local host_ip
+  host_ip="$(detect_host_ip || true)"
+
+  # For the legacy pipeline, adb reverse is never available (API<21), so
+  # 127.0.0.1 is NEVER useful — bake the host's LAN/tether IP instead.
+  # Try host IP unconditionally; the device-side IP check is irrelevant here
+  # because it's the *host* address we're embedding in the APK.
+  if [[ -n "$host_ip" ]]; then
+    if ! android_probe_control_api_from_device "$host_ip"; then
+      local host_iface
+      host_iface="$(ip -4 -o addr show scope global 2>/dev/null | awk -v target="$host_ip" '{split($4,a,"/"); if (a[1]==target) {print $2; exit}}' || true)"
+      echo "[android] ERROR: device cannot reach host control API at http://${host_ip}:${CONTROL_PORT}/status" >&2
+      echo "[android] - this causes the red 'control link' screen." >&2
+      if [[ -n "$host_iface" ]]; then
+        echo "[android] Fix firewall (run locally as root):" >&2
+        echo "  sudo iptables -I INPUT -i ${host_iface} -s 192.168.42.0/24 -p tcp -m multiport --dports ${CONTROL_PORT},${STREAM_PORT} -j ACCEPT" >&2
+      fi
+      echo "[android] Then rerun: ./wbeam android deploy" >&2
+      return 1
+    fi
+    # api_only_fallback is only meaningful for modern (where stream may use
+    # adb reverse): for legacy both endpoints must use the direct IP.
+    android_echo_hosts "$host_ip" "$host_ip"
+    return 0
+  fi
+
+  if [[ "$allow_no_transport" =~ ^(1|true|TRUE|yes|on)$ ]]; then
+    echo "[android] WARN: legacy pipeline — no host IP detected; app will be unreachable." >&2
+    echo "[android] Hint: set WBEAM_ANDROID_HOST=<host-ip> explicitly (e.g. 192.168.100.201)." >&2
+    android_echo_hosts "127.0.0.1" "127.0.0.1"
+    return 0
+  fi
+
+  echo "[android] ERROR: no transport path to host for legacy device." >&2
+  echo "[android] - adb reverse is unavailable on this device (or ADB transport is unstable)." >&2
+  echo "[android] - device has no active IPv4 network interface for LAN fallback." >&2
+  echo "[android] Hint: set WBEAM_ANDROID_ALLOW_NO_TRANSPORT=1 to force loopback deploy despite missing tunnel." >&2
+  echo "[android] Fix: connect tablet to Wi-Fi (same LAN as host) or set WBEAM_ANDROID_HOST manually after network is up." >&2
+  return 1
+}
+
+android_target_desc() {
+  if [[ -n "$ANDROID_SERIAL" ]]; then
+    echo "serial=$ANDROID_SERIAL"
+  else
+    echo "default-device"
+  fi
+}
+
+require_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "Missing required command: $1" >&2
+    exit 1
+  fi
+}
+
+host_build() {
+  require_cmd cargo
+  local rust_dir="$ROOT_DIR/src/host/rust"
+  echo "[host] Building Rust backend (release)…"
+  cd "$rust_dir" && cargo build --release -p wbeamd-server -p wbeamd-streamer
+  echo "[host] Build OK → $DAEMON_BIN"
+}
+
+ensure_daemon_binary() {
+  if [[ -x "$DAEMON_BIN" ]]; then
+    return 0
+  fi
+  echo "Daemon binary missing: $DAEMON_BIN" >&2
+  echo "Build it first:" >&2
+  echo "  cd $ROOT_DIR/src/host/rust && cargo build --release -p wbeamd-server -p wbeamd-streamer" >&2
+  exit 1
+}
+
+stop_local_processes() {
+  pkill -9 wbeamd-streamer 2>/dev/null || true
+  pkill -9 wbeamd-server 2>/dev/null || true
+  rm -f /tmp/wbeamd.lock
+}
+
+ensure_log_dir() {
+  mkdir -p "$LOG_DIR"
+}
+
+next_log_run_id() {
+  local day counter_file n
+  ensure_log_dir
+  day="$(date +%Y%m%d)"
+  counter_file="$LOG_DIR/.run.${day}.counter"
+  n=0
+  if [[ -f "$counter_file" ]]; then
+    n="$(tr -d '[:space:]' < "$counter_file" 2>/dev/null || echo 0)"
+  fi
+  if [[ ! "$n" =~ ^[0-9]+$ ]]; then
+    n=0
+  fi
+  n=$((n + 1))
+  printf '%s' "$n" > "$counter_file"
+  printf '%04d' "$n"
+}
+
+new_log_file() {
+  local domain ts run_id
+  domain="$1"
+  ts="$(date +%Y%m%d-%H%M%S)"
+  run_id="$(next_log_run_id)"
+  echo "$LOG_DIR/${ts}.${domain}.${run_id}.log"
+}
+
+adb_logcat_is_running() {
+  local pid
+  if [[ ! -f "$ADB_LOGCAT_PID_FILE" ]]; then
+    return 1
+  fi
+  pid="$(awk 'NR==1{print $1}' "$ADB_LOGCAT_PID_FILE" 2>/dev/null || true)"
+  [[ -n "$pid" ]] || return 1
+  kill -0 "$pid" 2>/dev/null
+}
+
+adb_logcat_start() {
+  local log_file pid serial
+  require_cmd adb
+  ensure_log_dir
+  serial="${ANDROID_SERIAL:-default}"
+
+  if adb_logcat_is_running; then
+    echo "[logs][adb] already running: $(cat "$ADB_LOGCAT_PID_FILE" 2>/dev/null)"
+    return 0
+  fi
+
+  adb start-server >/dev/null 2>&1 || true
+  log_file="$(new_log_file "adb")"
+  # Capture device logs continuously; useful for control-link failures.
+  (adb_device_cmd logcat -v threadtime) >>"$log_file" 2>&1 &
+  pid=$!
+  printf '%s %s %s\n' "$pid" "$log_file" "$serial" > "$ADB_LOGCAT_PID_FILE"
+  echo "[logs][adb] started pid=$pid serial=$serial file=$log_file"
+}
+
+adb_logcat_stop() {
+  local pid
+  if ! adb_logcat_is_running; then
+    rm -f "$ADB_LOGCAT_PID_FILE"
+    echo "[logs][adb] not running"
+    return 0
+  fi
+  pid="$(awk 'NR==1{print $1}' "$ADB_LOGCAT_PID_FILE" 2>/dev/null || true)"
+  kill "$pid" 2>/dev/null || true
+  rm -f "$ADB_LOGCAT_PID_FILE"
+  echo "[logs][adb] stopped pid=$pid"
+}
+
+adb_logcat_status() {
+  if adb_logcat_is_running; then
+    echo "[logs][adb] running: $(cat "$ADB_LOGCAT_PID_FILE" 2>/dev/null)"
+  else
+    echo "[logs][adb] not running"
+    return 1
+  fi
+}
+
+adb_logcat_tail() {
+  local latest
+  latest="$(ls -1t "$LOG_DIR"/*.adb.*.log 2>/dev/null | head -n 1 || true)"
+  if [[ -z "$latest" ]]; then
+    echo "[logs][adb] no adb logs in $LOG_DIR"
+    exit 1
+  fi
+  echo "[logs][adb] tailing $latest"
+  tail -n 200 -f "$latest"
+}
+
+adb_logcat_ensure_running() {
+  local auto_on="${WBEAM_ADB_LOGCAT_AUTO:-1}"
+  if [[ "$auto_on" =~ ^(1|true|TRUE|yes|on)$ ]]; then
+    adb_logcat_start
+  fi
+}
+
+control_api_status() {
+  curl -sSf "http://127.0.0.1:${CONTROL_PORT}/status"
+}
+
+print_control_unreachable_diagnostics() {
+  local lines ts diag_dir diag_file
+  lines="${WBEAM_DAEMON_LOG_LINES:-40}"
+  ts="$(date '+%Y-%m-%d %H:%M:%S %z')"
+  diag_dir="$ROOT_DIR/.logs"
+  diag_file="$diag_dir/wbeam-daemon-status.log"
+
+  echo "Control API not reachable on 127.0.0.1:${CONTROL_PORT}"
+
+  if command -v systemctl >/dev/null 2>&1; then
+    echo
+    echo "systemd user state (${SERVICE_NAME}):"
+    systemctl --user is-active "$SERVICE_NAME" 2>&1 || true
+    systemctl --user status "$SERVICE_NAME" --no-pager --full 2>&1 | sed -n '1,20p' || true
+  fi
+
+  if command -v journalctl >/dev/null 2>&1; then
+    echo
+    echo "Recent ${SERVICE_NAME} logs (last ${lines} lines):"
+    journalctl --user -u "$SERVICE_NAME" -n "$lines" --no-pager 2>&1 || true
+  fi
+
+  mkdir -p "$diag_dir"
+  {
+    echo "[$ts] control API unreachable on 127.0.0.1:${CONTROL_PORT}"
+    echo "user=$(id -un) uid=${UID}"
+    if command -v systemctl >/dev/null 2>&1; then
+      echo "is-active: $(systemctl --user is-active "$SERVICE_NAME" 2>&1 || true)"
+    fi
+    if command -v journalctl >/dev/null 2>&1; then
+      journalctl --user -u "$SERVICE_NAME" -n "$lines" --no-pager 2>&1 || true
+    fi
+    echo
+  } >> "$diag_file"
+
+  echo
+  echo "Diagnostics saved to: $diag_file"
+  echo "Hint: run './wbeam service up' when service is inactive."
+}
+
+service_write_unit() {
+  mkdir -p "$HOME/.config/systemd/user"
+  cat > "$SERVICE_FILE" <<EOF
+[Unit]
+Description=WBeam Screen Streaming Daemon
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=$DAEMON_BIN --control-port $CONTROL_PORT --stream-port $STREAM_PORT --root $ROOT_DIR
+Restart=on-failure
+RestartSec=5
+Environment="RUST_LOG=info"
+Environment="WBEAM_USE_RUST_STREAMER=1"
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
+EOF
+}
+
+service_up() {
+  require_cmd systemctl
+  ensure_daemon_binary
+  # Stop managed service first to avoid restart-on-failure churn when
+  # cleaning up stale manually launched processes.
+  systemctl --user stop "$SERVICE_NAME" >/dev/null 2>&1 || true
+  stop_local_processes
+
+  if [[ ! -f "$SERVICE_FILE" ]]; then
+    service_write_unit
+  fi
+
+  systemctl --user daemon-reload
+  systemctl --user enable "$SERVICE_NAME" >/dev/null 2>&1 || true
+  systemctl --user restart "$SERVICE_NAME"
+  sleep 1
+  service_status
+}
+
+service_down() {
+  require_cmd systemctl
+  systemctl --user stop "$SERVICE_NAME" >/dev/null 2>&1 || true
+  stop_local_processes
+  echo "Service stopped."
+}
+
+service_restart() {
+  service_down
+  service_up
+}
+
+service_remove() {
+  require_cmd systemctl
+  systemctl --user stop "$SERVICE_NAME" >/dev/null 2>&1 || true
+  systemctl --user disable "$SERVICE_NAME" >/dev/null 2>&1 || true
+  rm -f "$SERVICE_FILE"
+  systemctl --user daemon-reload
+  stop_local_processes
+  echo "Service removed: $SERVICE_FILE"
+}
+
+service_status() {
+  if command -v systemctl >/dev/null 2>&1; then
+    if [[ -f "$SERVICE_FILE" ]]; then
+      systemctl --user status "$SERVICE_NAME" --no-pager --full || true
+    else
+      echo "Service file not installed: $SERVICE_FILE"
+    fi
+  fi
+  echo
+  if control_api_status >/dev/null 2>&1; then
+    control_api_status
+    echo
+  else
+    print_control_unreachable_diagnostics
+  fi
+}
+
+service_logs() {
+  require_cmd journalctl
+  journalctl --user -u "$SERVICE_NAME" -f
+}
+
+ip_up() {
+  require_cmd adb
+  adb start-server >/dev/null
+  adb_device_cmd wait-for-device
+  adb_device_cmd reverse "tcp:${STREAM_PORT}" "tcp:${STREAM_PORT}"
+  adb_device_cmd reverse "tcp:${CONTROL_PORT}" "tcp:${CONTROL_PORT}"
+  ip_status
+}
+
+ip_down() {
+  adb_device_cmd reverse --remove "tcp:${STREAM_PORT}" >/dev/null 2>&1 || true
+  adb_device_cmd reverse --remove "tcp:${CONTROL_PORT}" >/dev/null 2>&1 || true
+  ip_status
+}
+
+ip_status() {
+  adb_device_cmd version >/dev/null
+  echo "ADB reverse mappings:"
+  adb_device_cmd reverse --list || true
+}
+
+# Run the release binary in the foreground (no systemd, clean output)
+host_run() {
+  ensure_daemon_binary
+  stop_local_processes
+  if command -v adb >/dev/null 2>&1; then
+    adb start-server >/dev/null 2>&1 || true
+    adb_device_cmd reverse "tcp:${STREAM_PORT}"   "tcp:${STREAM_PORT}"   2>/dev/null || true
+    adb_device_cmd reverse "tcp:${CONTROL_PORT}" "tcp:${CONTROL_PORT}" 2>/dev/null || true
+  fi
+  echo "[wbeam] host run — release binary, foreground"
+  echo "[wbeam] control=127.0.0.1:${CONTROL_PORT}  stream=127.0.0.1:${STREAM_PORT}"
+  echo "[wbeam] Ctrl-C to stop"
+  echo ""
+  export RUST_LOG="${RUST_LOG:-info}"
+  export WBEAM_USE_RUST_STREAMER=1
+  exec "$DAEMON_BIN" \
+    --control-port "$CONTROL_PORT" \
+    --stream-port  "$STREAM_PORT" \
+    --root         "$ROOT_DIR"
+}
+
+# Debug run: full RUST_LOG=debug, coloured output, ADB logcat sidecar
+host_debug() {
+  exec "$HOST_SCRIPTS_DIR/run_wbeamd_debug.sh" "$CONTROL_PORT" "$STREAM_PORT"
+}
+
+# Backwards-compat aliases
+daemon_up()   { host_run; }
+daemon_down() { stop_local_processes; echo "Daemon processes stopped."; }
+daemon_status() {
+  if control_api_status >/dev/null 2>&1; then
+    control_api_status
+    echo
+  else
+    print_control_unreachable_diagnostics
+    exit 1
+  fi
+}
+
+android_build() {
+  local pipeline_mode min_sdk build_api_host build_stream_host gradle_user_home
+  pipeline_mode="$(android_pipeline_mode)"
+  min_sdk="$(android_pipeline_min_sdk "$pipeline_mode")"
+  build_api_host="${WBEAM_ANDROID_API_HOST:-${WBEAM_ANDROID_HOST:-$(android_build_host "$pipeline_mode")}}"
+  build_stream_host="${WBEAM_ANDROID_STREAM_HOST:-${WBEAM_ANDROID_HOST:-$(android_build_host "$pipeline_mode")}}"
+  gradle_user_home="$ROOT_DIR/.gradle-user"
+  mkdir -p "$gradle_user_home"
+
+  echo "[android] Building debug APK (pipeline=${pipeline_mode}, minSdk=${min_sdk}, api_host=${build_api_host}, stream_host=${build_stream_host})…"
+  android_gradle_build_retry_once ":app:assembleDebug" "$min_sdk" "$build_api_host" "$build_stream_host" "$gradle_user_home"
+  echo "[android] APK: $ANDROID_APK"
+  # Record the baked config so android_should_skip_install can detect host changes.
+  printf 'api=%s|stream=%s|pipeline=%s' "$build_api_host" "$build_stream_host" "$pipeline_mode" \
+    > "$(android_build_stamp_path "$ANDROID_APK")" 2>/dev/null || true
+}
+
+android_install() {
+  if [[ ! -f "$ANDROID_APK" ]]; then
+    echo "APK not found: $ANDROID_APK" >&2
+    echo "Run './wbeam android build' first." >&2
+    exit 1
+  fi
+  adb start-server >/dev/null
+  adb_device_cmd wait-for-device
+  if android_should_skip_install "$ANDROID_APK"; then
+    echo "[android] APK version+config unchanged ($(android_expected_version_name)); skipping install (${ANDROID_SERIAL:-default})."
+    return 0
+  fi
+  echo "[android] Installing $ANDROID_APK (${ANDROID_SERIAL:-default})…"
+  adb_device_cmd install -r "$ANDROID_APK"
+  # Record the build config that is now on the device so future skip checks work.
+  local build_stamp install_stamp
+  build_stamp="$(android_build_stamp_path "$ANDROID_APK")"
+  install_stamp="$(android_install_stamp_path "$ANDROID_APK")"
+  if [[ -f "$build_stamp" ]]; then
+    cp "$build_stamp" "$install_stamp" 2>/dev/null || true
+  fi
+}
+
+android_launch() {
+  adb start-server >/dev/null
+  adb_device_cmd wait-for-device
+  echo "[android] Launching ${ANDROID_PACKAGE}/${ANDROID_ACTIVITY} ($(android_target_desc))…"
+  adb_device_cmd shell am start -n "${ANDROID_PACKAGE}/${ANDROID_ACTIVITY}"
+}
+
+android_deploy() {
+  local pipeline_mode build_hosts build_api_host build_stream_host
+  adb_logcat_ensure_running
+  pipeline_mode="$(android_pipeline_mode)"
+  build_hosts="$(android_resolve_deploy_hosts "$pipeline_mode")"
+  build_api_host="${build_hosts%%|*}"
+  build_stream_host="${build_hosts##*|}"
+  echo "[android] Deploy hosts: api=$build_api_host stream=$build_stream_host"
+  WBEAM_ANDROID_API_HOST="$build_api_host" WBEAM_ANDROID_STREAM_HOST="$build_stream_host" android_build
+  android_install
+  # Ensure adb reverse is active before the app launches so 127.0.0.1
+  # loopback tunnels the control+stream ports to this host.
+  if android_try_reverse_setup; then
+    echo "[android] adb reverse OK (control:${CONTROL_PORT} stream:${STREAM_PORT})"
+  else
+    echo "[android] WARN: adb reverse not available — app will use baked-in host ${build_api_host}" >&2
+  fi
+  android_launch
+}
+
+android_connected_serials() {
+  require_cmd adb
+  adb start-server >/dev/null
+  adb devices | awk 'NR>1 && $2=="device"{print $1}'
+}
+
+android_deploy_all() {
+  local serials=()
+  local serial=""
+  local ok_count=0
+  local fail_count=0
+  local skip_build="${WBEAM_ANDROID_SKIP_BUILD:-0}"
+  local serial_backup="$ANDROID_SERIAL"
+
+  mapfile -t serials < <(android_connected_serials)
+  if [[ "${#serials[@]}" -eq 0 ]]; then
+    echo "[android] No connected adb devices in 'device' state." >&2
+    echo "[android] Run 'adb devices' and authorize at least one device." >&2
+    exit 1
+  fi
+
+  echo "[android] Deploying to ${#serials[@]} device(s): ${serials[*]}"
+
+  if [[ "$skip_build" =~ ^(1|true|TRUE|yes|on)$ ]]; then
+    echo "[android] Skipping build (WBEAM_ANDROID_SKIP_BUILD=$skip_build)"
+  else
+    android_build
+  fi
+
+  for serial in "${serials[@]}"; do
+    ANDROID_SERIAL="$serial"
+    echo
+    echo "[android][$serial] install + reverse + launch"
+    if android_install && ip_up && android_launch; then
+      echo "[android][$serial] OK"
+      ((ok_count += 1))
+    else
+      echo "[android][$serial] FAILED" >&2
+      ((fail_count += 1))
+    fi
+  done
+
+  ANDROID_SERIAL="$serial_backup"
+  echo
+  echo "[android] Deploy summary: ok=${ok_count} failed=${fail_count}"
+  if (( fail_count > 0 )); then
+    exit 1
+  fi
+}
+
+android_build_release() {
+  local pipeline_mode min_sdk build_api_host build_stream_host gradle_user_home
+  pipeline_mode="$(android_pipeline_mode)"
+  min_sdk="$(android_pipeline_min_sdk "$pipeline_mode")"
+  build_api_host="${WBEAM_ANDROID_API_HOST:-${WBEAM_ANDROID_HOST:-$(android_build_host "$pipeline_mode")}}"
+  build_stream_host="${WBEAM_ANDROID_STREAM_HOST:-${WBEAM_ANDROID_HOST:-$(android_build_host "$pipeline_mode")}}"
+  gradle_user_home="$ROOT_DIR/.gradle-user"
+  mkdir -p "$gradle_user_home"
+
+  echo "[android] Building release APK (pipeline=${pipeline_mode}, minSdk=${min_sdk}, api_host=${build_api_host}, stream_host=${build_stream_host})…"
+  android_gradle_build_retry_once ":app:assembleRelease" "$min_sdk" "$build_api_host" "$build_stream_host" "$gradle_user_home"
+  if [[ -f "$ANDROID_APK_RELEASE" ]]; then
+    echo "[android] APK: $ANDROID_APK_RELEASE"
+    printf 'api=%s|stream=%s|pipeline=%s' "$build_api_host" "$build_stream_host" "$pipeline_mode" \
+      > "$(android_build_stamp_path "$ANDROID_APK_RELEASE")" 2>/dev/null || true
+  elif [[ -f "$ANDROID_APK_RELEASE_UNSIGNED" ]]; then
+    echo "[android] APK: $ANDROID_APK_RELEASE_UNSIGNED"
+    printf 'api=%s|stream=%s|pipeline=%s' "$build_api_host" "$build_stream_host" "$pipeline_mode" \
+      > "$(android_build_stamp_path "$ANDROID_APK_RELEASE_UNSIGNED")" 2>/dev/null || true
+  fi
+}
+
+android_rotate_gradle_transform_cache() {
+  local gradle_user_home="$1"
+  local cache_dir="${gradle_user_home}/caches/9.0-milestone-1"
+  local ts
+  ts="$(date +%Y%m%d-%H%M%S)"
+
+  if [[ -d "${cache_dir}/transforms" ]]; then
+    mv "${cache_dir}/transforms" "${cache_dir}/transforms.bak-${ts}"
+    echo "[android] Rotated Gradle transforms cache -> ${cache_dir}/transforms.bak-${ts}" >&2
+  fi
+}
+
+android_select_java_home() {
+  if [[ -n "${WBEAM_ANDROID_JAVA_HOME:-}" ]]; then
+    echo "$WBEAM_ANDROID_JAVA_HOME"
+    return 0
+  fi
+  if [[ -d "/usr/lib/jvm/java-17-openjdk" ]]; then
+    echo "/usr/lib/jvm/java-17-openjdk"
+    return 0
+  fi
+  return 1
+}
+
+android_gradle_build_retry_once() {
+  local task="$1"
+  local min_sdk="$2"
+  local build_api_host="$3"
+  local build_stream_host="$4"
+  local gradle_user_home="$5"
+  local gradle_java_home=""
+  local -a gradle_env
+  local tmp_log
+  local extra_args=()
+  tmp_log="$(mktemp "$ROOT_DIR/.gradle-build.XXXXXX.log")"
+  gradle_java_home="$(android_select_java_home || true)"
+  gradle_env=(GRADLE_USER_HOME="$gradle_user_home")
+  if [[ -n "$gradle_java_home" ]]; then
+    gradle_env+=(JAVA_HOME="$gradle_java_home")
+  fi
+
+  if [[ "$task" == ":app:assembleRelease" ]]; then
+    # Local deploy path: don't block release build on lint-vital crashes/noise.
+    extra_args=(-x :app:lintVitalAnalyzeRelease -x :app:lintVitalReportRelease -x :app:lintVitalRelease)
+  fi
+
+  if [[ -n "$gradle_java_home" ]]; then
+    echo "[android] Using JAVA_HOME=${gradle_java_home} for Gradle" >&2
+  fi
+
+  if (cd "$ANDROID_DIR" && env "${gradle_env[@]}" bash ./gradlew --no-daemon \
+      -PWBEAM_MIN_SDK="$min_sdk" \
+      -PWBEAM_HOST="$build_stream_host" \
+      -PWBEAM_API_HOST="$build_api_host" \
+      -PWBEAM_STREAM_HOST="$build_stream_host" \
+      "${extra_args[@]}" "$task" 2>&1 | tee "$tmp_log"); then
+    rm -f "$tmp_log"
+    return 0
+  fi
+
+  if grep -q "Could not read workspace metadata" "$tmp_log"; then
+    echo "[android] WARN: detected Gradle workspace metadata corruption; retrying once after cache rotation..." >&2
+    android_rotate_gradle_transform_cache "$gradle_user_home"
+    rm -f "$tmp_log"
+    cd "$ANDROID_DIR" && env "${gradle_env[@]}" bash ./gradlew --no-daemon \
+      -PWBEAM_MIN_SDK="$min_sdk" \
+      -PWBEAM_HOST="$build_stream_host" \
+      -PWBEAM_API_HOST="$build_api_host" \
+      -PWBEAM_STREAM_HOST="$build_stream_host" \
+      "${extra_args[@]}" "$task"
+    return $?
+  fi
+
+  rm -f "$tmp_log"
+  return 1
+}
+
+android_install_release() {
+  local release_apk=""
+  if [[ -f "$ANDROID_APK_RELEASE" ]]; then
+    release_apk="$ANDROID_APK_RELEASE"
+  elif [[ -f "$ANDROID_APK_RELEASE_UNSIGNED" ]]; then
+    release_apk="$ANDROID_APK_RELEASE_UNSIGNED"
+  fi
+
+  if [[ -z "$release_apk" ]]; then
+    echo "Release APK not found." >&2
+    echo "Run './wbeam android build-release' first." >&2
+    exit 1
+  fi
+
+  if [[ "$release_apk" == *"-unsigned.apk" ]]; then
+    echo "Release APK is unsigned: $release_apk" >&2
+    echo "Configure signing for release build before install, or use debug deploy for local testing." >&2
+    exit 1
+  fi
+
+  adb start-server >/dev/null
+  adb_device_cmd wait-for-device
+  if android_should_skip_install "$release_apk"; then
+    echo "[android] APK version+config unchanged ($(android_expected_version_name)); skipping release install (${ANDROID_SERIAL:-default})."
+    return 0
+  fi
+  echo "[android] Installing $release_apk ($(android_target_desc))…"
+  adb_device_cmd install -r "$release_apk"
+  local build_stamp install_stamp
+  build_stamp="$(android_build_stamp_path "$release_apk")"
+  install_stamp="$(android_install_stamp_path "$release_apk")"
+  if [[ -f "$build_stamp" ]]; then
+    cp "$build_stamp" "$install_stamp" 2>/dev/null || true
+  fi
+}
+
+android_deploy_release() {
+  local pipeline_mode build_hosts build_api_host build_stream_host
+  adb_logcat_ensure_running
+  pipeline_mode="$(android_pipeline_mode)"
+  build_hosts="$(android_resolve_deploy_hosts "$pipeline_mode")"
+  build_api_host="${build_hosts%%|*}"
+  build_stream_host="${build_hosts##*|}"
+  echo "[android] Release deploy hosts: api=$build_api_host stream=$build_stream_host"
+  WBEAM_ANDROID_API_HOST="$build_api_host" WBEAM_ANDROID_STREAM_HOST="$build_stream_host" android_build_release
+  android_install_release
+  android_launch
+}
+
+debug_up() {
+  exec "$HOST_SCRIPTS_DIR/run_wbeamd_debug.sh" "$CONTROL_PORT" "$STREAM_PORT"
+}
+
+debug_watch() {
+  exec "$HOST_SCRIPTS_DIR/watch_live_debug_logs.sh"
+}
+
+logs_live() {
+  debug_watch
+}
+
+logs_daemon() {
+  service_logs
+}
+
+logs_host() {
+  local host_log
+  host_log="$(ls -1t "$ROOT_DIR"/logs/*.service.*.log 2>/dev/null | head -n 1 || true)"
+  if [[ -z "$host_log" ]]; then
+    host_log="$(ls -1t "$ROOT_DIR"/src/host/rust/logs/wbeamd-debug-*.log 2>/dev/null | head -n 1 || true)"
+  fi
+  if [[ -z "$host_log" ]]; then
+    echo "No host debug log found in $ROOT_DIR/logs or $ROOT_DIR/src/host/rust/logs"
+    exit 1
+  fi
+  tail -n 200 -f "$host_log"
+}
+
+logs_adb() {
+  case "${1:-status}" in
+    start|up)   adb_logcat_start ;;
+    stop|down)  adb_logcat_stop ;;
+    status)     adb_logcat_status ;;
+    tail|watch) adb_logcat_tail ;;
+    *)          print_help; exit 1 ;;
+  esac
+}
+
+group="${1:-}"
+cmd="${2:-}"
+
+if [[ -z "$group" ]]; then
+  print_help
+  exit 1
+fi
+
+case "$group" in
+  service)
+    case "$cmd" in
+      up|start)       service_up ;;
+      down|stop)      service_down ;;
+      restart)        service_restart ;;
+      status)         service_status ;;
+      remove|rm)      service_remove ;;
+      logs)           service_logs ;;
+      *)              print_help; exit 1 ;;
+    esac
+    ;;
+  ip)
+    case "$cmd" in
+      up)             ip_up ;;
+      down)           ip_down ;;
+      status)         ip_status ;;
+      *)              print_help; exit 1 ;;
+    esac
+    ;;
+  host)
+    case "$cmd" in
+      build)          host_build ;;
+      run|start|up)   host_run ;;
+      debug)          host_debug ;;
+      status)         daemon_status ;;
+      down|stop)      daemon_down ;;
+      *)              print_help; exit 1 ;;
+    esac
+    ;;
+  daemon)
+    case "$cmd" in
+      up|start|run)   daemon_up ;;
+      down|stop)      daemon_down ;;
+      status)         daemon_status ;;
+      debug)          host_debug ;;
+      *)              print_help; exit 1 ;;
+    esac
+    ;;
+  android)
+    case "$cmd" in
+      build)          android_build ;;
+      install)        android_install ;;
+      launch)         android_launch ;;
+      deploy|run)     android_deploy ;;
+      deploy-all|run-all) android_deploy_all ;;
+      build-release|release-build)    android_build_release ;;
+      install-release|release-install) android_install_release ;;
+      deploy-release|release-deploy)   android_deploy_release ;;
+      *)              print_help; exit 1 ;;
+    esac
+    ;;
+  debug)
+    case "$cmd" in
+      up|start)       debug_up ;;
+      watch|logs)     debug_watch ;;
+      *)              print_help; exit 1 ;;
+    esac
+    ;;
+  logs)
+    case "$cmd" in
+      live)           logs_live ;;
+      daemon)         logs_daemon ;;
+      host)           logs_host ;;
+      adb)            logs_adb "${3:-status}" ;;
+      *)              print_help; exit 1 ;;
+    esac
+    ;;
+  help|-h|--help)
+    print_help
+    ;;
+  *)
+    print_help
+    exit 1
+    ;;
+esac

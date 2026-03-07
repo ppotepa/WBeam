@@ -24,6 +24,7 @@ import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.Locale;
 
 /**
@@ -517,16 +518,26 @@ public final class H264TcpPlayer {
                 + "Configure the host to use H.264 (encoder=h264).");
         }
 
+        final boolean legacyAvcBootstrap = !isHevc
+                && Build.VERSION.SDK_INT <= Build.VERSION_CODES.JELLY_BEAN_MR1;
+        byte[] legacySps = null;
+        byte[] legacyPps = null;
+
         // ── Create MediaCodec for the codec type signalled in HELLO ───────────
-        final MediaCodec codec;
-        try {
-            codec = MediaCodec.createDecoderByType(videoMime);
-            MediaFormat fmt = MediaFormat.createVideoFormat(videoMime, decodeWidth, decodeHeight);
-            codec.configure(fmt, surface, null, 0);
-            codec.start();
-            codecRef[0] = codec;
-        } catch (Exception e) {
-            throw new IOException("decoder init failed for " + videoMime, e);
+        MediaCodec codec = null;
+        if (!legacyAvcBootstrap) {
+            try {
+                codec = MediaCodec.createDecoderByType(videoMime);
+                MediaFormat fmt = MediaFormat.createVideoFormat(videoMime, decodeWidth, decodeHeight);
+                codec.configure(fmt, surface, null, 0);
+                codec.start();
+                codecRef[0] = codec;
+            } catch (Exception e) {
+                throw new IOException("decoder init failed for " + videoMime, e);
+            }
+        } else {
+            waitForKeyframe = true;
+            Log.i(TAG, "legacy AVC bootstrap enabled (API " + Build.VERSION.SDK_INT + ")");
         }
 
         while (running) {
@@ -592,9 +603,39 @@ public final class H264TcpPlayer {
                 continue;
             }
 
-                drainLatestFrame(codec, bufferInfo, drainStats,
-                    dropLateOutput,
-                    pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES ? 16_000 : 5_000);
+            if (legacyAvcBootstrap && codec == null) {
+                AvcCsd avcCsd = extractAvcCsd(payloadBuf, payloadLen);
+                if (avcCsd.sps != null) legacySps = avcCsd.sps;
+                if (avcCsd.pps != null) legacyPps = avcCsd.pps;
+                if (legacySps != null && legacyPps != null) {
+                    try {
+                        codec = createAvcDecoderWithCsd(legacySps, legacyPps);
+                        codecRef[0] = codec;
+                        queueCodecConfig(codec, legacySps, 2_000);
+                        queueCodecConfig(codec, legacyPps, 2_000);
+                        waitForKeyframe = true;
+                        Log.i(TAG, "legacy AVC decoder configured from in-stream SPS/PPS");
+                    } catch (IOException e) {
+                        throw e;
+                    } catch (Exception e) {
+                        throw new IOException("legacy AVC bootstrap failed", e);
+                    }
+                } else {
+                    droppedSec++;
+                    expectedSeq = seqU32 + 1;
+                    continue;
+                }
+            }
+
+            if (codec == null) {
+                droppedSec++;
+                expectedSeq = seqU32 + 1;
+                continue;
+            }
+
+            drainLatestFrame(codec, bufferInfo, drainStats,
+                dropLateOutput,
+                pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES ? 16_000 : 5_000);
             long nowAfterDrain = SystemClock.elapsedRealtime();
             pendingDecodeQueue = Math.max(0, pendingDecodeQueue - drainStats.releasedCount);
             if (drainStats.releasedCount > 0) lastDecodeProgressMs = nowAfterDrain;
@@ -1114,6 +1155,48 @@ public final class H264TcpPlayer {
         return true;
     }
 
+    private static boolean queueCodecConfig(MediaCodec codec, byte[] data, long inputTimeoutUs) {
+        if (codec == null || data == null || data.length == 0) return false;
+        int inputIndex = codec.dequeueInputBuffer(inputTimeoutUs);
+        if (inputIndex < 0) return false;
+        ByteBuffer inputBuffer;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            inputBuffer = codec.getInputBuffer(inputIndex);
+        } else {
+            ByteBuffer[] inputBuffers = codec.getInputBuffers();
+            inputBuffer = (inputBuffers != null && inputIndex < inputBuffers.length)
+                    ? inputBuffers[inputIndex]
+                    : null;
+        }
+        if (inputBuffer == null) {
+            codec.queueInputBuffer(inputIndex, 0, 0, 0, 0);
+            return false;
+        }
+        inputBuffer.clear();
+        if (data.length > inputBuffer.remaining()) {
+            codec.queueInputBuffer(inputIndex, 0, 0, 0, 0);
+            return false;
+        }
+        inputBuffer.put(data);
+        codec.queueInputBuffer(inputIndex, 0, data.length, 0, MediaCodec.BUFFER_FLAG_CODEC_CONFIG);
+        return true;
+    }
+
+    private MediaCodec createAvcDecoderWithCsd(byte[] sps, byte[] pps) throws IOException {
+        try {
+            MediaCodec codec = MediaCodec.createDecoderByType("video/avc");
+            MediaFormat fmt = MediaFormat.createVideoFormat("video/avc", decodeWidth, decodeHeight);
+            fmt.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, FRAME_PAYLOAD_INITIAL_CAP);
+            if (sps != null) fmt.setByteBuffer("csd-0", ByteBuffer.wrap(sps));
+            if (pps != null) fmt.setByteBuffer("csd-1", ByteBuffer.wrap(pps));
+            codec.configure(fmt, surface, null, 0);
+            codec.start();
+            return codec;
+        } catch (Exception e) {
+            throw new IOException("decoder init failed for legacy AVC", e);
+        }
+    }
+
     private static void drainLatestFrame(
             MediaCodec codec,
             MediaCodec.BufferInfo info,
@@ -1229,6 +1312,33 @@ public final class H264TcpPlayer {
         return false;
     }
 
+    private static AvcCsd extractAvcCsd(byte[] data, int size) {
+        byte[] sps = null;
+        byte[] pps = null;
+        int start = findStartCode(data, 0, size);
+        if (start < 0) {
+            if (size > 0) {
+                int type = data[0] & 0x1F;
+                if (type == 7) sps = Arrays.copyOf(data, size);
+                if (type == 8) pps = Arrays.copyOf(data, size);
+            }
+            return new AvcCsd(sps, pps);
+        }
+
+        while (start >= 0 && start < size) {
+            int nalHdrOff = (start + 2 < size && data[start + 2] == 1) ? (start + 3) : (start + 4);
+            if (nalHdrOff >= size) break;
+            int next = findStartCode(data, nalHdrOff + 1, size);
+            if (next < 0) next = size;
+            int nalType = data[nalHdrOff] & 0x1F;
+            if (nalType == 7 && sps == null) sps = Arrays.copyOfRange(data, nalHdrOff, next);
+            if (nalType == 8 && pps == null) pps = Arrays.copyOfRange(data, nalHdrOff, next);
+            if (sps != null && pps != null) break;
+            start = next;
+        }
+        return new AvcCsd(sps, pps);
+    }
+
     private static int firstNalType(byte[] data, int offset, int size) {
         if (size <= 0 || offset < 0 || offset >= data.length) return -1;
         int end = Math.min(data.length, offset + size);
@@ -1241,6 +1351,16 @@ public final class H264TcpPlayer {
         }
         if (i >= end) return -1;
         return data[i] & 0x1F;
+    }
+
+    private static final class AvcCsd {
+        final byte[] sps;
+        final byte[] pps;
+
+        AvcCsd(byte[] sps, byte[] pps) {
+            this.sps = sps;
+            this.pps = pps;
+        }
     }
 
     private void closeSocket() {

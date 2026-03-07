@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::os::fd::AsRawFd;
@@ -14,9 +15,10 @@ use tokio::sync::{mpsc, Mutex};
 use tokio::time::sleep;
 use tracing::{error, info, warn};
 use wbeamd_api::{
-    valid_values, validate_config, ActiveConfig, BaseResponse, ClientMetricsRequest,
-    ClientMetricsResponse, ConfigPatch, ErrorResponse, HealthResponse, KpiSnapshot,
-    MetricsResponse, MetricsSnapshot, PresetsResponse, StatusResponse, ValidationError,
+    valid_values, validate_config_with_presets, ActiveConfig, BaseResponse, ClientMetricsRequest,
+    ClientMetricsResponse, ConfigPatch, ErrorResponse, HealthResponse, HostProbeResponse,
+    KpiSnapshot, MetricsResponse, MetricsSnapshot, PresetsResponse, StatusResponse,
+    ValidationError,
 };
 
 pub mod domain;
@@ -32,7 +34,7 @@ use domain::state::{
     STATE_ERROR, STATE_IDLE, STATE_RECONNECTING, STATE_STARTING, STATE_STOPPING, STATE_STREAMING,
 };
 use infra::process as proc;
-use infra::{adb, config_store, telemetry};
+use infra::{adb, config_store, host_probe, telemetry};
 
 const DEFAULT_START_TIMEOUT: Duration = Duration::from_secs(45);
 const DUPLICATE_START_GUARD: Duration = Duration::from_secs(3);
@@ -42,6 +44,72 @@ const NO_PRESENT_RESTART_COOLDOWN: Duration = Duration::from_secs(15);
 const NO_PRESENT_MIN_RECV_FPS: f64 = 10.0;
 const NO_PRESENT_MAX_PRESENT_FPS: f64 = 1.0;
 const REVERSE_REFRESH_BACKSTOP: Duration = Duration::from_secs(120);
+
+fn load_presets_from_proto_file(root: &Path) -> Option<BTreeMap<String, ActiveConfig>> {
+    let path = root.join("proto/config/profiles.json");
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!("presets: failed to read {}: {e}", path.display());
+            return None;
+        }
+    };
+    let value: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!("presets: invalid JSON in {}: {e}", path.display());
+            return None;
+        }
+    };
+    let Some(profiles) = value.get("profiles").and_then(|v| v.as_object()) else {
+        warn!("presets: missing .profiles object in {}", path.display());
+        return None;
+    };
+
+    let mut out = BTreeMap::new();
+    for (name, node) in profiles {
+        let values = node.get("values").and_then(|v| v.as_object());
+        let size = values
+            .and_then(|v| v.get("PROTO_CAPTURE_SIZE"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("1280x720")
+            .to_string();
+        let fps = values
+            .and_then(|v| v.get("PROTO_CAPTURE_FPS"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(60) as u32;
+        let bitrate_kbps = values
+            .and_then(|v| v.get("PROTO_CAPTURE_BITRATE_KBPS"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(10_000) as u32;
+
+        out.insert(
+            name.clone(),
+            ActiveConfig {
+                profile: name.clone(),
+                encoder: "h264".to_string(),
+                cursor_mode: "embedded".to_string(),
+                size,
+                fps,
+                bitrate_kbps,
+                debug_fps: 0,
+                intra_only: false,
+            },
+        );
+    }
+
+    if out.is_empty() {
+        warn!("presets: no profiles loaded from {}", path.display());
+        None
+    } else {
+        info!(
+            "presets: loaded {} profile(s) from {}",
+            out.len(),
+            path.display()
+        );
+        Some(out)
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum CoreError {
@@ -55,6 +123,8 @@ pub enum CoreError {
     LockHeld(String),
     #[error("io error: {0}")]
     Io(String),
+    #[error("unsupported host mode: {0}")]
+    UnsupportedHost(String),
 }
 
 #[derive(Debug)]
@@ -81,10 +151,15 @@ struct Inner {
     last_adaptation_at: Option<Instant>,
     no_present_streak: u8,
     last_no_present_recovery_at: Option<Instant>,
+    presets: BTreeMap<String, ActiveConfig>,
 }
 
 impl Inner {
-    fn new(host_name: String, active_config: ActiveConfig) -> Self {
+    fn new(
+        host_name: String,
+        active_config: ActiveConfig,
+        presets: BTreeMap<String, ActiveConfig>,
+    ) -> Self {
         Self {
             state: STATE_IDLE.to_string(),
             active_config: active_config.clone(),
@@ -108,6 +183,7 @@ impl Inner {
             last_adaptation_at: None,
             no_present_streak: 0,
             last_no_present_recovery_at: None,
+            presets,
         }
     }
 }
@@ -129,6 +205,7 @@ pub struct DaemonCore {
     inner: Arc<Mutex<Inner>>,
     root: PathBuf,
     runtime_config_path: PathBuf,
+    host_probe: host_probe::HostProbe,
     stream_port: u16,
     control_port: u16,
     exit_tx: mpsc::UnboundedSender<(u64, i32)>,
@@ -168,15 +245,35 @@ impl DaemonCore {
             .unwrap_or_else(|| "unknown-host".to_string());
 
         let runtime_config_path = root.join("src/host/rust/config/runtime_state.json");
-        let active_config = config_store::load_runtime_config(&runtime_config_path)
-            .unwrap_or_else(ActiveConfig::balanced_default);
+        let presets = load_presets_from_proto_file(&root).unwrap_or_else(wbeamd_api::presets);
+        let active_config =
+            config_store::load_runtime_config_with_presets(&runtime_config_path, &presets)
+                .unwrap_or_else(|| {
+                    presets
+                        .get("balanced")
+                        .cloned()
+                        .unwrap_or_else(ActiveConfig::balanced_default)
+                });
+
+        let host_probe = host_probe::HostProbe::detect();
+        info!(
+            os = host_probe.os_name(),
+            session = host_probe.session_name(),
+            desktop = host_probe.desktop_name(),
+            capture_mode = host_probe.capture_mode_name(),
+            remote = host_probe.is_remote,
+            display = host_probe.display.as_deref().unwrap_or("-"),
+            wayland = host_probe.wayland_display.as_deref().unwrap_or("-"),
+            "host probe initialized"
+        );
 
         let (exit_tx, mut exit_rx) = mpsc::unbounded_channel::<(u64, i32)>();
 
         let core = Self {
-            inner: Arc::new(Mutex::new(Inner::new(host_name, active_config))),
+            inner: Arc::new(Mutex::new(Inner::new(host_name, active_config, presets))),
             root,
             runtime_config_path,
+            host_probe,
             stream_port,
             control_port,
             exit_tx,
@@ -230,11 +327,28 @@ impl DaemonCore {
         }
     }
 
-    pub async fn presets(&self) -> PresetsResponse {
-        PresetsResponse {
-            base: self.base_response().await,
+    pub async fn host_probe(&self) -> HostProbeResponse {
+        let inner = self.inner.lock().await;
+        HostProbeResponse {
+            base: self.base_from_inner(&inner),
             ok: true,
-            presets: wbeamd_api::presets(),
+            os: self.host_probe.os_name().to_string(),
+            session: self.host_probe.session_name().to_string(),
+            desktop: self.host_probe.desktop_name().to_string(),
+            capture_mode: self.host_probe.capture_mode_name().to_string(),
+            remote: self.host_probe.is_remote,
+            display: self.host_probe.display.clone(),
+            wayland_display: self.host_probe.wayland_display.clone(),
+            supported: self.host_probe.supports_streaming(),
+        }
+    }
+
+    pub async fn presets(&self) -> PresetsResponse {
+        let inner = self.inner.lock().await;
+        PresetsResponse {
+            base: self.base_from_inner(&inner),
+            ok: true,
+            presets: inner.presets.clone(),
             valid: valid_values(),
         }
     }
@@ -285,7 +399,8 @@ impl DaemonCore {
             )
         };
 
-        let cfg = validate_config(patch, &current_cfg)?;
+        let presets = { self.inner.lock().await.presets.clone() };
+        let cfg = validate_config_with_presets(patch, &current_cfg, &presets)?;
         let already_running = current_pid.is_some()
             && cfg == current_cfg
             && matches!(
@@ -314,7 +429,7 @@ impl DaemonCore {
     pub async fn apply(&self, patch: ConfigPatch) -> Result<StatusResponse, CoreError> {
         let (cfg, prev_cfg, was_running) = {
             let inner = self.inner.lock().await;
-            let cfg = validate_config(patch, &inner.active_config)?;
+            let cfg = validate_config_with_presets(patch, &inner.active_config, &inner.presets)?;
             (
                 cfg,
                 inner.active_config.clone(),
@@ -621,10 +736,29 @@ impl DaemonCore {
     }
 
     async fn start_with_config(&self, cfg: ActiveConfig) -> Result<(), CoreError> {
-        adb::ensure_usb_reverse(&self.root, self.stream_port, self.control_port, "start").await;
+        if !self.host_probe.supports_streaming() {
+            let reason = self.host_probe.unsupported_reason();
+            {
+                let mut inner = self.inner.lock().await;
+                inner.state = STATE_IDLE.to_string();
+                inner.last_error = reason.clone();
+            }
+            return Err(CoreError::UnsupportedHost(reason));
+        }
+
         {
             let mut inner = self.inner.lock().await;
             inner.last_reverse_refresh_at = Some(Instant::now());
+        }
+        // Do not block /start HTTP response on adb reverse, because Android API17
+        // client timeout is short (~1.5s) and reverse may fail/lag on tethered links.
+        {
+            let root = self.root.clone();
+            let stream_port = self.stream_port;
+            let control_port = self.control_port;
+            tokio::spawn(async move {
+                adb::ensure_usb_reverse(&root, stream_port, control_port, "start").await;
+            });
         }
 
         {
@@ -685,9 +819,13 @@ impl DaemonCore {
         let rust_streamer_bin = std::env::var("WBEAM_RUST_STREAMER_BIN")
             .ok()
             .map(PathBuf::from)
-            .unwrap_or_else(|| self.root.join("src/host/rust/target/release/wbeamd-streamer"));
+            .unwrap_or_else(|| {
+                self.root
+                    .join("src/host/rust/target/release/wbeamd-streamer")
+            });
 
         let mut cmd;
+        let capture_backend = self.host_probe.capture_mode_name();
         if use_rust_streamer {
             if !rust_streamer_bin.exists() {
                 error!(
@@ -704,6 +842,12 @@ impl DaemonCore {
             cmd = Command::new(rust_streamer_bin);
             cmd.arg("--profile")
                 .arg(&cfg.profile)
+                .arg("--capture-backend")
+                .arg(match capture_backend {
+                    "x11_gst" => "x11",
+                    "wayland_portal" => "wayland-portal",
+                    _ => "auto",
+                })
                 .arg("--port")
                 .arg(self.stream_port.to_string())
                 .arg("--encoder")
@@ -723,9 +867,28 @@ impl DaemonCore {
             if cfg.intra_only {
                 cmd.arg("--intra-only");
             }
+            if capture_backend == "x11_gst" {
+                if let Some(display) = self.host_probe.display.as_deref() {
+                    cmd.env("DISPLAY", display);
+                }
+                if let Ok(home) = std::env::var("HOME") {
+                    let xauth = std::path::Path::new(&home).join(".Xauthority");
+                    if xauth.exists() {
+                        cmd.env("XAUTHORITY", xauth);
+                    }
+                }
+            }
         } else {
+            if capture_backend == "x11_gst" {
+                return Err(CoreError::Spawn(
+                    "x11 backend requires Rust streamer (set WBEAM_USE_RUST_STREAMER=true)"
+                        .to_string(),
+                ));
+            }
             warn!("WBEAM_USE_RUST_STREAMER=false – using legacy python streamer");
-            let stream_script = self.root.join("src/host/scripts/stream_wayland_portal_h264.py");
+            let stream_script = self
+                .root
+                .join("src/host/scripts/stream_wayland_portal_h264.py");
             cmd = Command::new("python3");
             cmd.arg("-u")
                 .arg(stream_script)
@@ -816,7 +979,9 @@ impl DaemonCore {
 
         inner.last_output_at = Some(Instant::now());
 
-        if line.contains("Streaming Wayland screencast") {
+        if line.contains("Streaming Wayland screencast")
+            || line.contains("Streaming X11 screencast")
+        {
             inner.state = STATE_STREAMING.to_string();
             inner.last_error.clear();
             inner.stream_started_at = Some(Instant::now());
@@ -976,7 +1141,12 @@ mod tests {
     // ── helpers ─────────────────────────────────────────────────────────────
 
     fn default_inner() -> Inner {
-        Inner::new("test-host".to_string(), ActiveConfig::balanced_default())
+        let presets = wbeamd_api::presets();
+        Inner::new(
+            "test-host".to_string(),
+            ActiveConfig::balanced_default(),
+            presets,
+        )
     }
 
     /// Client metrics indicating high decode pressure (decode_p95 > 12 ms).

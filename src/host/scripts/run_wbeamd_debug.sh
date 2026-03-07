@@ -17,11 +17,29 @@ adb_device_cmd() {
   fi
 }
 
-LOG_DIR="${WBEAM_DEBUG_LOG_DIR:-$ROOT_DIR/src/host/rust/logs}"
+LOG_DIR="${WBEAM_DEBUG_LOG_DIR:-$ROOT_DIR/logs}"
 mkdir -p "$LOG_DIR"
 TS="$(date +%Y%m%d-%H%M%S)"
-LOG_FILE="${WBEAM_DEBUG_LOG_FILE:-$LOG_DIR/wbeamd-debug-$TS.log}"
-SESSION_RUST_LOG_DIR="$LOG_DIR/runs/$TS"
+
+next_run_id() {
+  local day counter_file n
+  day="$(date +%Y%m%d)"
+  counter_file="$LOG_DIR/.run.${day}.counter"
+  n=0
+  if [[ -f "$counter_file" ]]; then
+    n="$(tr -d '[:space:]' < "$counter_file" 2>/dev/null || echo 0)"
+  fi
+  if [[ ! "$n" =~ ^[0-9]+$ ]]; then
+    n=0
+  fi
+  n=$((n + 1))
+  printf '%s' "$n" > "$counter_file"
+  printf '%04d' "$n"
+}
+
+RUN_ID="$(next_run_id)"
+LOG_FILE="${WBEAM_DEBUG_LOG_FILE:-$LOG_DIR/${TS}.service.${RUN_ID}.log}"
+SESSION_RUST_LOG_DIR="$LOG_DIR/${TS}.service-rust.${RUN_ID}.d"
 mkdir -p "$SESSION_RUST_LOG_DIR"
 
 if command -v systemctl >/dev/null 2>&1; then
