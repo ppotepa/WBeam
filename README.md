@@ -57,6 +57,15 @@ full migration notes: `docs/repo_tree_src_layout.md`
 ./runas-remote <user> ./devtool -- gui
 ```
 
+- secret/env safety note for `runas-remote`:
+```bash
+# pass only selected secret env vars to target app (avoid putting secrets in CLI args)
+RUNAS_REMOTE_PASSTHROUGH_ENV="WBEAM_API_TOKEN,WBEAM_SECRET" ./runas-remote <user> ./devtool -- gui
+
+# or load KEY=VALUE from file (chmod 600 recommended)
+RUNAS_REMOTE_ENV_FILE=/path/to/remote.env ./runas-remote <user> ./devtool -- gui
+```
+
 - run proto lane:
 
 ```bash
