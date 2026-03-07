@@ -1,5 +1,54 @@
 # WBeam Progress Log
 
+Date: 2026-03-07
+Focus: Main lane stabilization (API17 path), host abstraction, deploy/runtime reliability
+
+## Current Branch State
+- Branch: `master`
+- Latest pushed commits:
+  - `c04f7986` - proto profile integration + host probing + remote/start/logging flow
+  - `2058d5f9` - `runas-remote` secure env passthrough + README note
+
+## Delivery Milestones Completed (Chronological)
+1. Android API17 decoder bootstrap path integrated in main app:
+   - delayed decoder init until SPS/PPS
+   - in-stream CSD extraction and codec config queueing
+   - profile set expanded with proto-trained presets (`fast60*`, `safe_60`, `quality60`, etc.)
+2. Host preset migration from proto to main Rust daemon/streamer:
+   - daemon loads profiles from `proto/config/profiles.json`
+   - `/v1/presets` now returns proto set (verified count: 9)
+   - validation and apply/start flow bound to loaded preset map
+3. Host runtime abstraction for capture/session probing:
+   - Linux session detection (`x11`/`wayland`) + capture mode resolution
+   - backend split introduced in streamer (`backend/{x11,wayland}`)
+4. Streamer/runtime tuning migration from proto:
+   - profile-driven queue/appsink/timeout/keepalive/GOP knobs
+   - transport sender behavior moved under profile-resolved config
+5. Android deploy and IP path hardening:
+   - legacy host IP selection prefers tether gateway from device route
+   - release install skip logic fixed to include baked config stamp, not only version
+6. Remote one-shot workflow:
+   - `start-remote` script added (service restart + android deploy + desktop launch via runas)
+   - logs standardized in `logs/` as `YYYYMMDD-HHMMSS.<domain>.<run>.log`
+7. Security hardening for remote launcher:
+   - `runas-remote` now supports `RUNAS_REMOTE_PASSTHROUGH_ENV`
+   - `runas-remote` now supports `RUNAS_REMOTE_ENV_FILE`
+   - `RUNAS_REMOTE_QUIET=1` to suppress startup metadata line
+   - README note added to keep secrets out of CLI args
+
+## Runtime Verification (2026-03-07)
+- `./wbeam service restart` OK, host probe shows `session=x11`, `capture_mode=x11_gst`
+- `./wbeam android deploy-release` builds/installs with baked host `192.168.42.239`
+- Android no longer uses stale `192.168.100.208`; control API points to `192.168.42.239:5001`
+- Host stream enters `STREAMING`; host logs show client connect + stable ~58-60 fps after reconnect
+- `./start-remote ppotepa` launches desktop app in remote X11 session (`display=:10`)
+
+## Known Follow-ups
+- Continue cross-platform host backend abstraction:
+  - keep Linux `x11/wayland` as primary
+  - add Windows backend lane next
+- Improve final cleanup around local cache/log artifacts in working tree during long debug sessions.
+
 Date: 2026-03-05
 Focus: Desktop Tauri lane + Android/Host delivery wiring
 
