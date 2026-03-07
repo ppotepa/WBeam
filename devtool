@@ -9,6 +9,7 @@ TAURI_MANIFEST="$TAURI_DIR/src-tauri/Cargo.toml"
 HOST_WORKSPACE_DIR="$ROOT_DIR/src/host/rust"
 CONTROL_PORT="${WBEAM_CONTROL_PORT:-5001}"
 STREAM_PORT="${WBEAM_STREAM_PORT:-5000}"
+BUILD_VERSION_FILE="$ROOT_DIR/.wbeam_build_version"
 
 mkdir -p "$TARGET_DIR"
 
@@ -36,6 +37,38 @@ EOF
 
 log() {
   printf '[devtool] %s\n' "$*"
+}
+
+normalize_build_version() {
+  local raw="${1:-}"
+  if [[ -z "$raw" ]]; then
+    return 1
+  fi
+  if [[ "$raw" == 0.0.* ]]; then
+    echo "$raw"
+  else
+    echo "0.0.${raw}"
+  fi
+}
+
+build_version_generate() {
+  local rev ts
+  rev="$(git -C "$ROOT_DIR" rev-parse --short=6 HEAD 2>/dev/null || true)"
+  [[ -n "$rev" ]] || rev="dev000"
+  ts="$(date +%Y%m%d%H%M%S)"
+  echo "0.0.${rev}.${ts}"
+}
+
+build_version_for_build() {
+  local explicit="${WBEAM_BUILD_REV:-}"
+  if [[ -n "$explicit" ]]; then
+    normalize_build_version "$explicit"
+    return 0
+  fi
+  local v
+  v="$(build_version_generate)"
+  printf '%s\n' "$v" > "$BUILD_VERSION_FILE"
+  echo "$v"
 }
 
 run_gui() {
@@ -132,6 +165,11 @@ run_deps_install() {
 }
 
 run_host_build() {
+  local build_version="${1:-}"
+  if [[ -z "$build_version" ]]; then
+    build_version="$(build_version_for_build)"
+  fi
+  log "build version: $build_version"
   log "build host runtime"
   cargo build --release -p wbeamd-server -p wbeamd-streamer --manifest-path "$HOST_WORKSPACE_DIR/Cargo.toml"
 }
@@ -150,14 +188,19 @@ run_desktop_build() {
 
 run_android_build() {
   local min_sdk="$1"
+  local build_version="${2:-}"
   local host="${WBEAM_HOST:-127.0.0.1}"
   local api_host="${WBEAM_API_HOST:-$host}"
   local stream_host="${WBEAM_STREAM_HOST:-$host}"
+  if [[ -z "$build_version" ]]; then
+    build_version="$(build_version_for_build)"
+  fi
   log "build android debug (minSdk=$min_sdk)"
   (
     cd "$ROOT_DIR/android"
     bash ./gradlew \
       "-PWBEAM_MIN_SDK=$min_sdk" \
+      "-PWBEAM_BUILD_REV=$build_version" \
       "-PWBEAM_HOST=$host" \
       "-PWBEAM_API_HOST=$api_host" \
       "-PWBEAM_STREAM_HOST=$stream_host" \
@@ -166,10 +209,12 @@ run_android_build() {
 }
 
 run_build_all() {
-  run_host_build
+  local build_version
+  build_version="$(build_version_for_build)"
+  run_host_build "$build_version"
   run_desktop_build
-  run_android_build 17
-  run_android_build 19
+  run_android_build 17 "$build_version"
+  run_android_build 19 "$build_version"
   log "build complete"
 }
 
@@ -199,13 +244,14 @@ required_min_sdk_for_device() {
 
 build_android_apk_variant() {
   local min_sdk="$1"
+  local build_version="$2"
   local out_apk="$TARGET_DIR/apk/app-debug-min${min_sdk}.apk"
   mkdir -p "$TARGET_DIR/apk"
   if [[ -f "$out_apk" ]]; then
     echo "$out_apk"
     return 0
   fi
-  run_android_build "$min_sdk"
+  run_android_build "$min_sdk" "$build_version"
   local built_apk="$ROOT_DIR/android/app/build/outputs/apk/debug/app-debug.apk"
   if [[ ! -f "$built_apk" ]]; then
     echo "APK not found after build: $built_apk" >&2
@@ -244,6 +290,9 @@ run_deploy_all() {
     esac
   done
 
+  local build_version
+  build_version="$(build_version_for_build)"
+
   mapfile -t serials < <(adb_connected_serials)
   if [[ -n "$serial_filter" ]]; then
     local filtered=()
@@ -279,7 +328,7 @@ run_deploy_all() {
       fi
     else
       if [[ -z "${apk_by_min_sdk[$min_sdk]:-}" ]]; then
-        apk_by_min_sdk[$min_sdk]="$(build_android_apk_variant "$min_sdk")"
+        apk_by_min_sdk[$min_sdk]="$(build_android_apk_variant "$min_sdk" "$build_version")"
       fi
       apk="${apk_by_min_sdk[$min_sdk]}"
     fi
