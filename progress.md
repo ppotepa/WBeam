@@ -11,6 +11,11 @@ Status: active
 - Service lifecycle is now controllable from desktop UI (install/uninstall/start/stop + status probe).
 
 ## Latest Completed Commits
+- `0c3dbee8` - `fix(remote): enforce dev-remote host/serial and harden gradle metadata cache recovery`
+  - `start-remote` now clears legacy env keys and stale host override vars before deploy.
+  - Added `WBEAM_DEV_REMOTE_SERIAL` support to force specific target when multiple devices are connected.
+  - `start-remote` keeps host override in one place (`WBEAM_DEV_REMOTE_HOST_IP`, default `192.168.100.208`).
+  - Gradle recovery in `wbeam` now rotates both `transforms` and `groovy-dsl` cache dirs on workspace metadata corruption.
 - `6010890e` - `fix(wbeam): auto-select adb serial to avoid multi-device deploy ambiguity`
   - Auto-selects a concrete serial when multiple `adb` devices are connected and `WBEAM_ANDROID_SERIAL` is not set.
   - Prevents `more than one device/emulator` failures in single-device flows (`./wbeam android deploy`, `start-remote`).
@@ -50,6 +55,7 @@ Status: active
 - `3d632425` - `refactor: drop service scripts and reset desktop-tauri to Solid/TS baseline`
 
 ## Runtime Verification (2026-03-07)
+- `bash -n start-remote wbeam` -> OK
 - `bash -n wbeam` -> OK
 - `bash -n wbeam devtool` -> OK
 - `cargo check --manifest-path src/host/rust/Cargo.toml -p wbeamd-core` -> OK
