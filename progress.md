@@ -11,6 +11,17 @@ Status: active
 - Service lifecycle is now controllable from desktop UI (install/uninstall/start/stop + status probe).
 
 ## Latest Completed Commits
+- `81162863` - `fix(versioning): unify host/android build rev and add version doctor`
+  - Added `./wbeam version doctor` with structured diagnostics and log output (`logs/YYYYMMDD-HHMMSS.version.NNNN.log`):
+    - host `/health` build revision
+    - `.wbeam_build_version` value
+    - `WBEAM_BUILD_REV` env status
+    - per-device APK version + match/mismatch result
+  - Added `./wbeam version new` and `./wbeam version current` helpers.
+  - `start-remote` now generates one shared build revision and passes it to both host build and Android deploy-all.
+  - `start-remote` now runs `wbeam version doctor` at the end of deploy for immediate mismatch diagnostics.
+  - `run_wbeamd.sh` now reuses `WBEAM_BUILD_REV` (or `.wbeam_build_version`) for debug `cargo run`, preventing host debug fallback revision (`0.0.<sha>-build`) drift.
+  - Android `StatusPoller` now logs build mismatch transitions (app vs host revision) to `adb logcat` for automatic root-cause visibility.
 - `5e811955` - `fix(remote): fresh start flow and robust multi-device deploy-all`
   - `start-remote` now performs full fresh cycle: host down, remove desktop user service, uninstall APK on all connected adb devices, host build, host start in remote user session, deploy-all, GUI launch.
   - `start-remote` wait logic hardened: longer control API wait and explicit host-probe readiness check (`supported=true` best effort).
