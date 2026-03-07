@@ -11,6 +11,11 @@ Status: active
 - Service lifecycle is now controllable from desktop UI (install/uninstall/start/stop + status probe).
 
 ## Latest Completed Commits
+- `7f8bb6de` - `fix(host): handle adb reverse per-serial for multi-device setups`
+  - Root cause fixed for multi-device ADB environments (`more than one emulator/device`).
+  - Host reverse mapping now targets explicit serials instead of global `adb reverse`.
+  - `wbeamd-core` now resolves connected serials from `adb devices` and applies reverse per device.
+  - Honors `WBEAM_ANDROID_SERIAL` when explicitly provided (single-target override).
 - `edf5ff33` - `feat(desktop-tauri): basic 400x800 device cards with service controls`
   - Added runtime title with host name (`WBeam - <hostname>`).
   - Added Basic/Advanced mode toggle (settings button placeholder).
@@ -33,6 +38,7 @@ Status: active
 - `3d632425` - `refactor: drop service scripts and reset desktop-tauri to Solid/TS baseline`
 
 ## Runtime Verification (2026-03-07)
+- `cargo check --manifest-path src/host/rust/Cargo.toml -p wbeamd-core` -> OK
 - `cd src/apps/desktop-tauri && npm run build` -> OK
 - `cargo check --manifest-path src/apps/desktop-tauri/src-tauri/Cargo.toml` -> OK
 
