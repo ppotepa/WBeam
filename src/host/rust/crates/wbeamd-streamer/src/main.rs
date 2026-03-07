@@ -1,3 +1,4 @@
+mod backend;
 mod capture;
 mod cli;
 mod encoder;
@@ -15,7 +16,7 @@ use gst::glib;
 use gst::prelude::*;
 use gstreamer as gst;
 
-use capture::request_portal_stream;
+use backend::prepare_capture;
 use cli::{resolve_profile, Args};
 use encoder::{is_hevc, is_png};
 use pipeline::make_pipeline;
@@ -28,16 +29,14 @@ async fn main() -> Result<()> {
 
     let cfg = resolve_profile(&args)?;
     println!(
-        "[wbeam] profile={} mode={:?} size={}x{} fps={} bitrate={}kbps encoder={} cursor={} skip_videoscale={}",
-        args.profile, cfg.stream_mode, cfg.width, cfg.height, cfg.fps, cfg.bitrate_kbps, cfg.encoder, args.cursor_mode, cfg.skip_videoscale
+        "[wbeam] profile={} mode={:?} capture={:?} size={}x{} fps={} bitrate={}kbps encoder={} cursor={} skip_videoscale={}",
+        args.profile, cfg.stream_mode, cfg.capture_backend, cfg.width, cfg.height, cfg.fps, cfg.bitrate_kbps, cfg.encoder, args.cursor_mode, cfg.skip_videoscale
     );
-    println!("[wbeam] Requesting ScreenCast portal session (KDE prompt expected)...");
-
-    let portal = request_portal_stream(&cfg).await?;
-    println!("[wbeam] Got PipeWire node id: {}", portal.node_id);
+    let capture = prepare_capture(&cfg).await?;
+    capture.announce_startup();
 
     let (pipeline, appsink, fps_counter) = make_pipeline(
-        &portal,
+        &capture,
         &cfg,
         args.port,
         &args.debug_dir,
@@ -61,6 +60,7 @@ async fn main() -> Result<()> {
         appsink,
         args.port,
         cfg.fps,
+        cfg.clone(),
         cfg.stream_mode,
         stop_flag.clone(),
         fps_counter,
@@ -90,10 +90,7 @@ async fn main() -> Result<()> {
         }
     })?;
 
-    println!(
-        "[wbeam] Streaming Wayland screencast on tcp://0.0.0.0:{}",
-        args.port
-    );
+    capture.announce_streaming(args.port);
     if args.debug_fps > 0 {
         println!(
             "[wbeam] Debug frames: {} ({} fps, max 300 files)",

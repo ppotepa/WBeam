@@ -3,16 +3,33 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-LOG_DIR="${WBEAM_DEBUG_LOG_DIR:-$ROOT_DIR/src/host/rust/logs}"
+LOG_DIR="${WBEAM_DEBUG_LOG_DIR:-$ROOT_DIR/logs}"
 mkdir -p "$LOG_DIR"
 
 TS="$(date +%Y%m%d-%H%M%S)"
-ANDROID_OUT="$LOG_DIR/android-logcat-$TS.log"
-COMBINED_OUT="$LOG_DIR/live-combined-$TS.log"
+next_run_id() {
+  local day counter_file n
+  day="$(date +%Y%m%d)"
+  counter_file="$LOG_DIR/.run.${day}.counter"
+  n=0
+  if [[ -f "$counter_file" ]]; then
+    n="$(tr -d '[:space:]' < "$counter_file" 2>/dev/null || echo 0)"
+  fi
+  if [[ ! "$n" =~ ^[0-9]+$ ]]; then
+    n=0
+  fi
+  n=$((n + 1))
+  printf '%s' "$n" > "$counter_file"
+  printf '%04d' "$n"
+}
+
+RUN_ID="$(next_run_id)"
+ANDROID_OUT="$LOG_DIR/${TS}.adb.${RUN_ID}.log"
+COMBINED_OUT="$LOG_DIR/${TS}.live.${RUN_ID}.log"
 
 HOST_FILE="${1:-}"
 if [[ -z "$HOST_FILE" ]]; then
-  HOST_FILE="$(ls -1t "$LOG_DIR"/wbeamd-debug-*.log 2>/dev/null | head -n 1 || true)"
+  HOST_FILE="$(ls -1t "$LOG_DIR"/*.service.*.log 2>/dev/null | head -n 1 || true)"
 fi
 
 if [[ -z "$HOST_FILE" ]]; then

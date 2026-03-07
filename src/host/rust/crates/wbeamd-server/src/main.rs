@@ -83,6 +83,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/status", get(get_status))
+        .route("/host-probe", get(get_host_probe))
         .route("/health", get(get_health))
         .route("/presets", get(get_presets))
         .route("/metrics", get(get_metrics))
@@ -93,6 +94,7 @@ async fn main() {
         .route("/client-metrics", post(post_client_metrics))
         .route("/client-hello", post(post_client_hello))
         .route("/v1/status", get(get_status))
+        .route("/v1/host-probe", get(get_host_probe))
         .route("/v1/health", get(get_health))
         .route("/v1/presets", get(get_presets))
         .route("/v1/metrics", get(get_metrics))
@@ -134,6 +136,10 @@ async fn main() {
 
 async fn get_status(State(state): State<AppState>) -> impl IntoResponse {
     Json(state.core.status().await)
+}
+
+async fn get_host_probe(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.core.host_probe().await)
 }
 
 async fn get_health(State(state): State<AppState>) -> impl IntoResponse {
@@ -219,7 +225,7 @@ async fn post_client_hello(
 
 async fn core_error_response(core: Arc<DaemonCore>, err: CoreError) -> axum::response::Response {
     let status = match err {
-        CoreError::Validation(_) => StatusCode::BAD_REQUEST,
+        CoreError::Validation(_) | CoreError::UnsupportedHost(_) => StatusCode::BAD_REQUEST,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     };
 

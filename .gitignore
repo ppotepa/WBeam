@@ -10,6 +10,28 @@ Thumbs.db
 **/.idea/
 .vscode/
 
+# Android / Gradle
+android/.gradle/
+android/**/build/
+android/local.properties
+android/captures/
+android/.cxx/
+.gradle-user/
+proto/front/.gradle/
+proto/front/**/.gradle/
+proto/front/**/build/
+proto/front/local.properties
+proto/front/captures/
+proto/front/.cxx/
+proto/front/**/.cxx/
+proto/front/.externalNativeBuild/
+proto/front/**/.externalNativeBuild/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+
 # Generic build artifacts
 **/build/
 **/target/
@@ -17,20 +39,6 @@ Thumbs.db
 **/.cxx/
 **/.externalNativeBuild/
 .build/
-.gradle-user/
-
-# Android packages / bytecode
-*.apk
-*.aab
-*.ap_
-*.dex
-*.class
-
-# Android local config
-android/local.properties
-android/captures/
-proto/front/local.properties
-proto/front/captures/
 
 # .NET
 proto/host-cs/bin/
@@ -46,14 +54,19 @@ venv/
 
 # Logs and runtime output
 *.log
-*.pid
-*.tmp
-*.cache
-all.log
+.logs/
+logs/*
+logs/.*
+!logs/.gitkeep
+.gradle-build.*.log
 src/host/logs/**
 src/host/rust/logs/**
 src/protocol/logs/**
 !src/host/rust/logs/.gitkeep
+*.pid
+*.tmp
+*.cache
+all.log
 
 # Local generated helper files
 codebase_concat*.txt

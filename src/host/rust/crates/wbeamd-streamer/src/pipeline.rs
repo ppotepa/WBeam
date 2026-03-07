@@ -4,7 +4,6 @@
 //! encoder → h264parse/h265parse → appsink pipeline, with an optional debug JPEG
 //! branch when `debug_fps > 0`.
 
-use std::os::unix::io::AsRawFd;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
@@ -15,7 +14,7 @@ use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
 
-use crate::capture::PortalStream;
+use crate::backend::PreparedCapture;
 use crate::cli::{ResolvedConfig, StreamMode};
 use crate::encoder::{configure_encoder, is_hevc, is_png, pick_encoder};
 
@@ -79,28 +78,24 @@ fn buffer_profile(mode: StreamMode, fps: u32, mode_png: bool) -> BufferProfile {
 /// Returns the `(Pipeline, AppSink, fps_counter)` triple.  The `fps_counter`
 /// is incremented by a pad probe on the appsink's sink pad on every buffer.
 pub fn make_pipeline(
-    stream: &PortalStream,
+    capture: &PreparedCapture,
     cfg: &ResolvedConfig,
     _port: u16,
     debug_dir: &str,
     debug_fps: u32,
     framed: bool,
 ) -> Result<(gst::Pipeline, gst_app::AppSink, Arc<AtomicU64>)> {
-    let pipeline = gst::Pipeline::with_name("wbeam-wayland-pipeline");
+    let pipeline = gst::Pipeline::with_name("wbeam-capture-pipeline");
     let mode_png = is_png(&cfg.encoder);
     let encoder_name = pick_encoder(&cfg.encoder)?;
     let hevc = is_hevc(&cfg.encoder);
-    let profile = buffer_profile(cfg.stream_mode, cfg.fps, mode_png);
+    let mut profile = buffer_profile(cfg.stream_mode, cfg.fps, mode_png);
+    profile.queue_buffers = cfg.queue_max_buffers.max(1);
+    profile.appsink_buffers = cfg.appsink_max_buffers.max(1);
+    profile.queue_time_ns = (cfg.queue_max_time_ms.max(1) as u64) * 1_000_000u64;
 
     // ── Source ───────────────────────────────────────────────────────────────
-    let src = gst::ElementFactory::make("pipewiresrc")
-        .name("src")
-        .build()
-        .context("pipewiresrc missing")?;
-    src.set_property("fd", stream.fd.as_raw_fd());
-    src.set_property("path", stream.node_id.to_string());
-    src.set_property("do-timestamp", true);
-    src.set_property("keepalive-time", 1000i32);
+    let src = capture.build_source(cfg)?;
 
     // ── Transform chain ──────────────────────────────────────────────────────
     let debug_enabled = debug_fps > 0;
@@ -217,6 +212,7 @@ pub fn make_pipeline(
             cfg.fps,
             &cfg.nv_preset,
             cfg.intra_only,
+            cfg.h264_gop,
         );
     }
     if let Some(rate) = &rate {
@@ -224,7 +220,7 @@ pub fn make_pipeline(
         // duplicates a frame to pad up to rate.  Duplicated frames waste encoded
         // bits (CBR rate control still charges them) and cause micro-stutter on
         // the Android side.
-        let _ = rate.set_property("drop-only", true);
+        let _ = rate.set_property("drop-only", cfg.videorate_drop_only);
         let _ = rate.set_property("max-rate", cfg.fps as i32);
         let _ = rate.set_property("average-period", 1_000_000_000u64 / cfg.fps as u64);
     }

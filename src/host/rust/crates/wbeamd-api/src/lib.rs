@@ -5,7 +5,20 @@ use thiserror::Error;
 
 pub const VALID_ENCODERS: &[&str] = &["h264", "h265", "rawpng"];
 pub const VALID_CURSOR_MODES: &[&str] = &["hidden", "embedded", "metadata"];
-pub const VALID_PROFILES: &[&str] = &["lowlatency", "balanced", "ultra"];
+pub const VALID_PROFILES: &[&str] = &[
+    "lowlatency",
+    "balanced",
+    "ultra",
+    "safe_60",
+    "aggressive_60",
+    "quality_60",
+    "debug_60",
+    "fast60",
+    "balanced60",
+    "quality60",
+    "fast60_2",
+    "fast60_3",
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ActiveConfig {
@@ -254,6 +267,21 @@ pub struct StatusResponse {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct HostProbeResponse {
+    #[serde(flatten)]
+    pub base: BaseResponse,
+    pub ok: bool,
+    pub os: String,
+    pub session: String,
+    pub desktop: String,
+    pub capture_mode: String,
+    pub remote: bool,
+    pub display: Option<String>,
+    pub wayland_display: Option<String>,
+    pub supported: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct HealthResponse {
     #[serde(flatten)]
     pub base: BaseResponse,
@@ -309,45 +337,69 @@ pub enum ValidationError {
 }
 
 pub fn presets() -> BTreeMap<String, ActiveConfig> {
+    fn cfg(profile: &str, size: &str, fps: u32, bitrate_kbps: u32, encoder: &str) -> ActiveConfig {
+        ActiveConfig {
+            profile: profile.to_string(),
+            encoder: encoder.to_string(),
+            cursor_mode: "embedded".to_string(),
+            size: size.to_string(),
+            fps,
+            bitrate_kbps,
+            debug_fps: 0,
+            intra_only: false,
+        }
+    }
+
     let mut map = BTreeMap::new();
     map.insert(
         "lowlatency".to_string(),
-        ActiveConfig {
-            profile: "lowlatency".to_string(),
-            encoder: "h265".to_string(),
-            cursor_mode: "embedded".to_string(),
-            size: "1280x720".to_string(),
-            fps: 60,
-            bitrate_kbps: 60_000,
-            debug_fps: 0,
-            intra_only: false,
-        },
+        cfg("lowlatency", "1280x720", 60, 60_000, "h265"),
     );
     map.insert(
         "balanced".to_string(),
-        ActiveConfig {
-            profile: "balanced".to_string(),
-            encoder: "h265".to_string(),
-            cursor_mode: "embedded".to_string(),
-            size: "1920x1080".to_string(),
-            fps: 60,
-            bitrate_kbps: 100_000,
-            debug_fps: 0,
-            intra_only: false,
-        },
+        cfg("balanced", "1920x1080", 60, 100_000, "h265"),
     );
     map.insert(
         "ultra".to_string(),
-        ActiveConfig {
-            profile: "ultra".to_string(),
-            encoder: "h265".to_string(),
-            cursor_mode: "embedded".to_string(),
-            size: "2560x1440".to_string(),
-            fps: 60,
-            bitrate_kbps: 150_000,
-            debug_fps: 0,
-            intra_only: false,
-        },
+        cfg("ultra", "2560x1440", 60, 150_000, "h265"),
+    );
+
+    // Proto-trained profiles (2026-02 autotune lineage), integrated into main presets.
+    map.insert(
+        "safe_60".to_string(),
+        cfg("safe_60", "1024x640", 60, 10_000, "h264"),
+    );
+    map.insert(
+        "aggressive_60".to_string(),
+        cfg("aggressive_60", "1024x640", 60, 7_000, "h264"),
+    );
+    map.insert(
+        "quality_60".to_string(),
+        cfg("quality_60", "1024x640", 60, 11_000, "h264"),
+    );
+    map.insert(
+        "debug_60".to_string(),
+        cfg("debug_60", "1024x640", 60, 8_500, "h264"),
+    );
+    map.insert(
+        "fast60".to_string(),
+        cfg("fast60", "1024x640", 60, 10_000, "h264"),
+    );
+    map.insert(
+        "balanced60".to_string(),
+        cfg("balanced60", "1024x640", 60, 10_000, "h264"),
+    );
+    map.insert(
+        "quality60".to_string(),
+        cfg("quality60", "1024x640", 60, 10_000, "h264"),
+    );
+    map.insert(
+        "fast60_2".to_string(),
+        cfg("fast60_2", "1280x800", 60, 10_000, "h264"),
+    );
+    map.insert(
+        "fast60_3".to_string(),
+        cfg("fast60_3", "1280x800", 60, 10_000, "h264"),
     );
     map
 }
@@ -356,19 +408,28 @@ pub fn validate_config(
     patch: ConfigPatch,
     current: &ActiveConfig,
 ) -> Result<ActiveConfig, ValidationError> {
+    validate_config_with_presets(patch, current, &presets())
+}
+
+pub fn validate_config_with_presets(
+    patch: ConfigPatch,
+    current: &ActiveConfig,
+    preset_map: &BTreeMap<String, ActiveConfig>,
+) -> Result<ActiveConfig, ValidationError> {
     let base_profile = patch
         .profile
         .as_deref()
         .unwrap_or(&current.profile)
         .to_string();
-    if !VALID_PROFILES.contains(&base_profile.as_str()) {
+    if !preset_map.contains_key(&base_profile) {
         return Err(ValidationError::InvalidProfile);
     }
 
     let requested_profile = patch.profile.clone();
     let mut cfg = if requested_profile.is_some() {
-        presets()
-            .remove(&base_profile)
+        preset_map
+            .get(&base_profile)
+            .cloned()
             .ok_or(ValidationError::InvalidProfile)?
     } else {
         current.clone()

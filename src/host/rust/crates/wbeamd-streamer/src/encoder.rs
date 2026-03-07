@@ -69,8 +69,15 @@ pub fn configure_encoder(
     fps: u32,
     nv_preset: &str,
     intra_only: bool,
+    h264_gop: u32,
 ) {
-    let gop: u32 = if intra_only { 1 } else { (fps / 8).max(6) };
+    let gop: u32 = if intra_only {
+        1
+    } else if h264_gop > 0 {
+        h264_gop
+    } else {
+        (fps / 8).max(6)
+    };
 
     if intra_only {
         println!("[wbeam] ALL-INTRA mode: gop=1, every frame is a full IDR");
@@ -110,11 +117,12 @@ pub fn configure_encoder(
         let _ = enc.set_property("bitrate", bitrate_kbps);
         let _ = enc.set_property_from_str("speed-preset", "ultrafast");
         let _ = enc.set_property_from_str("tune", "zerolatency");
+        let _ = enc.set_property("byte-stream", true);
         let _ = enc.set_property("key-int-max", gop);
         let option_str = if intra_only {
-            "bframes=0:no-open-gop=1:scenecut=0"
+            "bframes=0:cabac=0:ref=1:8x8dct=0:no-open-gop=1:scenecut=0"
         } else {
-            "bframes=0:no-open-gop=1:scenecut=40"
+            "bframes=0:cabac=0:ref=1:8x8dct=0:no-open-gop=1:scenecut=40"
         };
         let _ = enc.set_property("option-string", option_str);
         return;

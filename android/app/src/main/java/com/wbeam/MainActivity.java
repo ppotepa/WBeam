@@ -75,7 +75,20 @@ public class MainActivity extends AppCompatActivity {
     private static final String TEST_VIDEO_URL =
             "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4";
 
-    private static final String[] PROFILE_OPTIONS = {"lowlatency", "balanced", "ultra"};
+    private static final String[] PROFILE_OPTIONS = {
+            "fast60_3",
+            "fast60_2",
+            "fast60",
+            "safe_60",
+            "aggressive_60",
+            "quality_60",
+            "debug_60",
+            "balanced60",
+            "quality60",
+            "lowlatency",
+            "balanced",
+            "ultra"
+    };
     /**
      * Preferred video encoder for this device.
      * HEVC hardware decode was standardised in API 21 (Android 5.0).  On older
@@ -1012,16 +1025,16 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateHostHint() {
-        int[] sz = computeScaledSize();
+        StreamConfig cfg = effectiveStreamConfig();
         String apiBase = HostApiClient.API_BASE;
         String daemonStateUi = effectiveDaemonState(daemonState, latestPresentFps, 0, 0);
         String line1 = "Control API " + (daemonReachable ? "connected" : "waiting")
             + ": " + apiBase;
         String line2 = "Host: " + daemonHostName + " | Daemon: " + daemonStateUi + " (" + daemonService + ")";
         String line3 = "Outgoing config: " + getSelectedProfile()
-                + ", " + sz[0] + "x" + sz[1]
-                + ", " + getSelectedFps() + "fps, "
-                + getSelectedBitrateMbps() + "Mbps, "
+                + ", " + cfg.width + "x" + cfg.height
+                + ", " + cfg.fps + "fps, "
+                + cfg.bitrateMbps + "Mbps, "
                 + getSelectedEncoder() + (intraOnlyEnabled ? "+intra" : "")
                 + ", cursor " + getSelectedCursorMode();
         hostHintText.setText(line1 + "\n" + line2 + "\n" + line3);
@@ -1056,19 +1069,23 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private JSONObject buildConfigPayload() {
-        int[] sz = computeScaledSize();
+        StreamConfig cfg = effectiveStreamConfig();
         JSONObject payload = new JSONObject();
         try {
             String uiEncoder = getSelectedEncoder();
             // "raw-png" (UI label) → "rawpng" (API name); "h264"/"h265" pass through as-is.
             String encoder = "raw-png".equals(uiEncoder) ? "rawpng" : uiEncoder;
+            if (isLegacyAndroidDevice() && !"rawpng".equals(encoder)) {
+                // API17-era decoders are unstable with modern presets/codecs.
+                encoder = "h264";
+            }
             boolean intraOnly = "h265".equals(encoder) && intraOnlyEnabled;
             payload.put("profile", getSelectedProfile());
             payload.put("encoder", encoder);
             payload.put("cursor_mode", getSelectedCursorMode());
-            payload.put("size", sz[0] + "x" + sz[1]);
-            payload.put("fps", getSelectedFps());
-            payload.put("bitrate_kbps", getSelectedBitrateMbps() * 1000);
+            payload.put("size", cfg.width + "x" + cfg.height);
+            payload.put("fps", cfg.fps);
+            payload.put("bitrate_kbps", cfg.bitrateMbps * 1000);
             payload.put("debug_fps", 0);
             payload.put("intra_only", intraOnly);
         } catch (JSONException ignored) {
@@ -1145,11 +1162,14 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        int[] decodeSize = computeScaledSize();
-        int fps = getSelectedFps();
-        long frameUs = Math.max(1L, 1_000_000L / Math.max(1, fps));
+        StreamConfig cfg = effectiveStreamConfig();
+        long frameUs = Math.max(1L, 1_000_000L / Math.max(1, cfg.fps));
         SurfaceView preview = findViewById(R.id.previewSurface);
-        preview.getHolder().setFixedSize(decodeSize[0], decodeSize[1]);
+        if (isLegacyAndroidDevice()) {
+            preview.getHolder().setSizeFromLayout();
+        } else {
+            preview.getHolder().setFixedSize(cfg.width, cfg.height);
+        }
 
         player = new H264TcpPlayer(
                 surface,
@@ -1169,8 +1189,8 @@ public class MainActivity extends AppCompatActivity {
                         metricsReporter.push(metrics);
                     }
                 },
-                decodeSize[0],
-                decodeSize[1],
+                cfg.width,
+                cfg.height,
                 frameUs
         );
         player.start();
@@ -2233,6 +2253,41 @@ public class MainActivity extends AppCompatActivity {
         int w = Math.max(640, (baseW * scale / 100) & ~1);
         int h = Math.max(360, (baseH * scale / 100) & ~1);
         return new int[]{w, h};
+    }
+
+    private boolean isLegacyAndroidDevice() {
+        return Build.VERSION.SDK_INT <= Build.VERSION_CODES.JELLY_BEAN_MR2;
+    }
+
+    private StreamConfig effectiveStreamConfig() {
+        int[] sz = computeScaledSize();
+        int width = sz[0];
+        int height = sz[1];
+        int fps = getSelectedFps();
+        int bitrateMbps = getSelectedBitrateMbps();
+        if (isLegacyAndroidDevice()) {
+            // API17 transport is highly sensitive to sender timeouts under
+            // high throughput; pin a conservative profile by default.
+            width = 640;
+            height = 360;
+            fps = Math.min(fps, 24);
+            bitrateMbps = Math.min(bitrateMbps, 2);
+        }
+        return new StreamConfig(width, height, fps, bitrateMbps);
+    }
+
+    private static final class StreamConfig {
+        final int width;
+        final int height;
+        final int fps;
+        final int bitrateMbps;
+
+        StreamConfig(int width, int height, int fps, int bitrateMbps) {
+            this.width = width;
+            this.height = height;
+            this.fps = fps;
+            this.bitrateMbps = bitrateMbps;
+        }
     }
 
     private int getResolutionScalePercent() {
