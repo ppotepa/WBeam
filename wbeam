@@ -20,6 +20,8 @@ ANDROID_PIPELINE_FILE="$ROOT_DIR/.wbeam_android_pipeline"
 LOG_DIR="$ROOT_DIR/logs"
 ADB_LOGCAT_PID_FILE="$LOG_DIR/adb-logcat.pid"
 BUILD_VERSION_FILE="$ROOT_DIR/.wbeam_build_version"
+BUILD_NUMBER_FILE="$ROOT_DIR/.wbeam_buildno"
+VERSION_BASE="${WBEAM_VERSION_BASE:-0.1}"
 
 
 
@@ -232,21 +234,34 @@ normalize_build_version() {
   if [[ -z "$raw" ]]; then
     return 1
   fi
-  if [[ "$raw" == 0.0.* ]]; then
+  if [[ "$raw" =~ ^[0-9]+\.[0-9]+\..+ ]]; then
     echo "$raw"
   else
-    echo "0.0.${raw}"
+    echo "${VERSION_BASE}.${raw}"
   fi
 }
 
-build_version_generate() {
-  local rev ts
-  rev="$(git -C "$ROOT_DIR" rev-parse --short=6 HEAD 2>/dev/null || true)"
-  if [[ -z "$rev" ]]; then
-    rev="dev000"
+build_number_read_file() {
+  if [[ -f "$BUILD_NUMBER_FILE" ]]; then
+    tr -d '\r[:space:]' < "$BUILD_NUMBER_FILE" 2>/dev/null || true
   fi
-  ts="$(date +%Y%m%d%H%M%S)"
-  echo "0.0.${rev}.${ts}"
+}
+
+build_number_next() {
+  local n
+  n="$(build_number_read_file)"
+  if [[ ! "$n" =~ ^[0-9]+$ ]]; then
+    n=0
+  fi
+  n=$((n + 1))
+  printf '%s\n' "$n" > "$BUILD_NUMBER_FILE"
+  echo "$n"
+}
+
+build_version_generate() {
+  local next_no
+  next_no="$(build_number_next)"
+  echo "${VERSION_BASE}.${next_no}"
 }
 
 build_version_write_new() {
@@ -283,7 +298,13 @@ build_version_for_runtime() {
     normalize_build_version "$from_file"
     return 0
   fi
-  normalize_build_version "$(build_version_generate)"
+  local build_no
+  build_no="$(build_number_read_file)"
+  if [[ "$build_no" =~ ^[0-9]+$ ]]; then
+    echo "${VERSION_BASE}.${build_no}"
+  else
+    echo "${VERSION_BASE}.0"
+  fi
 }
 
 version_new() {
@@ -349,6 +370,7 @@ version_doctor() {
 
     file_build="$(build_version_read_file || true)"
     echo "[version-doctor] build_file=${BUILD_VERSION_FILE} value=${file_build:-<empty>}"
+    echo "[version-doctor] buildno_file=${BUILD_NUMBER_FILE} value=$(build_number_read_file || true)"
 
     if [[ -n "${WBEAM_BUILD_REV:-}" ]]; then
       echo "[version-doctor] env_WBEAM_BUILD_REV=${WBEAM_BUILD_REV}"

@@ -10,6 +10,8 @@ HOST_WORKSPACE_DIR="$ROOT_DIR/src/host/rust"
 CONTROL_PORT="${WBEAM_CONTROL_PORT:-5001}"
 STREAM_PORT="${WBEAM_STREAM_PORT:-5000}"
 BUILD_VERSION_FILE="$ROOT_DIR/.wbeam_build_version"
+BUILD_NUMBER_FILE="$ROOT_DIR/.wbeam_buildno"
+VERSION_BASE="${WBEAM_VERSION_BASE:-0.1}"
 
 mkdir -p "$TARGET_DIR"
 
@@ -44,19 +46,11 @@ normalize_build_version() {
   if [[ -z "$raw" ]]; then
     return 1
   fi
-  if [[ "$raw" == 0.0.* ]]; then
+  if [[ "$raw" =~ ^[0-9]+\.[0-9]+\..+ ]]; then
     echo "$raw"
   else
-    echo "0.0.${raw}"
+    echo "${VERSION_BASE}.${raw}"
   fi
-}
-
-build_version_generate() {
-  local rev ts
-  rev="$(git -C "$ROOT_DIR" rev-parse --short=6 HEAD 2>/dev/null || true)"
-  [[ -n "$rev" ]] || rev="dev000"
-  ts="$(date +%Y%m%d%H%M%S)"
-  echo "0.0.${rev}.${ts}"
 }
 
 build_version_for_build() {
@@ -65,8 +59,17 @@ build_version_for_build() {
     normalize_build_version "$explicit"
     return 0
   fi
-  local v
-  v="$(build_version_generate)"
+  local n
+  n=0
+  if [[ -f "$BUILD_NUMBER_FILE" ]]; then
+    n="$(tr -d '\r[:space:]' < "$BUILD_NUMBER_FILE" 2>/dev/null || echo 0)"
+  fi
+  if [[ ! "$n" =~ ^[0-9]+$ ]]; then
+    n=0
+  fi
+  n=$((n + 1))
+  printf '%s\n' "$n" > "$BUILD_NUMBER_FILE"
+  local v="${VERSION_BASE}.${n}"
   printf '%s\n' "$v" > "$BUILD_VERSION_FILE"
   echo "$v"
 }
