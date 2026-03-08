@@ -278,11 +278,25 @@ fn daemon_stream_state(serial: &str, stream_port: u16) -> String {
         .to_string()
 }
 
-fn daemon_post_action(action: &str, serial: &str, stream_port: u16) -> Result<String, String> {
+fn daemon_post_action(
+    action: &str,
+    serial: &str,
+    stream_port: u16,
+    display_mode: Option<&str>,
+) -> Result<String, String> {
     let control_port = std::env::var("WBEAM_CONTROL_PORT").unwrap_or_else(|_| "5001".to_string());
-    let url = format!(
+    let mut url = format!(
         "http://127.0.0.1:{control_port}/v1/{action}?serial={serial}&stream_port={stream_port}"
     );
+    if action == "start" {
+        if let Some(mode) = display_mode {
+            let normalized = mode.trim().to_lowercase();
+            if normalized == "virtual" || normalized == "duplicate" {
+                url.push_str("&display_mode=");
+                url.push_str(&normalized);
+            }
+        }
+    }
     let output = Command::new("curl")
         .args(["-sS", "--max-time", "3", "-X", "POST", "-w", "\nHTTP_STATUS:%{http_code}", &url])
         .output()
@@ -719,42 +733,14 @@ fn host_probe_brief() -> HostProbeBrief {
 fn device_connect(serial: String, stream_port: u16, display_mode: Option<String>) -> Result<String, String> {
     let chosen_mode = display_mode.unwrap_or_else(|| "duplicate".to_string());
     let normalized_mode = chosen_mode.trim().to_lowercase();
-    let effective_mode = match normalized_mode.as_str() {
-        "duplicate" => "duplicate",
-        // Temporary compatibility path: until host virtual desktop backend lands,
-        // keep connect functional by falling back to duplicate capture mode.
-        "virtual" => {
-            ui_service_log(
-                "device_connect",
-                "warn",
-                &format!(
-                    "serial={} port={} requested_mode=virtual fallback=duplicate",
-                    serial, stream_port
-                ),
-            );
-            "duplicate"
-        }
-        _ => {
-            let msg = format!("Unsupported display mode: {normalized_mode}");
-            ui_service_log(
-                "device_connect",
-                "error",
-                &format!(
-                    "serial={} port={} mode={} err={}",
-                    serial, stream_port, normalized_mode, msg
-                ),
-            );
-            return Err(msg);
-        }
-    };
-    if effective_mode != "duplicate" {
-        let msg = format!("Unsupported effective display mode: {effective_mode}");
+    if normalized_mode != "duplicate" && normalized_mode != "virtual" {
+        let msg = format!("Unsupported display mode: {normalized_mode}");
         ui_service_log(
             "device_connect",
             "error",
             &format!(
                 "serial={} port={} mode={} err={}",
-                serial, stream_port, effective_mode, msg
+                serial, stream_port, normalized_mode, msg
             ),
         );
         return Err(msg);
@@ -763,14 +749,14 @@ fn device_connect(serial: String, stream_port: u16, display_mode: Option<String>
         "device_connect",
         "begin",
         &format!(
-            "serial={} port={} requested_mode={} effective_mode={}",
-            serial, stream_port, normalized_mode, effective_mode
+            "serial={} port={} requested_mode={}",
+            serial, stream_port, normalized_mode
         ),
     );
     connect_log(&serial, stream_port, "device_connect begin");
     adb_prepare_connect(&serial, stream_port)?;
     connect_log(&serial, stream_port, "device_connect daemon_post_action start");
-    let resp = match daemon_post_action("start", &serial, stream_port) {
+    let resp = match daemon_post_action("start", &serial, stream_port, Some(&normalized_mode)) {
         Ok(v) => v,
         Err(err) => {
             ui_service_log(
@@ -806,7 +792,7 @@ fn device_disconnect(serial: String, stream_port: u16) -> Result<String, String>
         "begin",
         &format!("serial={} port={}", serial, stream_port),
     );
-    let res = daemon_post_action("stop", &serial, stream_port);
+    let res = daemon_post_action("stop", &serial, stream_port, None);
     match &res {
         Ok(_) => ui_service_log(
             "device_disconnect",

@@ -3,3 +3,4 @@ pub mod config_store;
 pub mod host_probe;
 pub mod process;
 pub mod telemetry;
+pub mod virtual_display;

@@ -34,7 +34,7 @@ use domain::state::{
     STATE_ERROR, STATE_IDLE, STATE_RECONNECTING, STATE_STARTING, STATE_STOPPING, STATE_STREAMING,
 };
 use infra::process as proc;
-use infra::{adb, config_store, host_probe, telemetry};
+use infra::{adb, config_store, host_probe, telemetry, virtual_display};
 
 const DEFAULT_START_TIMEOUT: Duration = Duration::from_secs(45);
 const DUPLICATE_START_GUARD: Duration = Duration::from_secs(3);
@@ -184,6 +184,8 @@ struct Inner {
     no_present_streak: u8,
     last_no_present_recovery_at: Option<Instant>,
     presets: BTreeMap<String, ActiveConfig>,
+    requested_display_mode: String,
+    virtual_display: Option<virtual_display::VirtualDisplayHandle>,
 }
 
 impl Inner {
@@ -216,6 +218,8 @@ impl Inner {
             no_present_streak: 0,
             last_no_present_recovery_at: None,
             presets,
+            requested_display_mode: "duplicate".to_string(),
+            virtual_display: None,
         }
     }
 }
@@ -250,6 +254,29 @@ pub struct DaemonCore {
 }
 
 impl DaemonCore {
+    fn normalize_display_mode(mode: Option<&str>) -> &'static str {
+        match mode.unwrap_or("duplicate").trim().to_lowercase().as_str() {
+            "virtual" => "virtual",
+            _ => "duplicate",
+        }
+    }
+
+    pub async fn set_display_mode(&self, mode: Option<&str>) {
+        let normalized = Self::normalize_display_mode(mode);
+        let mut inner = self.inner.lock().await;
+        inner.requested_display_mode = normalized.to_string();
+    }
+
+    async fn stop_virtual_display_if_any(&self) {
+        let pid = {
+            let mut inner = self.inner.lock().await;
+            inner.virtual_display.take().map(|vd| vd.pid)
+        };
+        if let Some(pid) = pid {
+            proc::terminate_pid(pid).await;
+        }
+    }
+
     pub fn acquire_lock(path: &Path) -> Result<InstanceLock, CoreError> {
         let mut file = OpenOptions::new()
             .create(true)
@@ -769,6 +796,7 @@ impl DaemonCore {
         if let Some(pid) = pid {
             proc::terminate_pid(pid).await;
         }
+        self.stop_virtual_display_if_any().await;
 
         let mut inner = self.inner.lock().await;
         inner.current_pid = None;
@@ -894,6 +922,34 @@ impl DaemonCore {
 
         let mut cmd;
         let capture_backend = self.host_probe.capture_mode_name();
+        let requested_display_mode = {
+            let inner = self.inner.lock().await;
+            inner.requested_display_mode.clone()
+        };
+        if requested_display_mode == "virtual" && capture_backend != "x11_gst" {
+            return Err(CoreError::UnsupportedHost(
+                "virtual desktop mode currently requires x11_gst host backend".to_string(),
+            ));
+        }
+        let mut x11_display_override: Option<String> = None;
+        let mut using_virtual_x11 = false;
+
+        if capture_backend == "x11_gst" {
+            if requested_display_mode == "virtual" {
+                self.stop_virtual_display_if_any().await;
+                let serial_hint = self.target_serial.as_deref().unwrap_or("default");
+                let handle = virtual_display::spawn_xvfb_for_serial(serial_hint, &cfg.size)
+                    .map_err(CoreError::Spawn)?;
+                x11_display_override = Some(handle.display.clone());
+                using_virtual_x11 = true;
+                let mut inner = self.inner.lock().await;
+                inner.virtual_display = Some(handle);
+            } else {
+                self.stop_virtual_display_if_any().await;
+                x11_display_override = self.host_probe.display.clone();
+            }
+        }
+
         if use_rust_streamer {
             if !rust_streamer_bin.exists() {
                 error!(
@@ -936,14 +992,18 @@ impl DaemonCore {
                 cmd.arg("--intra-only");
             }
             if capture_backend == "x11_gst" {
-                if let Some(display) = self.host_probe.display.as_deref() {
+                if let Some(display) = x11_display_override.as_deref() {
                     cmd.env("DISPLAY", display);
                 }
-                if let Ok(home) = std::env::var("HOME") {
+                if !using_virtual_x11 {
+                    if let Ok(home) = std::env::var("HOME") {
                     let xauth = std::path::Path::new(&home).join(".Xauthority");
                     if xauth.exists() {
                         cmd.env("XAUTHORITY", xauth);
                     }
+                    }
+                } else {
+                    cmd.env_remove("XAUTHORITY");
                 }
             }
         } else {

@@ -41,6 +41,7 @@ struct AppState {
 struct SessionQuery {
     serial: Option<String>,
     stream_port: Option<u16>,
+    display_mode: Option<String>,
 }
 
 struct SessionCore {
@@ -300,6 +301,7 @@ async fn post_start(
 ) -> impl IntoResponse {
     let serial = query.serial.as_deref();
     let core = state.sessions.resolve_core(serial, query.stream_port).await;
+    core.set_display_mode(query.display_mode.as_deref()).await;
     let patch = body.map(|Json(v)| v).unwrap_or_default();
     match core.start(patch).await {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),

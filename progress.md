@@ -16,9 +16,16 @@ Status: active
   - connect dialog now asks for `Create virtual desktop` vs `Duplicate current screen`,
   - selection is persisted per ADB serial in desktop UI storage.
 - Current compatibility behavior:
-  - selecting `virtual desktop` currently falls back to duplicate mode in Tauri backend,
-  - explicit warning is logged (`requested_mode=virtual fallback=duplicate`),
-  - real host-side virtual desktop backend is still pending implementation.
+  - `display_mode` is now forwarded from desktop connect flow to daemon `/v1/start`.
+  - Added first host implementation of `virtual desktop` for X11 backend:
+    - daemon now supports per-session requested display mode (`duplicate` / `virtual`),
+    - on `virtual` + `x11_gst`, host spawns dedicated `Xvfb` display per device serial,
+    - streamer captures from that virtual display (`DISPLAY=:<n>`) instead of host main desktop.
+  - Safety behavior:
+    - `virtual` is rejected on non-X11 capture backends with explicit error,
+    - on stop, daemon terminates spawned virtual display process.
+  - Requirement:
+    - host must have `Xvfb` installed for virtual mode.
 
 ## Current Baseline (Authoritative)
 - Desktop app is now based on Tauri 2 + SolidJS + TypeScript.

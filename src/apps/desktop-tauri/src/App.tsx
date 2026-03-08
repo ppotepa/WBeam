@@ -393,7 +393,7 @@ export default function App() {
                   />
                   <span>
                     Create virtual desktop
-                    <small>Temporary fallback: connects using duplicate mode.</small>
+                    <small>Create separate virtual X11 desktop on host for this stream.</small>
                   </span>
                 </label>
                 <label class={`mode-option ${!virtualSelected() ? "selected" : ""}`}>
