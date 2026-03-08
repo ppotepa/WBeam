@@ -75,13 +75,7 @@ build_version_for_build() {
 }
 
 run_gui() {
-  (
-    cd "$TAURI_DIR"
-    if [[ ! -d node_modules ]]; then
-      npm install
-    fi
-    exec npm run tauri dev -- "$@"
-  )
+  exec "$ROOT_DIR/desktop.sh" "$@"
 }
 
 as_root() {

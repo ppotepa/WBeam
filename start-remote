@@ -249,7 +249,7 @@ run_step "wait for control API" bash -lc 'for i in $(seq 1 180); do curl -fsS --
 run_step "wait for supported host-probe" bash -lc 'for i in $(seq 1 60); do probe="$(curl -fsS --max-time 1 http://127.0.0.1:5001/v1/host-probe 2>/dev/null || true)"; if [[ "$probe" == *"\"supported\":true"* ]]; then exit 0; fi; sleep 0.5; done; echo "[start-remote] WARN: host-probe not yet supported=true (continuing)" >&2; exit 0'
 
 DESKTOP_LOG="$(next_log_file desktop)"
-run_step "launch desktop GUI first (background)" runas_remote_exec "$DESKTOP_USER" bash -- -lc "cd '$ROOT_DIR' && nohup ./devtool >'$DESKTOP_LOG' 2>&1 & disown"
+run_step "launch desktop GUI first (background)" runas_remote_exec "$DESKTOP_USER" bash -- -lc "cd '$ROOT_DIR' && nohup ./desktop.sh >'$DESKTOP_LOG' 2>&1 & disown"
 run_step "wait for desktop process" bash -lc "for i in \$(seq 1 120); do pgrep -u '$DESKTOP_USER' -x wbeam-desktop-t >/dev/null 2>&1 && exit 0; sleep 0.5; done; echo '[start-remote] WARN: desktop process did not become ready (continuing).' >&2; exit 0"
 
 ADB_LOG="$(next_log_file adb)"

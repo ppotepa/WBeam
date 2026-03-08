@@ -630,3 +630,18 @@ Status: active
 - This fixes cases where real KDE session exists but is not marked as `Active=yes` (common in remote-control scenarios).
 - Validation:
   - `bash -n runas-remote` -> OK
+
+## In Progress (2026-03-08) [commit: pending] - desktop launcher split (`desktop.sh`)
+- Reintroduced dedicated desktop GUI launcher:
+  - new `./desktop.sh` as single-purpose desktop app entrypoint,
+  - supports `--release` mode for local release run.
+- Responsibility split restored:
+  - `devtool` remains build/deploy utility,
+  - GUI startup path delegated to `desktop.sh` (including `devtool gui`).
+- Remote flow updated:
+  - `start-remote` now launches desktop via `./desktop.sh` (not `devtool`),
+  - `runas-remote` default app changed to `./desktop.sh`.
+- Validation:
+  - `bash -n desktop.sh devtool runas-remote start-remote` -> OK
+  - `./desktop.sh --help` -> OK
+  - `./runas-remote --help` -> shows default app `./desktop.sh`

@@ -9,11 +9,11 @@ usage() {
 Usage:
   runas-remote <desktop_user> <script_or_app_path> [-- app_args...]
   runas-remote [script_or_app_path] [-- app_args...]               # default user
-  runas-remote [desktop_user]                                       # default app: ./devtool
+  runas-remote [desktop_user]                                       # default app: ./desktop.sh
 
 Examples:
-  ./runas-remote alice ./devtool -- gui
-  ./runas-remote alice devtool -- build
+  ./runas-remote alice ./desktop.sh
+  ./runas-remote alice ./devtool -- build
   ./runas-remote alice /home/alice/bin/myapp -- --flag
   ./runas-remote ./start-remote alice
 
@@ -166,7 +166,7 @@ load_extra_env_passthrough() {
 }
 
 DEFAULT_USER="${WBEAM_DEV_REMOTE_USER:-}"
-DEFAULT_APP="./devtool"
+DEFAULT_APP="./desktop.sh"
 
 if [[ -z "$DEFAULT_USER" ]]; then
   DEFAULT_USER="$(resolve_active_user_from_loginctl || true)"
@@ -230,7 +230,7 @@ if [[ "$APP_SPEC" == */* ]]; then
   fi
 elif [[ "$APP_SPEC" == "desktop" ]]; then
   echo "[runas-remote] 'desktop' target alias was removed." >&2
-  echo "[runas-remote] run devtool directly, e.g.: ./runas-remote $TARGET_USER ./devtool -- gui" >&2
+  echo "[runas-remote] run desktop launcher directly, e.g.: ./runas-remote $TARGET_USER ./desktop.sh" >&2
   exit 1
 elif [[ -x "$ROOT_DIR/$APP_SPEC" ]]; then
   TARGET_SCRIPT="$ROOT_DIR/$APP_SPEC"
