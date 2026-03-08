@@ -631,7 +631,7 @@ Status: active
 - Validation:
   - `bash -n runas-remote` -> OK
 
-## In Progress (2026-03-08) [commit: pending] - desktop launcher split (`desktop.sh`)
+## In Progress (2026-03-08) [commit: 14446f26] - desktop launcher split (`desktop.sh`)
 - Reintroduced dedicated desktop GUI launcher:
   - new `./desktop.sh` as single-purpose desktop app entrypoint,
   - supports `--release` mode for local release run.
