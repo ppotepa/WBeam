@@ -7,6 +7,7 @@ ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 usage() {
   cat <<'USAGE'
 Usage:
+  runas-remote --list-sessions [desktop_user]
   runas-remote <desktop_user> <script_or_app_path> [-- app_args...]
   runas-remote [script_or_app_path] [-- app_args...]               # default user
   runas-remote [desktop_user]                                       # default app: ./desktop.sh
@@ -21,6 +22,8 @@ Security env options:
   RUNAS_REMOTE_PASSTHROUGH_ENV="NAME1,NAME2"  # copy selected env vars to target app
   RUNAS_REMOTE_ENV_FILE=/path/to/env.file      # KEY=VALUE lines, mode 600 recommended
   RUNAS_REMOTE_SESSION_REMOTE=any|no|yes       # filter loginctl session by Remote flag
+  RUNAS_REMOTE_SESSION_ID=<sid>                # force loginctl session id
+  RUNAS_REMOTE_DISPLAY=:0                      # prefer/require given DISPLAY
   RUNAS_REMOTE_QUIET=1                         # suppress startup metadata line
 USAGE
 }
@@ -29,6 +32,7 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   usage
   exit 0
 fi
+
 
 user_exists() {
   id "$1" >/dev/null 2>&1
@@ -66,8 +70,36 @@ resolve_active_user_from_loginctl() {
 }
 
 resolve_desktop_session_id() {
-  local sid name type state active remote
+  local sid name type state active remote display
   local fallback_sid=""
+  local fallback_display_sid=""
+
+  if [[ -n "$FORCED_SESSION_ID" ]]; then
+    sid="$FORCED_SESSION_ID"
+    name="$(loginctl show-session "$sid" -p Name --value 2>/dev/null || true)"
+    type="$(loginctl show-session "$sid" -p Type --value 2>/dev/null || true)"
+    remote="$(loginctl show-session "$sid" -p Remote --value 2>/dev/null || true)"
+    display="$(loginctl show-session "$sid" -p Display --value 2>/dev/null || true)"
+    if [[ "$name" != "$TARGET_USER" ]]; then
+      echo "[runas-remote] forced sid=$sid does not belong to $TARGET_USER" >&2
+      return 1
+    fi
+    if [[ "$type" != "x11" && "$type" != "wayland" ]]; then
+      echo "[runas-remote] forced sid=$sid is not graphical (type=$type)" >&2
+      return 1
+    fi
+    if ! session_remote_matches "$remote"; then
+      echo "[runas-remote] forced sid=$sid does not match remote filter ($SESSION_REMOTE_FILTER)" >&2
+      return 1
+    fi
+    if [[ -n "$FORCED_DISPLAY" && "$display" != "$FORCED_DISPLAY" ]]; then
+      echo "[runas-remote] forced sid=$sid has display=$display, expected $FORCED_DISPLAY" >&2
+      return 1
+    fi
+    echo "$sid"
+    return 0
+  fi
+
   while read -r sid _; do
     [[ -n "$sid" ]] || continue
     name="$(loginctl show-session "$sid" -p Name --value 2>/dev/null || true)"
@@ -75,20 +107,32 @@ resolve_desktop_session_id() {
     state="$(loginctl show-session "$sid" -p State --value 2>/dev/null || true)"
     active="$(loginctl show-session "$sid" -p Active --value 2>/dev/null || true)"
     remote="$(loginctl show-session "$sid" -p Remote --value 2>/dev/null || true)"
+    display="$(loginctl show-session "$sid" -p Display --value 2>/dev/null || true)"
 
     if [[ "$name" == "$TARGET_USER" ]] && session_remote_matches "$remote"; then
       if [[ "$type" == "x11" || "$type" == "wayland" ]]; then
+        if [[ -n "$FORCED_DISPLAY" && "$display" != "$FORCED_DISPLAY" ]]; then
+          continue
+        fi
         if [[ "$active" == "yes" && "$state" == "active" ]]; then
           echo "$sid"
           return 0
         fi
         if [[ -z "$fallback_sid" && ( "$state" == "active" || "$state" == "online" ) ]]; then
-          fallback_sid="$sid"
+          if [[ -n "$display" ]]; then
+            fallback_display_sid="$sid"
+          else
+            fallback_sid="$sid"
+          fi
         fi
       fi
     fi
   done < <(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1" "$2}')
 
+  if [[ -n "$fallback_display_sid" ]]; then
+    echo "$fallback_display_sid"
+    return 0
+  fi
   if [[ -n "$fallback_sid" ]]; then
     echo "$fallback_sid"
     return 0
@@ -97,6 +141,8 @@ resolve_desktop_session_id() {
 }
 
 SESSION_REMOTE_FILTER="${RUNAS_REMOTE_SESSION_REMOTE:-any}"
+FORCED_SESSION_ID="${RUNAS_REMOTE_SESSION_ID:-}"
+FORCED_DISPLAY="${RUNAS_REMOTE_DISPLAY:-}"
 session_remote_matches() {
   local remote="${1:-}"
   case "$SESSION_REMOTE_FILTER" in
@@ -106,6 +152,33 @@ session_remote_matches() {
     *) true ;;
   esac
 }
+
+print_sessions() {
+  local wanted_user="${1:-}"
+  local sid name type state active remote display leader
+  printf '%-5s %-12s %-8s %-8s %-7s %-7s %-8s %-8s\n' "SID" "USER" "TYPE" "STATE" "ACTIVE" "REMOTE" "DISPLAY" "LEADER"
+  printf '%-5s %-12s %-8s %-8s %-7s %-7s %-8s %-8s\n' "-----" "------------" "--------" "--------" "-------" "-------" "--------" "--------"
+  while read -r sid _; do
+    [[ -n "$sid" ]] || continue
+    name="$(loginctl show-session "$sid" -p Name --value 2>/dev/null || true)"
+    type="$(loginctl show-session "$sid" -p Type --value 2>/dev/null || true)"
+    state="$(loginctl show-session "$sid" -p State --value 2>/dev/null || true)"
+    active="$(loginctl show-session "$sid" -p Active --value 2>/dev/null || true)"
+    remote="$(loginctl show-session "$sid" -p Remote --value 2>/dev/null || true)"
+    display="$(loginctl show-session "$sid" -p Display --value 2>/dev/null || true)"
+    leader="$(loginctl show-session "$sid" -p Leader --value 2>/dev/null || true)"
+    if [[ -n "$wanted_user" && "$name" != "$wanted_user" ]]; then
+      continue
+    fi
+    printf '%-5s %-12s %-8s %-8s %-7s %-7s %-8s %-8s\n' \
+      "${sid:-?}" "${name:-?}" "${type:-?}" "${state:-?}" "${active:-?}" "${remote:-?}" "${display:--}" "${leader:-?}"
+  done < <(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1" "$2}')
+}
+
+if [[ "${1:-}" == "--list-sessions" ]]; then
+  print_sessions "${2:-}"
+  exit 0
+fi
 
 session_env_var() {
   local sid="$1"
@@ -261,7 +334,10 @@ fi
 SESSION_TYPE="$(loginctl show-session "$SESSION_ID" -p Type --value 2>/dev/null || true)"
 [[ -n "$SESSION_TYPE" ]] || SESSION_TYPE="wayland"
 
-DISPLAY_VAL="$(loginctl show-session "$SESSION_ID" -p Display --value 2>/dev/null || true)"
+DISPLAY_VAL="${FORCED_DISPLAY:-}"
+if [[ -z "$DISPLAY_VAL" ]]; then
+  DISPLAY_VAL="$(loginctl show-session "$SESSION_ID" -p Display --value 2>/dev/null || true)"
+fi
 if [[ -z "$DISPLAY_VAL" ]]; then
   DISPLAY_VAL="$(session_env_var "$SESSION_ID" DISPLAY || true)"
 fi

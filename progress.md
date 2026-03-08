@@ -657,3 +657,20 @@ Status: active
 - Validation:
   - `bash -n start-remote runas-remote` -> OK
   - `./start-remote --help` -> shows unified interface
+
+## In Progress (2026-03-08) [commit: pending] - precise session targeting (sid/display)
+- Added explicit session targeting controls to avoid launching on wrong desktop:
+  - `runas-remote --list-sessions [user]` for quick session inventory,
+  - `RUNAS_REMOTE_SESSION_ID=<sid>` to force exact loginctl session,
+  - `RUNAS_REMOTE_DISPLAY=:N` to force/prefer exact DISPLAY.
+- Extended `start-remote` passthrough flags:
+  - `--session-id SID`
+  - `--display :N`
+  - these are forwarded to `runas-remote` selection env.
+- Session selection strategy in `runas-remote` now prefers:
+  - strict active graphical session,
+  - then graphical fallback with display/state match (`active|online`).
+- Validation:
+  - `bash -n runas-remote start-remote` -> OK
+  - `./start-remote --help` -> shows `--session-id` and `--display`
+  - `./runas-remote --list-sessions <user>` -> prints session table (when loginctl bus access is available)

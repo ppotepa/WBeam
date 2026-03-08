@@ -7,8 +7,8 @@ ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 usage() {
   cat <<'USAGE'
 Usage:
-  ./start-remote --local [desktop_user] [--quick] [--redeploy] [--rebuild-host] [--no-host-restart] [--fresh-service]
-  ./start-remote --rdp [desktop_user] [--quick] [--redeploy] [--rebuild-host] [--no-host-restart] [--fresh-service]
+  ./start-remote --local [desktop_user] [--quick] [--redeploy] [--rebuild-host] [--no-host-restart] [--fresh-service] [--session-id SID] [--display :N]
+  ./start-remote --rdp [desktop_user] [--quick] [--redeploy] [--rebuild-host] [--no-host-restart] [--fresh-service] [--session-id SID] [--display :N]
   WBEAM_DEV_REMOTE_USER=<user> ./start-remote
 
 Defaults:
@@ -32,6 +32,8 @@ Modes:
   --fresh-service   stop+disable+remove user service unit before startup
   --local           force local machine seat (loginctl Remote=no)
   --rdp             force remote session only (loginctl Remote=yes)
+  --session-id SID  force exact loginctl session id for runas-remote
+  --display :N      force exact DISPLAY for selected session
 
 Compatibility aliases:
   --local-session   == --local
@@ -47,6 +49,8 @@ HOST_RESTART=1
 FRESH_SERVICE=0
 DESKTOP_USER="${WBEAM_DEV_REMOTE_USER:-}"
 SESSION_REMOTE_FILTER="no"
+SESSION_ID_OVERRIDE=""
+DISPLAY_OVERRIDE=""
 
 session_remote_matches() {
   local remote="${1:-}"
@@ -113,6 +117,14 @@ while [[ $# -gt 0 ]]; do
       SESSION_REMOTE_FILTER="yes"
       shift
       ;;
+    --session-id)
+      SESSION_ID_OVERRIDE="${2:-}"
+      shift 2
+      ;;
+    --display)
+      DISPLAY_OVERRIDE="${2:-}"
+      shift 2
+      ;;
     --no-deploy)
       REDEPLOY=0
       shift
@@ -151,7 +163,15 @@ run_step() {
 }
 
 runas_remote_exec() {
-  env RUNAS_REMOTE_SESSION_REMOTE="$SESSION_REMOTE_FILTER" ./runas-remote "$@"
+  local -a env_args
+  env_args=("RUNAS_REMOTE_SESSION_REMOTE=$SESSION_REMOTE_FILTER")
+  if [[ -n "$SESSION_ID_OVERRIDE" ]]; then
+    env_args+=("RUNAS_REMOTE_SESSION_ID=$SESSION_ID_OVERRIDE")
+  fi
+  if [[ -n "$DISPLAY_OVERRIDE" ]]; then
+    env_args+=("RUNAS_REMOTE_DISPLAY=$DISPLAY_OVERRIDE")
+  fi
+  env "${env_args[@]}" ./runas-remote "$@"
 }
 
 next_log_file() {
@@ -294,6 +314,12 @@ echo
 echo "[start-remote] desktop already launched in background"
 echo "[start-remote] mode: redeploy=${REDEPLOY} rebuild_host=${REBUILD_HOST} host_restart=${HOST_RESTART} fresh_service=${FRESH_SERVICE}"
 echo "[start-remote] session_scope: remote_filter=${SESSION_REMOTE_FILTER}"
+if [[ -n "$SESSION_ID_OVERRIDE" ]]; then
+  echo "[start-remote] session_scope: forced_sid=${SESSION_ID_OVERRIDE}"
+fi
+if [[ -n "$DISPLAY_OVERRIDE" ]]; then
+  echo "[start-remote] session_scope: forced_display=${DISPLAY_OVERRIDE}"
+fi
 echo "[start-remote] logs:"
 echo "  desktop: $DESKTOP_LOG"
 echo "  adb:     $ADB_LOG"
