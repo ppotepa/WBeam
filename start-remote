@@ -7,16 +7,18 @@ ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 usage() {
   cat <<'USAGE'
 Usage:
-  ./start-remote [desktop_user] [--quick] [--redeploy] [--rebuild-host] [--no-host-restart] [--fresh-service] [--local-session|--remote-session]
+  ./start-remote --local [desktop_user] [--quick] [--redeploy] [--rebuild-host] [--no-host-restart] [--fresh-service]
+  ./start-remote --rdp [desktop_user] [--quick] [--redeploy] [--rebuild-host] [--no-host-restart] [--fresh-service]
   WBEAM_DEV_REMOTE_USER=<user> ./start-remote
 
 Defaults:
   desktop_user = active graphical user (or WBEAM_DEV_REMOTE_USER)
+  session scope = --local
 
 Flow:
   1) optionally remove desktop user service (only with --fresh-service)
-  2) restart host (remote user session)
-  3) launch desktop GUI first (remote user session)
+  2) restart host (selected GUI session)
+  3) launch desktop GUI first (selected GUI session)
   4) snapshot adb devices + start USB udev probe logging
   5) optional full Android deploy-all only with --redeploy
   6) print host-probe and daemon status
@@ -28,8 +30,14 @@ Modes:
   --no-host-restart keep currently running host daemon (skip host down/start)
   --redeploy        full cycle: rebuild host + force uninstall/install APK on all devices
   --fresh-service   stop+disable+remove user service unit before startup
-  --local-session   force local machine seat (loginctl Remote=no)
-  --remote-session  force remote session only (loginctl Remote=yes)
+  --local           force local machine seat (loginctl Remote=no)
+  --rdp             force remote session only (loginctl Remote=yes)
+
+Compatibility aliases:
+  --local-session   == --local
+  --remote-session  == --rdp
+  --actual-session  == --local
+  --real-machine    == --local
 USAGE
 }
 
@@ -38,7 +46,7 @@ REBUILD_HOST=0
 HOST_RESTART=1
 FRESH_SERVICE=0
 DESKTOP_USER="${WBEAM_DEV_REMOTE_USER:-}"
-SESSION_REMOTE_FILTER="any"
+SESSION_REMOTE_FILTER="no"
 
 session_remote_matches() {
   local remote="${1:-}"
@@ -97,11 +105,11 @@ while [[ $# -gt 0 ]]; do
       FRESH_SERVICE=1
       shift
       ;;
-    --local-session|--actual-session|--real-machine)
+    --local|--local-session|--actual-session|--real-machine)
       SESSION_REMOTE_FILTER="no"
       shift
       ;;
-    --remote-session)
+    --rdp|--remote-session)
       SESSION_REMOTE_FILTER="yes"
       shift
       ;;

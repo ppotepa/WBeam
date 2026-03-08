@@ -645,3 +645,15 @@ Status: active
   - `bash -n desktop.sh devtool runas-remote start-remote` -> OK
   - `./desktop.sh --help` -> OK
   - `./runas-remote --help` -> shows default app `./desktop.sh`
+
+## In Progress (2026-03-08) [commit: pending] - start-remote CLI unification
+- Simplified remote start interface to one script + two primary flags:
+  - `./start-remote --local <user>`
+  - `./start-remote --rdp <user>`
+- Default session scope changed to local machine seat (`--local` behavior).
+- Kept compatibility aliases for older flows:
+  - `--local-session`, `--remote-session`, `--actual-session`, `--real-machine`.
+- Removed wrapper script `start-local-session` to keep one canonical entrypoint.
+- Validation:
+  - `bash -n start-remote runas-remote` -> OK
+  - `./start-remote --help` -> shows unified interface
