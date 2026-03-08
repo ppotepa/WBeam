@@ -170,12 +170,12 @@ export function createSessionManager(api: HostApiManager) {
     }
   }
 
-  async function connectDevice(device: DeviceBasic) {
+  async function connectDevice(device: DeviceBasic, displayMode: "virtual" | "duplicate") {
     const key = `${device.serial}:connect`;
     setDeviceActionBusy((prev) => (prev.includes(key) ? prev : [...prev, key]));
     setError("");
     try {
-      await api.connectDevice(device);
+      await api.connectDevice(device, displayMode);
       await refreshSnapshot();
     } catch (err) {
       setError(String(err));

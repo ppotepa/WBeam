@@ -38,11 +38,40 @@ function DeviceTypeIcon(props: { type: string }) {
   return props.type === "Tablet" ? <Tablet size={16} /> : <Smartphone size={16} />;
 }
 
+type DisplayMode = "virtual" | "duplicate";
+const CONNECT_MODE_STORAGE_KEY = "wbeam.connect.mode.by.serial";
+
+function loadSavedDisplayMode(serial: string): DisplayMode | null {
+  try {
+    const raw = localStorage.getItem(CONNECT_MODE_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Record<string, string>;
+    const value = parsed?.[serial];
+    if (value === "virtual" || value === "duplicate") return value;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function saveDisplayMode(serial: string, mode: DisplayMode): void {
+  try {
+    const raw = localStorage.getItem(CONNECT_MODE_STORAGE_KEY);
+    const parsed = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+    parsed[serial] = mode;
+    localStorage.setItem(CONNECT_MODE_STORAGE_KEY, JSON.stringify(parsed));
+  } catch {
+    // Ignore localStorage failures.
+  }
+}
+
 export default function App() {
   const api = new HostApiManager();
   const session = createSessionManager(api);
   const [mode, setMode] = createSignal<"basic" | "advanced">("basic");
   const [hostName, setHostName] = createSignal("unknown-host");
+  const [connectDialogDevice, setConnectDialogDevice] = createSignal<DeviceBasic | null>(null);
+  const [connectDialogMode, setConnectDialogMode] = createSignal<DisplayMode>("virtual");
   const upgradeAvailable = () =>
     session.service().active
     && session.service().installed
@@ -84,6 +113,25 @@ export default function App() {
 
   function isDeviceBusy(device: DeviceBasic): boolean {
     return session.deviceActionBusy().some((entry) => entry.startsWith(`${device.serial}:`));
+  }
+
+  function openConnectDialog(device: DeviceBasic): void {
+    const saved = loadSavedDisplayMode(device.serial);
+    setConnectDialogMode(saved ?? "virtual");
+    setConnectDialogDevice(device);
+  }
+
+  function closeConnectDialog(): void {
+    setConnectDialogDevice(null);
+  }
+
+  async function confirmConnect(): Promise<void> {
+    const device = connectDialogDevice();
+    if (!device) return;
+    const chosenMode = connectDialogMode();
+    saveDisplayMode(device.serial, chosenMode);
+    closeConnectDialog();
+    await session.connectDevice(device, chosenMode);
   }
 
   onMount(async () => {
@@ -241,7 +289,7 @@ export default function App() {
                     class="device-btn"
                     title={connectBusy ? "Connecting..." : (connectDisabled ? connectReason : "Start stream for this device")}
                     disabled={connectDisabled}
-                    onClick={() => session.connectDevice(device)}
+                    onClick={() => openConnectDialog(device)}
                   >
                     <Show when={connectBusy} fallback={<Link2 size={13} />}>
                       <Loader2 size={13} class="spinning" />
@@ -327,6 +375,50 @@ export default function App() {
           <span>updated: {session.updatedAt()}</span>
         </footer>
       </section>
+      <Show when={connectDialogDevice()}>
+        {(deviceAccessor) => {
+          const device = deviceAccessor();
+          const virtualSelected = () => connectDialogMode() === "virtual";
+          return (
+            <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Select display mode">
+              <section class="connect-modal">
+                <h3>Connect mode</h3>
+                <p class="connect-modal-subtitle">{device.model} ({device.serial})</p>
+                <label class={`mode-option ${virtualSelected() ? "selected" : ""}`}>
+                  <input
+                    type="radio"
+                    name="display-mode"
+                    checked={virtualSelected()}
+                    onChange={() => setConnectDialogMode("virtual")}
+                  />
+                  <span>
+                    Create virtual desktop
+                    <small>Temporary fallback: connects using duplicate mode.</small>
+                  </span>
+                </label>
+                <label class={`mode-option ${!virtualSelected() ? "selected" : ""}`}>
+                  <input
+                    type="radio"
+                    name="display-mode"
+                    checked={!virtualSelected()}
+                    onChange={() => setConnectDialogMode("duplicate")}
+                  />
+                  <span>
+                    Duplicate current screen
+                    <small>Works with current host backend.</small>
+                  </span>
+                </label>
+                <div class="connect-modal-actions">
+                  <button class="device-btn" onClick={closeConnectDialog}>Cancel</button>
+                  <button class="device-btn" onClick={() => void confirmConnect()}>
+                    Connect
+                  </button>
+                </div>
+              </section>
+            </div>
+          );
+        }}
+      </Show>
     </main>
   );
 }

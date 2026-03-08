@@ -419,3 +419,73 @@ h1 {
   color: #c7d7ea;
   text-align: right;
 }
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 12, 18, 0.72);
+  display: grid;
+  place-items: center;
+  z-index: 120;
+  padding: 1rem;
+}
+
+.connect-modal {
+  width: min(360px, calc(100vw - 2rem));
+  border: 1px solid #2f4661;
+  border-radius: 12px;
+  background: #0f1a2a;
+  box-shadow: 0 20px 50px -28px rgba(0, 0, 0, 0.9);
+  padding: 0.8rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.connect-modal h3 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.connect-modal-subtitle {
+  margin: 0;
+  color: #99afc8;
+  font-size: 0.72rem;
+  font-family: "IBM Plex Mono", "Consolas", monospace;
+}
+
+.mode-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  border: 1px solid #2f445a;
+  border-radius: 8px;
+  background: #162335;
+  padding: 0.55rem;
+  cursor: pointer;
+}
+
+.mode-option.selected {
+  border-color: #6e8caf;
+  background: #1c2d43;
+}
+
+.mode-option input {
+  margin-top: 0.12rem;
+}
+
+.mode-option span {
+  display: grid;
+  gap: 0.12rem;
+  font-size: 0.76rem;
+}
+
+.mode-option small {
+  color: #a3b7cd;
+  font-size: 0.67rem;
+}
+
+.connect-modal-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.42rem;
+}

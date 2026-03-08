@@ -4,6 +4,22 @@ Date: 2026-03-07
 Branch: `master`
 Status: active
 
+## Session Update (2026-03-08)
+- Stabilized desktop UI refresh model to reduce flicker and inconsistent button states:
+  - separated internal polling sync from manual UI refresh semantics,
+  - reduced unnecessary signal updates by applying state only on real data change.
+- Fixed service lifecycle persistence across remote startup:
+  - `start-remote` no longer removes desktop service unit by default,
+  - added explicit `--fresh-service` flag for clean reinstall flow,
+  - improved Tauri service detection using `systemctl --user show ... LoadState`.
+- Added connect mode UX for per-device action:
+  - connect dialog now asks for `Create virtual desktop` vs `Duplicate current screen`,
+  - selection is persisted per ADB serial in desktop UI storage.
+- Current compatibility behavior:
+  - selecting `virtual desktop` currently falls back to duplicate mode in Tauri backend,
+  - explicit warning is logged (`requested_mode=virtual fallback=duplicate`),
+  - real host-side virtual desktop backend is still pending implementation.
+
 ## Current Baseline (Authoritative)
 - Desktop app is now based on Tauri 2 + SolidJS + TypeScript.
 - Primary desktop target is a compact `400x800` dialog UX.

@@ -716,11 +716,56 @@ fn host_probe_brief() -> HostProbeBrief {
 }
 
 #[tauri::command]
-fn device_connect(serial: String, stream_port: u16) -> Result<String, String> {
+fn device_connect(serial: String, stream_port: u16, display_mode: Option<String>) -> Result<String, String> {
+    let chosen_mode = display_mode.unwrap_or_else(|| "duplicate".to_string());
+    let normalized_mode = chosen_mode.trim().to_lowercase();
+    let effective_mode = match normalized_mode.as_str() {
+        "duplicate" => "duplicate",
+        // Temporary compatibility path: until host virtual desktop backend lands,
+        // keep connect functional by falling back to duplicate capture mode.
+        "virtual" => {
+            ui_service_log(
+                "device_connect",
+                "warn",
+                &format!(
+                    "serial={} port={} requested_mode=virtual fallback=duplicate",
+                    serial, stream_port
+                ),
+            );
+            "duplicate"
+        }
+        _ => {
+            let msg = format!("Unsupported display mode: {normalized_mode}");
+            ui_service_log(
+                "device_connect",
+                "error",
+                &format!(
+                    "serial={} port={} mode={} err={}",
+                    serial, stream_port, normalized_mode, msg
+                ),
+            );
+            return Err(msg);
+        }
+    };
+    if effective_mode != "duplicate" {
+        let msg = format!("Unsupported effective display mode: {effective_mode}");
+        ui_service_log(
+            "device_connect",
+            "error",
+            &format!(
+                "serial={} port={} mode={} err={}",
+                serial, stream_port, effective_mode, msg
+            ),
+        );
+        return Err(msg);
+    }
     ui_service_log(
         "device_connect",
         "begin",
-        &format!("serial={} port={}", serial, stream_port),
+        &format!(
+            "serial={} port={} requested_mode={} effective_mode={}",
+            serial, stream_port, normalized_mode, effective_mode
+        ),
     );
     connect_log(&serial, stream_port, "device_connect begin");
     adb_prepare_connect(&serial, stream_port)?;
