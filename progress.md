@@ -674,3 +674,14 @@ Status: active
   - `bash -n runas-remote start-remote` -> OK
   - `./start-remote --help` -> shows `--session-id` and `--display`
   - `./runas-remote --list-sessions <user>` -> prints session table (when loginctl bus access is available)
+
+## In Progress (2026-03-08) [commit: f2a47ba3] - auto local GUI detection hardening
+- Improved no-`sid` auto-detection for local mode:
+  - when `loginctl` `Remote=` is empty/unknown (`""`, `-`, `unknown`), it is treated as local for `--local` scope.
+- Applied in both:
+  - `runas-remote` session filter
+  - `start-remote` active-user resolver filter
+- Result:
+  - `./start-remote --local <user>` is now more likely to auto-pick real GUI session without manual `--session-id`.
+- Validation:
+  - `bash -n runas-remote start-remote` -> OK
