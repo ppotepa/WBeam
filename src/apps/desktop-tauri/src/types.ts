@@ -50,3 +50,11 @@ export type VirtualDoctor = {
   missingDeps: string[];
   installHint: string;
 };
+
+export type VirtualDepsInstallStatus = {
+  running: boolean;
+  done: boolean;
+  success: boolean;
+  message: string;
+  logs: string[];
+};

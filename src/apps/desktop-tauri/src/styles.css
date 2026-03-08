@@ -516,3 +516,66 @@ h1 {
   color: #fca5a5;
   font-size: 0.72rem;
 }
+
+.install-modal {
+  width: min(560px, calc(100vw - 2rem));
+}
+
+.install-progress {
+  height: 8px;
+  width: 100%;
+  border-radius: 999px;
+  background: #132234;
+  border: 1px solid #2c415a;
+  overflow: hidden;
+}
+
+.install-progress-bar {
+  height: 100%;
+  width: 100%;
+}
+
+.install-progress-bar.running {
+  background: linear-gradient(90deg, #1d9bf0 0%, #7dc3ff 50%, #1d9bf0 100%);
+  background-size: 240% 100%;
+  animation: installPulse 1.2s linear infinite;
+}
+
+.install-progress-bar.ok {
+  background: #2fb470;
+}
+
+.install-progress-bar.bad {
+  background: #d25656;
+}
+
+@keyframes installPulse {
+  0% {
+    background-position: 0% 0%;
+  }
+  100% {
+    background-position: 240% 0%;
+  }
+}
+
+.install-log {
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+  border-radius: 8px;
+  border: 1px solid #314963;
+  background: #0b1422;
+  color: #d9e5f2;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  padding: 0.55rem;
+  font-family: "IBM Plex Mono", "Consolas", monospace;
+}
+
+.install-ok {
+  color: #7be0a8;
+}
+
+.install-bad {
+  color: #ff9d9d;
+}

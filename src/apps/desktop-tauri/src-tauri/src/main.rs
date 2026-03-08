@@ -2,11 +2,14 @@
 
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::VecDeque;
 use std::fs;
 use std::fs::OpenOptions;
+use std::io::{BufRead, BufReader};
 use std::io::Write;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::Manager;
@@ -76,6 +79,39 @@ struct VirtualDoctor {
     install_hint: String,
 }
 
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct VirtualDepsInstallStatus {
+    running: bool,
+    done: bool,
+    success: bool,
+    message: String,
+    logs: Vec<String>,
+}
+
+#[derive(Debug)]
+struct VirtualDepsInstallState {
+    running: bool,
+    done: bool,
+    success: bool,
+    message: String,
+    logs: VecDeque<String>,
+}
+
+impl Default for VirtualDepsInstallState {
+    fn default() -> Self {
+        Self {
+            running: false,
+            done: false,
+            success: false,
+            message: "idle".to_string(),
+            logs: VecDeque::new(),
+        }
+    }
+}
+
+static VIRTUAL_DEPS_INSTALL_STATE: OnceLock<Mutex<VirtualDepsInstallState>> = OnceLock::new();
+
 #[tauri::command]
 fn ping() -> &'static str {
     "pong"
@@ -89,6 +125,47 @@ fn host_name() -> String {
         .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| "unknown-host".to_string())
+}
+
+fn virtual_deps_state() -> &'static Mutex<VirtualDepsInstallState> {
+    VIRTUAL_DEPS_INSTALL_STATE.get_or_init(|| Mutex::new(VirtualDepsInstallState::default()))
+}
+
+fn virtual_deps_snapshot() -> VirtualDepsInstallStatus {
+    let state = virtual_deps_state().lock().expect("virtual deps state lock");
+    VirtualDepsInstallStatus {
+        running: state.running,
+        done: state.done,
+        success: state.success,
+        message: state.message.clone(),
+        logs: state.logs.iter().cloned().collect(),
+    }
+}
+
+fn virtual_deps_reset_running() {
+    let mut state = virtual_deps_state().lock().expect("virtual deps state lock");
+    state.running = true;
+    state.done = false;
+    state.success = false;
+    state.message = "Starting installation...".to_string();
+    state.logs.clear();
+}
+
+fn virtual_deps_push_log(line: impl Into<String>) {
+    const MAX_LOG_LINES: usize = 500;
+    let mut state = virtual_deps_state().lock().expect("virtual deps state lock");
+    state.logs.push_back(line.into());
+    while state.logs.len() > MAX_LOG_LINES {
+        let _ = state.logs.pop_front();
+    }
+}
+
+fn virtual_deps_finish(success: bool, message: String) {
+    let mut state = virtual_deps_state().lock().expect("virtual deps state lock");
+    state.running = false;
+    state.done = true;
+    state.success = success;
+    state.message = message;
 }
 
 #[tauri::command]
@@ -804,32 +881,111 @@ fn virtual_doctor(serial: Option<String>, stream_port: Option<u16>) -> Result<Vi
 }
 
 #[tauri::command]
-fn virtual_install_deps() -> Result<String, String> {
+fn virtual_install_deps_start() -> Result<String, String> {
+    {
+        let state = virtual_deps_state().lock().expect("virtual deps state lock");
+        if state.running {
+            return Ok("already running".to_string());
+        }
+    }
+    virtual_deps_reset_running();
+    thread::spawn(run_virtual_install_job);
+    Ok("started".to_string())
+}
+
+#[tauri::command]
+fn virtual_install_deps_status() -> VirtualDepsInstallStatus {
+    virtual_deps_snapshot()
+}
+
+fn run_virtual_install_job() {
     let root = repo_root();
     let wbeam = root.join("wbeam");
-    let output = Command::new(&wbeam)
-        .current_dir(&root)
-        .args(["deps", "virtual", "install", "--yes"])
+    virtual_deps_push_log(format!("[virtual-deps] root={}", root.display()));
+
+    let is_root = Command::new("id")
+        .arg("-u")
         .output()
-        .map_err(|e| format!("virtual_install_deps spawn failed: {e}"))?;
-    if output.status.success() {
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if stdout.is_empty() {
-            Ok("virtual deps install completed".to_string())
-        } else {
-            Ok(stdout)
-        }
+        .ok()
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string() == "0")
+        .unwrap_or(false);
+
+    let mut cmd = if is_root {
+        let mut c = Command::new(&wbeam);
+        c.args(["deps", "virtual", "install", "--yes"]);
+        c
+    } else if command_exists("pkexec") {
+        virtual_deps_push_log("[virtual-deps] requesting privilege elevation via pkexec");
+        let mut c = Command::new("pkexec");
+        c.arg(&wbeam);
+        c.args(["deps", "virtual", "install", "--yes"]);
+        c
     } else {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let msg = if !stderr.is_empty() {
-            stderr
-        } else if !stdout.is_empty() {
-            stdout
-        } else {
-            format!("virtual deps install failed with status {}", output.status)
-        };
-        Err(msg)
+        virtual_deps_push_log("[virtual-deps] ERROR: pkexec not available and user is not root");
+        virtual_deps_finish(
+            false,
+            "Root privileges required. Install polkit/pkexec or run as root.".to_string(),
+        );
+        return;
+    };
+
+    let child_spawn = cmd
+        .current_dir(&root)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
+    let mut child = match child_spawn {
+        Ok(c) => c,
+        Err(e) => {
+            virtual_deps_finish(false, format!("Failed to start installer: {e}"));
+            return;
+        }
+    };
+
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let out_thread = stdout.map(|out| {
+        thread::spawn(move || {
+            let reader = BufReader::new(out);
+            for line in reader.lines().map_while(Result::ok) {
+                virtual_deps_push_log(line);
+            }
+        })
+    });
+    let err_thread = stderr.map(|err| {
+        thread::spawn(move || {
+            let reader = BufReader::new(err);
+            for line in reader.lines().map_while(Result::ok) {
+                virtual_deps_push_log(format!("[stderr] {line}"));
+            }
+        })
+    });
+
+    let status = match child.wait() {
+        Ok(s) => s,
+        Err(e) => {
+            virtual_deps_finish(false, format!("Installer wait failed: {e}"));
+            return;
+        }
+    };
+    if let Some(h) = out_thread {
+        let _ = h.join();
+    }
+    if let Some(h) = err_thread {
+        let _ = h.join();
+    }
+
+    if status.success() {
+        virtual_deps_finish(true, "Dependencies installed successfully.".to_string());
+    } else {
+        let code = status
+            .code()
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "signal".to_string());
+        virtual_deps_finish(
+            false,
+            format!("Dependency installation failed (exit: {code})."),
+        );
     }
 }
 
@@ -1242,7 +1398,8 @@ fn main() {
             service_status,
             host_probe_brief,
             virtual_doctor,
-            virtual_install_deps,
+            virtual_install_deps_start,
+            virtual_install_deps_status,
             device_connect,
             device_disconnect,
             service_install,

@@ -23,7 +23,7 @@ import {
   Loader2,
 } from "lucide-solid";
 import type { DeviceBasic } from "./types";
-import type { VirtualDoctor } from "./types";
+import type { VirtualDepsInstallStatus, VirtualDoctor } from "./types";
 import { HostApiManager } from "./managers/hostApiManager";
 import { createSessionManager } from "./managers/sessionManager";
 
@@ -76,6 +76,15 @@ export default function App() {
   const [virtualStartupDoctor, setVirtualStartupDoctor] = createSignal<VirtualDoctor | null>(null);
   const [virtualSetupVisible, setVirtualSetupVisible] = createSignal(false);
   const [virtualSetupInstalling, setVirtualSetupInstalling] = createSignal(false);
+  const [virtualInstallVisible, setVirtualInstallVisible] = createSignal(false);
+  const [virtualInstallStatus, setVirtualInstallStatus] = createSignal<VirtualDepsInstallStatus>({
+    running: false,
+    done: false,
+    success: false,
+    message: "idle",
+    logs: [],
+  });
+  let virtualInstallPollTimer: number | null = null;
   const upgradeAvailable = () =>
     session.service().active
     && session.service().installed
@@ -156,23 +165,79 @@ export default function App() {
     setVirtualSetupVisible(false);
   }
 
+  function stopVirtualInstallPolling(): void {
+    if (virtualInstallPollTimer !== null) {
+      window.clearInterval(virtualInstallPollTimer);
+      virtualInstallPollTimer = null;
+    }
+  }
+
+  function closeVirtualInstallModal(): void {
+    if (virtualInstallStatus().running) return;
+    setVirtualInstallVisible(false);
+  }
+
   async function installVirtualDeps(): Promise<void> {
     setVirtualSetupInstalling(true);
     session.setError("");
+    setVirtualInstallVisible(true);
+    setVirtualInstallStatus({
+      running: true,
+      done: false,
+      success: false,
+      message: "Starting dependency installer...",
+      logs: ["[ui] requesting installer start..."],
+    });
+    stopVirtualInstallPolling();
     try {
-      await api.installVirtualDeps();
-      const doctor = await api.getVirtualDoctor();
-      setVirtualStartupDoctor(doctor);
-      if (doctor.ok) {
-        setVirtualSetupVisible(false);
-      } else {
-        setVirtualSetupVisible(true);
-        const details = doctor.missingDeps.length > 0 ? ` Missing: ${doctor.missingDeps.join(", ")}.` : "";
-        session.setError(`${doctor.message}.${details}`.trim());
-      }
-      await session.refreshSnapshot({ silent: true });
+      await api.startVirtualDepsInstall();
+      const poll = async () => {
+        try {
+          const status = await api.getVirtualDepsInstallStatus();
+          setVirtualInstallStatus(status);
+          if (status.done) {
+            stopVirtualInstallPolling();
+            if (status.success) {
+              const doctor = await api.getVirtualDoctor();
+              setVirtualStartupDoctor(doctor);
+              if (doctor.ok) {
+                setVirtualSetupVisible(false);
+                session.setError("");
+              } else {
+                setVirtualSetupVisible(true);
+                const details = doctor.missingDeps.length > 0 ? ` Missing: ${doctor.missingDeps.join(", ")}.` : "";
+                session.setError(`${doctor.message}.${details}`.trim());
+              }
+              await session.refreshSnapshot({ silent: true });
+            } else {
+              session.setError(status.message);
+            }
+          }
+        } catch (err) {
+          stopVirtualInstallPolling();
+          setVirtualInstallStatus({
+            running: false,
+            done: true,
+            success: false,
+            message: `Installer status read failed: ${String(err)}`,
+            logs: [...virtualInstallStatus().logs, `[ui][error] ${String(err)}`],
+          });
+          session.setError(`Dependency installation failed: ${String(err)}`);
+        }
+      };
+      await poll();
+      virtualInstallPollTimer = window.setInterval(() => {
+        void poll();
+      }, 600);
     } catch (err) {
       session.setError(`Dependency installation failed: ${String(err)}`);
+      setVirtualInstallStatus({
+        running: false,
+        done: true,
+        success: false,
+        message: `Dependency installation failed: ${String(err)}`,
+        logs: [...virtualInstallStatus().logs, `[ui][error] ${String(err)}`],
+      });
     } finally {
       setVirtualSetupInstalling(false);
     }
@@ -203,7 +268,10 @@ export default function App() {
       if (session.deviceActionBusy().length > 0 || session.refreshInFlight()) return;
       void session.refreshSnapshot({ silent: true });
     }, 2500);
-    onCleanup(() => window.clearInterval(timer));
+    onCleanup(() => {
+      window.clearInterval(timer);
+      stopVirtualInstallPolling();
+    });
   });
 
   return (
@@ -499,6 +567,39 @@ export default function App() {
             </div>
           );
         }}
+      </Show>
+      <Show when={virtualInstallVisible()}>
+        <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Installing dependencies">
+          <section class="connect-modal setup-modal install-modal">
+            <h3>Installing virtual desktop dependencies</h3>
+            <p class="connect-modal-subtitle">Elevation is required (root/pkexec prompt).</p>
+            <div class="install-progress">
+              <div class={`install-progress-bar ${virtualInstallStatus().running ? "running" : virtualInstallStatus().success ? "ok" : "bad"}`} />
+            </div>
+            <p class={`setup-message ${virtualInstallStatus().done ? (virtualInstallStatus().success ? "install-ok" : "install-bad") : ""}`}>
+              {virtualInstallStatus().done
+                ? (virtualInstallStatus().success
+                  ? "Installation completed successfully."
+                  : "Installation failed.")
+                : "Installing..."}
+            </p>
+            <p class="setup-hint">{virtualInstallStatus().message}</p>
+            <textarea
+              class="install-log"
+              readOnly
+              value={virtualInstallStatus().logs.join("\n")}
+              aria-label="Installer terminal output"
+            />
+            <div class="connect-modal-actions">
+              <button class="device-btn" disabled={!virtualInstallStatus().done} onClick={closeVirtualInstallModal}>
+                {virtualInstallStatus().done ? "Close" : "Installing..."}
+              </button>
+              <button class="device-btn" disabled={!virtualInstallStatus().done} onClick={() => void session.refreshSnapshot()}>
+                Refresh
+              </button>
+            </div>
+          </section>
+        </div>
       </Show>
     </main>
   );

@@ -1,5 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { DeviceBasic, DevicesBasicResponse, HostProbeBrief, ServiceStatus, VirtualDoctor } from "../types";
+import type {
+  DeviceBasic,
+  DevicesBasicResponse,
+  HostProbeBrief,
+  ServiceStatus,
+  VirtualDepsInstallStatus,
+  VirtualDoctor,
+} from "../types";
 
 function normalizeApiError(err: unknown): string {
   const text = String(err ?? "unknown error");
@@ -86,12 +93,24 @@ export class HostApiManager {
     }
   }
 
-  async installVirtualDeps(): Promise<string> {
+  async startVirtualDepsInstall(): Promise<string> {
     try {
       return await withTimeout(
-        invoke<string>("virtual_install_deps"),
-        120000,
-        "virtual_install_deps",
+        invoke<string>("virtual_install_deps_start"),
+        2500,
+        "virtual_install_deps_start",
+      );
+    } catch (err) {
+      throw new Error(normalizeApiError(err));
+    }
+  }
+
+  async getVirtualDepsInstallStatus(): Promise<VirtualDepsInstallStatus> {
+    try {
+      return await withTimeout(
+        invoke<VirtualDepsInstallStatus>("virtual_install_deps_status"),
+        2500,
+        "virtual_install_deps_status",
       );
     } catch (err) {
       throw new Error(normalizeApiError(err));
