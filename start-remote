@@ -7,6 +7,7 @@ ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 usage() {
   cat <<'USAGE'
 Usage:
+  ./start-remote --list-sessions [desktop_user]
   ./start-remote --local [desktop_user] [--quick] [--redeploy] [--rebuild-host] [--no-host-restart] [--fresh-service] [--session-id SID] [--display :N]
   ./start-remote --rdp [desktop_user] [--quick] [--redeploy] [--rebuild-host] [--no-host-restart] [--fresh-service] [--session-id SID] [--display :N]
   WBEAM_DEV_REMOTE_USER=<user> ./start-remote
@@ -51,6 +52,15 @@ DESKTOP_USER="${WBEAM_DEV_REMOTE_USER:-}"
 SESSION_REMOTE_FILTER="no"
 SESSION_ID_OVERRIDE=""
 DISPLAY_OVERRIDE=""
+
+if [[ "${1:-}" == "--list-sessions" ]]; then
+  if [[ -n "${2:-}" && "${2:0:1}" != "-" ]]; then
+    ./runas-remote --list-sessions "$2"
+  else
+    ./runas-remote --list-sessions
+  fi
+  exit 0
+fi
 
 session_remote_matches() {
   local remote="${1:-}"
@@ -168,14 +178,12 @@ run_step() {
 runas_remote_exec() {
   local -a env_args
   env_args=("RUNAS_REMOTE_SESSION_REMOTE=$SESSION_REMOTE_FILTER")
-  if [[ -n "$SESSION_ID_OVERRIDE" ]]; then
-    env_args+=("RUNAS_REMOTE_SESSION_ID=$SESSION_ID_OVERRIDE")
-  fi
-  if [[ -n "$DISPLAY_OVERRIDE" ]]; then
-    env_args+=("RUNAS_REMOTE_DISPLAY=$DISPLAY_OVERRIDE")
-  fi
+  # Always set these to avoid stale exported values from parent shell.
+  env_args+=("RUNAS_REMOTE_SESSION_ID=$SESSION_ID_OVERRIDE")
+  env_args+=("RUNAS_REMOTE_DISPLAY=$DISPLAY_OVERRIDE")
   env "${env_args[@]}" ./runas-remote "$@"
 }
+
 
 next_log_file() {
   local domain="$1"

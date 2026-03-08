@@ -685,3 +685,14 @@ Status: active
   - `./start-remote --local <user>` is now more likely to auto-pick real GUI session without manual `--session-id`.
 - Validation:
   - `bash -n runas-remote start-remote` -> OK
+
+## In Progress (2026-03-08) [commit: pending] - session selection UX fixes (`--list-sessions`, stale env guard)
+- Fixed `start-remote --list-sessions` command path:
+  - handled before general argument parsing so it no longer falls through to unknown-flag error.
+- Fixed stale session override inheritance:
+  - `start-remote` now always sets `RUNAS_REMOTE_SESSION_ID` and `RUNAS_REMOTE_DISPLAY` explicitly when calling `runas-remote`,
+  - prevents accidental reuse of old exported values from parent shell.
+- Added manual-display fallback in `runas-remote`:
+  - when no loginctl graphical session is found but `RUNAS_REMOTE_DISPLAY=:N` is provided, launcher can proceed in manual mode.
+- Validation:
+  - `bash -n start-remote runas-remote` -> OK

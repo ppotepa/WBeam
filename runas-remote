@@ -330,14 +330,22 @@ TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
 XDG_RUNTIME_DIR="/run/user/$TARGET_UID"
 
 if ! SESSION_ID="$(resolve_desktop_session_id)"; then
-  echo "[runas-remote] could not detect a graphical session for $TARGET_USER." >&2
-  exit 1
+  if [[ -n "$FORCED_DISPLAY" ]]; then
+    SESSION_ID="manual"
+    SESSION_TYPE="x11"
+    DISPLAY_VAL="$FORCED_DISPLAY"
+  else
+    echo "[runas-remote] could not detect a graphical session for $TARGET_USER." >&2
+    exit 1
+  fi
 fi
 
-SESSION_TYPE="$(loginctl show-session "$SESSION_ID" -p Type --value 2>/dev/null || true)"
-[[ -n "$SESSION_TYPE" ]] || SESSION_TYPE="wayland"
+if [[ "${SESSION_TYPE:-}" == "" ]]; then
+  SESSION_TYPE="$(loginctl show-session "$SESSION_ID" -p Type --value 2>/dev/null || true)"
+  [[ -n "$SESSION_TYPE" ]] || SESSION_TYPE="wayland"
+fi
 
-DISPLAY_VAL="${FORCED_DISPLAY:-}"
+DISPLAY_VAL="${DISPLAY_VAL:-${FORCED_DISPLAY:-}}"
 if [[ -z "$DISPLAY_VAL" ]]; then
   DISPLAY_VAL="$(loginctl show-session "$SESSION_ID" -p Display --value 2>/dev/null || true)"
 fi
