@@ -23,6 +23,7 @@ import {
   Loader2,
 } from "lucide-solid";
 import type { DeviceBasic } from "./types";
+import type { VirtualDoctor } from "./types";
 import { HostApiManager } from "./managers/hostApiManager";
 import { createSessionManager } from "./managers/sessionManager";
 
@@ -40,6 +41,7 @@ function DeviceTypeIcon(props: { type: string }) {
 
 type DisplayMode = "virtual" | "duplicate";
 const CONNECT_MODE_STORAGE_KEY = "wbeam.connect.mode.by.serial";
+const VIRTUAL_SETUP_DISMISS_KEY = "wbeam.virtual.setup.dismissed.signature";
 
 function loadSavedDisplayMode(serial: string): DisplayMode | null {
   try {
@@ -72,6 +74,8 @@ export default function App() {
   const [hostName, setHostName] = createSignal("unknown-host");
   const [connectDialogDevice, setConnectDialogDevice] = createSignal<DeviceBasic | null>(null);
   const [connectDialogMode, setConnectDialogMode] = createSignal<DisplayMode>("virtual");
+  const [virtualStartupDoctor, setVirtualStartupDoctor] = createSignal<VirtualDoctor | null>(null);
+  const [virtualSetupVisible, setVirtualSetupVisible] = createSignal(false);
   const upgradeAvailable = () =>
     session.service().active
     && session.service().installed
@@ -164,6 +168,34 @@ export default function App() {
     await session.connectDevice(device, chosenMode);
   }
 
+  function doctorSignature(doctor: VirtualDoctor): string {
+    return `${doctor.hostBackend}|${doctor.missingDeps.join(",")}`;
+  }
+
+  function isVirtualSetupDismissed(doctor: VirtualDoctor): boolean {
+    try {
+      return localStorage.getItem(VIRTUAL_SETUP_DISMISS_KEY) === doctorSignature(doctor);
+    } catch {
+      return false;
+    }
+  }
+
+  function dismissVirtualSetupRemember(): void {
+    const doctor = virtualStartupDoctor();
+    if (doctor) {
+      try {
+        localStorage.setItem(VIRTUAL_SETUP_DISMISS_KEY, doctorSignature(doctor));
+      } catch {
+        // ignore storage failures
+      }
+    }
+    setVirtualSetupVisible(false);
+  }
+
+  function closeVirtualSetup(): void {
+    setVirtualSetupVisible(false);
+  }
+
   onMount(async () => {
     try {
       const name = await api.getHostName();
@@ -175,6 +207,15 @@ export default function App() {
     }
 
     await session.refreshSnapshot();
+    try {
+      const doctor = await api.getVirtualDoctor();
+      setVirtualStartupDoctor(doctor);
+      if (!doctor.ok && doctor.actionable && !isVirtualSetupDismissed(doctor)) {
+        setVirtualSetupVisible(true);
+      }
+    } catch {
+      // Non-blocking check; connect flow still performs per-device guard.
+    }
 
     const timer = window.setInterval(() => {
       if (session.deviceActionBusy().length > 0 || session.refreshInFlight()) return;
@@ -443,6 +484,28 @@ export default function App() {
                   <button class="device-btn" onClick={() => void confirmConnect()}>
                     Connect
                   </button>
+                </div>
+              </section>
+            </div>
+          );
+        }}
+      </Show>
+      <Show when={virtualSetupVisible() && virtualStartupDoctor()}>
+        {(doctorAccessor) => {
+          const doctor = doctorAccessor();
+          return (
+            <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Virtual desktop setup">
+              <section class="connect-modal setup-modal">
+                <h3>Virtual desktop setup</h3>
+                <p class="connect-modal-subtitle">Host backend: {doctor.hostBackend}</p>
+                <p class="setup-message">{doctor.message}</p>
+                <p class="setup-hint">{doctor.installHint}</p>
+                <Show when={doctor.missingDeps.length > 0}>
+                  <p class="setup-missing">Missing: {doctor.missingDeps.join(", ")}</p>
+                </Show>
+                <div class="connect-modal-actions">
+                  <button class="device-btn" onClick={dismissVirtualSetupRemember}>Later</button>
+                  <button class="device-btn" onClick={closeVirtualSetup}>Use duplicate</button>
                 </div>
               </section>
             </div>

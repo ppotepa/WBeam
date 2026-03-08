@@ -489,3 +489,30 @@ h1 {
   grid-template-columns: 1fr 1fr;
   gap: 0.42rem;
 }
+
+.setup-modal {
+  width: min(420px, calc(100vw - 2rem));
+}
+
+.setup-message {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #f8fafc;
+}
+
+.setup-hint {
+  margin: 0;
+  padding: 0.5rem;
+  border-radius: 8px;
+  border: 1px solid #425a74;
+  background: #15273a;
+  color: #dbeafe;
+  font-size: 0.72rem;
+  font-family: "IBM Plex Mono", "Consolas", monospace;
+}
+
+.setup-missing {
+  margin: 0;
+  color: #fca5a5;
+  font-size: 0.72rem;
+}

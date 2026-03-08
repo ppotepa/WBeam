@@ -73,10 +73,11 @@ export class HostApiManager {
     }
   }
 
-  async getVirtualDoctor(device: DeviceBasic): Promise<VirtualDoctor> {
+  async getVirtualDoctor(device?: DeviceBasic): Promise<VirtualDoctor> {
     try {
+      const params = device ? { serial: device.serial, streamPort: device.streamPort } : {};
       return await withTimeout(
-        invoke<VirtualDoctor>("virtual_doctor", { serial: device.serial, streamPort: device.streamPort }),
+        invoke<VirtualDoctor>("virtual_doctor", params),
         2500,
         "virtual_doctor",
       );

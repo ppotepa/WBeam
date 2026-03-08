@@ -40,6 +40,15 @@ Status: active
   - If dependencies are missing, user gets clear prompt with install hint and can fallback to `Duplicate`.
   - Prevents opaque 500 failures when virtual backend is not ready.
 
+## Session Update (2026-03-08) - startup virtual checks
+- Added first-start virtual capability check in desktop GUI startup flow:
+  - after initial snapshot, GUI runs `virtual_doctor` automatically,
+  - if virtual mode is actionable-but-missing (e.g. `Xvfb` absent), it shows setup modal immediately.
+- Added one-time dismissal memory:
+  - user can choose `Later` and suppress repeated startup prompts for the same host-backend+missing-deps signature.
+- Connect guard remains active:
+  - `Connect -> Virtual` still runs per-device doctor preflight and offers Duplicate fallback.
+
 ## Current Baseline (Authoritative)
 - Desktop app is now based on Tauri 2 + SolidJS + TypeScript.
 - Primary desktop target is a compact `400x800` dialog UX.
