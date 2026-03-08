@@ -35,7 +35,7 @@ use domain::state::{
     STATE_ERROR, STATE_IDLE, STATE_RECONNECTING, STATE_STARTING, STATE_STOPPING, STATE_STREAMING,
 };
 use infra::process as proc;
-use infra::{adb, config_store, host_probe, telemetry, virtual_display};
+use infra::{adb, config_store, host_probe, telemetry, virtual_display, x11_extend};
 
 const DEFAULT_START_TIMEOUT: Duration = Duration::from_secs(45);
 const DUPLICATE_START_GUARD: Duration = Duration::from_secs(3);
@@ -418,13 +418,29 @@ impl DaemonCore {
         let mut hint = "Virtual desktop is not available on this host backend.".to_string();
 
         if backend == "x11_gst" {
-            resolver = "linux_x11_xvfb".to_string();
-            if virtual_display::has_xvfb() {
+            let extend_probe = x11_extend::probe(self.host_probe.is_remote);
+            if extend_probe.supported {
                 supported = true;
-                hint = "Virtual desktop is available via Xvfb backend.".to_string();
+                resolver = "linux_x11_randr_extend".to_string();
+                hint = "X11 extend backend looks available; stream can target an additional desktop area.".to_string();
             } else {
-                missing.push("Xvfb".to_string());
-                hint = virtual_display::install_hint();
+                resolver = "linux_x11_xvfb_fallback".to_string();
+                if virtual_display::has_xvfb() {
+                    hint = format!(
+                        "X11 extend backend unavailable: {}. Xvfb fallback creates isolated virtual X space (not a KDE additional monitor). Use Duplicate mode in this session.",
+                        extend_probe.reason
+                    );
+                } else {
+                    missing = extend_probe.missing_deps;
+                    if !missing.iter().any(|m| m == "Xvfb") {
+                        missing.push("Xvfb".to_string());
+                    }
+                    hint = format!(
+                        "X11 extend backend unavailable: {}. {}",
+                        extend_probe.reason,
+                        virtual_display::install_hint()
+                    );
+                }
             }
         } else if backend == "wayland_portal" {
             resolver = "linux_wayland_portal_virtual".to_string();
@@ -891,7 +907,7 @@ impl DaemonCore {
             let inner = self.inner.lock().await;
             inner.requested_display_mode.clone()
         };
-        let mut cfg = cfg;
+        let mut launch_size = cfg.size.clone();
         if !self.host_probe.supports_streaming() {
             let reason = self.host_probe.unsupported_reason();
             {
@@ -904,19 +920,19 @@ impl DaemonCore {
 
         if requested_display_mode == "virtual" {
             if let Some(target_size) = adb::device_resolution(self.target_serial.as_deref()).await {
-                if cfg.size != target_size {
+                if launch_size != target_size {
                     info!(
                         serial = self.target_serial.as_deref().unwrap_or("auto"),
-                        from = %cfg.size,
+                        from = %launch_size,
                         to = %target_size,
                         "virtual mode: overriding stream size to target device resolution"
                     );
-                    cfg.size = target_size;
+                    launch_size = target_size;
                 }
             } else {
                 warn!(
                     serial = self.target_serial.as_deref().unwrap_or("auto"),
-                    configured = %cfg.size,
+                    configured = %launch_size,
                     "virtual mode: could not detect target device resolution; using configured size"
                 );
             }
@@ -1022,11 +1038,11 @@ impl DaemonCore {
             if requested_display_mode == "virtual" {
                 self.stop_virtual_display_if_any().await;
                 let serial_hint = self.target_serial.as_deref().unwrap_or("default");
-                let handle = virtual_display::spawn_xvfb_for_serial(serial_hint, &cfg.size)
+                let handle = virtual_display::spawn_xvfb_for_serial(serial_hint, &launch_size)
                     .map_err(CoreError::Spawn)?;
                 info!(
                     serial = serial_hint,
-                    size = %cfg.size,
+                    size = %launch_size,
                     display = %handle.display,
                     pid = handle.pid,
                     "virtual mode: spawned Xvfb display"
@@ -1070,7 +1086,7 @@ impl DaemonCore {
                 .arg("--cursor-mode")
                 .arg(&cfg.cursor_mode)
                 .arg("--size")
-                .arg(&cfg.size)
+                .arg(&launch_size)
                 .arg("--fps")
                 .arg(cfg.fps.to_string())
                 .arg("--bitrate-kbps")
@@ -1120,7 +1136,7 @@ impl DaemonCore {
                 .arg("--cursor-mode")
                 .arg(&cfg.cursor_mode)
                 .arg("--size")
-                .arg(&cfg.size)
+                .arg(&launch_size)
                 .arg("--fps")
                 .arg(cfg.fps.to_string())
                 .arg("--bitrate-kbps")

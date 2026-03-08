@@ -1179,9 +1179,24 @@ fn service_unit_content() -> String {
     let control_port = std::env::var("WBEAM_CONTROL_PORT").unwrap_or_else(|_| "5001".to_string());
     let stream_port = std::env::var("WBEAM_STREAM_PORT").unwrap_or_else(|_| "5000".to_string());
     let root = repo_root().to_string_lossy().to_string();
+    let mut session_env = String::new();
+    for key in [
+        "DISPLAY",
+        "XAUTHORITY",
+        "WAYLAND_DISPLAY",
+        "XDG_RUNTIME_DIR",
+        "DBUS_SESSION_BUS_ADDRESS",
+    ] {
+        if let Ok(val) = std::env::var(key) {
+            let trimmed = val.trim();
+            if !trimmed.is_empty() {
+                session_env.push_str(&format!("Environment={}={}\n", key, trimmed));
+            }
+        }
+    }
 
     format!(
-        "[Unit]\nDescription=WBeam Screen Streaming Daemon\nAfter=graphical-session.target\n\n[Service]\nType=simple\nExecStart={daemon_bin} --control-port {control_port} --stream-port {stream_port} --root {root}\nRestart=on-failure\nRestartSec=3\nEnvironment=RUST_LOG=info\nEnvironment=WBEAM_USE_RUST_STREAMER=1\nEnvironment=WBEAM_ROOT={root}\n\n[Install]\nWantedBy=default.target\n"
+        "[Unit]\nDescription=WBeam Screen Streaming Daemon\nAfter=graphical-session.target\n\n[Service]\nType=simple\nExecStart={daemon_bin} --control-port {control_port} --stream-port {stream_port} --root {root}\nRestart=on-failure\nRestartSec=3\nEnvironment=RUST_LOG=info\nEnvironment=WBEAM_USE_RUST_STREAMER=1\nEnvironment=WBEAM_ROOT={root}\n{session_env}\n[Install]\nWantedBy=default.target\n"
     )
 }
 

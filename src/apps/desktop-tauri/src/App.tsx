@@ -146,9 +146,11 @@ export default function App() {
       try {
         const doctor = await api.getVirtualDoctor(device);
         if (!doctor.ok) {
-          setVirtualStartupDoctor(doctor);
-          setVirtualSetupVisible(true);
-          session.setError("Virtual desktop dependencies are missing. Install deps or connect using Duplicate mode.");
+          if (doctor.actionable) {
+            setVirtualStartupDoctor(doctor);
+            setVirtualSetupVisible(true);
+          }
+          session.setError(`${doctor.message} ${doctor.installHint}`.trim());
           return;
         }
       } catch (err) {
