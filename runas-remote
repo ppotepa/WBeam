@@ -147,7 +147,10 @@ session_remote_matches() {
   local remote="${1:-}"
   case "$SESSION_REMOTE_FILTER" in
     any|ANY) true ;;
-    no|NO) [[ "${remote,,}" == "no" ]] ;;
+    no|NO)
+      remote="${remote,,}"
+      [[ -z "$remote" || "$remote" == "no" || "$remote" == "-" || "$remote" == "unknown" ]]
+      ;;
     yes|YES) [[ "${remote,,}" == "yes" ]] ;;
     *) true ;;
   esac
