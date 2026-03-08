@@ -10,6 +10,18 @@ use std::path::Path;
 
 use wbeamd_api::{validate_config, validate_config_with_presets, ActiveConfig, ConfigPatch};
 
+fn default_config_from_presets(presets: &BTreeMap<String, ActiveConfig>) -> ActiveConfig {
+    for key in ["fast60_3", "balanced60", "fast60", "safe_60"] {
+        if let Some(cfg) = presets.get(key) {
+            return cfg.clone();
+        }
+    }
+    if let Some((_name, cfg)) = presets.iter().next() {
+        return cfg.clone();
+    }
+    ActiveConfig::balanced_default()
+}
+
 /// Read and validate `ActiveConfig` from `path`.  Returns `None` if the file
 /// is missing, unreadable, or fails validation.
 pub fn load_runtime_config(path: &Path) -> Option<ActiveConfig> {
@@ -37,10 +49,7 @@ pub fn load_runtime_config_with_presets(
     let raw = fs::read_to_string(path).ok()?;
     let parsed: ActiveConfig = serde_json::from_str(&raw).ok()?;
 
-    let fallback = presets
-        .get("balanced")
-        .cloned()
-        .unwrap_or_else(ActiveConfig::balanced_default);
+    let fallback = default_config_from_presets(presets);
 
     let patch = ConfigPatch {
         profile: Some(parsed.profile),

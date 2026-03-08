@@ -31,42 +31,46 @@ idea is simple: plug android phone/tablet into linux and use it as an extra disp
 
 full migration notes: `docs/repo_tree_src_layout.md`
 
-## quick start
+## quick start (main command: `./wbeam`)
 
-- install deps once:
-
-```bash
-./devtool deps install
-```
-
-- start main lane (GUI):
+- check command list:
 
 ```bash
-./devtool
+./wbeam --help
 ```
 
-- start main lane (cli build/deploy):
+- most common local flow:
 
 ```bash
-./devtool build
-./devtool deploy
+./wbeam service install
+./wbeam service start
+./wbeam android deploy-all
+./wbgui
 ```
 
-- run remote desktop GUI on another user session:
+- check runtime health:
+
 ```bash
-./runas-remote <user> ./devtool -- gui
+./wbeam daemon status
+./wbeam version doctor
 ```
 
-- secret/env safety note for `runas-remote`:
+## remote usage (why `start-remote` exists)
+
+`start-remote` exists for remote work: host machine has USB-connected Android devices, but you control it from another PC (RDP/remote session).  
+It automates host/service/android prep in one command.
+
 ```bash
-# pass only selected secret env vars to target app (avoid putting secrets in CLI args)
-RUNAS_REMOTE_PASSTHROUGH_ENV="WBEAM_API_TOKEN,WBEAM_SECRET" ./runas-remote <user> ./devtool -- gui
-
-# or load KEY=VALUE from file (chmod 600 recommended)
-RUNAS_REMOTE_ENV_FILE=/path/to/remote.env ./runas-remote <user> ./devtool -- gui
+./start-remote <remote-user>
 ```
 
-- run proto lane:
+If you only need to run one app in a remote user session, use:
+
+```bash
+./runas-remote <remote-user> <command>
+```
+
+- run proto lane (sandbox):
 
 ```bash
 cd proto

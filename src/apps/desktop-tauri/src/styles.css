@@ -81,6 +81,7 @@ h1 {
   justify-content: center;
   cursor: pointer;
   gap: 0.28rem;
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, transform 90ms ease, box-shadow 140ms ease;
 }
 
 .icon-btn {
@@ -90,6 +91,22 @@ h1 {
 .refresh-btn,
 .svc-btn {
   padding: 0 0.55rem;
+}
+
+.icon-btn:hover:not(:disabled),
+.refresh-btn:hover:not(:disabled),
+.svc-btn:hover:not(:disabled) {
+  background: #223247;
+  border-color: #6e8caf;
+  box-shadow: 0 0 0 2px rgba(126, 173, 230, 0.22);
+  transform: translateY(-1px);
+}
+
+.icon-btn:active:not(:disabled),
+.refresh-btn:active:not(:disabled),
+.svc-btn:active:not(:disabled) {
+  transform: translateY(0);
+  background: #1c2a3d;
 }
 
 .svc-btn.svc-upgrade {
@@ -200,6 +217,27 @@ h1 {
   flex: 0 0 auto;
 }
 
+.device-row-busy {
+  position: relative;
+  border-color: #58718c;
+  filter: saturate(0.85) brightness(0.92);
+}
+
+.device-row-busy::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 10px;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    rgba(170, 194, 218, 0.05) 0%,
+    rgba(170, 194, 218, 0.2) 45%,
+    rgba(170, 194, 218, 0.05) 100%
+  );
+  animation: busy-sheen 1.1s linear infinite;
+}
+
 .line {
   display: flex;
   align-items: center;
@@ -255,24 +293,28 @@ h1 {
   justify-content: center;
   gap: 0.25rem;
   cursor: pointer;
-  transition: background-color 120ms ease, border-color 120ms ease, transform 80ms ease;
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, transform 90ms ease, box-shadow 140ms ease;
 }
 
 .device-btn:hover:not(:disabled) {
-  background: #24364b;
-  border-color: #5f7a98;
+  background: #2a3f57;
+  border-color: #7da8d9;
+  color: #f5fbff;
+  box-shadow: 0 0 0 2px rgba(125, 168, 217, 0.24);
   transform: translateY(-1px);
 }
 
 .device-btn:active:not(:disabled) {
   transform: translateY(0);
-  background: #1f2f42;
+  background: #23374d;
 }
 
 .device-btn:disabled {
-  opacity: 0.4;
+  opacity: 0.38;
   cursor: default;
-  filter: grayscale(0.5);
+  filter: grayscale(0.65) saturate(0.7);
+  border-color: #34485f;
+  background: #152130;
 }
 
 .spinning {
@@ -285,6 +327,17 @@ h1 {
   }
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes busy-sheen {
+  from {
+    transform: translateX(-35%);
+    opacity: 0.55;
+  }
+  to {
+    transform: translateX(35%);
+    opacity: 0.9;
   }
 }
 

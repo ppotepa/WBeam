@@ -3,20 +3,35 @@ import type { DeviceBasic, DevicesBasicResponse, HostProbeBrief, ServiceStatus }
 
 function normalizeApiError(err: unknown): string {
   const text = String(err ?? "unknown error");
+  if (text.toLowerCase().includes("timeout")) {
+    return "Host API timeout. Check service state and USB connectivity.";
+  }
   if (text.includes("curl")) {
     return "Host API unreachable. Verify desktop service is running.";
   }
   return text;
 }
 
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(`${label} timeout after ${ms}ms`)), ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
 export class HostApiManager {
   async getHostName(): Promise<string> {
-    return invoke<string>("host_name");
+    return withTimeout(invoke<string>("host_name"), 1500, "host_name");
   }
 
   async getServiceStatus(): Promise<ServiceStatus> {
     try {
-      return await invoke<ServiceStatus>("service_status");
+      return await withTimeout(invoke<ServiceStatus>("service_status"), 2000, "service_status");
     } catch (err) {
       throw new Error(normalizeApiError(err));
     }
@@ -24,7 +39,7 @@ export class HostApiManager {
 
   async getHostProbe(): Promise<HostProbeBrief> {
     try {
-      return await invoke<HostProbeBrief>("host_probe_brief");
+      return await withTimeout(invoke<HostProbeBrief>("host_probe_brief"), 2000, "host_probe_brief");
     } catch (err) {
       throw new Error(normalizeApiError(err));
     }
@@ -32,7 +47,7 @@ export class HostApiManager {
 
   async getDevices(): Promise<DevicesBasicResponse> {
     try {
-      return await invoke<DevicesBasicResponse>("list_devices_basic");
+      return await withTimeout(invoke<DevicesBasicResponse>("list_devices_basic"), 3500, "list_devices_basic");
     } catch (err) {
       throw new Error(normalizeApiError(err));
     }
@@ -40,7 +55,7 @@ export class HostApiManager {
 
   async serviceAction(action: "service_install" | "service_uninstall" | "service_start" | "service_stop"): Promise<ServiceStatus> {
     try {
-      return await invoke<ServiceStatus>(action);
+      return await withTimeout(invoke<ServiceStatus>(action), 6000, action);
     } catch (err) {
       throw new Error(normalizeApiError(err));
     }
@@ -48,7 +63,11 @@ export class HostApiManager {
 
   async connectDevice(device: DeviceBasic): Promise<void> {
     try {
-      await invoke<string>("device_connect", { serial: device.serial, streamPort: device.streamPort });
+      await withTimeout(
+        invoke<string>("device_connect", { serial: device.serial, streamPort: device.streamPort }),
+        10000,
+        "device_connect",
+      );
     } catch (err) {
       throw new Error(normalizeApiError(err));
     }
@@ -56,7 +75,11 @@ export class HostApiManager {
 
   async disconnectDevice(device: DeviceBasic): Promise<void> {
     try {
-      await invoke<string>("device_disconnect", { serial: device.serial, streamPort: device.streamPort });
+      await withTimeout(
+        invoke<string>("device_disconnect", { serial: device.serial, streamPort: device.streamPort }),
+        8000,
+        "device_disconnect",
+      );
     } catch (err) {
       throw new Error(normalizeApiError(err));
     }

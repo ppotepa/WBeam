@@ -23,11 +23,17 @@ export function createSessionManager(api: HostApiManager) {
     summary: "not checked",
   });
   const [loading, setLoading] = createSignal(true);
+  const [refreshing, setRefreshing] = createSignal(false);
   const [serviceBusy, setServiceBusy] = createSignal(false);
   const [error, setError] = createSignal<string>("");
   const [updatedAt, setUpdatedAt] = createSignal<string>("-");
-  const [deviceActionBusy, setDeviceActionBusy] = createSignal<string>("");
+  const [deviceActionBusy, setDeviceActionBusy] = createSignal<string[]>([]);
   const [hostProbe, setHostProbe] = createSignal<HostProbeBrief>(EMPTY_PROBE);
+  const [refreshInFlight, setRefreshInFlight] = createSignal(false);
+  let lastDevicesKey = "";
+  let lastServiceKey = "";
+  let lastProbeKey = "";
+  let lastVersionKey = "";
 
   const tabletCount = createMemo(() => devices().filter((d) => d.deviceClass === "Tablet").length);
   const phoneCount = createMemo(() => devices().filter((d) => d.deviceClass === "Phone").length);
@@ -37,43 +43,94 @@ export function createSessionManager(api: HostApiManager) {
     return "running";
   });
 
-  async function loadServiceStatus() {
+  async function loadServiceStatus(): Promise<boolean> {
     try {
-      setService(await api.getServiceStatus());
+      const next = await api.getServiceStatus();
+      const nextKey = JSON.stringify(next);
+      if (nextKey !== lastServiceKey) {
+        setService(next);
+        lastServiceKey = nextKey;
+        return true;
+      }
+      return false;
     } catch (err) {
       setError(String(err));
+      return false;
     }
   }
 
-  async function loadHostProbe() {
+  async function loadHostProbe(): Promise<boolean> {
     try {
-      setHostProbe(await api.getHostProbe());
+      const next = await api.getHostProbe();
+      const nextKey = JSON.stringify(next);
+      if (nextKey !== lastProbeKey) {
+        setHostProbe(next);
+        lastProbeKey = nextKey;
+        return true;
+      }
+      return false;
     } catch {
-      setHostProbe(EMPTY_PROBE);
+      const nextKey = JSON.stringify(EMPTY_PROBE);
+      if (nextKey !== lastProbeKey) {
+        setHostProbe(EMPTY_PROBE);
+        lastProbeKey = nextKey;
+        return true;
+      }
+      return false;
     }
   }
 
-  async function loadDevices() {
-    setLoading(true);
+  async function loadDevices(initial = false): Promise<boolean> {
+    let changed = false;
+    if (initial) setLoading(true);
     setError("");
     try {
       const response = await api.getDevices();
-      setDevices(response.devices || []);
-      setHostVersion(response.hostApkVersion || "");
-      setDaemonVersion(response.daemonApkVersion || "");
-      setUpdatedAt(new Date().toLocaleTimeString());
+      const nextDevices = response.devices || [];
+      const nextDevicesKey = JSON.stringify(nextDevices);
+      if (nextDevicesKey !== lastDevicesKey) {
+        setDevices(nextDevices);
+        lastDevicesKey = nextDevicesKey;
+        changed = true;
+      }
+
+      const nextHostVersion = response.hostApkVersion || "";
+      const nextDaemonVersion = response.daemonApkVersion || "";
+      const nextVersionKey = `${nextHostVersion}|${nextDaemonVersion}`;
+      if (nextVersionKey !== lastVersionKey) {
+        setHostVersion(nextHostVersion);
+        setDaemonVersion(nextDaemonVersion);
+        lastVersionKey = nextVersionKey;
+        changed = true;
+      }
+
       if (response.error) setError(response.error);
     } catch (err) {
       setError(String(err));
       setDevices([]);
+      lastDevicesKey = "";
+      changed = true;
     } finally {
-      setLoading(false);
+      if (initial) setLoading(false);
     }
+    return changed;
   }
 
-  async function refreshSnapshot() {
-    await Promise.all([loadServiceStatus(), loadHostProbe()]);
-    await loadDevices();
+  async function refreshSnapshot(options?: { silent?: boolean }) {
+    const silent = options?.silent ?? false;
+    if (refreshInFlight()) return;
+    setRefreshInFlight(true);
+    if (!silent) setRefreshing(true);
+    try {
+      const [serviceChanged, probeChanged] = await Promise.all([loadServiceStatus(), loadHostProbe()]);
+      const devicesChanged = await loadDevices(loading());
+      if (serviceChanged || probeChanged || devicesChanged) {
+        setUpdatedAt(new Date().toLocaleTimeString());
+      }
+    } finally {
+      if (!silent) setRefreshing(false);
+      setRefreshInFlight(false);
+    }
   }
 
   async function callServiceAction(action: "service_install" | "service_uninstall" | "service_start" | "service_stop") {
@@ -90,8 +147,32 @@ export function createSessionManager(api: HostApiManager) {
     }
   }
 
+  async function upgradeService() {
+    setServiceBusy(true);
+    setError("");
+    try {
+      if (service().installed && service().active) {
+        try {
+          await api.serviceAction("service_stop");
+        } catch {
+          // Continue upgrade path even if stop races/fails.
+        }
+      }
+      await api.serviceAction("service_install");
+      await api.serviceAction("service_start");
+      await refreshSnapshot();
+    } catch (err) {
+      setError(String(err));
+      await loadServiceStatus();
+    } finally {
+      await loadHostProbe();
+      setServiceBusy(false);
+    }
+  }
+
   async function connectDevice(device: DeviceBasic) {
-    setDeviceActionBusy(`${device.serial}:connect`);
+    const key = `${device.serial}:connect`;
+    setDeviceActionBusy((prev) => (prev.includes(key) ? prev : [...prev, key]));
     setError("");
     try {
       await api.connectDevice(device);
@@ -99,12 +180,13 @@ export function createSessionManager(api: HostApiManager) {
     } catch (err) {
       setError(String(err));
     } finally {
-      setDeviceActionBusy("");
+      setDeviceActionBusy((prev) => prev.filter((entry) => entry !== key));
     }
   }
 
   async function disconnectDevice(device: DeviceBasic) {
-    setDeviceActionBusy(`${device.serial}:disconnect`);
+    const key = `${device.serial}:disconnect`;
+    setDeviceActionBusy((prev) => (prev.includes(key) ? prev : [...prev, key]));
     setError("");
     try {
       await api.disconnectDevice(device);
@@ -112,7 +194,7 @@ export function createSessionManager(api: HostApiManager) {
     } catch (err) {
       setError(String(err));
     } finally {
-      setDeviceActionBusy("");
+      setDeviceActionBusy((prev) => prev.filter((entry) => entry !== key));
     }
   }
 
@@ -122,16 +204,19 @@ export function createSessionManager(api: HostApiManager) {
     daemonVersion,
     service,
     loading,
+    refreshing,
     serviceBusy,
     error,
     updatedAt,
     deviceActionBusy,
     hostProbe,
+    refreshInFlight,
     tabletCount,
     phoneCount,
     serviceState,
     refreshSnapshot,
     callServiceAction,
+    upgradeService,
     connectDevice,
     disconnectDevice,
     setError,

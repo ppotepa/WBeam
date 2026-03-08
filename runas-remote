@@ -137,12 +137,12 @@ DEFAULT_APP="./devtool"
 if [[ -z "$DEFAULT_USER" ]]; then
   DEFAULT_USER="$(resolve_active_user_from_loginctl || true)"
 fi
-if [[ -z "$DEFAULT_USER" ]]; then
-  echo "[runas-remote] default user not found. Provide <desktop_user> or set WBEAM_DEV_REMOTE_USER." >&2
-  exit 1
-fi
 
 if [[ $# -eq 0 ]]; then
+  if [[ -z "$DEFAULT_USER" ]]; then
+    echo "[runas-remote] default user not found. Provide <desktop_user> or set WBEAM_DEV_REMOTE_USER." >&2
+    exit 1
+  fi
   TARGET_USER="$DEFAULT_USER"
   APP_SPEC="$DEFAULT_APP"
   set --
@@ -151,6 +151,10 @@ elif [[ $# -eq 1 ]]; then
     TARGET_USER="$1"
     APP_SPEC="$DEFAULT_APP"
   else
+    if [[ -z "$DEFAULT_USER" ]]; then
+      echo "[runas-remote] default user not found. Provide <desktop_user> or set WBEAM_DEV_REMOTE_USER." >&2
+      exit 1
+    fi
     TARGET_USER="$DEFAULT_USER"
     APP_SPEC="$1"
   fi

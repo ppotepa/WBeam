@@ -982,8 +982,11 @@ android_deploy_all() {
     idx=$((idx + 1))
     local serial_stream_port serial_control_port
     ANDROID_SERIAL="$serial"
-    serial_stream_port=$((STREAM_PORT + idx))
+    serial_stream_port=$((STREAM_PORT + idx + 1))
     serial_control_port="$CONTROL_PORT"
+    if [[ "$serial_stream_port" -eq "$serial_control_port" ]]; then
+      serial_stream_port=$((serial_stream_port + 1))
+    fi
     echo
     pipeline_mode="$(android_pipeline_mode)"
     build_hosts="$(android_resolve_deploy_hosts "$pipeline_mode")" || {

@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+
+# Configure TigerVNC on Arch/CachyOS with dynamic resolution (no scrollbars)
+
+DISPLAY_NUM=":1"
+RESOLUTIONS="1920x1080,2560x1440,3840x2160"
+
+set -e
+
+echo "Creating VNC config..."
+
+mkdir -p ~/.vnc
+
+cat > ~/.vnc/config <<EOF
+session=plasma
+geometry=1920x1080
+localhost=no
+alwaysshared
+randr=${RESOLUTIONS}
+EOF
+
+echo "Setting permissions..."
+chmod 600 ~/.vnc/config
+
+echo "Setting VNC password (if not already set)..."
+if [ ! -f ~/.vnc/passwd ]; then
+    vncpasswd
+fi
+
+echo "Restarting VNC server..."
+sudo systemctl restart vncserver@${DISPLAY_NUM}
+
+echo "Done."
+echo "Connect using:"
+echo "$(hostname -I | awk '{print $1}'):5901"
+echo
+echo "If using TigerVNC Viewer:"

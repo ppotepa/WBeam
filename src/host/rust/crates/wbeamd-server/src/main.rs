@@ -89,7 +89,12 @@ impl SessionRegistry {
 
         let stream_port = requested_stream_port
             .filter(|p| *p > 0)
-            .unwrap_or_else(|| self.base_stream_port.saturating_add(1 + guard.len() as u16));
+            .unwrap_or_else(|| self.base_stream_port.saturating_add(2 + guard.len() as u16));
+        let stream_port = if stream_port == self.control_port {
+            stream_port.saturating_add(1)
+        } else {
+            stream_port
+        };
         let session_label = Some(format!("serial-{normalized}"));
         let target_serial = Some(normalized.to_string());
         let core = Arc::new(DaemonCore::new_for_session(

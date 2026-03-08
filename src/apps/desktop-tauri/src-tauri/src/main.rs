@@ -3,10 +3,12 @@
 use serde::Serialize;
 use serde_json::Value;
 use std::fs;
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::Manager;
 
 const SERVICE_NAME: &str = "wbeam-daemon";
@@ -80,10 +82,12 @@ fn host_name() -> String {
 
 #[tauri::command]
 fn list_devices_basic() -> DevicesBasicResponse {
+    ui_service_log("list_devices_basic", "begin", "");
     let host_apk_version = host_expected_apk_version();
     let daemon_apk_version = host_build_revision_from_health().unwrap_or_default();
     let svc = service_status();
     if !svc.available || !svc.installed || !svc.active {
+        ui_service_log("list_devices_basic", "skip", "service inactive");
         return DevicesBasicResponse {
             host_apk_version,
             daemon_apk_version,
@@ -127,7 +131,17 @@ fn list_devices_basic() -> DevicesBasicResponse {
                 let stream_port = port_map
                     .get(&serial)
                     .copied()
-                    .unwrap_or_else(|| base_stream_port.saturating_add(1 + idx as u16));
+                    .unwrap_or_else(|| {
+                        let mut p = base_stream_port.saturating_add(2 + idx as u16);
+                        let control_port = std::env::var("WBEAM_CONTROL_PORT")
+                            .ok()
+                            .and_then(|v| v.trim().parse::<u16>().ok())
+                            .unwrap_or(5001);
+                        if p == control_port {
+                            p = p.saturating_add(1);
+                        }
+                        p
+                    });
                 let stream_state = daemon_stream_state(&serial, stream_port);
 
                 devices.push(DeviceBasic {
@@ -151,19 +165,28 @@ fn list_devices_basic() -> DevicesBasicResponse {
                 });
             }
 
-            DevicesBasicResponse {
+            let response = DevicesBasicResponse {
                 host_apk_version,
                 daemon_apk_version,
                 devices,
                 error: None,
+            };
+            ui_service_log(
+                "list_devices_basic",
+                "ok",
+                &format!("devices={}", response.devices.len()),
+            );
+            response
+        }
+        Err(err) => {
+            ui_service_log("list_devices_basic", "error", &err);
+            DevicesBasicResponse {
+                host_apk_version,
+                daemon_apk_version,
+                devices: Vec::new(),
+                error: Some(err),
             }
         }
-        Err(err) => DevicesBasicResponse {
-            host_apk_version,
-            daemon_apk_version,
-            devices: Vec::new(),
-            error: Some(err),
-        },
     }
 }
 
@@ -278,6 +301,14 @@ fn daemon_post_action(action: &str, serial: &str, stream_port: u16) -> Result<St
         .rsplit_once("\nHTTP_STATUS:")
         .unwrap_or((body.as_str(), "000"));
     let status_code = status_line.trim();
+    ui_service_log(
+        "daemon_post_action",
+        "http",
+        &format!(
+            "action={} serial={} port={} status={}",
+            action, serial, stream_port, status_code
+        ),
+    );
     if !status_code.starts_with('2') {
         let trimmed = payload.trim();
         if trimmed.is_empty() {
@@ -288,6 +319,70 @@ fn daemon_post_action(action: &str, serial: &str, stream_port: u16) -> Result<St
     Ok(payload.trim().to_string())
 }
 
+fn connect_log(serial: &str, stream_port: u16, message: &str) {
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let path = repo_root().join("logs").join("desktop-connect.log");
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(
+            file,
+            "[{}][pid={}][serial={}][port={}] {}",
+            ts,
+            std::process::id(),
+            serial,
+            stream_port,
+            message
+        );
+    }
+}
+
+fn ui_service_log(command: &str, phase: &str, details: &str) {
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let path = repo_root().join("logs").join("ui-service.log");
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(
+            file,
+            "[{}][pid={}][cmd={}][{}] {}",
+            ts,
+            std::process::id(),
+            command,
+            phase,
+            details
+        );
+    }
+}
+
+fn adb_output_preview(out: &std::process::Output) -> String {
+    let so = String::from_utf8_lossy(&out.stdout).replace('\n', " ").trim().to_string();
+    let se = String::from_utf8_lossy(&out.stderr).replace('\n', " ").trim().to_string();
+    format!("status={} stdout='{}' stderr='{}'", out.status, so, se)
+}
+
+fn adb_api_level(serial: &str) -> Option<u32> {
+    let out = Command::new("adb")
+        .args(["-s", serial, "shell", "getprop", "ro.build.version.sdk"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse::<u32>()
+        .ok()
+}
+
 fn adb_prepare_connect(serial: &str, stream_port: u16) -> Result<(), String> {
     let control_port = std::env::var("WBEAM_CONTROL_PORT")
         .ok()
@@ -295,57 +390,142 @@ fn adb_prepare_connect(serial: &str, stream_port: u16) -> Result<(), String> {
         .unwrap_or(5001);
     let stream = stream_port.to_string();
     let control = control_port.to_string();
+    connect_log(
+        serial,
+        stream_port,
+        &format!("prepare_connect begin control_port={control_port}"),
+    );
 
-    let _ = Command::new("adb").args(["start-server"]).output()
-        .map_err(|e| format!("adb start-server failed: {e}"))?;
-
-    let wait = Command::new("adb")
-        .args(["-s", serial, "wait-for-device"])
+    let start = Command::new("adb")
+        .args(["start-server"])
         .output()
-        .map_err(|e| format!("adb wait-for-device failed: {e}"))?;
-    if !wait.status.success() {
-        return Err("ADB device is not ready. Reconnect USB / authorize device.".to_string());
+        .map_err(|e| {
+            let msg = format!("adb start-server failed: {e}");
+            connect_log(serial, stream_port, &msg);
+            msg
+        })?;
+    connect_log(
+        serial,
+        stream_port,
+        &format!("adb start-server {}", adb_output_preview(&start)),
+    );
+
+    // `wait-for-device` can block for a long time and makes UI look frozen.
+    // Use short polling with a hard timeout instead.
+    let mut ready = false;
+    for attempt in 1..=20 {
+        let state = Command::new("adb")
+            .args(["-s", serial, "get-state"])
+            .output()
+            .map_err(|e| {
+                let msg = format!("adb get-state failed: {e}");
+                connect_log(serial, stream_port, &msg);
+                msg
+            })?;
+        let state_txt = String::from_utf8_lossy(&state.stdout).trim().to_string();
+        connect_log(
+            serial,
+            stream_port,
+            &format!("adb get-state attempt={} {}", attempt, adb_output_preview(&state)),
+        );
+        if state.status.success() && state_txt == "device" {
+            ready = true;
+            break;
+        }
+        thread::sleep(Duration::from_millis(150));
+    }
+    if !ready {
+        let msg = "ADB device is not ready after 3s. Reconnect USB / authorize device.".to_string();
+        connect_log(serial, stream_port, &msg);
+        return Err(msg);
     }
 
     let rev_stream = Command::new("adb")
         .args(["-s", serial, "reverse", &format!("tcp:{stream}"), &format!("tcp:{stream}")])
         .output()
-        .map_err(|e| format!("adb reverse(stream) failed: {e}"))?;
+        .map_err(|e| {
+            let msg = format!("adb reverse(stream) failed: {e}");
+            connect_log(serial, stream_port, &msg);
+            msg
+        })?;
+    connect_log(
+        serial,
+        stream_port,
+        &format!("adb reverse stream {}", adb_output_preview(&rev_stream)),
+    );
     let rev_control = Command::new("adb")
         .args(["-s", serial, "reverse", &format!("tcp:{control}"), &format!("tcp:{control}")])
         .output()
-        .map_err(|e| format!("adb reverse(control) failed: {e}"))?;
+        .map_err(|e| {
+            let msg = format!("adb reverse(control) failed: {e}");
+            connect_log(serial, stream_port, &msg);
+            msg
+        })?;
+    connect_log(
+        serial,
+        stream_port,
+        &format!("adb reverse control {}", adb_output_preview(&rev_control)),
+    );
     if !rev_stream.status.success() || !rev_control.status.success() {
-        return Err(
-            "ADB reverse failed. Run full redeploy or check USB transport permissions."
-                .to_string(),
-        );
+        let api_level = adb_api_level(serial).unwrap_or(0);
+        if api_level > 0 && api_level <= 18 {
+            connect_log(
+                serial,
+                stream_port,
+                &format!(
+                    "adb reverse failed but continuing for legacy api_level={} (tether/LAN path)",
+                    api_level
+                ),
+            );
+        } else {
+            let msg =
+                "ADB reverse failed. Run full redeploy or check USB transport permissions."
+                    .to_string();
+            connect_log(serial, stream_port, &msg);
+            return Err(msg);
+        }
     }
 
     let launch = Command::new("adb")
         .args(["-s", serial, "shell", "am", "start", "-n", "com.wbeam/.MainActivity"])
         .output()
-        .map_err(|e| format!("adb launch failed: {e}"))?;
+        .map_err(|e| {
+            let msg = format!("adb launch failed: {e}");
+            connect_log(serial, stream_port, &msg);
+            msg
+        })?;
+    connect_log(
+        serial,
+        stream_port,
+        &format!("adb am start {}", adb_output_preview(&launch)),
+    );
     if !launch.status.success() {
-        return Err("Failed to launch Android app via adb.".to_string());
+        let msg = "Failed to launch Android app via adb.".to_string();
+        connect_log(serial, stream_port, &msg);
+        return Err(msg);
     }
 
+    connect_log(serial, stream_port, "prepare_connect ok");
     Ok(())
 }
 
 #[tauri::command]
 fn service_status() -> ServiceStatus {
+    ui_service_log("service_status", "begin", "");
     if !command_exists("systemctl") {
-        return ServiceStatus {
+        let status = ServiceStatus {
             available: false,
             installed: false,
             active: false,
             enabled: false,
             summary: "systemctl not available".to_string(),
         };
+        ui_service_log("service_status", "ok", "systemctl missing");
+        return status;
     }
 
-    let installed = unit_file_path().exists();
+    let load_state = systemctl_show_prop("LoadState").unwrap_or_default();
+    let installed = load_state == "loaded" || unit_file_path().exists();
     let active = systemctl_state("is-active").as_deref() == Some("active");
     let enabled = systemctl_state("is-enabled").as_deref() == Some("enabled");
 
@@ -359,13 +539,40 @@ fn service_status() -> ServiceStatus {
         }
     }
 
-    ServiceStatus {
+    let status = ServiceStatus {
         available: true,
         installed,
         active,
         enabled,
         summary,
-    }
+    };
+    ui_service_log(
+        "service_status",
+        "ok",
+        &format!(
+            "installed={} active={} enabled={}",
+            status.installed, status.active, status.enabled
+        ),
+    );
+    status
+}
+
+fn systemctl_show_prop(prop: &str) -> Option<String> {
+    Command::new("systemctl")
+        .args(["--user", "show", "-p", prop, "--value", SERVICE_NAME])
+        .output()
+        .ok()
+        .and_then(|out| {
+            if !out.status.success() {
+                return None;
+            }
+            let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if v.is_empty() {
+                None
+            } else {
+                Some(v)
+            }
+        })
 }
 
 fn daemon_lock_hint() -> Option<String> {
@@ -444,6 +651,7 @@ fn process_name_matches(pid: u32, needle: &str) -> bool {
 
 #[tauri::command]
 fn host_probe_brief() -> HostProbeBrief {
+    ui_service_log("host_probe_brief", "begin", "");
     let control_port = std::env::var("WBEAM_CONTROL_PORT").unwrap_or_else(|_| "5001".to_string());
     let url = format!("http://127.0.0.1:{control_port}/host-probe");
     let output = Command::new("curl")
@@ -451,6 +659,7 @@ fn host_probe_brief() -> HostProbeBrief {
         .output();
 
     let Ok(output) = output else {
+        ui_service_log("host_probe_brief", "error", "curl failed");
         return HostProbeBrief {
             reachable: false,
             os: "unknown".to_string(),
@@ -462,6 +671,7 @@ fn host_probe_brief() -> HostProbeBrief {
     };
 
     if !output.status.success() {
+        ui_service_log("host_probe_brief", "error", "curl non-success");
         return HostProbeBrief {
             reachable: false,
             os: "unknown".to_string(),
@@ -474,7 +684,7 @@ fn host_probe_brief() -> HostProbeBrief {
 
     let body = String::from_utf8_lossy(&output.stdout);
     let json: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
-    HostProbeBrief {
+    let probe = HostProbeBrief {
         reachable: true,
         os: json.get("os").and_then(|v| v.as_str()).unwrap_or("unknown").to_string(),
         session: json
@@ -493,18 +703,78 @@ fn host_probe_brief() -> HostProbeBrief {
             .unwrap_or("unknown")
             .to_string(),
         supported: json.get("supported").and_then(|v| v.as_bool()).unwrap_or(false),
-    }
+    };
+    ui_service_log(
+        "host_probe_brief",
+        "ok",
+        &format!(
+            "reachable={} mode={} supported={}",
+            probe.reachable, probe.capture_mode, probe.supported
+        ),
+    );
+    probe
 }
 
 #[tauri::command]
 fn device_connect(serial: String, stream_port: u16) -> Result<String, String> {
+    ui_service_log(
+        "device_connect",
+        "begin",
+        &format!("serial={} port={}", serial, stream_port),
+    );
+    connect_log(&serial, stream_port, "device_connect begin");
     adb_prepare_connect(&serial, stream_port)?;
-    daemon_post_action("start", &serial, stream_port)
+    connect_log(&serial, stream_port, "device_connect daemon_post_action start");
+    let resp = match daemon_post_action("start", &serial, stream_port) {
+        Ok(v) => v,
+        Err(err) => {
+            ui_service_log(
+                "device_connect",
+                "error",
+                &format!("serial={} port={} err={}", serial, stream_port, err),
+            );
+            connect_log(
+                &serial,
+                stream_port,
+                &format!("device_connect daemon_post_action error='{}'", err),
+            );
+            return Err(err);
+        }
+    };
+    ui_service_log(
+        "device_connect",
+        "ok",
+        &format!("serial={} port={}", serial, stream_port),
+    );
+    connect_log(
+        &serial,
+        stream_port,
+        &format!("device_connect ok response='{}'", resp),
+    );
+    Ok(resp)
 }
 
 #[tauri::command]
 fn device_disconnect(serial: String, stream_port: u16) -> Result<String, String> {
-    daemon_post_action("stop", &serial, stream_port)
+    ui_service_log(
+        "device_disconnect",
+        "begin",
+        &format!("serial={} port={}", serial, stream_port),
+    );
+    let res = daemon_post_action("stop", &serial, stream_port);
+    match &res {
+        Ok(_) => ui_service_log(
+            "device_disconnect",
+            "ok",
+            &format!("serial={} port={}", serial, stream_port),
+        ),
+        Err(err) => ui_service_log(
+            "device_disconnect",
+            "error",
+            &format!("serial={} port={} err={}", serial, stream_port, err),
+        ),
+    }
+    res
 }
 
 #[tauri::command]

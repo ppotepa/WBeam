@@ -131,6 +131,18 @@ fn load_presets_from_proto_file(root: &Path) -> Option<BTreeMap<String, ActiveCo
     }
 }
 
+fn default_config_from_presets(presets: &BTreeMap<String, ActiveConfig>) -> ActiveConfig {
+    for key in ["fast60_3", "balanced60", "fast60", "safe_60"] {
+        if let Some(cfg) = presets.get(key) {
+            return cfg.clone();
+        }
+    }
+    if let Some((_name, cfg)) = presets.iter().next() {
+        return cfg.clone();
+    }
+    ActiveConfig::balanced_default()
+}
+
 #[derive(Debug, Error)]
 pub enum CoreError {
     #[error(transparent)]
@@ -279,12 +291,7 @@ impl DaemonCore {
         let presets = load_presets_from_proto_file(&root).unwrap_or_else(wbeamd_api::presets);
         let active_config =
             config_store::load_runtime_config_with_presets(&runtime_config_path, &presets)
-                .unwrap_or_else(|| {
-                    presets
-                        .get("balanced")
-                        .cloned()
-                        .unwrap_or_else(ActiveConfig::balanced_default)
-                });
+                .unwrap_or_else(|| default_config_from_presets(&presets));
 
         let host_probe = host_probe::HostProbe::detect();
         info!(
@@ -432,7 +439,28 @@ impl DaemonCore {
         };
 
         let presets = { self.inner.lock().await.presets.clone() };
-        let cfg = validate_config_with_presets(patch, &current_cfg, &presets)?;
+        let cfg = match validate_config_with_presets(patch, &current_cfg, &presets) {
+            Ok(cfg) => cfg,
+            Err(ValidationError::InvalidProfile) => {
+                // Runtime config can be stale (e.g. "balanced" from old presets).
+                // Auto-heal to a valid preset so /start does not hard-fail.
+                let fallback = default_config_from_presets(&presets);
+                warn!(
+                    invalid_profile = %current_cfg.profile,
+                    fallback_profile = %fallback.profile,
+                    "invalid runtime profile; auto-healing to fallback"
+                );
+                {
+                    let mut inner = self.inner.lock().await;
+                    inner.active_config = fallback.clone();
+                    inner.baseline_config = fallback.clone();
+                }
+                let _ = config_store::persist_config(&self.runtime_config_path, &fallback)
+                    .map_err(|e| tracing::warn!("persist config during profile auto-heal: {e}"));
+                fallback
+            }
+            Err(err) => return Err(err.into()),
+        };
         let already_running = current_pid.is_some()
             && cfg == current_cfg
             && matches!(

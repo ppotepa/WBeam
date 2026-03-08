@@ -60,7 +60,7 @@ export default function App() {
   }
 
   function connectDisabledReason(device: DeviceBasic): string {
-    if (session.deviceActionBusy() !== "") return "Another device action is in progress";
+    if (isDeviceBusy(device)) return "This device action is already in progress";
     if (!session.service().active) return "Desktop service must be running";
     if (!device.apkInstalled) return "APK is not installed on this device";
     if (!device.apkMatchesDaemon) return "APK version must match daemon version";
@@ -70,7 +70,7 @@ export default function App() {
   }
 
   function disconnectDisabledReason(device: DeviceBasic): string {
-    if (session.deviceActionBusy() !== "") return "Another device action is in progress";
+    if (isDeviceBusy(device)) return "This device action is already in progress";
     if (!session.service().active) return "Desktop service must be running";
     if (device.streamState !== "STREAMING" && device.streamState !== "CONNECTING") {
       return "Device is not streaming";
@@ -79,7 +79,11 @@ export default function App() {
   }
 
   function isDeviceActionBusy(device: DeviceBasic, action: "connect" | "disconnect"): boolean {
-    return session.deviceActionBusy() === `${device.serial}:${action}`;
+    return session.deviceActionBusy().includes(`${device.serial}:${action}`);
+  }
+
+  function isDeviceBusy(device: DeviceBasic): boolean {
+    return session.deviceActionBusy().some((entry) => entry.startsWith(`${device.serial}:`));
   }
 
   onMount(async () => {
@@ -95,8 +99,9 @@ export default function App() {
     await session.refreshSnapshot();
 
     const timer = window.setInterval(() => {
-      void session.refreshSnapshot();
-    }, 1000);
+      if (session.deviceActionBusy().length > 0 || session.refreshInFlight()) return;
+      void session.refreshSnapshot({ silent: true });
+    }, 2500);
     onCleanup(() => window.clearInterval(timer));
   });
 
@@ -117,8 +122,11 @@ export default function App() {
             >
               <Settings size={16} />
             </button>
-            <button class="refresh-btn" onClick={() => session.refreshSnapshot()} disabled={session.loading()}>
-              {session.loading() ? "..." : "Refresh"}
+            <button class="refresh-btn" onClick={() => session.refreshSnapshot()} disabled={session.refreshing()}>
+              <Show when={session.refreshing()} fallback={<RefreshCw size={14} />}>
+                <Loader2 size={14} class="spinning" />
+              </Show>
+              {session.refreshing() ? "Refreshing" : "Refresh"}
             </button>
           </div>
         </header>
@@ -139,7 +147,7 @@ export default function App() {
         <ul class="device-list" aria-label="Connected devices">
           <For each={session.devices()}>
             {(device) => (
-              <li class="device-row">
+              <li class={`device-row ${isDeviceBusy(device) ? "device-row-busy" : ""}`} aria-busy={isDeviceBusy(device)}>
                 <div class="line model-line" title={`serial: ${device.serial}`}>
                   <DeviceTypeIcon type={device.deviceClass} />
                   <span class="model-text">{device.model}</span>
@@ -224,7 +232,7 @@ export default function App() {
                   <button
                     class="device-btn"
                     title="Refresh this device state"
-                    disabled={session.loading() || session.deviceActionBusy() !== ""}
+                    disabled={session.refreshing() || isDeviceBusy(device)}
                     onClick={() => session.refreshSnapshot()}
                   >
                     <RefreshCw size={13} /> Refresh
