@@ -514,7 +514,7 @@ Status: active
   - `cargo check --manifest-path src/apps/desktop-tauri/src-tauri/Cargo.toml` -> OK
   - `bash -n wbeam start-remote runas-remote` -> OK
 
-## In Progress (2026-03-08) - virtual desktop deps flow (Linux-first)
+## In Progress (2026-03-08) [commit: 87ec6e55] - virtual desktop deps flow (Linux-first)
 - Added host dependency probe script for virtual desktop prerequisites:
   - `scripts/virtual-deps-check.sh`
   - detects platform + package manager and checks required binaries (`Xvfb`, `xrandr`),
@@ -535,7 +535,7 @@ Status: active
   - `./wbeam deps virtual check` -> OK
   - `./wbeam deps virtual install --dry-run --yes` -> OK
 
-## In Progress (2026-03-08) - startup virtual setup modal UX hardening
+## In Progress (2026-03-08) [commit: a606a78f] - startup virtual setup modal UX hardening
 - Updated startup "Virtual desktop setup" modal actions to match strict flow:
   - removed `Later` and `Use duplicate`,
   - now only `Install deps` and `Cancel`.
