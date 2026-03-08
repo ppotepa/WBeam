@@ -570,3 +570,21 @@ Status: active
 - Validation:
   - `cd src/apps/desktop-tauri && npm run build` -> OK
   - `cargo check --manifest-path src/apps/desktop-tauri/src-tauri/Cargo.toml` -> OK
+
+## In Progress (2026-03-08) [commit: 4e8e356f] - virtual size override + watch logs multi-source snapshot
+- Virtual mode startup now prefers target device resolution for stream size:
+  - host resolves ADB `wm size` for target serial,
+  - when available, runtime `cfg.size` is overridden to match the connected device.
+- Added extra virtual startup diagnostics in host core:
+  - logs when size override happens (from/to + serial),
+  - logs when Xvfb display is spawned (DISPLAY, PID, size),
+  - logs warning when device resolution cannot be detected.
+- `./wbeam watch logs` improved for investigation workflow:
+  - detects latest numeric run-id from log files with run suffix,
+  - shows logs from all available sources for that run,
+  - auto-fallback to `latest-per-domain` when run-id spans stale files across time windows,
+  - used by both direct `watch logs` and TUI logs screen.
+- Validation:
+  - `bash -n wbeam` -> OK
+  - `cargo check --manifest-path src/host/rust/Cargo.toml -p wbeamd-core` -> OK
+  - `./wbeam watch logs --once` -> shows multi-source snapshot (host/adb/desktop/udev/version + service journal)
