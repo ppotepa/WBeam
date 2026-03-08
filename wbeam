@@ -40,6 +40,7 @@ Groups:
   host      build | run | debug | status | down
   daemon    up | down | status   (alias for host)
   android   build | install | launch | deploy | deploy-all | build-release | install-release | deploy-release
+  deps      virtual check [--json] | virtual install [--dry-run] [--yes]
   version   new | current | doctor
   watch     devices | connections | streaming | service | logs | status | health | doctor | tui
   debug     up | watch           (alias for host debug)
@@ -58,6 +59,8 @@ Examples:
   ./wbeam android build-release  # ./gradlew assembleRelease
   ./wbeam android install-release
   ./wbeam android deploy-release
+  ./wbeam deps virtual check --json
+  ./wbeam deps virtual install --dry-run
   ./wbeam version doctor         # diagnose host/APK version mismatch
   ./wbeam watch devices          # refresh adb/device status every 1s
   ./wbeam watch connections      # refresh host/ports/reverse map every 1s
@@ -1801,6 +1804,14 @@ watch_run_loop() {
   done
 }
 
+deps_virtual_check() {
+  "$ROOT_DIR/scripts/virtual-deps-check.sh" "$@"
+}
+
+deps_virtual_install() {
+  "$ROOT_DIR/scripts/virtual-deps-install.sh" "$@"
+}
+
 group="${1:-}"
 cmd="${2:-}"
 
@@ -1848,6 +1859,18 @@ case "$group" in
       install-release|release-install) android_install_release ;;
       deploy-release|release-deploy)   android_deploy_release ;;
       *)              print_help; exit 1 ;;
+    esac
+    ;;
+  deps)
+    case "$cmd" in
+      virtual)
+        case "${3:-}" in
+          check) shift 3; deps_virtual_check "$@" ;;
+          install) shift 3; deps_virtual_install "$@" ;;
+          *) print_help; exit 1 ;;
+        esac
+        ;;
+      *) print_help; exit 1 ;;
     esac
     ;;
   version)

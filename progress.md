@@ -513,3 +513,24 @@ Status: active
   - `cd src/apps/desktop-tauri && npm run build` -> OK
   - `cargo check --manifest-path src/apps/desktop-tauri/src-tauri/Cargo.toml` -> OK
   - `bash -n wbeam start-remote runas-remote` -> OK
+
+## In Progress (2026-03-08) - virtual desktop deps flow (Linux-first)
+- Added host dependency probe script for virtual desktop prerequisites:
+  - `scripts/virtual-deps-check.sh`
+  - detects platform + package manager and checks required binaries (`Xvfb`, `xrandr`),
+  - supports machine-readable output with `--json`,
+  - prints manager-specific install command hint.
+- Added installer script:
+  - `scripts/virtual-deps-install.sh`
+  - supports `--dry-run`, `--yes`,
+  - uses `sudo` when needed,
+  - installs deps via detected package manager (`apt/dnf/yum/zypper/pacman`).
+- Wired both scripts into main entrypoint `./wbeam`:
+  - `./wbeam deps virtual check [--json]`
+  - `./wbeam deps virtual install [--dry-run] [--yes]`
+- Windows path intentionally returns `not implemented` for now (explicit exit code 2) to keep scope Linux-first.
+- Validation:
+  - `bash -n wbeam scripts/virtual-deps-check.sh scripts/virtual-deps-install.sh` -> OK
+  - `./wbeam deps virtual check --json` -> OK
+  - `./wbeam deps virtual check` -> OK
+  - `./wbeam deps virtual install --dry-run --yes` -> OK
