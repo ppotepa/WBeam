@@ -551,3 +551,22 @@ Status: active
 - Validation:
   - `cd src/apps/desktop-tauri && npm run build` -> OK
   - `cargo check --manifest-path src/apps/desktop-tauri/src-tauri/Cargo.toml` -> OK
+
+## In Progress (2026-03-08) [commit: f53edc47] - privileged deps install flow with progress modal
+- Added dedicated install progress modal for Virtual Desktop dependencies:
+  - opens after `Install deps`,
+  - displays live installer terminal output,
+  - shows busy/progress state and final success/failure message.
+- Startup setup modal behavior:
+  - still only `Install deps` + `Cancel`,
+  - while install is running, action buttons are disabled.
+- Added async installer job in Tauri backend:
+  - `virtual_install_deps_start` starts background install job,
+  - `virtual_install_deps_status` returns live state (`running/done/success/message/logs`).
+- Elevation handling is explicit:
+  - if already root -> runs installer directly,
+  - otherwise requires `pkexec` (polkit prompt) for privilege escalation,
+  - if `pkexec` missing -> friendly error explaining root/elevation requirement.
+- Validation:
+  - `cd src/apps/desktop-tauri && npm run build` -> OK
+  - `cargo check --manifest-path src/apps/desktop-tauri/src-tauri/Cargo.toml` -> OK
