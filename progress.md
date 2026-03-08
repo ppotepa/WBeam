@@ -622,3 +622,11 @@ Status: active
   - `bash -n runas-remote start-remote start-local-session` -> OK
   - `./start-remote --help` -> shows new session flags
   - `./runas-remote --help` -> shows session remote filter env
+
+## In Progress (2026-03-08) [commit: 1b77727b] - runas session selection robustness
+- Improved `runas-remote` graphical session selection:
+  - still prefers strict `Active=yes && State=active`,
+  - now falls back to `State=active|online` graphical sessions when strict match is unavailable.
+- This fixes cases where real KDE session exists but is not marked as `Active=yes` (common in remote-control scenarios).
+- Validation:
+  - `bash -n runas-remote` -> OK
