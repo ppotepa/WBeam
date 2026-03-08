@@ -607,3 +607,18 @@ Status: active
   - `cargo check --manifest-path src/host/rust/Cargo.toml -p wbeamd-core` -> OK
   - `cargo check --manifest-path src/apps/desktop-tauri/src-tauri/Cargo.toml` -> OK
   - `cd src/apps/desktop-tauri && npm run build` -> OK
+
+## In Progress (2026-03-08) [commit: pending] - session-scope start flow (local vs remote)
+- Added session scope filtering for remote launcher:
+  - `runas-remote` now supports `RUNAS_REMOTE_SESSION_REMOTE=any|no|yes`,
+  - session selection uses loginctl `Remote=` property filter.
+- Extended `start-remote` with explicit scope flags:
+  - `--local-session` (real machine seat, `Remote=no`),
+  - `--remote-session` (`Remote=yes`),
+  - aliases accepted: `--actual-session`, `--real-machine`.
+- Added convenience wrapper:
+  - `./start-local-session` -> delegates to `./start-remote --local-session`.
+- Validation:
+  - `bash -n runas-remote start-remote start-local-session` -> OK
+  - `./start-remote --help` -> shows new session flags
+  - `./runas-remote --help` -> shows session remote filter env

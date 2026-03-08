@@ -20,6 +20,7 @@ Examples:
 Security env options:
   RUNAS_REMOTE_PASSTHROUGH_ENV="NAME1,NAME2"  # copy selected env vars to target app
   RUNAS_REMOTE_ENV_FILE=/path/to/env.file      # KEY=VALUE lines, mode 600 recommended
+  RUNAS_REMOTE_SESSION_REMOTE=any|no|yes       # filter loginctl session by Remote flag
   RUNAS_REMOTE_QUIET=1                         # suppress startup metadata line
 USAGE
 }
@@ -34,15 +35,16 @@ user_exists() {
 }
 
 resolve_active_user_from_loginctl() {
-  local sid name type state active
+  local sid name type state active remote
   while read -r sid _; do
     [[ -n "$sid" ]] || continue
     name="$(loginctl show-session "$sid" -p Name --value 2>/dev/null || true)"
     type="$(loginctl show-session "$sid" -p Type --value 2>/dev/null || true)"
     state="$(loginctl show-session "$sid" -p State --value 2>/dev/null || true)"
     active="$(loginctl show-session "$sid" -p Active --value 2>/dev/null || true)"
+    remote="$(loginctl show-session "$sid" -p Remote --value 2>/dev/null || true)"
 
-    if [[ -n "$name" && "$name" != "root" && "$active" == "yes" && "$state" == "active" ]]; then
+    if [[ -n "$name" && "$name" != "root" && "$active" == "yes" && "$state" == "active" ]] && session_remote_matches "$remote"; then
       if [[ "$type" == "x11" || "$type" == "wayland" ]]; then
         echo "$name"
         return 0
@@ -54,15 +56,16 @@ resolve_active_user_from_loginctl() {
 }
 
 resolve_desktop_session_id() {
-  local sid name type state active
+  local sid name type state active remote
   while read -r sid _; do
     [[ -n "$sid" ]] || continue
     name="$(loginctl show-session "$sid" -p Name --value 2>/dev/null || true)"
     type="$(loginctl show-session "$sid" -p Type --value 2>/dev/null || true)"
     state="$(loginctl show-session "$sid" -p State --value 2>/dev/null || true)"
     active="$(loginctl show-session "$sid" -p Active --value 2>/dev/null || true)"
+    remote="$(loginctl show-session "$sid" -p Remote --value 2>/dev/null || true)"
 
-    if [[ "$name" == "$TARGET_USER" && "$active" == "yes" && "$state" == "active" ]]; then
+    if [[ "$name" == "$TARGET_USER" && "$active" == "yes" && "$state" == "active" ]] && session_remote_matches "$remote"; then
       if [[ "$type" == "x11" || "$type" == "wayland" ]]; then
         echo "$sid"
         return 0
@@ -71,6 +74,17 @@ resolve_desktop_session_id() {
   done < <(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1" "$2}')
 
   return 1
+}
+
+SESSION_REMOTE_FILTER="${RUNAS_REMOTE_SESSION_REMOTE:-any}"
+session_remote_matches() {
+  local remote="${1:-}"
+  case "$SESSION_REMOTE_FILTER" in
+    any|ANY) true ;;
+    no|NO) [[ "${remote,,}" == "no" ]] ;;
+    yes|YES) [[ "${remote,,}" == "yes" ]] ;;
+    *) true ;;
+  esac
 }
 
 session_env_var() {

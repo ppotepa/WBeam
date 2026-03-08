@@ -7,7 +7,7 @@ ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 usage() {
   cat <<'USAGE'
 Usage:
-  ./start-remote [desktop_user] [--quick] [--redeploy] [--rebuild-host] [--no-host-restart] [--fresh-service]
+  ./start-remote [desktop_user] [--quick] [--redeploy] [--rebuild-host] [--no-host-restart] [--fresh-service] [--local-session|--remote-session]
   WBEAM_DEV_REMOTE_USER=<user> ./start-remote
 
 Defaults:
@@ -28,6 +28,8 @@ Modes:
   --no-host-restart keep currently running host daemon (skip host down/start)
   --redeploy        full cycle: rebuild host + force uninstall/install APK on all devices
   --fresh-service   stop+disable+remove user service unit before startup
+  --local-session   force local machine seat (loginctl Remote=no)
+  --remote-session  force remote session only (loginctl Remote=yes)
 USAGE
 }
 
@@ -36,16 +38,28 @@ REBUILD_HOST=0
 HOST_RESTART=1
 FRESH_SERVICE=0
 DESKTOP_USER="${WBEAM_DEV_REMOTE_USER:-}"
+SESSION_REMOTE_FILTER="any"
+
+session_remote_matches() {
+  local remote="${1:-}"
+  case "$SESSION_REMOTE_FILTER" in
+    any) true ;;
+    no) [[ "${remote,,}" == "no" ]] ;;
+    yes) [[ "${remote,,}" == "yes" ]] ;;
+    *) true ;;
+  esac
+}
 
 resolve_active_user() {
-  local sid name type state active
+  local sid name type state active remote
   while read -r sid _; do
     [[ -n "$sid" ]] || continue
     name="$(loginctl show-session "$sid" -p Name --value 2>/dev/null || true)"
     type="$(loginctl show-session "$sid" -p Type --value 2>/dev/null || true)"
     state="$(loginctl show-session "$sid" -p State --value 2>/dev/null || true)"
     active="$(loginctl show-session "$sid" -p Active --value 2>/dev/null || true)"
-    if [[ -n "$name" && "$name" != "root" && "$active" == "yes" && "$state" == "active" ]]; then
+    remote="$(loginctl show-session "$sid" -p Remote --value 2>/dev/null || true)"
+    if [[ -n "$name" && "$name" != "root" && "$active" == "yes" && "$state" == "active" ]] && session_remote_matches "$remote"; then
       if [[ "$type" == "x11" || "$type" == "wayland" ]]; then
         echo "$name"
         return 0
@@ -83,6 +97,14 @@ while [[ $# -gt 0 ]]; do
       FRESH_SERVICE=1
       shift
       ;;
+    --local-session|--actual-session|--real-machine)
+      SESSION_REMOTE_FILTER="no"
+      shift
+      ;;
+    --remote-session)
+      SESSION_REMOTE_FILTER="yes"
+      shift
+      ;;
     --no-deploy)
       REDEPLOY=0
       shift
@@ -118,6 +140,10 @@ run_step() {
   echo
   echo "[start-remote] $title"
   "$@"
+}
+
+runas_remote_exec() {
+  env RUNAS_REMOTE_SESSION_REMOTE="$SESSION_REMOTE_FILTER" ./runas-remote "$@"
 }
 
 next_log_file() {
@@ -198,7 +224,7 @@ else
   run_step "host stop (cleanup stale processes)" bash -lc "echo '[start-remote] skipped (--no-host-restart)'"
 fi
 if [[ "$FRESH_SERVICE" -eq 1 ]]; then
-  run_step "desktop service remove" ./runas-remote "$DESKTOP_USER" bash -- -lc "systemctl --user stop wbeam-daemon >/dev/null 2>&1 || true; systemctl --user disable wbeam-daemon >/dev/null 2>&1 || true; rm -f ~/.config/systemd/user/wbeam-daemon.service; systemctl --user daemon-reload >/dev/null 2>&1 || true"
+  run_step "desktop service remove" runas_remote_exec "$DESKTOP_USER" bash -- -lc "systemctl --user stop wbeam-daemon >/dev/null 2>&1 || true; systemctl --user disable wbeam-daemon >/dev/null 2>&1 || true; rm -f ~/.config/systemd/user/wbeam-daemon.service; systemctl --user daemon-reload >/dev/null 2>&1 || true"
 else
   run_step "desktop service keep" bash -lc "echo '[start-remote] keeping existing user service (use --fresh-service to reset)'"
 fi
@@ -215,7 +241,7 @@ else
   run_step "host build (release)" bash -lc "echo '[start-remote] skipped (fast mode, use --rebuild-host or --redeploy)'"
 fi
 if [[ "$HOST_RESTART" -eq 1 ]]; then
-  run_step "host start (debug, background in remote GUI session)" ./runas-remote "$DESKTOP_USER" bash -- -lc "cd '$ROOT_DIR' && WBEAM_BUILD_REV='$BUILD_REV' setsid -f nohup ./src/host/scripts/run_wbeamd_debug.sh 5001 5000 >/dev/null 2>&1"
+  run_step "host start (debug, background in selected GUI session)" runas_remote_exec "$DESKTOP_USER" bash -- -lc "cd '$ROOT_DIR' && WBEAM_BUILD_REV='$BUILD_REV' setsid -f nohup ./src/host/scripts/run_wbeamd_debug.sh 5001 5000 >/dev/null 2>&1"
 else
   run_step "host start (debug, background in remote GUI session user=${DESKTOP_USER})" bash -lc "echo '[start-remote] skipped (--no-host-restart)'"
 fi
@@ -223,7 +249,7 @@ run_step "wait for control API" bash -lc 'for i in $(seq 1 180); do curl -fsS --
 run_step "wait for supported host-probe" bash -lc 'for i in $(seq 1 60); do probe="$(curl -fsS --max-time 1 http://127.0.0.1:5001/v1/host-probe 2>/dev/null || true)"; if [[ "$probe" == *"\"supported\":true"* ]]; then exit 0; fi; sleep 0.5; done; echo "[start-remote] WARN: host-probe not yet supported=true (continuing)" >&2; exit 0'
 
 DESKTOP_LOG="$(next_log_file desktop)"
-run_step "launch desktop GUI first (background)" ./runas-remote "$DESKTOP_USER" bash -- -lc "cd '$ROOT_DIR' && nohup ./devtool >'$DESKTOP_LOG' 2>&1 & disown"
+run_step "launch desktop GUI first (background)" runas_remote_exec "$DESKTOP_USER" bash -- -lc "cd '$ROOT_DIR' && nohup ./devtool >'$DESKTOP_LOG' 2>&1 & disown"
 run_step "wait for desktop process" bash -lc "for i in \$(seq 1 120); do pgrep -u '$DESKTOP_USER' -x wbeam-desktop-t >/dev/null 2>&1 && exit 0; sleep 0.5; done; echo '[start-remote] WARN: desktop process did not become ready (continuing).' >&2; exit 0"
 
 ADB_LOG="$(next_log_file adb)"
@@ -259,6 +285,7 @@ echo
 echo
 echo "[start-remote] desktop already launched in background"
 echo "[start-remote] mode: redeploy=${REDEPLOY} rebuild_host=${REBUILD_HOST} host_restart=${HOST_RESTART} fresh_service=${FRESH_SERVICE}"
+echo "[start-remote] session_scope: remote_filter=${SESSION_REMOTE_FILTER}"
 echo "[start-remote] logs:"
 echo "  desktop: $DESKTOP_LOG"
 echo "  adb:     $ADB_LOG"
