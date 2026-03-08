@@ -646,7 +646,7 @@ Status: active
   - `./desktop.sh --help` -> OK
   - `./runas-remote --help` -> shows default app `./desktop.sh`
 
-## In Progress (2026-03-08) [commit: pending] - start-remote CLI unification
+## In Progress (2026-03-08) [commit: 36330cbc] - start-remote CLI unification
 - Simplified remote start interface to one script + two primary flags:
   - `./start-remote --local <user>`
   - `./start-remote --rdp <user>`
