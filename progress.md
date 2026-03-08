@@ -686,7 +686,7 @@ Status: active
 - Validation:
   - `bash -n runas-remote start-remote` -> OK
 
-## In Progress (2026-03-08) [commit: pending] - session selection UX fixes (`--list-sessions`, stale env guard)
+## In Progress (2026-03-08) [commit: 6cfa118e] - session selection UX fixes (`--list-sessions`, stale env guard)
 - Fixed `start-remote --list-sessions` command path:
   - handled before general argument parsing so it no longer falls through to unknown-flag error.
 - Fixed stale session override inheritance:
