@@ -128,7 +128,37 @@ export default function App() {
   async function confirmConnect(): Promise<void> {
     const device = connectDialogDevice();
     if (!device) return;
-    const chosenMode = connectDialogMode();
+    let chosenMode = connectDialogMode();
+    if (chosenMode === "virtual") {
+      try {
+        const doctor = await api.getVirtualDoctor(device);
+        if (!doctor.ok) {
+          const info = [
+            "Virtual desktop is not ready on this host.",
+            doctor.message,
+            doctor.installHint || "",
+            doctor.missingDeps.length > 0 ? `Missing: ${doctor.missingDeps.join(", ")}` : "",
+            "",
+            "Proceed with Duplicate mode for now?",
+          ]
+            .filter((line) => line.trim().length > 0)
+            .join("\n");
+          const proceedDuplicate = window.confirm(info);
+          if (!proceedDuplicate) {
+            return;
+          }
+          chosenMode = "duplicate";
+        }
+      } catch (err) {
+        const proceedDuplicate = window.confirm(
+          `Virtual desktop doctor check failed:\n${String(err)}\n\nProceed with Duplicate mode for now?`,
+        );
+        if (!proceedDuplicate) {
+          return;
+        }
+        chosenMode = "duplicate";
+      }
+    }
     saveDisplayMode(device.serial, chosenMode);
     closeConnectDialog();
     await session.connectDevice(device, chosenMode);

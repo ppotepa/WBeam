@@ -8,8 +8,16 @@ pub struct VirtualDisplayHandle {
     pub display: String,
 }
 
+pub fn has_xvfb() -> bool {
+    command_exists("Xvfb")
+}
+
+pub fn install_hint() -> String {
+    "Install Xvfb: Debian/Ubuntu `sudo apt install xvfb`, Fedora `sudo dnf install xorg-x11-server-Xvfb`, Arch `sudo pacman -S xorg-server-xvfb`".to_string()
+}
+
 pub fn spawn_xvfb_for_serial(serial: &str, size: &str) -> Result<VirtualDisplayHandle, String> {
-    if !command_exists("Xvfb") {
+    if !has_xvfb() {
         return Err("Xvfb binary not found on host (required for virtual desktop mode)".to_string());
     }
     let (width, height) = parse_size(size);

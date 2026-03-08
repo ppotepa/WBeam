@@ -65,6 +65,17 @@ struct HostProbeBrief {
     supported: bool,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VirtualDoctor {
+    ok: bool,
+    message: String,
+    actionable: bool,
+    host_backend: String,
+    missing_deps: Vec<String>,
+    install_hint: String,
+}
+
 #[tauri::command]
 fn ping() -> &'static str {
     "pong"
@@ -730,6 +741,69 @@ fn host_probe_brief() -> HostProbeBrief {
 }
 
 #[tauri::command]
+fn virtual_doctor(serial: Option<String>, stream_port: Option<u16>) -> Result<VirtualDoctor, String> {
+    let control_port = std::env::var("WBEAM_CONTROL_PORT").unwrap_or_else(|_| "5001".to_string());
+    let mut url = format!("http://127.0.0.1:{control_port}/v1/virtual/doctor");
+    let mut params: Vec<String> = Vec::new();
+    if let Some(s) = serial {
+        let trimmed = s.trim();
+        if !trimmed.is_empty() {
+            params.push(format!("serial={trimmed}"));
+        }
+    }
+    if let Some(port) = stream_port {
+        if port > 0 {
+            params.push(format!("stream_port={port}"));
+        }
+    }
+    if !params.is_empty() {
+        url.push('?');
+        url.push_str(&params.join("&"));
+    }
+
+    let output = Command::new("curl")
+        .args(["-fsS", "--max-time", "2", &url])
+        .output()
+        .map_err(|e| format!("virtual_doctor curl failed: {e}"))?;
+    if !output.status.success() {
+        return Err("virtual_doctor API unavailable".to_string());
+    }
+    let body = String::from_utf8_lossy(&output.stdout);
+    let json: Value = serde_json::from_str(&body).map_err(|e| format!("virtual_doctor invalid json: {e}"))?;
+    Ok(VirtualDoctor {
+        ok: json.get("ok").and_then(|v| v.as_bool()).unwrap_or(false),
+        message: json
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("virtual_doctor returned no message")
+            .to_string(),
+        actionable: json
+            .get("actionable")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        host_backend: json
+            .get("host_backend")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string(),
+        missing_deps: json
+            .get("missing_deps")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|item| item.as_str().map(ToString::to_string))
+                    .collect::<Vec<String>>()
+            })
+            .unwrap_or_default(),
+        install_hint: json
+            .get("install_hint")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+    })
+}
+
+#[tauri::command]
 fn device_connect(serial: String, stream_port: u16, display_mode: Option<String>) -> Result<String, String> {
     let chosen_mode = display_mode.unwrap_or_else(|| "duplicate".to_string());
     let normalized_mode = chosen_mode.trim().to_lowercase();
@@ -1137,6 +1211,7 @@ fn main() {
             list_devices_basic,
             service_status,
             host_probe_brief,
+            virtual_doctor,
             device_connect,
             device_disconnect,
             service_install,

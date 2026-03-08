@@ -41,3 +41,12 @@ export type HostProbeBrief = {
   captureMode: string;
   supported: boolean;
 };
+
+export type VirtualDoctor = {
+  ok: boolean;
+  message: string;
+  actionable: boolean;
+  hostBackend: string;
+  missingDeps: string[];
+  installHint: string;
+};

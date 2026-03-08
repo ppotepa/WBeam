@@ -27,6 +27,19 @@ Status: active
   - Requirement:
     - host must have `Xvfb` installed for virtual mode.
 
+## Session Update (2026-03-08) - virtual resolver + doctor
+- Added host-level virtual display resolver/doctor API:
+  - `GET /v1/virtual/probe`
+  - `GET /v1/virtual/doctor`
+- Resolver behavior:
+  - `x11_gst` -> resolver `linux_x11_xvfb`, requires `Xvfb`
+  - `wayland_portal` -> reports unsupported/pending virtual backend
+  - includes machine-readable `missing_deps[]` + `install_hint`.
+- Added desktop GUI preflight for `Connect -> Virtual`:
+  - UI now calls `virtual_doctor` before connect on selected device serial/port.
+  - If dependencies are missing, user gets clear prompt with install hint and can fallback to `Duplicate`.
+  - Prevents opaque 500 failures when virtual backend is not ready.
+
 ## Current Baseline (Authoritative)
 - Desktop app is now based on Tauri 2 + SolidJS + TypeScript.
 - Primary desktop target is a compact `400x800` dialog UX.

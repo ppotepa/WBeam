@@ -286,6 +286,30 @@ pub struct HostProbeResponse {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct VirtualDisplayProbeResponse {
+    #[serde(flatten)]
+    pub base: BaseResponse,
+    pub ok: bool,
+    pub host_backend: String,
+    pub virtual_supported: bool,
+    pub resolver: String,
+    pub missing_deps: Vec<String>,
+    pub install_hint: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct VirtualDisplayDoctorResponse {
+    #[serde(flatten)]
+    pub base: BaseResponse,
+    pub ok: bool,
+    pub message: String,
+    pub actionable: bool,
+    pub host_backend: String,
+    pub missing_deps: Vec<String>,
+    pub install_hint: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct HealthResponse {
     #[serde(flatten)]
     pub base: BaseResponse,

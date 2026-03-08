@@ -183,6 +183,8 @@ async fn main() {
         .route("/presets", get(get_presets))
         .route("/metrics", get(get_metrics))
         .route("/speedtest", get(get_speedtest))
+        .route("/virtual/probe", get(get_virtual_probe))
+        .route("/virtual/doctor", get(get_virtual_doctor))
         .route("/start", post(post_start))
         .route("/stop", post(post_stop))
         .route("/apply", post(post_apply))
@@ -194,6 +196,8 @@ async fn main() {
         .route("/v1/presets", get(get_presets))
         .route("/v1/metrics", get(get_metrics))
         .route("/v1/speedtest", get(get_speedtest))
+        .route("/v1/virtual/probe", get(get_virtual_probe))
+        .route("/v1/virtual/doctor", get(get_virtual_doctor))
         .route("/v1/start", post(post_start))
         .route("/v1/stop", post(post_stop))
         .route("/v1/apply", post(post_apply))
@@ -292,6 +296,24 @@ async fn get_speedtest(Query(query): Query<SpeedtestQuery>) -> impl IntoResponse
         ],
         payload,
     )
+}
+
+async fn get_virtual_probe(
+    State(state): State<AppState>,
+    Query(query): Query<SessionQuery>,
+) -> impl IntoResponse {
+    let serial = query.serial.as_deref();
+    let core = state.sessions.resolve_core(serial, query.stream_port).await;
+    Json(core.virtual_probe().await)
+}
+
+async fn get_virtual_doctor(
+    State(state): State<AppState>,
+    Query(query): Query<SessionQuery>,
+) -> impl IntoResponse {
+    let serial = query.serial.as_deref();
+    let core = state.sessions.resolve_core(serial, query.stream_port).await;
+    Json(core.virtual_doctor().await)
 }
 
 async fn post_start(

@@ -18,6 +18,7 @@ use wbeamd_api::{
     valid_values, validate_config_with_presets, ActiveConfig, BaseResponse, ClientMetricsRequest,
     ClientMetricsResponse, ConfigPatch, ErrorResponse, HealthResponse, HostProbeResponse,
     KpiSnapshot, MetricsResponse, MetricsSnapshot, PresetsResponse, StatusResponse,
+    VirtualDisplayDoctorResponse, VirtualDisplayProbeResponse,
     ValidationError,
 };
 
@@ -406,6 +407,68 @@ impl DaemonCore {
             display: self.host_probe.display.clone(),
             wayland_display: self.host_probe.wayland_display.clone(),
             supported: self.host_probe.supports_streaming(),
+        }
+    }
+
+    pub async fn virtual_probe(&self) -> VirtualDisplayProbeResponse {
+        let backend = self.host_probe.capture_mode_name().to_string();
+        let mut missing = Vec::new();
+        let mut resolver = "none".to_string();
+        let mut supported = false;
+        let mut hint = "Virtual desktop is not available on this host backend.".to_string();
+
+        if backend == "x11_gst" {
+            resolver = "linux_x11_xvfb".to_string();
+            if virtual_display::has_xvfb() {
+                supported = true;
+                hint = "Virtual desktop is available via Xvfb backend.".to_string();
+            } else {
+                missing.push("Xvfb".to_string());
+                hint = virtual_display::install_hint();
+            }
+        } else if backend == "wayland_portal" {
+            resolver = "linux_wayland_portal_virtual".to_string();
+            missing.push("virtual-wayland-backend".to_string());
+            hint = "Wayland virtual desktop backend is not implemented yet. Use Duplicate mode.".to_string();
+        }
+
+        VirtualDisplayProbeResponse {
+            base: self.base_response().await,
+            ok: true,
+            host_backend: backend,
+            virtual_supported: supported,
+            resolver,
+            missing_deps: missing,
+            install_hint: hint,
+        }
+    }
+
+    pub async fn virtual_doctor(&self) -> VirtualDisplayDoctorResponse {
+        let probe = self.virtual_probe().await;
+        let (ok, message, actionable) = if probe.virtual_supported {
+            (true, "Virtual desktop backend is ready.".to_string(), false)
+        } else if !probe.missing_deps.is_empty() {
+            (
+                false,
+                format!("Missing dependency: {}", probe.missing_deps.join(", ")),
+                true,
+            )
+        } else {
+            (
+                false,
+                "Virtual desktop is unsupported in current host session.".to_string(),
+                false,
+            )
+        };
+
+        VirtualDisplayDoctorResponse {
+            base: probe.base,
+            ok,
+            message,
+            actionable,
+            host_backend: probe.host_backend,
+            missing_deps: probe.missing_deps,
+            install_hint: probe.install_hint,
         }
     }
 

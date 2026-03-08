@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { DeviceBasic, DevicesBasicResponse, HostProbeBrief, ServiceStatus } from "../types";
+import type { DeviceBasic, DevicesBasicResponse, HostProbeBrief, ServiceStatus, VirtualDoctor } from "../types";
 
 function normalizeApiError(err: unknown): string {
   const text = String(err ?? "unknown error");
@@ -67,6 +67,18 @@ export class HostApiManager {
         invoke<string>("device_connect", { serial: device.serial, streamPort: device.streamPort, displayMode }),
         10000,
         "device_connect",
+      );
+    } catch (err) {
+      throw new Error(normalizeApiError(err));
+    }
+  }
+
+  async getVirtualDoctor(device: DeviceBasic): Promise<VirtualDoctor> {
+    try {
+      return await withTimeout(
+        invoke<VirtualDoctor>("virtual_doctor", { serial: device.serial, streamPort: device.streamPort }),
+        2500,
+        "virtual_doctor",
       );
     } catch (err) {
       throw new Error(normalizeApiError(err));
