@@ -804,6 +804,36 @@ fn virtual_doctor(serial: Option<String>, stream_port: Option<u16>) -> Result<Vi
 }
 
 #[tauri::command]
+fn virtual_install_deps() -> Result<String, String> {
+    let root = repo_root();
+    let wbeam = root.join("wbeam");
+    let output = Command::new(&wbeam)
+        .current_dir(&root)
+        .args(["deps", "virtual", "install", "--yes"])
+        .output()
+        .map_err(|e| format!("virtual_install_deps spawn failed: {e}"))?;
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if stdout.is_empty() {
+            Ok("virtual deps install completed".to_string())
+        } else {
+            Ok(stdout)
+        }
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let msg = if !stderr.is_empty() {
+            stderr
+        } else if !stdout.is_empty() {
+            stdout
+        } else {
+            format!("virtual deps install failed with status {}", output.status)
+        };
+        Err(msg)
+    }
+}
+
+#[tauri::command]
 fn device_connect(serial: String, stream_port: u16, display_mode: Option<String>) -> Result<String, String> {
     let chosen_mode = display_mode.unwrap_or_else(|| "duplicate".to_string());
     let normalized_mode = chosen_mode.trim().to_lowercase();
@@ -1212,6 +1242,7 @@ fn main() {
             service_status,
             host_probe_brief,
             virtual_doctor,
+            virtual_install_deps,
             device_connect,
             device_disconnect,
             service_install,

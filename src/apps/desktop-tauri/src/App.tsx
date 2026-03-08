@@ -41,7 +41,6 @@ function DeviceTypeIcon(props: { type: string }) {
 
 type DisplayMode = "virtual" | "duplicate";
 const CONNECT_MODE_STORAGE_KEY = "wbeam.connect.mode.by.serial";
-const VIRTUAL_SETUP_DISMISS_KEY = "wbeam.virtual.setup.dismissed.signature";
 
 function loadSavedDisplayMode(serial: string): DisplayMode | null {
   try {
@@ -76,6 +75,7 @@ export default function App() {
   const [connectDialogMode, setConnectDialogMode] = createSignal<DisplayMode>("virtual");
   const [virtualStartupDoctor, setVirtualStartupDoctor] = createSignal<VirtualDoctor | null>(null);
   const [virtualSetupVisible, setVirtualSetupVisible] = createSignal(false);
+  const [virtualSetupInstalling, setVirtualSetupInstalling] = createSignal(false);
   const upgradeAvailable = () =>
     session.service().active
     && session.service().installed
@@ -137,30 +137,14 @@ export default function App() {
       try {
         const doctor = await api.getVirtualDoctor(device);
         if (!doctor.ok) {
-          const info = [
-            "Virtual desktop is not ready on this host.",
-            doctor.message,
-            doctor.installHint || "",
-            doctor.missingDeps.length > 0 ? `Missing: ${doctor.missingDeps.join(", ")}` : "",
-            "",
-            "Proceed with Duplicate mode for now?",
-          ]
-            .filter((line) => line.trim().length > 0)
-            .join("\n");
-          const proceedDuplicate = window.confirm(info);
-          if (!proceedDuplicate) {
-            return;
-          }
-          chosenMode = "duplicate";
-        }
-      } catch (err) {
-        const proceedDuplicate = window.confirm(
-          `Virtual desktop doctor check failed:\n${String(err)}\n\nProceed with Duplicate mode for now?`,
-        );
-        if (!proceedDuplicate) {
+          setVirtualStartupDoctor(doctor);
+          setVirtualSetupVisible(true);
+          session.setError("Virtual desktop dependencies are missing. Install deps or connect using Duplicate mode.");
           return;
         }
-        chosenMode = "duplicate";
+      } catch (err) {
+        session.setError(`Virtual desktop doctor check failed: ${String(err)}`);
+        return;
       }
     }
     saveDisplayMode(device.serial, chosenMode);
@@ -168,32 +152,30 @@ export default function App() {
     await session.connectDevice(device, chosenMode);
   }
 
-  function doctorSignature(doctor: VirtualDoctor): string {
-    return `${doctor.hostBackend}|${doctor.missingDeps.join(",")}`;
-  }
-
-  function isVirtualSetupDismissed(doctor: VirtualDoctor): boolean {
-    try {
-      return localStorage.getItem(VIRTUAL_SETUP_DISMISS_KEY) === doctorSignature(doctor);
-    } catch {
-      return false;
-    }
-  }
-
-  function dismissVirtualSetupRemember(): void {
-    const doctor = virtualStartupDoctor();
-    if (doctor) {
-      try {
-        localStorage.setItem(VIRTUAL_SETUP_DISMISS_KEY, doctorSignature(doctor));
-      } catch {
-        // ignore storage failures
-      }
-    }
-    setVirtualSetupVisible(false);
-  }
-
   function closeVirtualSetup(): void {
     setVirtualSetupVisible(false);
+  }
+
+  async function installVirtualDeps(): Promise<void> {
+    setVirtualSetupInstalling(true);
+    session.setError("");
+    try {
+      await api.installVirtualDeps();
+      const doctor = await api.getVirtualDoctor();
+      setVirtualStartupDoctor(doctor);
+      if (doctor.ok) {
+        setVirtualSetupVisible(false);
+      } else {
+        setVirtualSetupVisible(true);
+        const details = doctor.missingDeps.length > 0 ? ` Missing: ${doctor.missingDeps.join(", ")}.` : "";
+        session.setError(`${doctor.message}.${details}`.trim());
+      }
+      await session.refreshSnapshot({ silent: true });
+    } catch (err) {
+      session.setError(`Dependency installation failed: ${String(err)}`);
+    } finally {
+      setVirtualSetupInstalling(false);
+    }
   }
 
   onMount(async () => {
@@ -210,7 +192,7 @@ export default function App() {
     try {
       const doctor = await api.getVirtualDoctor();
       setVirtualStartupDoctor(doctor);
-      if (!doctor.ok && doctor.actionable && !isVirtualSetupDismissed(doctor)) {
+      if (!doctor.ok && doctor.actionable) {
         setVirtualSetupVisible(true);
       }
     } catch {
@@ -504,8 +486,14 @@ export default function App() {
                   <p class="setup-missing">Missing: {doctor.missingDeps.join(", ")}</p>
                 </Show>
                 <div class="connect-modal-actions">
-                  <button class="device-btn" onClick={dismissVirtualSetupRemember}>Later</button>
-                  <button class="device-btn" onClick={closeVirtualSetup}>Use duplicate</button>
+                  <button class="device-btn" onClick={closeVirtualSetup} disabled={virtualSetupInstalling()}>
+                    Cancel
+                  </button>
+                  <button class="device-btn" onClick={() => void installVirtualDeps()} disabled={virtualSetupInstalling()}>
+                    <Show when={virtualSetupInstalling()} fallback={"Install deps"}>
+                      <><Loader2 size={13} class="spinning" /> Installing...</>
+                    </Show>
+                  </button>
                 </div>
               </section>
             </div>

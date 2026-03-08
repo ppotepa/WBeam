@@ -86,6 +86,18 @@ export class HostApiManager {
     }
   }
 
+  async installVirtualDeps(): Promise<string> {
+    try {
+      return await withTimeout(
+        invoke<string>("virtual_install_deps"),
+        120000,
+        "virtual_install_deps",
+      );
+    } catch (err) {
+      throw new Error(normalizeApiError(err));
+    }
+  }
+
   async disconnectDevice(device: DeviceBasic): Promise<void> {
     try {
       await withTimeout(

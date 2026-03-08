@@ -534,3 +534,20 @@ Status: active
   - `./wbeam deps virtual check --json` -> OK
   - `./wbeam deps virtual check` -> OK
   - `./wbeam deps virtual install --dry-run --yes` -> OK
+
+## In Progress (2026-03-08) - startup virtual setup modal UX hardening
+- Updated startup "Virtual desktop setup" modal actions to match strict flow:
+  - removed `Later` and `Use duplicate`,
+  - now only `Install deps` and `Cancel`.
+- Added busy state for dependency installation in modal:
+  - `Installing...` with spinner,
+  - buttons disabled while install is in progress.
+- Added Tauri backend command `virtual_install_deps`:
+  - executes `./wbeam deps virtual install --yes` from repo root,
+  - returns stdout/stderr error details to UI.
+- Updated connect flow guard for `virtual` mode:
+  - no automatic fallback confirm to duplicate,
+  - when doctor fails, UI opens setup modal and reports actionable error.
+- Validation:
+  - `cd src/apps/desktop-tauri && npm run build` -> OK
+  - `cargo check --manifest-path src/apps/desktop-tauri/src-tauri/Cargo.toml` -> OK
