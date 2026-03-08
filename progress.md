@@ -608,7 +608,7 @@ Status: active
   - `cargo check --manifest-path src/apps/desktop-tauri/src-tauri/Cargo.toml` -> OK
   - `cd src/apps/desktop-tauri && npm run build` -> OK
 
-## In Progress (2026-03-08) [commit: pending] - session-scope start flow (local vs remote)
+## In Progress (2026-03-08) [commit: b9018545] - session-scope start flow (local vs remote)
 - Added session scope filtering for remote launcher:
   - `runas-remote` now supports `RUNAS_REMOTE_SESSION_REMOTE=any|no|yes`,
   - session selection uses loginctl `Remote=` property filter.
