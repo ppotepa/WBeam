@@ -588,3 +588,22 @@ Status: active
   - `bash -n wbeam` -> OK
   - `cargo check --manifest-path src/host/rust/Cargo.toml -p wbeamd-core` -> OK
   - `./wbeam watch logs --once` -> shows multi-source snapshot (host/adb/desktop/udev/version + service journal)
+
+## In Progress (2026-03-08) [commit: 2723a9b5] - x11 extend capability probe + virtual mode truthfulness
+- Added dedicated X11 extend capability probe:
+  - new module `infra/x11_extend.rs`,
+  - validates `DISPLAY`, `xrandr` presence, RandR version >= 1.5, connected outputs,
+  - marks typical remote RDP/xrdp X11 sessions as non-extend-capable.
+- Updated virtual backend resolution semantics in `virtual_probe`:
+  - `linux_x11_randr_extend` is reported as supported only when extend probe passes,
+  - `linux_x11_xvfb_fallback` is no longer advertised as true additional monitor support,
+  - fallback hint now explicitly states it is isolated Xvfb space, not KDE monitor extension.
+- Updated desktop connect UX for virtual mode:
+  - actionable=false doctor failures no longer open install-deps modal,
+  - UI shows direct reason/hint (instead of misleading "missing deps" path).
+- Result:
+  - prevents silent routing into black-screen Xvfb path when user expects real desktop extension.
+- Validation:
+  - `cargo check --manifest-path src/host/rust/Cargo.toml -p wbeamd-core` -> OK
+  - `cargo check --manifest-path src/apps/desktop-tauri/src-tauri/Cargo.toml` -> OK
+  - `cd src/apps/desktop-tauri && npm run build` -> OK
