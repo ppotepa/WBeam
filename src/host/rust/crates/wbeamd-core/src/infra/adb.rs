@@ -84,6 +84,49 @@ pub async fn ensure_usb_reverse(
     }
 }
 
+pub async fn device_resolution(target_serial: Option<&str>) -> Option<String> {
+    let serials = adb_target_serials(target_serial).await;
+    let serial = serials.first()?.clone();
+    let output = Command::new("adb")
+        .arg("-s")
+        .arg(&serial)
+        .args(["shell", "wm", "size"])
+        .output()
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    parse_wm_size(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn parse_wm_size(raw: &str) -> Option<String> {
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if let Some(val) = trimmed.strip_prefix("Physical size:") {
+            let v = val.trim();
+            if is_size(v) {
+                return Some(v.to_string());
+            }
+        }
+        if let Some(val) = trimmed.strip_prefix("Override size:") {
+            let v = val.trim();
+            if is_size(v) {
+                return Some(v.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn is_size(v: &str) -> bool {
+    let mut parts = v.split('x');
+    let w_ok = parts.next().and_then(|x| x.parse::<u32>().ok()).is_some();
+    let h_ok = parts.next().and_then(|x| x.parse::<u32>().ok()).is_some();
+    w_ok && h_ok
+}
+
 async fn adb_target_serials(target_serial: Option<&str>) -> Vec<String> {
     if let Some(serial) = target_serial {
         let trimmed = serial.trim();

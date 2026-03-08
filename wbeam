@@ -1545,29 +1545,118 @@ watch_logs_latest() {
   ls -1t "$LOG_DIR"/$pattern 2>/dev/null | head -n 1 || true
 }
 
+watch_logs_extract_run_id() {
+  local path="$1"
+  basename "$path" | sed -n 's/.*\.\([0-9][0-9][0-9][0-9]\)\.log$/\1/p' | head -n 1
+}
+
+watch_logs_latest_run_id() {
+  local latest
+  latest="$(ls -1t "$LOG_DIR"/*.[0-9][0-9][0-9][0-9].log 2>/dev/null | head -n 1 || true)"
+  if [[ -z "$latest" ]]; then
+    return 1
+  fi
+  watch_logs_extract_run_id "$latest"
+}
+
+watch_logs_files_for_run() {
+  local run_id="$1"
+  ls -1t "$LOG_DIR"/*."$run_id".log 2>/dev/null || true
+}
+
+watch_logs_domain_from_file() {
+  local file="$1"
+  basename "$file" | sed -n 's/^[^.]*\.\(.*\)\.[0-9][0-9][0-9][0-9]\.log$/\1/p' | head -n 1
+}
+
+watch_logs_file_epoch() {
+  local file="$1" stamp
+  stamp="$(basename "$file" | cut -d'.' -f1)"
+  date -d "${stamp:0:8} ${stamp:9:2}:${stamp:11:2}:${stamp:13:2}" +%s 2>/dev/null || echo 0
+}
+
+watch_logs_latest_per_domain() {
+  local -a candidates
+  local -A seen=()
+  local file domain
+  mapfile -t candidates < <(ls -1t "$LOG_DIR"/*.[0-9][0-9][0-9][0-9].log 2>/dev/null || true)
+  for file in "${candidates[@]}"; do
+    domain="$(watch_logs_domain_from_file "$file")"
+    if [[ -z "$domain" ]]; then
+      continue
+    fi
+    if [[ -z "${seen[$domain]+x}" ]]; then
+      seen[$domain]="$file"
+      echo "$file"
+    fi
+  done
+}
+
 watch_logs_once() {
-  local host_log adb_log service_lines
-  host_log="$(watch_logs_latest "*.host.*.log")"
-  if [[ -z "$host_log" ]]; then
-    host_log="$(ls -1t "$ROOT_DIR"/src/host/rust/logs/wbeamd-debug-*.log 2>/dev/null | head -n 1 || true)"
-  fi
-  adb_log="$(watch_logs_latest "*.adb.*.log")"
+  local service_lines run_id
+  local -a run_files
+  local -a filtered_files
+  local -A seen_domain=()
 
-  echo "host log:"
-  if [[ -n "$host_log" ]]; then
-    echo "  file=$host_log"
-    tail -n 12 "$host_log" 2>/dev/null || true
+  run_id="$(watch_logs_latest_run_id || true)"
+  if [[ -n "$run_id" ]]; then
+    mapfile -t run_files < <(watch_logs_files_for_run "$run_id")
+    filtered_files=()
+    seen_domain=()
+    if [[ "${#run_files[@]}" -gt 0 ]]; then
+      local f d
+      for f in "${run_files[@]}"; do
+        d="$(watch_logs_domain_from_file "$f")"
+        [[ -n "$d" ]] || continue
+        if [[ -z "${seen_domain[$d]+x}" ]]; then
+          seen_domain[$d]=1
+          filtered_files+=("$f")
+        fi
+      done
+      run_files=("${filtered_files[@]}")
+    fi
+    echo "run_id: $run_id"
+    if [[ "${#run_files[@]}" -gt 1 ]]; then
+      local min_ts=0 max_ts=0 ts
+      for f in "${run_files[@]}"; do
+        ts="$(watch_logs_file_epoch "$f")"
+        if [[ "$ts" =~ ^[0-9]+$ ]] && [[ "$ts" -gt 0 ]]; then
+          if (( min_ts == 0 || ts < min_ts )); then min_ts="$ts"; fi
+          if (( ts > max_ts )); then max_ts="$ts"; fi
+        fi
+      done
+      if (( min_ts > 0 && max_ts > 0 && (max_ts - min_ts) > 600 )); then
+        mapfile -t run_files < <(watch_logs_latest_per_domain)
+        if [[ "${#run_files[@]}" -gt 0 ]]; then
+          echo "mode: latest-per-domain (run-id window too wide)"
+        fi
+      fi
+    fi
+    if [[ "${#run_files[@]}" -le 1 ]]; then
+      # Some workflows allocate run counters per-domain; show latest file for each
+      # domain so diagnostics include host/adb/desktop/service in one snapshot.
+      mapfile -t run_files < <(watch_logs_latest_per_domain)
+      if [[ "${#run_files[@]}" -gt 0 ]]; then
+        echo "mode: latest-per-domain (fallback)"
+      fi
+    fi
+    if [[ "${#run_files[@]}" -gt 0 ]]; then
+      local file domain
+      for file in "${run_files[@]}"; do
+        domain="$(watch_logs_domain_from_file "$file")"
+        if [[ -z "$domain" ]]; then
+          domain="unknown"
+        fi
+        echo
+        echo "${domain} log:"
+        echo "  file=$file"
+        tail -n 12 "$file" 2>/dev/null || true
+      done
+    else
+      echo "logs: $(watch_status_label missing)"
+    fi
   else
-    echo "  $(watch_status_label missing)"
-  fi
-  echo
-
-  echo "adb log:"
-  if [[ -n "$adb_log" ]]; then
-    echo "  file=$adb_log"
-    tail -n 12 "$adb_log" 2>/dev/null || true
-  else
-    echo "  $(watch_status_label missing)"
+    echo "run_id: $(watch_status_label missing)"
   fi
   echo
 

@@ -887,6 +887,11 @@ impl DaemonCore {
     }
 
     async fn start_with_config(&self, cfg: ActiveConfig) -> Result<(), CoreError> {
+        let requested_display_mode = {
+            let inner = self.inner.lock().await;
+            inner.requested_display_mode.clone()
+        };
+        let mut cfg = cfg;
         if !self.host_probe.supports_streaming() {
             let reason = self.host_probe.unsupported_reason();
             {
@@ -895,6 +900,26 @@ impl DaemonCore {
                 inner.last_error = reason.clone();
             }
             return Err(CoreError::UnsupportedHost(reason));
+        }
+
+        if requested_display_mode == "virtual" {
+            if let Some(target_size) = adb::device_resolution(self.target_serial.as_deref()).await {
+                if cfg.size != target_size {
+                    info!(
+                        serial = self.target_serial.as_deref().unwrap_or("auto"),
+                        from = %cfg.size,
+                        to = %target_size,
+                        "virtual mode: overriding stream size to target device resolution"
+                    );
+                    cfg.size = target_size;
+                }
+            } else {
+                warn!(
+                    serial = self.target_serial.as_deref().unwrap_or("auto"),
+                    configured = %cfg.size,
+                    "virtual mode: could not detect target device resolution; using configured size"
+                );
+            }
         }
 
         {
@@ -985,10 +1010,6 @@ impl DaemonCore {
 
         let mut cmd;
         let capture_backend = self.host_probe.capture_mode_name();
-        let requested_display_mode = {
-            let inner = self.inner.lock().await;
-            inner.requested_display_mode.clone()
-        };
         if requested_display_mode == "virtual" && capture_backend != "x11_gst" {
             return Err(CoreError::UnsupportedHost(
                 "virtual desktop mode currently requires x11_gst host backend".to_string(),
@@ -1003,6 +1024,13 @@ impl DaemonCore {
                 let serial_hint = self.target_serial.as_deref().unwrap_or("default");
                 let handle = virtual_display::spawn_xvfb_for_serial(serial_hint, &cfg.size)
                     .map_err(CoreError::Spawn)?;
+                info!(
+                    serial = serial_hint,
+                    size = %cfg.size,
+                    display = %handle.display,
+                    pid = handle.pid,
+                    "virtual mode: spawned Xvfb display"
+                );
                 x11_display_override = Some(handle.display.clone());
                 using_virtual_x11 = true;
                 let mut inner = self.inner.lock().await;
