@@ -118,7 +118,7 @@ pub fn configure_encoder(
         let _ = enc.set_property_from_str("speed-preset", "ultrafast");
         let _ = enc.set_property_from_str("tune", "zerolatency");
         let _ = enc.set_property("byte-stream", true);
-        let _ = enc.set_property("key-int-max", gop);
+        let _ = enc.set_property("key-int-max", gop as i32);
         let option_str = if intra_only {
             "bframes=0:cabac=0:ref=1:8x8dct=0:no-open-gop=1:scenecut=0"
         } else {
@@ -132,7 +132,7 @@ pub fn configure_encoder(
         let _ = enc.set_property("bitrate", bitrate_kbps);
         let _ = enc.set_property_from_str("speed-preset", "ultrafast");
         let _ = enc.set_property_from_str("tune", "zerolatency");
-        let _ = enc.set_property("key-int-max", gop);
+        let _ = enc.set_property("key-int-max", gop as i32);
         let option_str = if intra_only {
             "bframes=0:no-open-gop=1:scenecut=0:strong-intra-smoothing=0"
         } else {

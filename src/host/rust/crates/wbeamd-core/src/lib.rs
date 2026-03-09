@@ -1320,6 +1320,19 @@ impl DaemonCore {
         if let Some(bps) = proc::parse_kbps_line_to_bps(line) {
             inner.metrics.bitrate_actual_bps = bps;
         }
+
+        let trimmed = line.trim();
+        if !trimmed.is_empty() {
+            let lower = trimmed.to_ascii_lowercase();
+            if lower.contains("panic")
+                || lower.contains("error")
+                || lower.contains("failed")
+                || lower.contains("cannot")
+                || lower.contains("property '")
+            {
+                inner.last_error = trimmed.to_string();
+            }
+        }
     }
 
     async fn handle_child_exit(&self, run_id: u64, exit_code: i32) {
@@ -1347,14 +1360,20 @@ impl DaemonCore {
                 return;
             }
 
+            let preserved_stream_error = inner.last_error.clone();
             inner.last_error = format!("stream exited with code={exit_code}");
             inner.state = STATE_ERROR.to_string();
             inner.metrics.reconnects = inner.metrics.reconnects.saturating_add(1);
 
             if !had_streaming_session {
                 inner.state = STATE_IDLE.to_string();
-                inner.last_error =
-                    format!("stream start aborted (code={exit_code}); waiting for explicit /start");
+                inner.last_error = if preserved_stream_error.is_empty() {
+                    format!("stream start aborted (code={exit_code}); waiting for explicit /start")
+                } else {
+                    format!(
+                        "stream start aborted (code={exit_code}): {preserved_stream_error}"
+                    )
+                };
                 info!(
                     run_id,
                     exit_code,
