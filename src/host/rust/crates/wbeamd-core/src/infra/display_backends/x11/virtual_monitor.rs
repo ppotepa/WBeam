@@ -1,7 +1,7 @@
-use super::{Activation, ActivationError, DisplayMode, RuntimeHandle, VirtualMonitorProbe};
-use super::super::{host_probe::HostProbe, virtual_display, x11_real_output};
+use super::super::{Activation, ActivationError, RuntimeHandle, VirtualMonitorProbe};
+use super::super::super::{host_probe::HostProbe, virtual_display, x11_real_output};
 
-pub fn probe_virtual_monitor(host_probe: &HostProbe) -> VirtualMonitorProbe {
+pub fn probe(host_probe: &HostProbe) -> VirtualMonitorProbe {
     let real_probe = x11_real_output::probe(host_probe.is_remote);
     if real_probe.supported {
         return VirtualMonitorProbe {
@@ -39,22 +39,6 @@ pub fn probe_virtual_monitor(host_probe: &HostProbe) -> VirtualMonitorProbe {
 
 pub fn activate(
     host_probe: &HostProbe,
-    mode: DisplayMode,
-    serial_hint: &str,
-    size: &str,
-) -> Result<Activation, ActivationError> {
-    match mode {
-        DisplayMode::Duplicate => Ok(Activation {
-            display_override: host_probe.display.clone(),
-            ..Activation::default()
-        }),
-        DisplayMode::VirtualMonitor => activate_virtual_monitor(host_probe, serial_hint, size),
-        DisplayMode::VirtualIsolated => activate_virtual_isolated(serial_hint, size),
-    }
-}
-
-fn activate_virtual_monitor(
-    host_probe: &HostProbe,
     serial_hint: &str,
     size: &str,
 ) -> Result<Activation, ActivationError> {
@@ -63,20 +47,6 @@ fn activate_virtual_monitor(
         display_override: host_probe.display.clone(),
         capture_region: Some((handle.x, handle.y, handle.width, handle.height)),
         runtime_handle: Some(RuntimeHandle::X11RealOutput(handle)),
-        ..Activation::default()
-    })
-}
-
-fn activate_virtual_isolated(
-    serial_hint: &str,
-    size: &str,
-) -> Result<Activation, ActivationError> {
-    let handle =
-        virtual_display::spawn_xvfb_for_serial(serial_hint, size).map_err(ActivationError::Failed)?;
-    Ok(Activation {
-        display_override: Some(handle.display.clone()),
-        using_virtual_x11: true,
-        runtime_handle: Some(RuntimeHandle::X11VirtualIsolated(handle)),
         ..Activation::default()
     })
 }
