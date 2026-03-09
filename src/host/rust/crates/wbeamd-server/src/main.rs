@@ -323,7 +323,17 @@ async fn post_start(
 ) -> impl IntoResponse {
     let serial = query.serial.as_deref();
     let core = state.sessions.resolve_core(serial, query.stream_port).await;
-    core.set_display_mode(query.display_mode.as_deref()).await;
+    // display_mode is a sticky session preference. Do not reset it on every /start when the client
+    // doesn't provide the query param (Android client uses POST /start without it).
+    if query.display_mode.is_some() {
+        tracing::info!(
+            serial = serial.unwrap_or("default"),
+            stream_port = query.stream_port.unwrap_or(0),
+            display_mode = query.display_mode.as_deref().unwrap_or(""),
+            "start: display_mode override"
+        );
+        core.set_display_mode(query.display_mode.as_deref()).await;
+    }
     let patch = body.map(|Json(v)| v).unwrap_or_default();
     match core.start(patch).await {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),

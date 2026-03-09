@@ -114,6 +114,7 @@ impl Default for VirtualDepsInstallState {
 static VIRTUAL_DEPS_INSTALL_STATE: OnceLock<Mutex<VirtualDepsInstallState>> = OnceLock::new();
 static ADB_CMD_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 static DEVICE_SNAPSHOT_CACHE: OnceLock<Mutex<HashMap<String, CachedDeviceSnapshot>>> = OnceLock::new();
+static SESSION_LOGS: OnceLock<SessionLogs> = OnceLock::new();
 
 #[derive(Clone, Debug)]
 struct CachedDeviceSnapshot {
@@ -130,6 +131,13 @@ struct CachedDeviceSnapshot {
     battery_charging: bool,
     apk_installed: bool,
     apk_version: String,
+}
+
+#[derive(Clone, Debug)]
+struct SessionLogs {
+    stamp: String,
+    run_id: String,
+    dir: PathBuf,
 }
 
 #[tauri::command]
@@ -149,6 +157,67 @@ fn host_name() -> String {
 
 fn virtual_deps_state() -> &'static Mutex<VirtualDepsInstallState> {
     VIRTUAL_DEPS_INSTALL_STATE.get_or_init(|| Mutex::new(VirtualDepsInstallState::default()))
+}
+
+fn session_logs() -> &'static SessionLogs {
+    SESSION_LOGS.get_or_init(|| {
+        let dir = repo_root().join("logs");
+        let _ = fs::create_dir_all(&dir);
+
+        let stamp = Command::new("date")
+            .args(["+%Y%m%d-%H%M%S"])
+            .output()
+            .ok()
+            .and_then(|out| {
+                if out.status.success() {
+                    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+                } else {
+                    None
+                }
+            })
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| {
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_secs().to_string())
+                    .unwrap_or_else(|_| "0".to_string())
+            });
+
+        let day = Command::new("date")
+            .args(["+%Y%m%d"])
+            .output()
+            .ok()
+            .and_then(|out| {
+                if out.status.success() {
+                    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+                } else {
+                    None
+                }
+            })
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "unknown".to_string());
+
+        let counter_file = dir.join(format!(".run.{day}.counter"));
+        let prev = fs::read_to_string(&counter_file)
+            .ok()
+            .and_then(|v| v.trim().parse::<u32>().ok())
+            .unwrap_or(0);
+        let next = prev.saturating_add(1);
+        let _ = fs::write(&counter_file, format!("{next}"));
+        let run_id = format!("{:04}", next);
+
+        SessionLogs { stamp, run_id, dir }
+    })
+}
+
+fn ui_log_path() -> PathBuf {
+    let logs = session_logs();
+    logs.dir.join(format!("{}.ui.{}.log", logs.stamp, logs.run_id))
+}
+
+fn connect_log_path() -> PathBuf {
+    let logs = session_logs();
+    logs.dir.join(format!("{}.connect.{}.log", logs.stamp, logs.run_id))
 }
 
 fn virtual_deps_snapshot() -> VirtualDepsInstallStatus {
@@ -435,7 +504,7 @@ fn connect_log(serial: &str, stream_port: u16, message: &str) {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let path = repo_root().join("logs").join("desktop-connect.log");
+    let path = connect_log_path();
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
@@ -457,7 +526,7 @@ fn ui_service_log(command: &str, phase: &str, details: &str) {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let path = repo_root().join("logs").join("ui-service.log");
+    let path = ui_log_path();
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }

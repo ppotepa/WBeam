@@ -183,9 +183,22 @@ impl HostFacts {
         let desktop = detect_desktop();
         let display = detect_x11_display();
         let wayland_display = env::var("WAYLAND_DISPLAY").ok().filter(|v| !v.is_empty());
+        // "remote" is used to guard backends that rely on real RandR outputs.
+        // SSH by itself is not enough to mark the session as remote: developers often run
+        // commands over SSH while targeting the local :0 Xorg session (no forwarding).
+        let ssh = env::var_os("SSH_CONNECTION").is_some();
+        let forwarded_x11 = display
+            .as_deref()
+            .map(|d| {
+                let low = d.to_ascii_lowercase();
+                low.starts_with("localhost:")
+                    || low.starts_with("127.0.0.1:")
+                    || low.starts_with("::1:")
+            })
+            .unwrap_or(false);
         let is_remote = env::var_os("XRDP_SESSION").is_some()
             || env::var_os("RDP_SESSION").is_some()
-            || env::var_os("SSH_CONNECTION").is_some();
+            || (ssh && forwarded_x11);
 
         Self {
             os,
@@ -230,9 +243,9 @@ fn detect_session(os: HostOs) -> SessionKind {
     // In some remote launch paths (sudo/systemd user service), XDG_SESSION_TYPE can
     // be leaked as "tty" even when DISPLAY/WAYLAND_DISPLAY is correctly set.
     if session == "tty" {
-        if env::var_os("WAYLAND_DISPLAY").is_some() {
+        if env::var_os("WAYLAND_DISPLAY").is_some() || has_wayland_socket() {
             session = "wayland".to_string();
-        } else if env::var_os("DISPLAY").is_some() {
+        } else if env::var_os("DISPLAY").is_some() || has_x11_socket() {
             session = "x11".to_string();
         }
     }

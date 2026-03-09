@@ -375,7 +375,15 @@ impl DaemonCore {
             .unwrap_or_else(|| "unknown-host".to_string());
 
         let runtime_config_path = runtime_config_path_for_session(&root, session_label.as_deref());
-        let presets = load_presets_from_proto_file(&root).unwrap_or_else(wbeamd_api::presets);
+        // Merge built-in presets with proto-trained presets (proto can override).
+        // This prevents "invalid profile" errors when Android/GUI requests built-in profiles
+        // (balanced/ultra/lowlatency) and proto/profiles.json only contains the tuned set.
+        let mut presets = wbeamd_api::presets();
+        if let Some(proto_presets) = load_presets_from_proto_file(&root) {
+            for (k, v) in proto_presets {
+                presets.insert(k, v);
+            }
+        }
         let active_config =
             config_store::load_runtime_config_with_presets(&runtime_config_path, &presets)
                 .unwrap_or_else(|| default_config_from_presets(&presets));

@@ -3,6 +3,7 @@ package com.wbeam;
 import android.Manifest;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.graphics.Rect;
 import android.graphics.drawable.GradientDrawable;
 import android.media.MediaCodecInfo;
 import android.media.MediaCodecList;
@@ -1175,10 +1176,24 @@ public class MainActivity extends AppCompatActivity {
         StreamConfig cfg = effectiveStreamConfig();
         long frameUs = Math.max(1L, 1_000_000L / Math.max(1, cfg.fps));
         SurfaceView preview = findViewById(R.id.previewSurface);
+        Log.i(TAG, String.format(Locale.US,
+                "startLiveView: cfg=%dx%d@%dfps view=%dx%d surfaceValid=%s",
+                cfg.width, cfg.height, cfg.fps,
+                preview.getWidth(), preview.getHeight(),
+                surface != null && surface.isValid()));
         // Keep the Surface buffer sized from layout so video can scale to fill the screen.
         // setFixedSize(stream_w, stream_h) causes a "small centered video" effect whenever the
         // stream resolution differs from the view size (default config scales stream size).
         preview.getHolder().setSizeFromLayout();
+        try {
+            Rect frame = preview.getHolder().getSurfaceFrame();
+            if (frame != null) {
+                Log.i(TAG, String.format(Locale.US,
+                        "startLiveView: surfaceFrame=%dx%d",
+                        frame.width(), frame.height()));
+            }
+        } catch (Exception ignored) {
+        }
 
         player = new H264TcpPlayer(
                 surface,

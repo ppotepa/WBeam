@@ -34,7 +34,7 @@ pub fn probe(is_remote: bool) -> X11RealOutputProbe {
         };
     }
 
-    let display = std::env::var("DISPLAY").unwrap_or_default();
+    let display = detect_x11_display().unwrap_or_default();
     if display.trim().is_empty() {
         return X11RealOutputProbe {
             supported: false,
@@ -112,7 +112,7 @@ pub fn probe(is_remote: bool) -> X11RealOutputProbe {
 }
 
 pub fn create(_serial: &str, size: &str) -> Result<X11RealOutputHandle, String> {
-    let display = std::env::var("DISPLAY").unwrap_or_default();
+    let display = detect_x11_display().unwrap_or_default();
     if display.trim().is_empty() {
         return Err("DISPLAY is not set for daemon process".to_string());
     }
@@ -241,7 +241,7 @@ pub fn create(_serial: &str, size: &str) -> Result<X11RealOutputHandle, String> 
 }
 
 pub fn destroy(handle: &X11RealOutputHandle) -> Result<(), String> {
-    let display = std::env::var("DISPLAY").unwrap_or_default();
+    let display = detect_x11_display().unwrap_or_default();
     if display.trim().is_empty() {
         return Ok(());
     }
@@ -419,7 +419,36 @@ fn looks_mode(token: &str) -> bool {
 
 fn looks_virtual_output_name(name: &str) -> bool {
     let low = name.to_ascii_lowercase();
-    low.contains("virtual") || low.contains("dvi") || low.contains("hdmi") || low.contains("displayport")
+    low.contains("virtual")
+        || low.contains("vkms")
+        || low.contains("dvi")
+        || low.contains("hdmi")
+        || low.contains("displayport")
+}
+
+fn detect_x11_display() -> Option<String> {
+    if let Ok(value) = std::env::var("DISPLAY") {
+        if !value.trim().is_empty() {
+            return Some(value);
+        }
+    }
+
+    let entries = fs::read_dir("/tmp/.X11-unix").ok()?;
+    let mut best: Option<u32> = None;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !name.starts_with('X') {
+            continue;
+        }
+        let Ok(num) = name[1..].parse::<u32>() else {
+            continue;
+        };
+        best = Some(best.map(|cur| cur.max(num)).unwrap_or(num));
+    }
+    best.map(|n| format!(":{n}"))
 }
 
 fn is_evdi_name(name: &str) -> bool {
