@@ -1,6 +1,6 @@
 # WBeam Progress
 
-## In Progress (2026-03-09) - X11 real virtual output path (EVDI-first)
+## In Progress (2026-03-09, 51b91379) - X11 real virtual output path (EVDI-first)
 - Reworked X11 `virtual_monitor` semantics to target **real output backend** instead of logical RandR monitor objects:
   - Added new infra module: `src/host/rust/crates/wbeamd-core/src/infra/x11_real_output.rs`.
   - New probe path checks for X11 real-output capability (provider/output expectations for EVDI-like path).
@@ -20,6 +20,18 @@
   - `cargo check` passed for host (`wbeamd-core`, `wbeamd-server`, `wbeamd-api`) and Tauri backend.
   - `npm run build` passed for desktop-tauri frontend.
   - release build passed for `wbeamd-server` + `wbeamd-streamer`.
+
+## Session Update (2026-03-09, 51b91379) - Fixes from “Virtual Monitor retries” investigation
+- Fixed host probing mis-detecting GUI session when daemon is launched without `DISPLAY`:
+  - SSH no longer forces `remote=true` unless X11 forwarding is detected (`DISPLAY=localhost:*`).
+  - `XDG_SESSION_TYPE=tty` is now overridden by detected X11 sockets (`/tmp/.X11-unix/X*`), preventing `capture_mode=unsupported_host`.
+- Prevented Android-side `/apply` failures when the UI picks built-in presets:
+  - daemon now merges built-in presets (`wbeamd_api::presets`) with proto-trained presets (`proto/config/profiles.json`).
+- Logging improvements:
+  - Tauri backend now writes per-run logs: `logs/YYYYMMDD-HHMMSS.ui.NNNN.log` and `logs/YYYYMMDD-HHMMSS.connect.NNNN.log`.
+  - `desktop.sh` now tees output to `logs/YYYYMMDD-HHMMSS.desktop.NNNN.log`.
+- Android diagnostics:
+  - added `startLiveView` logs printing stream cfg vs SurfaceView size vs surface frame to debug “small centered video”.
 
 Date: 2026-03-07
 Branch: `master`
