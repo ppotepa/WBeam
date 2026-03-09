@@ -77,6 +77,7 @@ export default function App() {
   const [connectDialogMode, setConnectDialogMode] = createSignal<DisplayMode>("virtual_monitor");
   const [connectDialogDoctor, setConnectDialogDoctor] = createSignal<VirtualDoctor | null>(null);
   const [connectDialogDoctorLoading, setConnectDialogDoctorLoading] = createSignal(false);
+  const [connectDialogBlockReason, setConnectDialogBlockReason] = createSignal("");
   const [virtualStartupDoctor, setVirtualStartupDoctor] = createSignal<VirtualDoctor | null>(null);
   const [virtualSetupVisible, setVirtualSetupVisible] = createSignal(false);
   const [virtualSetupInstalling, setVirtualSetupInstalling] = createSignal(false);
@@ -137,6 +138,7 @@ export default function App() {
     setConnectDialogMode(saved ?? "virtual_monitor");
     setConnectDialogDoctor(null);
     setConnectDialogDoctorLoading(true);
+    setConnectDialogBlockReason(connectDisabledReason(device));
     setConnectDialogDevice(device);
     void api.getVirtualDoctor(device)
       .then((doctor) => {
@@ -154,11 +156,18 @@ export default function App() {
     setConnectDialogDevice(null);
     setConnectDialogDoctor(null);
     setConnectDialogDoctorLoading(false);
+    setConnectDialogBlockReason("");
   }
 
   async function confirmConnect(): Promise<void> {
     const device = connectDialogDevice();
     if (!device) return;
+    const blockedReason = connectDisabledReason(device);
+    if (blockedReason.length > 0) {
+      setConnectDialogBlockReason(blockedReason);
+      session.setError(blockedReason);
+      return;
+    }
     try {
       let chosenMode = connectDialogMode();
       let backendMode: "virtual_monitor" | "virtual_isolated" | "duplicate" = "duplicate";
@@ -434,8 +443,8 @@ export default function App() {
                   </button>
                   <button
                     class="device-btn"
-                    title={connectBusy ? "Connecting..." : (connectDisabled ? connectReason : "Start stream for this device")}
-                    disabled={connectDisabled}
+                    title={connectBusy ? "Connecting..." : (connectDisabled ? `Connect blocked: ${connectReason}` : "Start stream for this device")}
+                    disabled={connectBusy}
                     onClick={() => openConnectDialog(device)}
                   >
                     <Show when={connectBusy} fallback={<Link2 size={13} />}>
@@ -584,12 +593,15 @@ export default function App() {
                 <Show when={connectDialogDoctorLoading()}>
                   <p class="setup-message">Checking host capabilities...</p>
                 </Show>
+                <Show when={connectDialogBlockReason()}>
+                  {(msg) => <p class="setup-missing">Connect blocked: {msg()}</p>}
+                </Show>
                 <Show when={doctor()}>
                   {(d) => <p class="setup-hint">{d().installHint}</p>}
                 </Show>
                 <div class="connect-modal-actions">
                   <button class="device-btn" onClick={closeConnectDialog}>Cancel</button>
-                  <button class="device-btn" onClick={() => void confirmConnect()}>
+                  <button class="device-btn" onClick={() => void confirmConnect()} disabled={connectDialogBlockReason().length > 0}>
                     Connect
                   </button>
                 </div>
