@@ -1158,6 +1158,20 @@ public class MainActivity extends AppCompatActivity {
         return e.getClass().getSimpleName();
     }
 
+    private String compactDaemonErrorForUi(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        String compact = raw.replace('\n', ' ').replace('\r', ' ').trim();
+        while (compact.contains("  ")) {
+            compact = compact.replace("  ", " ");
+        }
+        if (compact.length() > 120) {
+            return compact.substring(0, 120) + "...";
+        }
+        return compact;
+    }
+
     // ══════════════════════════════════════════════════════════════════════════
     // Stream / media
     // ══════════════════════════════════════════════════════════════════════════
@@ -1960,8 +1974,11 @@ public class MainActivity extends AppCompatActivity {
                 || streamHost.trim().equals("localhost");
         String streamAddr = (streamHost != null && !streamHost.trim().isEmpty())
                 ? streamHost.trim() : "127.0.0.1";
+        String daemonErrCompact = compactDaemonErrorForUi(daemonLastError);
+        boolean daemonStartFailure = !daemonErrCompact.isEmpty()
+                && daemonErrCompact.toLowerCase(Locale.US).contains("stream start aborted");
         String streamFixHint = streamIsLoopback
-                ? "run: ./devtool ip up (adb reverse) \u00b7 ensure desktop service is running"
+                ? "check ADB reverse for stream/control ports \u00b7 ensure desktop service is running"
                 : "check USB tethering / host IP / LAN \u00b7 ensure desktop service is running";
 
         int step3;
@@ -1983,21 +2000,27 @@ public class MainActivity extends AppCompatActivity {
             step3Detail = "live \u00b7 fps=" + String.format(Locale.US, "%.0f", latestPresentFps)
                     + " \u00b7 " + effState.toLowerCase(Locale.US);
         } else {
-            // Never permanently error — always show ACTIVE so the user sees
-            // endless retry rather than a frozen red badge.
-            step3 = SS_ACTIVE;
             boolean hasWaited = elapsedMs > 5_000L;
-            if (streamReconnects > 0 && hasWaited) {
-                step3Detail = "retry #" + streamReconnects
-                        + " \u00b7 " + streamAddr + ":" + BuildConfig.WBEAM_STREAM_PORT
-                        + " unreachable \u00b7 " + streamFixHint;
-            } else if (streamReconnects > 0) {
-                step3Detail = "reconnecting \u00b7 attempt #" + streamReconnects + " \u00b7 awaiting frames\u2026";
-            } else if (hasWaited) {
-                step3Detail = "connecting to " + streamAddr + ":" + BuildConfig.WBEAM_STREAM_PORT
-                        + " \u00b7 " + streamFixHint;
+            if (daemonStartFailure && hasWaited) {
+                step3 = SS_ERROR;
+                step3Detail = "host stream start failed \u00b7 " + daemonErrCompact;
             } else {
-                step3Detail = "decoder started \u00b7 awaiting frames\u2026";
+                // Keep retrying by default for transient network/capture states.
+                step3 = SS_ACTIVE;
+                if (streamReconnects > 0 && hasWaited) {
+                    step3Detail = "retry #" + streamReconnects
+                            + " \u00b7 " + streamAddr + ":" + BuildConfig.WBEAM_STREAM_PORT
+                            + " unreachable \u00b7 " + streamFixHint
+                            + (daemonErrCompact.isEmpty() ? "" : " \u00b7 host error: " + daemonErrCompact);
+                } else if (streamReconnects > 0) {
+                    step3Detail = "reconnecting \u00b7 attempt #" + streamReconnects + " \u00b7 awaiting frames\u2026";
+                } else if (hasWaited) {
+                    step3Detail = "connecting to " + streamAddr + ":" + BuildConfig.WBEAM_STREAM_PORT
+                            + " \u00b7 " + streamFixHint
+                            + (daemonErrCompact.isEmpty() ? "" : " \u00b7 host error: " + daemonErrCompact);
+                } else {
+                    step3Detail = "decoder started \u00b7 awaiting frames\u2026";
+                }
             }
         }
 
@@ -2025,11 +2048,15 @@ public class MainActivity extends AppCompatActivity {
                         ? "build mismatch \u00b7 redeploy APK or rebuild host"
                         : "handshake in progress\u2026";
             } else if (step3 != SS_OK) {
-                subtitle = streamReconnects > 0
-                        ? "stream reconnecting \u00b7 attempt #" + streamReconnects + "\u2026"
-                        : elapsedMs > 5_000L
-                                ? "stream unreachable \u00b7 retrying\u2026"
-                                : "waiting for video frames\u2026";
+                if (step3 == SS_ERROR && daemonStartFailure) {
+                    subtitle = "host stream start failed \u00b7 check host logs";
+                } else {
+                    subtitle = streamReconnects > 0
+                            ? "stream reconnecting \u00b7 attempt #" + streamReconnects + "\u2026"
+                            : elapsedMs > 5_000L
+                                    ? "stream unreachable \u00b7 retrying\u2026"
+                                    : "waiting for video frames\u2026";
+                }
             } else {
                 subtitle = "all systems ready";
             }

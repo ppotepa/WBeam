@@ -231,6 +231,31 @@ pub fn create(_serial: &str, size: &str) -> Result<X11RealOutputHandle, String> 
         .geometry
         .ok_or_else(|| "active output has no geometry".to_string())?;
 
+    let mirrored_with = outputs_after
+        .iter()
+        .filter(|o| o.name != output.name && o.connected)
+        .filter_map(|o| {
+            o.geometry.and_then(|(ox, oy, ow, oh)| {
+                if ox == x && oy == y && ow == aw && oh == ah {
+                    Some(o.name.clone())
+                } else {
+                    None
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    if !mirrored_with.is_empty() {
+        return Err(format!(
+            "output {} enabled but mirrors active output(s): {} at {}x{}+{}+{}; extended desktop not active",
+            output.name,
+            mirrored_with.join(","),
+            aw,
+            ah,
+            x,
+            y
+        ));
+    }
+
     Ok(X11RealOutputHandle {
         output_name: output.name.clone(),
         x,

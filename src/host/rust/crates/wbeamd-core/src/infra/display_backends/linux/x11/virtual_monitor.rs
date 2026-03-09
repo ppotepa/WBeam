@@ -1,5 +1,6 @@
 use super::super::super::{Activation, ActivationError, RuntimeHandle, VirtualMonitorProbe};
 use super::super::super::super::{host_probe::HostProbe, virtual_display, x11_real_output};
+use tracing::info;
 
 pub fn probe(host_probe: &HostProbe) -> VirtualMonitorProbe {
     let real_probe = x11_real_output::probe(host_probe.is_remote);
@@ -43,6 +44,15 @@ pub fn activate(
     size: &str,
 ) -> Result<Activation, ActivationError> {
     let handle = x11_real_output::create(serial_hint, size).map_err(ActivationError::Failed)?;
+    info!(
+        serial = serial_hint,
+        output = %handle.output_name,
+        x = handle.x,
+        y = handle.y,
+        width = handle.width,
+        height = handle.height,
+        "x11 virtual monitor created"
+    );
     Ok(Activation {
         display_override: host_probe.display.clone(),
         capture_region: Some((handle.x, handle.y, handle.width, handle.height)),
