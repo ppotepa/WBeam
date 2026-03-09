@@ -1,5 +1,5 @@
-use super::super::{Activation, ActivationError, RuntimeHandle, VirtualMonitorProbe};
-use super::super::super::{host_probe::HostProbe, virtual_display, x11_real_output};
+use super::super::super::{Activation, ActivationError, RuntimeHandle, VirtualMonitorProbe};
+use super::super::super::super::{host_probe::HostProbe, virtual_display, x11_real_output};
 
 pub fn probe(host_probe: &HostProbe) -> VirtualMonitorProbe {
     let real_probe = x11_real_output::probe(host_probe.is_remote);

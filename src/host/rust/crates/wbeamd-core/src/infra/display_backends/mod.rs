@@ -1,12 +1,11 @@
-use super::host_probe::{HostOs, HostProbe, SessionKind};
+use super::host_probe::{HostOs, HostProbe};
 use super::process as proc;
 use super::virtual_display;
 use super::x11_real_output;
 use super::x11_virtual_monitor;
 
-mod wayland;
+mod linux;
 mod windows;
-mod x11;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DisplayMode {
@@ -67,10 +66,9 @@ pub fn normalize_requested_mode(mode: Option<&str>) -> DisplayMode {
 }
 
 pub fn virtual_monitor_probe(host_probe: &HostProbe) -> VirtualMonitorProbe {
-    match (host_probe.os, host_probe.session) {
-        (HostOs::Linux, SessionKind::X11) => x11::probe_virtual_monitor(host_probe),
-        (HostOs::Linux, SessionKind::Wayland) => wayland::probe_virtual_monitor(),
-        (HostOs::Windows, _) => windows::probe_virtual_monitor(),
+    match host_probe.os {
+        HostOs::Linux => linux::probe_virtual_monitor(host_probe),
+        HostOs::Windows => windows::probe_virtual_monitor(),
         _ => VirtualMonitorProbe {
             supported: false,
             resolver: "unsupported_host_backend".to_string(),
@@ -90,12 +88,9 @@ pub fn activate_start(
     serial_hint: &str,
     size: &str,
 ) -> Result<Activation, ActivationError> {
-    match (host_probe.os, host_probe.session) {
-        (HostOs::Linux, SessionKind::X11) => x11::activate(host_probe, mode, serial_hint, size),
-        (HostOs::Linux, SessionKind::Wayland) => {
-            wayland::activate(host_probe, mode, serial_hint, size)
-        }
-        (HostOs::Windows, _) => windows::activate(host_probe, mode, serial_hint, size),
+    match host_probe.os {
+        HostOs::Linux => linux::activate(host_probe, mode, serial_hint, size),
+        HostOs::Windows => windows::activate(host_probe, mode, serial_hint, size),
         _ => {
             if mode.is_virtual() {
                 Err(ActivationError::Unsupported(format!(

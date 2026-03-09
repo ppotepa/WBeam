@@ -1,5 +1,5 @@
-use super::super::{Activation, ActivationError, RuntimeHandle};
-use super::super::super::virtual_display;
+use super::super::super::{Activation, ActivationError, RuntimeHandle};
+use super::super::super::super::virtual_display;
 
 pub fn activate(serial_hint: &str, size: &str) -> Result<Activation, ActivationError> {
     let handle =

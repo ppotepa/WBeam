@@ -1,4 +1,4 @@
-use super::super::{Activation, ActivationError, VirtualMonitorProbe};
+use super::super::super::{Activation, ActivationError, VirtualMonitorProbe};
 
 pub fn probe() -> VirtualMonitorProbe {
     VirtualMonitorProbe {
