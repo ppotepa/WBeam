@@ -1057,6 +1057,19 @@ impl DaemonCore {
             }
             display_backends::ActivationError::Failed(msg) => CoreError::Spawn(msg),
         })?;
+        info!(
+            serial = serial_hint,
+            requested_mode = requested_mode.as_str(),
+            capture_backend = capture_backend,
+            x11_display = activation.display_override.as_deref().unwrap_or("-"),
+            x11_region = activation
+                .capture_region
+                .map(|(x, y, w, h)| format!("{x},{y} {w}x{h}"))
+                .unwrap_or_else(|| "-".to_string()),
+            virtual_x11 = activation.using_virtual_x11,
+            runtime_handle = activation.runtime_handle.is_some(),
+            "display backend activation"
+        );
         let x11_display_override = activation.display_override;
         let x11_capture_region = activation.capture_region;
         let using_virtual_x11 = activation.using_virtual_x11;
