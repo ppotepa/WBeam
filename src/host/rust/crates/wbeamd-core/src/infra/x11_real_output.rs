@@ -999,20 +999,6 @@ Provider 1: id: 0x48 cap: 0xf, Source Output, Sink Output, Source Offload, Sink 
 }
 
 fn resolve_xauthority() -> Option<PathBuf> {
-    if let Ok(path) = std::env::var("XAUTHORITY") {
-        let p = PathBuf::from(path);
-        if p.exists() {
-            return Some(p);
-        }
-    }
-
-    if let Some(home) = std::env::var_os("HOME") {
-        let p = Path::new(&home).join(".Xauthority");
-        if p.exists() {
-            return Some(p);
-        }
-    }
-
     let uid = std::env::var("UID")
         .ok()
         .filter(|v| !v.trim().is_empty())
@@ -1031,9 +1017,28 @@ fn resolve_xauthority() -> Option<PathBuf> {
                 }
             }
         }
-        candidates.sort();
+        candidates.sort_by_key(|p| {
+            std::fs::metadata(p)
+                .and_then(|m| m.modified())
+                .ok()
+                .unwrap_or(SystemTime::UNIX_EPOCH)
+        });
         if let Some(last) = candidates.pop() {
             return Some(last);
+        }
+    }
+
+    if let Ok(path) = std::env::var("XAUTHORITY") {
+        let p = PathBuf::from(path);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+
+    if let Some(home) = std::env::var_os("HOME") {
+        let p = Path::new(&home).join(".Xauthority");
+        if p.exists() {
+            return Some(p);
         }
     }
     None

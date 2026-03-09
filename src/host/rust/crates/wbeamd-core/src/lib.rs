@@ -46,20 +46,6 @@ const NO_PRESENT_MAX_PRESENT_FPS: f64 = 1.0;
 const REVERSE_REFRESH_BACKSTOP: Duration = Duration::from_secs(120);
 
 fn resolve_xauthority_for_capture() -> Option<PathBuf> {
-    if let Ok(path) = std::env::var("XAUTHORITY") {
-        let p = PathBuf::from(path);
-        if p.exists() {
-            return Some(p);
-        }
-    }
-
-    if let Ok(home) = std::env::var("HOME") {
-        let p = Path::new(&home).join(".Xauthority");
-        if p.exists() {
-            return Some(p);
-        }
-    }
-
     let uid = std::env::var("UID")
         .ok()
         .filter(|v| !v.trim().is_empty())
@@ -78,9 +64,28 @@ fn resolve_xauthority_for_capture() -> Option<PathBuf> {
                 }
             }
         }
-        candidates.sort();
+        candidates.sort_by_key(|p| {
+            std::fs::metadata(p)
+                .and_then(|m| m.modified())
+                .ok()
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+        });
         if let Some(last) = candidates.pop() {
             return Some(last);
+        }
+    }
+
+    if let Ok(path) = std::env::var("XAUTHORITY") {
+        let p = PathBuf::from(path);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+
+    if let Ok(home) = std::env::var("HOME") {
+        let p = Path::new(&home).join(".Xauthority");
+        if p.exists() {
+            return Some(p);
         }
     }
     None

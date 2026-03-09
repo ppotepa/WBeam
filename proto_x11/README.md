@@ -40,6 +40,7 @@ Behavior:
 Wrappers are also available:
 - `proto_x11/probe-host.sh`, `proto_x11/doctor.sh`, `proto_x11/status.sh`
 - `proto_x11/start.sh`, `proto_x11/stop.sh`, `proto_x11/smoke.sh`, `proto_x11/acceptance.sh`
+- `proto_x11/deploy-and-start.sh` (single-device deploy + start)
 - `proto_x11/android-build.sh`, `proto_x11/android-deploy.sh`
 - `proto_x11/service-status.sh`, `proto_x11/service-restart.sh`, `proto_x11/logs.sh`
 
@@ -73,3 +74,6 @@ If module is installed but not loaded:
 sudo modprobe evdi initial_device_count=1
 systemctl --user restart wbeam-daemon.service
 ```
+
+`deploy-and-start.sh` tries to auto-load `evdi` by default (sudo prompt if needed).
+Use `--no-auto-load-evdi` to disable this behavior.

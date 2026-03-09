@@ -16,6 +16,83 @@ elif [[ -n "${INVOCATION_ID:-}" ]]; then
   DEFAULT_LOCK_FILE="/tmp/wbeamd-service-${CONTROL_PORT}.lock"
 fi
 
+resolve_display() {
+  if [[ -n "${DISPLAY:-}" ]]; then
+    printf '%s\n' "$DISPLAY"
+    return 0
+  fi
+  if [[ -d /tmp/.X11-unix ]]; then
+    local sock
+    sock="$(ls -1 /tmp/.X11-unix/X* 2>/dev/null | sed 's|.*/X||' | sort -n | tail -1 || true)"
+    if [[ -n "$sock" ]]; then
+      printf ':%s\n' "$sock"
+      return 0
+    fi
+  fi
+  printf '\n'
+}
+
+list_xauth_candidates() {
+  local uid="${UID:-$(id -u 2>/dev/null || echo 1000)}"
+  local run_dir="/run/user/${uid}"
+  if [[ -d "$run_dir" ]]; then
+    ls -1t "$run_dir"/xauth_* 2>/dev/null || true
+  fi
+  if [[ -f "${XAUTHORITY:-}" ]]; then
+    printf '%s\n' "$XAUTHORITY"
+  fi
+  if [[ -f "${HOME:-}/.Xauthority" ]]; then
+    printf '%s\n' "${HOME}/.Xauthority"
+  fi
+}
+
+probe_x11_access() {
+  local display="$1"
+  local xauth="$2"
+  if ! command -v xrandr >/dev/null 2>&1; then
+    return 0
+  fi
+  if [[ -z "$display" ]]; then
+    return 1
+  fi
+  if [[ -n "$xauth" ]]; then
+    env DISPLAY="$display" XAUTHORITY="$xauth" xrandr --listproviders >/dev/null 2>&1
+    return $?
+  fi
+  env DISPLAY="$display" xrandr --listproviders >/dev/null 2>&1
+  return $?
+}
+
+prepare_x11_env() {
+  local display xauth cand
+  display="$(resolve_display)"
+  xauth=""
+  while IFS= read -r cand; do
+    [[ -n "$cand" && -f "$cand" ]] || continue
+    xauth="$cand"
+    break
+  done < <(list_xauth_candidates)
+
+  if [[ -n "$display" ]]; then
+    export DISPLAY="$display"
+  fi
+  if [[ -n "$xauth" ]]; then
+    export XAUTHORITY="$xauth"
+  fi
+
+  if ! probe_x11_access "${DISPLAY:-}" "${XAUTHORITY:-}"; then
+    while IFS= read -r cand; do
+      [[ -n "$cand" && -f "$cand" ]] || continue
+      if probe_x11_access "${DISPLAY:-}" "$cand"; then
+        export XAUTHORITY="$cand"
+        break
+      fi
+    done < <(list_xauth_candidates)
+  fi
+
+  echo "[wbeam] x11 env: DISPLAY=${DISPLAY:-<unset>} XAUTHORITY=${XAUTHORITY:-<unset>}" >&2
+}
+
 adb_device_cmd() {
   if [[ -n "$ANDROID_SERIAL" ]]; then
     adb -s "$ANDROID_SERIAL" "$@"
@@ -89,6 +166,8 @@ else
 fi
 
 echo "[wbeam] transport summary: serial=${ANDROID_SERIAL:-default} stream_reverse=${stream_reverse_ok} control_reverse=${control_reverse_ok}" >&2
+
+prepare_x11_env
 
 run_rust() {
   local args=(

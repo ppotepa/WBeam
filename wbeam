@@ -1930,6 +1930,7 @@ x11proto_run() {
 x11proto_android_build() {
   (
     ANDROID_PACKAGE="com.wbeam.x11"
+    ANDROID_ACTIVITY="com.wbeam.MainActivity"
     export WBEAM_ANDROID_APP_ID_SUFFIX=".x11"
     export WBEAM_ANDROID_APP_NAME="WBeam X11"
     android_build
@@ -1939,6 +1940,7 @@ x11proto_android_build() {
 x11proto_android_deploy() {
   (
     ANDROID_PACKAGE="com.wbeam.x11"
+    ANDROID_ACTIVITY="com.wbeam.MainActivity"
     export WBEAM_ANDROID_APP_ID_SUFFIX=".x11"
     export WBEAM_ANDROID_APP_NAME="WBeam X11"
     android_deploy
