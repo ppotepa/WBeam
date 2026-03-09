@@ -1,5 +1,21 @@
 # WBeam Progress
 
+## Session Update (2026-03-09, 4e63a732) - Display backend separation (X11/Wayland/Windows)
+- Separated host display-mode responsibilities into a dedicated backend layer:
+  - new module tree: `src/host/rust/crates/wbeamd-core/src/infra/display_backends/`
+  - backends: `x11`, `wayland`, `windows`
+  - unified router in `display_backends/mod.rs`
+- Unified runtime contract per backend:
+  - `virtual_monitor_probe(...)`
+  - `activate(...)` with explicit mode (`duplicate` / `virtual_monitor` / `virtual_isolated`)
+  - runtime handle lifecycle with centralized `stop_runtime(...)`
+- `DaemonCore` now delegates display-mode activation/probing to backend router instead of embedding X11 logic directly in `lib.rs`.
+- X11 implementation now encapsulates:
+  - duplicate mode activation
+  - virtual monitor activation via real output (`x11_real_output`)
+  - optional isolated fallback (`Xvfb`) as explicit mode
+- Wayland and Windows backends now have explicit stubs for both duplicate and virtual-monitor paths (virtual monitor returns clear `not implemented` contract instead of implicit fallthrough).
+
 ## In Progress (2026-03-09, 51b91379) - X11 real virtual output path (EVDI-first)
 - Reworked X11 `virtual_monitor` semantics to target **real output backend** instead of logical RandR monitor objects:
   - Added new infra module: `src/host/rust/crates/wbeamd-core/src/infra/x11_real_output.rs`.
