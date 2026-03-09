@@ -1,0 +1,761 @@
+Tak. Dla X11 trzeba to traktować jako **osobną implementację**, nie jako „uboższą wersję Waylanda”.
+
+Na X11, żeby uzyskać efekt **prawdziwego dodatkowego monitora**, masz tylko trzy sensowne klasy rozwiązań:
+
+1. **real output backend** — nowy output widoczny w `xrandr`, najlepiej przez EVDI / DisplayLink-like backend,
+2. **dummy Xorg / osobny X screen** — działa, ale to nie jest ten sam UX co normalny drugi monitor,
+3. **RandR monitor object (`--setmonitor`)** — logiczny monitor, ale nie prawdziwy output. To nie daje gwarancji zachowania jak normalny ekran. `xrandr` samo rozróżnia monitory od outputów/providerów. ([Arch Linux Manuals][1])
+
+W praktyce: **cel produktu na X11 powinien być taki: mieć własny backend, który dostarcza prawdziwy output do RandR**. To jest odpowiednik „sterownika udającego urządzenie” z Windows. EVDI dokładnie w tę stronę idzie: jest kompatybilne ze standardowym linuxowym DRM i takie wyświetlacze mogą być kontrolowane przez `xrandr` albo systemowe ustawienia ekranu. ([GitHub][2])
+
+## Co jest dziś błędne w waszej implementacji X11
+
+### 1. Macie dwa konkurencyjne modele, ale tylko jeden jest właściwy
+
+W kodzie są dwie ścieżki:
+
+* `infra/x11_real_output.rs`
+* `infra/x11_virtual_monitor.rs`
+
+Natomiast aktywna ścieżka dla `DisplayMode::VirtualMonitor` w Linux/X11 idzie do:
+
+* `src/host/rust/crates/wbeamd-core/src/infra/display_backends/linux/x11/virtual_monitor.rs`
+
+i ta ścieżka wywołuje:
+
+* `x11_real_output::create(...)`
+
+czyli faktycznie produkt **już uznaje**, że prawidłowym backendem X11 jest **real output**, nie `--setmonitor`.
+
+To jest dobra decyzja architektoniczna.
+
+Błąd polega na tym, że:
+
+* w repo dalej żyje `x11_virtual_monitor.rs`,
+* jego nazwa sugeruje „prawdziwy virtual monitor”,
+* ale technicznie to tylko `xrandr --setmonitor ... none`.
+
+To jest mylące i będzie później robiło chaos projektowy.
+
+### 2. `x11_virtual_monitor.rs` nie osiągnie celu produktu
+
+Ta implementacja robi:
+
+* `--fb`
+* `--setmonitor NAME GEOMETRY none`
+* potem sprawdza `--listmonitors`
+
+To potwierdza tylko, że **powstał monitor object**.
+Nie potwierdza:
+
+* że WM potraktuje to jak normalny ekran,
+* że okna będzie można przeciągać tak jak na drugi fizyczny monitor,
+* że capture / pozycjonowanie / focus / workspace będą działały stabilnie.
+
+To jest bardziej „syntetyczny podział przestrzeni” niż nowy ekran. Zgodnie z manem `xrandr`, `--setmonitor` definiuje monitor z geometrią i listą outputów lub `none`; to nie jest tworzenie nowego hardware’owego outputu. ([Arch Linux Manuals][1])
+
+### 3. `x11_real_output.rs` ma dobrą ideę, ale zbyt heurystyczną i zbyt kruchą implementację
+
+To jest obecnie najważniejszy plik dla X11. Problemów jest kilka.
+
+#### a) Zbyt luźne wykrywanie providera
+
+Macie logikę:
+
+* preferuj nazwę zawierającą `evdi` / `displaylink`
+* albo cokolwiek z capability `0x1`
+
+To może błędnie wybrać niewłaściwego providera, zwłaszcza na złożonych setupach multi-GPU.
+
+To trzeba przepisać na **jawny model provider roles**:
+
+* source provider musi mieć `Source Output`
+* sink provider musi mieć `Sink Output`
+* dodatkowo musi przejść walidację po nazwie / po obecności kandydackiego outputu
+
+#### b) Zbyt luźne wykrywanie outputu
+
+Macie:
+
+* `looks_virtual_output_name()`
+* akceptuje `virtual`, `vkms`, `dvi`, `hdmi`, `displayport`
+
+To jest za szerokie.
+`DVI` / `HDMI` / `DisplayPort` może oznaczać normalny fizyczny port.
+
+Powinno być:
+
+* najpierw powiązanie outputu z providerem, jeśli da się to ustalić,
+* potem whitelist nazw typu `DVI-I-*`, `DVI-D-*`, `Virtual-*`, `EVDI-*`, `DUMMY-*`, `VKMS-*`,
+* a dopiero na końcu fallback heurystyczny.
+
+#### c) Brak twardego rozróżnienia backendów
+
+Obecny kod miesza w jednym miejscu potencjalnie:
+
+* EVDI
+* VKMS
+* zwykłe disconnected HDMI/DVI
+* przypadkowe wyjścia
+
+Trzeba rozdzielić backendy logicznie:
+
+* `X11BackendKind::Evdi`
+* `X11BackendKind::Vkms`
+* `X11BackendKind::DummyXorg`
+* `X11BackendKind::SetMonitorFallback` tylko eksperymentalnie
+
+#### d) Brak preflightu „czy ten output naprawdę da się aktywować”
+
+Dziś `probe()` sprawdza:
+
+* jest provider?
+* jest disconnected candidate output?
+
+To za mało.
+
+Powinien robić:
+
+* `xrandr --listproviders`
+* `xrandr --query`
+* identyfikację provider/source/sink
+* identyfikację konkretnego outputu
+* sprawdzenie, czy output ma tryby lub czy można mu wstrzyknąć mode
+* sprawdzenie, czy po `--setprovideroutputsource` output nadal istnieje
+* opcjonalnie test `--dry-run`, jeśli środowisko pozwala
+
+#### e) Za słaba obsługa modeline
+
+`ensure_mode_with_cvt()` jest dobrym początkiem, ale:
+
+* używa tylko `cvt`
+* zakłada 60 Hz
+* nie ma retry dla reduced blanking
+* ignoruje konflikt istniejących mode names
+* nie robi `--rmmode` / cleanup
+
+To powinno umieć:
+
+* `cvt -r` jako fallback,
+* generować unikalną nazwę modu,
+* czyścić stary mode po `destroy`,
+* pamiętać dodane mody w handle runtime.
+
+#### f) `destroy()` jest zbyt ubogie
+
+Dziś robi tylko:
+
+* `xrandr --output <name> --off`
+
+Brakuje:
+
+* odpięcia provider link, jeśli był założony,
+* usunięcia dodanych modes,
+* opcjonalnego przywrócenia framebuffera,
+* sprzątania stanu runtime.
+
+### 4. Brakuje jawnej warstwy „driver/backend lifecycle”
+
+Na Windows miałbyś sterownik + lifecycle.
+Na X11 też tego potrzebujesz, tylko w linuksowej formie.
+
+Dzisiaj macie tylko „spróbuj xrandr-em coś wyklikać”.
+Brakuje warstwy, która zarządza:
+
+* załadowaniem backendu,
+* wykryciem jego gotowości,
+* utworzeniem virtual output,
+* aktywacją,
+* cleanupem po sesji.
+
+To powinno być osobne API, a nie zestaw luźnych helperów.
+
+---
+
+# Jak to poprawić na X11, żeby osiągnąć zamierzony efekt
+
+## Docelowy model
+
+Na X11 proponuję taki target:
+
+### Tier 1 — prawdziwy virtual output
+
+Backend sterownikowy:
+
+* preferencyjnie **EVDI / DisplayLink-like**
+* ewentualnie własny backend typu dummy-output, jeśli kiedyś pójdziecie głębiej w sterownik / DRM
+
+To ma dawać:
+
+* nowy output w `xrandr`
+* możliwość `--right-of`
+* normalną geometrię
+* brak mirroringu
+* okna przeciągane jak na drugi ekran
+
+### Tier 2 — dummy Xorg backend
+
+Nie jako „extended monitor”, tylko jako:
+
+* compat backend
+* osobna sesja renderowana do streamu
+* mniej zintegrowane UX
+
+Debianowy `xserver-xorg-video-dummy` faktycznie istnieje i daje „dummy display driver”, ale to nadal nie jest ten sam produktowy efekt co normalny dodatkowy output pulpitu. ([Debian Packages][3])
+
+### Tier 3 — `--setmonitor`
+
+Tylko jako:
+
+* eksperymentalny fallback
+* feature flag
+* tryb developerski
+
+Nie jako podstawowy backend produktu.
+
+---
+
+# Konkretne poprawki w repo
+
+## 1. Usuńcie pojęciowy bałagan wokół `x11_virtual_monitor.rs`
+
+Plik:
+
+* `src/host/rust/crates/wbeamd-core/src/infra/x11_virtual_monitor.rs`
+
+nie powinien nazywać się `virtual_monitor`, bo to sugeruje pełnoprawny backend.
+Nazwijcie go np.:
+
+* `x11_monitor_object.rs`
+* albo `x11_randr_setmonitor.rs`
+
+I oznaczcie jako:
+
+* experimental
+* non-primary
+* no true output
+
+To od razu porządkuje architekturę.
+
+## 2. Wprowadźcie wspólny trait/backend interface dla X11
+
+Nowy moduł, np.:
+
+* `infra/x11_backend/mod.rs`
+
+i trait:
+
+```rust
+pub trait X11VirtualOutputBackend {
+    fn probe(&self, host: &HostProbe) -> BackendProbe;
+    fn create(&self, serial: &str, size: &str) -> Result<BackendHandle, String>;
+    fn destroy(&self, handle: &BackendHandle) -> Result<(), String>;
+}
+```
+
+Backendy:
+
+* `evdi_backend.rs`
+* `dummy_backend.rs`
+* `setmonitor_backend.rs`
+
+Wtedy `display_backends/linux/x11/virtual_monitor.rs` robi tylko routing:
+
+* prefer EVDI
+* fallback dummy
+* optional fallback setmonitor
+
+## 3. Rozbijcie `x11_real_output.rs` na małe części
+
+Teraz to jest wszystko w jednym pliku. Podzieliłbym na:
+
+* `probe.rs`
+* `provider.rs`
+* `output.rs`
+* `mode.rs`
+* `activate.rs`
+* `cleanup.rs`
+
+Bo obecnie logika:
+
+* wykrywa,
+* parsuje,
+* aktywuje,
+* dodaje mode,
+* sprawdza mirroring,
+* niszczy
+
+wszystko na raz.
+
+## 4. Poprawcie model danych handle
+
+Dziś handle ma tylko:
+
+```rust
+pub struct X11RealOutputHandle {
+    pub output_name: String,
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+```
+
+Powinno być coś w stylu:
+
+```rust
+pub struct X11RealOutputHandle {
+    pub backend_kind: X11BackendKind,
+    pub provider_source_id: Option<String>,
+    pub provider_sink_id: Option<String>,
+    pub output_name: String,
+    pub primary_output_name: Option<String>,
+    pub added_mode_name: Option<String>,
+    pub previous_fb: Option<(u32, u32)>,
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+```
+
+Bez tego cleanup i debug będą zawsze kulawe.
+
+## 5. Dopiszcie pełny doctor dla X11
+
+Macie już sensowny probe, ale potrzebujecie osobnego „doctor report”.
+
+Powinien zwracać:
+
+* session kind
+* remote/local
+* DISPLAY
+* XAUTHORITY resolved/not
+* xrandr version
+* listproviders raw
+* parsed providers
+* list outputs raw
+* selected source provider
+* selected sink provider
+* selected output
+* whether mode exists
+* whether mode injection worked
+* whether output enabled
+* whether mirror detected
+* final geometry
+
+To bardzo pomoże przy supportowaniu wielu distro.
+
+## 6. Zmieńcie logikę wyboru providera
+
+Zamiast obecnego heurystycznego:
+
+```rust
+.find(|p| is_evdi_name(&p.name))
+.or_else(|| providers.iter().find(|p| has_cap(p.caps, 0x1)))
+```
+
+zróbcie ranking:
+
+1. provider name contains `evdi` / `displaylink`
+2. provider ma `Source Output`
+3. po linkowaniu pokazuje kandydacki output
+4. nie jest głównym providerem modesetting/nvidia/amdgpu, jeśli jest lepszy kandydat
+
+Podobnie sink:
+
+1. provider z `Sink Output`
+2. prefer `modesetting`
+3. fallback pierwszy sensowny nie-source
+
+## 7. Zmieńcie logikę wyboru outputu
+
+Zamiast:
+
+* pierwszy disconnected virtual-looking
+
+zróbcie:
+
+* outputy pojawiające się po provider link
+* outputy bez aktywnej geometrii
+* outputy przypominające EVDI/virtual/dummy
+* opcjonalnie whitelist po regex
+
+Przykład:
+
+```rust
+fn score_output(o: &OutputInfo) -> i32
+```
+
+i wybieracie najwyższy score, nie pierwszy lepszy.
+
+## 8. Ulepszcie tryby/modes
+
+W `ensure_mode_with_cvt()` poprawić:
+
+* try standard `cvt w h 60`
+* fallback `cvt -r w h 60`
+* unikalna nazwa np. `WBEAM_1920x1080_60_<hash>`
+* zapis do handle
+* usuwanie przy destroy
+
+Dodatkowo:
+
+* jeśli output ma już preferowany mode, nie dodawać nowego
+* jeśli `--newmode` zwróci „already exists”, spróbować reuse
+
+## 9. Dopiszcie retry i settle time
+
+Po `--setprovideroutputsource` i po `--output ... --mode ...` dajcie:
+
+* mały polling `xrandr --query`
+* np. 10 prób co 150 ms
+
+Bo część setupów aktualizuje stan z opóźnieniem.
+
+## 10. Poprawcie cleanup
+
+`destroy()` powinien:
+
+* wyłączyć output
+* odłączyć provider link, jeśli zakładaliście go jawnie
+* usunąć mode jeśli był wstrzyknięty
+* opcjonalnie przywrócić FB size, jeśli był sztucznie rozszerzony
+
+---
+
+# Co osiągnie sukces na X11
+
+## Wersja realistyczna
+
+Jeżeli celem jest „jak drugi monitor w KDE/X11”, to sukcesem będzie:
+
+1. proces hosta wykrywa local X11,
+2. wykrywa dostępny backend real-output,
+3. tworzy nowy output,
+4. ustawia go `--right-of` primary,
+5. dostaje geometrię różną od primary,
+6. capture region jest ustawiony na nowy output,
+7. okna można przeciągać między ekranami,
+8. po stopie output znika i stan wraca do normy.
+
+To jest poprawna definicja sukcesu.
+
+## Wersja „product matrix”
+
+Dla całego cross-platform projektu proponuję dokładnie taki model pojęciowy:
+
+* **Windows**: virtual display driver
+* **Wayland**: compositor/portal virtual output
+* **X11**: RandR real output backend
+* **Fallback Linux**: isolated dummy/Xvfb
+* **Experimental only**: setmonitor object
+
+To spina wszystkie platformy tą samą ideą:
+**„na każdej platformie potrzebujemy mechanizmu, który dostarcza systemowi nowy display endpoint”**.
+
+---
+
+# Najważniejszy wniosek
+
+Na X11 nie naprawisz tego samym `--setmonitor`.
+To nie jest odpowiednik windowsowego drivera ani waylandowego virtual outputu. `--setmonitor` może być dodatkiem, ale nie filarem rozwiązania. ([Arch Linux Manuals][1])
+
+Jeśli chcecie prawdziwy sukces na X11, to trzeba iść w:
+
+* **backend typu EVDI / DisplayLink-like**, czyli real output widoczny przez RandR,
+* a wasz obecny `x11_real_output.rs` powinien zostać rozwinięty do roli **głównego backendu X11**, z lepszym probingiem, lepszym lifecycle, lepszym cleanupem i czytelną diagnostyką. EVDI jest właśnie po to projektowane: user space może zarządzać wieloma ekranami, a wyświetlacze są sterowane przez standardowe narzędzia jak `xrandr`. ([GitHub][2])
+
+Mogę w następnym kroku rozpisać Ci to już całkiem technicznie jako **konkretny plan refaktoru plik po pliku**, z proponowaną strukturą modułów i gotową kolejnością implementacji dla X11.
+
+[1]: https://man.archlinux.org/man/xrandr.1?utm_source=chatgpt.com "xrandr(1) — Arch manual pages"
+[2]: https://github.com/DisplayLink/evdi?utm_source=chatgpt.com "GitHub - DisplayLink/evdi: Extensible Virtual Display Interface"
+[3]: https://packages.debian.org/bookworm/xserver-xorg-video-dummy?utm_source=chatgpt.com "Details of package xserver-xorg-video-dummy in bookworm"
+
+1. **Ustal jeden właściwy cel dla X11**
+   Nie `Xvfb`, nie `--setmonitor` jako główna ścieżka.
+   Główny target: **real output backend** widoczny w `xrandr`.
+
+```rust
+pub enum X11ModeKind {
+    RealOutput,        // docelowe
+    IsolatedDisplay,   // Xvfb / dummy
+    MonitorObject,     // tylko fallback / eksperyment
+}
+```
+
+2. **Przemianuj mylący moduł `x11_virtual_monitor.rs`**
+   On nie tworzy prawdziwego monitora, tylko RandR monitor object.
+   Nazwij np. `x11_monitor_object.rs`.
+
+```rust
+// było:
+mod x11_virtual_monitor;
+
+// ma być:
+mod x11_monitor_object;
+```
+
+3. **Wprowadź wspólny interfejs backendów X11**
+   Dzięki temu routing będzie czysty.
+
+```rust
+pub trait X11Backend {
+    fn probe(&self) -> ProbeResult;
+    fn create(&self, req: &DisplayRequest) -> Result<DisplayHandle, String>;
+    fn destroy(&self, handle: &DisplayHandle) -> Result<(), String>;
+}
+```
+
+4. **Dodaj 3 backendy**
+
+   * `evdi_backend.rs` – główny
+   * `dummy_backend.rs` – compat
+   * `monitor_object_backend.rs` – eksperymentalny
+
+```rust
+match preferred_backend() {
+    BackendKind::Evdi => evdi.create(&req),
+    BackendKind::Dummy => dummy.create(&req),
+    BackendKind::MonitorObject => setmonitor.create(&req),
+}
+```
+
+5. **Zrób `probe()` jako osobny etap diagnostyczny**
+   Niech zbiera wszystko zanim zaczniecie aktywację.
+
+```rust
+pub struct ProbeResult {
+    pub display: Option<String>,
+    pub xrandr_found: bool,
+    pub providers: Vec<ProviderInfo>,
+    pub outputs: Vec<OutputInfo>,
+    pub backend_candidates: Vec<BackendCandidate>,
+}
+```
+
+6. **Rozbij `x11_real_output.rs` na mniejsze pliki**
+   Teraz jest za dużo odpowiedzialności w jednym miejscu.
+
+```text
+x11/
+  probe.rs
+  provider.rs
+  output.rs
+  mode.rs
+  activate.rs
+  cleanup.rs
+  doctor.rs
+```
+
+7. **Popraw wybór providera**
+   Nie bierz “pierwszego pasującego”. Użyj scoringu.
+
+```rust
+fn score_provider(p: &ProviderInfo) -> i32 {
+    let mut score = 0;
+    if p.name.contains("evdi") { score += 100; }
+    if p.name.contains("displaylink") { score += 80; }
+    if p.has_source_output { score += 40; }
+    score
+}
+```
+
+8. **Popraw wybór outputu**
+   Nie łap ogólnie `HDMI`/`DVI` bez kontekstu.
+   Najpierw szukaj outputów backendowych / virtualnych.
+
+```rust
+fn score_output(o: &OutputInfo) -> i32 {
+    let mut score = 0;
+    if o.name.contains("Virtual") { score += 100; }
+    if o.name.contains("EVDI") { score += 100; }
+    if o.name.contains("DUMMY") { score += 80; }
+    if o.connected == false { score += 20; }
+    score
+}
+```
+
+9. **Dodaj jawny model handle runtime**
+   Sam `output_name` to za mało.
+
+```rust
+pub struct X11RealOutputHandle {
+    pub backend_kind: BackendKind,
+    pub provider_source: Option<String>,
+    pub provider_sink: Option<String>,
+    pub output_name: String,
+    pub mode_name: Option<String>,
+    pub width: u32,
+    pub height: u32,
+    pub x: i32,
+    pub y: i32,
+}
+```
+
+10. **Wydziel tworzenie mode do osobnego modułu**
+    `cvt` ma być tylko częścią strategii.
+
+```rust
+fn ensure_mode(output: &str, w: u32, h: u32, hz: u32) -> Result<String, String> {
+    // 1. sprawdź istniejący
+    // 2. cvt
+    // 3. cvt -r
+    // 4. addmode
+}
+```
+
+11. **Rób unikalne nazwy mode**
+    Żeby uniknąć konfliktów.
+
+```rust
+let mode_name = format!("APP_{}x{}_{}_{}", w, h, hz, session_id);
+```
+
+12. **Dodaj polling po aktywacji**
+    X11 często aktualizuje stan z opóźnieniem.
+
+```rust
+for _ in 0..10 {
+    if output_is_active(&output_name)? {
+        break;
+    }
+    std::thread::sleep(std::time::Duration::from_millis(150));
+}
+```
+
+13. **Aktywacja ma być wieloetapowa**
+    Nie jeden wielki blok.
+
+```rust
+link_provider()?;
+ensure_mode()?;
+enable_output()?;
+position_output_right_of_primary()?;
+verify_geometry()?;
+```
+
+14. **Weryfikuj sukces po geometrii, nie po samym exit code**
+    `xrandr` może zakończyć się OK, ale efekt może być zły.
+
+```rust
+if geom.width != requested.width || geom.x == primary.x {
+    return Err("Output activated incorrectly".into());
+}
+```
+
+15. **Dodaj “doctor report” dla supportu i logów**
+    To będzie kluczowe na różnych distro.
+
+```rust
+pub struct X11DoctorReport {
+    pub session_type: String,
+    pub display: String,
+    pub providers_raw: String,
+    pub outputs_raw: String,
+    pub selected_provider: Option<String>,
+    pub selected_output: Option<String>,
+    pub issues: Vec<String>,
+}
+```
+
+16. **Zrób fallback matrix**
+    Najpierw real output, potem dummy, na końcu eksperyment.
+
+```rust
+if evdi.probe().supported {
+    return evdi.create(&req);
+}
+if dummy.probe().supported {
+    return dummy.create(&req);
+}
+if feature_flags.monitor_object_fallback {
+    return monitor_object.create(&req);
+}
+```
+
+17. **Nie sprzedawaj `--setmonitor` jako pełnego success path**
+    W UI i kodzie nazwij to jasno.
+
+```rust
+pub enum CapabilityLevel {
+    TrueExtendedMonitor,
+    IsolatedVirtualDisplay,
+    ExperimentalLogicalMonitor,
+}
+```
+
+18. **Popraw cleanup**
+    Teraz samo `--off` nie wystarczy.
+
+```rust
+disable_output()?;
+remove_mode_if_added()?;
+unlink_provider_if_needed()?;
+clear_runtime_state()?;
+```
+
+19. **Oddziel “extended monitor” od “isolated display” w UI/API**
+    Żeby user wiedział, czego oczekiwać.
+
+```rust
+pub enum UserVisibleMode {
+    ExtendedMonitor,   // przeciąganie okien
+    Duplicate,
+    IsolatedDisplay,   // osobny pulpit
+}
+```
+
+20. **Zdefiniuj kryterium sukcesu dla X11**
+    Konkretnie, testowalnie.
+
+```text
+[OK] nowy output widoczny w xrandr
+[OK] output ma własną geometrię
+[OK] nie jest mirror primary
+[OK] okna można przenieść na nowy ekran
+[OK] po destroy stan wraca do normy
+```
+
+21. **Na końcu dopisz testy integracyjne dla parserów i doctora**
+    Nawet jeśli nie zrobicie pełnych testów X servera.
+
+```rust
+#[test]
+fn parses_xrandr_providers() {
+    let raw = include_str!("fixtures/providers.txt");
+    let parsed = parse_providers(raw);
+    assert!(!parsed.is_empty());
+}
+```
+
+22. **Minimalna kolejność wdrożenia**
+    Najpierw architektura, potem backend.
+
+```text
+1. rename x11_virtual_monitor -> monitor_object
+2. trait X11Backend
+3. doctor/probe
+4. refactor x11_real_output -> evdi backend
+5. add mode lifecycle
+6. add cleanup
+7. add fallback matrix
+8. expose clear UI/API modes
+```
+
+23. **Najważniejsza decyzja projektowa**
+    Na X11 sukces = **udawane urządzenie / real output**, nie logiczny monitor.
+
+```text
+Windows  -> virtual display driver
+Wayland  -> compositor virtual output
+X11      -> RandR real output backend
+```
+
+24. **Najkrótszy werdykt**
+    `x11_real_output.rs` rozwijacie.
+    `x11_virtual_monitor.rs` degradujecie do fallbacku eksperymentalnego.
+    `Xvfb` zostawiacie jako isolated mode, nie extended monitor.
+
+Jeśli chcesz, mogę teraz rozpisać to jako **konkretne TODO per plik** w formie checklisty do wdrożenia.
+

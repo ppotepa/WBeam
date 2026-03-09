@@ -207,21 +207,10 @@ public final class StatusPoller {
             return;
         }
 
-        long now = SystemClock.elapsedRealtime();
         if (autoStartPending && "IDLE".equals(daemonState)) {
             autoStartPending = false;
             permanentlySuppressAutoStart();
             callbacks.onAutoStartFailed();
-            return;
-        }
-        if (now < suppressAutoStartUntil) {
-            return;
-        }
-        if (now - lastAutoStartAt < AUTO_START_COOLDOWN_MS) {
-            return;
-        }
-        if ("IDLE".equals(daemonState)) {
-            callbacks.onAutoStartRequired();
         }
     }
 

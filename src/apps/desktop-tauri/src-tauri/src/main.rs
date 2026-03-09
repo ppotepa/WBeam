@@ -5,8 +5,8 @@ use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::fs::OpenOptions;
-use std::io::{BufRead, BufReader};
 use std::io::Write;
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
@@ -113,7 +113,8 @@ impl Default for VirtualDepsInstallState {
 
 static VIRTUAL_DEPS_INSTALL_STATE: OnceLock<Mutex<VirtualDepsInstallState>> = OnceLock::new();
 static ADB_CMD_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-static DEVICE_SNAPSHOT_CACHE: OnceLock<Mutex<HashMap<String, CachedDeviceSnapshot>>> = OnceLock::new();
+static DEVICE_SNAPSHOT_CACHE: OnceLock<Mutex<HashMap<String, CachedDeviceSnapshot>>> =
+    OnceLock::new();
 static SESSION_LOGS: OnceLock<SessionLogs> = OnceLock::new();
 
 #[derive(Clone, Debug)]
@@ -212,16 +213,20 @@ fn session_logs() -> &'static SessionLogs {
 
 fn ui_log_path() -> PathBuf {
     let logs = session_logs();
-    logs.dir.join(format!("{}.ui.{}.log", logs.stamp, logs.run_id))
+    logs.dir
+        .join(format!("{}.ui.{}.log", logs.stamp, logs.run_id))
 }
 
 fn connect_log_path() -> PathBuf {
     let logs = session_logs();
-    logs.dir.join(format!("{}.connect.{}.log", logs.stamp, logs.run_id))
+    logs.dir
+        .join(format!("{}.connect.{}.log", logs.stamp, logs.run_id))
 }
 
 fn virtual_deps_snapshot() -> VirtualDepsInstallStatus {
-    let state = virtual_deps_state().lock().expect("virtual deps state lock");
+    let state = virtual_deps_state()
+        .lock()
+        .expect("virtual deps state lock");
     VirtualDepsInstallStatus {
         running: state.running,
         done: state.done,
@@ -232,7 +237,9 @@ fn virtual_deps_snapshot() -> VirtualDepsInstallStatus {
 }
 
 fn virtual_deps_reset_running() {
-    let mut state = virtual_deps_state().lock().expect("virtual deps state lock");
+    let mut state = virtual_deps_state()
+        .lock()
+        .expect("virtual deps state lock");
     state.running = true;
     state.done = false;
     state.success = false;
@@ -242,7 +249,9 @@ fn virtual_deps_reset_running() {
 
 fn virtual_deps_push_log(line: impl Into<String>) {
     const MAX_LOG_LINES: usize = 500;
-    let mut state = virtual_deps_state().lock().expect("virtual deps state lock");
+    let mut state = virtual_deps_state()
+        .lock()
+        .expect("virtual deps state lock");
     state.logs.push_back(line.into());
     while state.logs.len() > MAX_LOG_LINES {
         let _ = state.logs.pop_front();
@@ -250,7 +259,9 @@ fn virtual_deps_push_log(line: impl Into<String>) {
 }
 
 fn virtual_deps_finish(success: bool, message: String) {
-    let mut state = virtual_deps_state().lock().expect("virtual deps state lock");
+    let mut state = virtual_deps_state()
+        .lock()
+        .expect("virtual deps state lock");
     state.running = false;
     state.done = true;
     state.success = success;
@@ -277,7 +288,8 @@ fn list_devices_basic() -> DevicesBasicResponse {
         .ok()
         .and_then(|v| v.trim().parse::<u16>().ok())
         .unwrap_or(5000);
-    let port_map = load_device_port_map();
+    let mut port_map = load_device_port_map();
+    let mut port_map_changed = false;
 
     match adb_devices() {
         Ok(serials) => {
@@ -288,21 +300,32 @@ fn list_devices_basic() -> DevicesBasicResponse {
                     !host_apk_version.is_empty() && snap.apk_version == host_apk_version;
                 let apk_matches_daemon =
                     !daemon_apk_version.is_empty() && snap.apk_version == daemon_apk_version;
-                let stream_port = port_map
-                    .get(&serial)
-                    .copied()
-                    .unwrap_or_else(|| {
-                        let mut p = base_stream_port.saturating_add(2 + idx as u16);
-                        let control_port = std::env::var("WBEAM_CONTROL_PORT")
-                            .ok()
-                            .and_then(|v| v.trim().parse::<u16>().ok())
-                            .unwrap_or(5001);
-                        if p == control_port {
-                            p = p.saturating_add(1);
-                        }
-                        p
-                    });
-                let stream_state = daemon_stream_state(&serial, stream_port);
+                let mut stream_port = port_map.get(&serial).copied().unwrap_or_else(|| {
+                    let mut p = base_stream_port.saturating_add(2 + idx as u16);
+                    let control_port = std::env::var("WBEAM_CONTROL_PORT")
+                        .ok()
+                        .and_then(|v| v.trim().parse::<u16>().ok())
+                        .unwrap_or(5001);
+                    if p == control_port {
+                        p = p.saturating_add(1);
+                    }
+                    p
+                });
+                let stream_state = if svc.active {
+                    let (state, resolved_port) = daemon_stream_state_and_port(&serial, Some(stream_port))
+                        .or_else(|| daemon_stream_state_and_port(&serial, None))
+                        .unwrap_or_else(|| ("unknown".to_string(), stream_port));
+                    if resolved_port != stream_port {
+                        stream_port = resolved_port;
+                    }
+                    if port_map.get(&serial).copied() != Some(stream_port) {
+                        port_map.insert(serial.clone(), stream_port);
+                        port_map_changed = true;
+                    }
+                    state
+                } else {
+                    "unknown".to_string()
+                };
 
                 devices.push(DeviceBasic {
                     serial,
@@ -331,6 +354,9 @@ fn list_devices_basic() -> DevicesBasicResponse {
                 devices,
                 error: None,
             };
+            if port_map_changed {
+                let _ = save_device_port_map(&port_map);
+            }
             ui_service_log(
                 "list_devices_basic",
                 "ok",
@@ -372,6 +398,21 @@ fn load_device_port_map() -> std::collections::HashMap<String, u16> {
         }
     }
     map
+}
+
+fn save_device_port_map(map: &std::collections::HashMap<String, u16>) -> Result<(), String> {
+    let path = repo_root().join(".wbeam_device_ports");
+    let mut rows = map
+        .iter()
+        .map(|(serial, port)| format!("{serial} {port}"))
+        .collect::<Vec<_>>();
+    rows.sort();
+    let mut body = String::new();
+    for row in rows {
+        body.push_str(&row);
+        body.push('\n');
+    }
+    fs::write(&path, body).map_err(|e| format!("failed to write {}: {e}", path.display()))
 }
 
 fn host_expected_apk_version() -> String {
@@ -416,26 +457,32 @@ fn host_build_revision_from_health() -> Option<String> {
         .map(|s| s.to_string())
 }
 
-fn daemon_stream_state(serial: &str, stream_port: u16) -> String {
+fn daemon_stream_state_and_port(serial: &str, stream_port: Option<u16>) -> Option<(String, u16)> {
     let control_port = std::env::var("WBEAM_CONTROL_PORT").unwrap_or_else(|_| "5001".to_string());
-    let url = format!(
-        "http://127.0.0.1:{control_port}/v1/status?serial={serial}&stream_port={stream_port}"
-    );
+    let mut url = format!("http://127.0.0.1:{control_port}/v1/status?serial={serial}");
+    if let Some(port) = stream_port {
+        url.push_str(&format!("&stream_port={port}"));
+    }
     let output = Command::new("curl")
         .args(["-fsS", "--max-time", "1", &url])
         .output();
-    let Ok(output) = output else {
-        return "unknown".to_string();
-    };
+    let Ok(output) = output else { return None; };
     if !output.status.success() {
-        return "unknown".to_string();
+        return None;
     }
     let body = String::from_utf8_lossy(&output.stdout);
-    let json: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
-    json.get("state")
+    let json: Value = serde_json::from_str(&body).ok()?;
+    let state = json
+        .get("state")
         .and_then(|v| v.as_str())
-        .unwrap_or("unknown")
-        .to_string()
+        .unwrap_or("unknown");
+    let resolved_port = json
+        .get("stream_port")
+        .and_then(|v| v.as_u64())
+        .and_then(|v| u16::try_from(v).ok())
+        .or(stream_port)
+        .unwrap_or(0);
+    Some((state.to_string(), resolved_port))
 }
 
 fn daemon_post_action(
@@ -454,7 +501,6 @@ fn daemon_post_action(
             let mode_param = match normalized.as_str() {
                 "duplicate" => Some("duplicate"),
                 "virtual" | "virtual_monitor" => Some("virtual_monitor"),
-                "isolated" | "virtual_isolated" => Some("virtual_isolated"),
                 _ => None,
             };
             if let Some(mode_param) = mode_param {
@@ -464,7 +510,16 @@ fn daemon_post_action(
         }
     }
     let output = Command::new("curl")
-        .args(["-sS", "--max-time", "3", "-X", "POST", "-w", "\nHTTP_STATUS:%{http_code}", &url])
+        .args([
+            "-sS",
+            "--max-time",
+            "3",
+            "-X",
+            "POST",
+            "-w",
+            "\nHTTP_STATUS:%{http_code}",
+            &url,
+        ])
         .output()
         .map_err(|e| format!("curl failed: {e}"))?;
     if !output.status.success() {
@@ -492,11 +547,27 @@ fn daemon_post_action(
     if !status_code.starts_with('2') {
         let trimmed = payload.trim();
         if trimmed.is_empty() {
-            return Err(format!("daemon action failed: {action} (http={status_code})"));
+            return Err(format!(
+                "daemon action failed: {action} (http={status_code})"
+            ));
         }
         return Err(trimmed.to_string());
     }
     Ok(payload.trim().to_string())
+}
+
+fn service_ready_for_device_actions() -> Result<(), String> {
+    let svc = service_status();
+    if !svc.available {
+        return Err("Desktop service control is unavailable on this host.".to_string());
+    }
+    if !svc.installed {
+        return Err("Desktop service is not installed.".to_string());
+    }
+    if !svc.active {
+        return Err("Desktop service is not running.".to_string());
+    }
+    Ok(())
 }
 
 fn connect_log(serial: &str, stream_port: u16, message: &str) {
@@ -554,8 +625,6 @@ fn adb_prepare_connect(serial: &str, stream_port: u16) -> Result<(), String> {
         .ok()
         .and_then(|v| v.trim().parse::<u16>().ok())
         .unwrap_or(5001);
-    let stream = stream_port.to_string();
-    let control = control_port.to_string();
     connect_log(
         serial,
         stream_port,
@@ -595,27 +664,80 @@ fn adb_prepare_connect(serial: &str, stream_port: u16) -> Result<(), String> {
         return Err(msg);
     }
 
-    let rev_stream = adb_cmd(&[
+    let rev_stream_primary = adb_cmd(&[
         "-s",
         serial,
         "reverse",
-        &format!("tcp:{stream}"),
-        &format!("tcp:{stream}"),
+        "tcp:5000",
+        &format!("tcp:{stream_port}"),
     ]);
-    if let Ok(out) = &rev_stream {
-        connect_log(serial, stream_port, &format!("adb reverse stream ok out='{out}'"));
+    if let Ok(out) = &rev_stream_primary {
+        connect_log(
+            serial,
+            stream_port,
+            &format!("adb reverse stream primary ok 5000->{stream_port} out='{out}'"),
+        );
     }
-    let rev_control = adb_cmd(&[
+    let rev_control_primary = adb_cmd(&[
         "-s",
         serial,
         "reverse",
-        &format!("tcp:{control}"),
-        &format!("tcp:{control}"),
+        "tcp:5001",
+        &format!("tcp:{control_port}"),
     ]);
-    if let Ok(out) = &rev_control {
-        connect_log(serial, stream_port, &format!("adb reverse control ok out='{out}'"));
+    if let Ok(out) = &rev_control_primary {
+        connect_log(
+            serial,
+            stream_port,
+            &format!("adb reverse control primary ok 5001->{control_port} out='{out}'"),
+        );
     }
-    if rev_stream.is_err() || rev_control.is_err() {
+    if stream_port != 5000 {
+        match adb_cmd(&[
+            "-s",
+            serial,
+            "reverse",
+            &format!("tcp:{stream_port}"),
+            &format!("tcp:{stream_port}"),
+        ]) {
+            Ok(out) => connect_log(
+                serial,
+                stream_port,
+                &format!("adb reverse stream compat ok {stream_port}->{stream_port} out='{out}'"),
+            ),
+            Err(err) => connect_log(
+                serial,
+                stream_port,
+                &format!("adb reverse stream compat failed {stream_port}->{stream_port}: {err}"),
+            ),
+        }
+    }
+    if control_port != 5001 {
+        match adb_cmd(&[
+            "-s",
+            serial,
+            "reverse",
+            &format!("tcp:{control_port}"),
+            &format!("tcp:{control_port}"),
+        ]) {
+            Ok(out) => connect_log(
+                serial,
+                stream_port,
+                &format!(
+                    "adb reverse control compat ok {control_port}->{control_port} out='{out}'"
+                ),
+            ),
+            Err(err) => connect_log(
+                serial,
+                stream_port,
+                &format!(
+                    "adb reverse control compat failed {control_port}->{control_port}: {err}"
+                ),
+            ),
+        }
+    }
+
+    if rev_stream_primary.is_err() || rev_control_primary.is_err() {
         let api_level = adb_api_level(serial).unwrap_or(0);
         if api_level > 0 && api_level <= 18 {
             connect_log(
@@ -627,20 +749,27 @@ fn adb_prepare_connect(serial: &str, stream_port: u16) -> Result<(), String> {
                 ),
             );
         } else {
-            let msg =
-                "ADB reverse failed. Run full redeploy or check USB transport permissions."
-                    .to_string();
+            let msg = "ADB reverse failed. Run full redeploy or check USB transport permissions."
+                .to_string();
             connect_log(serial, stream_port, &msg);
             return Err(msg);
         }
     }
 
-    let launch = adb_cmd(&["-s", serial, "shell", "am", "start", "-n", "com.wbeam/.MainActivity"])
-        .map_err(|e| {
-            let msg = format!("adb launch failed: {e}");
-            connect_log(serial, stream_port, &msg);
-            msg
-        })?;
+    let launch = adb_cmd(&[
+        "-s",
+        serial,
+        "shell",
+        "am",
+        "start",
+        "-n",
+        "com.wbeam/.MainActivity",
+    ])
+    .map_err(|e| {
+        let msg = format!("adb launch failed: {e}");
+        connect_log(serial, stream_port, &msg);
+        msg
+    })?;
     connect_log(serial, stream_port, &format!("adb am start out='{launch}'"));
     if launch.trim().is_empty() {
         let msg = "Failed to launch Android app via adb.".to_string();
@@ -701,9 +830,10 @@ fn service_status() -> ServiceStatus {
 }
 
 fn systemctl_show_prop(prop: &str) -> Option<String> {
-    Command::new("systemctl")
-        .args(["--user", "show", "-p", prop, "--value", SERVICE_NAME])
-        .output()
+    let mut cmd = Command::new("systemctl");
+    cmd.args(["--user", "show", "-p", prop, "--value", SERVICE_NAME]);
+    apply_systemctl_user_env(&mut cmd);
+    cmd.output()
         .ok()
         .and_then(|out| {
             if !out.status.success() {
@@ -719,53 +849,97 @@ fn systemctl_show_prop(prop: &str) -> Option<String> {
 }
 
 fn daemon_lock_hint() -> Option<String> {
-    let lock_path = PathBuf::from("/tmp/wbeamd.lock");
-    let pid_text = fs::read_to_string(lock_path).ok()?;
-    let pid = pid_text.trim().parse::<u32>().ok()?;
+    for lock_path in ["/tmp/wbeamd-service-5001.lock", "/tmp/wbeamd.lock"] {
+        let pid_text = match fs::read_to_string(lock_path) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let pid = match pid_text.trim().parse::<u32>() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
 
-    let output = Command::new("ps")
-        .args(["-p", &pid.to_string(), "-o", "comm="])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let comm = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if comm.contains("wbeamd-server") {
-        return Some(format!("lock held by pid={pid} ({comm})"));
+        let output = match Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "comm="])
+            .output()
+        {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if !output.status.success() {
+            continue;
+        }
+        let comm = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if comm.contains("wbeamd-server") {
+            return Some(format!("lock held by pid={pid} ({comm})"));
+        }
     }
     None
 }
 
 fn stop_conflicting_lock_holder() {
-    let lock_path = PathBuf::from("/tmp/wbeamd.lock");
-    let Ok(pid_text) = fs::read_to_string(&lock_path) else {
+    for lock in ["/tmp/wbeamd.lock", "/tmp/wbeamd-service-5001.lock"] {
+        let lock_path = PathBuf::from(lock);
+        let Ok(pid_text) = fs::read_to_string(&lock_path) else {
+            continue;
+        };
+        let Ok(pid) = pid_text.trim().parse::<u32>() else {
+            continue;
+        };
+        if !process_name_matches(pid, "wbeamd-server") {
+            continue;
+        }
+
+        let pid_s = pid.to_string();
+        let _ = Command::new("kill").args(["-TERM", &pid_s]).status();
+        for _ in 0..10 {
+            if !process_exists(pid) {
+                let _ = fs::remove_file(&lock_path);
+                break;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        if process_exists(pid) {
+            let _ = Command::new("kill").args(["-KILL", &pid_s]).status();
+            for _ in 0..10 {
+                if !process_exists(pid) {
+                    let _ = fs::remove_file(&lock_path);
+                    break;
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+        }
+    }
+}
+
+fn stop_conflicting_port_holder(control_port: u16) {
+    let pattern = format!("wbeamd-server --control-port {control_port}");
+    let output = Command::new("pgrep").args(["-f", &pattern]).output();
+    let Ok(output) = output else {
         return;
     };
-    let Ok(pid) = pid_text.trim().parse::<u32>() else {
-        return;
-    };
-    if !process_name_matches(pid, "wbeamd-server") {
+    if !output.status.success() {
         return;
     }
-
-    let pid_s = pid.to_string();
-    let _ = Command::new("kill").args(["-TERM", &pid_s]).status();
-    for _ in 0..10 {
-        if !process_exists(pid) {
-            let _ = fs::remove_file(&lock_path);
-            return;
+    let pids = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| line.trim().parse::<u32>().ok())
+        .collect::<Vec<_>>();
+    for pid in pids {
+        if !process_name_matches(pid, "wbeamd-server") {
+            continue;
         }
-        thread::sleep(Duration::from_millis(100));
-    }
-
-    let _ = Command::new("kill").args(["-KILL", &pid_s]).status();
-    for _ in 0..10 {
-        if !process_exists(pid) {
-            let _ = fs::remove_file(&lock_path);
-            return;
+        let pid_s = pid.to_string();
+        let _ = Command::new("kill").args(["-TERM", &pid_s]).status();
+        for _ in 0..10 {
+            if !process_exists(pid) {
+                break;
+            }
+            thread::sleep(Duration::from_millis(100));
         }
-        thread::sleep(Duration::from_millis(100));
+        if process_exists(pid) {
+            let _ = Command::new("kill").args(["-KILL", &pid_s]).status();
+        }
     }
 }
 
@@ -829,7 +1003,11 @@ fn host_probe_brief() -> HostProbeBrief {
     let json: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
     let probe = HostProbeBrief {
         reachable: true,
-        os: json.get("os").and_then(|v| v.as_str()).unwrap_or("unknown").to_string(),
+        os: json
+            .get("os")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string(),
         session: json
             .get("session")
             .and_then(|v| v.as_str())
@@ -845,7 +1023,10 @@ fn host_probe_brief() -> HostProbeBrief {
             .and_then(|v| v.as_str())
             .unwrap_or("unknown")
             .to_string(),
-        supported: json.get("supported").and_then(|v| v.as_bool()).unwrap_or(false),
+        supported: json
+            .get("supported")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
     };
     ui_service_log(
         "host_probe_brief",
@@ -859,7 +1040,10 @@ fn host_probe_brief() -> HostProbeBrief {
 }
 
 #[tauri::command]
-fn virtual_doctor(serial: Option<String>, stream_port: Option<u16>) -> Result<VirtualDoctor, String> {
+fn virtual_doctor(
+    serial: Option<String>,
+    stream_port: Option<u16>,
+) -> Result<VirtualDoctor, String> {
     let control_port = std::env::var("WBEAM_CONTROL_PORT").unwrap_or_else(|_| "5001".to_string());
     let mut url = format!("http://127.0.0.1:{control_port}/v1/virtual/doctor");
     let mut params: Vec<String> = Vec::new();
@@ -887,7 +1071,8 @@ fn virtual_doctor(serial: Option<String>, stream_port: Option<u16>) -> Result<Vi
         return Err("virtual_doctor API unavailable".to_string());
     }
     let body = String::from_utf8_lossy(&output.stdout);
-    let json: Value = serde_json::from_str(&body).map_err(|e| format!("virtual_doctor invalid json: {e}"))?;
+    let json: Value =
+        serde_json::from_str(&body).map_err(|e| format!("virtual_doctor invalid json: {e}"))?;
     Ok(VirtualDoctor {
         ok: json.get("ok").and_then(|v| v.as_bool()).unwrap_or(false),
         message: json
@@ -929,7 +1114,9 @@ fn virtual_doctor(serial: Option<String>, stream_port: Option<u16>) -> Result<Vi
 #[tauri::command]
 fn virtual_install_deps_start() -> Result<String, String> {
     {
-        let state = virtual_deps_state().lock().expect("virtual deps state lock");
+        let state = virtual_deps_state()
+            .lock()
+            .expect("virtual deps state lock");
         if state.running {
             return Ok("already running".to_string());
         }
@@ -1036,13 +1223,17 @@ fn run_virtual_install_job() {
 }
 
 #[tauri::command]
-fn device_connect(serial: String, stream_port: u16, display_mode: Option<String>) -> Result<String, String> {
+fn device_connect(
+    serial: String,
+    stream_port: u16,
+    display_mode: Option<String>,
+) -> Result<String, String> {
+    service_ready_for_device_actions()?;
     let chosen_mode = display_mode.unwrap_or_else(|| "duplicate".to_string());
     let normalized_mode = chosen_mode.trim().to_lowercase();
     if normalized_mode != "duplicate"
         && normalized_mode != "virtual"
         && normalized_mode != "virtual_monitor"
-        && normalized_mode != "virtual_isolated"
     {
         let msg = format!("Unsupported display mode: {normalized_mode}");
         ui_service_log(
@@ -1064,8 +1255,78 @@ fn device_connect(serial: String, stream_port: u16, display_mode: Option<String>
         ),
     );
     connect_log(&serial, stream_port, "device_connect begin");
+    if normalized_mode == "virtual" || normalized_mode == "virtual_monitor" {
+        let doctor = virtual_doctor(Some(serial.clone()), Some(stream_port))?;
+        if !doctor.ok {
+            let msg = if !doctor.install_hint.trim().is_empty() {
+                format!("Virtual monitor unavailable: {}", doctor.install_hint)
+            } else {
+                format!("Virtual monitor unavailable: {}", doctor.message)
+            };
+            ui_service_log(
+                "device_connect",
+                "error",
+                &format!(
+                    "serial={} port={} mode={} err={}",
+                    serial, stream_port, normalized_mode, msg
+                ),
+            );
+            connect_log(&serial, stream_port, &msg);
+            return Err(msg);
+        }
+        let resolver = doctor.resolver.as_str();
+        let is_real_output = resolver == "linux_x11_real_output";
+        let is_monitor_object = resolver == "linux_x11_monitor_object_experimental";
+        if !is_real_output && !is_monitor_object {
+            let msg = format!(
+                "Virtual monitor backend is unsupported for connect. Active resolver={}. {}",
+                doctor.resolver, doctor.install_hint
+            );
+            ui_service_log(
+                "device_connect",
+                "error",
+                &format!(
+                    "serial={} port={} mode={} err={}",
+                    serial, stream_port, normalized_mode, msg
+                ),
+            );
+            connect_log(&serial, stream_port, &msg);
+            return Err(msg);
+        }
+        if is_monitor_object {
+            let allow_monitor_object = std::env::var("WBEAM_X11_ALLOW_MONITOR_OBJECT")
+                .ok()
+                .map(|v| {
+                    let low = v.trim().to_ascii_lowercase();
+                    low == "1" || low == "true" || low == "on" || low == "yes"
+                })
+                .unwrap_or(false);
+            if !allow_monitor_object {
+                let msg = "Virtual monitor fallback (xrandr --setmonitor) is experimental and disabled by default. Use a real RandR output backend (EVDI) or explicitly set WBEAM_X11_ALLOW_MONITOR_OBJECT=1.".to_string();
+                ui_service_log(
+                    "device_connect",
+                    "error",
+                    &format!(
+                        "serial={} port={} mode={} err={}",
+                        serial, stream_port, normalized_mode, msg
+                    ),
+                );
+                connect_log(&serial, stream_port, &msg);
+                return Err(msg);
+            }
+            connect_log(
+                &serial,
+                stream_port,
+                "virtual monitor fallback active: xrandr --setmonitor (simulated monitor)",
+            );
+        }
+    }
     adb_prepare_connect(&serial, stream_port)?;
-    connect_log(&serial, stream_port, "device_connect daemon_post_action start");
+    connect_log(
+        &serial,
+        stream_port,
+        "device_connect daemon_post_action start",
+    );
     let resp = match daemon_post_action("start", &serial, stream_port, Some(&normalized_mode)) {
         Ok(v) => v,
         Err(err) => {
@@ -1097,12 +1358,28 @@ fn device_connect(serial: String, stream_port: u16, display_mode: Option<String>
 
 #[tauri::command]
 fn device_disconnect(serial: String, stream_port: u16) -> Result<String, String> {
+    service_ready_for_device_actions()?;
     ui_service_log(
         "device_disconnect",
         "begin",
         &format!("serial={} port={}", serial, stream_port),
     );
-    let res = daemon_post_action("stop", &serial, stream_port, None);
+    let mut res = daemon_post_action("stop", &serial, stream_port, None);
+    if res.is_err() {
+        // Fallback: stream port may have drifted from stale UI mapping.
+        let control_port = std::env::var("WBEAM_CONTROL_PORT").unwrap_or_else(|_| "5001".to_string());
+        let url = format!("http://127.0.0.1:{control_port}/v1/stop?serial={serial}");
+        let output = Command::new("curl")
+            .args(["-sS", "--max-time", "3", "-X", "POST", &url])
+            .output()
+            .map_err(|e| format!("curl failed: {e}"))?;
+        if output.status.success() {
+            res = Ok(String::from_utf8_lossy(&output.stdout).trim().to_string());
+        }
+    }
+    if res.is_ok() {
+        let _ = adb_cmd(&["-s", &serial, "shell", "am", "start", "-n", "com.wbeam/.MainActivity"]);
+    }
     match &res {
         Ok(_) => ui_service_log(
             "device_disconnect",
@@ -1126,7 +1403,8 @@ fn service_install() -> Result<ServiceStatus, String> {
         fs::create_dir_all(parent).map_err(|e| format!("cannot create unit dir: {e}"))?;
     }
 
-    fs::write(&unit_path, service_unit_content()).map_err(|e| format!("cannot write unit file: {e}"))?;
+    fs::write(&unit_path, service_unit_content())
+        .map_err(|e| format!("cannot write unit file: {e}"))?;
 
     systemctl_user(&["daemon-reload"])?;
     systemctl_user(&["enable", SERVICE_NAME])?;
@@ -1148,13 +1426,40 @@ fn service_uninstall() -> Result<ServiceStatus, String> {
 
 #[tauri::command]
 fn service_start() -> Result<ServiceStatus, String> {
+    ui_service_log("service_start", "begin", "");
     ensure_systemctl()?;
-    if !unit_file_path().exists() {
+    let unit_path = unit_file_path();
+    if !unit_path.exists() {
+        ui_service_log("service_start", "error", "service is not installed");
         return Err("service is not installed".to_string());
     }
+    let expected = service_unit_content();
+    let current = fs::read_to_string(&unit_path).unwrap_or_default();
+    if current != expected {
+        fs::write(&unit_path, expected).map_err(|e| format!("cannot rewrite unit file: {e}"))?;
+        systemctl_user(&["daemon-reload"])?;
+    }
+    let control_port = std::env::var("WBEAM_CONTROL_PORT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u16>().ok())
+        .unwrap_or(5001);
+    stop_conflicting_port_holder(control_port);
     stop_conflicting_lock_holder();
-    systemctl_user(&["start", SERVICE_NAME])?;
-    Ok(service_status())
+    let _ = systemctl_user(&["reset-failed", SERVICE_NAME]);
+    if let Err(err) = systemctl_user(&["start", SERVICE_NAME]) {
+        ui_service_log("service_start", "error", &err);
+        return Err(err);
+    }
+    let status = service_status();
+    ui_service_log(
+        "service_start",
+        "ok",
+        &format!(
+            "installed={} active={} enabled={}",
+            status.installed, status.active, status.enabled
+        ),
+    );
+    Ok(status)
 }
 
 #[tauri::command]
@@ -1174,6 +1479,34 @@ fn ensure_systemctl() -> Result<(), String> {
     }
 }
 
+fn apply_systemctl_user_env(cmd: &mut Command) {
+    let uid = Command::new("id")
+        .arg("-u")
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .and_then(|out| {
+            let txt = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if txt.is_empty() {
+                None
+            } else {
+                Some(txt)
+            }
+        });
+
+    if let Some(uid) = uid {
+        let runtime = format!("/run/user/{uid}");
+        cmd.env("XDG_RUNTIME_DIR", &runtime);
+        cmd.env("DBUS_SESSION_BUS_ADDRESS", format!("unix:path={runtime}/bus"));
+    } else {
+        cmd.env_remove("XDG_RUNTIME_DIR");
+        cmd.env_remove("DBUS_SESSION_BUS_ADDRESS");
+    }
+    cmd.env_remove("DISPLAY");
+    cmd.env_remove("XAUTHORITY");
+    cmd.env_remove("WAYLAND_DISPLAY");
+}
+
 fn command_exists(name: &str) -> bool {
     Command::new("sh")
         .args(["-c", &format!("command -v {name} >/dev/null 2>&1")])
@@ -1183,20 +1516,20 @@ fn command_exists(name: &str) -> bool {
 }
 
 fn systemctl_state(action: &str) -> Option<String> {
-    Command::new("systemctl")
-        .args(["--user", action, SERVICE_NAME])
-        .output()
+    let mut cmd = Command::new("systemctl");
+    cmd.args(["--user", action, SERVICE_NAME]);
+    apply_systemctl_user_env(&mut cmd);
+    cmd.output()
         .ok()
         .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
         .filter(|v| !v.is_empty())
 }
 
 fn systemctl_user(args: &[&str]) -> Result<(), String> {
-    let output = Command::new("systemctl")
-        .arg("--user")
-        .args(args)
-        .output()
-        .map_err(|e| format!("systemctl failed: {e}"))?;
+    let mut cmd = Command::new("systemctl");
+    cmd.arg("--user").args(args);
+    apply_systemctl_user_env(&mut cmd);
+    let output = cmd.output().map_err(|e| format!("systemctl failed: {e}"))?;
 
     if output.status.success() {
         return Ok(());
@@ -1229,6 +1562,7 @@ fn service_unit_content() -> String {
         .to_string();
     let control_port = std::env::var("WBEAM_CONTROL_PORT").unwrap_or_else(|_| "5001".to_string());
     let stream_port = std::env::var("WBEAM_STREAM_PORT").unwrap_or_else(|_| "5000".to_string());
+    let service_lock_file = format!("/tmp/wbeamd-service-{control_port}.lock");
     let root = repo_root().to_string_lossy().to_string();
     let exec_start = if let Some(bin) = daemon_bin_override {
         // Backward compatible override for prebuilt daemon binaries.
@@ -1243,7 +1577,6 @@ fn service_unit_content() -> String {
         "XAUTHORITY",
         "WAYLAND_DISPLAY",
         "XDG_RUNTIME_DIR",
-        "DBUS_SESSION_BUS_ADDRESS",
     ] {
         if let Ok(val) = std::env::var(key) {
             let trimmed = val.trim();
@@ -1254,7 +1587,7 @@ fn service_unit_content() -> String {
     }
 
     format!(
-        "[Unit]\nDescription=WBeam Screen Streaming Daemon\nAfter=graphical-session.target\n\n[Service]\nType=simple\nExecStart={exec_start}\nRestart=on-failure\nRestartSec=3\nEnvironment=RUST_LOG=info\nEnvironment=WBEAM_DAEMON_IMPL=rust\nEnvironment=WBEAM_USE_RUST_STREAMER=1\nEnvironment=WBEAM_ROOT={root}\n{session_env}\n[Install]\nWantedBy=default.target\n"
+        "[Unit]\nDescription=WBeam Screen Streaming Daemon\nAfter=graphical-session.target\n\n[Service]\nType=simple\nExecStart={exec_start}\nRestart=on-failure\nRestartSec=3\nEnvironment=RUST_LOG=info\nEnvironment=WBEAM_DAEMON_IMPL=rust\nEnvironment=WBEAM_USE_RUST_STREAMER=1\nEnvironment=WBEAM_ROOT={root}\nEnvironment=WBEAM_LOCK_FILE={service_lock_file}\n{session_env}\n[Install]\nWantedBy=default.target\n"
     )
 }
 
@@ -1351,7 +1684,9 @@ fn adb_devices() -> Result<Vec<String>, String> {
 }
 
 fn adb_getprop(serial: &str, key: &str) -> Option<String> {
-    adb_shell(serial, &["getprop", key]).ok().filter(|v| !v.is_empty())
+    adb_shell(serial, &["getprop", key])
+        .ok()
+        .filter(|v| !v.is_empty())
 }
 
 fn adb_resolution(serial: &str) -> String {
@@ -1539,7 +1874,8 @@ fn should_retry_adb_error(stderr: &str) -> bool {
 }
 
 fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../")
+    let raw = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../");
+    fs::canonicalize(&raw).unwrap_or(raw)
 }
 
 fn or_unknown(value: Option<String>) -> String {

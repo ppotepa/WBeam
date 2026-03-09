@@ -1,8 +1,6 @@
 use super::host_probe::{HostOs, HostProbe};
-use super::process as proc;
-use super::virtual_display;
+use super::x11_monitor_object;
 use super::x11_real_output;
-use super::x11_virtual_monitor;
 
 mod linux;
 mod windows;
@@ -11,7 +9,6 @@ mod windows;
 pub enum DisplayMode {
     Duplicate,
     VirtualMonitor,
-    VirtualIsolated,
 }
 
 impl DisplayMode {
@@ -19,7 +16,6 @@ impl DisplayMode {
         match self {
             Self::Duplicate => "duplicate",
             Self::VirtualMonitor => "virtual_monitor",
-            Self::VirtualIsolated => "virtual_isolated",
         }
     }
 
@@ -31,8 +27,7 @@ impl DisplayMode {
 #[derive(Debug, Clone)]
 pub enum RuntimeHandle {
     X11RealOutput(x11_real_output::X11RealOutputHandle),
-    X11VirtualIsolated(virtual_display::VirtualDisplayHandle),
-    X11VirtualMonitor(x11_virtual_monitor::X11VirtualMonitorHandle),
+    X11MonitorObject(x11_monitor_object::X11MonitorObjectHandle),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -60,7 +55,6 @@ pub struct VirtualMonitorProbe {
 pub fn normalize_requested_mode(mode: Option<&str>) -> DisplayMode {
     match mode.unwrap_or("duplicate").trim().to_lowercase().as_str() {
         "virtual" | "virtual_monitor" => DisplayMode::VirtualMonitor,
-        "isolated" | "virtual_isolated" => DisplayMode::VirtualIsolated,
         _ => DisplayMode::Duplicate,
     }
 }
@@ -110,11 +104,8 @@ pub async fn stop_runtime(handle: RuntimeHandle) {
         RuntimeHandle::X11RealOutput(h) => {
             let _ = x11_real_output::destroy(&h);
         }
-        RuntimeHandle::X11VirtualIsolated(h) => {
-            proc::terminate_pid(h.pid).await;
-        }
-        RuntimeHandle::X11VirtualMonitor(h) => {
-            let _ = x11_virtual_monitor::destroy(&h);
+        RuntimeHandle::X11MonitorObject(h) => {
+            let _ = x11_monitor_object::destroy(&h);
         }
     }
 }

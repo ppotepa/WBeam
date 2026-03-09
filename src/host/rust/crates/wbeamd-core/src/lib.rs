@@ -18,8 +18,7 @@ use wbeamd_api::{
     valid_values, validate_config_with_presets, ActiveConfig, BaseResponse, ClientMetricsRequest,
     ClientMetricsResponse, ConfigPatch, ErrorResponse, HealthResponse, HostProbeResponse,
     KpiSnapshot, MetricsResponse, MetricsSnapshot, PresetsResponse, StatusResponse,
-    VirtualDisplayDoctorResponse, VirtualDisplayProbeResponse,
-    ValidationError,
+    ValidationError, VirtualDisplayDoctorResponse, VirtualDisplayProbeResponse,
 };
 
 pub mod domain;
@@ -35,9 +34,7 @@ use domain::state::{
     STATE_ERROR, STATE_IDLE, STATE_RECONNECTING, STATE_STARTING, STATE_STOPPING, STATE_STREAMING,
 };
 use infra::process as proc;
-use infra::{
-    adb, config_store, display_backends, host_probe, telemetry,
-};
+use infra::{adb, config_store, display_backends, host_probe, telemetry};
 
 const DEFAULT_START_TIMEOUT: Duration = Duration::from_secs(45);
 const DUPLICATE_START_GUARD: Duration = Duration::from_secs(3);
@@ -917,6 +914,19 @@ impl DaemonCore {
         }
     }
 
+    async fn mark_start_failed(&self, message: String) {
+        let mut inner = self.inner.lock().await;
+        inner.current_pid = None;
+        inner.state = STATE_IDLE.to_string();
+        inner.last_error = message;
+        inner.run_started_at = None;
+        inner.stream_started_at = None;
+        inner.last_output_at = None;
+        inner.last_streaming_line_at = None;
+        inner.telemetry_file = None;
+        inner.no_present_streak = 0;
+    }
+
     async fn start_with_config(&self, cfg: ActiveConfig) -> Result<(), CoreError> {
         let requested_display_mode = {
             let inner = self.inner.lock().await;
@@ -1026,8 +1036,11 @@ impl DaemonCore {
         if let Some(pid) = existing_pid {
             proc::terminate_pid(pid).await;
         }
-        adb::ensure_stream_port_available(self.stream_port)
-            .map_err(|_| CoreError::PortBusy(self.stream_port))?;
+        if adb::ensure_stream_port_available(self.stream_port).is_err() {
+            let err = CoreError::PortBusy(self.stream_port);
+            self.mark_start_failed(err.to_string()).await;
+            return Err(err);
+        }
 
         let use_rust_streamer = std::env::var("WBEAM_USE_RUST_STREAMER")
             .ok()
@@ -1045,18 +1058,24 @@ impl DaemonCore {
         let capture_backend = self.host_probe.capture_mode_name();
         self.stop_virtual_display_if_any().await;
         let serial_hint = self.target_serial.as_deref().unwrap_or("default");
-        let activation = display_backends::activate_start(
+        let activation = match display_backends::activate_start(
             &self.host_probe,
             requested_mode,
             serial_hint,
             &launch_size,
-        )
-        .map_err(|e| match e {
-            display_backends::ActivationError::Unsupported(msg) => {
-                CoreError::UnsupportedHost(msg)
+        ) {
+            Ok(v) => v,
+            Err(e) => {
+                let err = match e {
+                    display_backends::ActivationError::Unsupported(msg) => {
+                        CoreError::UnsupportedHost(msg)
+                    }
+                    display_backends::ActivationError::Failed(msg) => CoreError::Spawn(msg),
+                };
+                self.mark_start_failed(err.to_string()).await;
+                return Err(err);
             }
-            display_backends::ActivationError::Failed(msg) => CoreError::Spawn(msg),
-        })?;
+        };
         info!(
             serial = serial_hint,
             requested_mode = requested_mode.as_str(),
@@ -1085,11 +1104,13 @@ impl DaemonCore {
                     "rust streamer binary not found – run `./devtool host build` to build it \
                      (set WBEAM_USE_RUST_STREAMER=false to force legacy python streamer)"
                 );
-                return Err(CoreError::Spawn(format!(
+                let err = CoreError::Spawn(format!(
                     "rust streamer binary not found: {} \
                      (run `./devtool host build`; or set WBEAM_USE_RUST_STREAMER=false to use python fallback)",
                     rust_streamer_bin.display()
-                )));
+                ));
+                self.mark_start_failed(err.to_string()).await;
+                return Err(err);
             }
             cmd = Command::new(rust_streamer_bin);
             cmd.arg("--profile")
@@ -1144,10 +1165,12 @@ impl DaemonCore {
             }
         } else {
             if capture_backend == "x11_gst" {
-                return Err(CoreError::Spawn(
+                let err = CoreError::Spawn(
                     "x11 backend requires Rust streamer (set WBEAM_USE_RUST_STREAMER=true)"
                         .to_string(),
-                ));
+                );
+                self.mark_start_failed(err.to_string()).await;
+                return Err(err);
             }
             warn!("WBEAM_USE_RUST_STREAMER=false – using legacy python streamer");
             let stream_script = self
@@ -1186,11 +1209,22 @@ impl DaemonCore {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        let mut child = cmd.spawn().map_err(|e| CoreError::Spawn(e.to_string()))?;
+        let mut child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                let err = CoreError::Spawn(e.to_string());
+                self.mark_start_failed(err.to_string()).await;
+                return Err(err);
+            }
+        };
 
-        let pid = child
-            .id()
-            .ok_or_else(|| CoreError::Spawn("child process has no pid".to_string()))?;
+        let pid = if let Some(pid) = child.id() {
+            pid
+        } else {
+            let err = CoreError::Spawn("child process has no pid".to_string());
+            self.mark_start_failed(err.to_string()).await;
+            return Err(err);
+        };
 
         info!(run_id, pid, "stream process started");
 
@@ -1307,9 +1341,7 @@ impl DaemonCore {
                 inner.last_error = if preserved_stream_error.is_empty() {
                     format!("stream start aborted (code={exit_code}); waiting for explicit /start")
                 } else {
-                    format!(
-                        "stream start aborted (code={exit_code}): {preserved_stream_error}"
-                    )
+                    format!("stream start aborted (code={exit_code}): {preserved_stream_error}")
                 };
                 info!(
                     run_id,

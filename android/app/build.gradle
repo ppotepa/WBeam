@@ -38,6 +38,12 @@ def wbeamControlPortRaw = (project.findProperty("WBEAM_CONTROL_PORT") ?: System.
 def wbeamControlPort = Integer.parseInt(wbeamControlPortRaw)
 def wbeamStreamPortRaw = (project.findProperty("WBEAM_STREAM_PORT") ?: System.getenv("WBEAM_STREAM_PORT") ?: "5000").toString().trim()
 def wbeamStreamPort = Integer.parseInt(wbeamStreamPortRaw)
+def wbeamAppIdSuffixRaw = (project.findProperty("WBEAM_APP_ID_SUFFIX") ?: System.getenv("WBEAM_ANDROID_APP_ID_SUFFIX") ?: "").toString().trim()
+def wbeamAppIdSuffix = wbeamAppIdSuffixRaw.isEmpty()
+    ? ""
+    : (wbeamAppIdSuffixRaw.startsWith(".") ? wbeamAppIdSuffixRaw : ".${wbeamAppIdSuffixRaw}")
+def wbeamAppNameRaw = (project.findProperty("WBEAM_APP_NAME") ?: System.getenv("WBEAM_ANDROID_APP_NAME") ?: "WBeam").toString().trim()
+def wbeamAppName = wbeamAppNameRaw.isEmpty() ? "WBeam" : wbeamAppNameRaw.replace("\"", "")
 
 android {
     namespace = 'com.wbeam'
@@ -49,11 +55,12 @@ android {
     }
 
     defaultConfig {
-        applicationId "com.wbeam"
+        applicationId "com.wbeam${wbeamAppIdSuffix}"
         minSdk = wbeamMinSdk
         targetSdk = 35
         versionCode = 1
         versionName = wbeamBuildRevision
+        resValue "string", "app_name", "\"${wbeamAppName}\""
         buildConfigField "String", "WBEAM_BUILD_REV", "\"${wbeamBuildRevision}\""
         buildConfigField "String", "WBEAM_HOST", "\"${wbeamHost}\""
         buildConfigField "String", "WBEAM_API_HOST", "\"${wbeamApiHost}\""

@@ -1,8 +1,8 @@
 mod duplicate;
 mod virtual_monitor;
 
-use super::super::{Activation, ActivationError, DisplayMode, VirtualMonitorProbe};
 use super::super::super::host_probe::HostProbe;
+use super::super::{Activation, ActivationError, DisplayMode, VirtualMonitorProbe};
 
 pub fn probe_virtual_monitor() -> VirtualMonitorProbe {
     virtual_monitor::probe()
@@ -16,6 +16,6 @@ pub fn activate(
 ) -> Result<Activation, ActivationError> {
     match mode {
         DisplayMode::Duplicate => duplicate::activate(),
-        DisplayMode::VirtualMonitor | DisplayMode::VirtualIsolated => virtual_monitor::activate(),
+        DisplayMode::VirtualMonitor => virtual_monitor::activate(),
     }
 }

@@ -87,11 +87,13 @@ public final class HostApiClient {
 
     private static String appendSessionQuery(String path) {
         String normalized = normalizePath(path);
-        if (TARGET_SERIAL.isEmpty()) {
-            return normalized;
-        }
+        StringBuilder sb = new StringBuilder(normalized);
         String separator = normalized.contains("?") ? "&" : "?";
-        return normalized + separator + "serial=" + TARGET_SERIAL + "&stream_port=" + STREAM_PORT;
+        sb.append(separator).append("stream_port=").append(STREAM_PORT);
+        if (!TARGET_SERIAL.isEmpty()) {
+            sb.append("&serial=").append(TARGET_SERIAL);
+        }
+        return sb.toString();
     }
 
     /**

@@ -42,7 +42,9 @@ pub fn probe(is_remote: bool) -> X11ExtendProbe {
         };
     };
     if !version_out.status.success() {
-        let stderr = String::from_utf8_lossy(&version_out.stderr).trim().to_string();
+        let stderr = String::from_utf8_lossy(&version_out.stderr)
+            .trim()
+            .to_string();
         let mut reason = "xrandr --version returned non-zero status".to_string();
         if !stderr.is_empty() {
             reason = format!("{reason}: {stderr}");
@@ -80,7 +82,9 @@ pub fn probe(is_remote: bool) -> X11ExtendProbe {
         };
     };
     if !query_out.status.success() {
-        let stderr = String::from_utf8_lossy(&query_out.stderr).trim().to_string();
+        let stderr = String::from_utf8_lossy(&query_out.stderr)
+            .trim()
+            .to_string();
         let reason = if stderr.is_empty() {
             "xrandr --query failed".to_string()
         } else {

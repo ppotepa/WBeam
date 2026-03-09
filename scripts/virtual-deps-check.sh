@@ -123,6 +123,11 @@ fi
 if ! command_exists modinfo || ! modinfo evdi >/dev/null 2>&1; then
   missing+=("evdi")
 fi
+if command_exists modinfo && modinfo evdi >/dev/null 2>&1; then
+  if ! command_exists lsmod || ! lsmod | grep -q '^evdi '; then
+    missing+=("evdi-module-loaded")
+  fi
+fi
 
 # For real X11 virtual-monitor mode we also need an EVDI-backed xrandr provider
 # visible in the current GUI session.
@@ -139,12 +144,12 @@ fi
 
 install_cmd=""
 case "$manager" in
-  deb) install_cmd="sudo apt-get update && sudo apt-get install -y dkms linux-headers-generic evdi-dkms xvfb x11-xserver-utils" ;;
-  rpm-dnf) install_cmd="sudo dnf install -y xorg-x11-server-Xvfb xrandr dkms kernel-devel akmod-evdi || sudo dnf install -y xorg-x11-server-Xvfb xrandr dkms kernel-devel evdi-dkms" ;;
-  rpm-yum) install_cmd="sudo yum install -y xorg-x11-server-Xvfb xrandr dkms kernel-devel evdi-dkms" ;;
-  rpm-zypper) install_cmd="sudo zypper install -y xorg-x11-server-Xvfb xrandr dkms kernel-default-devel evdi-dkms" ;;
-  arch) install_cmd="sudo pacman -S --noconfirm xorg-server-xvfb xorg-xrandr dkms linux-headers && $(arch_evdi_install_hint)" ;;
-  *) install_cmd="install package manager dependencies manually: evdi (kernel module), Xvfb, xrandr" ;;
+  deb) install_cmd="sudo apt-get update && sudo apt-get install -y dkms linux-headers-generic evdi-dkms xvfb x11-xserver-utils && sudo modprobe evdi initial_device_count=1" ;;
+  rpm-dnf) install_cmd="sudo dnf install -y xorg-x11-server-Xvfb xrandr dkms kernel-devel akmod-evdi || sudo dnf install -y xorg-x11-server-Xvfb xrandr dkms kernel-devel evdi-dkms; sudo modprobe evdi initial_device_count=1" ;;
+  rpm-yum) install_cmd="sudo yum install -y xorg-x11-server-Xvfb xrandr dkms kernel-devel evdi-dkms && sudo modprobe evdi initial_device_count=1" ;;
+  rpm-zypper) install_cmd="sudo zypper install -y xorg-x11-server-Xvfb xrandr dkms kernel-default-devel evdi-dkms && sudo modprobe evdi initial_device_count=1" ;;
+  arch) install_cmd="sudo pacman -S --noconfirm xorg-server-xvfb xorg-xrandr dkms linux-headers && $(arch_evdi_install_hint) && sudo modprobe evdi initial_device_count=1" ;;
+  *) install_cmd="install package manager dependencies manually: evdi (kernel module), Xvfb, xrandr; then load module: sudo modprobe evdi initial_device_count=1" ;;
 esac
 
 ok=true

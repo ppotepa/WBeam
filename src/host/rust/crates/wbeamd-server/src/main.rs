@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -54,59 +54,118 @@ struct SessionRegistry {
     base_stream_port: u16,
     default_core: Arc<DaemonCore>,
     serial_cores: Mutex<HashMap<String, SessionCore>>,
+    port_cores: Mutex<HashMap<u16, SessionCore>>,
 }
 
 impl SessionRegistry {
-    fn new(root: PathBuf, base_stream_port: u16, control_port: u16, default_core: Arc<DaemonCore>) -> Self {
+    fn new(
+        root: PathBuf,
+        base_stream_port: u16,
+        control_port: u16,
+        default_core: Arc<DaemonCore>,
+    ) -> Self {
         Self {
             root,
             control_port,
             base_stream_port,
             default_core,
             serial_cores: Mutex::new(HashMap::new()),
+            port_cores: Mutex::new(HashMap::new()),
         }
     }
 
-    async fn resolve_core(&self, serial: Option<&str>, requested_stream_port: Option<u16>) -> Arc<DaemonCore> {
-        let Some(raw) = serial else {
-            return self.default_core.clone();
-        };
-        let normalized = raw.trim();
-        if normalized.is_empty() {
-            return self.default_core.clone();
-        }
+    async fn resolve_core(
+        &self,
+        serial: Option<&str>,
+        requested_stream_port: Option<u16>,
+    ) -> Arc<DaemonCore> {
+        if let Some(raw) = serial {
+            let normalized = raw.trim();
+            if !normalized.is_empty() {
+                {
+                    let guard = self.serial_cores.lock().await;
+                    if let Some(existing) = guard.get(normalized) {
+                        return existing.core.clone();
+                    }
+                }
 
-        {
-            let guard = self.serial_cores.lock().await;
-            if let Some(existing) = guard.get(normalized) {
-                return existing.core.clone();
+                let mut guard = self.serial_cores.lock().await;
+                if let Some(existing) = guard.get(normalized) {
+                    return existing.core.clone();
+                }
+
+                let stream_port = requested_stream_port
+                    .filter(|p| *p > 0)
+                    .unwrap_or_else(|| self.base_stream_port.saturating_add(2 + guard.len() as u16));
+                let stream_port = if stream_port == self.control_port {
+                    stream_port.saturating_add(1)
+                } else {
+                    stream_port
+                };
+                let session_label = Some(format!("serial-{normalized}"));
+                let target_serial = Some(normalized.to_string());
+                let core = Arc::new(DaemonCore::new_for_session(
+                    self.root.clone(),
+                    stream_port,
+                    self.control_port,
+                    session_label,
+                    target_serial,
+                ));
+                guard.insert(normalized.to_string(), SessionCore { core: core.clone() });
+                let mut port_guard = self.port_cores.lock().await;
+                port_guard.insert(stream_port, SessionCore { core: core.clone() });
+                info!(
+                    serial = normalized,
+                    stream_port, "created daemon session core"
+                );
+                return core;
             }
         }
 
-        let mut guard = self.serial_cores.lock().await;
-        if let Some(existing) = guard.get(normalized) {
-            return existing.core.clone();
+        // Serial is unknown/empty on some Android builds; use stream_port as fallback key.
+        {
+            let guard = self.serial_cores.lock().await;
+            if guard.len() == 1 {
+                if let Some((_serial, session)) = guard.iter().next() {
+                    return session.core.clone();
+                }
+            }
         }
 
-        let stream_port = requested_stream_port
-            .filter(|p| *p > 0)
-            .unwrap_or_else(|| self.base_stream_port.saturating_add(2 + guard.len() as u16));
-        let stream_port = if stream_port == self.control_port {
+        let Some(stream_port) = requested_stream_port.filter(|p| *p > 0) else {
+            return self.default_core.clone();
+        };
+        if stream_port == self.base_stream_port {
+            return self.default_core.clone();
+        }
+        {
+            let guard = self.port_cores.lock().await;
+            if let Some(existing) = guard.get(&stream_port) {
+                return existing.core.clone();
+            }
+        }
+        let mut guard = self.port_cores.lock().await;
+        if let Some(existing) = guard.get(&stream_port) {
+            return existing.core.clone();
+        }
+        let safe_stream_port = if stream_port == self.control_port {
             stream_port.saturating_add(1)
         } else {
             stream_port
         };
-        let session_label = Some(format!("serial-{normalized}"));
-        let target_serial = Some(normalized.to_string());
+        let session_label = Some(format!("port-{safe_stream_port}"));
         let core = Arc::new(DaemonCore::new_for_session(
             self.root.clone(),
-            stream_port,
+            safe_stream_port,
             self.control_port,
             session_label,
-            target_serial,
+            None,
         ));
-        guard.insert(normalized.to_string(), SessionCore { core: core.clone() });
-        info!(serial = normalized, stream_port, "created daemon session core");
+        guard.insert(safe_stream_port, SessionCore { core: core.clone() });
+        info!(
+            stream_port = safe_stream_port,
+            "created daemon session core (port fallback)"
+        );
         core
     }
 
@@ -118,8 +177,18 @@ impl SessionRegistry {
                 cores.push(entry.core.clone());
             }
         }
+        {
+            let guard = self.port_cores.lock().await;
+            for entry in guard.values() {
+                cores.push(entry.core.clone());
+            }
+        }
+        let mut seen = HashSet::new();
         for core in cores {
-            let _ = core.stop().await;
+            let key = Arc::as_ptr(&core) as usize;
+            if seen.insert(key) {
+                let _ = core.stop().await;
+            }
         }
     }
 }

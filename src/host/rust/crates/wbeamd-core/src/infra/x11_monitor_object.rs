@@ -3,15 +3,16 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[derive(Debug, Clone)]
-pub struct X11VirtualMonitorHandle {
+pub struct X11MonitorObjectHandle {
     pub name: String,
     pub x: i32,
     pub y: i32,
     pub width: u32,
     pub height: u32,
+    pub previous_fb: Option<(u32, u32)>,
 }
 
-pub fn create(serial: &str, size: &str) -> Result<X11VirtualMonitorHandle, String> {
+pub fn create(serial: &str, size: &str) -> Result<X11MonitorObjectHandle, String> {
     let display = std::env::var("DISPLAY").unwrap_or_default();
     if display.trim().is_empty() {
         return Err("DISPLAY is not set for daemon process".to_string());
@@ -22,6 +23,9 @@ pub fn create(serial: &str, size: &str) -> Result<X11VirtualMonitorHandle, Strin
     let xauth = resolve_xauthority();
     let (w, h) = parse_size(size);
     let name = monitor_name_for_serial(serial);
+    let previous_fb = xrandr_output(&["--query"], &display, xauth.as_deref())
+        .ok()
+        .and_then(|raw| parse_current_fb(&raw));
 
     // Best-effort cleanup in case stale monitor object exists from previous run.
     let _ = xrandr(&["--delmonitor", &name], &display, xauth.as_deref());
@@ -32,8 +36,12 @@ pub fn create(serial: &str, size: &str) -> Result<X11VirtualMonitorHandle, Strin
     let fb_w = (x as u32).saturating_add(w);
     let fb_h = max_h.max(h);
 
-    xrandr(&["--fb", &format!("{fb_w}x{fb_h}")], &display, xauth.as_deref())
-        .map_err(|e| format!("xrandr --fb failed: {e}"))?;
+    xrandr(
+        &["--fb", &format!("{fb_w}x{fb_h}")],
+        &display,
+        xauth.as_deref(),
+    )
+    .map_err(|e| format!("xrandr --fb failed: {e}"))?;
 
     let geometry = format!("{w}/{w}x{h}/{h}+{x}+{y}");
     xrandr(
@@ -49,27 +57,27 @@ pub fn create(serial: &str, size: &str) -> Result<X11VirtualMonitorHandle, Strin
         return Err("monitor object was not visible after setmonitor".to_string());
     }
 
-    Ok(X11VirtualMonitorHandle {
+    Ok(X11MonitorObjectHandle {
         name,
         x,
         y,
         width: w,
         height: h,
+        previous_fb,
     })
 }
 
-pub fn destroy(handle: &X11VirtualMonitorHandle) -> Result<(), String> {
+pub fn destroy(handle: &X11MonitorObjectHandle) -> Result<(), String> {
     let display = std::env::var("DISPLAY").unwrap_or_default();
     if display.trim().is_empty() {
         return Ok(());
     }
     let xauth = resolve_xauthority();
-    xrandr(
-        &["--delmonitor", &handle.name],
-        &display,
-        xauth.as_deref(),
-    )
-    .map(|_| ())
+    let _ = xrandr(&["--delmonitor", &handle.name], &display, xauth.as_deref());
+    if let Some((w, h)) = handle.previous_fb {
+        let _ = xrandr(&["--fb", &format!("{w}x{h}")], &display, xauth.as_deref());
+    }
+    Ok(())
 }
 
 fn existing_layout(display: &str, xauth: Option<&Path>) -> (i32, u32) {
@@ -84,7 +92,6 @@ fn existing_layout(display: &str, xauth: Option<&Path>) -> (i32, u32) {
         if line.is_empty() || line.starts_with("Monitors:") {
             continue;
         }
-        // Example: "0: +*eDP-1 1920/344x1080/194+0+0  eDP-1"
         let Some(geom) = line.split_whitespace().nth(2) else {
             continue;
         };
@@ -103,7 +110,6 @@ fn existing_layout(display: &str, xauth: Option<&Path>) -> (i32, u32) {
 }
 
 fn parse_monitor_geometry_token(token: &str) -> Option<(u32, i32, u32)> {
-    // token format: "<w>/<mm>x<h>/<mm>+<x>+<y>"
     let (size_part, pos_part) = token.split_once('+')?;
     let (w_part, h_part) = size_part.split_once('x')?;
     let w = w_part.split('/').next()?.parse::<u32>().ok()?;
@@ -124,6 +130,22 @@ fn parse_size(raw: &str) -> (u32, u32) {
         .and_then(|v| v.parse::<u32>().ok())
         .unwrap_or(720);
     (w.max(320), h.max(240))
+}
+
+fn parse_current_fb(raw: &str) -> Option<(u32, u32)> {
+    for line in raw.lines() {
+        let low = line.to_ascii_lowercase();
+        if !low.starts_with("screen ") || !low.contains(" current ") {
+            continue;
+        }
+        let current_part = line.split("current").nth(1)?;
+        let dims = current_part.split(',').next()?.trim();
+        let mut it = dims.split('x');
+        let w = it.next()?.trim().parse::<u32>().ok()?;
+        let h = it.next()?.trim().parse::<u32>().ok()?;
+        return Some((w, h));
+    }
+    None
 }
 
 fn monitor_name_for_serial(serial: &str) -> String {
@@ -230,4 +252,45 @@ fn resolve_xauthority() -> Option<PathBuf> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_monitor_geometry_token_parses_valid_geometry() {
+        let token = "1920/508x1080/286+1920+0";
+        assert_eq!(
+            parse_monitor_geometry_token(token),
+            Some((1920, 1920, 1080))
+        );
+    }
+
+    #[test]
+    fn parse_monitor_geometry_token_rejects_invalid_geometry() {
+        assert_eq!(parse_monitor_geometry_token("foo"), None);
+        assert_eq!(parse_monitor_geometry_token("1920+0+0"), None);
+    }
+
+    #[test]
+    fn parse_size_applies_defaults_and_minimums() {
+        assert_eq!(parse_size("160x100"), (320, 240));
+        assert_eq!(parse_size("1920x1080"), (1920, 1080));
+        assert_eq!(parse_size("bad"), (1280, 720));
+    }
+
+    #[test]
+    fn parse_current_fb_extracts_dimensions() {
+        let query = "Screen 0: minimum 8 x 8, current 3280 x 1080, maximum 32767 x 32767";
+        assert_eq!(parse_current_fb(query), Some((3280, 1080)));
+    }
+
+    #[test]
+    fn monitor_name_for_serial_normalizes_and_truncates() {
+        let name = monitor_name_for_serial("ab:cd-ef_1234567890-XYZ-extra");
+        assert!(name.starts_with("WBEAM_"));
+        assert!(name.len() <= 24);
+        assert!(name.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_'));
+    }
 }

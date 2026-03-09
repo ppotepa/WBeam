@@ -5,6 +5,7 @@ pub mod host_probe;
 pub mod process;
 pub mod telemetry;
 pub mod virtual_display;
+pub mod x11_backend;
 pub mod x11_extend;
+pub mod x11_monitor_object;
 pub mod x11_real_output;
-pub mod x11_virtual_monitor;

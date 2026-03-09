@@ -8,7 +8,12 @@ fn main() {
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| format!("0.1.0.0.{}", git_short_rev().unwrap_or_else(|| "dev0".to_string())));
+        .unwrap_or_else(|| {
+            format!(
+                "0.1.0.0.{}",
+                git_short_rev().unwrap_or_else(|| "dev0".to_string())
+            )
+        });
 
     // Keep revision as a direct pass-through. Any normalization here breaks
     // host/APK version parity and causes false mismatch diagnostics.

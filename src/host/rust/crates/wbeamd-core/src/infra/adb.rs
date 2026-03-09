@@ -12,6 +12,9 @@ use std::time::{Duration, Instant};
 use tokio::process::Command;
 use tracing::warn;
 
+const ANDROID_DEVICE_STREAM_PORT: u16 = 5000;
+const ANDROID_DEVICE_CONTROL_PORT: u16 = 5001;
+
 static USB_REVERSE_GUARD: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
 static USB_REVERSE_LAST_AT: OnceLock<StdMutex<Option<Instant>>> = OnceLock::new();
 
@@ -51,7 +54,10 @@ pub async fn ensure_usb_reverse(
     let _guard = match guard.try_lock() {
         Ok(g) => g,
         Err(_) => {
-            warn!(reason, "skipping reverse refresh (another reverse task in progress)");
+            warn!(
+                reason,
+                "skipping reverse refresh (another reverse task in progress)"
+            );
             return;
         }
     };
@@ -71,12 +77,18 @@ pub async fn ensure_usb_reverse(
     let serials = adb_target_serials(target_serial).await;
 
     if serials.is_empty() {
-        warn!(reason, "no adb devices in 'device' state for reverse mapping");
+        warn!(
+            reason,
+            "no adb devices in 'device' state for reverse mapping"
+        );
         return;
     }
 
     for serial in serials {
+        // Primary mapping for Android client: app dials fixed localhost ports
+        // (5000 stream, 5001 control) and host may run session on per-device ports.
         match Command::new(&script)
+            .arg(ANDROID_DEVICE_STREAM_PORT.to_string())
             .arg(stream_port.to_string())
             .env("WBEAM_ANDROID_SERIAL", &serial)
             .stdout(Stdio::null())
@@ -89,11 +101,41 @@ pub async fn ensure_usb_reverse(
             Err(e) => warn!(reason, %serial, error = %e, "failed to execute usb_reverse.sh"),
         }
 
+        // Compatibility mapping for APKs built with per-device stream port.
+        // Keep this as a plain `adb reverse` to avoid extra reconnect churn.
+        if needs_stream_compat_mapping(stream_port) {
+            match Command::new("adb")
+                .arg("-s")
+                .arg(&serial)
+                .arg("reverse")
+                .arg(format!("tcp:{stream_port}"))
+                .arg(format!("tcp:{stream_port}"))
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .await
+            {
+                Ok(s) if s.success() => {}
+                Ok(s) => warn!(
+                    reason,
+                    %serial,
+                    code = ?s.code(),
+                    "compat adb reverse for stream port failed"
+                ),
+                Err(e) => warn!(
+                    reason,
+                    %serial,
+                    error = %e,
+                    "failed to execute compat adb reverse for stream port"
+                ),
+            }
+        }
+
         match Command::new("adb")
             .arg("-s")
             .arg(&serial)
             .arg("reverse")
-            .arg(format!("tcp:{control_port}"))
+            .arg(format!("tcp:{ANDROID_DEVICE_CONTROL_PORT}"))
             .arg(format!("tcp:{control_port}"))
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -101,10 +143,19 @@ pub async fn ensure_usb_reverse(
             .await
         {
             Ok(s) if s.success() => {}
-            Ok(s) => warn!(reason, %serial, code = ?s.code(), "adb reverse for control port failed"),
-            Err(e) => warn!(reason, %serial, error = %e, "failed to execute adb reverse for control port"),
+            Ok(s) => {
+                warn!(reason, %serial, code = ?s.code(), "adb reverse for control port failed")
+            }
+            Err(e) => {
+                warn!(reason, %serial, error = %e, "failed to execute adb reverse for control port")
+            }
         }
+
     }
+}
+
+fn needs_stream_compat_mapping(stream_port: u16) -> bool {
+    stream_port != ANDROID_DEVICE_STREAM_PORT
 }
 
 pub async fn device_resolution(target_serial: Option<&str>) -> Option<String> {
@@ -165,10 +216,7 @@ async fn adb_target_serials(target_serial: Option<&str>) -> Vec<String> {
         }
     }
 
-    let output = Command::new("adb")
-        .arg("devices")
-        .output()
-        .await;
+    let output = Command::new("adb").arg("devices").output().await;
 
     let Ok(out) = output else {
         return Vec::new();
@@ -194,4 +242,26 @@ async fn adb_target_serials(target_serial: Option<&str>) -> Vec<String> {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compat_mapping_not_needed_for_default_stream_port() {
+        assert!(!needs_stream_compat_mapping(5000));
+    }
+
+    #[test]
+    fn compat_mapping_needed_for_non_default_stream_port() {
+        assert!(needs_stream_compat_mapping(5002));
+        assert!(needs_stream_compat_mapping(7000));
+    }
+
+    #[test]
+    fn android_device_port_constants_are_stable() {
+        assert_eq!(ANDROID_DEVICE_STREAM_PORT, 5000);
+        assert_eq!(ANDROID_DEVICE_CONTROL_PORT, 5001);
+    }
 }

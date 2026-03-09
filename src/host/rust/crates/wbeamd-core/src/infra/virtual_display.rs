@@ -18,7 +18,9 @@ pub fn install_hint() -> String {
 
 pub fn spawn_xvfb_for_serial(serial: &str, size: &str) -> Result<VirtualDisplayHandle, String> {
     if !has_xvfb() {
-        return Err("Xvfb binary not found on host (required for virtual desktop mode)".to_string());
+        return Err(
+            "Xvfb binary not found on host (required for virtual desktop mode)".to_string(),
+        );
     }
     let (width, height) = parse_size(size);
     let base = 100 + (stable_hash(serial) % 200) as u16;
@@ -51,7 +53,9 @@ pub fn spawn_xvfb_for_serial(serial: &str, size: &str) -> Result<VirtualDisplayH
             return Ok(VirtualDisplayHandle { pid, display });
         }
 
-        let _ = Command::new("kill").args(["-TERM", &pid.to_string()]).status();
+        let _ = Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .status();
     }
 
     Err("failed to allocate free Xvfb display number".to_string())

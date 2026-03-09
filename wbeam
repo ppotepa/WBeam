@@ -11,8 +11,8 @@ DAEMON_NAME="${WBEAM_DAEMON_SERVICE_NAME:-wbeam-daemon}"
 DAEMON_BIN="$ROOT_DIR/src/host/rust/target/release/wbeamd-server"
 
 ANDROID_DIR="$ROOT_DIR/android"
-ANDROID_PACKAGE="com.wbeam"
-ANDROID_ACTIVITY=".MainActivity"
+ANDROID_PACKAGE="${WBEAM_ANDROID_PACKAGE:-com.wbeam}"
+ANDROID_ACTIVITY="${WBEAM_ANDROID_ACTIVITY:-.MainActivity}"
 ANDROID_APK="$ANDROID_DIR/app/build/outputs/apk/debug/app-debug.apk"
 ANDROID_APK_RELEASE="$ANDROID_DIR/app/build/outputs/apk/release/app-release.apk"
 ANDROID_APK_RELEASE_UNSIGNED="$ANDROID_DIR/app/build/outputs/apk/release/app-release-unsigned.apk"
@@ -37,9 +37,10 @@ Usage:
 
 Groups:
   ip        up | down | status
-  host      build | run | debug | status | down
+  host      build | run | debug | status | down | probe
   daemon    up | down | status   (alias for host)
   android   build | install | launch | deploy | deploy-all | build-release | install-release | deploy-release
+  x11proto  probe-host | doctor | status | start | stop | smoke | acceptance | android-build | android-deploy
   deps      virtual check [--json] | virtual install [--dry-run] [--yes]
   version   new | current | doctor
   watch     devices | connections | streaming | service | logs | status | health | doctor | tui
@@ -51,6 +52,7 @@ Examples:
   ./wbeam host build             # cargo build --release wbeamd-server + wbeamd-streamer
   ./wbeam host run               # release binary, foreground
   ./wbeam host debug             # debug build + coloured logs + ADB sidecar
+  ./wbeam host probe             # host fingerprint JSON (os/session/display/providers/tools)
   ./wbeam android deploy         # build + install + launch in one step
   ./wbeam android deploy-all     # build once, install + launch on all connected devices
   ./wbeam android build          # ./gradlew assembleDebug only
@@ -59,6 +61,10 @@ Examples:
   ./wbeam android build-release  # ./gradlew assembleRelease
   ./wbeam android install-release
   ./wbeam android deploy-release
+  ./wbeam x11proto doctor --serial <serial> --stream-port 5002
+  ./wbeam x11proto smoke --serial <serial> --stream-port 5002
+  ./wbeam x11proto acceptance --serial <serial> --stream-port 5002
+  ./wbeam x11proto android-deploy
   ./wbeam deps virtual check --json
   ./wbeam deps virtual install --dry-run
   ./wbeam version doctor         # diagnose host/APK version mismatch
@@ -542,8 +548,13 @@ android_device_has_ipv4() {
 android_try_reverse_setup() {
   local stream_port="${1:-$STREAM_PORT}"
   local control_port="${2:-$CONTROL_PORT}"
-  adb_device_cmd reverse "tcp:${stream_port}" "tcp:${stream_port}" >/dev/null 2>&1 || return 1
-  adb_device_cmd reverse "tcp:${control_port}" "tcp:${control_port}" >/dev/null 2>&1 || return 1
+  # Canonical device-side ports expected by Android app.
+  adb_device_cmd reverse "tcp:5000" "tcp:${stream_port}" >/dev/null 2>&1 || return 1
+  adb_device_cmd reverse "tcp:5001" "tcp:${control_port}" >/dev/null 2>&1 || return 1
+  # Compatibility mapping for APKs built with per-device stream port.
+  if [[ "$stream_port" != "5000" ]]; then
+    adb_device_cmd reverse "tcp:${stream_port}" "tcp:${stream_port}" >/dev/null 2>&1 || true
+  fi
   return 0
 }
 
@@ -877,6 +888,17 @@ daemon_status() {
     print_control_unreachable_diagnostics
     exit 1
   fi
+}
+
+host_probe() {
+  if command -v python3 >/dev/null 2>&1; then
+    exec python3 "$HOST_SCRIPTS_DIR/probe_host.py" "$@"
+  fi
+  if command -v python >/dev/null 2>&1; then
+    exec python "$HOST_SCRIPTS_DIR/probe_host.py" "$@"
+  fi
+  echo "Missing required command: python3 (or python)" >&2
+  exit 1
 }
 
 android_build() {
@@ -1901,6 +1923,28 @@ deps_virtual_install() {
   "$ROOT_DIR/scripts/virtual-deps-install.sh" "$@"
 }
 
+x11proto_run() {
+  "$ROOT_DIR/proto_x11/run.sh" "$@"
+}
+
+x11proto_android_build() {
+  (
+    ANDROID_PACKAGE="com.wbeam.x11"
+    export WBEAM_ANDROID_APP_ID_SUFFIX=".x11"
+    export WBEAM_ANDROID_APP_NAME="WBeam X11"
+    android_build
+  )
+}
+
+x11proto_android_deploy() {
+  (
+    ANDROID_PACKAGE="com.wbeam.x11"
+    export WBEAM_ANDROID_APP_ID_SUFFIX=".x11"
+    export WBEAM_ANDROID_APP_NAME="WBeam X11"
+    android_deploy
+  )
+}
+
 group="${1:-}"
 cmd="${2:-}"
 
@@ -1925,6 +1969,7 @@ case "$group" in
       debug)          host_debug ;;
       status)         daemon_status ;;
       down|stop)      daemon_down ;;
+      probe)          shift 2; host_probe "$@" ;;
       *)              print_help; exit 1 ;;
     esac
     ;;
@@ -1948,6 +1993,15 @@ case "$group" in
       install-release|release-install) android_install_release ;;
       deploy-release|release-deploy)   android_deploy_release ;;
       *)              print_help; exit 1 ;;
+    esac
+    ;;
+  x11proto)
+    case "$cmd" in
+      probe-host|probe) shift 2; x11proto_run probe-host "$@" ;;
+      doctor|status|start|stop|smoke|acceptance) shift 2; x11proto_run "$cmd" "$@" ;;
+      android-build) x11proto_android_build ;;
+      android-deploy) x11proto_android_deploy ;;
+      *) print_help; exit 1 ;;
     esac
     ;;
   deps)

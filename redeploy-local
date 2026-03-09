@@ -3,35 +3,46 @@ set -euo pipefail
 
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+USER_UID="$(id -u)"
+USER_RUNTIME_DIR="/run/user/$USER_UID"
 
 usage() {
   cat <<'USAGE'
 Usage:
-  ./redeploy-local [--no-host-restart] [--no-host-build] [--no-android]
+  ./redeploy-local [--host-restart] [--no-host-build] [--no-android] [--no-desktop-build] [--no-desktop-start]
 
 Flow (default):
   1) stop host daemon processes
-  2) generate shared build revision
-  3) build host (release)
-  4) start host debug daemon in background (no desktop UI launch)
-  5) deploy Android APK to all connected ADB devices (force install)
-  6) run version doctor
+  2) remove desktop user service unit
+  3) generate shared build revision
+  4) build host (release)
+  5) (optional) start host debug daemon in background
+  6) rebuild desktop app bundle
+  7) deploy Android APK to all connected ADB devices (force install)
+  8) run version doctor
+  9) launch desktop UI (after APK deploy)
 
 Notes:
-  - This script never starts desktop UI.
-  - Use desktop UI separately via: ./desktop.sh
+  - Service is intentionally removed here; desktop UI should own service lifecycle.
+  - By default this script does NOT start host daemon; use --host-restart only for diagnostics.
 USAGE
 }
 
-HOST_RESTART=1
+HOST_RESTART=0
 HOST_BUILD=1
 ANDROID_DEPLOY=1
+DESKTOP_BUILD=1
+DESKTOP_START=1
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)
       usage
       exit 0
+      ;;
+    --host-restart)
+      HOST_RESTART=1
+      shift
       ;;
     --no-host-restart)
       HOST_RESTART=0
@@ -43,6 +54,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-android)
       ANDROID_DEPLOY=0
+      shift
+      ;;
+    --no-desktop-build)
+      DESKTOP_BUILD=0
+      shift
+      ;;
+    --no-desktop-start)
+      DESKTOP_START=0
       shift
       ;;
     *)
@@ -62,6 +81,21 @@ fi
 
 echo "[redeploy-local] host stop"
 ./wbeam host down || true
+
+echo "[redeploy-local] remove desktop user service"
+if command -v systemctl >/dev/null 2>&1; then
+  XDG_RUNTIME_DIR="$USER_RUNTIME_DIR" DBUS_SESSION_BUS_ADDRESS="unix:path=$USER_RUNTIME_DIR/bus" \
+    systemctl --user stop wbeam-daemon.service >/dev/null 2>&1 || true
+  XDG_RUNTIME_DIR="$USER_RUNTIME_DIR" DBUS_SESSION_BUS_ADDRESS="unix:path=$USER_RUNTIME_DIR/bus" \
+    systemctl --user disable wbeam-daemon.service >/dev/null 2>&1 || true
+  if ! rm -f "$HOME/.config/systemd/user/wbeam-daemon.service" >/dev/null 2>&1; then
+    echo "[redeploy-local] WARN: failed to remove $HOME/.config/systemd/user/wbeam-daemon.service"
+  fi
+  XDG_RUNTIME_DIR="$USER_RUNTIME_DIR" DBUS_SESSION_BUS_ADDRESS="unix:path=$USER_RUNTIME_DIR/bus" \
+    systemctl --user daemon-reload >/dev/null 2>&1 || true
+else
+  echo "[redeploy-local] WARN: systemctl not found; service cleanup skipped"
+fi
 
 BUILD_REV="$(./wbeam version new)"
 echo "[redeploy-local] build_rev=$BUILD_REV"
@@ -84,12 +118,28 @@ if [[ "$HOST_RESTART" -eq 1 ]]; then
     sleep 0.5
   done
 else
-  echo "[redeploy-local] host start skipped (--no-host-restart)"
+  echo "[redeploy-local] host start skipped (default; use --host-restart for diagnostics)"
+fi
+
+if [[ "$DESKTOP_BUILD" -eq 1 ]]; then
+  echo "[redeploy-local] desktop build"
+  npm --prefix "$ROOT_DIR/src/apps/desktop-tauri" run build
+else
+  echo "[redeploy-local] desktop build skipped (--no-desktop-build)"
 fi
 
 if [[ "$ANDROID_DEPLOY" -eq 1 ]]; then
-  echo "[redeploy-local] android deploy-all"
-  WBEAM_BUILD_REV="$BUILD_REV" WBEAM_ANDROID_FORCE_INSTALL=1 ./wbeam android deploy-all
+  if command -v adb >/dev/null 2>&1; then
+    DEVICE_COUNT="$(adb devices | awk 'NR>1 && $2=="device" {n++} END{print n+0}')"
+  else
+    DEVICE_COUNT=0
+  fi
+  if [[ "$DEVICE_COUNT" -gt 0 ]]; then
+    echo "[redeploy-local] android deploy-all (devices=$DEVICE_COUNT)"
+    WBEAM_BUILD_REV="$BUILD_REV" WBEAM_ANDROID_FORCE_INSTALL=1 ./wbeam android deploy-all
+  else
+    echo "[redeploy-local] android deploy skipped (no adb devices in 'device' state)"
+  fi
 else
   echo "[redeploy-local] android deploy skipped (--no-android)"
 fi
@@ -97,6 +147,16 @@ fi
 echo "[redeploy-local] version doctor"
 ./wbeam version doctor || true
 
-echo "[redeploy-local] DONE"
-echo "[redeploy-local] start desktop UI manually with: ./desktop.sh"
+if [[ "$DESKTOP_START" -eq 1 ]]; then
+  DESKTOP_USER="${WBEAM_DEV_REMOTE_USER:-$(id -un)}"
+  DESKTOP_LOG="$ROOT_DIR/logs/$(date +%Y%m%d-%H%M%S).desktop.redeploy-local.log"
+  echo "[redeploy-local] launch desktop UI via runas-remote user=$DESKTOP_USER (background)"
+  nohup env RUNAS_REMOTE_SESSION_REMOTE=no RUNAS_REMOTE_QUIET=1 \
+    "$ROOT_DIR/runas-remote" "$DESKTOP_USER" "$ROOT_DIR/desktop.sh" >"$DESKTOP_LOG" 2>&1 &
+  disown || true
+  echo "[redeploy-local] desktop log: $DESKTOP_LOG"
+else
+  echo "[redeploy-local] desktop start skipped (--no-desktop-start)"
+fi
 
+echo "[redeploy-local] DONE"

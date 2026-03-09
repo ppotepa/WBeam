@@ -139,10 +139,11 @@ export function createSessionManager(api: HostApiManager) {
       let devicesChanged = false;
       if (canProbeDevices) {
         devicesChanged = await loadDevices(loading(), !silent);
-      } else if (devices().length > 0 || hostVersion() || daemonVersion()) {
+      } else if (devices().length > 0 || hostVersion() || daemonVersion() || deviceActionBusy().length > 0) {
         setDevices([]);
         setHostVersion("");
         setDaemonVersion("");
+        setDeviceActionBusy([]);
         lastDevicesKey = "";
         lastVersionKey = "";
         devicesChanged = true;
@@ -195,7 +196,7 @@ export function createSessionManager(api: HostApiManager) {
 
   async function connectDevice(
     device: DeviceBasic,
-    displayMode: "virtual_monitor" | "virtual_isolated" | "duplicate",
+    displayMode: "virtual_monitor" | "duplicate",
   ) {
     const key = `${device.serial}:connect`;
     setDeviceActionBusy((prev) => (prev.includes(key) ? prev : [...prev, key]));

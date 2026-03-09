@@ -17,12 +17,13 @@ Defaults:
   session scope = --local
 
 Flow:
-  1) optionally remove desktop user service (only with --fresh-service)
+  1) optionally remove desktop user service (forced in --redeploy)
   2) restart host (selected GUI session)
-  3) launch desktop GUI first (selected GUI session)
-  4) snapshot adb devices + start USB udev probe logging
-  5) optional full Android deploy-all only with --redeploy
-  6) print host-probe and daemon status
+  3) snapshot adb devices + start USB udev probe logging
+  4) optional full Android deploy-all only with --redeploy
+  5) optional desktop rebuild (forced in --redeploy)
+  6) launch desktop GUI (selected GUI session)
+  7) print host-probe and daemon status
 
 Modes:
   --quick           explicit fast startup (no Android deploy, no host rebuild)
@@ -48,6 +49,7 @@ REDEPLOY=0
 REBUILD_HOST=0
 HOST_RESTART=1
 FRESH_SERVICE=0
+REBUILD_DESKTOP=0
 DESKTOP_USER="${WBEAM_DEV_REMOTE_USER:-}"
 SESSION_REMOTE_FILTER="no"
 SESSION_ID_OVERRIDE=""
@@ -103,15 +105,21 @@ while [[ $# -gt 0 ]]; do
     --redeploy|--deploy)
       REDEPLOY=1
       REBUILD_HOST=1
+      REBUILD_DESKTOP=1
       shift
       ;;
     --quick)
       REDEPLOY=0
       REBUILD_HOST=0
+      REBUILD_DESKTOP=0
       shift
       ;;
     --rebuild-host)
       REBUILD_HOST=1
+      shift
+      ;;
+    --rebuild-desktop)
+      REBUILD_DESKTOP=1
       shift
       ;;
     --no-host-restart)
@@ -153,6 +161,10 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "$REDEPLOY" -eq 1 ]]; then
+  FRESH_SERVICE=1
+fi
 
 if [[ -z "$DESKTOP_USER" ]]; then
   DESKTOP_USER="$(resolve_active_user || true)"
@@ -287,10 +299,6 @@ fi
 run_step "wait for control API" bash -lc 'for i in $(seq 1 180); do curl -fsS --max-time 1 http://127.0.0.1:5001/v1/status >/dev/null 2>&1 && exit 0; sleep 0.5; done; exit 1'
 run_step "wait for supported host-probe" bash -lc 'for i in $(seq 1 60); do probe="$(curl -fsS --max-time 1 http://127.0.0.1:5001/v1/host-probe 2>/dev/null || true)"; if [[ "$probe" == *"\"supported\":true"* ]]; then exit 0; fi; sleep 0.5; done; echo "[start-remote] WARN: host-probe not yet supported=true (continuing)" >&2; exit 0'
 
-DESKTOP_LOG="$(next_log_file desktop)"
-run_step "launch desktop GUI first (background)" runas_remote_exec "$DESKTOP_USER" bash -- -lc "cd '$ROOT_DIR' && nohup ./desktop.sh >'$DESKTOP_LOG' 2>&1 & disown"
-run_step "wait for desktop process" bash -lc "for i in \$(seq 1 120); do pgrep -u '$DESKTOP_USER' -x wbeam-desktop-t >/dev/null 2>&1 && exit 0; sleep 0.5; done; echo '[start-remote] WARN: desktop process did not become ready (continuing).' >&2; exit 0"
-
 ADB_LOG="$(next_log_file adb)"
 bash -lc "adb start-server >/dev/null 2>&1 || true"
 : > "$ADB_LOG"
@@ -304,7 +312,7 @@ if [[ "$REDEPLOY" -eq 1 ]]; then
   run_step "android uninstall APK on all adb devices" bash -lc 'adb start-server >/dev/null 2>&1 || true; for s in $(adb devices | awk '"'"'NR>1 && $2=="device"{print $1}'"'"'); do echo "[start-remote][$s] uninstall com.wbeam"; adb -s "$s" uninstall com.wbeam >/dev/null 2>&1 || true; done'
   if ! run_step "android deploy-all" env WBEAM_BUILD_REV="$BUILD_REV" WBEAM_ANDROID_FORCE_INSTALL=1 WBEAM_ANDROID_SKIP_LAUNCH=1 ./wbeam android deploy-all; then
     deploy_failed=1
-    echo "[start-remote] WARN: android deploy-all failed; desktop is already running for diagnostics." >&2
+    echo "[start-remote] WARN: android deploy-all failed; desktop launch skipped." >&2
   fi
 else
   run_step "android deploy-all" bash -lc "echo '[start-remote] skipped (fast mode, use --redeploy)'"
@@ -312,6 +320,21 @@ fi
 
 run_step "adb snapshot (post-deploy)" adb_snapshot_log "$ADB_LOG"
 run_step "version doctor" ./wbeam version doctor
+
+if [[ "$REBUILD_DESKTOP" -eq 1 ]]; then
+  run_step "desktop app rebuild" bash -lc "npm --prefix '$ROOT_DIR/src/apps/desktop-tauri' run build"
+else
+  run_step "desktop app rebuild" bash -lc "echo '[start-remote] skipped (use --rebuild-desktop or --redeploy)'"
+fi
+
+DESKTOP_LOG=""
+if [[ "$deploy_failed" -eq 0 ]]; then
+  DESKTOP_LOG="$(next_log_file desktop)"
+  run_step "launch desktop GUI (background)" runas_remote_exec "$DESKTOP_USER" bash -- -lc "cd '$ROOT_DIR' && nohup ./desktop.sh >'$DESKTOP_LOG' 2>&1 & disown"
+  run_step "wait for desktop process" bash -lc "for i in \$(seq 1 120); do pgrep -u '$DESKTOP_USER' -x wbeam-desktop-t >/dev/null 2>&1 && exit 0; sleep 0.5; done; echo '[start-remote] WARN: desktop process did not become ready (continuing).' >&2; exit 0"
+else
+  echo "[start-remote] desktop launch skipped because deploy failed."
+fi
 
 echo
 echo "[start-remote] host-probe:"
@@ -322,8 +345,7 @@ curl -sS http://127.0.0.1:5001/v1/status || true
 echo
 
 echo
-echo "[start-remote] desktop already launched in background"
-echo "[start-remote] mode: redeploy=${REDEPLOY} rebuild_host=${REBUILD_HOST} host_restart=${HOST_RESTART} fresh_service=${FRESH_SERVICE}"
+echo "[start-remote] mode: redeploy=${REDEPLOY} rebuild_host=${REBUILD_HOST} rebuild_desktop=${REBUILD_DESKTOP} host_restart=${HOST_RESTART} fresh_service=${FRESH_SERVICE}"
 echo "[start-remote] session_scope: remote_filter=${SESSION_REMOTE_FILTER}"
 if [[ -n "$SESSION_ID_OVERRIDE" ]]; then
   echo "[start-remote] session_scope: forced_sid=${SESSION_ID_OVERRIDE}"
@@ -332,7 +354,11 @@ if [[ -n "$DISPLAY_OVERRIDE" ]]; then
   echo "[start-remote] session_scope: forced_display=${DISPLAY_OVERRIDE}"
 fi
 echo "[start-remote] logs:"
-echo "  desktop: $DESKTOP_LOG"
+if [[ -n "$DESKTOP_LOG" ]]; then
+  echo "  desktop: $DESKTOP_LOG"
+else
+  echo "  desktop: (not launched)"
+fi
 echo "  adb:     $ADB_LOG"
 echo "  udev:    $UDEV_LOG"
 if [[ "$deploy_failed" -eq 1 ]]; then

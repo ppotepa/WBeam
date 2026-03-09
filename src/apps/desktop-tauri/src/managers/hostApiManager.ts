@@ -70,7 +70,7 @@ export class HostApiManager {
 
   async connectDevice(
     device: DeviceBasic,
-    displayMode: "virtual_monitor" | "virtual_isolated" | "duplicate",
+    displayMode: "virtual_monitor" | "duplicate",
   ): Promise<void> {
     try {
       await withTimeout(

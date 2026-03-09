@@ -132,4 +132,15 @@ case "$manager" in
     ;;
 esac
 
+if command_exists modprobe; then
+  with_sudo modprobe evdi initial_device_count=1 \
+    || with_sudo modprobe evdi \
+    || true
+fi
+
+if command_exists lsmod && ! lsmod | grep -q '^evdi '; then
+  echo "[virtual-deps] WARN: evdi module is still not loaded." >&2
+  echo "[virtual-deps] Try: sudo modprobe evdi initial_device_count=1" >&2
+fi
+
 echo "[virtual-deps] install done"

@@ -546,6 +546,13 @@ export default function App() {
           const virtualMonitorSelected = () => connectDialogMode() === "virtual_monitor";
           const doctor = () => connectDialogDoctor();
           const virtualMonitorAvailable = () => isVirtualMonitorAvailable(doctor() ?? null);
+          const virtualMonitorHint = () => {
+            if (!virtualMonitorAvailable()) return "Not implemented for current host session yet.";
+            if (doctor()?.resolver === "linux_x11_monitor_object_experimental") {
+              return "Experimental simulated monitor space on X11 (xrandr --setmonitor); not a true output.";
+            }
+            return "Creates real additional monitor space on host desktop.";
+          };
           return (
             <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Select display mode">
               <section class="connect-modal">
@@ -562,9 +569,7 @@ export default function App() {
                   <span>
                     Virtual monitor (extend host desktop)
                     <small>
-                      {virtualMonitorAvailable()
-                        ? "Creates real additional monitor space on host desktop."
-                        : "Not implemented for current host session yet."}
+                      {virtualMonitorHint()}
                     </small>
                   </span>
                 </label>

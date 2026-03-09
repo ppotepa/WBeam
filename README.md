@@ -20,6 +20,11 @@ idea is simple: plug android phone/tablet into linux and use it as an extra disp
 - used for risky changes: startup flow, reconnect, queue sizing, pacing, decoder behavior
 - main entrypoint: `proto/run.sh`
 
+3) `proto_x11/` lane (focused X11 virtual monitor)
+- strict real-output X11 path (no default `--setmonitor` fallback)
+- separate APK identity for experiments: `com.wbeam.x11`
+- host entrypoint: `proto_x11/run.sh`
+
 ## repo layout (after src migration)
 
 - `src/apps/desktop-egui/` -> desktop control app (rust + egui)
