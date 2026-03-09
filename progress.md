@@ -761,3 +761,13 @@ Status: active
   - unified activation/probe return types
 - Validation:
   - `cargo check -p wbeamd-core -p wbeamd-server` -> OK
+
+## In Progress (2026-03-09) [commit: 664cb92e] - add Linux platform layer in backend tree
+- Restructured backend modules to enforce hierarchy:
+  - `display_backends/mod.rs` (host router)
+  - `display_backends/linux/mod.rs` (linux router by session type)
+  - `display_backends/linux/x11/*` and `display_backends/linux/wayland/*` (platform-mode implementations)
+  - `display_backends/windows/*` (platform-mode implementations)
+- Kept mode boundary explicit inside each backend (`duplicate`, `virtual_monitor`, and `x11/virtual_isolated` compatibility mode).
+- Validation:
+  - `cargo check -p wbeamd-core -p wbeamd-server` -> OK
