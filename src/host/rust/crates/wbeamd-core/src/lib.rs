@@ -36,8 +36,7 @@ use domain::state::{
 };
 use infra::process as proc;
 use infra::{
-    adb, config_store, host_probe, telemetry, virtual_display, x11_real_output,
-    x11_virtual_monitor,
+    adb, config_store, display_backends, host_probe, telemetry,
 };
 
 const DEFAULT_START_TIMEOUT: Duration = Duration::from_secs(45);
@@ -230,9 +229,7 @@ struct Inner {
     last_no_present_recovery_at: Option<Instant>,
     presets: BTreeMap<String, ActiveConfig>,
     requested_display_mode: String,
-    virtual_display: Option<virtual_display::VirtualDisplayHandle>,
-    real_output: Option<x11_real_output::X11RealOutputHandle>,
-    virtual_monitor: Option<x11_virtual_monitor::X11VirtualMonitorHandle>,
+    display_runtime: Option<display_backends::RuntimeHandle>,
 }
 
 impl Inner {
@@ -266,9 +263,7 @@ impl Inner {
             last_no_present_recovery_at: None,
             presets,
             requested_display_mode: "duplicate".to_string(),
-            virtual_display: None,
-            real_output: None,
-            virtual_monitor: None,
+            display_runtime: None,
         }
     }
 }
@@ -304,11 +299,7 @@ pub struct DaemonCore {
 
 impl DaemonCore {
     fn normalize_display_mode(mode: Option<&str>) -> &'static str {
-        match mode.unwrap_or("duplicate").trim().to_lowercase().as_str() {
-            "virtual" | "virtual_monitor" => "virtual_monitor",
-            "isolated" | "virtual_isolated" => "virtual_isolated",
-            _ => "duplicate",
-        }
+        display_backends::normalize_requested_mode(mode).as_str()
     }
 
     pub async fn set_display_mode(&self, mode: Option<&str>) {
@@ -318,22 +309,12 @@ impl DaemonCore {
     }
 
     async fn stop_virtual_display_if_any(&self) {
-        let (pid, monitor, real_output) = {
+        let runtime = {
             let mut inner = self.inner.lock().await;
-            (
-                inner.virtual_display.take().map(|vd| vd.pid),
-                inner.virtual_monitor.take(),
-                inner.real_output.take(),
-            )
+            inner.display_runtime.take()
         };
-        if let Some(pid) = pid {
-            proc::terminate_pid(pid).await;
-        }
-        if let Some(handle) = monitor {
-            let _ = x11_virtual_monitor::destroy(&handle);
-        }
-        if let Some(handle) = real_output {
-            let _ = x11_real_output::destroy(&handle);
+        if let Some(handle) = runtime {
+            display_backends::stop_runtime(handle).await;
         }
     }
 
@@ -479,50 +460,16 @@ impl DaemonCore {
 
     pub async fn virtual_probe(&self) -> VirtualDisplayProbeResponse {
         let backend = self.host_probe.capture_mode_name().to_string();
-        let mut missing = Vec::new();
-        let mut resolver = "none".to_string();
-        let mut supported = false;
-        let mut hint = "Virtual desktop is not available on this host backend.".to_string();
-
-        if backend == "x11_gst" {
-            let real_probe = x11_real_output::probe(self.host_probe.is_remote);
-            if real_probe.supported {
-                supported = true;
-                resolver = "linux_x11_evdi_real_output".to_string();
-                hint = "X11 real-output backend is available. Virtual monitor mode should create a true additional desktop output.".to_string();
-            } else {
-                resolver = "linux_x11_xvfb_fallback".to_string();
-                if virtual_display::has_xvfb() {
-                    hint = format!(
-                        "X11 real-output backend unavailable: {}. Isolated session (Xvfb) is available, but it is not a KDE additional monitor.",
-                        real_probe.reason
-                    );
-                } else {
-                    missing = real_probe.missing_deps;
-                    if !missing.iter().any(|m| m == "Xvfb") {
-                        missing.push("Xvfb".to_string());
-                    }
-                    hint = format!(
-                        "X11 real-output backend unavailable: {}. {}",
-                        real_probe.reason,
-                        virtual_display::install_hint()
-                    );
-                }
-            }
-        } else if backend == "wayland_portal" {
-            resolver = "linux_wayland_portal_virtual".to_string();
-            missing.push("virtual-wayland-backend".to_string());
-            hint = "Wayland virtual desktop backend is not implemented yet. Use Duplicate mode.".to_string();
-        }
+        let probe = display_backends::virtual_monitor_probe(&self.host_probe);
 
         VirtualDisplayProbeResponse {
             base: self.base_response().await,
             ok: true,
             host_backend: backend,
-            virtual_supported: supported,
-            resolver,
-            missing_deps: missing,
-            install_hint: hint,
+            virtual_supported: probe.supported,
+            resolver: probe.resolver,
+            missing_deps: probe.missing_deps,
+            install_hint: probe.hint,
         }
     }
 
@@ -975,6 +922,8 @@ impl DaemonCore {
             let inner = self.inner.lock().await;
             inner.requested_display_mode.clone()
         };
+        let requested_mode =
+            display_backends::normalize_requested_mode(Some(&requested_display_mode));
         let mut launch_size = cfg.size.clone();
         if !self.host_probe.supports_streaming() {
             let reason = self.host_probe.unsupported_reason();
@@ -986,7 +935,7 @@ impl DaemonCore {
             return Err(CoreError::UnsupportedHost(reason));
         }
 
-        if requested_display_mode != "duplicate" {
+        if requested_mode.is_virtual() {
             if let Some(target_size) = adb::device_resolution(self.target_serial.as_deref()).await {
                 if launch_size != target_size {
                     info!(
@@ -1094,51 +1043,26 @@ impl DaemonCore {
 
         let mut cmd;
         let capture_backend = self.host_probe.capture_mode_name();
-        let mut x11_capture_region: Option<(i32, i32, u32, u32)> = None;
-        if requested_display_mode != "duplicate" && capture_backend != "x11_gst" {
-            return Err(CoreError::UnsupportedHost(
-                "virtual desktop mode currently requires x11_gst host backend".to_string(),
-            ));
-        }
-        let mut x11_display_override: Option<String> = None;
-        let mut using_virtual_x11 = false;
-
-        if capture_backend == "x11_gst" {
-            if requested_display_mode == "virtual_monitor" {
-                self.stop_virtual_display_if_any().await;
-                let serial_hint = self.target_serial.as_deref().unwrap_or("default");
-                let handle = x11_real_output::create(serial_hint, &launch_size)
-                    .map_err(CoreError::Spawn)?;
-                info!(
-                    serial = serial_hint,
-                    size = %launch_size,
-                    output = %handle.output_name,
-                    "virtual monitor mode: enabled real x11 output"
-                );
-                x11_display_override = self.host_probe.display.clone();
-                x11_capture_region = Some((handle.x, handle.y, handle.width, handle.height));
-                let mut inner = self.inner.lock().await;
-                inner.real_output = Some(handle);
-            } else if requested_display_mode == "virtual_isolated" {
-                self.stop_virtual_display_if_any().await;
-                let serial_hint = self.target_serial.as_deref().unwrap_or("default");
-                let handle = virtual_display::spawn_xvfb_for_serial(serial_hint, &launch_size)
-                    .map_err(CoreError::Spawn)?;
-                info!(
-                    serial = serial_hint,
-                    size = %launch_size,
-                    display = %handle.display,
-                    pid = handle.pid,
-                    "virtual mode: spawned Xvfb display"
-                );
-                x11_display_override = Some(handle.display.clone());
-                using_virtual_x11 = true;
-                let mut inner = self.inner.lock().await;
-                inner.virtual_display = Some(handle);
-            } else {
-                self.stop_virtual_display_if_any().await;
-                x11_display_override = self.host_probe.display.clone();
+        self.stop_virtual_display_if_any().await;
+        let serial_hint = self.target_serial.as_deref().unwrap_or("default");
+        let activation = display_backends::activate_start(
+            &self.host_probe,
+            requested_mode,
+            serial_hint,
+            &launch_size,
+        )
+        .map_err(|e| match e {
+            display_backends::ActivationError::Unsupported(msg) => {
+                CoreError::UnsupportedHost(msg)
             }
+            display_backends::ActivationError::Failed(msg) => CoreError::Spawn(msg),
+        })?;
+        let x11_display_override = activation.display_override;
+        let x11_capture_region = activation.capture_region;
+        let using_virtual_x11 = activation.using_virtual_x11;
+        if let Some(runtime_handle) = activation.runtime_handle {
+            let mut inner = self.inner.lock().await;
+            inner.display_runtime = Some(runtime_handle);
         }
 
         if use_rust_streamer {
