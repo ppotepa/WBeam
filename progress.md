@@ -771,3 +771,21 @@ Status: active
 - Kept mode boundary explicit inside each backend (`duplicate`, `virtual_monitor`, and `x11/virtual_isolated` compatibility mode).
 - Validation:
   - `cargo check -p wbeamd-core -p wbeamd-server` -> OK
+
+## In Progress (2026-03-09) [commit: abe29ade] - virtual stream startup diagnostics and X11 capture fix
+- Diagnosed real startup failure from host status/logs:
+  - `stream start aborted (code=101): property 'startx' of type 'GstXImageSrc' can't be set from the given type (expected: 'guint', got: 'gint')`
+- Fixed Rust streamer X11 source property types:
+  - `ximagesrc` `startx/starty/endx/endy` now set as `u32` (with normalization from env values).
+- Added stronger X11 virtual monitor validation:
+  - if enabled output geometry mirrors another active output exactly, backend now returns a clear error (`extended desktop not active`) instead of proceeding silently.
+- Added X11 virtual monitor activation log with output/geometry for easier diagnosis.
+- Improved Android startup step-3 messaging:
+  - removed hardcoded `./devtool ip up` hint,
+  - shows clearer ADB reverse/LAN guidance,
+  - surfaces compact host `last_error`,
+  - shows explicit `host stream start failed` when daemon reports stream start abort.
+- Validation:
+  - `cargo check -p wbeamd-streamer -p wbeamd-core -p wbeamd-server` -> OK
+  - Android Gradle compile check blocked by local Gradle runtime issue:
+    `Could not determine a usable wildcard IP for this machine`.
