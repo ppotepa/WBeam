@@ -789,3 +789,11 @@ Status: active
   - `cargo check -p wbeamd-streamer -p wbeamd-core -p wbeamd-server` -> OK
   - Android Gradle compile check blocked by local Gradle runtime issue:
     `Could not determine a usable wildcard IP for this machine`.
+
+## In Progress (2026-03-09) [commit: a0af30ab] - connect-mode modal reliability in desktop UI
+- Addressed regression where users could miss mode selection prompt before connect:
+  - `Connect` now opens mode dialog even when connect preconditions are currently blocked.
+  - Dialog shows explicit blocking reason (`Connect blocked: ...`) and disables confirm until preconditions are met.
+- Kept virtual/isolated/duplicate mode selection path unchanged; connect still goes through explicit mode validation.
+- Validation:
+  - `cd src/apps/desktop-tauri && npm run build` -> OK
