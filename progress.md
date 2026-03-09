@@ -745,3 +745,19 @@ Status: active
   - when no loginctl graphical session is found but `RUNAS_REMOTE_DISPLAY=:N` is provided, launcher can proceed in manual mode.
 - Validation:
   - `bash -n start-remote runas-remote` -> OK
+
+## In Progress (2026-03-09) [commit: 409789cc] - backend split per platform + mode
+- Refactored display backend layout to explicit platform folders:
+  - `display_backends/x11/`
+  - `display_backends/wayland/`
+  - `display_backends/windows/`
+- Split mode responsibilities into separate modules in each platform:
+  - `duplicate`
+  - `virtual_monitor`
+  - (X11 additionally keeps `virtual_isolated` as compatibility mode)
+- Kept common routing contract unchanged in `display_backends/mod.rs`:
+  - platform selection by host probe
+  - mode normalization
+  - unified activation/probe return types
+- Validation:
+  - `cargo check -p wbeamd-core -p wbeamd-server` -> OK
