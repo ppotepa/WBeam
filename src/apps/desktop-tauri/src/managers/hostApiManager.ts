@@ -68,7 +68,10 @@ export class HostApiManager {
     }
   }
 
-  async connectDevice(device: DeviceBasic, displayMode: "virtual" | "duplicate"): Promise<void> {
+  async connectDevice(
+    device: DeviceBasic,
+    displayMode: "virtual_monitor" | "virtual_isolated" | "duplicate",
+  ): Promise<void> {
     try {
       await withTimeout(
         invoke<string>("device_connect", { serial: device.serial, streamPort: device.streamPort, displayMode }),

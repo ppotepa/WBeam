@@ -15,6 +15,24 @@ command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
+install_evdi_arch() {
+  if pacman -Si evdi-dkms >/dev/null 2>&1; then
+    with_sudo pacman -S --noconfirm evdi-dkms
+    return 0
+  fi
+  if command_exists yay; then
+    run_cmd yay -S --noconfirm evdi-dkms
+    return 0
+  fi
+  if command_exists paru; then
+    run_cmd paru -S --noconfirm evdi-dkms
+    return 0
+  fi
+  echo "[virtual-deps] ERROR: package 'evdi-dkms' is not available in enabled pacman repos." >&2
+  echo "[virtual-deps] Install an AUR helper (yay/paru) or enable a repo providing evdi-dkms." >&2
+  return 1
+}
+
 detect_os() {
   local u
   u="$(uname -s 2>/dev/null | tr '[:upper:]' '[:lower:]')"
@@ -96,21 +114,22 @@ fi
 case "$manager" in
   deb)
     with_sudo apt-get update
-    with_sudo apt-get install -y xvfb x11-xserver-utils
+    with_sudo apt-get install -y dkms linux-headers-generic evdi-dkms xvfb x11-xserver-utils
     ;;
   rpm-dnf)
-    with_sudo dnf install -y xorg-x11-server-Xvfb xrandr
+    with_sudo dnf install -y xorg-x11-server-Xvfb xrandr dkms kernel-devel akmod-evdi \
+      || with_sudo dnf install -y xorg-x11-server-Xvfb xrandr dkms kernel-devel evdi-dkms
     ;;
   rpm-yum)
-    with_sudo yum install -y xorg-x11-server-Xvfb xrandr
+    with_sudo yum install -y xorg-x11-server-Xvfb xrandr dkms kernel-devel evdi-dkms
     ;;
   rpm-zypper)
-    with_sudo zypper install -y xorg-x11-server-Xvfb xrandr
+    with_sudo zypper install -y xorg-x11-server-Xvfb xrandr dkms kernel-default-devel evdi-dkms
     ;;
   arch)
-    with_sudo pacman -S --noconfirm xorg-server-xvfb xorg-xrandr
+    with_sudo pacman -S --noconfirm xorg-server-xvfb xorg-xrandr dkms linux-headers
+    install_evdi_arch
     ;;
 esac
 
 echo "[virtual-deps] install done"
-

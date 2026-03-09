@@ -1,7 +1,7 @@
 //! WBTP/1 sender – packages frames into the wire protocol and streams them
 //! over a TCP connection.
 //!
-//! # Design rules (from next.md)
+//! # Design rules
 //! * Bounded queue – capacity is set at construction, never grows.
 //! * Latest-frame-wins – when the queue is full, the *oldest* pending frame is
 //!   dropped, not the incoming one.

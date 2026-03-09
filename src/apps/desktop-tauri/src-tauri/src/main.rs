@@ -2,7 +2,7 @@
 
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader};
@@ -75,6 +75,7 @@ struct VirtualDoctor {
     message: String,
     actionable: bool,
     host_backend: String,
+    resolver: String,
     missing_deps: Vec<String>,
     install_hint: String,
 }
@@ -111,6 +112,25 @@ impl Default for VirtualDepsInstallState {
 }
 
 static VIRTUAL_DEPS_INSTALL_STATE: OnceLock<Mutex<VirtualDepsInstallState>> = OnceLock::new();
+static ADB_CMD_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+static DEVICE_SNAPSHOT_CACHE: OnceLock<Mutex<HashMap<String, CachedDeviceSnapshot>>> = OnceLock::new();
+
+#[derive(Clone, Debug)]
+struct CachedDeviceSnapshot {
+    ts_epoch_ms: u128,
+    model: String,
+    platform: String,
+    os_version: String,
+    device_class: String,
+    resolution: String,
+    max_resolution: String,
+    api_level: String,
+    battery_percent: String,
+    battery_level: Option<u8>,
+    battery_charging: bool,
+    apk_installed: bool,
+    apk_version: String,
+}
 
 #[tauri::command]
 fn ping() -> &'static str {
@@ -194,28 +214,11 @@ fn list_devices_basic() -> DevicesBasicResponse {
         Ok(serials) => {
             let mut devices = Vec::new();
             for (idx, serial) in serials.into_iter().enumerate() {
-                let model = adb_getprop(&serial, "ro.product.model");
-                let manufacturer = adb_getprop(&serial, "ro.product.manufacturer").unwrap_or_default();
-                let os_version = adb_getprop(&serial, "ro.build.version.release");
-                let platform = detect_platform(&manufacturer);
-                let resolution = adb_resolution(&serial);
-                let density = adb_density(&serial);
-                let device_class = classify_device(&resolution, density);
-                let max_resolution = adb_max_resolution(&serial, &resolution);
-                let api_level = adb_getprop(&serial, "ro.build.version.sdk");
-                let (battery_percent, battery_level, battery_charging) = adb_battery_info(&serial);
-                let apk_path = adb_shell(&serial, &["pm", "path", "com.wbeam"]);
-                let apk_installed = apk_path
-                    .as_ref()
-                    .map(|out| out.contains("package:"))
-                    .unwrap_or(false);
-                let apk_version = if apk_installed {
-                    adb_apk_version(&serial)
-                } else {
-                    String::new()
-                };
-                let apk_matches_host = !host_apk_version.is_empty() && apk_version == host_apk_version;
-                let apk_matches_daemon = !daemon_apk_version.is_empty() && apk_version == daemon_apk_version;
+                let snap = collect_device_snapshot(&serial);
+                let apk_matches_host =
+                    !host_apk_version.is_empty() && snap.apk_version == host_apk_version;
+                let apk_matches_daemon =
+                    !daemon_apk_version.is_empty() && snap.apk_version == daemon_apk_version;
                 let stream_port = port_map
                     .get(&serial)
                     .copied()
@@ -234,18 +237,18 @@ fn list_devices_basic() -> DevicesBasicResponse {
 
                 devices.push(DeviceBasic {
                     serial,
-                    model: or_unknown(model),
-                    platform,
-                    os_version: or_unknown(os_version),
-                    device_class,
-                    resolution: or_unknown(Some(resolution)),
-                    max_resolution,
-                    api_level: or_unknown(api_level),
-                    battery_percent,
-                    battery_level,
-                    battery_charging,
-                    apk_installed,
-                    apk_version,
+                    model: snap.model,
+                    platform: snap.platform,
+                    os_version: snap.os_version,
+                    device_class: snap.device_class,
+                    resolution: snap.resolution,
+                    max_resolution: snap.max_resolution,
+                    api_level: snap.api_level,
+                    battery_percent: snap.battery_percent,
+                    battery_level: snap.battery_level,
+                    battery_charging: snap.battery_charging,
+                    apk_installed: snap.apk_installed,
+                    apk_version: snap.apk_version,
                     apk_matches_host,
                     apk_matches_daemon,
                     stream_port,
@@ -379,9 +382,15 @@ fn daemon_post_action(
     if action == "start" {
         if let Some(mode) = display_mode {
             let normalized = mode.trim().to_lowercase();
-            if normalized == "virtual" || normalized == "duplicate" {
+            let mode_param = match normalized.as_str() {
+                "duplicate" => Some("duplicate"),
+                "virtual" | "virtual_monitor" => Some("virtual_monitor"),
+                "isolated" | "virtual_isolated" => Some("virtual_isolated"),
+                _ => None,
+            };
+            if let Some(mode_param) = mode_param {
                 url.push_str("&display_mode=");
-                url.push_str(&normalized);
+                url.push_str(mode_param);
             }
         }
     }
@@ -465,24 +474,10 @@ fn ui_service_log(command: &str, phase: &str, details: &str) {
     }
 }
 
-fn adb_output_preview(out: &std::process::Output) -> String {
-    let so = String::from_utf8_lossy(&out.stdout).replace('\n', " ").trim().to_string();
-    let se = String::from_utf8_lossy(&out.stderr).replace('\n', " ").trim().to_string();
-    format!("status={} stdout='{}' stderr='{}'", out.status, so, se)
-}
-
 fn adb_api_level(serial: &str) -> Option<u32> {
-    let out = Command::new("adb")
-        .args(["-s", serial, "shell", "getprop", "ro.build.version.sdk"])
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    String::from_utf8_lossy(&out.stdout)
-        .trim()
-        .parse::<u32>()
+    adb_cmd(&["-s", serial, "shell", "getprop", "ro.build.version.sdk"])
         .ok()
+        .and_then(|v| v.trim().parse::<u32>().ok())
 }
 
 fn adb_prepare_connect(serial: &str, stream_port: u16) -> Result<(), String> {
@@ -498,39 +493,28 @@ fn adb_prepare_connect(serial: &str, stream_port: u16) -> Result<(), String> {
         &format!("prepare_connect begin control_port={control_port}"),
     );
 
-    let start = Command::new("adb")
-        .args(["start-server"])
-        .output()
-        .map_err(|e| {
-            let msg = format!("adb start-server failed: {e}");
-            connect_log(serial, stream_port, &msg);
-            msg
-        })?;
-    connect_log(
-        serial,
-        stream_port,
-        &format!("adb start-server {}", adb_output_preview(&start)),
-    );
+    adb_cmd(&["start-server"]).map_err(|e| {
+        let msg = format!("adb start-server failed: {e}");
+        connect_log(serial, stream_port, &msg);
+        msg
+    })?;
+    connect_log(serial, stream_port, "adb start-server ok");
 
     // `wait-for-device` can block for a long time and makes UI look frozen.
     // Use short polling with a hard timeout instead.
     let mut ready = false;
     for attempt in 1..=20 {
-        let state = Command::new("adb")
-            .args(["-s", serial, "get-state"])
-            .output()
-            .map_err(|e| {
-                let msg = format!("adb get-state failed: {e}");
-                connect_log(serial, stream_port, &msg);
-                msg
-            })?;
-        let state_txt = String::from_utf8_lossy(&state.stdout).trim().to_string();
+        let state_txt = adb_cmd(&["-s", serial, "get-state"]).map_err(|e| {
+            let msg = format!("adb get-state failed: {e}");
+            connect_log(serial, stream_port, &msg);
+            msg
+        })?;
         connect_log(
             serial,
             stream_port,
-            &format!("adb get-state attempt={} {}", attempt, adb_output_preview(&state)),
+            &format!("adb get-state attempt={} state='{}'", attempt, state_txt),
         );
-        if state.status.success() && state_txt == "device" {
+        if state_txt.trim() == "device" {
             ready = true;
             break;
         }
@@ -542,33 +526,27 @@ fn adb_prepare_connect(serial: &str, stream_port: u16) -> Result<(), String> {
         return Err(msg);
     }
 
-    let rev_stream = Command::new("adb")
-        .args(["-s", serial, "reverse", &format!("tcp:{stream}"), &format!("tcp:{stream}")])
-        .output()
-        .map_err(|e| {
-            let msg = format!("adb reverse(stream) failed: {e}");
-            connect_log(serial, stream_port, &msg);
-            msg
-        })?;
-    connect_log(
+    let rev_stream = adb_cmd(&[
+        "-s",
         serial,
-        stream_port,
-        &format!("adb reverse stream {}", adb_output_preview(&rev_stream)),
-    );
-    let rev_control = Command::new("adb")
-        .args(["-s", serial, "reverse", &format!("tcp:{control}"), &format!("tcp:{control}")])
-        .output()
-        .map_err(|e| {
-            let msg = format!("adb reverse(control) failed: {e}");
-            connect_log(serial, stream_port, &msg);
-            msg
-        })?;
-    connect_log(
+        "reverse",
+        &format!("tcp:{stream}"),
+        &format!("tcp:{stream}"),
+    ]);
+    if let Ok(out) = &rev_stream {
+        connect_log(serial, stream_port, &format!("adb reverse stream ok out='{out}'"));
+    }
+    let rev_control = adb_cmd(&[
+        "-s",
         serial,
-        stream_port,
-        &format!("adb reverse control {}", adb_output_preview(&rev_control)),
-    );
-    if !rev_stream.status.success() || !rev_control.status.success() {
+        "reverse",
+        &format!("tcp:{control}"),
+        &format!("tcp:{control}"),
+    ]);
+    if let Ok(out) = &rev_control {
+        connect_log(serial, stream_port, &format!("adb reverse control ok out='{out}'"));
+    }
+    if rev_stream.is_err() || rev_control.is_err() {
         let api_level = adb_api_level(serial).unwrap_or(0);
         if api_level > 0 && api_level <= 18 {
             connect_log(
@@ -588,20 +566,14 @@ fn adb_prepare_connect(serial: &str, stream_port: u16) -> Result<(), String> {
         }
     }
 
-    let launch = Command::new("adb")
-        .args(["-s", serial, "shell", "am", "start", "-n", "com.wbeam/.MainActivity"])
-        .output()
+    let launch = adb_cmd(&["-s", serial, "shell", "am", "start", "-n", "com.wbeam/.MainActivity"])
         .map_err(|e| {
             let msg = format!("adb launch failed: {e}");
             connect_log(serial, stream_port, &msg);
             msg
         })?;
-    connect_log(
-        serial,
-        stream_port,
-        &format!("adb am start {}", adb_output_preview(&launch)),
-    );
-    if !launch.status.success() {
+    connect_log(serial, stream_port, &format!("adb am start out='{launch}'"));
+    if launch.trim().is_empty() {
         let msg = "Failed to launch Android app via adb.".to_string();
         connect_log(serial, stream_port, &msg);
         return Err(msg);
@@ -863,6 +835,11 @@ fn virtual_doctor(serial: Option<String>, stream_port: Option<u16>) -> Result<Vi
             .and_then(|v| v.as_str())
             .unwrap_or("unknown")
             .to_string(),
+        resolver: json
+            .get("resolver")
+            .and_then(|v| v.as_str())
+            .unwrap_or("none")
+            .to_string(),
         missing_deps: json
             .get("missing_deps")
             .and_then(|v| v.as_array())
@@ -993,7 +970,11 @@ fn run_virtual_install_job() {
 fn device_connect(serial: String, stream_port: u16, display_mode: Option<String>) -> Result<String, String> {
     let chosen_mode = display_mode.unwrap_or_else(|| "duplicate".to_string());
     let normalized_mode = chosen_mode.trim().to_lowercase();
-    if normalized_mode != "duplicate" && normalized_mode != "virtual" {
+    if normalized_mode != "duplicate"
+        && normalized_mode != "virtual"
+        && normalized_mode != "virtual_monitor"
+        && normalized_mode != "virtual_isolated"
+    {
         let msg = format!("Unsupported display mode: {normalized_mode}");
         ui_service_log(
             "device_connect",
@@ -1170,15 +1151,23 @@ fn unit_file_path() -> PathBuf {
 }
 
 fn service_unit_content() -> String {
-    let daemon_bin = std::env::var("WBEAM_DAEMON_BIN").ok().filter(|v| !v.trim().is_empty()).unwrap_or_else(|| {
-        repo_root()
-            .join("src/host/rust/target/release/wbeamd-server")
-            .to_string_lossy()
-            .to_string()
-    });
+    let daemon_bin_override = std::env::var("WBEAM_DAEMON_BIN")
+        .ok()
+        .filter(|v| !v.trim().is_empty());
+    let default_runner = repo_root()
+        .join("src/host/scripts/run_wbeamd.sh")
+        .to_string_lossy()
+        .to_string();
     let control_port = std::env::var("WBEAM_CONTROL_PORT").unwrap_or_else(|_| "5001".to_string());
     let stream_port = std::env::var("WBEAM_STREAM_PORT").unwrap_or_else(|_| "5000".to_string());
     let root = repo_root().to_string_lossy().to_string();
+    let exec_start = if let Some(bin) = daemon_bin_override {
+        // Backward compatible override for prebuilt daemon binaries.
+        format!("{bin} --control-port {control_port} --stream-port {stream_port} --root {root}")
+    } else {
+        // Default to repository runner to avoid stale release-binary drift.
+        format!("{default_runner} {control_port} {stream_port}")
+    };
     let mut session_env = String::new();
     for key in [
         "DISPLAY",
@@ -1196,7 +1185,7 @@ fn service_unit_content() -> String {
     }
 
     format!(
-        "[Unit]\nDescription=WBeam Screen Streaming Daemon\nAfter=graphical-session.target\n\n[Service]\nType=simple\nExecStart={daemon_bin} --control-port {control_port} --stream-port {stream_port} --root {root}\nRestart=on-failure\nRestartSec=3\nEnvironment=RUST_LOG=info\nEnvironment=WBEAM_USE_RUST_STREAMER=1\nEnvironment=WBEAM_ROOT={root}\n{session_env}\n[Install]\nWantedBy=default.target\n"
+        "[Unit]\nDescription=WBeam Screen Streaming Daemon\nAfter=graphical-session.target\n\n[Service]\nType=simple\nExecStart={exec_start}\nRestart=on-failure\nRestartSec=3\nEnvironment=RUST_LOG=info\nEnvironment=WBEAM_DAEMON_IMPL=rust\nEnvironment=WBEAM_USE_RUST_STREAMER=1\nEnvironment=WBEAM_ROOT={root}\n{session_env}\n[Install]\nWantedBy=default.target\n"
     )
 }
 
@@ -1207,6 +1196,71 @@ fn detect_platform(manufacturer: &str) -> String {
     } else {
         "Android".to_string()
     }
+}
+
+fn device_snapshot_cache() -> &'static Mutex<HashMap<String, CachedDeviceSnapshot>> {
+    DEVICE_SNAPSHOT_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn now_epoch_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0)
+}
+
+fn collect_device_snapshot(serial: &str) -> CachedDeviceSnapshot {
+    const SNAPSHOT_TTL_MS: u128 = 10_000;
+    let now_ms = now_epoch_ms();
+    if let Ok(cache) = device_snapshot_cache().lock() {
+        if let Some(hit) = cache.get(serial) {
+            if now_ms.saturating_sub(hit.ts_epoch_ms) <= SNAPSHOT_TTL_MS {
+                return hit.clone();
+            }
+        }
+    }
+
+    let model = adb_getprop(serial, "ro.product.model");
+    let manufacturer = adb_getprop(serial, "ro.product.manufacturer").unwrap_or_default();
+    let os_version = adb_getprop(serial, "ro.build.version.release");
+    let platform = detect_platform(&manufacturer);
+    let resolution = adb_resolution(serial);
+    let density = adb_density(serial);
+    let device_class = classify_device(&resolution, density);
+    let max_resolution = adb_max_resolution(serial, &resolution);
+    let api_level = adb_getprop(serial, "ro.build.version.sdk");
+    let (battery_percent, battery_level, battery_charging) = adb_battery_info(serial);
+    let apk_path = adb_shell(serial, &["pm", "path", "com.wbeam"]);
+    let apk_installed = apk_path
+        .as_ref()
+        .map(|out| out.contains("package:"))
+        .unwrap_or(false);
+    let apk_version = if apk_installed {
+        adb_apk_version(serial)
+    } else {
+        String::new()
+    };
+
+    let snap = CachedDeviceSnapshot {
+        ts_epoch_ms: now_ms,
+        model: or_unknown(model),
+        platform,
+        os_version: or_unknown(os_version),
+        device_class,
+        resolution: or_unknown(Some(resolution)),
+        max_resolution,
+        api_level: or_unknown(api_level),
+        battery_percent,
+        battery_level,
+        battery_charging,
+        apk_installed,
+        apk_version,
+    };
+
+    if let Ok(mut cache) = device_snapshot_cache().lock() {
+        cache.insert(serial.to_string(), snap.clone());
+    }
+    snap
 }
 
 fn adb_devices() -> Result<Vec<String>, String> {
@@ -1367,13 +1421,27 @@ fn adb_shell(serial: &str, args: &[&str]) -> Result<String, String> {
 }
 
 fn adb_cmd(args: &[&str]) -> Result<String, String> {
-    let output = Command::new("adb")
-        .args(args)
-        .output()
-        .map_err(|err| format!("adb failed: {err}"))?;
+    let _guard = ADB_CMD_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .expect("adb lock poisoned");
+
+    let output = run_adb(args)?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let mut stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if should_retry_adb_error(&stderr) {
+            let _ = run_adb(&["start-server"]);
+            std::thread::sleep(Duration::from_millis(120));
+            let retry = run_adb(args)?;
+            if retry.status.success() {
+                return Ok(String::from_utf8_lossy(&retry.stdout)
+                    .replace('\r', "")
+                    .trim()
+                    .to_string());
+            }
+            stderr = String::from_utf8_lossy(&retry.stderr).trim().to_string();
+        }
         if stderr.is_empty() {
             return Err(format!("adb exited with {}", output.status));
         }
@@ -1384,6 +1452,21 @@ fn adb_cmd(args: &[&str]) -> Result<String, String> {
         .replace('\r', "")
         .trim()
         .to_string())
+}
+
+fn run_adb(args: &[&str]) -> Result<std::process::Output, String> {
+    Command::new("adb")
+        .args(args)
+        .output()
+        .map_err(|err| format!("adb failed: {err}"))
+}
+
+fn should_retry_adb_error(stderr: &str) -> bool {
+    let low = stderr.to_ascii_lowercase();
+    low.contains("protocol fault")
+        || low.contains("connection reset by peer")
+        || low.contains("cannot connect to daemon")
+        || low.contains("daemon still not running")
 }
 
 fn repo_root() -> PathBuf {

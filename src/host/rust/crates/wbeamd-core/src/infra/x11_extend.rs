@@ -1,3 +1,5 @@
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[derive(Debug, Clone)]
@@ -25,7 +27,13 @@ pub fn probe(is_remote: bool) -> X11ExtendProbe {
         };
     }
 
-    let version_out = Command::new("xrandr").arg("--version").output();
+    let xauth = resolve_xauthority();
+    let mut version_cmd = Command::new("xrandr");
+    version_cmd.arg("--version").env("DISPLAY", &display);
+    if let Some(path) = xauth.as_deref() {
+        version_cmd.env("XAUTHORITY", path);
+    }
+    let version_out = version_cmd.output();
     let Ok(version_out) = version_out else {
         return X11ExtendProbe {
             supported: false,
@@ -34,9 +42,17 @@ pub fn probe(is_remote: bool) -> X11ExtendProbe {
         };
     };
     if !version_out.status.success() {
+        let stderr = String::from_utf8_lossy(&version_out.stderr).trim().to_string();
+        let mut reason = "xrandr --version returned non-zero status".to_string();
+        if !stderr.is_empty() {
+            reason = format!("{reason}: {stderr}");
+        }
+        if xauth.is_none() {
+            reason = format!("{reason} (XAUTHORITY not resolved)");
+        }
         return X11ExtendProbe {
             supported: false,
-            reason: "xrandr --version returned non-zero status".to_string(),
+            reason,
             missing_deps: Vec::new(),
         };
     }
@@ -50,7 +66,12 @@ pub fn probe(is_remote: bool) -> X11ExtendProbe {
         };
     }
 
-    let query_out = Command::new("xrandr").arg("--query").output();
+    let mut query_cmd = Command::new("xrandr");
+    query_cmd.arg("--query").env("DISPLAY", &display);
+    if let Some(path) = xauth.as_deref() {
+        query_cmd.env("XAUTHORITY", path);
+    }
+    let query_out = query_cmd.output();
     let Ok(query_out) = query_out else {
         return X11ExtendProbe {
             supported: false,
@@ -105,18 +126,26 @@ pub fn probe(is_remote: bool) -> X11ExtendProbe {
 fn detect_randr_15_or_newer(raw: &str) -> bool {
     for line in raw.lines() {
         let low = line.to_ascii_lowercase();
-        if !low.contains("xrandr version") {
+        if !low.contains("version") {
             continue;
         }
-        let maybe_ver = line.split_whitespace().last().unwrap_or_default();
-        let mut parts = maybe_ver.split('.');
-        let major = parts.next().and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
-        let minor = parts.next().and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
-        if major > 1 {
-            return true;
-        }
-        if major == 1 && minor >= 5 {
-            return true;
+        for token in line.split_whitespace() {
+            let normalized = token.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '.');
+            if !normalized.contains('.') {
+                continue;
+            }
+            let mut parts = normalized.split('.');
+            let major = parts
+                .next()
+                .and_then(|v| v.parse::<u32>().ok())
+                .unwrap_or(0);
+            let minor = parts
+                .next()
+                .and_then(|v| v.parse::<u32>().ok())
+                .unwrap_or(0);
+            if major > 1 || (major == 1 && minor >= 5) {
+                return true;
+            }
         }
     }
     false
@@ -130,3 +159,44 @@ fn command_exists(name: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn resolve_xauthority() -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("XAUTHORITY") {
+        let p = PathBuf::from(path);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+
+    if let Some(home) = std::env::var_os("HOME") {
+        let p = Path::new(&home).join(".Xauthority");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+
+    let uid = std::env::var("UID")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .or_else(|| std::env::var("EUID").ok())
+        .unwrap_or_else(|| "1000".to_string());
+    let run_dir = PathBuf::from(format!("/run/user/{uid}"));
+    if run_dir.exists() {
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        if let Ok(entries) = fs::read_dir(&run_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if name.starts_with("xauth_") && path.is_file() {
+                        candidates.push(path);
+                    }
+                }
+            }
+        }
+        candidates.sort();
+        if let Some(last) = candidates.pop() {
+            return Some(last);
+        }
+    }
+
+    None
+}

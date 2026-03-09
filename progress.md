@@ -1,5 +1,26 @@
 # WBeam Progress
 
+## In Progress (2026-03-09) - X11 real virtual output path (EVDI-first)
+- Reworked X11 `virtual_monitor` semantics to target **real output backend** instead of logical RandR monitor objects:
+  - Added new infra module: `src/host/rust/crates/wbeamd-core/src/infra/x11_real_output.rs`.
+  - New probe path checks for X11 real-output capability (provider/output expectations for EVDI-like path).
+  - New create/destroy path attempts to enable a real X11 output and returns active geometry for capture region binding.
+- Core integration:
+  - `virtual_probe` now prioritizes resolver `linux_x11_evdi_real_output`.
+  - `virtual_doctor` now exposes `resolver` in API model.
+  - `virtual_monitor` start path now calls `x11_real_output::create(...)` (strict real-output intent).
+  - Added `real_output` lifecycle ownership in daemon state and cleanup path.
+- Desktop UI gating:
+  - Connect modal now treats virtual monitor as available only for resolver `linux_x11_evdi_real_output` (or wayland portal path).
+  - Prevents false-positive enablement of pseudo-virtual paths.
+- Dependency scripts updated for real-output prep:
+  - `scripts/virtual-deps-check.sh` now checks `evdi` + `xrandr` + `Xvfb`.
+  - `scripts/virtual-deps-install.sh` now includes package-manager install paths for `evdi`/dkms/tooling (best-effort distro matrix) plus fallback deps.
+- Validation:
+  - `cargo check` passed for host (`wbeamd-core`, `wbeamd-server`, `wbeamd-api`) and Tauri backend.
+  - `npm run build` passed for desktop-tauri frontend.
+  - release build passed for `wbeamd-server` + `wbeamd-streamer`.
+
 Date: 2026-03-07
 Branch: `master`
 Status: active

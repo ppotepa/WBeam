@@ -469,6 +469,12 @@ h1 {
   background: #1c2d43;
 }
 
+.mode-option.disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
+  filter: grayscale(0.35);
+}
+
 .mode-option input {
   margin-top: 0.12rem;
 }

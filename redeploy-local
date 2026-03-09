@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  ./redeploy-local [--no-host-restart] [--no-host-build] [--no-android]
+
+Flow (default):
+  1) stop host daemon processes
+  2) generate shared build revision
+  3) build host (release)
+  4) start host debug daemon in background (no desktop UI launch)
+  5) deploy Android APK to all connected ADB devices (force install)
+  6) run version doctor
+
+Notes:
+  - This script never starts desktop UI.
+  - Use desktop UI separately via: ./desktop.sh
+USAGE
+}
+
+HOST_RESTART=1
+HOST_BUILD=1
+ANDROID_DEPLOY=1
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --no-host-restart)
+      HOST_RESTART=0
+      shift
+      ;;
+    --no-host-build)
+      HOST_BUILD=0
+      shift
+      ;;
+    --no-android)
+      ANDROID_DEPLOY=0
+      shift
+      ;;
+    *)
+      echo "[redeploy-local] unknown arg: $1" >&2
+      usage
+      exit 1
+      ;;
+  esac
+done
+
+cd "$ROOT_DIR"
+
+if [[ ! -x "$ROOT_DIR/wbeam" ]]; then
+  echo "[redeploy-local] missing executable: $ROOT_DIR/wbeam" >&2
+  exit 1
+fi
+
+echo "[redeploy-local] host stop"
+./wbeam host down || true
+
+BUILD_REV="$(./wbeam version new)"
+echo "[redeploy-local] build_rev=$BUILD_REV"
+
+if [[ "$HOST_BUILD" -eq 1 ]]; then
+  echo "[redeploy-local] host build (release)"
+  WBEAM_BUILD_REV="$BUILD_REV" ./wbeam host build
+else
+  echo "[redeploy-local] host build skipped (--no-host-build)"
+fi
+
+if [[ "$HOST_RESTART" -eq 1 ]]; then
+  echo "[redeploy-local] host start (debug background)"
+  WBEAM_BUILD_REV="$BUILD_REV" setsid -f nohup ./src/host/scripts/run_wbeamd_debug.sh 5001 5000 >/dev/null 2>&1
+  echo "[redeploy-local] wait for control API"
+  for _ in $(seq 1 180); do
+    if curl -fsS --max-time 1 http://127.0.0.1:5001/v1/status >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.5
+  done
+else
+  echo "[redeploy-local] host start skipped (--no-host-restart)"
+fi
+
+if [[ "$ANDROID_DEPLOY" -eq 1 ]]; then
+  echo "[redeploy-local] android deploy-all"
+  WBEAM_BUILD_REV="$BUILD_REV" WBEAM_ANDROID_FORCE_INSTALL=1 ./wbeam android deploy-all
+else
+  echo "[redeploy-local] android deploy skipped (--no-android)"
+fi
+
+echo "[redeploy-local] version doctor"
+./wbeam version doctor || true
+
+echo "[redeploy-local] DONE"
+echo "[redeploy-local] start desktop UI manually with: ./desktop.sh"
+

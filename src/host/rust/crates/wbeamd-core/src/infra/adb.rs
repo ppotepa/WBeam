@@ -6,9 +6,14 @@
 use std::net::TcpListener;
 use std::path::Path;
 use std::process::Stdio;
+use std::sync::{Mutex as StdMutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use tokio::process::Command;
 use tracing::warn;
+
+static USB_REVERSE_GUARD: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+static USB_REVERSE_LAST_AT: OnceLock<StdMutex<Option<Instant>>> = OnceLock::new();
 
 /// Attempt to open the stream port.  If it is busy, try to kill the occupant
 /// with `fuser -k`, then retry once.
@@ -42,6 +47,24 @@ pub async fn ensure_usb_reverse(
     reason: &str,
     target_serial: Option<&str>,
 ) {
+    let guard = USB_REVERSE_GUARD.get_or_init(|| tokio::sync::Mutex::new(()));
+    let _guard = match guard.try_lock() {
+        Ok(g) => g,
+        Err(_) => {
+            warn!(reason, "skipping reverse refresh (another reverse task in progress)");
+            return;
+        }
+    };
+    let last = USB_REVERSE_LAST_AT.get_or_init(|| StdMutex::new(None));
+    if let Ok(mut slot) = last.lock() {
+        if let Some(prev) = *slot {
+            if prev.elapsed() < Duration::from_millis(800) {
+                return;
+            }
+        }
+        *slot = Some(Instant::now());
+    }
+
     tracing::info!(reason, "refreshing adb reverse mappings");
 
     let script = root.join("src/host/scripts/usb_reverse.sh");

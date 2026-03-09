@@ -227,6 +227,16 @@ fn detect_session(os: HostOs) -> SessionKind {
         }
     }
 
+    // In some remote launch paths (sudo/systemd user service), XDG_SESSION_TYPE can
+    // be leaked as "tty" even when DISPLAY/WAYLAND_DISPLAY is correctly set.
+    if session == "tty" {
+        if env::var_os("WAYLAND_DISPLAY").is_some() {
+            session = "wayland".to_string();
+        } else if env::var_os("DISPLAY").is_some() {
+            session = "x11".to_string();
+        }
+    }
+
     match session.as_str() {
         "wayland" => SessionKind::Wayland,
         "x11" => SessionKind::X11,

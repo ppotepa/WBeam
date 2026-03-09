@@ -10,6 +10,22 @@ command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
+arch_evdi_install_hint() {
+  if command_exists pacman && pacman -Si evdi-dkms >/dev/null 2>&1; then
+    echo "sudo pacman -S --noconfirm evdi-dkms"
+    return 0
+  fi
+  if command_exists yay; then
+    echo "yay -S --noconfirm evdi-dkms"
+    return 0
+  fi
+  if command_exists paru; then
+    echo "paru -S --noconfirm evdi-dkms"
+    return 0
+  fi
+  echo "install AUR helper (yay/paru) and run: yay -S evdi-dkms"
+}
+
 detect_os() {
   local u
   u="$(uname -s 2>/dev/null | tr '[:upper:]' '[:lower:]')"
@@ -98,21 +114,37 @@ fi
 
 manager="$(detect_linux_manager)"
 missing=()
+if ! command_exists xrandr; then
+  missing+=("xrandr")
+fi
 if ! command_exists Xvfb; then
   missing+=("Xvfb")
 fi
-if ! command_exists xrandr; then
-  missing+=("xrandr")
+if ! command_exists modinfo || ! modinfo evdi >/dev/null 2>&1; then
+  missing+=("evdi")
+fi
+
+# For real X11 virtual-monitor mode we also need an EVDI-backed xrandr provider
+# visible in the current GUI session.
+if command_exists xrandr && command_exists modinfo && modinfo evdi >/dev/null 2>&1; then
+  if [[ -n "${DISPLAY:-}" ]]; then
+    providers_out="$(xrandr --listproviders 2>/dev/null || true)"
+    if [[ -z "$providers_out" ]]; then
+      missing+=("x11-display-access")
+    elif ! printf '%s\n' "$providers_out" | grep -Eqi 'evdi|displaylink'; then
+      missing+=("evdi-provider")
+    fi
+  fi
 fi
 
 install_cmd=""
 case "$manager" in
-  deb) install_cmd="sudo apt-get update && sudo apt-get install -y xvfb x11-xserver-utils" ;;
-  rpm-dnf) install_cmd="sudo dnf install -y xorg-x11-server-Xvfb xrandr" ;;
-  rpm-yum) install_cmd="sudo yum install -y xorg-x11-server-Xvfb xrandr" ;;
-  rpm-zypper) install_cmd="sudo zypper install -y xorg-x11-server-Xvfb xrandr" ;;
-  arch) install_cmd="sudo pacman -S --noconfirm xorg-server-xvfb xorg-xrandr" ;;
-  *) install_cmd="install package manager dependencies manually: Xvfb, xrandr" ;;
+  deb) install_cmd="sudo apt-get update && sudo apt-get install -y dkms linux-headers-generic evdi-dkms xvfb x11-xserver-utils" ;;
+  rpm-dnf) install_cmd="sudo dnf install -y xorg-x11-server-Xvfb xrandr dkms kernel-devel akmod-evdi || sudo dnf install -y xorg-x11-server-Xvfb xrandr dkms kernel-devel evdi-dkms" ;;
+  rpm-yum) install_cmd="sudo yum install -y xorg-x11-server-Xvfb xrandr dkms kernel-devel evdi-dkms" ;;
+  rpm-zypper) install_cmd="sudo zypper install -y xorg-x11-server-Xvfb xrandr dkms kernel-default-devel evdi-dkms" ;;
+  arch) install_cmd="sudo pacman -S --noconfirm xorg-server-xvfb xorg-xrandr dkms linux-headers && $(arch_evdi_install_hint)" ;;
+  *) install_cmd="install package manager dependencies manually: evdi (kernel module), Xvfb, xrandr" ;;
 esac
 
 ok=true
@@ -127,11 +159,10 @@ else
   echo "[virtual-deps] manager=$manager"
   if [[ "$ok" == true ]]; then
     echo "[virtual-deps] status=ok"
-    echo "[virtual-deps] all required dependencies present (Xvfb, xrandr)"
+    echo "[virtual-deps] all required dependencies present (evdi, Xvfb, xrandr, evdi-provider)"
   else
     echo "[virtual-deps] status=missing"
     echo "[virtual-deps] missing=${missing[*]}"
     echo "[virtual-deps] install_cmd=$install_cmd"
   fi
 fi
-

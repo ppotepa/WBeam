@@ -34,6 +34,10 @@ export function createSessionManager(api: HostApiManager) {
   let lastServiceKey = "";
   let lastProbeKey = "";
   let lastVersionKey = "";
+  let nextDevicesPollAt = 0;
+  let devicesPollIntervalMs = 5000;
+  const DEVICES_POLL_MIN_MS = 5000;
+  const DEVICES_POLL_MAX_MS = 20000;
 
   const tabletCount = createMemo(() => devices().filter((d) => d.deviceClass === "Tablet").length);
   const phoneCount = createMemo(() => devices().filter((d) => d.deviceClass === "Phone").length);
@@ -80,7 +84,11 @@ export function createSessionManager(api: HostApiManager) {
     }
   }
 
-  async function loadDevices(initial = false): Promise<boolean> {
+  async function loadDevices(initial = false, force = false): Promise<boolean> {
+    const now = Date.now();
+    if (!force && now < nextDevicesPollAt) {
+      return false;
+    }
     let changed = false;
     if (initial) setLoading(true);
     setError("");
@@ -105,11 +113,15 @@ export function createSessionManager(api: HostApiManager) {
       }
 
       if (response.error) setError(response.error);
+      devicesPollIntervalMs = DEVICES_POLL_MIN_MS;
+      nextDevicesPollAt = Date.now() + devicesPollIntervalMs;
     } catch (err) {
       setError(String(err));
       setDevices([]);
       lastDevicesKey = "";
       changed = true;
+      devicesPollIntervalMs = Math.min(DEVICES_POLL_MAX_MS, devicesPollIntervalMs + 5000);
+      nextDevicesPollAt = Date.now() + devicesPollIntervalMs;
     } finally {
       if (initial) setLoading(false);
     }
@@ -123,7 +135,18 @@ export function createSessionManager(api: HostApiManager) {
     if (!silent) setRefreshing(true);
     try {
       const [serviceChanged, probeChanged] = await Promise.all([loadServiceStatus(), loadHostProbe()]);
-      const devicesChanged = await loadDevices(loading());
+      const canProbeDevices = service().active;
+      let devicesChanged = false;
+      if (canProbeDevices) {
+        devicesChanged = await loadDevices(loading(), !silent);
+      } else if (devices().length > 0 || hostVersion() || daemonVersion()) {
+        setDevices([]);
+        setHostVersion("");
+        setDaemonVersion("");
+        lastDevicesKey = "";
+        lastVersionKey = "";
+        devicesChanged = true;
+      }
       if (serviceChanged || probeChanged || devicesChanged) {
         setUpdatedAt(new Date().toLocaleTimeString());
       }
@@ -170,7 +193,10 @@ export function createSessionManager(api: HostApiManager) {
     }
   }
 
-  async function connectDevice(device: DeviceBasic, displayMode: "virtual" | "duplicate") {
+  async function connectDevice(
+    device: DeviceBasic,
+    displayMode: "virtual_monitor" | "virtual_isolated" | "duplicate",
+  ) {
     const key = `${device.serial}:connect`;
     setDeviceActionBusy((prev) => (prev.includes(key) ? prev : [...prev, key]));
     setError("");

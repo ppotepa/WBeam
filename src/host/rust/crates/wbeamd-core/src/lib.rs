@@ -35,7 +35,10 @@ use domain::state::{
     STATE_ERROR, STATE_IDLE, STATE_RECONNECTING, STATE_STARTING, STATE_STOPPING, STATE_STREAMING,
 };
 use infra::process as proc;
-use infra::{adb, config_store, host_probe, telemetry, virtual_display, x11_extend};
+use infra::{
+    adb, config_store, host_probe, telemetry, virtual_display, x11_real_output,
+    x11_virtual_monitor,
+};
 
 const DEFAULT_START_TIMEOUT: Duration = Duration::from_secs(45);
 const DUPLICATE_START_GUARD: Duration = Duration::from_secs(3);
@@ -45,6 +48,47 @@ const NO_PRESENT_RESTART_COOLDOWN: Duration = Duration::from_secs(15);
 const NO_PRESENT_MIN_RECV_FPS: f64 = 10.0;
 const NO_PRESENT_MAX_PRESENT_FPS: f64 = 1.0;
 const REVERSE_REFRESH_BACKSTOP: Duration = Duration::from_secs(120);
+
+fn resolve_xauthority_for_capture() -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("XAUTHORITY") {
+        let p = PathBuf::from(path);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+
+    if let Ok(home) = std::env::var("HOME") {
+        let p = Path::new(&home).join(".Xauthority");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+
+    let uid = std::env::var("UID")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .or_else(|| std::env::var("EUID").ok())
+        .unwrap_or_else(|| "1000".to_string());
+    let run_dir = PathBuf::from(format!("/run/user/{uid}"));
+    if run_dir.exists() {
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&run_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if name.starts_with("xauth_") && path.is_file() {
+                        candidates.push(path);
+                    }
+                }
+            }
+        }
+        candidates.sort();
+        if let Some(last) = candidates.pop() {
+            return Some(last);
+        }
+    }
+    None
+}
 
 fn runtime_config_path_for_session(root: &Path, session_label: Option<&str>) -> PathBuf {
     let config_dir = root.join("src/host/rust/config");
@@ -187,6 +231,8 @@ struct Inner {
     presets: BTreeMap<String, ActiveConfig>,
     requested_display_mode: String,
     virtual_display: Option<virtual_display::VirtualDisplayHandle>,
+    real_output: Option<x11_real_output::X11RealOutputHandle>,
+    virtual_monitor: Option<x11_virtual_monitor::X11VirtualMonitorHandle>,
 }
 
 impl Inner {
@@ -221,6 +267,8 @@ impl Inner {
             presets,
             requested_display_mode: "duplicate".to_string(),
             virtual_display: None,
+            real_output: None,
+            virtual_monitor: None,
         }
     }
 }
@@ -257,7 +305,8 @@ pub struct DaemonCore {
 impl DaemonCore {
     fn normalize_display_mode(mode: Option<&str>) -> &'static str {
         match mode.unwrap_or("duplicate").trim().to_lowercase().as_str() {
-            "virtual" => "virtual",
+            "virtual" | "virtual_monitor" => "virtual_monitor",
+            "isolated" | "virtual_isolated" => "virtual_isolated",
             _ => "duplicate",
         }
     }
@@ -269,12 +318,22 @@ impl DaemonCore {
     }
 
     async fn stop_virtual_display_if_any(&self) {
-        let pid = {
+        let (pid, monitor, real_output) = {
             let mut inner = self.inner.lock().await;
-            inner.virtual_display.take().map(|vd| vd.pid)
+            (
+                inner.virtual_display.take().map(|vd| vd.pid),
+                inner.virtual_monitor.take(),
+                inner.real_output.take(),
+            )
         };
         if let Some(pid) = pid {
             proc::terminate_pid(pid).await;
+        }
+        if let Some(handle) = monitor {
+            let _ = x11_virtual_monitor::destroy(&handle);
+        }
+        if let Some(handle) = real_output {
+            let _ = x11_real_output::destroy(&handle);
         }
     }
 
@@ -418,26 +477,26 @@ impl DaemonCore {
         let mut hint = "Virtual desktop is not available on this host backend.".to_string();
 
         if backend == "x11_gst" {
-            let extend_probe = x11_extend::probe(self.host_probe.is_remote);
-            if extend_probe.supported {
+            let real_probe = x11_real_output::probe(self.host_probe.is_remote);
+            if real_probe.supported {
                 supported = true;
-                resolver = "linux_x11_randr_extend".to_string();
-                hint = "X11 extend backend looks available; stream can target an additional desktop area.".to_string();
+                resolver = "linux_x11_evdi_real_output".to_string();
+                hint = "X11 real-output backend is available. Virtual monitor mode should create a true additional desktop output.".to_string();
             } else {
                 resolver = "linux_x11_xvfb_fallback".to_string();
                 if virtual_display::has_xvfb() {
                     hint = format!(
-                        "X11 extend backend unavailable: {}. Xvfb fallback creates isolated virtual X space (not a KDE additional monitor). Use Duplicate mode in this session.",
-                        extend_probe.reason
+                        "X11 real-output backend unavailable: {}. Isolated session (Xvfb) is available, but it is not a KDE additional monitor.",
+                        real_probe.reason
                     );
                 } else {
-                    missing = extend_probe.missing_deps;
+                    missing = real_probe.missing_deps;
                     if !missing.iter().any(|m| m == "Xvfb") {
                         missing.push("Xvfb".to_string());
                     }
                     hint = format!(
-                        "X11 extend backend unavailable: {}. {}",
-                        extend_probe.reason,
+                        "X11 real-output backend unavailable: {}. {}",
+                        real_probe.reason,
                         virtual_display::install_hint()
                     );
                 }
@@ -472,7 +531,7 @@ impl DaemonCore {
         } else {
             (
                 false,
-                "Virtual desktop is unsupported in current host session.".to_string(),
+                "Virtual monitor mode is unavailable in current host session.".to_string(),
                 false,
             )
         };
@@ -483,6 +542,7 @@ impl DaemonCore {
             message,
             actionable,
             host_backend: probe.host_backend,
+            resolver: probe.resolver,
             missing_deps: probe.missing_deps,
             install_hint: probe.install_hint,
         }
@@ -918,7 +978,7 @@ impl DaemonCore {
             return Err(CoreError::UnsupportedHost(reason));
         }
 
-        if requested_display_mode == "virtual" {
+        if requested_display_mode != "duplicate" {
             if let Some(target_size) = adb::device_resolution(self.target_serial.as_deref()).await {
                 if launch_size != target_size {
                     info!(
@@ -1026,7 +1086,8 @@ impl DaemonCore {
 
         let mut cmd;
         let capture_backend = self.host_probe.capture_mode_name();
-        if requested_display_mode == "virtual" && capture_backend != "x11_gst" {
+        let mut x11_capture_region: Option<(i32, i32, u32, u32)> = None;
+        if requested_display_mode != "duplicate" && capture_backend != "x11_gst" {
             return Err(CoreError::UnsupportedHost(
                 "virtual desktop mode currently requires x11_gst host backend".to_string(),
             ));
@@ -1035,7 +1096,22 @@ impl DaemonCore {
         let mut using_virtual_x11 = false;
 
         if capture_backend == "x11_gst" {
-            if requested_display_mode == "virtual" {
+            if requested_display_mode == "virtual_monitor" {
+                self.stop_virtual_display_if_any().await;
+                let serial_hint = self.target_serial.as_deref().unwrap_or("default");
+                let handle = x11_real_output::create(serial_hint, &launch_size)
+                    .map_err(CoreError::Spawn)?;
+                info!(
+                    serial = serial_hint,
+                    size = %launch_size,
+                    output = %handle.output_name,
+                    "virtual monitor mode: enabled real x11 output"
+                );
+                x11_display_override = self.host_probe.display.clone();
+                x11_capture_region = Some((handle.x, handle.y, handle.width, handle.height));
+                let mut inner = self.inner.lock().await;
+                inner.real_output = Some(handle);
+            } else if requested_display_mode == "virtual_isolated" {
                 self.stop_virtual_display_if_any().await;
                 let serial_hint = self.target_serial.as_deref().unwrap_or("default");
                 let handle = virtual_display::spawn_xvfb_for_serial(serial_hint, &launch_size)
@@ -1102,12 +1178,20 @@ impl DaemonCore {
                 if let Some(display) = x11_display_override.as_deref() {
                     cmd.env("DISPLAY", display);
                 }
+                if let Some((x, y, w, h)) = x11_capture_region {
+                    cmd.env("WBEAM_X11_CAPTURE_X", x.to_string());
+                    cmd.env("WBEAM_X11_CAPTURE_Y", y.to_string());
+                    cmd.env("WBEAM_X11_CAPTURE_W", w.to_string());
+                    cmd.env("WBEAM_X11_CAPTURE_H", h.to_string());
+                } else {
+                    cmd.env_remove("WBEAM_X11_CAPTURE_X");
+                    cmd.env_remove("WBEAM_X11_CAPTURE_Y");
+                    cmd.env_remove("WBEAM_X11_CAPTURE_W");
+                    cmd.env_remove("WBEAM_X11_CAPTURE_H");
+                }
                 if !using_virtual_x11 {
-                    if let Ok(home) = std::env::var("HOME") {
-                    let xauth = std::path::Path::new(&home).join(".Xauthority");
-                    if xauth.exists() {
+                    if let Some(xauth) = resolve_xauthority_for_capture() {
                         cmd.env("XAUTHORITY", xauth);
-                    }
                     }
                 } else {
                     cmd.env_remove("XAUTHORITY");

@@ -14,6 +14,7 @@ import android.os.Looper;
 import android.os.SystemClock;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
+import android.text.method.ScrollingMovementMethod;
 import android.text.style.ForegroundColorSpan;
 import android.util.Log;
 import android.view.MotionEvent;
@@ -153,6 +154,9 @@ public class MainActivity extends AppCompatActivity {
     // ── Startup overlay ────────────────────────────────────────────────────────
     private TextView startupTitleText;
     private TextView startupSubtitleText;
+    private View startupStep1Card;
+    private View startupStep2Card;
+    private View startupStep3Card;
     private TextView startupStep1Badge;
     private TextView startupStep1Label;
     private TextView startupStep1Detail;
@@ -586,6 +590,9 @@ public class MainActivity extends AppCompatActivity {
         debugInfoText = findViewById(R.id.debugInfoText);
         startupTitleText    = findViewById(R.id.startupTitle);
         startupSubtitleText = findViewById(R.id.startupSubtitle);
+        startupStep1Card    = findViewById(R.id.startupStep1Row);
+        startupStep2Card    = findViewById(R.id.startupStep2Row);
+        startupStep3Card    = findViewById(R.id.startupStep3Row);
         startupStep1Badge   = findViewById(R.id.startupStep1Badge);
         startupStep1Label   = findViewById(R.id.startupStep1Label);
         startupStep1Detail  = findViewById(R.id.startupStep1Detail);
@@ -599,6 +606,9 @@ public class MainActivity extends AppCompatActivity {
         startupStep3Detail  = findViewById(R.id.startupStep3Detail);
         startupStep3Status  = findViewById(R.id.startupStep3Status);
         startupInfoText     = findViewById(R.id.startupInfoText);
+        if (startupInfoText != null) {
+            startupInfoText.setMovementMethod(new ScrollingMovementMethod());
+        }
         liveLogText = findViewById(R.id.liveLogText);
 
         resValueText = findViewById(R.id.resValueText);
@@ -1165,11 +1175,10 @@ public class MainActivity extends AppCompatActivity {
         StreamConfig cfg = effectiveStreamConfig();
         long frameUs = Math.max(1L, 1_000_000L / Math.max(1, cfg.fps));
         SurfaceView preview = findViewById(R.id.previewSurface);
-        if (isLegacyAndroidDevice()) {
-            preview.getHolder().setSizeFromLayout();
-        } else {
-            preview.getHolder().setFixedSize(cfg.width, cfg.height);
-        }
+        // Keep the Surface buffer sized from layout so video can scale to fill the screen.
+        // setFixedSize(stream_w, stream_h) causes a "small centered video" effect whenever the
+        // stream resolution differs from the view size (default config scales stream size).
+        preview.getHolder().setSizeFromLayout();
 
         player = new H264TcpPlayer(
                 surface,
@@ -1977,11 +1986,11 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        applyStepState(step1, "1", startupStep1Badge, startupStep1Label,
+        applyStepState(step1, "1", startupStep1Card, startupStep1Badge, startupStep1Label,
                 startupStep1Status, startupStep1Detail, step1Detail);
-        applyStepState(step2, "2", startupStep2Badge, startupStep2Label,
+        applyStepState(step2, "2", startupStep2Card, startupStep2Badge, startupStep2Label,
                 startupStep2Status, startupStep2Detail, step2Detail);
-        applyStepState(step3, "3", startupStep3Badge, startupStep3Label,
+        applyStepState(step3, "3", startupStep3Card, startupStep3Badge, startupStep3Label,
                 startupStep3Status, startupStep3Detail, step3Detail);
 
         // subtitle
@@ -2017,13 +2026,21 @@ public class MainActivity extends AppCompatActivity {
 
         // info line
         if (startupInfoText != null) {
-            startupInfoText.setText(
-                    "api=" + HostApiClient.API_BASE
-                    + "  impl=" + BuildConfig.WBEAM_API_IMPL
-                    + "  stream=" + BuildConfig.WBEAM_STREAM_HOST + ":" + BuildConfig.WBEAM_STREAM_PORT
-                    + "  app=" + BuildConfig.WBEAM_BUILD_REV
-                    + "  host=" + daemonBuildRevision);
-            startupInfoText.setTextColor(Color.parseColor("#334155"));
+            StringBuilder startupLog = new StringBuilder();
+            startupLog.append("api=").append(HostApiClient.API_BASE)
+                    .append("  impl=").append(BuildConfig.WBEAM_API_IMPL).append('\n')
+                    .append("stream=").append(BuildConfig.WBEAM_STREAM_HOST).append(':')
+                    .append(BuildConfig.WBEAM_STREAM_PORT).append('\n')
+                    .append("app=").append(BuildConfig.WBEAM_BUILD_REV)
+                    .append("  host=").append(daemonBuildRevision).append('\n')
+                    .append("state=").append(daemonState);
+            if (daemonLastError != null && !daemonLastError.trim().isEmpty()) {
+                startupLog.append('\n').append("error=").append(daemonLastError.trim());
+            } else if (lastUiInfo != null && !lastUiInfo.trim().isEmpty()) {
+                startupLog.append('\n').append("hint=").append(lastUiInfo.trim());
+            }
+            startupInfoText.setText(startupLog.toString());
+            startupInfoText.setTextColor(Color.parseColor("#CBD5E1"));
         }
 
         boolean allOk = step1 == SS_OK && step2 == SS_OK && step3 == SS_OK;
@@ -2103,51 +2120,62 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void applyStepState(int state, String number,
-            TextView badge, TextView label, TextView status, TextView detail,
+            View card, TextView badge, TextView label, TextView status, TextView detail,
             String detailText) {
-        if (badge == null || label == null || status == null || detail == null) {
+        if (badge == null || label == null || status == null || detail == null || card == null) {
             return;
         }
-        int badgeBg, badgeFg, labelColor, statusColor;
+        int badgeBg, badgeFg, labelColor, statusColor, cardBg;
         String statusStr;
+        String icon = stepIconForNumber(number);
+        boolean blink = (preflightAnimTick % 2) == 0;
         switch (state) {
             case SS_OK:
+                cardBg     = Color.parseColor("#0F2E25");
                 badgeBg    = Color.parseColor("#14532D");
                 badgeFg    = Color.parseColor("#4ADE80");
-                labelColor = Color.parseColor("#4ADE80");
+                labelColor = Color.parseColor("#86EFAC");
                 statusColor= Color.parseColor("#4ADE80");
-                statusStr  = " OK";
-                badge.setText("\u2713");
-                detail.setTextColor(Color.parseColor("#166534"));
+                statusStr  = "OK";
+                badge.setText(icon);
+                detail.setTextColor(Color.parseColor("#86EFAC"));
                 break;
             case SS_ERROR:
-                badgeBg    = Color.parseColor("#450A0A");
-                badgeFg    = Color.parseColor("#F87171");
-                labelColor = Color.parseColor("#F87171");
-                statusColor= Color.parseColor("#F87171");
+                cardBg     = Color.parseColor("#361113");
+                badgeBg    = Color.parseColor("#7F1D1D");
+                badgeFg    = Color.parseColor("#FCA5A5");
+                labelColor = Color.parseColor("#FCA5A5");
+                statusColor= Color.parseColor("#FCA5A5");
                 statusStr  = "ERR";
-                badge.setText("\u2717");
-                detail.setTextColor(Color.parseColor("#7F1D1D"));
+                badge.setText(icon);
+                detail.setTextColor(Color.parseColor("#FCA5A5"));
                 break;
             case SS_ACTIVE:
-                badgeBg    = Color.parseColor("#78350F");
-                badgeFg    = Color.parseColor("#FDE68A");
-                labelColor = Color.parseColor("#F8FAFC");
+                cardBg     = blink ? Color.parseColor("#3A2A0F") : Color.parseColor("#2B1F0F");
+                badgeBg    = blink ? Color.parseColor("#A16207") : Color.parseColor("#854D0E");
+                badgeFg    = Color.parseColor("#FEF08A");
+                labelColor = Color.parseColor("#FEF08A");
                 statusColor= Color.parseColor("#FDE68A");
-                final String[] spinChars = {"|", "/", "-", "\\"};
-                statusStr  = " " + spinChars[preflightAnimTick % 4];
-                badge.setText(number);
-                detail.setTextColor(Color.parseColor("#92400E"));
+                statusStr  = "BUSY";
+                badge.setText(icon);
+                detail.setTextColor(Color.parseColor("#FDE68A"));
                 break;
             default: // SS_PENDING
-                badgeBg    = Color.parseColor("#0F172A");
-                badgeFg    = Color.parseColor("#334155");
-                labelColor = Color.parseColor("#334155");
-                statusColor= Color.parseColor("#1E293B");
-                statusStr  = "---";
-                badge.setText(number);
-                detail.setTextColor(Color.parseColor("#1E293B"));
+                cardBg     = Color.parseColor("#111827");
+                badgeBg    = Color.parseColor("#1E293B");
+                badgeFg    = Color.parseColor("#64748B");
+                labelColor = Color.parseColor("#64748B");
+                statusColor= Color.parseColor("#64748B");
+                statusStr  = "WAIT";
+                badge.setText(icon);
+                detail.setTextColor(Color.parseColor("#94A3B8"));
                 break;
+        }
+        if (card.getBackground() instanceof GradientDrawable) {
+            GradientDrawable cardDrawable = (GradientDrawable) card.getBackground().mutate();
+            cardDrawable.setColor(cardBg);
+        } else {
+            card.setBackgroundColor(cardBg);
         }
         badge.setBackgroundColor(badgeBg);
         badge.setTextColor(badgeFg);
@@ -2155,6 +2183,16 @@ public class MainActivity extends AppCompatActivity {
         status.setText(statusStr);
         status.setTextColor(statusColor);
         detail.setText(detailText != null ? detailText : "");
+    }
+
+    private String stepIconForNumber(String number) {
+        if ("1".equals(number)) {
+            return "\u21C4"; // link
+        }
+        if ("2".equals(number)) {
+            return "\u2699"; // handshake/config
+        }
+        return "\u25B6"; // stream/play
     }
 
     private String spinnerGlyph() {

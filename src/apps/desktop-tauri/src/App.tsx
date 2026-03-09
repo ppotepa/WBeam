@@ -39,7 +39,7 @@ function DeviceTypeIcon(props: { type: string }) {
   return props.type === "Tablet" ? <Tablet size={16} /> : <Smartphone size={16} />;
 }
 
-type DisplayMode = "virtual" | "duplicate";
+type DisplayMode = "virtual_monitor" | "isolated" | "duplicate";
 const CONNECT_MODE_STORAGE_KEY = "wbeam.connect.mode.by.serial";
 
 function loadSavedDisplayMode(serial: string): DisplayMode | null {
@@ -48,7 +48,9 @@ function loadSavedDisplayMode(serial: string): DisplayMode | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Record<string, string>;
     const value = parsed?.[serial];
-    if (value === "virtual" || value === "duplicate") return value;
+    if (value === "virtual_monitor" || value === "isolated" || value === "duplicate") return value;
+    // Backward compatibility with legacy value.
+    if (value === "virtual") return "isolated";
     return null;
   } catch {
     return null;
@@ -72,7 +74,9 @@ export default function App() {
   const [mode, setMode] = createSignal<"basic" | "advanced">("basic");
   const [hostName, setHostName] = createSignal("unknown-host");
   const [connectDialogDevice, setConnectDialogDevice] = createSignal<DeviceBasic | null>(null);
-  const [connectDialogMode, setConnectDialogMode] = createSignal<DisplayMode>("virtual");
+  const [connectDialogMode, setConnectDialogMode] = createSignal<DisplayMode>("virtual_monitor");
+  const [connectDialogDoctor, setConnectDialogDoctor] = createSignal<VirtualDoctor | null>(null);
+  const [connectDialogDoctorLoading, setConnectDialogDoctorLoading] = createSignal(false);
   const [virtualStartupDoctor, setVirtualStartupDoctor] = createSignal<VirtualDoctor | null>(null);
   const [virtualSetupVisible, setVirtualSetupVisible] = createSignal(false);
   const [virtualSetupInstalling, setVirtualSetupInstalling] = createSignal(false);
@@ -130,37 +134,60 @@ export default function App() {
 
   function openConnectDialog(device: DeviceBasic): void {
     const saved = loadSavedDisplayMode(device.serial);
-    setConnectDialogMode(saved ?? "virtual");
+    setConnectDialogMode(saved ?? "virtual_monitor");
+    setConnectDialogDoctor(null);
+    setConnectDialogDoctorLoading(true);
     setConnectDialogDevice(device);
+    void api.getVirtualDoctor(device)
+      .then((doctor) => {
+        setConnectDialogDoctor(doctor);
+      })
+      .catch(() => {
+        setConnectDialogDoctor(null);
+      })
+      .finally(() => {
+        setConnectDialogDoctorLoading(false);
+      });
   }
 
   function closeConnectDialog(): void {
     setConnectDialogDevice(null);
+    setConnectDialogDoctor(null);
+    setConnectDialogDoctorLoading(false);
   }
 
   async function confirmConnect(): Promise<void> {
     const device = connectDialogDevice();
     if (!device) return;
-    let chosenMode = connectDialogMode();
-    if (chosenMode === "virtual") {
-      try {
-        const doctor = await api.getVirtualDoctor(device);
-        if (!doctor.ok) {
-          if (doctor.actionable) {
-            setVirtualStartupDoctor(doctor);
-            setVirtualSetupVisible(true);
-          }
+    try {
+      let chosenMode = connectDialogMode();
+      let backendMode: "virtual_monitor" | "virtual_isolated" | "duplicate" = "duplicate";
+      if (chosenMode === "virtual_monitor") {
+        const doctor = connectDialogDoctor() ?? await api.getVirtualDoctor(device);
+        if (!isVirtualMonitorAvailable(doctor)) {
+          session.setError(
+            "Virtual monitor mode is unavailable in current host session. Use Isolated session (Xvfb) or Duplicate."
+          );
+          return;
+        }
+        backendMode = "virtual_monitor";
+      } else if (chosenMode === "isolated") {
+        const doctor = connectDialogDoctor() ?? await api.getVirtualDoctor(device);
+        const xvfbMissing = doctor.missingDeps.includes("Xvfb");
+        if (xvfbMissing) {
+          setVirtualStartupDoctor(doctor);
+          setVirtualSetupVisible(true);
           session.setError(`${doctor.message} ${doctor.installHint}`.trim());
           return;
         }
-      } catch (err) {
-        session.setError(`Virtual desktop doctor check failed: ${String(err)}`);
-        return;
+        backendMode = "virtual_isolated";
       }
+      saveDisplayMode(device.serial, chosenMode);
+      closeConnectDialog();
+      await session.connectDevice(device, backendMode);
+    } catch (err) {
+      session.setError(`Connect mode validation failed: ${String(err)}`);
     }
-    saveDisplayMode(device.serial, chosenMode);
-    closeConnectDialog();
-    await session.connectDevice(device, chosenMode);
   }
 
   function closeVirtualSetup(): void {
@@ -259,9 +286,6 @@ export default function App() {
     try {
       const doctor = await api.getVirtualDoctor();
       setVirtualStartupDoctor(doctor);
-      if (!doctor.ok && doctor.actionable) {
-        setVirtualSetupVisible(true);
-      }
     } catch {
       // Non-blocking check; connect flow still performs per-device guard.
     }
@@ -269,7 +293,7 @@ export default function App() {
     const timer = window.setInterval(() => {
       if (session.deviceActionBusy().length > 0 || session.refreshInFlight()) return;
       void session.refreshSnapshot({ silent: true });
-    }, 2500);
+    }, 4000);
     onCleanup(() => {
       window.clearInterval(timer);
       stopVirtualInstallPolling();
@@ -501,29 +525,55 @@ export default function App() {
       <Show when={connectDialogDevice()}>
         {(deviceAccessor) => {
           const device = deviceAccessor();
-          const virtualSelected = () => connectDialogMode() === "virtual";
+          const virtualMonitorSelected = () => connectDialogMode() === "virtual_monitor";
+          const isolatedSelected = () => connectDialogMode() === "isolated";
+          const doctor = () => connectDialogDoctor();
+          const virtualMonitorAvailable = () => isVirtualMonitorAvailable(doctor() ?? null);
+          const isolatedAvailable = () => {
+            const d = doctor();
+            if (!d) return true;
+            return !d.missingDeps.includes("Xvfb");
+          };
           return (
             <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Select display mode">
               <section class="connect-modal">
                 <h3>Connect mode</h3>
                 <p class="connect-modal-subtitle">{device.model} ({device.serial})</p>
-                <label class={`mode-option ${virtualSelected() ? "selected" : ""}`}>
+                <label class={`mode-option ${virtualMonitorSelected() ? "selected" : ""} ${!virtualMonitorAvailable() ? "disabled" : ""}`}>
                   <input
                     type="radio"
                     name="display-mode"
-                    checked={virtualSelected()}
-                    onChange={() => setConnectDialogMode("virtual")}
+                    checked={virtualMonitorSelected()}
+                    disabled={!virtualMonitorAvailable()}
+                    onChange={() => setConnectDialogMode("virtual_monitor")}
                   />
                   <span>
-                    Create virtual desktop
-                    <small>Create separate virtual X11 desktop on host for this stream.</small>
+                    Virtual monitor (extend host desktop)
+                    <small>
+                      {virtualMonitorAvailable()
+                        ? "Creates real additional monitor space on host desktop."
+                        : "Not implemented for current host session yet."}
+                    </small>
                   </span>
                 </label>
-                <label class={`mode-option ${!virtualSelected() ? "selected" : ""}`}>
+                <label class={`mode-option ${isolatedSelected() ? "selected" : ""} ${!isolatedAvailable() ? "disabled" : ""}`}>
                   <input
                     type="radio"
                     name="display-mode"
-                    checked={!virtualSelected()}
+                    checked={isolatedSelected()}
+                    disabled={!isolatedAvailable()}
+                    onChange={() => setConnectDialogMode("isolated")}
+                  />
+                  <span>
+                    Isolated session (Xvfb)
+                    <small>Separate virtual X11 session. Not visible in KDE display settings.</small>
+                  </span>
+                </label>
+                <label class={`mode-option ${connectDialogMode() === "duplicate" ? "selected" : ""}`}>
+                  <input
+                    type="radio"
+                    name="display-mode"
+                    checked={connectDialogMode() === "duplicate"}
                     onChange={() => setConnectDialogMode("duplicate")}
                   />
                   <span>
@@ -531,6 +581,12 @@ export default function App() {
                     <small>Works with current host backend.</small>
                   </span>
                 </label>
+                <Show when={connectDialogDoctorLoading()}>
+                  <p class="setup-message">Checking host capabilities...</p>
+                </Show>
+                <Show when={doctor()}>
+                  {(d) => <p class="setup-hint">{d().installHint}</p>}
+                </Show>
                 <div class="connect-modal-actions">
                   <button class="device-btn" onClick={closeConnectDialog}>Cancel</button>
                   <button class="device-btn" onClick={() => void confirmConnect()}>
@@ -605,4 +661,14 @@ export default function App() {
       </Show>
     </main>
   );
+}
+function isVirtualMonitorResolver(resolver: string | undefined): boolean {
+  return resolver === "linux_x11_evdi_real_output";
+}
+
+function isVirtualMonitorAvailable(doctor: VirtualDoctor | null): boolean {
+  if (!doctor || !doctor.ok) return false;
+  if (isVirtualMonitorResolver(doctor.resolver)) return true;
+  if (doctor.hostBackend === "wayland_portal") return true;
+  return false;
 }

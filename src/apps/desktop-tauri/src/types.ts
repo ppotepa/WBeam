@@ -47,6 +47,7 @@ export type VirtualDoctor = {
   message: string;
   actionable: boolean;
   hostBackend: string;
+  resolver: string;
   missingDeps: string[];
   installHint: string;
 };

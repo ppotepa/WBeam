@@ -305,6 +305,7 @@ pub struct VirtualDisplayDoctorResponse {
     pub message: String,
     pub actionable: bool,
     pub host_backend: String,
+    pub resolver: String,
     pub missing_deps: Vec<String>,
     pub install_hint: String,
 }

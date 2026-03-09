@@ -335,8 +335,18 @@ if ! SESSION_ID="$(resolve_desktop_session_id)"; then
     SESSION_TYPE="x11"
     DISPLAY_VAL="$FORCED_DISPLAY"
   else
-    echo "[runas-remote] could not detect a graphical session for $TARGET_USER." >&2
-    exit 1
+    for sock in /tmp/.X11-unix/X*; do
+      [[ -S "$sock" ]] || continue
+      SESSION_ID="manual"
+      SESSION_TYPE="x11"
+      DISPLAY_VAL=":${sock##*X}"
+      echo "[runas-remote] WARN: no loginctl graphical session for $TARGET_USER; falling back to DISPLAY=$DISPLAY_VAL" >&2
+      break
+    done
+    if [[ -z "${SESSION_ID:-}" ]]; then
+      echo "[runas-remote] could not detect a graphical session for $TARGET_USER." >&2
+      exit 1
+    fi
   fi
 fi
 
@@ -375,6 +385,13 @@ DBUS_ADDR="unix:path=$XDG_RUNTIME_DIR/bus"
 XAUTHORITY_VAL="${TARGET_HOME:-/home/$TARGET_USER}/.Xauthority"
 if [[ "$SESSION_TYPE" == "x11" ]]; then
   XAUTHORITY_VAL="$(session_env_var "$SESSION_ID" XAUTHORITY || true)"
+  if [[ -z "$XAUTHORITY_VAL" || ! -f "$XAUTHORITY_VAL" ]]; then
+    for xa in "$XDG_RUNTIME_DIR"/xauth_*; do
+      [[ -f "$xa" ]] || continue
+      XAUTHORITY_VAL="$xa"
+      break
+    done
+  fi
   [[ -n "$XAUTHORITY_VAL" ]] || XAUTHORITY_VAL="${TARGET_HOME:-/home/$TARGET_USER}/.Xauthority"
 fi
 
@@ -382,6 +399,21 @@ env_args=(
   "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
   "DBUS_SESSION_BUS_ADDRESS=$DBUS_ADDR"
 )
+
+# Force session identity for child processes (daemon/UI). Without this override,
+# a parent shell exported as tty can leak into target process and break host probe.
+if [[ -n "$SESSION_TYPE" ]]; then
+  env_args+=("XDG_SESSION_TYPE=$SESSION_TYPE")
+fi
+
+SESSION_DESKTOP_VAL="$(session_env_var "$SESSION_ID" XDG_CURRENT_DESKTOP || true)"
+if [[ -z "$SESSION_DESKTOP_VAL" ]]; then
+  SESSION_DESKTOP_VAL="$(session_env_var "$SESSION_ID" DESKTOP_SESSION || true)"
+fi
+if [[ -n "$SESSION_DESKTOP_VAL" ]]; then
+  env_args+=("XDG_CURRENT_DESKTOP=$SESSION_DESKTOP_VAL")
+  env_args+=("DESKTOP_SESSION=$SESSION_DESKTOP_VAL")
+fi
 
 if [[ -n "${RUNAS_REMOTE_PASSTHROUGH_ENV:-}" ]]; then
   load_extra_env_passthrough "${RUNAS_REMOTE_PASSTHROUGH_ENV}"

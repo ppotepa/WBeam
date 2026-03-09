@@ -29,8 +29,6 @@ idea is simple: plug android phone/tablet into linux and use it as an extra disp
 - `src/compat/` -> api-level policy packs (`api17`, `api21`, `api29`)
 - `proto/` -> sandbox lane kept separate on purpose
 
-full migration notes: `docs/repo_tree_src_layout.md`
-
 ## quick start (main command: `./wbeam`)
 
 - check command list:
