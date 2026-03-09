@@ -39,7 +39,7 @@ function DeviceTypeIcon(props: { type: string }) {
   return props.type === "Tablet" ? <Tablet size={16} /> : <Smartphone size={16} />;
 }
 
-type DisplayMode = "virtual_monitor" | "isolated" | "duplicate";
+type DisplayMode = "virtual_monitor" | "duplicate";
 const CONNECT_MODE_STORAGE_KEY = "wbeam.connect.mode.by.serial";
 
 function loadSavedDisplayMode(serial: string): DisplayMode | null {
@@ -48,9 +48,10 @@ function loadSavedDisplayMode(serial: string): DisplayMode | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Record<string, string>;
     const value = parsed?.[serial];
-    if (value === "virtual_monitor" || value === "isolated" || value === "duplicate") return value;
-    // Backward compatibility with legacy value.
-    if (value === "virtual") return "isolated";
+    if (value === "virtual_monitor" || value === "duplicate") return value;
+    // Backward compatibility with legacy values.
+    if (value === "virtual") return "virtual_monitor";
+    if (value === "isolated" || value === "virtual_isolated") return "duplicate";
     return null;
   } catch {
     return null;
@@ -133,7 +134,25 @@ export default function App() {
     return session.deviceActionBusy().some((entry) => entry.startsWith(`${device.serial}:`));
   }
 
+  function isWaylandPortalHost(): boolean {
+    return session.hostProbe().captureMode === "wayland_portal";
+  }
+
+  async function connectWaylandPortal(device: DeviceBasic): Promise<void> {
+    const blockedReason = connectDisabledReason(device);
+    if (blockedReason.length > 0) {
+      session.setError(blockedReason);
+      return;
+    }
+    saveDisplayMode(device.serial, "duplicate");
+    await session.connectDevice(device, "duplicate");
+  }
+
   function openConnectDialog(device: DeviceBasic): void {
+    if (isWaylandPortalHost()) {
+      void connectWaylandPortal(device);
+      return;
+    }
     const saved = loadSavedDisplayMode(device.serial);
     setConnectDialogMode(saved ?? "virtual_monitor");
     setConnectDialogDoctor(null);
@@ -170,26 +189,16 @@ export default function App() {
     }
     try {
       let chosenMode = connectDialogMode();
-      let backendMode: "virtual_monitor" | "virtual_isolated" | "duplicate" = "duplicate";
+      let backendMode: "virtual_monitor" | "duplicate" = "duplicate";
       if (chosenMode === "virtual_monitor") {
         const doctor = connectDialogDoctor() ?? await api.getVirtualDoctor(device);
         if (!isVirtualMonitorAvailable(doctor)) {
           session.setError(
-            "Virtual monitor mode is unavailable in current host session. Use Isolated session (Xvfb) or Duplicate."
+            "Virtual monitor mode is unavailable in current host session. Use Duplicate mode."
           );
           return;
         }
         backendMode = "virtual_monitor";
-      } else if (chosenMode === "isolated") {
-        const doctor = connectDialogDoctor() ?? await api.getVirtualDoctor(device);
-        const xvfbMissing = doctor.missingDeps.includes("Xvfb");
-        if (xvfbMissing) {
-          setVirtualStartupDoctor(doctor);
-          setVirtualSetupVisible(true);
-          session.setError(`${doctor.message} ${doctor.installHint}`.trim());
-          return;
-        }
-        backendMode = "virtual_isolated";
       }
       saveDisplayMode(device.serial, chosenMode);
       closeConnectDialog();
@@ -444,7 +453,7 @@ export default function App() {
                   <button
                     class="device-btn"
                     title={connectBusy ? "Connecting..." : (connectDisabled ? `Connect blocked: ${connectReason}` : "Start stream for this device")}
-                    disabled={connectBusy}
+                    disabled={connectBusy || connectDisabled}
                     onClick={() => openConnectDialog(device)}
                   >
                     <Show when={connectBusy} fallback={<Link2 size={13} />}>
@@ -535,14 +544,8 @@ export default function App() {
         {(deviceAccessor) => {
           const device = deviceAccessor();
           const virtualMonitorSelected = () => connectDialogMode() === "virtual_monitor";
-          const isolatedSelected = () => connectDialogMode() === "isolated";
           const doctor = () => connectDialogDoctor();
           const virtualMonitorAvailable = () => isVirtualMonitorAvailable(doctor() ?? null);
-          const isolatedAvailable = () => {
-            const d = doctor();
-            if (!d) return true;
-            return !d.missingDeps.includes("Xvfb");
-          };
           return (
             <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Select display mode">
               <section class="connect-modal">
@@ -563,19 +566,6 @@ export default function App() {
                         ? "Creates real additional monitor space on host desktop."
                         : "Not implemented for current host session yet."}
                     </small>
-                  </span>
-                </label>
-                <label class={`mode-option ${isolatedSelected() ? "selected" : ""} ${!isolatedAvailable() ? "disabled" : ""}`}>
-                  <input
-                    type="radio"
-                    name="display-mode"
-                    checked={isolatedSelected()}
-                    disabled={!isolatedAvailable()}
-                    onChange={() => setConnectDialogMode("isolated")}
-                  />
-                  <span>
-                    Isolated session (Xvfb)
-                    <small>Separate virtual X11 session. Not visible in KDE display settings.</small>
                   </span>
                 </label>
                 <label class={`mode-option ${connectDialogMode() === "duplicate" ? "selected" : ""}`}>
@@ -675,7 +665,7 @@ export default function App() {
   );
 }
 function isVirtualMonitorResolver(resolver: string | undefined): boolean {
-  return resolver === "linux_x11_evdi_real_output";
+  return resolver === "linux_x11_real_output" || resolver === "linux_x11_monitor_object_experimental";
 }
 
 function isVirtualMonitorAvailable(doctor: VirtualDoctor | null): boolean {

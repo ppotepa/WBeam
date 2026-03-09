@@ -247,6 +247,8 @@ public class MainActivity extends AppCompatActivity {
     private String lastHudCompactLine = "hud: waiting for metrics";
     private double latestTargetFps = 60.0;
     private double latestPresentFps = 0.0;
+    private long latestStreamUptimeSec = 0L;
+    private long latestFrameOutHost = 0L;
     private final SpannableStringBuilder liveLogBuffer = new SpannableStringBuilder();
 
     // ── Daemon state (updated via StatusPoller.Callbacks) ──────────────────────
@@ -391,10 +393,14 @@ public class MainActivity extends AppCompatActivity {
                 if (errorChanged && !lastError.isEmpty()) {
                     appendLiveLogError("host last_error: " + lastError);
                 }
+                if (!"STREAMING".equals(state)
+                        && !"STARTING".equals(state)
+                        && !"RECONNECTING".equals(state)) {
+                    stopLiveView();
+                }
                 updateActionButtonsEnabled();
                 updateHostHint();
                 refreshStatusText();
-                updatePreflightOverlay();
                 if (metrics != null) {
                     long frameIn = metrics.optLong("frame_in", 0);
                     long frameOut = metrics.optLong("frame_out", 0);
@@ -408,12 +414,14 @@ public class MainActivity extends AppCompatActivity {
                             + (errCompact.isEmpty() ? "" : " | last_error: " + errCompact));
                 }
                 updatePerfHud(metrics);
+                updatePreflightOverlay();
             }
 
             @Override
             public void onDaemonOffline(boolean wasReachable, Exception e) {
                 daemonReachable = false;
                 daemonState = "DISCONNECTED";
+                stopLiveView();
                 handshakeResolved = false;
                 transportProbeOk = false;
                 transportProbeInFlight = false;
@@ -1038,7 +1046,8 @@ public class MainActivity extends AppCompatActivity {
     private void updateHostHint() {
         StreamConfig cfg = effectiveStreamConfig();
         String apiBase = HostApiClient.API_BASE;
-        String daemonStateUi = effectiveDaemonState(daemonState, latestPresentFps, 0, 0);
+        String daemonStateUi = effectiveDaemonState(
+                daemonState, latestPresentFps, latestStreamUptimeSec, latestFrameOutHost);
         String line1 = "Control API " + (daemonReachable ? "connected" : "waiting")
             + ": " + apiBase;
         String line2 = "Host: " + daemonHostName + " | Daemon: " + daemonStateUi + " (" + daemonService + ")";
@@ -1586,7 +1595,8 @@ public class MainActivity extends AppCompatActivity {
     private void refreshStatusText() {
         int color = ledColorForState(lastUiState);
         String host = daemonHostName == null || daemonHostName.trim().isEmpty() ? "-" : daemonHostName;
-        String daemonStateUi = effectiveDaemonState(daemonState, latestPresentFps, 0, 0);
+        String daemonStateUi = effectiveDaemonState(
+                daemonState, latestPresentFps, latestStreamUptimeSec, latestFrameOutHost);
         String transport = "USB:" + (daemonReachable ? "Connected" : "Disconnected")
                 + " | Host:" + host
             + " | Stream:" + daemonStateUi;
@@ -1634,6 +1644,8 @@ public class MainActivity extends AppCompatActivity {
         }
         latestTargetFps = getSelectedFps();
         latestPresentFps = 0.0;
+        latestStreamUptimeSec = 0L;
+        latestFrameOutHost = 0L;
         lastHudCompactLine = "hud: offline | waiting metrics";
         perfHudText.setText("HUD OFFLINE\nwaiting for host metrics...");
         perfHudText.setTextColor(Color.parseColor("#FCA5A5"));
@@ -1665,6 +1677,8 @@ public class MainActivity extends AppCompatActivity {
         String daemonStateUi = effectiveDaemonState(daemonState, presentFps, streamUptimeSec, frameOutHost);
         latestTargetFps = targetFps;
         latestPresentFps = presentFps;
+        latestStreamUptimeSec = streamUptimeSec;
+        latestFrameOutHost = frameOutHost;
         double frametimeP95 = kpi != null ? kpi.optDouble("frametime_ms_p95", 0.0) : 0.0;
         double decodeP95 = kpi != null ? kpi.optDouble("decode_time_ms_p95", 0.0) : 0.0;
         double renderP95 = kpi != null ? kpi.optDouble("render_time_ms_p95", 0.0) : 0.0;
@@ -1802,7 +1816,8 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         String state = lastUiState == null ? "IDLE" : lastUiState.toUpperCase(Locale.US);
-        String daemonStateUi = effectiveDaemonState(daemonState, latestPresentFps, 0, 0);
+        String daemonStateUi = effectiveDaemonState(
+                daemonState, latestPresentFps, latestStreamUptimeSec, latestFrameOutHost);
         String host = daemonHostName == null || daemonHostName.trim().isEmpty() ? "-" : daemonHostName;
         double safeTarget = latestTargetFps > 0.0 ? latestTargetFps : 60.0;
         double lossPct = Math.max(0.0, ((safeTarget - latestPresentFps) / safeTarget) * 100.0);
@@ -1951,8 +1966,9 @@ public class MainActivity extends AppCompatActivity {
         }
 
         // ── step 3: stream ────────────────────────────────────────────────────
-        String effState = effectiveDaemonState(daemonState, latestPresentFps, 0, 0);
-        boolean streamFlowing = latestPresentFps >= 1.0 || "STREAMING".equals(effState);
+        String effState = effectiveDaemonState(
+                daemonState, latestPresentFps, latestStreamUptimeSec, latestFrameOutHost);
+        boolean streamFlowing = "STREAMING".equals(effState);
 
         // Parse stream reconnect count from lastStatsLine ("reconnects: N")
         int streamReconnects = 0;
