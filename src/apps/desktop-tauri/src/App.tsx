@@ -665,7 +665,7 @@ export default function App() {
   );
 }
 function isVirtualMonitorResolver(resolver: string | undefined): boolean {
-  return resolver === "linux_x11_real_output" || resolver === "linux_x11_monitor_object_experimental";
+  return resolver === "linux_x11_real_output";
 }
 
 function isVirtualMonitorAvailable(doctor: VirtualDoctor | null): boolean {

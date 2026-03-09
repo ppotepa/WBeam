@@ -524,7 +524,14 @@ pub fn validate_config_with_presets(
 
     cfg.size = format!("{w}x{h}");
     cfg.fps = cfg.fps.clamp(24, 120);
-    cfg.bitrate_kbps = cfg.bitrate_kbps.clamp(4_000, 300_000);
+    // x265enc rejects values above ~100 Mbps on many hosts; keep config
+    // within backend-safe limits to avoid runtime panics on stream start.
+    let bitrate_max = if cfg.encoder == "h265" {
+        100_000
+    } else {
+        300_000
+    };
+    cfg.bitrate_kbps = cfg.bitrate_kbps.clamp(4_000, bitrate_max);
     cfg.debug_fps = cfg.debug_fps.clamp(0, 10);
 
     // RAW PNG is CPU/network heavy. Clamp to a latency-friendly envelope.
@@ -560,5 +567,45 @@ pub fn valid_values() -> ValidValues {
             .iter()
             .map(|v| (*v).to_string())
             .collect(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base_config(encoder: &str, bitrate_kbps: u32) -> ActiveConfig {
+        ActiveConfig {
+            profile: "balanced".to_string(),
+            encoder: encoder.to_string(),
+            cursor_mode: "embedded".to_string(),
+            size: "1920x1080".to_string(),
+            fps: 60,
+            bitrate_kbps,
+            debug_fps: 0,
+            intra_only: false,
+        }
+    }
+
+    #[test]
+    fn validate_config_caps_h265_bitrate_to_backend_safe_limit() {
+        let current = base_config("h265", 60_000);
+        let patch = ConfigPatch {
+            bitrate_kbps: Some(250_000),
+            ..Default::default()
+        };
+        let cfg = validate_config(patch, &current).expect("valid config");
+        assert_eq!(cfg.bitrate_kbps, 100_000);
+    }
+
+    #[test]
+    fn validate_config_keeps_h264_high_bitrate_range() {
+        let current = base_config("h264", 10_000);
+        let patch = ConfigPatch {
+            bitrate_kbps: Some(250_000),
+            ..Default::default()
+        };
+        let cfg = validate_config(patch, &current).expect("valid config");
+        assert_eq!(cfg.bitrate_kbps, 250_000);
     }
 }

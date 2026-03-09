@@ -71,6 +71,7 @@ pub fn configure_encoder(
     intra_only: bool,
     h264_gop: u32,
 ) {
+    const X265_MAX_BITRATE_KBPS: u32 = 100_000;
     let gop: u32 = if intra_only {
         1
     } else if h264_gop > 0 {
@@ -129,7 +130,14 @@ pub fn configure_encoder(
     }
 
     if encoder == "x265" {
-        let _ = enc.set_property("bitrate", bitrate_kbps);
+        let safe_bitrate = bitrate_kbps.min(X265_MAX_BITRATE_KBPS);
+        if safe_bitrate != bitrate_kbps {
+            println!(
+                "[wbeam] clamping x265 bitrate from {} to {} kbps (backend safety)",
+                bitrate_kbps, safe_bitrate
+            );
+        }
+        let _ = enc.set_property("bitrate", safe_bitrate);
         let _ = enc.set_property_from_str("speed-preset", "ultrafast");
         let _ = enc.set_property_from_str("tune", "zerolatency");
         let _ = enc.set_property("key-int-max", gop as i32);

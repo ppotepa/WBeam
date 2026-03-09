@@ -151,10 +151,11 @@ pub fn config_for_level(base: &ActiveConfig, level: u8) -> ActiveConfig {
     } else {
         (base.fps.saturating_mul(fps_pct as u32) / 100).clamp(30, 120)
     };
+    let bitrate_max = if cfg.encoder == "h265" { 100_000 } else { 120_000 };
     cfg.bitrate_kbps = if png_profile {
         (base.bitrate_kbps.saturating_mul(bitrate_pct) / 100).clamp(4_000, 80_000)
     } else {
-        (base.bitrate_kbps.saturating_mul(bitrate_pct) / 100).clamp(4_000, 120_000)
+        (base.bitrate_kbps.saturating_mul(bitrate_pct) / 100).clamp(4_000, bitrate_max)
     };
     cfg
 }
@@ -256,5 +257,14 @@ mod tests {
         c.decode_time_ms_p95 = 2.0;
         c.render_time_ms_p95 = 1.0;
         assert!(is_low_pressure(120, &c));
+    }
+
+    #[test]
+    fn config_level_caps_h265_bitrate_to_safe_limit() {
+        let mut base = ActiveConfig::balanced_default();
+        base.encoder = "h265".to_string();
+        base.bitrate_kbps = 150_000;
+        let cfg = config_for_level(&base, 0);
+        assert_eq!(cfg.bitrate_kbps, 100_000);
     }
 }
