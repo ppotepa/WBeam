@@ -1,5 +1,13 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending) - Vite/esbuild EPIPE mitigation
+- Hardened desktop Vite dev config against sporadic esbuild `write EPIPE` failures:
+  - disabled HMR error overlay (`server.hmr.overlay = false`) so desktop UI is not blocked by modal overlay during transient dev worker crashes,
+  - excluded `lucide-solid` from Vite optimizeDeps pre-bundle to avoid heavy esbuild pre-transform path that was repeatedly hitting EPIPE.
+- Validation:
+  - `npm run build` in `src/apps/desktop-tauri` -> OK
+  - `npm run dev` runtime smoke could not be fully validated in this sandbox because binding `:1420` is blocked (`listen EPERM`), but static config is applied and build passes.
+
 ## Session Update (2026-03-10, pending) - Multi-device Wayland stability (API34/35 focus)
 - Desktop device list refresh tightened for multi-device workflows:
   - lowered adaptive devices polling floor from `5000ms` to `1200ms`,
