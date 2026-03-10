@@ -1,5 +1,20 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending) - Comprehensive Trainer product/spec document
+- Added a full project-level Trainer blueprint in:
+  - `trainer.md`
+- Document consolidates all agreed direction for the dedicated training app and pipeline, including:
+  - app identity and runtime dependency model (`trainer` + `trainer.sh`, daemon-required behavior),
+  - IA/tabs (`Train`, `Live HUD`, `Profiles`, `Runs`, `Compare`, `Devices`),
+  - formal training input contract,
+  - mandatory preflight diagnostics (ADB throughput/latency + baseline stream benchmark),
+  - staged optimization design (stability floor -> bitrate ceiling -> fine tuning),
+  - hard-gate + weighted scoring model by mode (`max_quality`, `balanced`, `low_latency`),
+  - full HUD requirements with live metrics and charts,
+  - profile artifact contract with per-profile directory outputs and required `parameters.json`,
+  - proposed trainer API surface and event stream,
+  - phased implementation plan, acceptance criteria, and open questions.
+
 ## Session Update (2026-03-10, pending) - Train proto engine env sanitization for `run.sh`
 - Fixed training failure in `./wbeam train wizard` (`proto` engine) caused by inherited shell env vars blocked by `proto/run.py`.
 - In `src/domains/training/legacy_engine.py`:
