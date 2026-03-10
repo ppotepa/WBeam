@@ -1,0 +1,112 @@
+stages:
+  - build
+  - publish
+
+workflow:
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH
+
+default:
+  interruptible: true
+  before_script:
+    - chmod +x scripts/ci/*.sh
+
+build_deb:
+  stage: build
+  image: rust:bookworm
+  script:
+    - apt-get update
+    - >
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends
+      ca-certificates
+      curl
+      git
+      jq
+      pkg-config
+      build-essential
+      libssl-dev
+      libdbus-1-dev
+      libgstreamer1.0-dev
+      libgstreamer-plugins-base1.0-dev
+      libx11-dev
+      libxrandr-dev
+      libxfixes-dev
+      libxext-dev
+      libxrender-dev
+      dpkg-dev
+    - ./scripts/ci/build_deb.sh
+  artifacts:
+    paths:
+      - dist/*.deb
+    expire_in: 14 days
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+build_rpm:
+  stage: build
+  image: fedora:41
+  script:
+    - dnf -y install ca-certificates curl git jq rust cargo gcc gcc-c++ make pkgconf-pkg-config
+    - dnf -y install openssl-devel dbus-devel gstreamer1-devel gstreamer1-plugins-base-devel
+    - dnf -y install libX11-devel libXrandr-devel libXfixes-devel libXext-devel libXrender-devel
+    - dnf -y install rpm-build tar gzip findutils
+    - ./scripts/ci/build_rpm.sh
+  artifacts:
+    paths:
+      - dist/*.rpm
+    expire_in: 14 days
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+build_aarch64_tar:
+  stage: build
+  image: rust:bookworm
+  script:
+    - apt-get update
+    - >
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends
+      ca-certificates
+      curl
+      git
+      jq
+      pkg-config
+      build-essential
+      gcc-aarch64-linux-gnu
+      libssl-dev
+      libdbus-1-dev
+      libx11-dev
+      libxrandr-dev
+      libxfixes-dev
+      libxext-dev
+      libxrender-dev
+      file
+      tar
+      gzip
+    - ./scripts/ci/build_aarch64_tar.sh
+  artifacts:
+    paths:
+      - dist/*aarch64*.tar.gz
+    expire_in: 14 days
+  allow_failure: true
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+publish_github_release:
+  stage: publish
+  image: alpine:3.21
+  variables:
+    GIT_STRATEGY: fetch
+  script:
+    - apk add --no-cache bash curl jq
+    - ./scripts/ci/publish_github_release.sh
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
