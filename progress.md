@@ -1886,3 +1886,21 @@ Status: active
   - `python3 -m py_compile src/domains/training/wizard.py` -> OK
   - `cd src/apps/trainer-tauri && npm run build` -> OK
   - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+
+## In Progress (2026-03-10) - HUD visual maquette (SVG/XML)
+- Added full-screen HUD layout mock as SVG/XML file:
+  - `trainer.hud.maquette.xml`
+- Maquette includes:
+  - transparent full-screen frame + subtle dual grid,
+  - unified single overlay composition (no multi-corner split),
+  - top run/profile/trial strip,
+  - live metrics block with severity placeholders,
+  - trends block (sparkline + bar examples),
+  - lower status/event/legend zones,
+  - placeholder tokens for runtime values (`{run_id}`, `{Mbps}`, `{score}`, etc.).
+- Design intent encoded in file for implementation handoff:
+  - compact mono typography,
+  - alpha-based panels,
+  - threshold color semantics (`OK/WARN/RISK`).
+- Validation:
+  - XML parse check via `xml.etree.ElementTree` -> OK
