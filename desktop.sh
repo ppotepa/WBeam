@@ -51,6 +51,53 @@ Usage:
 EOF
 }
 
+desktop_has_graphical_env() {
+  if [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
+    return 0
+  fi
+  if [[ -n "${DISPLAY:-}" ]]; then
+    return 0
+  fi
+  return 1
+}
+
+desktop_ensure_graphical_context() {
+  local -a launch_args
+  launch_args=("$@")
+
+  # Already inside a graphical environment.
+  if desktop_has_graphical_env && [[ "${XDG_SESSION_TYPE:-}" != "tty" ]]; then
+    return 0
+  fi
+
+  # Prevent reexec loops.
+  if [[ "${WBEAM_DESKTOP_REEXEC:-0}" == "1" ]]; then
+    echo "[desktop] failed to enter graphical session context (DISPLAY/WAYLAND still missing)." >&2
+    echo "[desktop] run './runas-remote <user> ./desktop.sh' and verify active GUI session." >&2
+    return 1
+  fi
+
+  if [[ "${WBEAM_DESKTOP_AUTO_REEXEC:-1}" != "1" ]]; then
+    echo "[desktop] no graphical session in current shell (DISPLAY/WAYLAND missing)." >&2
+    echo "[desktop] run './runas-remote <user> ./desktop.sh' or set WBEAM_DESKTOP_AUTO_REEXEC=1." >&2
+    return 1
+  fi
+
+  local target_user="${WBEAM_DEV_REMOTE_USER:-$(id -un)}"
+  local runas="$ROOT_DIR/runas-remote"
+  if [[ ! -x "$runas" ]]; then
+    echo "[desktop] missing executable: $runas" >&2
+    return 1
+  fi
+
+  echo "[desktop] no graphical session in current shell; re-launching via runas-remote user=$target_user"
+  exec env \
+    RUNAS_REMOTE_QUIET=1 \
+    RUNAS_REMOTE_SESSION_REMOTE="${RUNAS_REMOTE_SESSION_REMOTE:-no}" \
+    WBEAM_DESKTOP_REEXEC=1 \
+    "$runas" "$target_user" "$ROOT_DIR/desktop.sh" -- "${launch_args[@]}"
+}
+
 ensure_supported_node() {
   if ! command -v node >/dev/null 2>&1; then
     echo "[desktop] node is required (recommended v20 or v22 LTS)." >&2
@@ -120,6 +167,8 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   usage
   exit 0
 fi
+
+desktop_ensure_graphical_context "$@"
 
 run_dev() {
   local log_file

@@ -923,3 +923,15 @@ Status: active
 - Validation:
   - `bash -n desktop.sh` -> OK
   - `./desktop.sh --help` -> OK
+
+## In Progress (2026-03-10) [commit: pending] - desktop launcher auto-reexec into graphical session
+- Hardened `desktop.sh` against GTK init failures from tty shells:
+  - detects missing graphical env (`DISPLAY`/`WAYLAND_DISPLAY`) or `XDG_SESSION_TYPE=tty`,
+  - auto re-launches via `runas-remote` into active GUI session (default enabled),
+  - loop guard via `WBEAM_DESKTOP_REEXEC=1`.
+- Added control flag:
+  - `WBEAM_DESKTOP_AUTO_REEXEC=0` to disable auto-reexec and fail fast with actionable message.
+- Validation:
+  - `bash -n desktop.sh` -> OK
+  - `WBEAM_DESKTOP_AUTO_REEXEC=0 ./desktop.sh --dev` -> clear tty/GUI error
+  - `WBEAM_DESKTOP_REEXEC=1 ./desktop.sh --dev` -> loop-guard error path
