@@ -109,6 +109,14 @@ export default function App() {
 
   function connectDisabledReason(device: DeviceBasic): string {
     if (isDeviceBusy(device)) return "This device action is already in progress";
+    if (isWaylandPortalHost()) {
+      const otherConnectInFlight = session
+        .deviceActionBusy()
+        .some((entry) => entry.endsWith(":connect") && !entry.startsWith(`${device.serial}:`));
+      if (otherConnectInFlight) {
+        return "Another Wayland portal connect is in progress";
+      }
+    }
     if (!session.service().active) return "Desktop service must be running";
     if (!device.apkInstalled) return "APK is not installed on this device";
     if (!device.apkMatchesDaemon) return "APK version must match daemon version";
@@ -310,10 +318,24 @@ export default function App() {
 
     const timer = window.setInterval(() => {
       if (session.deviceActionBusy().length > 0 || session.refreshInFlight()) return;
-      void session.refreshSnapshot({ silent: true });
-    }, 4000);
+      void session.refreshSnapshot({ silent: true, forceDevices: true });
+    }, 1200);
+
+    const refreshVisible = () => {
+      if (session.deviceActionBusy().length > 0 || session.refreshInFlight()) return;
+      void session.refreshSnapshot({ silent: true, forceDevices: true });
+    };
+    const onFocus = () => refreshVisible();
+    const onVisibilityChange = () => {
+      if (!document.hidden) refreshVisible();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
     onCleanup(() => {
       window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       stopVirtualInstallPolling();
     });
   });

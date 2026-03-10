@@ -1325,6 +1325,21 @@ impl DaemonCore {
             let stream_script = self
                 .root
                 .join("src/host/scripts/stream_wayland_portal_h264.py");
+            let session_suffix = self
+                .target_serial
+                .as_deref()
+                .unwrap_or("default")
+                .chars()
+                .map(|ch| {
+                    if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                        ch
+                    } else {
+                        '_'
+                    }
+                })
+                .collect::<String>();
+            let restore_token_file =
+                format!("/tmp/wbeam-portal-restore-token-{}-{}", session_suffix, self.stream_port);
             cmd = Command::new("python3");
             cmd.arg("-u")
                 .arg(stream_script)
@@ -1346,6 +1361,8 @@ impl DaemonCore {
                 .arg("/tmp/wbeam-frames")
                 .arg("--debug-fps")
                 .arg(cfg.debug_fps.to_string())
+                .arg("--restore-token-file")
+                .arg(restore_token_file)
                 .env("PYTHONUNBUFFERED", "1")
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())

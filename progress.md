@@ -1,5 +1,24 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending) - Multi-device Wayland stability (API34/35 focus)
+- Desktop device list refresh tightened for multi-device workflows:
+  - lowered adaptive devices polling floor from `5000ms` to `1200ms`,
+  - added forced fast refresh on window focus and on `visibilitychange` resume,
+  - kept adaptive backoff to reduce unnecessary polling when nothing changes.
+- Wayland portal connect flow now blocks parallel connect starts across different devices:
+  - prevents overlapping portal prompt races that produced duplicated selection windows.
+- Tauri backend connect/disconnect now resolves a canonical stream port per target serial before action:
+  - guards against stale UI port values and per-device session collisions,
+  - adds explicit requested/effective port trace logging for diagnostics.
+- Host daemon (`wbeamd-server`) now serializes `/start` operations for `wayland_portal` capture mode:
+  - enforces one portal start handshake at a time across sessions to reduce prompt duplication/mixups.
+- Legacy Python Wayland portal fallback now uses per-session restore-token files:
+  - token path includes serial + stream port to avoid cross-device token interference.
+- Validation run:
+  - `npm run build` in `src/apps/desktop-tauri` -> OK
+  - `cargo check -p wbeamd-server` in `src/host/rust` -> OK
+  - `cargo check` in `src/apps/desktop-tauri/src-tauri` -> OK
+
 ## Session Update (2026-03-09, 4e63a732) - Display backend separation (X11/Wayland/Windows)
 - Separated host display-mode responsibilities into a dedicated backend layer:
   - new module tree: `src/host/rust/crates/wbeamd-core/src/infra/display_backends/`

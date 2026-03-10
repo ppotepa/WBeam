@@ -53,6 +53,7 @@ struct SessionRegistry {
     control_port: u16,
     base_stream_port: u16,
     default_core: Arc<DaemonCore>,
+    portal_start_gate: Mutex<()>,
     serial_cores: Mutex<HashMap<String, SessionCore>>,
     port_cores: Mutex<HashMap<u16, SessionCore>>,
 }
@@ -69,6 +70,7 @@ impl SessionRegistry {
             control_port,
             base_stream_port,
             default_core,
+            portal_start_gate: Mutex::new(()),
             serial_cores: Mutex::new(HashMap::new()),
             port_cores: Mutex::new(HashMap::new()),
         }
@@ -491,7 +493,14 @@ async fn post_start(
         core.set_display_mode(query.display_mode.as_deref()).await;
     }
     let patch = body.map(|Json(v)| v).unwrap_or_default();
-    match core.start(patch).await {
+    let host_probe = core.host_probe().await;
+    let start_result = if host_probe.capture_mode == "wayland_portal" {
+        let _guard = state.sessions.portal_start_gate.lock().await;
+        core.start(patch).await
+    } else {
+        core.start(patch).await
+    };
+    match start_result {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(err) => core_error_response(core, err).await,
     }

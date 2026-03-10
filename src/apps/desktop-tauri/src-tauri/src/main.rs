@@ -504,6 +504,17 @@ fn list_devices_basic() -> DevicesBasicResponse {
     }
 }
 
+fn resolve_stream_port_for_serial(serial: &str, requested_stream_port: u16) -> u16 {
+    let response = list_devices_basic();
+    response
+        .devices
+        .into_iter()
+        .find(|device| device.serial == serial)
+        .map(|device| device.stream_port)
+        .filter(|port| *port > 0)
+        .unwrap_or_else(|| if requested_stream_port > 0 { requested_stream_port } else { 5000 })
+}
+
 fn default_stream_port_for_index(base_stream_port: u16, control_port: u16, idx: usize) -> u16 {
     let offset = u16::try_from(idx).unwrap_or(u16::MAX);
     let mut port = base_stream_port.saturating_add(2).saturating_add(offset);
@@ -1392,6 +1403,20 @@ fn device_connect(
     display_mode: Option<String>,
 ) -> Result<String, String> {
     service_ready_for_device_actions()?;
+    let mut effective_stream_port = resolve_stream_port_for_serial(&serial, stream_port);
+    if effective_stream_port != stream_port {
+        ui_service_log(
+            "device_connect",
+            "port_remap",
+            &format!(
+                "serial={} requested_port={} effective_port={}",
+                serial, stream_port, effective_stream_port
+            ),
+        );
+    }
+    if effective_stream_port == 0 {
+        effective_stream_port = 5000;
+    }
     let chosen_mode = display_mode.unwrap_or_else(|| "duplicate".to_string());
     let normalized_mode = chosen_mode.trim().to_lowercase();
     if normalized_mode != "duplicate"
@@ -1403,8 +1428,8 @@ fn device_connect(
             "device_connect",
             "error",
             &format!(
-                "serial={} port={} mode={} err={}",
-                serial, stream_port, normalized_mode, msg
+                "serial={} requested_port={} effective_port={} mode={} err={}",
+                serial, stream_port, effective_stream_port, normalized_mode, msg
             ),
         );
         return Err(msg);
@@ -1413,13 +1438,13 @@ fn device_connect(
         "device_connect",
         "begin",
         &format!(
-            "serial={} port={} requested_mode={}",
-            serial, stream_port, normalized_mode
+            "serial={} requested_port={} effective_port={} requested_mode={}",
+            serial, stream_port, effective_stream_port, normalized_mode
         ),
     );
-    connect_log(&serial, stream_port, "device_connect begin");
+    connect_log(&serial, effective_stream_port, "device_connect begin");
     if normalized_mode == "virtual" || normalized_mode == "virtual_monitor" {
-        let doctor = virtual_doctor(Some(serial.clone()), Some(stream_port))?;
+        let doctor = virtual_doctor(Some(serial.clone()), Some(effective_stream_port))?;
         if !doctor.ok {
             let msg = if !doctor.install_hint.trim().is_empty() {
                 format!("Virtual monitor unavailable: {}", doctor.install_hint)
@@ -1430,11 +1455,11 @@ fn device_connect(
                 "device_connect",
                 "error",
                 &format!(
-                    "serial={} port={} mode={} err={}",
-                    serial, stream_port, normalized_mode, msg
+                    "serial={} requested_port={} effective_port={} mode={} err={}",
+                    serial, stream_port, effective_stream_port, normalized_mode, msg
                 ),
             );
-            connect_log(&serial, stream_port, &msg);
+            connect_log(&serial, effective_stream_port, &msg);
             return Err(msg);
         }
         let resolver = doctor.resolver.as_str();
@@ -1449,11 +1474,11 @@ fn device_connect(
                 "device_connect",
                 "error",
                 &format!(
-                    "serial={} port={} mode={} err={}",
-                    serial, stream_port, normalized_mode, msg
+                    "serial={} requested_port={} effective_port={} mode={} err={}",
+                    serial, stream_port, effective_stream_port, normalized_mode, msg
                 ),
             );
-            connect_log(&serial, stream_port, &msg);
+            connect_log(&serial, effective_stream_port, &msg);
             return Err(msg);
         }
         if is_monitor_object {
@@ -1464,37 +1489,40 @@ fn device_connect(
                     "device_connect",
                     "error",
                     &format!(
-                        "serial={} port={} mode={} err={}",
-                        serial, stream_port, normalized_mode, msg
+                        "serial={} requested_port={} effective_port={} mode={} err={}",
+                        serial, stream_port, effective_stream_port, normalized_mode, msg
                     ),
                 );
-                connect_log(&serial, stream_port, &msg);
+                connect_log(&serial, effective_stream_port, &msg);
                 return Err(msg);
             }
             connect_log(
                 &serial,
-                stream_port,
+                effective_stream_port,
                 "virtual monitor fallback active: xrandr --setmonitor (simulated monitor)",
             );
         }
     }
-    adb_prepare_connect(&serial, stream_port)?;
+    adb_prepare_connect(&serial, effective_stream_port)?;
     connect_log(
         &serial,
-        stream_port,
+        effective_stream_port,
         "device_connect daemon_post_action start",
     );
-    let resp = match daemon_post_action("start", &serial, stream_port, Some(&normalized_mode)) {
+    let resp = match daemon_post_action("start", &serial, effective_stream_port, Some(&normalized_mode)) {
         Ok(v) => v,
         Err(err) => {
             ui_service_log(
                 "device_connect",
                 "error",
-                &format!("serial={} port={} err={}", serial, stream_port, err),
+                &format!(
+                    "serial={} requested_port={} effective_port={} err={}",
+                    serial, stream_port, effective_stream_port, err
+                ),
             );
             connect_log(
                 &serial,
-                stream_port,
+                effective_stream_port,
                 &format!("device_connect daemon_post_action error='{}'", err),
             );
             return Err(err);
@@ -1503,11 +1531,14 @@ fn device_connect(
     ui_service_log(
         "device_connect",
         "ok",
-        &format!("serial={} port={}", serial, stream_port),
+        &format!(
+            "serial={} requested_port={} effective_port={}",
+            serial, stream_port, effective_stream_port
+        ),
     );
     connect_log(
         &serial,
-        stream_port,
+        effective_stream_port,
         &format!("device_connect ok response='{}'", resp),
     );
     Ok(resp)
@@ -1516,12 +1547,16 @@ fn device_connect(
 #[tauri::command]
 fn device_disconnect(serial: String, stream_port: u16) -> Result<String, String> {
     service_ready_for_device_actions()?;
+    let effective_stream_port = resolve_stream_port_for_serial(&serial, stream_port);
     ui_service_log(
         "device_disconnect",
         "begin",
-        &format!("serial={} port={}", serial, stream_port),
+        &format!(
+            "serial={} requested_port={} effective_port={}",
+            serial, stream_port, effective_stream_port
+        ),
     );
-    let mut res = daemon_post_action("stop", &serial, stream_port, None);
+    let mut res = daemon_post_action("stop", &serial, effective_stream_port, None);
     if res.is_err() {
         // Fallback: stream port may have drifted from stale UI mapping.
         let control_port = wbeam_control_port();
@@ -1541,12 +1576,18 @@ fn device_disconnect(serial: String, stream_port: u16) -> Result<String, String>
         Ok(_) => ui_service_log(
             "device_disconnect",
             "ok",
-            &format!("serial={} port={}", serial, stream_port),
+            &format!(
+                "serial={} requested_port={} effective_port={}",
+                serial, stream_port, effective_stream_port
+            ),
         ),
         Err(err) => ui_service_log(
             "device_disconnect",
             "error",
-            &format!("serial={} port={} err={}", serial, stream_port, err),
+            &format!(
+                "serial={} requested_port={} effective_port={} err={}",
+                serial, stream_port, effective_stream_port, err
+            ),
         ),
     }
     res

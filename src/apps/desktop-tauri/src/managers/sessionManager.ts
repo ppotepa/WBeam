@@ -36,8 +36,8 @@ export function createSessionManager(api: HostApiManager) {
   let lastVersionKey = "";
   let nextDevicesPollAt = 0;
   let devicesPollIntervalMs = 5000;
-  const DEVICES_POLL_MIN_MS = 5000;
-  const DEVICES_POLL_MAX_MS = 20000;
+  const DEVICES_POLL_MIN_MS = 1200;
+  const DEVICES_POLL_MAX_MS = 7000;
 
   const tabletCount = createMemo(() => devices().filter((d) => d.deviceClass === "Tablet").length);
   const phoneCount = createMemo(() => devices().filter((d) => d.deviceClass === "Phone").length);
@@ -113,7 +113,11 @@ export function createSessionManager(api: HostApiManager) {
       }
 
       if (response.error) setError(response.error);
-      devicesPollIntervalMs = DEVICES_POLL_MIN_MS;
+      if (force || changed) {
+        devicesPollIntervalMs = DEVICES_POLL_MIN_MS;
+      } else {
+        devicesPollIntervalMs = Math.min(DEVICES_POLL_MAX_MS, devicesPollIntervalMs + 400);
+      }
       nextDevicesPollAt = Date.now() + devicesPollIntervalMs;
     } catch (err) {
       setError(String(err));
@@ -128,8 +132,9 @@ export function createSessionManager(api: HostApiManager) {
     return changed;
   }
 
-  async function refreshSnapshot(options?: { silent?: boolean }) {
+  async function refreshSnapshot(options?: { silent?: boolean; forceDevices?: boolean }) {
     const silent = options?.silent ?? false;
+    const forceDevices = options?.forceDevices ?? !silent;
     if (refreshInFlight()) return;
     setRefreshInFlight(true);
     if (!silent) setRefreshing(true);
@@ -138,7 +143,7 @@ export function createSessionManager(api: HostApiManager) {
       const canProbeDevices = service().active;
       let devicesChanged = false;
       if (canProbeDevices) {
-        devicesChanged = await loadDevices(loading(), !silent);
+        devicesChanged = await loadDevices(loading(), forceDevices);
       } else if (devices().length > 0 || hostVersion() || daemonVersion() || deviceActionBusy().length > 0) {
         setDevices([]);
         setHostVersion("");
