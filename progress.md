@@ -947,3 +947,20 @@ Status: active
 - Default behavior in debug build now starts with overlay hidden (`debugOverlayVisible=false`), to reduce on-screen clutter.
 - Validation:
   - `cd android && GRADLE_USER_HOME=/home/ppotepa/git/WBeam/.gradle-user ./gradlew :app:compileDebugJavaWithJavac --no-daemon --stacktrace` -> OK
+
+## In Progress (2026-03-10) [commit: 3b84944e] - monotonic build-number recovery + all-device redeploy targeting
+- Hardened build-number increment logic in `wbeam`:
+  - build counter now seeds from max of `.wbeam_buildno` and parseable `.wbeam_build_version`,
+  - prevents accidental reset to `0` when one file is stale/corrupted/legacy-formatted.
+- Applied same monotonic fallback in `devtool` build-version generation path.
+- Added explicit multi-device targeting support:
+  - `wbeam` now accepts `WBEAM_ANDROID_SERIALS` (comma/space separated) as an override list for connected serials.
+- Updated `redeploy-local` Android deploy stage:
+  - retries ADB device discovery until snapshot stabilizes,
+  - passes full discovered serial list via `WBEAM_ANDROID_SERIALS`,
+  - clears `WBEAM_ANDROID_SERIAL` for this call to avoid single-device pinning.
+- Added compatibility wrapper script:
+  - `./redeploy_local` now delegates to `./redeploy-local`.
+- Validation:
+  - `bash -n wbeam devtool redeploy-local redeploy_local` -> OK
+  - `./redeploy_local --help` -> OK
