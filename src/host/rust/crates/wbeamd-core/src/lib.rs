@@ -13,7 +13,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{mpsc, Mutex};
 use tokio::time::sleep;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use wbeamd_api::{
     valid_values, validate_config_with_presets, ActiveConfig, BaseResponse, ClientMetricsRequest,
     ClientMetricsResponse, ConfigPatch, ErrorResponse, HealthResponse, HostProbeResponse,
@@ -248,70 +248,80 @@ fn runtime_config_path_for_session(root: &Path, session_label: Option<&str>) -> 
     config_dir.join("runtime_state.json")
 }
 
-fn load_presets_from_proto_file(root: &Path) -> Option<BTreeMap<String, ActiveConfig>> {
-    let path = root.join("proto/config/profiles.json");
-    let raw = match std::fs::read_to_string(&path) {
-        Ok(v) => v,
-        Err(e) => {
-            warn!("presets: failed to read {}: {e}", path.display());
-            return None;
+fn load_presets_from_training_files(root: &Path) -> Option<BTreeMap<String, ActiveConfig>> {
+    // New canonical path: config/training/profiles.json
+    // Legacy fallback: proto/config/profiles.json
+    let candidates = [
+        root.join("config/training/profiles.json"),
+        root.join("proto/config/profiles.json"),
+    ];
+
+    for path in candidates {
+        let raw = match std::fs::read_to_string(&path) {
+            Ok(v) => v,
+            Err(e) => {
+                debug!("presets: cannot read {}: {e}", path.display());
+                continue;
+            }
+        };
+        let value: serde_json::Value = match serde_json::from_str(&raw) {
+            Ok(v) => v,
+            Err(e) => {
+                warn!("presets: invalid JSON in {}: {e}", path.display());
+                continue;
+            }
+        };
+        let Some(profiles) = value.get("profiles").and_then(|v| v.as_object()) else {
+            warn!("presets: missing .profiles object in {}", path.display());
+            continue;
+        };
+
+        let mut out = BTreeMap::new();
+        for (name, node) in profiles {
+            let values = node.get("values").and_then(|v| v.as_object());
+            let size = values
+                .and_then(|v| v.get("PROTO_CAPTURE_SIZE"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("1280x720")
+                .to_string();
+            let fps = values
+                .and_then(|v| v.get("PROTO_CAPTURE_FPS"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(60) as u32;
+            let bitrate_kbps = values
+                .and_then(|v| v.get("PROTO_CAPTURE_BITRATE_KBPS"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(10_000) as u32;
+
+            out.insert(
+                name.clone(),
+                ActiveConfig {
+                    profile: name.clone(),
+                    encoder: "h264".to_string(),
+                    cursor_mode: "embedded".to_string(),
+                    size,
+                    fps,
+                    bitrate_kbps,
+                    debug_fps: 0,
+                    intra_only: false,
+                },
+            );
         }
-    };
-    let value: serde_json::Value = match serde_json::from_str(&raw) {
-        Ok(v) => v,
-        Err(e) => {
-            warn!("presets: invalid JSON in {}: {e}", path.display());
-            return None;
+
+        if out.is_empty() {
+            warn!("presets: no profiles loaded from {}", path.display());
+            continue;
         }
-    };
-    let Some(profiles) = value.get("profiles").and_then(|v| v.as_object()) else {
-        warn!("presets: missing .profiles object in {}", path.display());
-        return None;
-    };
-
-    let mut out = BTreeMap::new();
-    for (name, node) in profiles {
-        let values = node.get("values").and_then(|v| v.as_object());
-        let size = values
-            .and_then(|v| v.get("PROTO_CAPTURE_SIZE"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("1280x720")
-            .to_string();
-        let fps = values
-            .and_then(|v| v.get("PROTO_CAPTURE_FPS"))
-            .and_then(|v| v.as_u64())
-            .unwrap_or(60) as u32;
-        let bitrate_kbps = values
-            .and_then(|v| v.get("PROTO_CAPTURE_BITRATE_KBPS"))
-            .and_then(|v| v.as_u64())
-            .unwrap_or(10_000) as u32;
-
-        out.insert(
-            name.clone(),
-            ActiveConfig {
-                profile: name.clone(),
-                encoder: "h264".to_string(),
-                cursor_mode: "embedded".to_string(),
-                size,
-                fps,
-                bitrate_kbps,
-                debug_fps: 0,
-                intra_only: false,
-            },
-        );
-    }
-
-    if out.is_empty() {
-        warn!("presets: no profiles loaded from {}", path.display());
-        None
-    } else {
         info!(
             "presets: loaded {} profile(s) from {}",
             out.len(),
             path.display()
         );
-        Some(out)
+        return Some(out);
     }
+
+    warn!("presets: no training profiles found in config/training or proto/config");
+    None
 }
 
 fn default_config_from_presets(presets: &BTreeMap<String, ActiveConfig>) -> ActiveConfig {
@@ -497,12 +507,12 @@ impl DaemonCore {
             .unwrap_or_else(|| "unknown-host".to_string());
 
         let runtime_config_path = runtime_config_path_for_session(&root, session_label.as_deref());
-        // Merge built-in presets with proto-trained presets (proto can override).
+        // Merge built-in presets with training-domain presets (training profiles can override).
         // Canonical runtime profile is now "baseline"; legacy profile names are
         // canonicalized in API validation to preserve backward compatibility.
         let mut presets = wbeamd_api::presets();
-        if let Some(proto_presets) = load_presets_from_proto_file(&root) {
-            for (k, v) in proto_presets {
+        if let Some(training_presets) = load_presets_from_training_files(&root) {
+            for (k, v) in training_presets {
                 presets.insert(k, v);
             }
         }

@@ -2064,7 +2064,7 @@ x11proto_android_deploy() {
 
 train_wizard() {
   require_cmd python3
-  "$ROOT_DIR/scripts/train_wizard.py" "$@"
+  "$ROOT_DIR/src/domains/training/wizard.py" "$@"
 }
 
 group="${1:-}"

@@ -20,9 +20,11 @@ from urllib import parse as urlparse
 from urllib import request as urlrequest
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[3]
 DEVICE_PORTS_FILE = ROOT / ".wbeam_device_ports"
-PROFILE_FILE = ROOT / "proto" / "config" / "profiles.json"
+TRAINING_DIR = ROOT / "config" / "training"
+PROFILE_FILE = TRAINING_DIR / "profiles.json"
+AUTOTUNE_BEST_FILE = TRAINING_DIR / "autotune-best.json"
 DESKTOP_RUNTIME_FILE = (
     ROOT / "src" / "apps" / "desktop-tauri" / "src" / "config" / "trained-profile-runtime.json"
 )
@@ -600,8 +602,9 @@ def run_proto_autotune_engine(
 ) -> int:
     proto_dir = ROOT / "proto"
     base_template_path = proto_dir / "config" / "proto.json"
-    best_out_rel = "config/autotune-best.json"
-    profiles_out_rel = "config/profiles.json"
+    TRAINING_DIR.mkdir(parents=True, exist_ok=True)
+    best_out_path = AUTOTUNE_BEST_FILE.resolve()
+    profiles_out_path = PROFILE_FILE.resolve()
     if not base_template_path.exists():
         eprint(f"[error] missing proto base config: {base_template_path}")
         return 1
@@ -687,9 +690,9 @@ def run_proto_autotune_engine(
         "baseline",
         "--export-profiles",
         "--profiles-out",
-        profiles_out_rel,
+        str(profiles_out_path),
         "--best-config-out",
-        best_out_rel,
+        str(best_out_path),
         "--results",
         f"autotune-results-main-{stamp}.json",
     ]
@@ -706,7 +709,7 @@ def run_proto_autotune_engine(
         eprint(f"[error] proto autotune failed (exit={proc.returncode})")
         return proc.returncode
 
-    best_cfg_path = proto_dir / best_out_rel
+    best_cfg_path = best_out_path
     if not best_cfg_path.exists():
         eprint(f"[error] expected best config not found: {best_cfg_path}")
         return 1
@@ -721,7 +724,7 @@ def run_proto_autotune_engine(
     cursor = str(best_cfg.get("PROTO_CURSOR_MODE", "embedded")).strip() or "embedded"
     write_desktop_runtime_defaults_explicit(DESKTOP_RUNTIME_FILE, encoder, cursor)
     print(f"[proto-engine] updated desktop runtime defaults: {DESKTOP_RUNTIME_FILE}")
-    print(f"[proto-engine] profiles: {proto_dir / profiles_out_rel}")
+    print(f"[proto-engine] profiles: {profiles_out_path}")
     print(f"[proto-engine] best config: {best_cfg_path}")
     return 0
 

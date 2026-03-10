@@ -35,7 +35,7 @@ Rule: do not hardcode usernames or host IPs. Pass user explicitly or via `WBEAM_
 ### Desktop side
 
 - Current UI: Tauri + Solid + TypeScript: `src/apps/desktop-tauri`
-- Legacy desktop UI (still in repo): `src/apps/desktop-egui`
+- Legacy desktop-egui UI has been removed from active repo paths.
 
 ### Android side
 
@@ -297,7 +297,8 @@ WBeam/
   src/
     apps/
       desktop-tauri/
-      desktop-egui/
+    domains/
+      training/
     host/
       daemon/
       rust/
@@ -321,4 +322,3 @@ WBeam/
 - Keep Android-host compatibility strictly tied to shared build revision.
 - Preserve API17 compatibility path while extending modern pipeline.
 - Add features behind explicit probes/startup checks (host session type, capture backend, device transport readiness).
-

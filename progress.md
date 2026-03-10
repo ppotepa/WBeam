@@ -1,5 +1,24 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending) - Training domain reorganization + legacy desktop removal
+- Removed legacy desktop UI project:
+  - deleted `src/apps/desktop-egui/` from repository.
+- Promoted training to an explicit main-project domain:
+  - moved trainer entrypoint from `scripts/train_wizard.py` to `src/domains/training/wizard.py`,
+  - `./wbeam train wizard` now points to the new domain path.
+- Moved canonical training profile storage out of proto lane:
+  - new canonical path: `config/training/profiles.json`,
+  - seeded with current baseline profile.
+- Host daemon preset loading is now aligned with new structure:
+  - first reads `config/training/profiles.json`,
+  - keeps fallback compatibility with legacy `proto/config/profiles.json`.
+- Trainer proto engine export paths updated to main-project training domain:
+  - profiles -> `config/training/profiles.json`,
+  - best snapshot -> `config/training/autotune-best.json`.
+- Docs cleanup:
+  - `AGENTS.md` updated (legacy desktop removed, training domain path visible in tree),
+  - `proto/README.md` marked desktop-egui as historical.
+
 ## Session Update (2026-03-10, pending) - Train wizard switched to legacy proto autotune core by default
 - Reworked `./wbeam train wizard` default engine to use the proven proto dynamic autotune loop:
   - new default `--engine proto`,
