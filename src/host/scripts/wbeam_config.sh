@@ -9,6 +9,7 @@
 #  4) <repo>/config/wbeam.conf
 #
 # ENV values already present in the process always win over config files.
+# INI-like section headers ([service], [android], ...) are accepted and ignored.
 
 wbeam_conf_trim() {
   local s="${1-}"

@@ -866,3 +866,10 @@ Status: active
   - `bash -n wbeam devtool start-remote runas-remote redeploy-local desktop.sh src/host/scripts/run_wbeamd.sh src/host/scripts/run_wbeamd_debug.sh src/host/scripts/wbeam_config.sh` -> OK
   - `cd src/host/rust && cargo check -p wbeamd-core` -> OK
   - `cd src/apps/desktop-tauri/src-tauri && cargo check` -> OK
+
+## In Progress (2026-03-10) [commit: pending] - sectioned `wbeam.conf` layout + x11 section
+- Converted `config/wbeam.conf` to INI-like sectioned format (`[service]`, `[android]`, `[version]`, `[x11]`).
+- Kept runtime keys as `WBEAM_*` to preserve compatibility with existing loaders.
+- Added `x11` section with `WBEAM_X11_ALLOW_MONITOR_OBJECT` and placeholders for future policy unification.
+- Confirmed shell loader accepts section headers and still reads values:
+  - `source src/host/scripts/wbeam_config.sh && wbeam_load_config ...` -> `control=5001 x11_allow=0`
