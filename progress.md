@@ -1034,3 +1034,22 @@ Status: active
 - Validation:
   - `bash -n redeploy-local` -> OK
   - `./redeploy-local --help` -> OK
+
+## In Progress (2026-03-10) [commit: c85b8606] - multi-device session isolation hardening (API17 + API34)
+- Host daemon (`wbeamd-server`) session resolution was hardened to avoid creating per-serial cores on read-only polls:
+  - added read-only resolver for `/status`, `/health`, `/metrics`, `/presets`, `/virtual/*`,
+  - prevents accidental session/port creation during background polling before explicit `/start`.
+- Added per-session cleanup on `/stop`:
+  - when a specific session is stopped, registry mappings (`serial_cores`, `port_cores`) are now forgotten,
+  - reduces stale session reuse and helps virtual-monitor lifecycle per device.
+- Desktop Tauri device listing hardening:
+  - `daemon_stream_state_and_port(...)` now ignores daemon responses not bound to the queried serial (`target_serial` mismatch/empty),
+  - prevents default-session stream port from being incorrectly applied to per-device tiles.
+  - stale `.wbeam_device_ports` entries for disconnected serials are pruned during refresh.
+- Legacy/API17 host-IP detection improved in `wbeam`:
+  - added fallback route probe (`route -n`) when `ip route` is unavailable on old Android,
+  - broadened USB-interface private-IP detection beyond only `192.168.42/43`.
+- Validation:
+  - `cargo check -p wbeamd-server` -> OK
+  - `cargo check -p wbeam-desktop-tauri` -> OK
+  - `bash -n wbeam` -> OK
