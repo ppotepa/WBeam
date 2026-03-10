@@ -935,3 +935,15 @@ Status: active
   - `bash -n desktop.sh` -> OK
   - `WBEAM_DESKTOP_AUTO_REEXEC=0 ./desktop.sh --dev` -> clear tty/GUI error
   - `WBEAM_DESKTOP_REEXEC=1 ./desktop.sh --dev` -> loop-guard error path
+
+## In Progress (2026-03-10) [commit: 09ab7e60] - Android debug overlay toggle via hardware volume keys
+- Implemented debug-only hardware key control in `MainActivity`:
+  - `VOL_UP` opens debug overlay controls.
+  - `VOL_DOWN` hides debug overlay controls.
+- Overlay visibility now controls:
+  - top bar (`Settings` / `Fullscreen`),
+  - quick action row (`Start` / `Stop` / `Bandwidth Test`),
+  - debug info panel.
+- Default behavior in debug build now starts with overlay hidden (`debugOverlayVisible=false`), to reduce on-screen clutter.
+- Validation:
+  - `cd android && GRADLE_USER_HOME=/home/ppotepa/git/WBeam/.gradle-user ./gradlew :app:compileDebugJavaWithJavac --no-daemon --stacktrace` -> OK
