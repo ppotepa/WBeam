@@ -901,3 +901,16 @@ Status: active
 - Validation:
   - `cd src/host/rust && cargo check -p wbeamd-core` -> OK
   - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+
+## In Progress (2026-03-10) [commit: pending] - X11 startup warning as separate window (outside main webview)
+- Added startup detection for host session type in desktop Tauri backend.
+- On X11 startup, app now opens a separate warning window (not in-app modal overlay):
+  - states that X11 virtual desktop path is experimental / not fully supported,
+  - recommends Wayland for reliability.
+- Added static notice page for dedicated window:
+  - `src/apps/desktop-tauri/public/x11-warning.html`
+- Added config gate:
+  - `WBEAM_X11_STARTUP_NOTICE` (default enabled).
+- Validation:
+  - `cd src/apps/desktop-tauri/src-tauri && cargo check` -> OK
+  - `cd src/apps/desktop-tauri && npm run build` -> OK

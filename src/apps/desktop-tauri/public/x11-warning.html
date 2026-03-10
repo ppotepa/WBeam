@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WBeam - X11 Notice</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: "DejaVu Sans", "Noto Sans", sans-serif;
+        background: #0b1424;
+        color: #e7eefc;
+      }
+      .card {
+        padding: 20px;
+        line-height: 1.45;
+      }
+      h2 {
+        margin: 0 0 10px 0;
+        font-size: 20px;
+        color: #ffd27a;
+      }
+      p {
+        margin: 0 0 10px 0;
+        font-size: 14px;
+      }
+      .hint {
+        color: #9fb0cb;
+      }
+      .actions {
+        margin-top: 14px;
+      }
+      button {
+        border: 1px solid #375a8a;
+        background: #132643;
+        color: #e7eefc;
+        border-radius: 8px;
+        padding: 8px 14px;
+        font-size: 14px;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #1a3156;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h2>X11 Support Is Experimental</h2>
+      <p>Virtual desktop on X11 is not fully supported and may be unstable.</p>
+      <p>Wayland session is recommended for best reliability and user experience.</p>
+      <p class="hint">You can continue on X11, but expect degraded behavior in virtual-monitor workflows.</p>
+      <div class="actions">
+        <button type="button" onclick="window.close()">Continue</button>
+      </div>
+    </div>
+  </body>
+</html>

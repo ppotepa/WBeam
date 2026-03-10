@@ -12,7 +12,7 @@ use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tauri::Manager;
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 const SERVICE_NAME: &str = "wbeam-daemon";
 
@@ -1967,6 +1967,62 @@ fn or_unknown(value: Option<String>) -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
+fn detect_session_type_for_notice() -> Option<String> {
+    if let Some(kind) = std::env::var("XDG_SESSION_TYPE")
+        .ok()
+        .map(|v| v.trim().to_ascii_lowercase())
+        .filter(|v| !v.is_empty())
+    {
+        return Some(kind);
+    }
+    if let Ok(session_id) = std::env::var("XDG_SESSION_ID") {
+        let trimmed = session_id.trim();
+        if !trimmed.is_empty() {
+            let output = Command::new("loginctl")
+                .args(["show-session", trimmed, "-p", "Type", "--value"])
+                .output();
+            if let Ok(output) = output {
+                if output.status.success() {
+                    let value = String::from_utf8_lossy(&output.stdout)
+                        .trim()
+                        .to_ascii_lowercase();
+                    if !value.is_empty() {
+                        return Some(value);
+                    }
+                }
+            }
+        }
+    }
+    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        return Some("wayland".to_string());
+    }
+    if std::env::var_os("DISPLAY").is_some() {
+        return Some("x11".to_string());
+    }
+    None
+}
+
+fn should_show_x11_startup_notice() -> bool {
+    if !wbeam_config_bool("WBEAM_X11_STARTUP_NOTICE", true) {
+        return false;
+    }
+    detect_session_type_for_notice().as_deref() == Some("x11")
+}
+
+fn show_x11_startup_notice_window(app: &tauri::AppHandle) {
+    const LABEL: &str = "x11-startup-notice";
+    if app.get_webview_window(LABEL).is_some() {
+        return;
+    }
+    let _ = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("x11-warning.html".into()))
+        .title("WBeam - X11 Experimental Notice")
+        .inner_size(560.0, 260.0)
+        .resizable(false)
+        .always_on_top(true)
+        .center()
+        .build();
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
@@ -1976,6 +2032,12 @@ fn main() {
                 let _ = window.set_focus();
             }
         }))
+        .setup(|app| {
+            if should_show_x11_startup_notice() {
+                show_x11_startup_notice_window(app.handle());
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             ping,
             host_name,
