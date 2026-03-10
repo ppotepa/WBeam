@@ -1,5 +1,15 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending) - connect modal now visible on Wayland (checkbox discoverability fix)
+- Fixed missing experimental-duplication checkbox visibility in desktop Tauri app:
+  - removed Wayland fast-path that skipped connect modal and directly triggered duplicate connect,
+  - connect modal now opens for all hosts, so mode controls and checkbox are always visible.
+- Tightened virtual mode availability guard in UI:
+  - `virtual monitor` is now marked available only for supported resolver path (`linux_x11_real_output`),
+  - prevents misleading virtual selection on `wayland_portal` hosts.
+- Validation:
+  - `cd src/apps/desktop-tauri && npm run build` -> OK
+
 ## Session Update (2026-03-10, pending) - GUI checkbox for experimental virtual duplication (virtual mirror)
 - Added desktop connect-modal checkbox:
   - label: `Use experimental duplication (virtual mirror)`,

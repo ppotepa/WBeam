@@ -170,21 +170,7 @@ export default function App() {
     return session.hostProbe().captureMode === "wayland_portal";
   }
 
-  async function connectWaylandPortal(device: DeviceBasic): Promise<void> {
-    const blockedReason = connectDisabledReason(device);
-    if (blockedReason.length > 0) {
-      session.setError(blockedReason);
-      return;
-    }
-    saveDisplayMode(device.serial, "duplicate");
-    await session.connectDevice(device, "duplicate");
-  }
-
   function openConnectDialog(device: DeviceBasic): void {
-    if (isWaylandPortalHost()) {
-      void connectWaylandPortal(device);
-      return;
-    }
     const saved = loadSavedDisplayMode(device.serial);
     setConnectDialogMode(saved ?? "virtual_monitor");
     setConnectDialogExperimentalDuplication(loadSavedExperimentalDuplication(device.serial));
@@ -744,6 +730,5 @@ function isVirtualMonitorResolver(resolver: string | undefined): boolean {
 function isVirtualMonitorAvailable(doctor: VirtualDoctor | null): boolean {
   if (!doctor || !doctor.ok) return false;
   if (isVirtualMonitorResolver(doctor.resolver)) return true;
-  if (doctor.hostBackend === "wayland_portal") return true;
   return false;
 }
