@@ -1,5 +1,15 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending) - Train proto engine env sanitization for `run.sh`
+- Fixed training failure in `./wbeam train wizard` (`proto` engine) caused by inherited shell env vars blocked by `proto/run.py`.
+- In `src/domains/training/legacy_engine.py`:
+  - added `build_proto_run_env()` to strip blocked runtime prefixes (`PROTO_`, `RUN_`, `WBEAM_`, `HOST_IP`, `SERIAL`, etc.) before invoking proto runner,
+  - `prepare_device_once(...)` now runs `proto/run.sh --prepare-only` with sanitized env,
+  - full-run trial path (`run.sh --config ...`) now also uses sanitized env.
+- Effect:
+  - training no longer aborts with `runtime environment overrides are not allowed`,
+  - realistic one-time prepare + visible on-device overlay flow can proceed.
+
 ## Session Update (2026-03-10, pending) - Train wizard proto engine now runs realistic prepare flow
 - Fixed unrealistic `proto` wizard run mode where trials could execute without visible tablet stream/HUD:
   - removed forced `--host-only` from `src/domains/training/wizard.py` when invoking legacy engine.

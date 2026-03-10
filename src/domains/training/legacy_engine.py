@@ -189,6 +189,19 @@ PROFILE_QUALITY_KEYS: set[str] = {
     "WBEAM_H264_GOP",
 }
 
+PROTO_BLOCKED_ENV_PREFIXES: tuple[str, ...] = (
+    "PROTO_",
+    "RUN_",
+    "WBEAM_",
+    "HOST_IP",
+    "SERIAL",
+    "GRADLEW",
+    "CARGO_BIN",
+    "QEMU_",
+    "ANDROID_EMULATOR_BIN",
+    "ANDROID_LOG_FILE",
+)
+
 
 @dataclass
 class TrialResult:
@@ -218,6 +231,18 @@ class TrialResult:
 def log(msg: str) -> None:
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     print(f"[autotune {ts}] {msg}", flush=True)
+
+
+def build_proto_run_env() -> dict[str, str]:
+    env = os.environ.copy()
+    blocked = [
+        name
+        for name in env
+        if any(name == prefix or name.startswith(prefix) for prefix in PROTO_BLOCKED_ENV_PREFIXES)
+    ]
+    for name in blocked:
+        env.pop(name, None)
+    return env
 
 
 def format_secs(total: float) -> str:
@@ -790,10 +815,12 @@ def prepare_device_once(proto_dir: Path, run_script: Path, config_path: Path, ti
     cmd = [str(run_script), "--config", str(config_path), "--prepare-only"]
     log("reuse-device: one-time APK deploy/app launch before benchmark loop")
     log("reuse-device cmd: " + " ".join(cmd))
+    run_env = build_proto_run_env()
     try:
         cp = subprocess.run(
             cmd,
             cwd=str(proto_dir),
+            env=run_env,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -946,6 +973,7 @@ def run_trial(
     proc = subprocess.Popen(
         cmd,
         cwd=str(cwd),
+        env=build_proto_run_env() if not host_only else os.environ.copy(),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
