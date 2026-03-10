@@ -1724,3 +1724,26 @@ Status: active
   - runtime adaptive policy switching with hysteresis/cooldown,
   - charts and telemetry dimensions dedicated to adaptation behavior.
 - Added explicit implementation note that code snippets are pseudocode architecture references and must be mapped to current backend contracts/flow rather than copied 1:1.
+
+## In Progress (2026-03-10) - Trainer UI/UX responsiveness + live readability + Wayland launch stability
+- Upgraded `src/apps/trainer-tauri` UX flow for faster feedback and clearer live-state visibility:
+  - added blocking `busy-overlay` with spinner card for long actions,
+  - added topbar live sync timestamp badge (`Last sync`) for operator confidence,
+  - added dynamic polling interval hot-apply (no restart needed).
+- Improved `Live Run` ergonomics:
+  - added inferred `Live health` pill (`idle`/`active`/`gated`/`degraded`) from run tail,
+  - added empty-state card when no samples are available yet,
+  - added `Stage Timeline` panel parsing warmup/sampling/generation/health-gate/failure/completion lines.
+- Enhanced trainer visual system in `styles.css`:
+  - busy overlay + spinner animation,
+  - timeline cards with severity-coded left rails,
+  - compact readability improvements for pills and live states,
+  - smoother transitions for KPI and timeline cards.
+- Stabilized Tauri launcher backend selection for Wayland sessions:
+  - `trainer.sh` and `desktop.sh` now force X11 backend only when `DISPLAY` exists,
+  - in Wayland-only sessions (`DISPLAY` missing), scripts keep native wayland backend,
+  - this avoids protocol errors caused by forcing unavailable X11 path.
+- Validation:
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+  - `bash -n trainer.sh` -> OK
+  - `bash -n desktop.sh` -> OK

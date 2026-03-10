@@ -70,9 +70,15 @@ apply_tauri_stability_env() {
   export WEBKIT_DISABLE_DMABUF_RENDERER="${WEBKIT_DISABLE_DMABUF_RENDERER:-1}"
 
   if [[ "${XDG_SESSION_TYPE:-}" == "wayland" && "${WBEAM_TAURI_NATIVE_WAYLAND:-0}" != "1" ]]; then
-    export GDK_BACKEND="${GDK_BACKEND:-x11}"
-    export WINIT_UNIX_BACKEND="${WINIT_UNIX_BACKEND:-x11}"
-    log "wayland detected; forcing x11 backend for Tauri stability (set WBEAM_TAURI_NATIVE_WAYLAND=1 to disable)"
+    if [[ -n "${DISPLAY:-}" ]]; then
+      export GDK_BACKEND="${GDK_BACKEND:-x11}"
+      export WINIT_UNIX_BACKEND="${WINIT_UNIX_BACKEND:-x11}"
+      log "wayland detected with DISPLAY available; forcing x11 backend for Tauri stability"
+    else
+      export GDK_BACKEND="${GDK_BACKEND:-wayland}"
+      export WINIT_UNIX_BACKEND="${WINIT_UNIX_BACKEND:-wayland}"
+      log "wayland-only session detected (DISPLAY missing); using native wayland backend"
+    fi
   fi
 
   if [[ "${GDK_BACKEND:-}" == "x11" && -z "${XAUTHORITY:-}" ]]; then

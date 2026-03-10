@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 
 type Tab =
   | "train"
@@ -124,6 +124,13 @@ type HudSeries = {
   present: number[];
   recv: number[];
   drops: number[];
+};
+
+type LiveStage = {
+  label: string;
+  detail: string;
+  ts: string;
+  level: "info" | "warn" | "risk" | "ok";
 };
 
 type SettingsModel = {
@@ -290,6 +297,54 @@ function parseHudSeries(lines: string[]): HudSeries {
   };
 }
 
+function parseLiveStages(lines: string[]): LiveStage[] {
+  const output: LiveStage[] = [];
+  for (const line of lines) {
+    const ts = line.slice(0, 8);
+    if (line.includes("generation ") && line.includes("population=")) {
+      output.push({ label: "Generation", detail: line.trim(), ts, level: "info" });
+      continue;
+    }
+    if (line.includes("warmup")) {
+      output.push({ label: "Warmup", detail: line.trim(), ts, level: "info" });
+      continue;
+    }
+    if (line.includes("sampling")) {
+      output.push({ label: "Sampling", detail: line.trim(), ts, level: "info" });
+      continue;
+    }
+    if (line.includes("done trial=") || line.includes(" score=")) {
+      output.push({ label: "Trial complete", detail: line.trim(), ts, level: "ok" });
+      continue;
+    }
+    if (line.includes("note: health gate")) {
+      output.push({ label: "Health gate", detail: line.trim(), ts, level: "warn" });
+      continue;
+    }
+    if (line.includes("ERROR") || line.includes("failed")) {
+      output.push({ label: "Failure", detail: line.trim(), ts, level: "risk" });
+      continue;
+    }
+  }
+  return output.slice(-10).reverse();
+}
+
+function inferLiveHealth(lines: string[]): { state: string; tone: "ok" | "warn" | "risk" | "info" } {
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i];
+    if (line.includes("ERROR") || line.includes("failed")) {
+      return { state: "degraded", tone: "risk" };
+    }
+    if (line.includes("note: health gate")) {
+      return { state: "gated", tone: "warn" };
+    }
+    if (line.includes("sampling") || line.includes("warmup") || line.includes("trial=")) {
+      return { state: "active", tone: "ok" };
+    }
+  }
+  return { state: "idle", tone: "info" };
+}
+
 function profileUpdatedAt(item: ProfileItem): number {
   return Number(item.updated_at_unix_ms || 0);
 }
@@ -321,6 +376,7 @@ export default function App() {
   const [tail, setTail] = createSignal<RunTail | null>(null);
   const [busyAction, setBusyAction] = createSignal("");
   const [lastError, setLastError] = createSignal("");
+  const [lastRefreshAt, setLastRefreshAt] = createSignal<number>(Date.now());
   const [preflightText, setPreflightText] = createSignal("not started");
   const [showAdvanced, setShowAdvanced] = createSignal(false);
 
@@ -376,6 +432,9 @@ export default function App() {
   });
   const hud = createMemo(() => parseHud(tail()?.lines || []));
   const hudSeries = createMemo(() => parseHudSeries(tail()?.lines || []));
+  const liveStages = createMemo(() => parseLiveStages(tail()?.lines || []));
+  const liveHealth = createMemo(() => inferLiveHealth(tail()?.lines || []));
+  const hasLiveSamples = createMemo(() => hudSeries().score.length > 0 || hudSeries().present.length > 0);
 
   const hardBlockers = createMemo(() => {
     const problems: string[] = [];
@@ -521,6 +580,17 @@ export default function App() {
     }
   }
 
+  async function runPollingTick() {
+    await refreshHealth();
+    await refreshRuns();
+    await refreshDevices();
+    if (tab() === "profiles" || tab() === "compare") await refreshProfiles();
+    if (tab() === "datasets") await refreshDatasets();
+    if (tab() === "live" || tab() === "runs" || runningRuns().length > 0) await refreshTail();
+    if (tab() === "diagnostics") await refreshDiagnostics();
+    setLastRefreshAt(Date.now());
+  }
+
   async function runPreflight() {
     await withUiGuard("Running preflight", async () => {
       if (!canPreflight()) {
@@ -603,20 +673,28 @@ export default function App() {
       await refreshDiagnostics();
       await refreshDatasets();
       await refreshTail();
+      setLastRefreshAt(Date.now());
     });
     pollId = window.setInterval(async () => {
       try {
-        await refreshHealth();
-        await refreshRuns();
-        await refreshDevices();
-        if (tab() === "profiles" || tab() === "compare") await refreshProfiles();
-        if (tab() === "datasets") await refreshDatasets();
-        if (tab() === "live" || tab() === "runs" || runningRuns().length > 0) await refreshTail();
-        if (tab() === "diagnostics") await refreshDiagnostics();
+        await runPollingTick();
       } catch (err) {
         setLastError(String(err));
       }
     }, settings().pollingMs);
+  });
+
+  createEffect(() => {
+    const intervalMs = settings().pollingMs;
+    if (!pollId) return;
+    window.clearInterval(pollId);
+    pollId = window.setInterval(async () => {
+      try {
+        await runPollingTick();
+      } catch (err) {
+        setLastError(String(err));
+      }
+    }, intervalMs);
   });
 
   onCleanup(() => {
@@ -641,6 +719,7 @@ export default function App() {
           <span class="badge info">Runs: {runs().length}</span>
           <span class="badge info">Devices: {devices().length}</span>
           <span class="badge info">Build: {health().build_revision || "-"}</span>
+          <span class="badge muted">Last sync: {new Date(lastRefreshAt()).toLocaleTimeString()}</span>
         </div>
         <div class="topbar-actions">
           <button
@@ -682,6 +761,15 @@ export default function App() {
         </aside>
 
         <section class="content-zone">
+          <Show when={busyAction()}>
+            <div class="busy-overlay">
+              <div class="busy-overlay-card">
+                <span class="spinner" />
+                <strong>{busyAction()}</strong>
+                <small>Please wait, trainer is processing...</small>
+              </div>
+            </div>
+          </Show>
           <Show when={busyAction()}>
             <div class="busy-banner">{busyAction()}...</div>
           </Show>
@@ -942,6 +1030,10 @@ export default function App() {
                   <div class="meta-item"><strong>Mode</strong><span>{hud().mode !== "-" ? hud().mode : activeRun()?.mode || "-"}</span></div>
                   <div class="meta-item"><strong>Generation</strong><span>{hud().generation}</span></div>
                   <div class="meta-item"><strong>Progress</strong><span>{hud().progress}</span></div>
+                  <div class="meta-item">
+                    <strong>Live health</strong>
+                    <span class={`live-pill ${liveHealth().tone}`}>{liveHealth().state}</span>
+                  </div>
                 </div>
                 <Show when={activeRun() && (activeRun()!.status === "running" || activeRun()!.status === "stopping")}>
                   <button class="danger" disabled={!!busyAction()} onClick={() => void stopRun(activeRun()!.run_id)}>
@@ -952,6 +1044,12 @@ export default function App() {
 
               <article class="panel card live-center">
                 <h2>Live HUD</h2>
+                <Show when={!hasLiveSamples()}>
+                  <div class="empty-live">
+                    <strong>Waiting for live samples</strong>
+                    <span>When trials emit metrics, charts and KPI cards update automatically.</span>
+                  </div>
+                </Show>
                 <div class="kpi-grid">
                   <div class="kpi-card">
                     <span>Trial</span>
@@ -1013,6 +1111,28 @@ export default function App() {
                     </div>
                   </section>
                 </div>
+
+                <section class="timeline-card">
+                  <h3>Stage Timeline</h3>
+                  <Show
+                    when={liveStages().length > 0}
+                    fallback={<p class="hint">No stage events yet. Start training or wait for next trial events.</p>}
+                  >
+                    <div class="timeline-list">
+                      <For each={liveStages()}>
+                        {(stage) => (
+                          <div class={`timeline-item ${stage.level}`}>
+                            <span class="timeline-head">
+                              <strong>{stage.label}</strong>
+                              <small>{stage.ts}</small>
+                            </span>
+                            <span class="mono">{stage.detail}</span>
+                          </div>
+                        )}
+                      </For>
+                    </div>
+                  </Show>
+                </section>
               </article>
 
               <article class="panel card fixed-right">
@@ -1362,7 +1482,7 @@ export default function App() {
                   <option value="3200">3200</option>
                 </select>
               </label>
-              <p class="hint">Settings apply instantly to visual behavior. Polling change takes effect after restart.</p>
+              <p class="hint">Settings apply instantly, including polling interval.</p>
             </article>
           </Show>
         </section>
