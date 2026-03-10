@@ -1,5 +1,12 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending) - Force Android app landscape orientation
+- Enforced horizontal app orientation for Android client UI:
+  - `MainActivity` now uses `android:screenOrientation="sensorLandscape"` in manifest.
+  - Effect: app stays in landscape (including reverse-landscape), matching horizontal desktop streaming targets.
+- Validation:
+  - `./gradlew :app:compileDebugJavaWithJavac --no-daemon --stacktrace` -> BUILD SUCCESSFUL.
+
 ## Session Update (2026-03-10, pending) - Wayland portal output auto-layout (non-overlap)
 - Added host-side post-start layout pass for `wayland_portal` sessions in `wbeamd-server`:
   - after successful `/start`, server now inspects KDE output topology via `kscreen-doctor -j`,
