@@ -16,7 +16,7 @@ pub fn activate(
 ) -> Result<Activation, ActivationError> {
     match mode {
         DisplayMode::Duplicate => duplicate::activate(),
-        DisplayMode::VirtualMonitor => virtual_monitor::activate(),
+        DisplayMode::VirtualMonitor => duplicate::activate(),
         DisplayMode::VirtualMirror => duplicate::activate(),
     }
 }

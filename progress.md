@@ -9,8 +9,11 @@
   - toggle is visible but disabled (greyed) on X11/non-Wayland hosts,
   - state is persisted in localStorage (`wbeam.connect.experimental.dup.wayland`).
 - Backend wiring for Wayland experimental mode:
-  - Tauri `device_connect` now skips virtual-doctor blocking specifically for `wayland_portal + virtual_mirror`,
-  - host Wayland backend maps `virtual_mirror` to the duplicate activation path (no unsupported-error on connect).
+  - Tauri `device_connect` now skips virtual-doctor blocking for `wayland_portal` virtual modes,
+  - host Wayland backend maps both `virtual_monitor` (legacy flow) and `virtual_mirror` (experimental toggle) to non-failing activation.
+- Regression fix after field logs:
+  - on Wayland, unchecked toggle now sends `virtual_monitor` again (restores pre-change behavior),
+  - checked toggle sends `virtual_mirror`.
 - Validation:
   - `cd src/apps/desktop-tauri && npm run build`
   - `cd src/apps/desktop-tauri/src-tauri && cargo check`

@@ -1454,7 +1454,12 @@ fn device_connect(
         || normalized_mode == "virtual_mirror"
         || normalized_mode == "virtual-duplicate"
         || normalized_mode == "virtual_duplicate";
-    let skip_virtual_doctor = is_wayland_portal && normalized_mode == "virtual_mirror";
+    let skip_virtual_doctor = is_wayland_portal
+        && (normalized_mode == "virtual_monitor"
+            || normalized_mode == "virtual_mirror"
+            || normalized_mode == "virtual-duplicate"
+            || normalized_mode == "virtual_duplicate"
+            || normalized_mode == "virtual");
     if is_virtual_mode && !skip_virtual_doctor {
         let doctor = virtual_doctor(Some(serial.clone()), Some(effective_stream_port))?;
         if !doctor.ok {

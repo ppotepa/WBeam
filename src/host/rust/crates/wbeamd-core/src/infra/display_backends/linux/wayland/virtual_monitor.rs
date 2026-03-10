@@ -1,4 +1,4 @@
-use super::super::super::{Activation, ActivationError, VirtualMonitorProbe};
+use super::super::super::VirtualMonitorProbe;
 
 pub fn probe() -> VirtualMonitorProbe {
     VirtualMonitorProbe {
@@ -9,10 +9,4 @@ pub fn probe() -> VirtualMonitorProbe {
             "Wayland virtual monitor backend is not implemented yet. Duplicate mode is available."
                 .to_string(),
     }
-}
-
-pub fn activate() -> Result<Activation, ActivationError> {
-    Err(ActivationError::Unsupported(
-        "Wayland virtual monitor mode is not implemented yet".to_string(),
-    ))
 }

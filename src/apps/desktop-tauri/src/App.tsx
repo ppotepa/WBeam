@@ -177,7 +177,7 @@ export default function App() {
       session.setError(blockedReason);
       return;
     }
-    const mode = waylandExperimentalDuplication() ? "virtual_mirror" : "duplicate";
+    const mode = waylandExperimentalDuplication() ? "virtual_mirror" : "virtual_monitor";
     await session.connectDevice(device, mode);
   }
 
