@@ -172,6 +172,7 @@ public class MainActivity extends AppCompatActivity {
     private TextView startupStep3Detail;
     private TextView startupStep3Status;
     private TextView startupInfoText;
+    private TextView startupBuildVersionText;
     private TextView liveLogText;
     private TextView resValueText;
     private TextView fpsValueText;
@@ -313,6 +314,7 @@ public class MainActivity extends AppCompatActivity {
         settingsRepository = new SettingsRepository(this);
 
         bindViews();
+        bindStartupBuildVersion();
         setupSpinners();
         setupSeekbars();
         setupSurfaceCallbacks();
@@ -638,6 +640,7 @@ public class MainActivity extends AppCompatActivity {
         startupStep3Detail  = findViewById(R.id.startupStep3Detail);
         startupStep3Status  = findViewById(R.id.startupStep3Status);
         startupInfoText     = findViewById(R.id.startupInfoText);
+        startupBuildVersionText = findViewById(R.id.startupBuildVersion);
         if (startupInfoText != null) {
             startupInfoText.setMovementMethod(new ScrollingMovementMethod());
         }
@@ -678,6 +681,17 @@ public class MainActivity extends AppCompatActivity {
         simpleFps120Button = findViewById(R.id.simpleFps120Button);
         simpleFps144Button = findViewById(R.id.simpleFps144Button);
         simpleApplyButton = findViewById(R.id.simpleApplyButton);
+    }
+
+    private void bindStartupBuildVersion() {
+        if (startupBuildVersionText == null) {
+            return;
+        }
+        String rev = BuildConfig.WBEAM_BUILD_REV == null ? "" : BuildConfig.WBEAM_BUILD_REV.trim();
+        if (rev.isEmpty()) {
+            rev = "unknown";
+        }
+        startupBuildVersionText.setText("build " + rev);
     }
 
     private void applyBuildVariantUi() {

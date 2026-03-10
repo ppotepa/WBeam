@@ -72,6 +72,14 @@ adb_connected_serials_retry() {
   printf '%s\n' "${serials[@]}"
 }
 
+adb_installed_wbeam_version() {
+  local serial="$1"
+  adb -s "$serial" shell dumpsys package com.wbeam 2>/dev/null \
+    | sed -n 's/^[[:space:]]*versionName=//p' \
+    | head -n 1 \
+    | tr -d '\r'
+}
+
 ensure_desktop_dev_deps() {
   if [[ -f "$DESKTOP_DIR/node_modules/vite/client.d.ts" ]]; then
     return 0
@@ -195,6 +203,36 @@ if [[ "$ANDROID_DEPLOY" -eq 1 ]]; then
       WBEAM_ANDROID_SERIAL="" \
       WBEAM_ANDROID_SERIALS="$SERIALS_CSV" \
       ./wbeam android deploy-all
+
+    VERIFY_FAIL=0
+    for serial in "${DEPLOY_SERIALS[@]}"; do
+      installed_ver="$(adb_installed_wbeam_version "$serial" || true)"
+      if [[ "$installed_ver" == "$BUILD_REV" ]]; then
+        echo "[redeploy-local][$serial] verify ok (version=$installed_ver)"
+        continue
+      fi
+
+      echo "[redeploy-local][$serial] WARN: expected version=$BUILD_REV, got=${installed_ver:-<none>} — retrying targeted deploy"
+      if WBEAM_BUILD_REV="$BUILD_REV" \
+         WBEAM_ANDROID_FORCE_INSTALL=1 \
+         WBEAM_ANDROID_SKIP_LAUNCH=1 \
+         WBEAM_ANDROID_SERIAL="$serial" \
+         ./wbeam android deploy; then
+        installed_ver="$(adb_installed_wbeam_version "$serial" || true)"
+        if [[ "$installed_ver" == "$BUILD_REV" ]]; then
+          echo "[redeploy-local][$serial] recovery ok (version=$installed_ver)"
+          continue
+        fi
+      fi
+
+      echo "[redeploy-local][$serial] ERROR: deploy verification failed (expected=$BUILD_REV got=${installed_ver:-<none>})" >&2
+      VERIFY_FAIL=1
+    done
+
+    if [[ "$VERIFY_FAIL" -ne 0 ]]; then
+      echo "[redeploy-local] android deploy verification failed for one or more devices" >&2
+      exit 1
+    fi
   else
     echo "[redeploy-local] android deploy skipped (no adb devices in 'device' state)"
   fi
