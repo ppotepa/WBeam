@@ -1871,8 +1871,7 @@ public class MainActivity extends AppCompatActivity {
                 bpRecover,
                 reason.isEmpty() ? "-" : reason
         );
-        perfHudText.setText(hud);
-            lastHudCompactLine = String.format(
+        lastHudCompactLine = String.format(
                 Locale.US,
                 "hud fps %.0f/%.1f | e2e %.1fms | dec %.1fms | ren %.1fms | q %d/%d/%d",
                 targetFps,
@@ -1883,8 +1882,8 @@ public class MainActivity extends AppCompatActivity {
                 qT,
                 qD,
                 qR
-            );
-            refreshDebugInfoOverlay();
+        );
+        refreshDebugInfoOverlay();
 
         // Build explicit pressure reason so logcat shows exactly which condition fired.
         StringBuilder hpSb = new StringBuilder();
@@ -1910,8 +1909,9 @@ public class MainActivity extends AppCompatActivity {
                         || timingPressure
                         || queuePressure
         );
+        String runtimeStateTone = "ok";
         if (highPressure) {
-            perfHudText.setTextColor(Color.parseColor("#FCA5A5")); // red
+            runtimeStateTone = "risk";
             Log.w(TAG, "HUD RED warmingUp=" + warmingUp + " hp=" + hpReason
                     + " dec_p95=" + String.format(Locale.US, "%.2f", decodeP95)
                     + " ren_p95=" + String.format(Locale.US, "%.2f", renderP95)
@@ -1921,13 +1921,32 @@ public class MainActivity extends AppCompatActivity {
                     + " fps_present=" + String.format(Locale.US, "%.1f", presentFps)
                     + " stream_up=" + streamUptimeSec + "s");
         } else if (warmingUp || mediumPressure) {
-            perfHudText.setTextColor(Color.parseColor("#FDE68A")); // yellow
-        } else {
-            perfHudText.setTextColor(Color.parseColor("#BBF7D0")); // green
+            runtimeStateTone = "warn";
         }
-        if (perfHudPanel != null) {
-            perfHudPanel.setAlpha(0.95f);
-        }
+        renderRuntimeHudOverlay(
+                daemonStateUi,
+                targetFps,
+                presentFps,
+                recvFps,
+                decodeFps,
+                e2eP95,
+                decodeP95,
+                renderP95,
+                frametimeP95,
+                qT,
+                qD,
+                qR,
+                qTMax,
+                qDMax,
+                qRMax,
+                adaptiveLevel,
+                adaptiveAction,
+                drops,
+                bpHigh,
+                bpRecover,
+                reason,
+                runtimeStateTone
+        );
 
         String compact = String.format(
                 Locale.US,
@@ -1965,6 +1984,109 @@ public class MainActivity extends AppCompatActivity {
                         : daemonLastError)
         );
         emitHudDebugAdb(compact);
+    }
+
+    private void renderRuntimeHudOverlay(
+            String daemonStateUi,
+            double targetFps,
+            double presentFps,
+            double recvFps,
+            double decodeFps,
+            double e2eP95,
+            double decodeP95,
+            double renderP95,
+            double frametimeP95,
+            int qT,
+            int qD,
+            int qR,
+            int qTMax,
+            int qDMax,
+            int qRMax,
+            int adaptiveLevel,
+            String adaptiveAction,
+            long drops,
+            long bpHigh,
+            long bpRecover,
+            String reason,
+            String tone
+    ) {
+        if (perfHudWebView != null) {
+            String html = "<!doctype html><html><head><meta charset='utf-8'/>"
+                    + "<style>"
+                    + "html,body{margin:0;padding:0;background:transparent;color:#d9fbff;font-family:'JetBrains Mono','IBM Plex Mono',monospace;font-size:11px;}"
+                    + ".root{padding:8px;box-sizing:border-box;width:100vw;height:100vh;display:grid;grid-template-rows:auto 1fr;gap:8px;}"
+                    + ".top{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;}"
+                    + ".chip{border:1px solid rgba(126,245,255,.35);background:rgba(2,20,24,.30);padding:6px 8px;}"
+                    + ".chip .k{font-size:10px;color:#9dddea;display:block;letter-spacing:.05em;}"
+                    + ".chip .v{font-size:12px;color:#dcf9ff;}"
+                    + ".state-ok{color:#6ee7b7;} .state-warn{color:#fbbf24;} .state-risk{color:#f87171;}"
+                    + ".main{display:grid;grid-template-columns:1fr 1fr;gap:8px;min-height:0;}"
+                    + ".panel{border:1px solid rgba(126,245,255,.35);background:rgba(2,20,24,.24);padding:6px;min-height:0;overflow:auto;}"
+                    + ".kpi{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;}"
+                    + ".kpi .item{border:1px solid rgba(126,245,255,.25);padding:6px;background:rgba(0,0,0,.25);}"
+                    + ".kpi .item .k{font-size:10px;color:#9dddea;display:block;}"
+                    + ".kpi .item .v{font-size:12px;color:#dcf9ff;}"
+                    + ".tbl{width:100%;border-collapse:collapse;table-layout:fixed;}"
+                    + ".tbl td{border:1px solid rgba(126,245,255,.28);padding:4px 6px;vertical-align:top;word-break:break-word;}"
+                    + ".tbl td:first-child{width:52%;color:#dffcff;} .tbl td:last-child{text-align:right;color:#b9f8ff;}"
+                    + "</style></head><body><div class='root'>"
+                    + "<div class='top'>"
+                    + "<div class='chip'><span class='k'>HUD</span><span class='v'>RUNTIME</span></div>"
+                    + "<div class='chip'><span class='k'>STATE</span><span class='v state-" + escapeHtml(tone) + "'>" + escapeHtml(daemonStateUi) + "</span></div>"
+                    + "<div class='chip'><span class='k'>FPS</span><span class='v'>" + String.format(Locale.US, "%.0f / %.1f", targetFps, presentFps) + "</span></div>"
+                    + "<div class='chip'><span class='k'>ADAPT</span><span class='v'>L" + adaptiveLevel + " " + escapeHtml(adaptiveAction) + "</span></div>"
+                    + "</div>"
+                    + "<div class='main'>"
+                    + "<div class='panel'><div class='kpi'>"
+                    + "<div class='item'><span class='k'>E2E p95</span><span class='v'>" + String.format(Locale.US, "%.1f ms", e2eP95) + "</span></div>"
+                    + "<div class='item'><span class='k'>Frame p95</span><span class='v'>" + String.format(Locale.US, "%.2f ms", frametimeP95) + "</span></div>"
+                    + "<div class='item'><span class='k'>Decode p95</span><span class='v'>" + String.format(Locale.US, "%.2f ms", decodeP95) + "</span></div>"
+                    + "<div class='item'><span class='k'>Render p95</span><span class='v'>" + String.format(Locale.US, "%.2f ms", renderP95) + "</span></div>"
+                    + "<div class='item'><span class='k'>Recv/Decode FPS</span><span class='v'>" + String.format(Locale.US, "%.1f / %.1f", recvFps, decodeFps) + "</span></div>"
+                    + "<div class='item'><span class='k'>Drops</span><span class='v'>" + drops + " (bp " + bpHigh + "/" + bpRecover + ")</span></div>"
+                    + "</div></div>"
+                    + "<div class='panel'><table class='tbl'>"
+                    + "<tr><td>Transport queue</td><td>" + qT + "/" + qTMax + "</td></tr>"
+                    + "<tr><td>Decode queue</td><td>" + qD + "/" + qDMax + "</td></tr>"
+                    + "<tr><td>Render queue</td><td>" + qR + "/" + qRMax + "</td></tr>"
+                    + "<tr><td>Reason</td><td>" + escapeHtml(reason == null || reason.isEmpty() ? "-" : reason) + "</td></tr>"
+                    + "<tr><td>Host error</td><td>" + escapeHtml(daemonLastError == null || daemonLastError.isEmpty() ? "-" : daemonLastError) + "</td></tr>"
+                    + "</table></div>"
+                    + "</div></div></body></html>";
+            perfHudWebView.loadDataWithBaseURL(null, html, "text/html", "utf-8", null);
+            perfHudWebView.setVisibility(View.VISIBLE);
+            perfHudText.setVisibility(View.GONE);
+        } else if (perfHudText != null) {
+            String hud = String.format(
+                    Locale.US,
+                    "HUD %s\nfps %.0f/%.1f frame %.2fms\ndec %.2fms ren %.2fms e2e %.2fms\nq %d/%d/%d max %d/%d/%d\nadapt L%d %s\ndrops %d bp %d/%d\n%s",
+                    daemonReachable ? "LIVE" : "DEGRADED",
+                    targetFps,
+                    presentFps,
+                    frametimeP95,
+                    decodeP95,
+                    renderP95,
+                    e2eP95,
+                    qT,
+                    qD,
+                    qR,
+                    qTMax,
+                    qDMax,
+                    qRMax,
+                    adaptiveLevel,
+                    adaptiveAction,
+                    drops,
+                    bpHigh,
+                    bpRecover,
+                    reason == null || reason.isEmpty() ? "-" : reason
+            );
+            perfHudText.setText(hud);
+            perfHudText.setTextColor(Color.parseColor("#B3EAF4FF"));
+            perfHudText.setVisibility(View.VISIBLE);
+        }
+        if (perfHudPanel != null) {
+            perfHudPanel.setAlpha(0.95f);
+        }
     }
 
     private void renderTrainerHudOverlay(String rawHudText) {

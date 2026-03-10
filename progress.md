@@ -2078,3 +2078,20 @@ Status: active
 - Added `trainerHudSessionActive` run-state flag to detect rising edge of trainer HUD activity.
 - Validation:
   - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+
+## In Progress (2026-03-10) - Unified HUD renderer path (runtime + trainer)
+- Unified Android HUD display path so trainer and normal runtime are rendered through the same overlay mechanism (`perfHudWebView`), with layout varying by context:
+  - trainer context keeps the structured maquette-style layout path,
+  - runtime context now also renders via a dedicated WebView layout (`renderRuntimeHudOverlay`) instead of plain text-only labels.
+- Preserved existing VolUp+VolDown hold semantics as the single operator toggle for HUD visibility while allowing context-specific content.
+- Runtime HUD now shows a consistent grid/chip presentation with:
+  - state tone (`ok/warn/risk`),
+  - FPS target/current,
+  - adapt level/action,
+  - latency/frame/decode/render KPIs,
+  - queue depths and reason/error details.
+- Added text fallback only when WebView is unavailable, to keep backward resilience.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
