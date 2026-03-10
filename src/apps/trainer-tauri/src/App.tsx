@@ -157,6 +157,15 @@ type SettingsModel = {
   pollingMs: number;
 };
 
+type LiveSeries = {
+  present: number[];
+  recv: number[];
+  drop: number[];
+  mbps: number[];
+  latency: number[];
+  score: number[];
+};
+
 function formatTs(ms?: number | null): string {
   if (!ms) return "-";
   const date = new Date(ms);
@@ -494,6 +503,28 @@ export default function App() {
   const [hudChartMode, setHudChartMode] = createSignal("bars");
   const [hudFontPreset, setHudFontPreset] = createSignal("compact");
   const [hudLayout, setHudLayout] = createSignal("wide");
+  const [liveResolutionMode, setLiveResolutionMode] = createSignal("auto_native");
+  const [livePresetSize, setLivePresetSize] = createSignal("2000x1200");
+  const [liveCustomWidth, setLiveCustomWidth] = createSignal(2000);
+  const [liveCustomHeight, setLiveCustomHeight] = createSignal(1200);
+  const [liveFps, setLiveFps] = createSignal(60);
+  const [liveTargetMbps, setLiveTargetMbps] = createSignal(30);
+  const [liveMinMbps, setLiveMinMbps] = createSignal(8);
+  const [liveMaxMbps, setLiveMaxMbps] = createSignal(120);
+  const [liveCursorMode, setLiveCursorMode] = createSignal("embedded");
+  const [liveIntraOnly, setLiveIntraOnly] = createSignal(false);
+  const [liveProfileDraft, setLiveProfileDraft] = createSignal("live-baseline");
+  const [liveStatus, setLiveStatus] = createSignal<Record<string, unknown> | null>(null);
+  const [liveMetrics, setLiveMetrics] = createSignal<Record<string, unknown> | null>(null);
+  const [liveActionText, setLiveActionText] = createSignal("");
+  const [liveSeries, setLiveSeries] = createSignal<LiveSeries>({
+    present: [],
+    recv: [],
+    drop: [],
+    mbps: [],
+    latency: [],
+    score: [],
+  });
   const [selectedRunId, setSelectedRunId] = createSignal("");
   const [leftProfile, setLeftProfile] = createSignal("");
   const [rightProfile, setRightProfile] = createSignal("");
@@ -569,6 +600,85 @@ export default function App() {
 
   const canPreflight = createMemo(() => serviceOnline() && !!serial() && selectedEncoders().length > 0);
   const canStart = createMemo(() => hardBlockers().length === 0);
+  const currentStreamPort = createMemo(() => {
+    const bySerial = devices().find((d) => d.serial === serial());
+    const fromDevice = Number(bySerial?.stream_port || 0);
+    if (Number.isFinite(fromDevice) && fromDevice > 0) return fromDevice;
+    return 5000;
+  });
+  const liveRunning = createMemo(() => {
+    const state = String(valueAt(liveStatus(), ["base", "state"]) || "").toUpperCase();
+    return state === "STREAMING" || state === "STARTING" || state === "RECONNECTING";
+  });
+  const liveKpi = createMemo(() => {
+    const kpi = (valueAt(liveMetrics(), ["kpi"]) as Record<string, unknown>) || {};
+    const present = Number(kpi.present_fps || 0);
+    const recv = Number(kpi.recv_fps || 0);
+    const drop = Number(kpi.drop_rate || 0);
+    const mbps = Number(kpi.effective_bitrate_mbps || 0);
+    const latency = Number(kpi.e2e_latency_ms_p95 || 0);
+    return {
+      present: Number.isFinite(present) ? present : 0,
+      recv: Number.isFinite(recv) ? recv : 0,
+      drop: Number.isFinite(drop) ? drop : 0,
+      mbps: Number.isFinite(mbps) ? mbps : 0,
+      latency: Number.isFinite(latency) ? latency : 0,
+    };
+  });
+  const hasLiveSeries = createMemo(() => liveSeries().present.length > 0);
+
+  function sessionPath(path: string): string {
+    const params = new URLSearchParams();
+    if (serial().trim()) params.set("serial", serial().trim());
+    params.set("stream_port", String(currentStreamPort()));
+    return `${path}?${params.toString()}`;
+  }
+
+  function resolvedLiveSize(): string | null {
+    if (liveResolutionMode() === "auto_native") return null;
+    if (liveResolutionMode() === "preset") return livePresetSize();
+    const w = Math.max(320, Number(liveCustomWidth() || 0));
+    const h = Math.max(240, Number(liveCustomHeight() || 0));
+    return `${w}x${h}`;
+  }
+
+  function buildLivePatchPayload(): Record<string, unknown> {
+    const payload: Record<string, unknown> = {
+      serial: serial().trim(),
+      stream_port: currentStreamPort(),
+      profile: profileName().trim() || "baseline",
+      encoder: selectedEncoder(),
+      fps: Number(liveFps()),
+      bitrate_kbps: mbpsToKbps(Number(liveTargetMbps())),
+      cursor_mode: liveCursorMode(),
+      intra_only: Boolean(liveIntraOnly()),
+    };
+    const size = resolvedLiveSize();
+    if (size) payload.size = size;
+    return payload;
+  }
+
+  function appendLiveSeriesPoint(point: {
+    present: number;
+    recv: number;
+    drop: number;
+    mbps: number;
+    latency: number;
+    score: number;
+  }) {
+    setLiveSeries((prev) => {
+      const cap = 80;
+      const next = {
+        present: [...prev.present, point.present].slice(-cap),
+        recv: [...prev.recv, point.recv].slice(-cap),
+        drop: [...prev.drop, point.drop].slice(-cap),
+        mbps: [...prev.mbps, point.mbps].slice(-cap),
+        latency: [...prev.latency, point.latency].slice(-cap),
+        score: [...prev.score, point.score].slice(-cap),
+      };
+      return next;
+    });
+  }
 
   async function refreshHealth() {
     const data = await fetchJson<Health>("/v1/health");
@@ -667,6 +777,86 @@ export default function App() {
     setTail(data);
   }
 
+  async function refreshLiveSession() {
+    if (!serial().trim()) return;
+    const data = await fetchJson<Record<string, unknown>>(sessionPath("/v1/trainer/live/status"));
+    const status = (data.status as Record<string, unknown>) || null;
+    const metrics = (data.metrics as Record<string, unknown>) || null;
+    setLiveStatus(status);
+    setLiveMetrics(metrics);
+
+    const kpi = (valueAt(metrics, ["kpi"]) as Record<string, unknown>) || {};
+    const present = Number(kpi.present_fps || 0);
+    const recv = Number(kpi.recv_fps || 0);
+    const drop = Number(kpi.drop_rate || 0);
+    const mbps = Number(kpi.effective_bitrate_mbps || 0);
+    const latency = Number(kpi.e2e_latency_ms_p95 || 0);
+    const score = Math.max(0, (Number.isFinite(present) ? present : 0) * 2 - (Number.isFinite(latency) ? latency : 0) * 0.08 - (Number.isFinite(drop) ? drop : 0) * 120);
+    appendLiveSeriesPoint({
+      present: Number.isFinite(present) ? present : 0,
+      recv: Number.isFinite(recv) ? recv : 0,
+      drop: Number.isFinite(drop) ? drop : 0,
+      mbps: Number.isFinite(mbps) ? mbps : 0,
+      latency: Number.isFinite(latency) ? latency : 0,
+      score,
+    });
+  }
+
+  async function startLiveRun() {
+    await withUiGuard("Starting live run", async () => {
+      if (!serial().trim()) throw new Error("Select a device first.");
+      const resp = await fetch("/v1/trainer/live/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildLivePatchPayload()),
+      });
+      const body = (await resp.json()) as Record<string, unknown>;
+      if (!resp.ok) throw new Error(String(body.error || "live start failed"));
+      setLiveActionText("Live session started.");
+      await refreshLiveSession();
+      setTab("live");
+    });
+  }
+
+  async function applyLiveConfig() {
+    await withUiGuard("Applying live config", async () => {
+      if (!serial().trim()) throw new Error("Select a device first.");
+      const resp = await fetch("/v1/trainer/live/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildLivePatchPayload()),
+      });
+      const body = (await resp.json()) as Record<string, unknown>;
+      if (!resp.ok) throw new Error(String(body.error || "live apply failed"));
+      setLiveActionText("Live config applied.");
+      await refreshLiveSession();
+    });
+  }
+
+  async function saveLiveProfile() {
+    await withUiGuard("Saving live profile", async () => {
+      const name = safeName(liveProfileDraft().trim());
+      if (!name) throw new Error("Enter profile name.");
+      if (!serial().trim()) throw new Error("Select a device first.");
+      const resp = await fetch("/v1/trainer/live/save-profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          serial: serial().trim(),
+          stream_port: currentStreamPort(),
+          profile_name: name,
+          description: "Saved from Live Run tab.",
+          tags: [selectedEncoder(), "live"],
+        }),
+      });
+      const body = (await resp.json()) as Record<string, unknown>;
+      if (!resp.ok) throw new Error(String(body.error || "save profile failed"));
+      setLiveActionText(`Profile saved: ${String(body.profile_name || name)}`);
+      setProfileName(String(body.profile_name || name));
+      await refreshProfiles();
+    });
+  }
+
   async function loadProfileDetail(which: "left" | "right", name: string) {
     if (!name) return;
     const data = await fetchJson<ProfileDetail>(`/v1/trainer/profiles/${encodeURIComponent(name)}`);
@@ -700,6 +890,7 @@ export default function App() {
     if (tab() === "profiles" || tab() === "compare") await refreshProfiles();
     if (tab() === "datasets") await refreshDatasets();
     if (tab() === "live" || tab() === "runs" || runningRuns().length > 0) await refreshTail();
+    if (tab() === "live") await refreshLiveSession();
     if (tab() === "diagnostics") await refreshDiagnostics();
     setLastRefreshAt(Date.now());
   }
@@ -806,6 +997,7 @@ export default function App() {
       await refreshDiagnostics();
       await refreshDatasets();
       await refreshTail();
+      await refreshLiveSession();
       setLastRefreshAt(Date.now());
     });
     pollId = window.setInterval(async () => {
@@ -842,6 +1034,14 @@ export default function App() {
   const presentSummary = createMemo(() => seriesSummary(hudSeries().present));
   const recvSummary = createMemo(() => seriesSummary(hudSeries().recv));
   const dropSummary = createMemo(() => seriesSummary(hudSeries().drops));
+  const liveScoreBars = createMemo(() => toBars(liveSeries().score));
+  const livePresentBars = createMemo(() => toBars(liveSeries().present));
+  const liveRecvBars = createMemo(() => toBars(liveSeries().recv));
+  const liveDropBars = createMemo(() => toBars(liveSeries().drop, true));
+  const liveScoreSummary = createMemo(() => seriesSummary(liveSeries().score));
+  const livePresentSummary = createMemo(() => seriesSummary(liveSeries().present));
+  const liveRecvSummary = createMemo(() => seriesSummary(liveSeries().recv));
+  const liveDropSummary = createMemo(() => seriesSummary(liveSeries().drop));
   const selectedDevice = createMemo(() => devices().find((item) => item.serial === serial()));
   const datasetTrials = createMemo(() => parseDatasetTrials(datasetDetail()?.parameters || {}));
   const datasetScoreBars = createMemo(() => toBars(datasetTrials().map((v) => v.score)));
@@ -1240,75 +1440,195 @@ export default function App() {
           <Show when={tab() === "live"}>
             <div class="live-layout">
               <article class="panel card fixed-left">
-                <h2>Run Context</h2>
+                <h2>Live Run Controls</h2>
                 <div class="meta-grid">
-                  <div class="meta-item"><strong>Run</strong><span class="mono">{activeRun()?.run_id || "-"}</span></div>
-                  <div class="meta-item"><strong>Status</strong><span>{activeRun()?.status || "idle"}</span></div>
-                  <div class="meta-item"><strong>Profile</strong><span>{activeRun()?.profile_name || profileName()}</span></div>
-                  <div class="meta-item"><strong>Device</strong><span>{activeRun()?.serial || serial() || "-"}</span></div>
-                  <div class="meta-item"><strong>Mode</strong><span>{hud().mode !== "-" ? hud().mode : activeRun()?.mode || "-"}</span></div>
-                  <div class="meta-item"><strong>Generation</strong><span>{hud().generation}</span></div>
-                  <div class="meta-item"><strong>Progress</strong><span>{hud().progress}</span></div>
-                  <div class="meta-item"><strong>HUD charts</strong><span>{activeRun()?.hud_chart_mode || hudChartMode()}</span></div>
-                  <div class="meta-item"><strong>HUD font</strong><span>{activeRun()?.hud_font_preset || hudFontPreset()}</span></div>
-                  <div class="meta-item"><strong>HUD layout</strong><span>{activeRun()?.hud_layout || hudLayout()}</span></div>
+                  <div class="meta-item"><strong>Session state</strong><span>{String(valueAt(liveStatus(), ["base", "state"]) || "idle")}</span></div>
+                  <div class="meta-item"><strong>Device</strong><span>{serial() || "-"}</span></div>
+                  <div class="meta-item"><strong>Stream port</strong><span>{currentStreamPort()}</span></div>
+                  <div class="meta-item"><strong>Profile</strong><span>{String(valueAt(liveStatus(), ["base", "active_config", "profile"]) || profileName())}</span></div>
+                  <div class="meta-item"><strong>Encoder</strong><span>{String(valueAt(liveStatus(), ["base", "active_config", "encoder"]) || selectedEncoder())}</span></div>
+                  <div class="meta-item"><strong>Size</strong><span>{String(valueAt(liveStatus(), ["base", "active_config", "size"]) || resolvedLiveSize() || "native")}</span></div>
+                  <div class="meta-item"><strong>FPS</strong><span>{String(valueAt(liveStatus(), ["base", "active_config", "fps"]) || liveFps())}</span></div>
+                  <div class="meta-item"><strong>Bitrate</strong><span>{String(valueAt(liveStatus(), ["base", "active_config", "bitrate_kbps"]) || mbpsToKbps(liveTargetMbps()))} kbps</span></div>
                   <div class="meta-item">
                     <strong>Live health</strong>
-                    <span class={`live-pill ${liveHealth().tone}`}>{liveHealth().state}</span>
+                    <span class={`live-pill ${liveRunning() ? "ok" : "warn"}`}>{liveRunning() ? "running" : "idle"}</span>
                   </div>
                 </div>
-                <Show when={activeRun() && (activeRun()!.status === "running" || activeRun()!.status === "stopping")}>
-                  <button class="danger" disabled={!!busyAction()} onClick={() => void stopRun(activeRun()!.run_id)}>
-                    Stop Run
+                <div class="two-col">
+                  <label title="Used for Save Profile action.">
+                    Save profile as
+                    <input value={liveProfileDraft()} onInput={(e) => setLiveProfileDraft(e.currentTarget.value)} />
+                  </label>
+                  <label title="Encoder family to tune live.">
+                    Encoder
+                    <select value={selectedEncoder()} onInput={(e) => setSelectedEncoder(e.currentTarget.value)}>
+                      <option value="h264">h264</option>
+                      <option value="h265">h265</option>
+                      <option value="mjpeg">mjpeg</option>
+                      <option value="rawpng">rawpng</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="two-col">
+                  <label>
+                    FPS
+                    <input type="number" min="1" max="144" value={liveFps()} onInput={(e) => setLiveFps(Number(e.currentTarget.value || 60))} />
+                  </label>
+                  <label>
+                    Target Mbps
+                    <input type="number" min="1" max="300" step="0.5" value={liveTargetMbps()} onInput={(e) => setLiveTargetMbps(Number(e.currentTarget.value || 30))} />
+                  </label>
+                </div>
+                <div class="two-col">
+                  <label>
+                    Min Mbps
+                    <input type="number" min="1" max="300" step="0.5" value={liveMinMbps()} onInput={(e) => setLiveMinMbps(Number(e.currentTarget.value || 8))} />
+                  </label>
+                  <label>
+                    Max Mbps
+                    <input type="number" min="1" max="300" step="0.5" value={liveMaxMbps()} onInput={(e) => setLiveMaxMbps(Number(e.currentTarget.value || 120))} />
+                  </label>
+                </div>
+                <div class="two-col">
+                  <label>
+                    Resolution mode
+                    <select value={liveResolutionMode()} onInput={(e) => setLiveResolutionMode(e.currentTarget.value)}>
+                      <option value="auto_native">auto_native</option>
+                      <option value="preset">preset</option>
+                      <option value="custom">custom</option>
+                    </select>
+                  </label>
+                  <Show when={liveResolutionMode() === "preset"}>
+                    <label>
+                      Size preset
+                      <select value={livePresetSize()} onInput={(e) => setLivePresetSize(e.currentTarget.value)}>
+                        <option value="1280x720">1280x720</option>
+                        <option value="1600x900">1600x900</option>
+                        <option value="1920x1080">1920x1080</option>
+                        <option value="2000x1200">2000x1200</option>
+                        <option value="2560x1440">2560x1440</option>
+                      </select>
+                    </label>
+                  </Show>
+                </div>
+                <Show when={liveResolutionMode() === "custom"}>
+                  <div class="two-col">
+                    <label>
+                      Width
+                      <input type="number" min="320" max="7680" value={liveCustomWidth()} onInput={(e) => setLiveCustomWidth(Number(e.currentTarget.value || 2000))} />
+                    </label>
+                    <label>
+                      Height
+                      <input type="number" min="240" max="4320" value={liveCustomHeight()} onInput={(e) => setLiveCustomHeight(Number(e.currentTarget.value || 1200))} />
+                    </label>
+                  </div>
+                </Show>
+                <div class="two-col">
+                  <label>
+                    Cursor mode
+                    <select value={liveCursorMode()} onInput={(e) => setLiveCursorMode(e.currentTarget.value)}>
+                      <option value="embedded">embedded</option>
+                      <option value="none">none</option>
+                    </select>
+                  </label>
+                  <label class="switch">
+                    <input type="checkbox" checked={liveIntraOnly()} onInput={(e) => setLiveIntraOnly(e.currentTarget.checked)} />
+                    <span>Intra-only</span>
+                  </label>
+                </div>
+
+                <Show when={selectedEncoder() === "h264" || selectedEncoder() === "h265"}>
+                  <div class="two-col">
+                    <label>
+                      Encoder preset
+                      <select value={manualH26xPreset()} onInput={(e) => setManualH26xPreset(e.currentTarget.value)}>
+                        <option value="ultrafast">ultrafast</option>
+                        <option value="fast">fast</option>
+                        <option value="balanced">balanced</option>
+                        <option value="quality">quality</option>
+                      </select>
+                    </label>
+                    <label>
+                      GOP
+                      <input type="number" min="1" max="240" value={manualH26xGop()} onInput={(e) => setManualH26xGop(Number(e.currentTarget.value || 60))} />
+                    </label>
+                  </div>
+                </Show>
+                <Show when={selectedEncoder() === "mjpeg"}>
+                  <label>
+                    JPEG quality
+                    <input type="number" min="1" max="100" value={manualMjpegQuality()} onInput={(e) => setManualMjpegQuality(Number(e.currentTarget.value || 85))} />
+                  </label>
+                </Show>
+                <Show when={selectedEncoder() === "rawpng"}>
+                  <label>
+                    PNG compression
+                    <input type="number" min="0" max="9" value={manualPngCompression()} onInput={(e) => setManualPngCompression(Number(e.currentTarget.value || 4))} />
+                  </label>
+                </Show>
+
+                <div class="actions-row">
+                  <button class="primary strong" disabled={!!busyAction() || !serial().trim()} onClick={() => void startLiveRun()}>
+                    Start Live
                   </button>
+                  <button class="primary" disabled={!!busyAction() || !serial().trim()} onClick={() => void applyLiveConfig()}>
+                    Apply Live
+                  </button>
+                  <button class="quiet" disabled={!!busyAction() || !serial().trim()} onClick={() => void saveLiveProfile()}>
+                    Save Profile
+                  </button>
+                </div>
+                <Show when={liveActionText()}>
+                  <p class="hint">{liveActionText()}</p>
                 </Show>
               </article>
 
               <article class="panel card live-center">
                 <h2>Live HUD</h2>
-                <Show when={!hasLiveSamples()}>
+                <Show when={!hasLiveSeries()}>
                   <div class="empty-live">
                     <strong>Waiting for live samples</strong>
-                    <span>When trials emit metrics, charts and KPI cards update automatically.</span>
+                    <span>Start Live session and apply settings to collect metrics.</span>
                   </div>
                 </Show>
                 <div class="kpi-grid">
                   <div class="kpi-card">
-                    <span>Trial</span>
-                    <strong>{hud().trialId}</strong>
+                    <span>State</span>
+                    <strong>{String(valueAt(liveStatus(), ["base", "state"]) || "idle")}</strong>
                   </div>
                   <div class="kpi-card">
-                    <span>Score</span>
-                    <strong>{hud().score}</strong>
+                    <span>Live score</span>
+                    <strong>{liveScoreSummary().last}</strong>
                   </div>
                   <div class="kpi-card">
                     <span>Present FPS</span>
-                    <strong>{hud().presentFps}</strong>
+                    <strong>{liveKpi().present.toFixed(1)}</strong>
                   </div>
                   <div class="kpi-card">
                     <span>Pipe FPS</span>
-                    <strong>{hud().recvFps}</strong>
+                    <strong>{liveKpi().recv.toFixed(1)}</strong>
                   </div>
                   <div class="kpi-card">
                     <span>Live Mbps</span>
-                    <strong>{hud().bitrateMbps}</strong>
+                    <strong>{liveKpi().mbps.toFixed(2)}</strong>
                   </div>
                   <div class="kpi-card">
                     <span>E2E p95 (ms)</span>
-                    <strong>{hud().e2eP95Ms}</strong>
+                    <strong>{liveKpi().latency.toFixed(1)}</strong>
                   </div>
                   <div class="kpi-card">
                     <span>Drops</span>
-                    <strong>{hud().dropsPerSec}</strong>
+                    <strong>{liveKpi().drop.toFixed(3)}</strong>
                   </div>
                 </div>
 
                 <div class="chart-grid">
                   <section class="chart-card">
                     <h3>Score trend</h3>
-                    <p class="chart-stats">last {scoreSummary().last} | min {scoreSummary().min} | max {scoreSummary().max}</p>
+                    <p class="chart-stats">last {liveScoreSummary().last} | min {liveScoreSummary().min} | max {liveScoreSummary().max}</p>
                     <div class="bar-row">
-                      <For each={scoreBars()}>
+                      <For each={liveScoreBars()}>
                         {(bar, idx) => (
                           <span
                             class={`bar ${bar.cls}`}
@@ -1321,9 +1641,9 @@ export default function App() {
                   </section>
                   <section class="chart-card">
                     <h3>Present FPS trend</h3>
-                    <p class="chart-stats">last {presentSummary().last} | min {presentSummary().min} | max {presentSummary().max}</p>
+                    <p class="chart-stats">last {livePresentSummary().last} | min {livePresentSummary().min} | max {livePresentSummary().max}</p>
                     <div class="bar-row">
-                      <For each={presentBars()}>
+                      <For each={livePresentBars()}>
                         {(bar, idx) => (
                           <span
                             class={`bar ${bar.cls}`}
@@ -1336,9 +1656,9 @@ export default function App() {
                   </section>
                   <section class="chart-card">
                     <h3>Pipeline FPS trend</h3>
-                    <p class="chart-stats">last {recvSummary().last} | min {recvSummary().min} | max {recvSummary().max}</p>
+                    <p class="chart-stats">last {liveRecvSummary().last} | min {liveRecvSummary().min} | max {liveRecvSummary().max}</p>
                     <div class="bar-row">
-                      <For each={recvBars()}>
+                      <For each={liveRecvBars()}>
                         {(bar, idx) => (
                           <span
                             class={`bar ${bar.cls}`}
@@ -1351,9 +1671,9 @@ export default function App() {
                   </section>
                   <section class="chart-card">
                     <h3>Drop trend</h3>
-                    <p class="chart-stats">last {dropSummary().last} | min {dropSummary().min} | max {dropSummary().max}</p>
+                    <p class="chart-stats">last {liveDropSummary().last} | min {liveDropSummary().min} | max {liveDropSummary().max}</p>
                     <div class="bar-row">
-                      <For each={dropBars()}>
+                      <For each={liveDropBars()}>
                         {(bar, idx) => (
                           <span
                             class={`bar ${bar.cls}`}
@@ -1370,7 +1690,7 @@ export default function App() {
                   <h3>Stage Timeline</h3>
                   <Show
                     when={liveStages().length > 0}
-                    fallback={<p class="hint">No stage events yet. Start training or wait for next trial events.</p>}
+                    fallback={<p class="hint">No events yet. Start Live and apply settings.</p>}
                   >
                     <div class="timeline-list">
                       <For each={liveStages()}>

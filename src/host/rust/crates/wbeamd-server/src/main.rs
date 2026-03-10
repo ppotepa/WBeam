@@ -253,6 +253,31 @@ struct TrainerDatasetRecomputeResponse {
     output_path: String,
 }
 
+#[derive(Debug, Deserialize, Default)]
+struct TrainerLiveStartRequest {
+    serial: String,
+    stream_port: Option<u16>,
+    #[serde(flatten)]
+    patch: ConfigPatch,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct TrainerLiveApplyRequest {
+    serial: String,
+    stream_port: Option<u16>,
+    #[serde(flatten)]
+    patch: ConfigPatch,
+}
+
+#[derive(Debug, Deserialize)]
+struct TrainerLiveSaveProfileRequest {
+    serial: String,
+    stream_port: Option<u16>,
+    profile_name: String,
+    description: Option<String>,
+    tags: Option<Vec<String>>,
+}
+
 struct TrainerState {
     root: PathBuf,
     control_port: u16,
@@ -618,6 +643,10 @@ async fn main() {
         )
         .route("/trainer/devices", get(get_trainer_devices))
         .route("/trainer/diagnostics", get(get_trainer_diagnostics))
+        .route("/trainer/live/status", get(get_trainer_live_status))
+        .route("/trainer/live/start", post(post_trainer_live_start))
+        .route("/trainer/live/apply", post(post_trainer_live_apply))
+        .route("/trainer/live/save-profile", post(post_trainer_live_save_profile))
         .route("/v1/status", get(get_status))
         .route("/v1/host-probe", get(get_host_probe))
         .route("/v1/health", get(get_health))
@@ -650,6 +679,10 @@ async fn main() {
         )
         .route("/v1/trainer/devices", get(get_trainer_devices))
         .route("/v1/trainer/diagnostics", get(get_trainer_diagnostics))
+        .route("/v1/trainer/live/status", get(get_trainer_live_status))
+        .route("/v1/trainer/live/start", post(post_trainer_live_start))
+        .route("/v1/trainer/live/apply", post(post_trainer_live_apply))
+        .route("/v1/trainer/live/save-profile", post(post_trainer_live_save_profile))
         .with_state(app_state.clone());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], args.control_port));
@@ -749,9 +782,13 @@ async fn get_metrics(
         if let Some(serial_val) = query.serial.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
             let hud_text = read_trainer_overlay_text(serial_val, stream_port);
             let hud_json = read_trainer_overlay_json(serial_val, stream_port).unwrap_or(Value::Null);
+            let hud_active =
+                trainer_overlay_marker_active(serial_val, stream_port)
+                    || hud_text.as_ref().is_some_and(|txt| !txt.trim().is_empty())
+                    || !hud_json.is_null();
             obj.insert(
                 "trainer_hud_active".to_string(),
-                Value::Bool(hud_text.as_ref().is_some_and(|txt| !txt.trim().is_empty())),
+                Value::Bool(hud_active),
             );
             obj.insert(
                 "trainer_hud_text".to_string(),
@@ -1432,6 +1469,205 @@ async fn post_trainer_stop(
         )
             .into_response(),
     }
+}
+
+async fn get_trainer_live_status(
+    State(state): State<AppState>,
+    Query(query): Query<SessionQuery>,
+) -> impl IntoResponse {
+    let serial = query.serial.as_deref();
+    let core = state
+        .sessions
+        .resolve_core_readonly(serial, query.stream_port)
+        .await
+        .unwrap_or_else(|| state.sessions.default_core());
+    let status = serde_json::to_value(core.status().await).unwrap_or_else(|_| Value::Null);
+    let metrics = serde_json::to_value(core.metrics().await).unwrap_or_else(|_| Value::Null);
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "ok": true,
+            "status": status,
+            "metrics": metrics
+        })),
+    )
+        .into_response()
+}
+
+async fn post_trainer_live_start(
+    State(state): State<AppState>,
+    body: Option<Json<TrainerLiveStartRequest>>,
+) -> impl IntoResponse {
+    let req = body.map(|Json(v)| v).unwrap_or_default();
+    let serial = req.serial.trim().to_string();
+    if serial.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"ok": false, "error": "serial is required"})),
+        )
+            .into_response();
+    }
+    let core = state
+        .sessions
+        .resolve_core(Some(serial.as_str()), req.stream_port)
+        .await;
+    match core.start(req.patch).await {
+        Ok(resp) => (
+            StatusCode::OK,
+            Json(serde_json::json!({"ok": true, "mode": "live", "status": resp})),
+        )
+            .into_response(),
+        Err(err) => core_error_response(core, err).await,
+    }
+}
+
+async fn post_trainer_live_apply(
+    State(state): State<AppState>,
+    body: Option<Json<TrainerLiveApplyRequest>>,
+) -> impl IntoResponse {
+    let req = body.map(|Json(v)| v).unwrap_or_default();
+    let serial = req.serial.trim().to_string();
+    if serial.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"ok": false, "error": "serial is required"})),
+        )
+            .into_response();
+    }
+    let core = state
+        .sessions
+        .resolve_core(Some(serial.as_str()), req.stream_port)
+        .await;
+    match core.apply(req.patch).await {
+        Ok(resp) => (
+            StatusCode::OK,
+            Json(serde_json::json!({"ok": true, "mode": "live", "status": resp})),
+        )
+            .into_response(),
+        Err(err) => core_error_response(core, err).await,
+    }
+}
+
+async fn post_trainer_live_save_profile(
+    State(state): State<AppState>,
+    body: Option<Json<TrainerLiveSaveProfileRequest>>,
+) -> impl IntoResponse {
+    let req = body.map(|Json(v)| v).unwrap_or(TrainerLiveSaveProfileRequest {
+        serial: String::new(),
+        stream_port: None,
+        profile_name: String::new(),
+        description: None,
+        tags: None,
+    });
+    let serial = req.serial.trim().to_string();
+    if serial.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"ok": false, "error": "serial is required"})),
+        )
+            .into_response();
+    }
+    let profile_name = sanitize_profile_name(req.profile_name.trim());
+    if profile_name.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"ok": false, "error": "profile_name is required"})),
+        )
+            .into_response();
+    }
+
+    let core = state
+        .sessions
+        .resolve_core_readonly(Some(serial.as_str()), req.stream_port)
+        .await
+        .unwrap_or_else(|| state.sessions.default_core());
+    let status = serde_json::to_value(core.status().await).unwrap_or_else(|_| Value::Null);
+    let metrics = serde_json::to_value(core.metrics().await).unwrap_or_else(|_| Value::Null);
+
+    let profile_root = trainer_profile_root(&state.trainer.root);
+    let profile_dir = profile_root.join(&profile_name);
+    if let Err(err) = fs::create_dir_all(&profile_dir) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"ok": false, "error": format!("failed to create profile dir: {err}")})),
+        )
+            .into_response();
+    }
+    let now = now_unix_ms();
+    let best_score = live_snapshot_score(&metrics);
+    let runtime_cfg = status
+        .get("base")
+        .and_then(|v| v.get("active_config"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let profile_json = serde_json::json!({
+        "engine": "trainer_live_v1",
+        "profile": {
+            "name": profile_name,
+            "runtime": runtime_cfg,
+            "origin": {
+                "mode": "live_run",
+                "score": best_score,
+            }
+        },
+        "device": {
+            "serial": serial,
+            "stream_port": req.stream_port.unwrap_or(state.sessions.base_stream_port),
+        },
+        "meta": {
+            "created_at_unix_ms": now,
+            "description": req.description.clone().unwrap_or_default(),
+            "tags": req.tags.clone().unwrap_or_default(),
+        }
+    });
+    let parameters_json = serde_json::json!({
+        "engine": "trainer_live_v1",
+        "serial": serial,
+        "best": {
+            "score": best_score
+        },
+        "live": {
+            "saved_at_unix_ms": now,
+            "description": req.description.unwrap_or_default(),
+            "tags": req.tags.unwrap_or_default(),
+            "status": status,
+            "metrics": metrics
+        },
+        "results": []
+    });
+    let profile_path = profile_dir.join(format!("{profile_name}.json"));
+    let params_path = profile_dir.join("parameters.json");
+    if let Err(err) = fs::write(
+        &profile_path,
+        serde_json::to_vec_pretty(&profile_json).unwrap_or_default(),
+    ) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"ok": false, "error": format!("failed to write profile json: {err}")})),
+        )
+            .into_response();
+    }
+    if let Err(err) = fs::write(
+        &params_path,
+        serde_json::to_vec_pretty(&parameters_json).unwrap_or_default(),
+    ) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"ok": false, "error": format!("failed to write parameters json: {err}")})),
+        )
+            .into_response();
+    }
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "ok": true,
+            "profile_name": profile_name,
+            "profile_path": profile_path.to_string_lossy().to_string(),
+            "parameters_path": params_path.to_string_lossy().to_string(),
+            "best_score": best_score
+        })),
+    )
+        .into_response()
 }
 
 async fn get_trainer_runs(State(state): State<AppState>) -> impl IntoResponse {
@@ -2245,14 +2481,10 @@ fn session_suffix(raw: &str) -> String {
 }
 
 fn read_trainer_overlay_text(serial: &str, stream_port: u16) -> Option<String> {
-    let suffix = session_suffix(serial);
-    let marker = PathBuf::from(format!(
-        "/tmp/wbeam-trainer-active-{}-{}.flag",
-        suffix, stream_port
-    ));
-    if !marker.exists() {
+    if !trainer_overlay_marker_active(serial, stream_port) {
         return None;
     }
+    let suffix = session_suffix(serial);
     let overlay = PathBuf::from(format!(
         "/tmp/wbeam-trainer-overlay-{}-{}.txt",
         suffix, stream_port
@@ -2267,20 +2499,43 @@ fn read_trainer_overlay_text(serial: &str, stream_port: u16) -> Option<String> {
 }
 
 fn read_trainer_overlay_json(serial: &str, stream_port: u16) -> Option<Value> {
-    let suffix = session_suffix(serial);
-    let marker = PathBuf::from(format!(
-        "/tmp/wbeam-trainer-active-{}-{}.flag",
-        suffix, stream_port
-    ));
-    if !marker.exists() {
+    if !trainer_overlay_marker_active(serial, stream_port) {
         return None;
     }
+    let suffix = session_suffix(serial);
     let overlay = PathBuf::from(format!(
         "/tmp/wbeam-trainer-overlay-{}-{}.json",
         suffix, stream_port
     ));
     let raw = fs::read_to_string(overlay).ok()?;
     serde_json::from_str::<Value>(&raw).ok()
+}
+
+fn trainer_overlay_marker_active(serial: &str, stream_port: u16) -> bool {
+    let suffix = session_suffix(serial);
+    PathBuf::from(format!(
+        "/tmp/wbeam-trainer-active-{}-{}.flag",
+        suffix, stream_port
+    ))
+    .exists()
+}
+
+fn live_snapshot_score(metrics: &Value) -> f64 {
+    let kpi = metrics.get("kpi").cloned().unwrap_or(Value::Null);
+    let present = kpi
+        .get("present_fps")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let e2e_p95 = kpi
+        .get("e2e_latency_ms_p95")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let drops = kpi
+        .get("drop_rate")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    // Weighted utility for live snapshot ranking.
+    ((present * 2.0) - (e2e_p95 * 0.08) - (drops * 120.0)).max(0.0)
 }
 
 fn read_json_value(path: &Path) -> Value {

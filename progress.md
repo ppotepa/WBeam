@@ -2181,3 +2181,30 @@ Status: active
 - Validation:
   - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
   - `cd src/apps/trainer-tauri && npm run build` -> OK
+
+## In Progress (2026-03-10) - Live Run v1 (start/apply/save-profile)
+- Added backend live endpoints in Rust daemon API:
+  - `GET /v1/trainer/live/status`
+  - `POST /v1/trainer/live/start`
+  - `POST /v1/trainer/live/apply`
+  - `POST /v1/trainer/live/save-profile`
+  - (same non-`/v1` aliases were also added)
+- Live backend behavior:
+  - `start`/`apply` use existing session-aware core resolution (`serial` + `stream_port`) and `ConfigPatch`,
+  - `save-profile` writes a compatible profile bundle into `config/training/profiles/<profile_name>/`:
+    - `<profile_name>.json`
+    - `parameters.json`
+  - profile includes live snapshot status/metrics metadata and derived `best.score`.
+- Trainer HUD signal robustness on server side:
+  - `trainer_hud_active` now uses marker presence + text + json availability (not text-only).
+- Added frontend Live Run controls in `trainer-tauri`:
+  - session controls: `Start Live`, `Apply Live`, `Save Profile`,
+  - live tuning fields: encoder, resolution mode/preset/custom size, FPS, target/min/max Mbps, cursor mode, intra-only, encoder-specific knobs,
+  - live context panel wired to real session status (`/v1/trainer/live/status`),
+  - live KPI/graphs sourced from live metrics polling (not only trainer tail parsing).
+- Frontend live telemetry:
+  - maintains local rolling series (`present/recv/drop/mbps/latency/score`) for charting in Live tab,
+  - adds explicit action feedback text after start/apply/save actions.
+- Validation:
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
