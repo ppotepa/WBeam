@@ -1,5 +1,16 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending) - streamer crash guard for key-int-max (exit code 101)
+- Investigated `stream start aborted (code=101)` with `key-int-max` hint.
+- Added defensive GOP property handling in Rust streamer encoder config:
+  - `key-int-max` is now applied only when property exists on the active encoder backend,
+  - GOP value is passed as `u32` for safer type matching with GObject property expectations,
+  - when property is unavailable, streamer logs warning and continues instead of aborting start.
+- Scope:
+  - `x264` and `x265` branches in `wbeamd-streamer` encoder setup.
+- Validation:
+  - `cd src/host/rust && cargo check -p wbeamd-streamer`
+
 ## Session Update (2026-03-10, pending) - Wayland-only experimental mirroring toggle in main UI
 - Reworked connect UX split by host backend:
   - on `wayland_portal`, `Connect` now skips the middle mode modal and starts connect directly (portal chooser still appears as normal),

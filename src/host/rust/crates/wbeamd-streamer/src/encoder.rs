@@ -79,6 +79,15 @@ pub fn configure_encoder(
     } else {
         (fps / 8).max(6)
     };
+    let set_gop_key_int_max = |enc: &gst::Element, gop_value: u32| {
+        if enc.find_property("key-int-max").is_none() {
+            println!(
+                "[wbeam] WARN: encoder backend has no 'key-int-max' property; GOP property override skipped"
+            );
+            return;
+        }
+        let _ = enc.set_property("key-int-max", gop_value);
+    };
 
     if intra_only {
         println!("[wbeam] ALL-INTRA mode: gop=1, every frame is a full IDR");
@@ -119,7 +128,7 @@ pub fn configure_encoder(
         let _ = enc.set_property_from_str("speed-preset", "ultrafast");
         let _ = enc.set_property_from_str("tune", "zerolatency");
         let _ = enc.set_property("byte-stream", true);
-        let _ = enc.set_property("key-int-max", gop as i32);
+        set_gop_key_int_max(enc, gop);
         let option_str = if intra_only {
             "bframes=0:cabac=0:ref=1:8x8dct=0:no-open-gop=1:scenecut=0"
         } else {
@@ -140,7 +149,7 @@ pub fn configure_encoder(
         let _ = enc.set_property("bitrate", safe_bitrate);
         let _ = enc.set_property_from_str("speed-preset", "ultrafast");
         let _ = enc.set_property_from_str("tune", "zerolatency");
-        let _ = enc.set_property("key-int-max", gop as i32);
+        set_gop_key_int_max(enc, gop);
         let option_str = if intra_only {
             "bframes=0:no-open-gop=1:scenecut=0:strong-intra-smoothing=0"
         } else {
