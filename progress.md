@@ -1,5 +1,46 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending, branch `trainerv2`) - Trainer UI blueprint expanded with field-level interaction contract
+- Expanded `trainer.ui.md` from high-level UX blueprint into detailed interaction spec:
+  - added global control taxonomy describing where to use:
+    - radio cards,
+    - segmented controls,
+    - dropdowns,
+    - comboboxes,
+    - chips,
+    - steppers,
+    - sliders,
+    - switches,
+    - accordions,
+    - drawers,
+  - for each control family documented animation, transition, focus, loading, and disabled behavior.
+- Added validation severity model and dependency semantics:
+  - `hard block`,
+  - `soft warning`,
+  - `derived override`,
+  - plus global field dependency matrix for the trainer UI.
+- Added screen-by-screen interaction contract covering:
+  - bootstrap / service gate,
+  - `Train`,
+  - `Preflight Review`,
+  - `Live Run`,
+  - `Run Results`,
+  - `Runs`,
+  - `Profiles`,
+  - `Datasets`,
+  - `Compare`,
+  - `Devices`,
+  - `Validation`,
+  - `Diagnostics`,
+  - `Settings`.
+- Each screen section now specifies:
+  - required inputs,
+  - blocking conditions,
+  - control types,
+  - motion/transition rules,
+  - busy/error behavior,
+  - rationale for why a given interaction pattern is used.
+
 ## Session Update (2026-03-10, pending, branch `trainerv2`) - Comprehensive Trainer UI/UX blueprint document
 - Added a dedicated UI/UX specification document:
   - `trainer.ui.md`
