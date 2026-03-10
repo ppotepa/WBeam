@@ -7,7 +7,6 @@ import argparse
 import itertools
 import json
 import os
-import random
 import statistics
 import subprocess
 import sys
@@ -437,10 +436,12 @@ def build_trial_space(
     cursor_mode = str(current.get("cursor_mode", "embedded")).strip() or "embedded"
 
     if mode == "quality":
-        encoders = [current_encoder, "h265", "h264"]
-        sizes = [device_size or current_size, current_size, "1920x1080", "2560x1440"]
-        fps_values = [current_fps, 60, 72, 90]
-        bitrate_values = [current_bitrate, 12000, 18000, 25000, 40000, 60000, 90000]
+        # Default quality mode is intentionally biased towards max fidelity:
+        # native landscape resolution + high bitrate ladder (up to 200 Mbps).
+        encoders = ["h265", "h264", current_encoder]
+        sizes = [device_size or current_size, current_size]
+        fps_values = [90, 72, 60, current_fps]
+        bitrate_values = [200000, 160000, 120000, 90000, 60000, 40000, current_bitrate]
     elif mode == "latency":
         encoders = [current_encoder, "h264"]
         sizes = [current_size, "1280x720", "1280x800", "1600x900"]
@@ -458,6 +459,25 @@ def build_trial_space(
     bitrate_values = [v for v in dedupe_keep_order([max(1000, v) for v in bitrate_values]) if v <= 400000]
     cursor_values = [cursor_mode] if cursor_mode in {"hidden", "embedded", "metadata"} else ["embedded"]
     return encoders, sizes, fps_values, bitrate_values, cursor_values
+
+
+def _size_pixels(size: str) -> int:
+    if "x" not in size:
+        return 0
+    w_raw, h_raw = size.split("x", 1)
+    if not (w_raw.isdigit() and h_raw.isdigit()):
+        return 0
+    return int(w_raw) * int(h_raw)
+
+
+def quality_priority_key(config: TrialConfig) -> tuple[int, int, int, int]:
+    encoder_score = 2 if config.encoder == "h265" else (1 if config.encoder == "h264" else 0)
+    return (
+        config.bitrate_kbps,
+        _size_pixels(config.size),
+        config.fps,
+        encoder_score,
+    )
 
 
 def patch_payload(config: TrialConfig) -> dict[str, Any]:
@@ -569,7 +589,7 @@ def main() -> int:
     parser.add_argument("--control-port", type=int, default=int(os.environ.get("WBEAM_CONTROL_PORT", "5001")))
     parser.add_argument("--stream-port", type=int, default=None, help="Override stream port for selected serial.")
     parser.add_argument("--serial", default=None, help="Target ADB serial (interactive if omitted).")
-    parser.add_argument("--mode", choices=["balanced", "quality", "latency", "custom"], default=None)
+    parser.add_argument("--mode", choices=["balanced", "quality", "latency", "custom"], default="quality")
     parser.add_argument("--trials", type=int, default=None)
     parser.add_argument("--warmup-sec", type=int, default=4)
     parser.add_argument("--sample-sec", type=int, default=12)
@@ -644,9 +664,6 @@ def main() -> int:
             time.sleep(2.0)
 
     mode = args.mode
-    if mode is None:
-        mode_options = ["balanced", "quality", "latency", "custom"]
-        mode = mode_options[prompt_choice("Training mode:", mode_options, default_idx=0)]
 
     device_size = detect_device_size(serial)
     if device_size:
@@ -681,7 +698,8 @@ def main() -> int:
         for (e, s, f, b, c) in itertools.product(encoders, sizes, fps_values, bitrate_values, cursor_values)
     ]
     combos = dedupe_keep_order(combos)
-    random.shuffle(combos)
+    if mode == "quality":
+        combos = sorted(combos, key=quality_priority_key, reverse=True)
 
     warmup_sec = max(1, args.warmup_sec)
     sample_sec = max(4, args.sample_sec)

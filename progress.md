@@ -1,5 +1,11 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending) - Trainer defaults switched to max-quality baseline
+- Updated main-lane trainer wizard defaults (`./wbeam train wizard`) to prioritize highest quality out-of-the-box:
+  - default mode is now `quality` (no extra prompt needed),
+  - quality search space starts with native/current landscape resolution and a high bitrate ladder up to `200000 kbps` (200 Mbps),
+  - quality trial order is now deterministic high-to-low (bitrate -> resolution -> FPS -> encoder) instead of randomized, so first executed trials are max-fidelity candidates.
+
 ## Session Update (2026-03-10, pending) - Main-lane trainer wizard (`wbeam train wizard`)
 - Added a new interactive trainer in the main path:
   - `./wbeam train wizard` (aliases: `train tui`, `train run`),
