@@ -2,7 +2,8 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount }
 
 type Tab =
   | "train"
-  | "live"
+  | "live_run"
+  | "live_stats"
   | "runs"
   | "profiles"
   | "datasets"
@@ -453,7 +454,8 @@ function profileUpdatedAt(item: ProfileItem): number {
 export default function App() {
   const tabs: Array<{ id: Tab; label: string; hint: string }> = [
     { id: "train", label: "Train", hint: "Configure and start" },
-    { id: "live", label: "Live Run", hint: "Live HUD and events" },
+    { id: "live_run", label: "Live Run", hint: "Live config and apply" },
+    { id: "live_stats", label: "Live Stats", hint: "Live HUD and events" },
     { id: "runs", label: "Runs", hint: "History and stop control" },
     { id: "profiles", label: "Profiles", hint: "Saved outputs" },
     { id: "datasets", label: "Datasets", hint: "Run artifacts and recompute" },
@@ -814,7 +816,7 @@ export default function App() {
       if (!resp.ok) throw new Error(String(body.error || "live start failed"));
       setLiveActionText("Live session started.");
       await refreshLiveSession();
-      setTab("live");
+      setTab("live_stats");
     });
   }
 
@@ -889,8 +891,8 @@ export default function App() {
     await refreshDevices();
     if (tab() === "profiles" || tab() === "compare") await refreshProfiles();
     if (tab() === "datasets") await refreshDatasets();
-    if (tab() === "live" || tab() === "runs" || runningRuns().length > 0) await refreshTail();
-    if (tab() === "live") await refreshLiveSession();
+    if (tab() === "live_stats" || tab() === "runs" || runningRuns().length > 0) await refreshTail();
+    if (tab() === "live_stats" || tab() === "live_run") await refreshLiveSession();
     if (tab() === "diagnostics") await refreshDiagnostics();
     setLastRefreshAt(Date.now());
   }
@@ -970,7 +972,7 @@ export default function App() {
       }
       await refreshProfiles();
       await refreshTail();
-      if (settings().autoOpenLiveTab) setTab("live");
+      if (settings().autoOpenLiveTab) setTab("live_stats");
     });
   }
 
@@ -1105,7 +1107,7 @@ export default function App() {
                 onClick={() => setTab(item.id)}
               >
                 <span>{item.label}</span>
-                <Show when={item.id === "live" && runningRuns().length > 0}>
+                <Show when={item.id === "live_stats" && (runningRuns().length > 0 || liveRunning())}>
                   <small class="pulse-dot">live</small>
                 </Show>
               </button>
@@ -1437,23 +1439,15 @@ export default function App() {
             </div>
           </Show>
 
-          <Show when={tab() === "live"}>
-            <div class="live-layout">
-              <article class="panel card fixed-left">
-                <h2>Live Run Controls</h2>
+          <Show when={tab() === "live_run"}>
+            <div class="train-grid">
+              <article class="panel card">
+                <h2>Live Run</h2>
                 <div class="meta-grid">
                   <div class="meta-item"><strong>Session state</strong><span>{String(valueAt(liveStatus(), ["base", "state"]) || "idle")}</span></div>
                   <div class="meta-item"><strong>Device</strong><span>{serial() || "-"}</span></div>
                   <div class="meta-item"><strong>Stream port</strong><span>{currentStreamPort()}</span></div>
-                  <div class="meta-item"><strong>Profile</strong><span>{String(valueAt(liveStatus(), ["base", "active_config", "profile"]) || profileName())}</span></div>
-                  <div class="meta-item"><strong>Encoder</strong><span>{String(valueAt(liveStatus(), ["base", "active_config", "encoder"]) || selectedEncoder())}</span></div>
-                  <div class="meta-item"><strong>Size</strong><span>{String(valueAt(liveStatus(), ["base", "active_config", "size"]) || resolvedLiveSize() || "native")}</span></div>
-                  <div class="meta-item"><strong>FPS</strong><span>{String(valueAt(liveStatus(), ["base", "active_config", "fps"]) || liveFps())}</span></div>
-                  <div class="meta-item"><strong>Bitrate</strong><span>{String(valueAt(liveStatus(), ["base", "active_config", "bitrate_kbps"]) || mbpsToKbps(liveTargetMbps()))} kbps</span></div>
-                  <div class="meta-item">
-                    <strong>Live health</strong>
-                    <span class={`live-pill ${liveRunning() ? "ok" : "warn"}`}>{liveRunning() ? "running" : "idle"}</span>
-                  </div>
+                  <div class="meta-item"><strong>Active encoder</strong><span>{String(valueAt(liveStatus(), ["base", "active_config", "encoder"]) || selectedEncoder())}</span></div>
                 </div>
                 <div class="two-col">
                   <label title="Used for Save Profile action.">
@@ -1582,6 +1576,51 @@ export default function App() {
                 <Show when={liveActionText()}>
                   <p class="hint">{liveActionText()}</p>
                 </Show>
+              </article>
+
+              <article class="panel card">
+                <h2>Live Snapshot</h2>
+                <div class="meta-grid">
+                  <div class="meta-item"><strong>State</strong><span>{String(valueAt(liveStatus(), ["base", "state"]) || "idle")}</span></div>
+                  <div class="meta-item"><strong>Present FPS</strong><span>{liveKpi().present.toFixed(1)}</span></div>
+                  <div class="meta-item"><strong>Pipeline FPS</strong><span>{liveKpi().recv.toFixed(1)}</span></div>
+                  <div class="meta-item"><strong>Live Mbps</strong><span>{liveKpi().mbps.toFixed(2)}</span></div>
+                  <div class="meta-item"><strong>E2E p95</strong><span>{liveKpi().latency.toFixed(1)} ms</span></div>
+                  <div class="meta-item"><strong>Drops</strong><span>{liveKpi().drop.toFixed(3)}</span></div>
+                </div>
+                <div class="actions-row">
+                  <button class="primary" disabled={!!busyAction()} onClick={() => setTab("live_stats")}>
+                    Open Live Stats
+                  </button>
+                </div>
+                <p class="hint">Live Run mirrors Train-style workflow: configure, apply on the same session, then inspect detailed charts in Live Stats.</p>
+              </article>
+            </div>
+          </Show>
+
+          <Show when={tab() === "live_stats"}>
+            <div class="live-layout">
+              <article class="panel card fixed-left">
+                <h2>Live Stats Context</h2>
+                <div class="meta-grid">
+                  <div class="meta-item"><strong>Session state</strong><span>{String(valueAt(liveStatus(), ["base", "state"]) || "idle")}</span></div>
+                  <div class="meta-item"><strong>Device</strong><span>{serial() || "-"}</span></div>
+                  <div class="meta-item"><strong>Stream port</strong><span>{currentStreamPort()}</span></div>
+                  <div class="meta-item"><strong>Profile</strong><span>{String(valueAt(liveStatus(), ["base", "active_config", "profile"]) || profileName())}</span></div>
+                  <div class="meta-item"><strong>Encoder</strong><span>{String(valueAt(liveStatus(), ["base", "active_config", "encoder"]) || selectedEncoder())}</span></div>
+                  <div class="meta-item"><strong>Size</strong><span>{String(valueAt(liveStatus(), ["base", "active_config", "size"]) || resolvedLiveSize() || "native")}</span></div>
+                  <div class="meta-item"><strong>FPS</strong><span>{String(valueAt(liveStatus(), ["base", "active_config", "fps"]) || liveFps())}</span></div>
+                  <div class="meta-item"><strong>Bitrate</strong><span>{String(valueAt(liveStatus(), ["base", "active_config", "bitrate_kbps"]) || mbpsToKbps(liveTargetMbps()))} kbps</span></div>
+                  <div class="meta-item">
+                    <strong>Live health</strong>
+                    <span class={`live-pill ${liveRunning() ? "ok" : "warn"}`}>{liveRunning() ? "running" : "idle"}</span>
+                  </div>
+                </div>
+                <div class="actions-row">
+                  <button class="primary" disabled={!!busyAction()} onClick={() => setTab("live_run")}>
+                    Open Live Run Controls
+                  </button>
+                </div>
               </article>
 
               <article class="panel card live-center">
@@ -1744,7 +1783,7 @@ export default function App() {
                               class="link-btn"
                               onClick={() => {
                                 setSelectedRunId(r.run_id);
-                                setTab("live");
+                                setTab("live_stats");
                                 void refreshTail();
                               }}
                             >
@@ -2263,7 +2302,7 @@ export default function App() {
                     checked={settings().autoOpenLiveTab}
                     onInput={(e) => setSettings((prev) => ({ ...prev, autoOpenLiveTab: e.currentTarget.checked }))}
                   />
-                  <span>Auto-open Live Run on start</span>
+                  <span>Auto-open Live Stats on start</span>
                 </label>
                 <label class="switch">
                   <input

@@ -2208,3 +2208,23 @@ Status: active
 - Validation:
   - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
   - `cd src/apps/trainer-tauri && npm run build` -> OK
+
+## In Progress (2026-03-10) - Split Live tab into Live Run + Live Stats
+- Reworked trainer UI navigation to use two distinct tabs:
+  - `Live Run` -> configuration/apply/save workflow (Train-like control surface),
+  - `Live Stats` -> charts, KPI stream, timeline, and event log.
+- Updated tab model and routing:
+  - added `live_run` and `live_stats` tab IDs,
+  - removed single overloaded `live` tab usage.
+- UX behavior updates:
+  - `Start Live` now switches to `Live Stats` by default for immediate monitoring,
+  - `Auto-open Live ...` setting now targets `Live Stats` after training start,
+  - run list shortcuts now open `Live Stats`.
+- `Live Run` layout now mirrors `Train` intent:
+  - left card: full live parameter controls + actions (`Start Live`, `Apply Live`, `Save Profile`),
+  - right card: quick live snapshot + direct jump to `Live Stats`.
+- `Live Stats` now focuses on observability:
+  - left card reduced to session context + quick jump back to `Live Run controls`,
+  - center/right cards keep KPI charts, timeline, and log feed.
+- Validation:
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
