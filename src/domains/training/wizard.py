@@ -601,12 +601,16 @@ def run_proto_autotune_engine(
     overlay: bool,
 ) -> int:
     proto_dir = ROOT / "proto"
+    engine_script = ROOT / "src" / "domains" / "training" / "legacy_engine.py"
     base_template_path = proto_dir / "config" / "proto.json"
     TRAINING_DIR.mkdir(parents=True, exist_ok=True)
     best_out_path = AUTOTUNE_BEST_FILE.resolve()
     profiles_out_path = PROFILE_FILE.resolve()
     if not base_template_path.exists():
         eprint(f"[error] missing proto base config: {base_template_path}")
+        return 1
+    if not engine_script.exists():
+        eprint(f"[error] missing training engine: {engine_script}")
         return 1
 
     try:
@@ -650,7 +654,7 @@ def run_proto_autotune_engine(
 
     cmd = [
         "python3",
-        str(proto_dir / "autotune.py"),
+        str(engine_script),
         "--base-config",
         str(temp_base),
         "--host-only",

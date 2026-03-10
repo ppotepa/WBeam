@@ -1,5 +1,19 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending) - Training domain cleanup and compatibility wrappers
+- Continued organization of `train` as a first-class app domain:
+  - moved legacy autotune engine from `proto/autotune.py` to `src/domains/training/legacy_engine.py`,
+  - moved max-quality helper from `proto/train-autotune-max-quality.sh` to `src/domains/training/train_max_quality.sh`,
+  - added domain doc `src/domains/training/README.md`.
+- Kept backward compatibility for existing tooling:
+  - `proto/autotune.py` now acts as a thin wrapper delegating to `src/domains/training/legacy_engine.py`,
+  - `proto/train-autotune-max-quality.sh` now forwards to `src/domains/training/train_max_quality.sh`.
+- Updated train wizard engine wiring:
+  - `src/domains/training/wizard.py` now invokes the engine from the new domain path and validates its presence.
+- Training outputs from max-quality helper are now written to main-lane locations:
+  - profiles/best config under `config/training/`,
+  - reports under `logs/train/`.
+
 ## Session Update (2026-03-10, pending) - Training domain reorganization + legacy desktop removal
 - Removed legacy desktop UI project:
   - deleted `src/apps/desktop-egui/` from repository.
