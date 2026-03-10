@@ -976,3 +976,14 @@ Status: active
 - Validation:
   - `bash -n redeploy-local redeploy_local wbeam devtool` -> OK
   - `cd android && GRADLE_USER_HOME=/home/ppotepa/git/WBeam/.gradle-user ./gradlew :app:compileDebugJavaWithJavac --no-daemon --stacktrace` -> OK
+
+## In Progress (2026-03-10) [commit: e1e5642c] - redeploy script naming compatibility cleanup
+- Clarified script entrypoints around redeploy naming variants:
+  - canonical implementation remains `./redeploy-local`,
+  - `./redeploy_local` kept as compatibility wrapper,
+  - added `./redeply_local` compatibility wrapper for common typo.
+- All wrappers now delegate to the same canonical script path to avoid behavior drift.
+- Validation:
+  - `bash -n redeploy-local redeploy_local redeply_local` -> OK
+  - `./redeploy_local --help` -> OK
+  - `./redeply_local --help` -> OK
