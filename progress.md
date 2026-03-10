@@ -1,5 +1,17 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending, branch `trainerv2`) - Comprehensive Trainer UI/UX blueprint document
+- Added a dedicated UI/UX specification document:
+  - `trainer.ui.md`
+- Consolidated the new Trainer desktop product direction into one canonical design document covering:
+  - end-to-end user flow from bootstrap and service gate through training, live run, completion, and post-run analysis,
+  - complete information architecture (`Train`, `Live Run`, `Runs`, `Profiles`, `Datasets`, `Compare`, `Devices`, `Validation`, `Diagnostics`, `Settings`),
+  - workstation-style shell layout (top status bar, left rail, optional right detail pane),
+  - per-screen behavior and layout expectations,
+  - design system guidance for typography, color tokens, density, backgrounds, charts, tables, async states, tooltips, and motion,
+  - device-side HUD overlay consistency requirements,
+  - UX acceptance criteria and UI implementation priority order.
+
 ## Session Update (2026-03-10, pending, branch `trainerv2`) - Trainer run stability (single portal consent + live HUD visibility)
 - Fixed trainer run behavior where each profile apply could trigger another Wayland portal chooser:
   - `src/domains/training/wizard.py` now creates per-session trainer marker file:
