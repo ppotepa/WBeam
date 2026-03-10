@@ -1481,3 +1481,11 @@ Status: active
   - scalable execution/data/API planes (`queue`, `worker`, `lock manager`, `recompute engine`),
   - SLO/SLA expectations for trainer runtime and live HUD,
   - observability, testing matrix, and commercial-grade readiness criteria.
+
+## In Progress (2026-03-10) - TrainerV2 dynamic workload adaptation addendum
+- Extended `trainer.update.md` with explicit strategy for unknown/dynamic screen usage:
+  - workload segmentation model (`text_static`, `ui_interactive`, `video_motion`, `mixed`),
+  - segment-aware scoring and worst-case preference,
+  - runtime adaptive policy switching with hysteresis/cooldown,
+  - charts and telemetry dimensions dedicated to adaptation behavior.
+- Added explicit implementation note that code snippets are pseudocode architecture references and must be mapped to current backend contracts/flow rather than copied 1:1.

@@ -797,3 +797,117 @@ Iteracja jest domknięta, gdy:
 3. `Datasets` umożliwia uruchomienie `Find Optimal Best`,
 4. wykresy pokazują per-encoder i bitrate range (`min/max/optimum`),
 5. runy działają stabilnie pod obciążeniem wielu zadań w kolejce.
+
+---
+
+## 17. Adaptacja do dynamicznego użycia ekranu (unknown workload)
+
+### 17.1 Założenie
+
+Użytkownik może mieć dowolny typ treści na ekranie, więc trener i runtime muszą działać dobrze nie dla jednego scenariusza, ale dla zmiennego miksu:
+
+1. statyczny desktop / tekst,
+2. UI interaktywne z krótkimi burstami ruchu,
+3. wideo pełnoekranowe,
+4. workload mieszany.
+
+### 17.2 Co to oznacza dla treningu
+
+Trening ma być `workload-aware`, czyli każdy trial oceniamy nie tylko globalnie, ale też segmentowo.
+
+Segmenty oceny:
+
+1. `text_static`,
+2. `ui_interactive`,
+3. `video_motion`,
+4. `mixed`.
+
+Każdy segment ma osobne metryki i score częściowy, a wynik końcowy zawiera:
+
+1. `mean_score`,
+2. `worst_case_score` (np. p10),
+3. `switching_penalty` (kara za niestabilne przełączanie ustawień).
+
+### 17.3 Metryki segmentacji (proponowane)
+
+Na poziomie telemetry snapshot:
+
+1. `frame_delta_ratio`,
+2. `edge_density`,
+3. `text_like_block_ratio`,
+4. `scene_change_rate`,
+5. `motion_intensity`.
+
+Na podstawie tych cech system przypisuje próbki do segmentu workloadu.
+
+### 17.4 Rozszerzenie modelu profilu
+
+Profil końcowy nie powinien być tylko jedną konfiguracją, ale mapą polityk:
+
+1. `policy_text_static`,
+2. `policy_ui_interactive`,
+3. `policy_video_motion`,
+4. `policy_mixed`.
+
+Każda polityka ma:
+
+1. encoder + parametry,
+2. bitrate min/max,
+3. fps target/range,
+4. warunki aktywacji.
+
+### 17.5 Runtime adaptation policy
+
+Runtime policy engine:
+
+1. obserwuje cechy workloadu,
+2. wybiera aktywną politykę profilu,
+3. przełącza konfigurację z hysteresis i cooldownem,
+4. zapisuje eventy przełączeń do telemetry.
+
+To zapobiega oscylacjom i „thrashingowi”.
+
+### 17.6 Rozszerzenie scoringu
+
+Docelowy score:
+
+1. komponent jakości segmentowej,
+2. komponent stabilności segmentowej,
+3. komponent latencji,
+4. komponent efektywności bitrate,
+5. kara za niestabilne przełączenia.
+
+Wynik końcowy powinien preferować konfiguracje o dobrym `worst-case`, a nie tylko najwyższej średniej.
+
+### 17.7 Rozszerzenie wykresów pod dynamiczny workload
+
+W `Live HUD` i `Datasets`:
+
+1. timeline segmentów workloadu,
+2. score per segment,
+3. aktywna polityka runtime w czasie,
+4. liczba i koszt przełączeń,
+5. bitrate/fps vs segment.
+
+### 17.8 Jak to pomaga praktycznie
+
+Ta warstwa odpowiada na problem „nie wiadomo, co użytkownik ma na ekranie”, bo:
+
+1. trener uczy profil na wielu klasach zachowania ekranu,
+2. runtime umie adaptować się w locie,
+3. wynik jest bardziej odporny na realne, zmienne użycie.
+
+### 17.9 Uwaga implementacyjna (pseudokod)
+
+Wszystkie bloki kodu w tym dokumencie należy traktować jako pseudokod architektoniczny.
+
+Powód:
+
+1. aktualny backend ma własne różnice implementacyjne,
+2. celem jest zachowanie kontraktów i logiki, a nie 1:1 kopiowanie kodu.
+
+Zasada dla zespołu:
+
+1. mapować logikę pseudokodu na istniejące komponenty backendu,
+2. zachować semantykę flow, walidacji i artefaktów,
+3. utrzymać kompatybilność z obecnym runtime.
