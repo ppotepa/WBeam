@@ -615,3 +615,185 @@ Testy wymagane:
 3. Każdy trial musi zapisywać pełne `encoder_params` i `global_params`.
 4. UI ma blokować start runu, jeśli krytyczne pola są nieustawione.
 5. `trainer.sh` ma być jedynym oficjalnym entrypointem dla trenera.
+
+---
+
+## 16. Iteracja komplementarności UI i backendu (Top-tier Quality & Scalability)
+
+### 16.1 Cel tej iteracji
+
+Domknąć luki między tym, co użytkownik może skonfigurować w UI, a tym, co backend/engine realnie wspiera, żeby uniknąć:
+
+1. „martwych” pól w GUI,
+2. ukrytych domyślnych wartości w backendzie,
+3. niepowtarzalnych runów,
+4. ograniczonej skalowalności przy większej liczbie runów/urządzeń.
+
+### 16.2 Macierz komplementarności (UI -> Backend -> Dataset)
+
+Każdy parametr ma mieć 1:1 mapowanie:
+
+1. UI field,
+2. API payload field,
+3. Engine runtime field,
+4. Persisted dataset field,
+5. Chart/analytics dimension.
+
+Wymóg:
+
+1. brak parametru „tylko UI”,
+2. brak parametru „tylko backend” bez ekspozycji w `Advanced`,
+3. brak parametru niewidocznego w artefaktach runu.
+
+### 16.3 Docelowy model parametryzacji treningu
+
+#### 16.3.1 Parametry globalne
+
+1. `goal_mode`,
+2. `encoder_mode` (`single` / `multi`),
+3. `generations`,
+4. `population`,
+5. `elite_count`,
+6. `mutation_rate`,
+7. `crossover_rate`,
+8. `warmup_sec`,
+9. `sample_sec`,
+10. `poll_sec`,
+11. `bitrate_min_kbps`,
+12. `bitrate_max_kbps`,
+13. `bitrate_step_kbps` lub `bitrate_values`,
+14. `fps_values`,
+15. `size_values`,
+16. `stage_budgets`,
+17. `gate_thresholds`,
+18. `scoring_profile`.
+
+#### 16.3.2 Parametry per encoder
+
+`h264`:
+
+1. `preset`,
+2. `tune`,
+3. `profile`,
+4. `level`,
+5. `gop`,
+6. `bframes`,
+7. `ref`,
+8. `rc_lookahead`,
+9. `aq_mode`,
+10. `qp_or_crf`,
+11. `threads`.
+
+`h265`:
+
+1. analogicznie do `h264`,
+2. dodatkowo `ctu`, `sao`, `deblock`, `rd`.
+
+`mjpeg/jpeg`:
+
+1. `quality`,
+2. `subsampling`,
+3. `restart_interval`.
+
+`rawpng`:
+
+1. `compression_level`,
+2. `filter`,
+3. `strategy`.
+
+### 16.4 Kontrakty konfiguracji (strict mode)
+
+Wprowadzamy tryb `strict config contract`:
+
+1. backend odrzuca unknown fields,
+2. backend odrzuca brak pól obowiązkowych,
+3. backend zwraca pełny raport walidacji (które pole i dlaczego),
+4. UI pokazuje inline errors i blokuje start.
+
+### 16.5 Skalowalność systemu (architektura docelowa)
+
+#### 16.5.1 Execution plane
+
+1. `Run Queue` - kolejka uruchomień,
+2. `Run Worker` - wykonanie runu,
+3. `Device Lock Manager` - blokada per serial (1 aktywny run na urządzenie),
+4. `Cancellation Controller` - natychmiastowe bezpieczne stopowanie.
+
+#### 16.5.2 Data plane
+
+1. `Artifact Writer` - atomowe zapisy plików,
+2. `Dataset Index` - szybkie wyszukiwanie po run/profile/device/encoder,
+3. `Telemetry Stream` - live event feed + snapshot endpoint,
+4. `Recompute Engine` - deterministyczny ranking offline.
+
+#### 16.5.3 API plane
+
+1. endpointy command (`start/stop/recompute`),
+2. endpointy query (`runs/profiles/datasets/charts`),
+3. endpointy stream (`events`).
+
+### 16.6 SLO/SLA i QoS dla trenera
+
+Minimalne cele jakości:
+
+1. start runu < 2s (po stronie API),
+2. update HUD <= 1s latency,
+3. brak utraty eventów krytycznych,
+4. deterministyczność recompute 100% przy tych samych danych,
+5. pełna integralność artefaktów runu.
+
+### 16.7 Observability i operacyjność
+
+Wymagane telemetry:
+
+1. `run_start`, `run_finish`, `run_cancel`,
+2. `generation_start/end`,
+3. `trial_start/end`,
+4. `gate_reject`,
+5. `dataset_write_ok/fail`,
+6. `recompute_ok/fail`.
+
+Wymagane dashboardy:
+
+1. success rate runów,
+2. średni czas runu per encoder mode,
+3. rozkład błędów walidacji,
+4. throughput event stream.
+
+### 16.8 Testowalność i jakość implementacji
+
+Wymagane warstwy testów:
+
+1. Unit tests (scoring, constraints, ladder generation),
+2. Contract tests (API schema),
+3. Integration tests (UI -> API -> artifacts),
+4. Determinism tests (`find-optimal` repeated run),
+5. E2E smoke (start->train->recompute->apply).
+
+### 16.9 Security i bezpieczeństwo danych
+
+1. sanity-check wszystkich ścieżek plikowych,
+2. brak path traversal w `run_id` i `profile_name`,
+3. podpis/hash datasetu i artefaktów krytycznych,
+4. jawne wersjonowanie schematu i scoringu.
+
+### 16.10 Komercyjna gotowość (benchmark wobec rozwiązań enterprise)
+
+Aby wejść na poziom „top tier”, system musi mieć:
+
+1. pełną parametryzację encoderów i GA,
+2. replay/recompute z gwarancją deterministyczności,
+3. quality gates + explainability,
+4. per-device capability model,
+5. observability i governance artefaktów,
+6. skalowalny model run queue + worker.
+
+### 16.11 Definicja domknięcia tej iteracji
+
+Iteracja jest domknięta, gdy:
+
+1. każda kontrolka `Train` ma mapowanie do backendu i datasetu,
+2. wszystkie parametry treningu są odczytywalne z artefaktu runu,
+3. `Datasets` umożliwia uruchomienie `Find Optimal Best`,
+4. wykresy pokazują per-encoder i bitrate range (`min/max/optimum`),
+5. runy działają stabilnie pod obciążeniem wielu zadań w kolejce.

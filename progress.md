@@ -1472,3 +1472,12 @@ Status: active
   - pseudo-code for core flows and recompute path,
   - error handling, validation, fallbacks,
   - risks, performance constraints, and test focus areas.
+
+## In Progress (2026-03-10) - TrainerV2 top-tier completeness iteration (UI/backend/scalability)
+- Extended `trainer.update.md` with dedicated iteration focused on end-to-end UI/backend complementarity and scalability:
+  - strict UI->API->engine->dataset parameter mapping matrix,
+  - fully parameterized training model (global + per-encoder),
+  - strict config contract and validation behavior,
+  - scalable execution/data/API planes (`queue`, `worker`, `lock manager`, `recompute engine`),
+  - SLO/SLA expectations for trainer runtime and live HUD,
+  - observability, testing matrix, and commercial-grade readiness criteria.
