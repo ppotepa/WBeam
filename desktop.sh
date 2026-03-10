@@ -62,10 +62,17 @@ ensure_supported_node() {
     echo "[desktop] unable to detect node version." >&2
     return 1
   fi
-  if (( major < 18 || major > 22 )); then
+  if (( major < 18 )); then
     echo "[desktop] unsupported node version: $(node -v)" >&2
-    echo "[desktop] use Node 20.x or 22.x LTS for desktop-tauri." >&2
+    echo "[desktop] minimum supported is Node 18+, recommended 20.x or 22.x LTS." >&2
     return 1
+  fi
+  if (( major > 22 )); then
+    echo "[desktop] warning: using newer Node version $(node -v); 20.x/22.x LTS is recommended." >&2
+    if [[ "${WBEAM_DESKTOP_STRICT_NODE:-0}" == "1" ]]; then
+      echo "[desktop] strict mode enabled (WBEAM_DESKTOP_STRICT_NODE=1), refusing to start." >&2
+      return 1
+    fi
   fi
 }
 

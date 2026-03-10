@@ -914,3 +914,12 @@ Status: active
 - Validation:
   - `cd src/apps/desktop-tauri/src-tauri && cargo check` -> OK
   - `cd src/apps/desktop-tauri && npm run build` -> OK
+
+## In Progress (2026-03-10) [commit: pending] - relax desktop Node version gate for newer runtimes
+- Updated `desktop.sh` Node check:
+  - keeps hard fail for Node `<18`,
+  - allows Node `>22` with warning (instead of blocking),
+  - optional strict mode via `WBEAM_DESKTOP_STRICT_NODE=1`.
+- Validation:
+  - `bash -n desktop.sh` -> OK
+  - `./desktop.sh --help` -> OK
