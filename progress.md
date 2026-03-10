@@ -2145,3 +2145,20 @@ Status: active
 - Unified renderer now accepts explicit scale class (`buildUnifiedHudHtml(..., scaleClass)`), so future UI can expose direct HUD size control without layout rewrites.
 - Validation:
   - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+
+## In Progress (2026-03-10) - HUD completeness + darker desktop trainer theme
+- Android HUD completeness pass (trainer mode):
+  - added hard fallback details rows when structured `rows` payload is empty, so overlay never renders as "empty frame",
+  - added explicit placeholders (`PENDING`) for missing metrics instead of blank/implicit fields,
+  - strengthened Mbps visibility:
+    - `live_mbps` now falls back to `bitrate_mbps_mean` when missing,
+    - card value falls back to `target_mbps` (`NN.NN (target)`) before `PENDING`.
+- Android HUD visual contrast pass:
+  - reduced transparency (more opaque panels/chips/progress/table cells) for better readability on live stream.
+- Desktop trainer visual theme refresh:
+  - switched to darker, more IDE-like palette with pastel accents and stronger line contrast,
+  - tightened spacing/padding and panel density for a more compact layout,
+  - improved selected-row highlight contrast.
+- Validation:
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK

@@ -1,21 +1,21 @@
 @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
 
 :root {
-  --bg-0: #08111b;
-  --bg-1: #0d1826;
-  --bg-2: #132235;
-  --panel: rgba(13, 27, 41, 0.84);
-  --panel-soft: rgba(15, 32, 50, 0.72);
-  --line-soft: rgba(140, 176, 208, 0.2);
-  --line-strong: rgba(140, 176, 208, 0.34);
-  --text-main: #f4f8fb;
-  --text-muted: #b7c4d3;
-  --text-dim: #8b9aad;
-  --accent: #49c2ff;
-  --accent-soft: rgba(73, 194, 255, 0.2);
-  --ok: #38d39f;
-  --warn: #f6ba4a;
-  --risk: #ff6c5c;
+  --bg-0: #0a0d14;
+  --bg-1: #111622;
+  --bg-2: #191f2c;
+  --panel: rgba(20, 27, 39, 0.92);
+  --panel-soft: rgba(24, 32, 47, 0.88);
+  --line-soft: rgba(158, 174, 201, 0.28);
+  --line-strong: rgba(158, 174, 201, 0.46);
+  --text-main: #edf3ff;
+  --text-muted: #bdc9dc;
+  --text-dim: #8f9ab0;
+  --accent: #7ab3ff;
+  --accent-soft: rgba(122, 179, 255, 0.22);
+  --ok: #78d4b4;
+  --warn: #f2c27d;
+  --risk: #f08f8f;
 }
 
 * {
@@ -41,9 +41,9 @@ select {
 
 .trainer-shell {
   min-height: 100vh;
-  padding: 16px;
+  padding: 12px;
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .topbar {
@@ -51,7 +51,7 @@ select {
   border-radius: 14px;
   background: var(--panel);
   backdrop-filter: blur(8px);
-  padding: 12px 14px;
+  padding: 10px 12px;
   display: grid;
   grid-template-columns: 1.3fr 1.5fr auto;
   gap: 12px;
@@ -113,14 +113,14 @@ select {
 .shell-body {
   display: grid;
   grid-template-columns: 206px minmax(0, 1fr);
-  gap: 12px;
+  gap: 10px;
 }
 
 .nav-rail {
   border: 1px solid var(--line-soft);
   border-radius: 14px;
   background: var(--panel-soft);
-  padding: 8px;
+  padding: 7px;
   display: grid;
   align-content: start;
   gap: 6px;
@@ -130,8 +130,8 @@ select {
   border: 1px solid transparent;
   background: transparent;
   color: var(--text-muted);
-  border-radius: 10px;
-  padding: 9px 10px;
+  border-radius: 9px;
+  padding: 8px 9px;
   text-align: left;
   cursor: pointer;
   display: flex;
@@ -166,9 +166,9 @@ select {
 
 .panel.card {
   border: 1px solid var(--line-soft);
-  border-radius: 14px;
+  border-radius: 12px;
   background: var(--panel);
-  padding: 12px;
+  padding: 10px;
 }
 
 .panel.card h2 {
@@ -260,14 +260,14 @@ select {
   width: 100%;
   border: 1px solid var(--line-soft);
   border-radius: 9px;
-  background: rgba(0, 0, 0, 0.17);
+  background: rgba(0, 0, 0, 0.24);
   color: var(--text-main);
-  padding: 8px 10px;
+  padding: 7px 9px;
 }
 
 select option {
-  background: #11253a;
-  color: #e8f4ff;
+  background: #1b2231;
+  color: #eef3ff;
 }
 
 input:focus,
@@ -723,7 +723,7 @@ th,
 td {
   border-bottom: 1px solid var(--line-soft);
   text-align: left;
-  padding: 8px 6px;
+  padding: 7px 6px;
   vertical-align: top;
 }
 
@@ -734,7 +734,7 @@ th {
 }
 
 .selected-row {
-  background: rgba(73, 194, 255, 0.11);
+  background: rgba(122, 179, 255, 0.24);
 }
 
 .selected-row td {

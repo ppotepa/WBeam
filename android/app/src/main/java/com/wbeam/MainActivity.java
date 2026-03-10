@@ -2236,6 +2236,9 @@ public class MainActivity extends AppCompatActivity {
         double recv = kpi != null ? kpi.optDouble("recv_fps", Double.NaN) : Double.NaN;
         double decode = kpi != null ? kpi.optDouble("decode_fps", Double.NaN) : Double.NaN;
         double liveMbps = kpi != null ? kpi.optDouble("live_mbps", Double.NaN) : Double.NaN;
+        if (Double.isNaN(liveMbps) || liveMbps <= 0.0) {
+            liveMbps = hud.optDouble("bitrate_mbps_mean", Double.NaN);
+        }
         double latency = kpi != null ? kpi.optDouble("latency_ms_p95", Double.NaN) : Double.NaN;
         double drops = kpi != null ? kpi.optDouble("drops_per_sec", Double.NaN) : Double.NaN;
         double queue = kpi != null ? kpi.optDouble("queue_depth", Double.NaN) : Double.NaN;
@@ -2262,6 +2265,16 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         }
+        if (detailsRows.length() == 0) {
+            detailsRows.append(hudDetailRow("RUN ID", runId));
+            detailsRows.append(hudDetailRow("PROFILE", profile));
+            detailsRows.append(hudDetailRow("ENCODER", encoder));
+            detailsRows.append(hudDetailRow("SIZE", size));
+            detailsRows.append(hudDetailRow("TARGET", String.format(Locale.US, "%d FPS @ %.1f Mbps", fps, targetMbps)));
+            detailsRows.append(hudDetailRow("LIVE MBPS", fmtDoubleOrPlaceholder(liveMbps, "%.2f", "PENDING")));
+            detailsRows.append(hudDetailRow("LATENCY p95", fmtDoubleOrPlaceholder(latency, "%.1f ms", "PENDING")));
+            detailsRows.append(hudDetailRow("DROPS/s", fmtDoubleOrPlaceholder(drops, "%.3f", "PENDING")));
+        }
         String trendScore = trends != null ? escapeHtml(trends.optJSONArray("score") != null ? trends.optJSONArray("score").toString() : "[]") : "[]";
         String trendFps = trends != null ? escapeHtml(trends.optJSONArray("present_fps") != null ? trends.optJSONArray("present_fps").toString() : "[]") : "[]";
         String trendMbps = trends != null ? escapeHtml(trends.optJSONArray("mbps") != null ? trends.optJSONArray("mbps").toString() : "[]") : "[]";
@@ -2275,12 +2288,12 @@ public class MainActivity extends AppCompatActivity {
                 + hudChip("ENCODER", encoder, "")
                 + hudChip("SIZE/FPS", size + " @" + fps + " | " + String.format(Locale.US, "%.1f", targetMbps) + " Mbps", "");
 
-        String cards = hudCard("SCORE", Double.isNaN(score) ? "-" : String.format(Locale.US, "%.2f", score), "")
-                + hudCard("PRESENT FPS", Double.isNaN(present) ? "-" : String.format(Locale.US, "%.1f", present), hudToneClass(fpsState))
-                + hudCard("PIPE/DEC FPS", (Double.isNaN(recv) ? "-" : String.format(Locale.US, "%.1f", recv)) + " / " + (Double.isNaN(decode) ? "-" : String.format(Locale.US, "%.1f", decode)), "")
-                + hudCard("LIVE MBPS", Double.isNaN(liveMbps) ? "-" : String.format(Locale.US, "%.2f", liveMbps), hudToneClass(mbpsState))
-                + hudCard("LAT p95 ms", Double.isNaN(latency) ? "-" : String.format(Locale.US, "%.1f", latency), hudToneClass(latState))
-                + hudCard("DROPS/s | QUEUE", (Double.isNaN(drops) ? "-" : String.format(Locale.US, "%.3f", drops)) + " | " + (Double.isNaN(queue) ? "-" : String.format(Locale.US, "%.3f", queue)), hudToneClass(dropState));
+        String cards = hudCard("SCORE", fmtDoubleOrPlaceholder(score, "%.2f", "PENDING"), "")
+                + hudCard("PRESENT FPS", fmtDoubleOrPlaceholder(present, "%.1f", "PENDING"), hudToneClass(fpsState))
+                + hudCard("PIPE/DEC FPS", fmtDoubleOrPlaceholder(recv, "%.1f", "PENDING") + " / " + fmtDoubleOrPlaceholder(decode, "%.1f", "PENDING"), "")
+                + hudCard("LIVE MBPS", fmtLiveMbps(liveMbps, targetMbps), hudToneClass(mbpsState))
+                + hudCard("LAT p95 ms", fmtDoubleOrPlaceholder(latency, "%.1f", "PENDING"), hudToneClass(latState))
+                + hudCard("DROPS/s | QUEUE", fmtDoubleOrPlaceholder(drops, "%.3f", "PENDING") + " | " + fmtDoubleOrPlaceholder(queue, "%.3f", "PENDING"), hudToneClass(dropState));
 
         String trend = "layout=" + safeText(layoutMode)
                 + " | quality=" + safeText(qualityState.toUpperCase(Locale.US))
@@ -2312,24 +2325,24 @@ public class MainActivity extends AppCompatActivity {
                 + "html,body{margin:0;padding:0;background:transparent;color:#d9fbff;font-family:'JetBrains Mono','IBM Plex Mono',monospace;font-size:11px;}"
                 + ".root{padding:6px;box-sizing:border-box;width:100vw;height:100vh;display:grid;grid-template-rows:auto auto minmax(0,1fr);gap:6px;}"
                 + ".top{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px;}"
-                + ".chip{border:1px solid rgba(126,245,255,.30);background:rgba(2,20,24,.18);padding:5px 7px;min-height:34px;}"
+                + ".chip{border:1px solid rgba(126,245,255,.44);background:rgba(6,24,31,.58);padding:5px 7px;min-height:34px;}"
                 + ".chip .k{font-size:10px;color:#9dddea;display:block;letter-spacing:.05em;}"
                 + ".chip .v{font-size:12px;color:#dcf9ff;}"
-                + ".progress{border:1px solid rgba(126,245,255,.35);background:rgba(2,20,24,.14);padding:5px 7px;}"
+                + ".progress{border:1px solid rgba(126,245,255,.46);background:rgba(6,24,31,.64);padding:5px 7px;}"
                 + ".p-head{display:flex;align-items:center;justify-content:space-between;gap:8px;}"
                 + ".p-label{font-size:11px;color:#b9f8ff;letter-spacing:.04em;}"
                 + ".p-pct{font-size:12px;color:#dcf9ff;font-weight:700;}"
                 + ".p-track{margin-top:6px;height:7px;background:rgba(0,0,0,.35);border:1px solid rgba(126,245,255,.35);}"
                 + ".p-fill{height:100%;width:" + safePct + "%;background:linear-gradient(90deg,#60f2c2,#7dd3fc);}"
                 + ".main{display:grid;grid-template-columns:1.25fr 1fr;gap:6px;min-height:0;}"
-                + ".panel{border:1px solid rgba(126,245,255,.30);background:rgba(2,20,24,.12);padding:6px;min-height:0;overflow:auto;}"
+                + ".panel{border:1px solid rgba(126,245,255,.42);background:rgba(6,24,31,.54);padding:6px;min-height:0;overflow:auto;}"
                 + ".kpi{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;}"
-                + ".kpi .item{border:1px solid rgba(126,245,255,.22);padding:6px;background:rgba(0,0,0,.18);}"
+                + ".kpi .item{border:1px solid rgba(126,245,255,.32);padding:6px;background:rgba(0,0,0,.28);}"
                 + ".kpi .item .k{font-size:10px;color:#9dddea;display:block;}"
                 + ".kpi .item .v{font-size:12px;color:#dcf9ff;}"
                 + ".trend{font-size:10px;line-height:1.3;margin-top:6px;color:#9dddea;word-break:break-word;}"
                 + ".detail-table{width:100%;border-collapse:collapse;table-layout:fixed;}"
-                + ".detail-table td{border:1px solid rgba(126,245,255,.28);padding:4px 6px;vertical-align:top;word-break:break-word;}"
+                + ".detail-table td{border:1px solid rgba(126,245,255,.36);padding:4px 6px;vertical-align:top;word-break:break-word;}"
                 + ".detail-table td:first-child{width:52%;color:#dffcff;} .detail-table td:last-child{text-align:right;color:#b9f8ff;}"
                 + ".state-ok{color:#6ee7b7;} .state-warn{color:#fbbf24;} .state-risk{color:#f87171;} .state-pending{color:#94a3b8;}"
                 + ".trainer.scale-2x .chip .k{font-size:18px;letter-spacing:.03em;}"
@@ -2374,6 +2387,23 @@ public class MainActivity extends AppCompatActivity {
             return 0;
         }
         return Math.max(0, Math.min(100, progressPercent));
+    }
+
+    private String fmtDoubleOrPlaceholder(double value, String pattern, String fallback) {
+        if (Double.isNaN(value) || Double.isInfinite(value) || value < 0.0) {
+            return fallback;
+        }
+        return String.format(Locale.US, pattern, value);
+    }
+
+    private String fmtLiveMbps(double liveMbps, double targetMbps) {
+        if (!Double.isNaN(liveMbps) && !Double.isInfinite(liveMbps) && liveMbps > 0.0) {
+            return String.format(Locale.US, "%.2f", liveMbps);
+        }
+        if (!Double.isNaN(targetMbps) && !Double.isInfinite(targetMbps) && targetMbps > 0.0) {
+            return String.format(Locale.US, "%.2f (target)", targetMbps);
+        }
+        return "PENDING";
     }
 
     private String safeText(String value) {
