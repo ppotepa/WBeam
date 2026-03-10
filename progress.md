@@ -1786,3 +1786,25 @@ Status: active
   - `python3 -m py_compile src/domains/training/wizard.py src/host/scripts/stream_wayland_portal_h264.py` -> OK
   - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
   - `cd src/apps/trainer-tauri && npm run build` -> OK
+
+## In Progress (2026-03-10) - HUD V3 chart mode + live Mbps telemetry plumbing
+- Added configurable Android HUD trend rendering mode (`bars` / `line`) end-to-end:
+  - GUI control in Trainer advanced section,
+  - API contract field `hud_chart_mode` in `/v1/trainer/start`,
+  - server forwards mode to wizard via `--overlay-chart`,
+  - wizard renders trend lines using selected style.
+- Extended trainer trial scoring telemetry with measured live bitrate:
+  - `bitrate_mbps_mean` computed from daemon metrics (`metrics.bitrate_actual_bps` fallback to `latest_client_metrics.recv_bps`),
+  - included in best/result artifacts in `parameters.json`,
+  - printed in trial logs (`mbps=...`) for live parsing.
+- Enhanced Android HUD content density:
+  - added `live_mbps` panel metric,
+  - added `mbps_tr` trend section,
+  - compact framed box style retained for game-like readability.
+- Desktop Live Run HUD improved:
+  - parses and shows `Live Mbps` KPI card from run tail logs,
+  - keeps chart summary annotations (`last/min/max`) and per-sample tooltips.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py src/host/scripts/stream_wayland_portal_h264.py` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK

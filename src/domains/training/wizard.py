@@ -56,6 +56,7 @@ class TrialResult:
     drop_rate_per_sec: float
     late_rate_per_sec: float
     queue_depth_mean: float
+    bitrate_mbps_mean: float
     sample_count: int
     notes: str
 
@@ -194,10 +195,9 @@ def fmt_mbps_from_kbps(kbps: int | float) -> str:
     return f"{mbps:.1f} Mbps"
 
 
-def spark_ascii(values: list[float], width: int = 24) -> str:
+def spark_ascii(values: list[float], width: int = 24, chars: str = " .:-=+*#%@") -> str:
     if not values:
         return "." * max(6, width)
-    chars = " .:-=+*#%@"
     if width <= 0:
         width = len(values)
     tail = values[-width:]
@@ -214,6 +214,20 @@ def spark_ascii(values: list[float], width: int = 24) -> str:
     return "".join(out)
 
 
+def trend_line(values: list[float], width: int = 24) -> str:
+    return spark_ascii(values, width=width, chars=" .-:=+*#%@")
+
+
+def trend_bars(values: list[float], width: int = 24) -> str:
+    return spark_ascii(values, width=width, chars=" ▁▂▃▄▅▆▇█")
+
+
+def trend_render(values: list[float], mode: str, width: int = 24) -> str:
+    if mode == "line":
+        return trend_line(values, width=width)
+    return trend_bars(values, width=width)
+
+
 def write_overlay_snapshot(
     path: Path,
     *,
@@ -228,11 +242,13 @@ def write_overlay_snapshot(
     result: TrialResult | None = None,
     history: list[TrialResult] | None = None,
     note: str = "",
+    chart_mode: str = "bars",
 ) -> None:
     recent = history or []
     valid_scores = [item.score for item in recent if item.score > -900.0]
     valid_present = [item.present_fps_mean for item in recent if item.present_fps_mean > 0.0]
     valid_drop = [item.drop_rate_per_sec * 100.0 for item in recent if item.sample_count > 0]
+    valid_bitrate = [item.bitrate_mbps_mean for item in recent if item.bitrate_mbps_mean > 0.0]
     best_recent = max(valid_scores) if valid_scores else 0.0
     best_trial = ""
     if recent:
@@ -282,8 +298,9 @@ def write_overlay_snapshot(
                 f"║ pipe      {bar_line(result.recv_fps_mean, target_fps)}",
                 f"║ decode    {bar_line(result.decode_fps_mean, target_fps)}",
                 f"║ bitrate   {fmt_mbps_from_kbps(result.config.bitrate_kbps)}",
-                f"║ score_tr  {spark_ascii(valid_scores, width=28)}",
-                f"║ fps_tr    {spark_ascii(valid_present, width=28)}",
+                f"║ live_mbps {result.bitrate_mbps_mean:.1f}",
+                f"║ score_tr  {trend_render(valid_scores, chart_mode, width=28)}",
+                f"║ fps_tr    {trend_render(valid_present, chart_mode, width=28)}",
                 "╚════════════════════════════════════",
             ]
         )
@@ -296,8 +313,9 @@ def write_overlay_snapshot(
                 f"║ pipe      {bar_line(0.0, target_fps)}",
                 f"║ decode    {bar_line(0.0, target_fps)}",
                 "║ bitrate   <pending>",
-                f"║ score_tr  {spark_ascii(valid_scores, width=28)}",
-                f"║ fps_tr    {spark_ascii(valid_present, width=28)}",
+                "║ live_mbps <pending>",
+                f"║ score_tr  {trend_render(valid_scores, chart_mode, width=28)}",
+                f"║ fps_tr    {trend_render(valid_present, chart_mode, width=28)}",
                 "╚════════════════════════════════════",
             ]
         )
@@ -317,7 +335,8 @@ def write_overlay_snapshot(
                 f"║ drops/s     {result.drop_rate_per_sec:.3f}",
                 f"║ late/s      {result.late_rate_per_sec:.3f}",
                 f"║ queue_mean  {result.queue_depth_mean:.3f}",
-                f"║ drop_tr     {spark_ascii(valid_drop, width=28)}",
+                f"║ drop_tr     {trend_render(valid_drop, chart_mode, width=28)}",
+                f"║ mbps_tr     {trend_render(valid_bitrate, chart_mode, width=28)}",
                 f"║ samples     {result.sample_count}",
                 f"║ state       {quality_state}/{result.notes}",
                 "╚════════════════════════════════════",
@@ -327,7 +346,8 @@ def write_overlay_snapshot(
         lines.extend(
             [
                 "╔═ QUALITY / LATENCY ════════════════",
-                f"║ drop_tr     {spark_ascii(valid_drop, width=28)}",
+                f"║ drop_tr     {trend_render(valid_drop, chart_mode, width=28)}",
+                f"║ mbps_tr     {trend_render(valid_bitrate, chart_mode, width=28)}",
                 "║ state       pending",
                 "║ waiting for metrics...",
                 "╚════════════════════════════════════",
@@ -897,6 +917,7 @@ def score_trial(
     e2e_p95_vals: list[float] = []
     decode_p95_vals: list[float] = []
     render_p95_vals: list[float] = []
+    bitrate_mbps_vals: list[float] = []
     queue_vals: list[float] = []
     drops_first = 0
     drops_last = 0
@@ -907,6 +928,9 @@ def score_trial(
         metrics = sample.get("metrics", {}) if isinstance(sample, dict) else {}
         kpi = metrics.get("kpi", {}) if isinstance(metrics, dict) else {}
         latest = metrics.get("latest_client_metrics", {}) if isinstance(metrics, dict) else {}
+        bitrate_bps = as_float(metrics.get("bitrate_actual_bps"), 0.0) if isinstance(metrics, dict) else 0.0
+        if bitrate_bps <= 0.0 and isinstance(latest, dict):
+            bitrate_bps = as_float(latest.get("recv_bps"), 0.0)
         present_vals.append(as_float(kpi.get("present_fps"), 0.0))
         recv_vals.append(as_float(kpi.get("recv_fps"), 0.0))
         decode_vals.append(as_float(kpi.get("decode_fps"), 0.0))
@@ -918,6 +942,7 @@ def score_trial(
             + as_float(latest.get("decode_queue_depth"), 0.0)
             + as_float(latest.get("render_queue_depth"), 0.0)
         )
+        bitrate_mbps_vals.append(max(0.0, bitrate_bps / 1_000_000.0))
         drops_now = as_int(metrics.get("drops"), 0)
         late_now = as_int(latest.get("too_late_frames"), 0)
         if idx == 0:
@@ -934,6 +959,7 @@ def score_trial(
     decode_p95_mean = mean(decode_p95_vals)
     render_p95_mean = mean(render_p95_vals)
     queue_mean = mean(queue_vals)
+    bitrate_mbps_mean = mean(bitrate_mbps_vals)
     observed_sec = max(float(sample_sec), 1.0)
     drop_rate = max(0.0, (drops_last - drops_first) / observed_sec)
     late_rate = max(0.0, (late_last - late_first) / observed_sec)
@@ -988,6 +1014,7 @@ def score_trial(
         drop_rate_per_sec=drop_rate,
         late_rate_per_sec=late_rate,
         queue_depth_mean=queue_mean,
+        bitrate_mbps_mean=bitrate_mbps_mean,
         sample_count=len(samples),
         notes=notes,
     )
@@ -1228,6 +1255,12 @@ def main() -> int:
         default=True,
         help="Reserved flag for trainer compatibility (no effect in live trainer path).",
     )
+    parser.add_argument(
+        "--overlay-chart",
+        choices=["bars", "line"],
+        default="bars",
+        help="On-device HUD trend style.",
+    )
     args = parser.parse_args()
     run_id = sanitize_profile_name(args.run_id or f"run-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
     generations = max(1, min(64, int(args.generations)))
@@ -1448,6 +1481,7 @@ def main() -> int:
             result=None,
             history=[],
             note="initializing",
+            chart_mode=args.overlay_chart,
         )
 
     try:
@@ -1472,6 +1506,7 @@ def main() -> int:
                     result=None,
                     history=results,
                     note="apply -> warmup -> sample",
+                    chart_mode=args.overlay_chart,
                 )
             print(
                 f"\n[{trial_id}] apply encoder={cfg.encoder} size={cfg.size} "
@@ -1502,6 +1537,7 @@ def main() -> int:
                     drop_rate_per_sec=0.0,
                     late_rate_per_sec=0.0,
                     queue_depth_mean=0.0,
+                    bitrate_mbps_mean=0.0,
                     sample_count=0,
                     notes="apply_failed",
                 )
@@ -1520,6 +1556,7 @@ def main() -> int:
                         result=failed,
                         history=results,
                         note="apply failed",
+                        chart_mode=args.overlay_chart,
                     )
                 continue
 
@@ -1552,11 +1589,12 @@ def main() -> int:
                         result=result,
                         history=results,
                         note="sample complete",
+                        chart_mode=args.overlay_chart,
                     )
                 print(
                     f"[{trial_id}] score={result.score:.2f} present={result.present_fps_mean:.1f} "
                     f"recv={result.recv_fps_mean:.1f} e2e95={result.e2e_p95_mean_ms:.1f}ms "
-                    f"drops/s={result.drop_rate_per_sec:.3f}"
+                    f"drops/s={result.drop_rate_per_sec:.3f} mbps={result.bitrate_mbps_mean:.1f}"
                 )
                 print(
                     "done "
@@ -1564,7 +1602,8 @@ def main() -> int:
                     f"sender_p50={result.present_fps_mean:.1f} "
                     f"pipe_p50={result.recv_fps_mean:.1f} "
                     f"timeout_mean={result.e2e_p95_mean_ms:.1f} "
-                    f"drop={result.drop_rate_per_sec * 100.0:.1f}%"
+                    f"drop={result.drop_rate_per_sec * 100.0:.1f}% "
+                    f"mbps={result.bitrate_mbps_mean:.1f}"
                 )
             except Exception as exc:
                 print(f"[{trial_id}] sample failed: {exc}")
@@ -1581,6 +1620,7 @@ def main() -> int:
                     drop_rate_per_sec=0.0,
                     late_rate_per_sec=0.0,
                     queue_depth_mean=0.0,
+                    bitrate_mbps_mean=0.0,
                     sample_count=0,
                     notes="sample_failed",
                 )
@@ -1599,6 +1639,7 @@ def main() -> int:
                         result=failed,
                         history=results,
                         note="sample failed",
+                        chart_mode=args.overlay_chart,
                     )
 
         if not results:
@@ -1633,6 +1674,7 @@ def main() -> int:
                 result=best,
                 history=results,
                 note="best candidate",
+                chart_mode=args.overlay_chart,
             )
         should_apply_best = args.apply_best
         if should_apply_best is None:
@@ -1698,6 +1740,7 @@ def main() -> int:
             "poll_sec": args.poll_sec,
             "non_interactive": bool(args.non_interactive),
             "overlay": bool(args.overlay),
+            "overlay_chart": args.overlay_chart,
             "trial_count": len(trials),
             "exported_baseline": exported,
             "preflight": preflight,
@@ -1706,6 +1749,7 @@ def main() -> int:
                 "score": best.score,
                 "config": asdict(best.config),
                 "notes": best.notes,
+                "bitrate_mbps_mean": best.bitrate_mbps_mean,
             },
             "results": [
                 {
@@ -1719,6 +1763,7 @@ def main() -> int:
                     "drop_rate_per_sec": item.drop_rate_per_sec,
                     "late_rate_per_sec": item.late_rate_per_sec,
                     "queue_depth_mean": item.queue_depth_mean,
+                    "bitrate_mbps_mean": item.bitrate_mbps_mean,
                     "sample_count": item.sample_count,
                     "notes": item.notes,
                 }

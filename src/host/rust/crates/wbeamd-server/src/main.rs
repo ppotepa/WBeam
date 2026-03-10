@@ -69,6 +69,7 @@ struct TrainerRun {
     bitrate_max_kbps: u32,
     encoder_mode: String,
     encoders: Vec<String>,
+    hud_chart_mode: String,
     exit_code: Option<i32>,
     pid: Option<u32>,
     error: Option<String>,
@@ -99,6 +100,7 @@ struct TrainerStartRequest {
     bitrate_max_kbps: Option<u32>,
     encoder_mode: Option<String>,
     encoders: Option<Vec<String>>,
+    hud_chart_mode: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -959,6 +961,7 @@ async fn post_trainer_start(
         bitrate_max_kbps: None,
         encoder_mode: None,
         encoders: None,
+        hud_chart_mode: None,
     });
 
     let serial = req.serial.trim().to_string();
@@ -1039,6 +1042,19 @@ async fn post_trainer_start(
         return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"ok": false, "error": "single encoder_mode requires exactly one encoder"})),
+        )
+            .into_response();
+    }
+    let hud_chart_mode = req
+        .hud_chart_mode
+        .as_deref()
+        .unwrap_or("bars")
+        .trim()
+        .to_ascii_lowercase();
+    if !matches!(hud_chart_mode.as_str(), "bars" | "line") {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"ok": false, "error": "invalid hud_chart_mode (use bars|line)"})),
         )
             .into_response();
     }
@@ -1136,6 +1152,8 @@ async fn post_trainer_start(
         .arg(&encoder_mode)
         .arg("--encoders")
         .arg(encoders.join(","))
+        .arg("--overlay-chart")
+        .arg(&hud_chart_mode)
         .arg("--stream-port")
         .arg(stream_port.to_string())
         .arg("--control-port")
@@ -1184,6 +1202,7 @@ async fn post_trainer_start(
         bitrate_max_kbps,
         encoder_mode: encoder_mode.clone(),
         encoders: encoders.clone(),
+        hud_chart_mode: hud_chart_mode.clone(),
         exit_code: None,
         pid: Some(pid),
         error: None,
@@ -1211,6 +1230,7 @@ async fn post_trainer_start(
         "bitrate_max_kbps": run.bitrate_max_kbps,
         "encoder_mode": run.encoder_mode,
         "encoders": run.encoders,
+        "hud_chart_mode": run.hud_chart_mode,
         "stream_port": stream_port,
     });
     let _ = fs::write(

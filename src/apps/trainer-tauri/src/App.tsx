@@ -33,6 +33,7 @@ type RunItem = {
   log_path: string;
   profile_dir: string;
   run_artifacts_dir: string;
+  hud_chart_mode?: string;
   exit_code?: number | null;
   error?: string | null;
 };
@@ -114,6 +115,7 @@ type HudSnapshot = {
   score: string;
   presentFps: string;
   recvFps: string;
+  bitrateMbps: string;
   e2eP95Ms: string;
   dropsPerSec: string;
   progress: string;
@@ -229,6 +231,7 @@ function parseHud(lines: string[]): HudSnapshot {
   let score = "-";
   let presentFps = "-";
   let recvFps = "-";
+  let bitrateMbps = "-";
   let e2eP95Ms = "-";
   let dropsPerSec = "-";
   let progress = "-";
@@ -237,11 +240,11 @@ function parseHud(lines: string[]): HudSnapshot {
 
   const trialStartRe = /^\[(t\d+)] apply /;
   const trialScoreRe =
-    /^\[(t\d+)] score=([0-9.\-]+) present=([0-9.\-]+) recv=([0-9.\-]+) e2e95=([0-9.\-]+)ms drops\/s=([0-9.\-]+)/;
+    /^\[(t\d+)] score=([0-9.\-]+) present=([0-9.\-]+) recv=([0-9.\-]+) e2e95=([0-9.\-]+)ms drops\/s=([0-9.\-]+)(?: mbps=([0-9.\-]+))?/;
   const progressRe = /^trial space=(\d+) running=(\d+)/;
   const protoTrialRe = /\btrial=([A-Za-z0-9_.:-]+)/;
   const protoDoneRe =
-    /done trial=([A-Za-z0-9_.:-]+) score=([0-9.\-]+).*sender_p50=([0-9.\-]+).*pipe_p50=([0-9.\-]+).*timeout_mean=([0-9.\-]+).*drop=([0-9.\-]+)%/;
+    /done trial=([A-Za-z0-9_.:-]+) score=([0-9.\-]+).*sender_p50=([0-9.\-]+).*pipe_p50=([0-9.\-]+).*timeout_mean=([0-9.\-]+).*drop=([0-9.\-]+)%(?:.*mbps=([0-9.\-]+))?/;
   const protoGenRe = /generation\s+(\d+)\/(\d+):\s+population=(\d+)\s+\(start\)/;
   const modeRe = /"mode"\s*:\s*"([^"]+)"/;
 
@@ -257,6 +260,7 @@ function parseHud(lines: string[]): HudSnapshot {
       recvFps = scoreMatch[4];
       e2eP95Ms = scoreMatch[5];
       dropsPerSec = scoreMatch[6];
+      if (scoreMatch[7]) bitrateMbps = scoreMatch[7];
     }
 
     const p = line.match(progressRe);
@@ -273,6 +277,7 @@ function parseHud(lines: string[]): HudSnapshot {
       recvFps = protoDone[4];
       e2eP95Ms = protoDone[5];
       dropsPerSec = `${protoDone[6]}%`;
+      if (protoDone[7]) bitrateMbps = protoDone[7];
     }
 
     const protoGen = line.match(protoGenRe);
@@ -287,7 +292,7 @@ function parseHud(lines: string[]): HudSnapshot {
     }
   }
 
-  return { trialId, score, presentFps, recvFps, e2eP95Ms, dropsPerSec, progress, generation, mode };
+  return { trialId, score, presentFps, recvFps, bitrateMbps, e2eP95Ms, dropsPerSec, progress, generation, mode };
 }
 
 function parseHudSeries(lines: string[]): HudSeries {
@@ -422,6 +427,7 @@ export default function App() {
   const [encRawpng, setEncRawpng] = createSignal(false);
   const [encMjpeg, setEncMjpeg] = createSignal(false);
   const [overlay, setOverlay] = createSignal(true);
+  const [hudChartMode, setHudChartMode] = createSignal("bars");
   const [selectedRunId, setSelectedRunId] = createSignal("");
   const [leftProfile, setLeftProfile] = createSignal("");
   const [rightProfile, setRightProfile] = createSignal("");
@@ -666,6 +672,7 @@ export default function App() {
           encoder_mode: encoderMode(),
           encoders,
           overlay: overlay(),
+          hud_chart_mode: hudChartMode(),
         }),
       });
       const body = (await resp.json()) as Record<string, unknown>;
@@ -1010,6 +1017,13 @@ export default function App() {
                       <input type="checkbox" checked={overlay()} onInput={(e) => setOverlay(e.currentTarget.checked)} />
                       <span>Show on-device HUD overlay</span>
                     </label>
+                    <label title="Overlay trend style rendered on Android HUD during training.">
+                      HUD chart style
+                      <select value={hudChartMode()} onInput={(e) => setHudChartMode(e.currentTarget.value)}>
+                        <option value="bars">bars</option>
+                        <option value="line">line</option>
+                      </select>
+                    </label>
                   </div>
                 </Show>
               </article>
@@ -1067,6 +1081,7 @@ export default function App() {
                   <div class="meta-item"><strong>Mode</strong><span>{hud().mode !== "-" ? hud().mode : activeRun()?.mode || "-"}</span></div>
                   <div class="meta-item"><strong>Generation</strong><span>{hud().generation}</span></div>
                   <div class="meta-item"><strong>Progress</strong><span>{hud().progress}</span></div>
+                  <div class="meta-item"><strong>HUD charts</strong><span>{activeRun()?.hud_chart_mode || hudChartMode()}</span></div>
                   <div class="meta-item">
                     <strong>Live health</strong>
                     <span class={`live-pill ${liveHealth().tone}`}>{liveHealth().state}</span>
@@ -1103,6 +1118,10 @@ export default function App() {
                   <div class="kpi-card">
                     <span>Pipe FPS</span>
                     <strong>{hud().recvFps}</strong>
+                  </div>
+                  <div class="kpi-card">
+                    <span>Live Mbps</span>
+                    <strong>{hud().bitrateMbps}</strong>
                   </div>
                   <div class="kpi-card">
                     <span>E2E p95 (ms)</span>
