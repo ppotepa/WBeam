@@ -42,7 +42,6 @@ import androidx.core.view.WindowInsetsControllerCompat;
 import com.wbeam.api.HostApiClient;
 import com.wbeam.api.StatusListener;
 import com.wbeam.api.StatusPoller;
-import com.wbeam.settings.SettingsRepository;
 import com.wbeam.stream.H264TcpPlayer;
 import com.wbeam.stream.VideoTestController;
 import com.wbeam.stream.StreamSessionController;
@@ -124,6 +123,11 @@ public class MainActivity extends AppCompatActivity {
     }
     private static final String[] ENCODER_OPTIONS = {PREFERRED_VIDEO, "raw-png"};
     private static final String[] CURSOR_OPTIONS = {"embedded", "hidden", "metadata"};
+    private static final String DEFAULT_PROFILE = "lowlatency";
+    private static final String DEFAULT_CURSOR_MODE = "embedded";
+    private static final int DEFAULT_RES_SCALE = 100;
+    private static final int DEFAULT_FPS = 60;
+    private static final int DEFAULT_BITRATE_MBPS = 25;
 
     private static final int LIVE_LOG_MAX_LINES = 80;
     private static final long SIMPLE_MENU_AUTO_HIDE_MS = 10_000L;
@@ -272,7 +276,6 @@ public class MainActivity extends AppCompatActivity {
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
 
-    private SettingsRepository settingsRepository;
     private StatusPoller statusPoller;
     private StreamSessionController sessionController;
     private ClientMetricsReporter metricsReporter;
@@ -329,8 +332,6 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-
-        settingsRepository = new SettingsRepository(this);
 
         bindViews();
         bindStartupBuildVersion();
@@ -561,7 +562,7 @@ public class MainActivity extends AppCompatActivity {
         startupDismissed = false;
         startPreflightPulse();
         updatePreflightOverlay();
-        updateStatus(STATE_IDLE, "tap Settings -> Start Live", 0);
+        updateStatus(STATE_IDLE, "waiting for desktop connect", 0);
         statusPoller.start();
     }
 
@@ -734,35 +735,12 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void applyBuildVariantUi() {
-        if (BuildConfig.DEBUG) {
-            hideSimpleMenu();
-            setFullscreen(false);
-            if (statusPanel != null) {
-                statusPanel.setVisibility(View.GONE);
-            }
-            if (perfHudPanel != null) {
-                perfHudPanel.setVisibility(View.GONE);
-            }
-            if (debugFpsGraphView != null) {
-                debugFpsGraphView.setCapacity(DEBUG_FPS_GRAPH_POINTS);
-            }
-            if (logButton != null) {
-                logButton.setVisibility(View.GONE);
-            }
-            if (fullscreenButton != null) {
-                fullscreenButton.setVisibility(View.VISIBLE);
-            }
-            setDebugOverlayVisible(debugOverlayVisible);
-            startDebugGraphSampling();
-            refreshDebugInfoOverlay();
-            return;
-        }
-
         hideSettingsPanel();
+        hideSimpleMenu();
         setDebugControlsVisible(false);
-        setFullscreen(true);
-        showSimpleMenu();
-
+        if (topBar != null) {
+            topBar.setVisibility(View.GONE);
+        }
         if (quickActionRow != null) {
             quickActionRow.setVisibility(View.GONE);
         }
@@ -772,16 +750,31 @@ public class MainActivity extends AppCompatActivity {
         if (perfHudPanel != null) {
             perfHudPanel.setVisibility(View.GONE);
         }
-        if (debugInfoPanel != null) {
-            debugInfoPanel.setVisibility(View.GONE);
+        if (settingsButton != null) {
+            settingsButton.setVisibility(View.GONE);
         }
-        stopDebugGraphSampling();
         if (logButton != null) {
             logButton.setVisibility(View.GONE);
         }
         if (fullscreenButton != null) {
             fullscreenButton.setVisibility(View.GONE);
         }
+        if (BuildConfig.DEBUG) {
+            setFullscreen(false);
+            if (debugFpsGraphView != null) {
+                debugFpsGraphView.setCapacity(DEBUG_FPS_GRAPH_POINTS);
+            }
+            setDebugOverlayVisible(debugOverlayVisible);
+            startDebugGraphSampling();
+            refreshDebugInfoOverlay();
+            return;
+        }
+
+        setFullscreen(true);
+        if (debugInfoPanel != null) {
+            debugInfoPanel.setVisibility(View.GONE);
+        }
+        stopDebugGraphSampling();
     }
 
     private void setupSpinners() {
@@ -888,52 +881,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void setupButtons() {
-        settingsButton.setOnClickListener(v -> {
-            if (BuildConfig.DEBUG) {
-                toggleSettingsPanel();
-            } else {
-                toggleSimpleMenu();
-            }
-        });
-        logButton.setOnClickListener(v -> toggleLiveLogPanel());
-        settingsButton.setOnLongClickListener(v -> {
-            if (!BuildConfig.DEBUG) {
-                return false;
-            }
-            setDebugControlsVisible(!debugControlsVisible);
-            Toast.makeText(
-                    this,
-                    debugControlsVisible ? "Debug controls ON" : "Debug controls OFF",
-                    Toast.LENGTH_SHORT
-            ).show();
-            return true;
-        });
-        settingsCloseButton.setOnClickListener(v -> hideSettingsPanel());
-        applySettingsButton.setOnClickListener(v -> applySettings(true));
-
-        startButton.setOnClickListener(v -> requestStartGuarded(true, true));
-        stopButton.setOnClickListener(v -> sessionController.requestStop(true));
-        testButton.setOnClickListener(v -> videoTestController.startBandwidthTest());
-        testButton.setOnLongClickListener(v -> {
-            videoTestController.startPublicVideoTest();
-            return true;
-        });
-        if (quickStartButton != null) {
-            quickStartButton.setOnClickListener(v -> requestStartGuarded(true, true));
+        if (settingsCloseButton != null) {
+            settingsCloseButton.setOnClickListener(v -> hideSettingsPanel());
         }
-        if (quickStopButton != null) {
-            quickStopButton.setOnClickListener(v -> sessionController.requestStop(true));
-        }
-        if (quickTestButton != null) {
-            quickTestButton.setOnClickListener(v -> videoTestController.startBandwidthTest());
-            quickTestButton.setOnLongClickListener(v -> {
-                videoTestController.startPublicVideoTest();
-                return true;
-            });
-        }
-
-        fullscreenButton.setOnClickListener(v -> toggleFullscreen());
-        cursorOverlayButton.setOnClickListener(v -> toggleCursorOverlayMode());
 
         if (simpleMenuPanel != null) {
             simpleMenuPanel.setOnTouchListener((v, event) -> {
@@ -987,17 +937,10 @@ public class MainActivity extends AppCompatActivity {
         if (simpleApplyButton != null) {
             simpleApplyButton.setOnClickListener(v -> {
                 applySimpleMenuToSettings();
-                applySettings(true);
                 requestStartGuarded(false, true);
                 hideSimpleMenu();
             });
         }
-
-        intraOnlyButton.setOnClickListener(v -> {
-            intraOnlyEnabled = !intraOnlyEnabled;
-            updateIntraOnlyButton();
-            applySettings(true);
-        });
 
         updateActionButtonsEnabled();
     }
@@ -1016,20 +959,11 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         int visibility = visible ? View.VISIBLE : View.GONE;
-        if (topBar != null) {
-            topBar.setVisibility(visibility);
-        }
-        if (quickActionRow != null) {
-            quickActionRow.setVisibility(visibility);
-        }
         if (debugInfoPanel != null) {
             debugInfoPanel.setVisibility(visibility);
             if (visible) {
                 debugInfoPanel.setAlpha(DEBUG_INFO_ALPHA_IDLE);
             }
-        }
-        if (!visible) {
-            hideSettingsPanel();
         }
     }
 
@@ -1069,39 +1003,25 @@ public class MainActivity extends AppCompatActivity {
     // ══════════════════════════════════════════════════════════════════════════
 
     private void loadSavedSettings() {
-        SettingsRepository.SettingsSnapshot s = settingsRepository.load();
-        setSpinnerSelection(profileSpinner, PROFILE_OPTIONS, s.profile);
-        setSpinnerSelection(encoderSpinner, ENCODER_OPTIONS, s.encoder);
-        setSpinnerSelection(cursorSpinner, CURSOR_OPTIONS, s.cursor);
-        resolutionSeek.setProgress(clamp(s.resScale, 50, 100) - 50);
-        fpsSeek.setProgress(clamp(s.fps, 24, 144) - 24);
-        bitrateSeek.setProgress(clamp(s.bitrateMbps, 5, 300) - 5);
-        cursorOverlayEnabled = s.localCursor;
+        setSpinnerSelection(profileSpinner, PROFILE_OPTIONS, DEFAULT_PROFILE);
+        setSpinnerSelection(encoderSpinner, ENCODER_OPTIONS, PREFERRED_VIDEO);
+        setSpinnerSelection(cursorSpinner, CURSOR_OPTIONS, DEFAULT_CURSOR_MODE);
+        resolutionSeek.setProgress(clamp(DEFAULT_RES_SCALE, 50, 100) - 50);
+        fpsSeek.setProgress(clamp(DEFAULT_FPS, 24, 144) - 24);
+        bitrateSeek.setProgress(clamp(DEFAULT_BITRATE_MBPS, 5, 300) - 5);
+        cursorOverlayEnabled = true;
         enforceCursorOverlayPolicy(false);
-        intraOnlyEnabled = s.intraOnly;
+        intraOnlyEnabled = false;
         updateIntraOnlyButton();
         updateSettingValueLabels();
-        simpleMode = "raw-png".equals(getSelectedEncoder()) ? "raw-png" : PREFERRED_VIDEO;
-        simpleFps = clamp(getSelectedFps(), 30, 144);
+        simpleMode = PREFERRED_VIDEO;
+        simpleFps = DEFAULT_FPS;
         refreshSimpleMenuButtons();
-    }
-
-    private void saveSettings() {
-        settingsRepository.save(new SettingsRepository.SettingsSnapshot(
-                getSelectedProfile(), getSelectedEncoder(), getSelectedCursorMode(),
-                getResolutionScalePercent(), getSelectedFps(), getSelectedBitrateMbps(),
-                cursorOverlayEnabled, intraOnlyEnabled
-        ));
     }
 
     private void applySettings(boolean userAction) {
         updateSettingValueLabels();
-        saveSettings();
         updateHostHint();
-        if (userAction) {
-            JSONObject payload = buildConfigPayload();
-            sessionController.postApiCommand("POST", "/apply", payload, "applied", true, false);
-        }
     }
 
     private void updateSettingValueLabels() {
@@ -1409,8 +1329,12 @@ public class MainActivity extends AppCompatActivity {
                 WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
 
         if (enable) {
-            topBar.setVisibility(View.GONE);
-            statusPanel.setVisibility(View.GONE);
+            if (topBar != null) {
+                topBar.setVisibility(View.GONE);
+            }
+            if (statusPanel != null) {
+                statusPanel.setVisibility(View.GONE);
+            }
             hideSettingsPanel();
 
             WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
@@ -1423,8 +1347,14 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        topBar.setVisibility(View.VISIBLE);
-        statusPanel.setVisibility(View.VISIBLE);
+        if (!BuildConfig.DEBUG) {
+            if (topBar != null) {
+                topBar.setVisibility(View.VISIBLE);
+            }
+            if (statusPanel != null) {
+                statusPanel.setVisibility(View.VISIBLE);
+            }
+        }
 
         WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
         if (controller != null) {
@@ -1550,7 +1480,7 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         if (persist) {
-            saveSettings();
+            updateHostHint();
         }
     }
 

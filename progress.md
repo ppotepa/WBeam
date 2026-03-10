@@ -1,5 +1,19 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending) - Android debug overlay simplified to read-only telemetry
+- Simplified Android debug UX in `MainActivity` to remove runtime profile/control editing from the app screen:
+  - removed `SettingsRepository` usage (no SharedPreferences read/write for stream profile controls in this path),
+  - debug startup now uses fixed defaults (`lowlatency`, preferred codec, embedded cursor, 100% scale, 60 FPS, 25 Mbps),
+  - removed UI hooks that changed presets/profile/encoder/bitrate/FPS from debug controls.
+- Volume-key debug overlay remains, but now shows telemetry-only content (debug info text + FPS/loss graph) without exposing settings actions.
+- App chrome related to on-device control editing is hidden in this flow:
+  - top bar, quick actions, settings/log/fullscreen toggles are hidden,
+  - settings/debug control panels are not exposed from the overlay.
+- Minor UX text update:
+  - idle hint changed from manual settings-driven start to desktop-driven flow (`waiting for desktop connect`).
+- Validation:
+  - `cd android && GRADLE_USER_HOME="/home/ppotepa/git/WBeam/.gradle-user" ./gradlew :app:compileDebugJavaWithJavac --no-daemon --stacktrace` -> BUILD SUCCESSFUL
+
 ## Session Update (2026-03-10, pending) - streamer crash guard for key-int-max (exit code 101)
 - Investigated `stream start aborted (code=101)` with `key-int-max` hint.
 - Added defensive GOP property handling in Rust streamer encoder config:
