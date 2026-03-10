@@ -1838,3 +1838,21 @@ Status: active
 - Validation:
   - `cd src/apps/trainer-tauri && npm run build` -> OK
   - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+
+## In Progress (2026-03-10) - Unified full-frame Android HUD + live per-sample updates
+- Reworked Wayland overlay rendering path to a single unified overlay element (`hud_main`) in `stream_wayland_portal_h264.py`:
+  - replaced legacy 4-corner (`hud_tl/tr/bl/br`) composition with one coherent full-frame text layout,
+  - enabled transparent background (`shaded-background=false`) and semi-transparent text color,
+  - retained backward compatibility in parser: supports new `[MAIN]` section and merges legacy `[TL/TR/BL/BR]` if needed.
+- Reworked trainer HUD payload (`wizard.py`) into one grid-aligned block:
+  - single rectangular layout with fixed-width line justification,
+  - consistent table-like sections for run/config/live/quality/trends,
+  - explicit threshold labels (`OK/WARN/RISK`) per metric area (fps/latency/drop health).
+- Added true live HUD refresh during sampling:
+  - `collect_metrics_samples` now supports per-sample callback,
+  - during each trial sampling pass HUD updates continuously with partial metrics,
+  - `live_mbps` and other values now evolve during the sample window instead of appearing static until trial end.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py src/host/scripts/stream_wayland_portal_h264.py` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK

@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -195,6 +196,37 @@ def fmt_mbps_from_kbps(kbps: int | float) -> str:
     return f"{mbps:.1f} Mbps"
 
 
+def severity_tag(value: float, warn_at: float, risk_at: float, invert: bool = False) -> str:
+    v = float(value)
+    if invert:
+        if v <= risk_at:
+            return "RISK"
+        if v <= warn_at:
+            return "WARN"
+        return "OK"
+    if v >= risk_at:
+        return "RISK"
+    if v >= warn_at:
+        return "WARN"
+    return "OK"
+
+
+def kv_line(left: str, right: str, width: int = 86) -> str:
+    l = left.strip()
+    r = right.strip()
+    gap = max(2, width - len(l) - len(r))
+    return f"{l}{' ' * gap}{r}"[:width]
+
+
+def box_line(text: str, width: int = 86) -> str:
+    payload = text[: width - 2]
+    return f"|{payload.ljust(width - 2)}|"
+
+
+def box_sep(width: int = 86) -> str:
+    return "+" + ("-" * (width - 2)) + "+"
+
+
 def spark_ascii(values: list[float], width: int = 24, chars: str = " .:-=+*#%@") -> str:
     if not values:
         return "." * max(6, width)
@@ -257,102 +289,71 @@ def write_overlay_snapshot(
             best_trial = ranked[0].trial_id
 
     target_fps = float(cfg.fps if cfg is not None else 60)
-    lines: list[str] = []
-    lines.extend(
-        [
-            "[TL]",
-            "╔═ WBEAM TRAINER HUD ════════════════",
-            f"║ RUN {run_id}",
-            f"║ PROFILE {profile_name}",
-            f"║ TRIAL {trial_id}  [{trial_index}/{trial_total}]",
-            f"║ GEN {generation_index}/{generation_total}",
-            f"║ NOTE {note or 'running'}",
-            "╚════════════════════════════════════",
-            "",
-            "[TR]",
-        ]
-    )
+    lines: list[str] = ["[MAIN]"]
+    lines.append(box_sep())
+    lines.append(box_line(kv_line("WBEAM TRAINER HUD", f"RUN {run_id}", width=84)))
+    lines.append(box_line(kv_line(f"PROFILE {profile_name}", f"GEN {generation_index}/{generation_total}", width=84)))
+    lines.append(box_line(kv_line(f"TRIAL {trial_id} [{trial_index}/{trial_total}]", f"NOTE {note or 'running'}", width=84)))
+    lines.append(box_sep())
     if cfg is not None:
-        lines.extend(
-            [
-                "╔═ STREAM CONFIG ════════════════════",
-                f"║ codec     {cfg.encoder.upper()}",
-                f"║ size      {cfg.size}",
-                f"║ fps       {cfg.fps}",
-                f"║ bitrate   {fmt_mbps_from_kbps(cfg.bitrate_kbps)}",
-                f"║ cursor    {cfg.cursor_mode}",
-                "╚════════════════════════════════════",
-            ]
+        lines.append(
+            box_line(
+                kv_line(
+                    f"CODEC {cfg.encoder.upper()} | SIZE {cfg.size} | FPS {cfg.fps}",
+                    f"TARGET {fmt_mbps_from_kbps(cfg.bitrate_kbps)}",
+                    width=84,
+                )
+            )
         )
+        lines.append(box_line(kv_line(f"CURSOR {cfg.cursor_mode}", f"CHART {chart_mode.upper()}", width=84)))
     else:
-        lines.extend(["╔═ STREAM CONFIG ════════════════════", "║ pending...", "╚════════════════════════════════════"])
+        lines.append(box_line("STREAM CONFIG pending..."))
     if best_trial:
-        lines.append(f"BEST {best_trial}  score={best_recent:.2f}")
-    lines.extend(["", "[BL]"])
+        lines.append(box_line(kv_line(f"BEST {best_trial}", f"SCORE {best_recent:.2f}", width=84)))
+    lines.append(box_sep())
     if result is not None:
+        fps_state = severity_tag(result.present_fps_mean, target_fps * 0.75, target_fps * 0.55, invert=True)
+        lat_state = severity_tag(result.e2e_p95_mean_ms, 70.0, 120.0)
+        drop_state = severity_tag(result.drop_rate_per_sec, 0.06, 0.20)
         lines.extend(
             [
-                "╔═ LIVE METRICS ═════════════════════",
-                f"║ score     {result.score:.2f}",
-                f"║ present   {bar_line(result.present_fps_mean, target_fps)}",
-                f"║ pipe      {bar_line(result.recv_fps_mean, target_fps)}",
-                f"║ decode    {bar_line(result.decode_fps_mean, target_fps)}",
-                f"║ bitrate   {fmt_mbps_from_kbps(result.config.bitrate_kbps)}",
-                f"║ live_mbps {result.bitrate_mbps_mean:.1f}",
-                f"║ score_tr  {trend_render(valid_scores, chart_mode, width=28)}",
-                f"║ fps_tr    {trend_render(valid_present, chart_mode, width=28)}",
-                "╚════════════════════════════════════",
+                box_line(kv_line(f"SCORE {result.score:.2f}", f"FPS {result.present_fps_mean:.1f} [{fps_state}]", width=84)),
+                box_line(kv_line(f"PIPE {result.recv_fps_mean:.1f} | DECODE {result.decode_fps_mean:.1f}", f"LAT {result.e2e_p95_mean_ms:.1f}ms [{lat_state}]", width=84)),
+                box_line(kv_line(f"LIVE Mbps {result.bitrate_mbps_mean:.1f}", f"DROPS/s {result.drop_rate_per_sec:.3f} [{drop_state}]", width=84)),
+                box_line(kv_line(f"QUEUE {result.queue_depth_mean:.3f}", f"SAMPLES {result.sample_count}", width=84)),
             ]
         )
     else:
         lines.extend(
             [
-                "╔═ LIVE METRICS ═════════════════════",
-                "║ score     <sampling>",
-                f"║ present   {bar_line(0.0, target_fps)}",
-                f"║ pipe      {bar_line(0.0, target_fps)}",
-                f"║ decode    {bar_line(0.0, target_fps)}",
-                "║ bitrate   <pending>",
-                "║ live_mbps <pending>",
-                f"║ score_tr  {trend_render(valid_scores, chart_mode, width=28)}",
-                f"║ fps_tr    {trend_render(valid_present, chart_mode, width=28)}",
-                "╚════════════════════════════════════",
+                box_line(kv_line("SCORE <sampling>", f"FPS 0.0/{target_fps:.1f} [PENDING]", width=84)),
+                box_line("PIPE/DECODE/LAT pending..."),
+                box_line("LIVE Mbps pending..."),
             ]
         )
-    lines.extend(["", "[BR]"])
+    lines.append(box_sep())
     if result is not None:
-        quality_state = "good"
+        quality_state = "OK"
         if result.drop_rate_per_sec > 0.20 or result.e2e_p95_mean_ms > 120.0:
-            quality_state = "risk"
+            quality_state = "RISK"
         elif result.drop_rate_per_sec > 0.06 or result.e2e_p95_mean_ms > 70.0:
-            quality_state = "warn"
+            quality_state = "WARN"
         lines.extend(
             [
-                "╔═ QUALITY / LATENCY ════════════════",
-                f"║ e2e_p95     {result.e2e_p95_mean_ms:.1f} ms",
-                f"║ decode_p95  {result.decode_p95_mean_ms:.1f} ms",
-                f"║ render_p95  {result.render_p95_mean_ms:.1f} ms",
-                f"║ drops/s     {result.drop_rate_per_sec:.3f}",
-                f"║ late/s      {result.late_rate_per_sec:.3f}",
-                f"║ queue_mean  {result.queue_depth_mean:.3f}",
-                f"║ drop_tr     {trend_render(valid_drop, chart_mode, width=28)}",
-                f"║ mbps_tr     {trend_render(valid_bitrate, chart_mode, width=28)}",
-                f"║ samples     {result.sample_count}",
-                f"║ state       {quality_state}/{result.notes}",
-                "╚════════════════════════════════════",
+                box_line(kv_line(f"SCORE TR  {trend_render(valid_scores, chart_mode, width=28)}", f"FPS TR {trend_render(valid_present, chart_mode, width=24)}", width=84)),
+                box_line(kv_line(f"DROP TR   {trend_render(valid_drop, chart_mode, width=28)}", f"MBPS TR {trend_render(valid_bitrate, chart_mode, width=23)}", width=84)),
+                box_line(kv_line(f"E2E/DECODE/RENDER p95: {result.e2e_p95_mean_ms:.1f}/{result.decode_p95_mean_ms:.1f}/{result.render_p95_mean_ms:.1f} ms", f"STATE {quality_state}/{result.notes}", width=84)),
             ]
         )
     else:
         lines.extend(
             [
-                "╔═ QUALITY / LATENCY ════════════════",
-                f"║ drop_tr     {trend_render(valid_drop, chart_mode, width=28)}",
-                f"║ mbps_tr     {trend_render(valid_bitrate, chart_mode, width=28)}",
-                "║ state       pending",
-                "║ waiting for metrics...",
-                "╚════════════════════════════════════",
+                box_line(kv_line(f"SCORE TR  {trend_render(valid_scores, chart_mode, width=28)}", f"FPS TR {trend_render(valid_present, chart_mode, width=24)}", width=84)),
+                box_line(kv_line(f"DROP TR   {trend_render(valid_drop, chart_mode, width=28)}", f"MBPS TR {trend_render(valid_bitrate, chart_mode, width=23)}", width=84)),
+                box_line("STATE PENDING / waiting for metrics..."),
             ]
         )
+    lines.append(box_sep())
     payload = "\n".join(lines).strip() + "\n"
     try:
         path.write_text(payload, encoding="utf-8")
@@ -747,8 +748,10 @@ def collect_metrics_samples(
     stream_port: int,
     sample_sec: int,
     poll_sec: float,
+    on_sample: Callable[[list[dict[str, Any]], float], None] | None = None,
 ) -> list[dict[str, Any]]:
     samples: list[dict[str, Any]] = []
+    started = time.monotonic()
     deadline = time.monotonic() + sample_sec
     while time.monotonic() < deadline:
         snap = http_json(
@@ -759,6 +762,12 @@ def collect_metrics_samples(
             timeout=2.0,
         )
         samples.append(snap)
+        if on_sample is not None:
+            elapsed = max(0.0, time.monotonic() - started)
+            try:
+                on_sample(samples, elapsed)
+            except Exception:
+                pass
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             break
@@ -1566,12 +1575,41 @@ def main() -> int:
 
             print(f"[{trial_id}] sampling {sample_sec}s...")
             try:
+                def _on_sample_progress(sample_rows: list[dict[str, Any]], elapsed_sec: float) -> None:
+                    if overlay_path is None:
+                        return
+                    if not sample_rows:
+                        return
+                    partial = score_trial(
+                        cfg,
+                        sample_rows,
+                        max(1, int(round(max(elapsed_sec, args.poll_sec)))),
+                        trial_id,
+                        mode,
+                    )
+                    write_overlay_snapshot(
+                        overlay_path,
+                        run_id=run_id,
+                        profile_name=profile_name,
+                        trial_id=trial_id,
+                        trial_index=idx,
+                        trial_total=len(trials),
+                        generation_index=generation_idx,
+                        generation_total=generations,
+                        cfg=cfg,
+                        result=partial,
+                        history=results + [partial],
+                        note=f"sampling {elapsed_sec:.1f}s",
+                        chart_mode=args.overlay_chart,
+                    )
+
                 samples = collect_metrics_samples(
                     control_port=args.control_port,
                     serial=serial,
                     stream_port=stream_port,
                     sample_sec=sample_sec,
                     poll_sec=max(0.3, args.poll_sec),
+                    on_sample=_on_sample_progress,
                 )
                 result = score_trial(cfg, samples, sample_sec, trial_id, mode)
                 results.append(result)

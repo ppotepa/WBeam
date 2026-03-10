@@ -554,27 +554,14 @@ def make_pipeline(
         or bool(os.getenv("WBEAM_OVERLAY_TEXT_FILE", "").strip())
     )
     if overlay_enabled:
-        # 4-corner HUD layout:
-        # - TL: phase/time
-        # - TR: generation/trial/settings
-        # - BL: live fps/dup (separate corner for quick glance)
-        # - BR: score + summary metrics
-        overlay_specs = [
-            ("hud_tl", 0, 0, 8, 8),
-            ("hud_tr", 2, 0, 8, 8),
-            ("hud_bl", 0, 2, 8, 8),
-            ("hud_br", 2, 2, 8, 8),
-        ]
-        for name, halign, valign, xpad, ypad in overlay_specs:
-            ov = Gst.ElementFactory.make("textoverlay", name)
-            if ov is None:
-                overlays = []
-                break
-            set_if_supported(ov, "halignment", halign)
-            set_if_supported(ov, "valignment", valign)
-            set_if_supported(ov, "xpad", xpad)
-            set_if_supported(ov, "ypad", ypad)
-            overlays.append(ov)
+        # Single unified full-frame HUD overlay.
+        ov = Gst.ElementFactory.make("textoverlay", "hud_main")
+        if ov is not None:
+            set_if_supported(ov, "halignment", 0)  # left
+            set_if_supported(ov, "valignment", 0)  # top
+            set_if_supported(ov, "xpad", 6)
+            set_if_supported(ov, "ypad", 6)
+            overlays = [ov]
         if not overlays:
             print("[warn] textoverlay element unavailable; HUD overlay disabled", file=sys.stderr)
             overlay_enabled = False
@@ -604,7 +591,7 @@ def make_pipeline(
             "capsfilter",
         ]
         if overlay_enabled:
-            element_names.extend(["textoverlay(hud_tl)", "textoverlay(hud_tr)", "textoverlay(hud_bl)", "textoverlay(hud_br)"])
+            element_names.extend(["textoverlay(hud_main)"])
         element_names.extend(
             [
                 "tee",
@@ -655,12 +642,15 @@ def make_pipeline(
         )
         for ov in overlays:
             set_if_supported(ov, "font-desc", overlay_font)
-            set_if_supported(ov, "shaded-background", True)
+            # Transparent background + light shadow for readability.
+            set_if_supported(ov, "shaded-background", False)
             set_if_supported(ov, "draw-shadow", True)
+            # Semi-transparent light text (ARGB).
+            set_if_supported(ov, "color", 0xB3EAF4FF)
             set_if_supported(ov, "text", "")
         # Backward-compatible fallback when no sectioned text is provided.
         if overlays:
-            set_if_supported(overlays[1], "text", overlay_text)  # TR
+            set_if_supported(overlays[0], "text", overlay_text)
 
     configure_encoder(enc, encoder_name, bitrate_kbps, fps, nv_preset)
     # Responsiveness-first default: allow videorate to duplicate when source is sparse.
@@ -956,26 +946,21 @@ def main():
 
     overlay_file = os.getenv("WBEAM_OVERLAY_TEXT_FILE", "").strip()
     if overlay_file:
-        overlay_elements = {
-            "TL": pipeline.get_by_name("hud_tl"),
-            "TR": pipeline.get_by_name("hud_tr"),
-            "BL": pipeline.get_by_name("hud_bl"),
-            "BR": pipeline.get_by_name("hud_br"),
-        }
+        overlay_elements = {"MAIN": pipeline.get_by_name("hud_main")}
         if any(v is not None for v in overlay_elements.values()):
             print(f"[wbeam] Overlay text source: {overlay_file}", flush=True)
-            overlay_state = {"TL": "", "TR": "", "BL": "", "BR": ""}
+            overlay_state = {"MAIN": ""}
 
             def _parse_overlay_sections(raw_text: str) -> dict[str, str]:
                 text = raw_text.replace("\r\n", "\n").replace("\r", "\n").strip()
-                out = {"TL": "", "TR": "", "BL": "", "BR": ""}
+                out = {"MAIN": ""}
                 if not text:
                     return out
 
-                section_rx = re.compile(r"^\[(TL|TR|BL|BR)\]\s*$", re.IGNORECASE)
+                section_rx = re.compile(r"^\[(MAIN|TL|TR|BL|BR)\]\s*$", re.IGNORECASE)
                 lines = text.split("\n")
                 current = None
-                buckets = {"TL": [], "TR": [], "BL": [], "BR": []}
+                buckets = {"MAIN": [], "TL": [], "TR": [], "BL": [], "BR": []}
                 section_count = 0
                 for line in lines:
                     m = section_rx.match(line.strip())
@@ -987,12 +972,21 @@ def main():
                         buckets[current].append(line.rstrip())
 
                 if section_count > 0:
-                    for key in out:
-                        out[key] = "\n".join(buckets[key]).strip()
+                    # Prefer new MAIN block, fallback to merged legacy quadrants.
+                    main = "\n".join(buckets["MAIN"]).strip()
+                    if main:
+                        out["MAIN"] = main
+                        return out
+                    merged = []
+                    for key in ("TL", "TR", "BL", "BR"):
+                        block = "\n".join(buckets[key]).strip()
+                        if block:
+                            merged.append(block)
+                    out["MAIN"] = "\n\n".join(merged).strip()
                     return out
 
-                # Backward compatibility: old 1-block overlay goes to TR.
-                out["TR"] = text
+                # Backward compatibility: old 1-block overlay goes to MAIN.
+                out["MAIN"] = text
                 return out
 
             def _refresh_overlay_text():
