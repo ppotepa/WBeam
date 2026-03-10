@@ -265,6 +265,11 @@ select {
   padding: 8px 10px;
 }
 
+select option {
+  background: #11253a;
+  color: #e8f4ff;
+}
+
 input:focus,
 select:focus {
   outline: none;
@@ -730,6 +735,10 @@ th {
 
 .selected-row {
   background: rgba(73, 194, 255, 0.11);
+}
+
+.selected-row td {
+  color: var(--text-main);
 }
 
 .log-tail {

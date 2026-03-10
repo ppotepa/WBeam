@@ -2109,3 +2109,19 @@ Status: active
 - Kept one HUD display mechanism and one toggle model (VolUp+VolDown hold), while allowing context-dependent data composition.
 - Validation:
   - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+
+## In Progress (2026-03-10) - Single-overlay cleanup + readability pass
+- Removed layered HUD behavior on Android debug toggle:
+  - `setDebugOverlayVisible(...)` now keeps only `perfHudPanel` visible,
+  - legacy `debugInfoPanel` (including old FPS graph area) is always hidden to prevent double overlays.
+- Improved unified HUD translucency and fit:
+  - reduced panel/chip background opacity for better stream visibility behind overlay,
+  - adjusted root/grid sizing and panel density to better fill the full screen consistently.
+- Stabilized HUD container composition in layout:
+  - `perfHudPanel` switched from `LinearLayout` to `FrameLayout` so WebView/Text fallback layers don't fight vertical measurement.
+- Desktop trainer UI readability fix:
+  - dropdown options now use explicit dark background + bright text (`select option`),
+  - selected table rows force readable text color (`.selected-row td`).
+- Validation:
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK

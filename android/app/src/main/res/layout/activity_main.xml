@@ -191,14 +191,13 @@
         </LinearLayout>
     </LinearLayout>
 
-    <LinearLayout
+    <FrameLayout
         android:id="@+id/perfHudPanel"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:layout_gravity="top"
         android:background="@android:color/transparent"
-        android:orientation="vertical"
-        android:padding="12dp">
+        android:padding="6dp">
 
         <WebView
             android:id="@+id/perfHudWebView"
@@ -217,7 +216,7 @@
             android:text="HUD OFFLINE"
             android:textColor="#B3EAF4FF"
             android:textSize="9sp" />
-    </LinearLayout>
+    </FrameLayout>
 
     <!-- ── Startup / preflight full-screen modal ─────────────────────────── -->
     <FrameLayout

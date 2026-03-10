@@ -994,17 +994,15 @@ public class MainActivity extends AppCompatActivity {
         if (!BuildConfig.DEBUG) {
             return;
         }
-        int visibility = visible ? View.VISIBLE : View.GONE;
+        // Unified HUD mode: keep only one on-screen overlay panel.
+        // Legacy debug panel (text + fps graph) stays disabled to avoid layered HUDs.
         if (debugInfoPanel != null) {
-            debugInfoPanel.setVisibility(visibility);
-            if (visible) {
-                debugInfoPanel.setAlpha(DEBUG_INFO_ALPHA_IDLE);
-            }
+            debugInfoPanel.setVisibility(View.GONE);
         }
         if (perfHudPanel != null) {
-            perfHudPanel.setVisibility(visibility);
+            perfHudPanel.setVisibility(visible ? View.VISIBLE : View.GONE);
             if (visible) {
-                perfHudPanel.setAlpha(0.95f);
+                perfHudPanel.setAlpha(0.88f);
             }
         }
     }
@@ -2307,19 +2305,19 @@ public class MainActivity extends AppCompatActivity {
         return "<!doctype html><html><head><meta charset='utf-8'/>"
                 + "<style>"
                 + "html,body{margin:0;padding:0;background:transparent;color:#d9fbff;font-family:'JetBrains Mono','IBM Plex Mono',monospace;font-size:11px;}"
-                + ".root{padding:8px;box-sizing:border-box;width:100vw;height:100vh;display:grid;grid-template-rows:auto auto 1fr;gap:8px;}"
+                + ".root{padding:6px;box-sizing:border-box;width:100vw;height:100vh;display:grid;grid-template-rows:auto auto minmax(0,1fr);gap:6px;}"
                 + ".top{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px;}"
-                + ".chip{border:1px solid rgba(126,245,255,.35);background:rgba(2,20,24,.30);padding:6px 8px;min-height:36px;}"
+                + ".chip{border:1px solid rgba(126,245,255,.30);background:rgba(2,20,24,.18);padding:5px 7px;min-height:34px;}"
                 + ".chip .k{font-size:10px;color:#9dddea;display:block;letter-spacing:.05em;}"
                 + ".chip .v{font-size:12px;color:#dcf9ff;}"
-                + ".progress{border:1px solid rgba(126,245,255,.45);background:rgba(2,20,24,.30);padding:6px 8px;}"
+                + ".progress{border:1px solid rgba(126,245,255,.35);background:rgba(2,20,24,.14);padding:5px 7px;}"
                 + ".p-label{font-size:11px;color:#b9f8ff;letter-spacing:.04em;}"
                 + ".p-track{margin-top:6px;height:7px;background:rgba(0,0,0,.35);border:1px solid rgba(126,245,255,.35);}"
                 + ".p-fill{height:100%;width:" + safePct + "%;background:linear-gradient(90deg,#60f2c2,#7dd3fc);}"
-                + ".main{display:grid;grid-template-columns:1.25fr 1fr;gap:8px;min-height:0;}"
-                + ".panel{border:1px solid rgba(126,245,255,.35);background:rgba(2,20,24,.24);padding:6px;min-height:0;overflow:auto;}"
+                + ".main{display:grid;grid-template-columns:1.25fr 1fr;gap:6px;min-height:0;}"
+                + ".panel{border:1px solid rgba(126,245,255,.30);background:rgba(2,20,24,.12);padding:6px;min-height:0;overflow:auto;}"
                 + ".kpi{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;}"
-                + ".kpi .item{border:1px solid rgba(126,245,255,.25);padding:6px;background:rgba(0,0,0,.25);}"
+                + ".kpi .item{border:1px solid rgba(126,245,255,.22);padding:6px;background:rgba(0,0,0,.18);}"
                 + ".kpi .item .k{font-size:10px;color:#9dddea;display:block;}"
                 + ".kpi .item .v{font-size:12px;color:#dcf9ff;}"
                 + ".trend{font-size:10px;line-height:1.3;margin-top:6px;color:#9dddea;word-break:break-word;}"
