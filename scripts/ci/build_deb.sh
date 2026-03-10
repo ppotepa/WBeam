@@ -3,12 +3,13 @@ set -Eeuo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
-DEB_VERSION="$(deb_version)"
+DEB_VERSION="${WBEAM_VERSION}"
 ARCH="$(dpkg --print-architecture)"
 PKG_NAME="wbeam"
 
 echo "[build_deb] Building Rust binaries..."
 cargo build --release -p wbeamd-server -p wbeamd-streamer --manifest-path "${RUST_MANIFEST}"
+write_version_manifest
 
 PKGROOT="$(mktemp -d)"
 trap 'rm -rf "${PKGROOT}"' EXIT

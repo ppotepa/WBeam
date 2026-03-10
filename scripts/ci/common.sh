@@ -20,37 +20,29 @@ normalize_tag_version() {
 }
 
 build_stamp() {
-  date -u +%Y%m%d
+  date -u +%Y%m%d%H%M
 }
 
-deb_version() {
+wbeam_version() {
   if [[ -n "${CI_COMMIT_TAG:-}" ]]; then
     normalize_tag_version "${CI_COMMIT_TAG}"
   else
-    printf '0.0.0~git%s.%s\n' "$(build_stamp)" "${CI_COMMIT_SHORT_SHA:-dev}"
+    printf '0.0.0.main.%s.%s\n' "$(build_stamp)" "${CI_COMMIT_SHORT_SHA:-dev}"
   fi
 }
 
-rpm_version() {
-  if [[ -n "${CI_COMMIT_TAG:-}" ]]; then
-    normalize_tag_version "${CI_COMMIT_TAG}"
-  else
-    printf '0.0.0\n'
-  fi
-}
+WBEAM_VERSION="${WBEAM_VERSION:-$(wbeam_version)}"
+export WBEAM_VERSION
 
-rpm_release() {
-  if [[ -n "${CI_COMMIT_TAG:-}" ]]; then
-    printf '1\n'
-  else
-    printf '0.git%s.%s\n' "$(build_stamp)" "${CI_COMMIT_SHORT_SHA:-dev}"
-  fi
+write_version_manifest() {
+  cat > "${DIST_DIR}/VERSION.txt" <<EOF
+WBEAM_VERSION=${WBEAM_VERSION}
+CI_PIPELINE_ID=${CI_PIPELINE_ID:-local}
+CI_COMMIT_SHA=${CI_COMMIT_SHA:-local}
+CI_COMMIT_REF_NAME=${CI_COMMIT_REF_NAME:-local}
+EOF
 }
 
 artifact_version() {
-  if [[ -n "${CI_COMMIT_TAG:-}" ]]; then
-    normalize_tag_version "${CI_COMMIT_TAG}"
-  else
-    printf 'main-%s\n' "${CI_COMMIT_SHORT_SHA:-dev}"
-  fi
+  printf '%s\n' "${WBEAM_VERSION}"
 }

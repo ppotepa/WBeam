@@ -3,13 +3,14 @@ set -Eeuo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
-RPM_VERSION="$(rpm_version)"
-RPM_RELEASE="$(rpm_release)"
+RPM_VERSION="${WBEAM_VERSION}"
+RPM_RELEASE="1"
 TOPDIR="$(mktemp -d)"
 trap 'rm -rf "${TOPDIR}"' EXIT
 
 echo "[build_rpm] Building Rust binaries..."
 cargo build --release -p wbeamd-server -p wbeamd-streamer --manifest-path "${RUST_MANIFEST}"
+write_version_manifest
 
 mkdir -p "${TOPDIR}/"{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
 

@@ -85,6 +85,7 @@ upload_asset() {
 require_env GH_TOKEN
 require_env GH_OWNER
 require_env GH_REPO
+require_env WBEAM_VERSION
 
 if ! ls "${DIST_DIR}"/* >/dev/null 2>&1; then
   echo "[publish] No artifacts in ${DIST_DIR}; nothing to upload." >&2
@@ -97,7 +98,7 @@ if [[ -n "${CI_COMMIT_TAG:-}" ]]; then
   PRERELEASE_JSON="false"
 elif [[ "${CI_COMMIT_BRANCH:-}" == "main" || "${CI_COMMIT_BRANCH:-}" == "${CI_DEFAULT_BRANCH:-}" ]]; then
   RELEASE_TAG="main-latest"
-  RELEASE_NAME="main-latest (${CI_COMMIT_SHORT_SHA:-local})"
+  RELEASE_NAME="main-latest (${WBEAM_VERSION})"
   PRERELEASE_JSON="true"
 else
   echo "[publish] Branch is not releasable, skipping."
@@ -109,7 +110,7 @@ RELEASE_PAYLOAD="$(jq -n \
   --arg tag_name "${RELEASE_TAG}" \
   --arg target_commitish "${CI_COMMIT_SHA:-}" \
   --arg name "${RELEASE_NAME}" \
-  --arg body "Automated release from GitLab pipeline ${CI_PIPELINE_URL:-local}." \
+  --arg body "Automated release from GitLab pipeline ${CI_PIPELINE_URL:-local}. Version: ${WBEAM_VERSION}" \
   --argjson prerelease "${PRERELEASE_JSON}" \
   '{tag_name:$tag_name,target_commitish:$target_commitish,name:$name,body:$body,draft:false,prerelease:$prerelease}')"
 

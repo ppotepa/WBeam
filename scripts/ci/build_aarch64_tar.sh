@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
-ARTIFACT_VER="$(artifact_version)"
+ARTIFACT_VER="${WBEAM_VERSION}"
 TARGET="aarch64-unknown-linux-gnu"
 OUT_NAME="wbeam-linux-aarch64-${ARTIFACT_VER}.tar.gz"
 PKGROOT="$(mktemp -d)"
@@ -20,6 +20,7 @@ mkdir -p "${PKGROOT}/bin" "${PKGROOT}/doc"
 install -m 0755 "${ROOT_DIR}/wbeam" "${PKGROOT}/bin/wbeam"
 install -m 0755 "${ROOT_DIR}/src/host/rust/target/${TARGET}/release/wbeamd-server" "${PKGROOT}/bin/wbeamd-server"
 install -m 0644 "${ROOT_DIR}/README.md" "${PKGROOT}/doc/README.md"
+write_version_manifest
 
 tar -C "${PKGROOT}" -czf "${DIST_DIR}/${OUT_NAME}" .
 echo "[build_aarch64] Created ${DIST_DIR}/${OUT_NAME}"

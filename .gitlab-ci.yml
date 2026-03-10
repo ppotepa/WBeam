@@ -10,6 +10,13 @@ workflow:
 default:
   interruptible: true
   before_script:
+    - |
+      if [ -n "${CI_COMMIT_TAG:-}" ]; then
+        export WBEAM_VERSION="${CI_COMMIT_TAG#v}"
+        export WBEAM_VERSION="${WBEAM_VERSION#V}"
+      else
+        export WBEAM_VERSION="0.0.0.main.${CI_PIPELINE_IID}.${CI_COMMIT_SHORT_SHA}"
+      fi
     - chmod +x scripts/ci/*.sh
 
 build_deb:
@@ -39,6 +46,7 @@ build_deb:
   artifacts:
     paths:
       - dist/*.deb
+      - dist/VERSION.txt
     expire_in: 14 days
   rules:
     - if: $CI_COMMIT_TAG
@@ -57,6 +65,7 @@ build_rpm:
   artifacts:
     paths:
       - dist/*.rpm
+      - dist/VERSION.txt
     expire_in: 14 days
   rules:
     - if: $CI_COMMIT_TAG
@@ -91,8 +100,37 @@ build_aarch64_tar:
   artifacts:
     paths:
       - dist/*aarch64*.tar.gz
+      - dist/VERSION.txt
     expire_in: 14 days
   allow_failure: true
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+build_apk_release:
+  stage: build
+  image: eclipse-temurin:17-jdk-jammy
+  variables:
+    ANDROID_SDK_ROOT: "/opt/android-sdk"
+    ANDROID_HOME: "/opt/android-sdk"
+    GRADLE_USER_HOME: "${CI_PROJECT_DIR}/.gradle-user"
+  script:
+    - apt-get update
+    - DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl unzip ca-certificates
+    - mkdir -p "${ANDROID_SDK_ROOT}/cmdline-tools"
+    - curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o /tmp/cmdline-tools.zip
+    - unzip -q /tmp/cmdline-tools.zip -d /tmp
+    - rm -rf "${ANDROID_SDK_ROOT}/cmdline-tools/latest"
+    - mv /tmp/cmdline-tools "${ANDROID_SDK_ROOT}/cmdline-tools/latest"
+    - yes | "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" --sdk_root="${ANDROID_SDK_ROOT}" --licenses >/dev/null
+    - "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" --sdk_root="${ANDROID_SDK_ROOT}" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+    - ./scripts/ci/build_apk_release.sh
+  artifacts:
+    paths:
+      - dist/*.apk
+      - dist/VERSION.txt
+    expire_in: 14 days
   rules:
     - if: $CI_COMMIT_TAG
     - if: $CI_COMMIT_BRANCH == "main"
