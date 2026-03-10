@@ -1,5 +1,19 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending) - Wayland portal output auto-layout (non-overlap)
+- Added host-side post-start layout pass for `wayland_portal` sessions in `wbeamd-server`:
+  - after successful `/start`, server now inspects KDE output topology via `kscreen-doctor -j`,
+  - tracks serial -> output mapping when a new enabled output appears after a connect,
+  - auto-repositions overlapping managed outputs into a horizontal non-overlapping layout (`output.<name>.position.x,y`) to reduce “app looks broken” confusion.
+- Safety guards:
+  - logic is best-effort and non-fatal (stream start succeeds even if layout command fails),
+  - ignores cloned/replicated outputs and disabled outputs,
+  - can be disabled with `WBEAM_WAYLAND_PORTAL_AUTO_LAYOUT=0`.
+- Known limitation:
+  - KDE `kscreen-doctor` does not expose output rename in this path, so connector naming in Display Configuration is compositor-managed and cannot be set to Android serial directly from this integration.
+- Validation:
+  - `cargo check -p wbeamd-server` -> OK.
+
 ## Session Update (2026-03-10, pending) - Unified debug overlay toggle via volume-key hold
 - Android debug overlay toggle input was unified across API levels in `MainActivity`:
   - replaced separate single-key behavior (`Vol+` ON, `Vol-` OFF) with one consistent chord:
