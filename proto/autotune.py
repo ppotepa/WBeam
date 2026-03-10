@@ -238,6 +238,140 @@ def percentile(values: list[float], q: float) -> float:
     return data[idx]
 
 
+def adb_devices(cmd_timeout_s: int) -> list[tuple[str, str]]:
+    try:
+        cp = subprocess.run(
+            ["adb", "devices"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=max(3, int(cmd_timeout_s)),
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return []
+
+    out: list[tuple[str, str]] = []
+    for line in (cp.stdout or "").splitlines():
+        line = line.strip()
+        if not line or line.startswith("List of devices"):
+            continue
+        parts = line.split()
+        if len(parts) >= 2:
+            out.append((parts[0], parts[1]))
+    return out
+
+
+def pick_serial(cmd_timeout_s: int, shell_timeout_s: int) -> str:
+    preferred = ""
+    first_physical = ""
+    first_any = ""
+
+    for serial, state in adb_devices(cmd_timeout_s):
+        if state != "device":
+            continue
+        if not first_any:
+            first_any = serial
+        if not serial.startswith("emulator-") and not first_physical:
+            first_physical = serial
+
+        try:
+            model_cp = subprocess.run(
+                ["adb", "-s", serial, "shell", "getprop", "ro.product.model"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=max(3, int(shell_timeout_s)),
+                check=False,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+        model = (model_cp.stdout or "").strip()
+        if "S6000" in model or "Lenovo" in model:
+            preferred = serial
+            break
+
+    return preferred or first_physical or first_any
+
+
+def parse_capture_size(raw: str) -> tuple[int, int] | None:
+    m = re.search(r"(?i)physical size:\s*([0-9]+)\s*x\s*([0-9]+)", raw)
+    if m:
+        w = int(m.group(1))
+        h = int(m.group(2))
+        if w > 0 and h > 0:
+            return w, h
+    m = re.search(r"([0-9]+)\s*x\s*([0-9]+)", raw)
+    if m:
+        w = int(m.group(1))
+        h = int(m.group(2))
+        if w > 0 and h > 0:
+            return w, h
+    return None
+
+
+def even_capture_size(w: int, h: int) -> tuple[int, int]:
+    w = max(2, int(w))
+    h = max(2, int(h))
+    if w % 2 == 1:
+        w -= 1
+    if h % 2 == 1:
+        h -= 1
+    return w, h
+
+
+def detect_device_capture_size(
+    base_cfg: dict[str, Any],
+    cmd_timeout_s: int,
+    shell_timeout_s: int,
+) -> tuple[str | None, str | None]:
+    serial = str(base_cfg.get("SERIAL", "")).strip()
+    if not serial:
+        serial = pick_serial(cmd_timeout_s, shell_timeout_s)
+    if not serial:
+        return None, None
+
+    try:
+        wm_cp = subprocess.run(
+            ["adb", "-s", serial, "shell", "wm", "size"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=max(3, int(shell_timeout_s)),
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        wm_cp = None
+
+    if wm_cp is not None:
+        parsed = parse_capture_size(wm_cp.stdout or "")
+        if parsed is not None:
+            w, h = even_capture_size(*parsed)
+            return f"{w}x{h}", serial
+
+    try:
+        dump_cp = subprocess.run(
+            ["adb", "-s", serial, "shell", "dumpsys", "display"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=max(3, int(shell_timeout_s)),
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        dump_cp = None
+
+    if dump_cp is not None:
+        out = dump_cp.stdout or ""
+        w_match = re.search(r"deviceWidth=([0-9]+)", out)
+        h_match = re.search(r"deviceHeight=([0-9]+)", out)
+        if w_match and h_match:
+            w, h = even_capture_size(int(w_match.group(1)), int(h_match.group(1)))
+            return f"{w}x{h}", serial
+
+    return None, serial
+
+
 def parse_portal_metrics(path: Path) -> tuple[list[float], list[float], list[float], list[float]]:
     sender: list[float] = []
     pipe: list[float] = []
@@ -1005,7 +1139,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument(
         "--capture-size",
         default=None,
-        help="Override PROTO_CAPTURE_SIZE for this run (example: 1024x640).",
+        help=(
+            "Override PROTO_CAPTURE_SIZE for this run (example: 1024x640). "
+            "If omitted, autotune tries to auto-detect full physical resolution from the target ADB device."
+        ),
     )
     p.add_argument("--generations", type=int, default=1)
     p.add_argument("--population", type=int, default=7)
@@ -1145,8 +1282,38 @@ def main(argv: list[str]) -> int:
     profile_max_timeout_mean = max(0.0, float(args.profile_max_timeout_mean))
     profile_max_stale_p50 = max(0.0, float(args.profile_max_stale_p50))
     require_portal_metrics = bool(args.require_portal_metrics)
+    capture_size_source = "config"
+    capture_size_auto = ""
+    capture_size_serial = ""
     if capture_size_override:
         base_cfg["PROTO_CAPTURE_SIZE"] = capture_size_override
+        capture_size_source = "arg"
+    else:
+        cmd_timeout_s = max(3, cfg_int(base_cfg, "PROTO_ADB_CMD_TIMEOUT_SECS", 12))
+        shell_timeout_s = max(3, cfg_int(base_cfg, "PROTO_ADB_SHELL_TIMEOUT_SECS", 8))
+        detected_size, detected_serial = detect_device_capture_size(
+            base_cfg=base_cfg,
+            cmd_timeout_s=cmd_timeout_s,
+            shell_timeout_s=shell_timeout_s,
+        )
+        if detected_size:
+            base_cfg["PROTO_CAPTURE_SIZE"] = detected_size
+            capture_size_source = "device_auto"
+            capture_size_auto = detected_size
+            capture_size_serial = detected_serial or ""
+            log(
+                "capture-size auto-detect: "
+                f"serial={capture_size_serial or '-'} size={detected_size}"
+            )
+        else:
+            current_capture_size = str(base_cfg.get("PROTO_CAPTURE_SIZE", "")).strip()
+            if current_capture_size:
+                log(
+                    "capture-size auto-detect unavailable; "
+                    f"keeping config value {current_capture_size}"
+                )
+            else:
+                log("capture-size auto-detect unavailable and config has empty PROTO_CAPTURE_SIZE")
     forced_fps = int(args.fps) if args.fps is not None else None
     if forced_fps is not None:
         base_cfg["PROTO_CAPTURE_FPS"] = forced_fps
@@ -1167,6 +1334,7 @@ def main(argv: list[str]) -> int:
         f"reuse_device={requested_reuse_device} host_only={bool(args.host_only)} "
         f"overlay={show_overlay} single_portal_consent={single_portal_consent} "
         f"fast_mode={fast_mode} capture_size={base_cfg.get('PROTO_CAPTURE_SIZE', '')} "
+        f"capture_size_source={capture_size_source} "
         f"export_profiles={export_profiles} "
         f"single_profile_name={profile_name_single or '-'} "
         f"forced_fps={forced_fps if forced_fps is not None else 'auto'} "
@@ -1551,6 +1719,9 @@ def main(argv: list[str]) -> int:
         "profile_max_stale_p50": profile_max_stale_p50,
         "fast_mode": fast_mode,
         "capture_size_override": capture_size_override,
+        "capture_size_source": capture_size_source,
+        "capture_size_auto_detected": capture_size_auto,
+        "capture_size_auto_serial": capture_size_serial,
         "fast_mode_tunable_keys": sorted(k for k in tunable_keys if k in FAST_MODE_TUNABLE_KEYS),
         "generations": generations,
         "population": population,

@@ -1,5 +1,21 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending) - autotune: default capture size auto-detected from target device
+- Updated `proto/autotune.py` so `--capture-size` is now truly optional:
+  - when `--capture-size` is omitted, autotune auto-detects full physical device resolution via ADB (`wm size`, fallback `dumpsys display`),
+  - selected size is written into runtime `PROTO_CAPTURE_SIZE` before trials start,
+  - preserves existing config value only when auto-detection is unavailable.
+- Serial resolution follows existing proto behavior:
+  - uses configured `SERIAL` when present,
+  - otherwise uses the same ADB selection strategy as `proto/run.py` (prefer physical + Lenovo/S6000 heuristic).
+- Added explicit run metadata in autotune report output:
+  - `capture_size_source` (`arg|device_auto|config`),
+  - `capture_size_auto_detected`,
+  - `capture_size_auto_serial`.
+- Validation:
+  - `python -m py_compile proto/autotune.py` -> OK
+  - `python proto/autotune.py --help` -> OK
+
 ## Session Update (2026-03-10, pending) - Force Android app landscape orientation
 - Enforced horizontal app orientation for Android client UI:
   - `MainActivity` now uses `android:screenOrientation="sensorLandscape"` in manifest.
