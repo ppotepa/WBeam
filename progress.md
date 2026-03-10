@@ -1869,3 +1869,20 @@ Status: active
   - `python3 -m py_compile src/domains/training/wizard.py src/host/scripts/stream_wayland_portal_h264.py` -> OK
   - `cd src/apps/trainer-tauri && npm run build` -> OK
   - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+
+## In Progress (2026-03-10) - HUD extended thresholds + readability hardening
+- Extended Android unified HUD scoring semantics in `wizard.py`:
+  - added colorized threshold states for additional runtime signals:
+    - `LIVE Mbps` (target-relative, low-throughput detection),
+    - `QUEUE` depth,
+    - `LATE/s` (late frame cadence),
+    - note/health state mapping.
+  - added in-HUD legend row (`OK/WARN/RISK`) for immediate interpretation.
+- Improved overlay text layout resilience with markup-aware helpers:
+  - added `strip_markup` and `visible_len` for spacing/padding calculations,
+  - updated `kv_line`/`box_line` to avoid clipping/invalidating color markup when aligning HUD rows.
+- Quality state now incorporates queue pressure in addition to latency/drop thresholds.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK

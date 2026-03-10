@@ -223,16 +223,39 @@ def severity_markup(tag: str) -> str:
     return html.escape(tone or "-")
 
 
+def strip_markup(text: str) -> str:
+    return re.sub(r"<[^>]+>", "", text or "")
+
+
+def visible_len(text: str) -> int:
+    return len(strip_markup(text))
+
+
+def note_severity(note: str) -> str:
+    token = (note or "").strip().lower()
+    if token in {"ok", "stable"}:
+        return "OK"
+    if token in {"no_samples", "stream_unstable", "gate_failed", "sample_failed", "apply_failed"}:
+        return "RISK"
+    return "WARN"
+
+
 def kv_line(left: str, right: str, width: int = 86) -> str:
     l = left.strip()
     r = right.strip()
-    gap = max(2, width - len(l) - len(r))
-    return f"{l}{' ' * gap}{r}"[:width]
+    gap = max(2, width - visible_len(l) - visible_len(r))
+    return f"{l}{' ' * gap}{r}"
 
 
 def box_line(text: str, width: int = 86) -> str:
-    payload = text[: width - 2]
-    return f"|{payload.ljust(width - 2)}|"
+    payload = text
+    max_vis = width - 2
+    vis = visible_len(payload)
+    if vis > max_vis:
+        plain = strip_markup(payload)
+        payload = plain[:max_vis]
+        vis = len(payload)
+    return f"|{payload}{' ' * max(0, max_vis - vis)}|"
 
 
 def box_sep(width: int = 86) -> str:
@@ -306,6 +329,15 @@ def write_overlay_snapshot(
     lines.append(box_line(kv_line("WBEAM TRAINER HUD", f"RUN {run_id}", width=84)))
     lines.append(box_line(kv_line(f"PROFILE {profile_name}", f"GEN {generation_index}/{generation_total}", width=84)))
     lines.append(box_line(kv_line(f"TRIAL {trial_id} [{trial_index}/{trial_total}]", f"NOTE {note or 'running'}", width=84)))
+    lines.append(
+        box_line(
+            kv_line(
+                f"LEGEND {severity_markup('OK')} stable",
+                f"{severity_markup('WARN')} watch  {severity_markup('RISK')} critical",
+                width=84,
+            )
+        )
+    )
     lines.append(box_sep())
     if cfg is not None:
         lines.append(
@@ -327,12 +359,21 @@ def write_overlay_snapshot(
         fps_state = severity_tag(result.present_fps_mean, target_fps * 0.75, target_fps * 0.55, invert=True)
         lat_state = severity_tag(result.e2e_p95_mean_ms, 70.0, 120.0)
         drop_state = severity_tag(result.drop_rate_per_sec, 0.06, 0.20)
+        queue_state = severity_tag(result.queue_depth_mean, 0.80, 1.60)
+        late_state = severity_tag(result.late_rate_per_sec, 0.30, 1.00)
+        mbps_state = severity_tag(
+            result.bitrate_mbps_mean,
+            max(1.0, (float(cfg.bitrate_kbps) / 1000.0) * 0.55) if cfg is not None else 6.0,
+            max(1.0, (float(cfg.bitrate_kbps) / 1000.0) * 0.35) if cfg is not None else 3.5,
+            invert=True,
+        )
         lines.extend(
             [
                 box_line(kv_line(f"SCORE {result.score:.2f}", f"FPS {result.present_fps_mean:.1f} [{severity_markup(fps_state)}]", width=84)),
                 box_line(kv_line(f"PIPE {result.recv_fps_mean:.1f} | DECODE {result.decode_fps_mean:.1f}", f"LAT {result.e2e_p95_mean_ms:.1f}ms [{severity_markup(lat_state)}]", width=84)),
-                box_line(kv_line(f"LIVE Mbps {result.bitrate_mbps_mean:.1f}", f"DROPS/s {result.drop_rate_per_sec:.3f} [{severity_markup(drop_state)}]", width=84)),
-                box_line(kv_line(f"QUEUE {result.queue_depth_mean:.3f}", f"SAMPLES {result.sample_count}", width=84)),
+                box_line(kv_line(f"LIVE Mbps {result.bitrate_mbps_mean:.1f} [{severity_markup(mbps_state)}]", f"DROPS/s {result.drop_rate_per_sec:.3f} [{severity_markup(drop_state)}]", width=84)),
+                box_line(kv_line(f"QUEUE {result.queue_depth_mean:.3f} [{severity_markup(queue_state)}]", f"LATE/s {result.late_rate_per_sec:.3f} [{severity_markup(late_state)}]", width=84)),
+                box_line(kv_line(f"SAMPLES {result.sample_count}", f"NOTE {html.escape(result.notes)}", width=84)),
             ]
         )
     else:
@@ -346,15 +387,16 @@ def write_overlay_snapshot(
     lines.append(box_sep())
     if result is not None:
         quality_state = "OK"
-        if result.drop_rate_per_sec > 0.20 or result.e2e_p95_mean_ms > 120.0:
+        if result.drop_rate_per_sec > 0.20 or result.e2e_p95_mean_ms > 120.0 or result.queue_depth_mean > 1.60:
             quality_state = "RISK"
-        elif result.drop_rate_per_sec > 0.06 or result.e2e_p95_mean_ms > 70.0:
+        elif result.drop_rate_per_sec > 0.06 or result.e2e_p95_mean_ms > 70.0 or result.queue_depth_mean > 0.80:
             quality_state = "WARN"
+        note_state = note_severity(result.notes)
         lines.extend(
             [
                 box_line(kv_line(f"SCORE TR  {trend_render(valid_scores, chart_mode, width=28)}", f"FPS TR {trend_render(valid_present, chart_mode, width=24)}", width=84)),
                 box_line(kv_line(f"DROP TR   {trend_render(valid_drop, chart_mode, width=28)}", f"MBPS TR {trend_render(valid_bitrate, chart_mode, width=23)}", width=84)),
-                box_line(kv_line(f"E2E/DECODE/RENDER p95: {result.e2e_p95_mean_ms:.1f}/{result.decode_p95_mean_ms:.1f}/{result.render_p95_mean_ms:.1f} ms", f"STATE {severity_markup(quality_state)}/{html.escape(result.notes)}", width=84)),
+                box_line(kv_line(f"E2E/DECODE/RENDER p95: {result.e2e_p95_mean_ms:.1f}/{result.decode_p95_mean_ms:.1f}/{result.render_p95_mean_ms:.1f} ms", f"STATE {severity_markup(quality_state)} | NOTE {severity_markup(note_state)}", width=84)),
             ]
         )
     else:
