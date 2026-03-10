@@ -18,6 +18,7 @@ import android.text.Spanned;
 import android.text.method.ScrollingMovementMethod;
 import android.text.style.ForegroundColorSpan;
 import android.util.Log;
+import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.SurfaceHolder;
@@ -216,6 +217,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean isFullscreen = false;
     private boolean cursorOverlayEnabled = true;
     private boolean debugControlsVisible = false;
+    private boolean debugOverlayVisible = false;
     private boolean liveLogVisible = false;
     private long lastHudAdbLogAt = 0L;
     private String lastHudAdbSnapshot = "";
@@ -572,6 +574,27 @@ public class MainActivity extends AppCompatActivity {
         super.onBackPressed();
     }
 
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (BuildConfig.DEBUG) {
+            if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+                if (event.getRepeatCount() == 0 && !debugOverlayVisible) {
+                    setDebugOverlayVisible(true);
+                    Toast.makeText(this, "Debug overlay ON", Toast.LENGTH_SHORT).show();
+                }
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+                if (event.getRepeatCount() == 0 && debugOverlayVisible) {
+                    setDebugOverlayVisible(false);
+                    Toast.makeText(this, "Debug overlay OFF", Toast.LENGTH_SHORT).show();
+                }
+                return true;
+            }
+        }
+        return super.onKeyDown(keyCode, event);
+    }
+
     // ══════════════════════════════════════════════════════════════════════════
     // View setup
     // ══════════════════════════════════════════════════════════════════════════
@@ -661,18 +684,11 @@ public class MainActivity extends AppCompatActivity {
         if (BuildConfig.DEBUG) {
             hideSimpleMenu();
             setFullscreen(false);
-            if (quickActionRow != null) {
-                quickActionRow.setVisibility(View.VISIBLE);
-            }
             if (statusPanel != null) {
                 statusPanel.setVisibility(View.GONE);
             }
             if (perfHudPanel != null) {
                 perfHudPanel.setVisibility(View.GONE);
-            }
-            if (debugInfoPanel != null) {
-                debugInfoPanel.setVisibility(View.VISIBLE);
-                debugInfoPanel.setAlpha(DEBUG_INFO_ALPHA_IDLE);
             }
             if (debugFpsGraphView != null) {
                 debugFpsGraphView.setCapacity(DEBUG_FPS_GRAPH_POINTS);
@@ -683,6 +699,7 @@ public class MainActivity extends AppCompatActivity {
             if (fullscreenButton != null) {
                 fullscreenButton.setVisibility(View.VISIBLE);
             }
+            setDebugOverlayVisible(debugOverlayVisible);
             startDebugGraphSampling();
             refreshDebugInfoOverlay();
             return;
@@ -938,6 +955,29 @@ public class MainActivity extends AppCompatActivity {
         }
         button.setEnabled(enabled);
         button.setAlpha(enabled ? 1.0f : 0.45f);
+    }
+
+    private void setDebugOverlayVisible(boolean visible) {
+        debugOverlayVisible = visible;
+        if (!BuildConfig.DEBUG) {
+            return;
+        }
+        int visibility = visible ? View.VISIBLE : View.GONE;
+        if (topBar != null) {
+            topBar.setVisibility(visibility);
+        }
+        if (quickActionRow != null) {
+            quickActionRow.setVisibility(visibility);
+        }
+        if (debugInfoPanel != null) {
+            debugInfoPanel.setVisibility(visibility);
+            if (visible) {
+                debugInfoPanel.setAlpha(DEBUG_INFO_ALPHA_IDLE);
+            }
+        }
+        if (!visible) {
+            hideSettingsPanel();
+        }
     }
 
     private void updateActionButtonsEnabled() {
