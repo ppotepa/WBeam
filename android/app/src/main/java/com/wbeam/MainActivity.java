@@ -2011,48 +2011,42 @@ public class MainActivity extends AppCompatActivity {
             String tone
     ) {
         if (perfHudWebView != null) {
-            String html = "<!doctype html><html><head><meta charset='utf-8'/>"
-                    + "<style>"
-                    + "html,body{margin:0;padding:0;background:transparent;color:#d9fbff;font-family:'JetBrains Mono','IBM Plex Mono',monospace;font-size:11px;}"
-                    + ".root{padding:8px;box-sizing:border-box;width:100vw;height:100vh;display:grid;grid-template-rows:auto 1fr;gap:8px;}"
-                    + ".top{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;}"
-                    + ".chip{border:1px solid rgba(126,245,255,.35);background:rgba(2,20,24,.30);padding:6px 8px;}"
-                    + ".chip .k{font-size:10px;color:#9dddea;display:block;letter-spacing:.05em;}"
-                    + ".chip .v{font-size:12px;color:#dcf9ff;}"
-                    + ".state-ok{color:#6ee7b7;} .state-warn{color:#fbbf24;} .state-risk{color:#f87171;}"
-                    + ".main{display:grid;grid-template-columns:1fr 1fr;gap:8px;min-height:0;}"
-                    + ".panel{border:1px solid rgba(126,245,255,.35);background:rgba(2,20,24,.24);padding:6px;min-height:0;overflow:auto;}"
-                    + ".kpi{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;}"
-                    + ".kpi .item{border:1px solid rgba(126,245,255,.25);padding:6px;background:rgba(0,0,0,.25);}"
-                    + ".kpi .item .k{font-size:10px;color:#9dddea;display:block;}"
-                    + ".kpi .item .v{font-size:12px;color:#dcf9ff;}"
-                    + ".tbl{width:100%;border-collapse:collapse;table-layout:fixed;}"
-                    + ".tbl td{border:1px solid rgba(126,245,255,.28);padding:4px 6px;vertical-align:top;word-break:break-word;}"
-                    + ".tbl td:first-child{width:52%;color:#dffcff;} .tbl td:last-child{text-align:right;color:#b9f8ff;}"
-                    + "</style></head><body><div class='root'>"
-                    + "<div class='top'>"
-                    + "<div class='chip'><span class='k'>HUD</span><span class='v'>RUNTIME</span></div>"
-                    + "<div class='chip'><span class='k'>STATE</span><span class='v state-" + escapeHtml(tone) + "'>" + escapeHtml(daemonStateUi) + "</span></div>"
-                    + "<div class='chip'><span class='k'>FPS</span><span class='v'>" + String.format(Locale.US, "%.0f / %.1f", targetFps, presentFps) + "</span></div>"
-                    + "<div class='chip'><span class='k'>ADAPT</span><span class='v'>L" + adaptiveLevel + " " + escapeHtml(adaptiveAction) + "</span></div>"
-                    + "</div>"
-                    + "<div class='main'>"
-                    + "<div class='panel'><div class='kpi'>"
-                    + "<div class='item'><span class='k'>E2E p95</span><span class='v'>" + String.format(Locale.US, "%.1f ms", e2eP95) + "</span></div>"
-                    + "<div class='item'><span class='k'>Frame p95</span><span class='v'>" + String.format(Locale.US, "%.2f ms", frametimeP95) + "</span></div>"
-                    + "<div class='item'><span class='k'>Decode p95</span><span class='v'>" + String.format(Locale.US, "%.2f ms", decodeP95) + "</span></div>"
-                    + "<div class='item'><span class='k'>Render p95</span><span class='v'>" + String.format(Locale.US, "%.2f ms", renderP95) + "</span></div>"
-                    + "<div class='item'><span class='k'>Recv/Decode FPS</span><span class='v'>" + String.format(Locale.US, "%.1f / %.1f", recvFps, decodeFps) + "</span></div>"
-                    + "<div class='item'><span class='k'>Drops</span><span class='v'>" + drops + " (bp " + bpHigh + "/" + bpRecover + ")</span></div>"
-                    + "</div></div>"
-                    + "<div class='panel'><table class='tbl'>"
-                    + "<tr><td>Transport queue</td><td>" + qT + "/" + qTMax + "</td></tr>"
-                    + "<tr><td>Decode queue</td><td>" + qD + "/" + qDMax + "</td></tr>"
-                    + "<tr><td>Render queue</td><td>" + qR + "/" + qRMax + "</td></tr>"
-                    + "<tr><td>Reason</td><td>" + escapeHtml(reason == null || reason.isEmpty() ? "-" : reason) + "</td></tr>"
-                    + "<tr><td>Host error</td><td>" + escapeHtml(daemonLastError == null || daemonLastError.isEmpty() ? "-" : daemonLastError) + "</td></tr>"
-                    + "</table></div>"
-                    + "</div></div></body></html>";
+            StringBuilder chips = new StringBuilder();
+            chips.append(hudChip("HUD", "RUNTIME", ""));
+            chips.append(hudChip("STATE", daemonStateUi, hudToneClass(tone)));
+            chips.append(hudChip("FPS", String.format(Locale.US, "%.0f / %.1f", targetFps, presentFps), hudToneClass(tone)));
+            chips.append(hudChip("ADAPT", "L" + adaptiveLevel + " " + safeText(adaptiveAction), ""));
+
+            StringBuilder cards = new StringBuilder();
+            cards.append(hudCard("E2E p95", String.format(Locale.US, "%.1f ms", e2eP95), hudToneClass(tone)));
+            cards.append(hudCard("Frame p95", String.format(Locale.US, "%.2f ms", frametimeP95), ""));
+            cards.append(hudCard("Decode p95", String.format(Locale.US, "%.2f ms", decodeP95), ""));
+            cards.append(hudCard("Render p95", String.format(Locale.US, "%.2f ms", renderP95), ""));
+            cards.append(hudCard("Recv/Decode FPS", String.format(Locale.US, "%.1f / %.1f", recvFps, decodeFps), ""));
+            cards.append(hudCard("Drops", drops + " (bp " + bpHigh + "/" + bpRecover + ")", ""));
+
+            StringBuilder details = new StringBuilder();
+            details.append(hudDetailRow("Transport queue", qT + "/" + qTMax));
+            details.append(hudDetailRow("Decode queue", qD + "/" + qDMax));
+            details.append(hudDetailRow("Render queue", qR + "/" + qRMax));
+            details.append(hudDetailRow("Reason", safeText(reason)));
+            details.append(hudDetailRow("Host error", safeText(daemonLastError)));
+
+            String trend = "runtime health=" + tone.toUpperCase(Locale.US)
+                    + " | recv=" + String.format(Locale.US, "%.1f", recvFps)
+                    + " decode=" + String.format(Locale.US, "%.1f", decodeFps)
+                    + " present=" + String.format(Locale.US, "%.1f", presentFps)
+                    + " | drops=" + drops;
+
+            String html = buildUnifiedHudHtml(
+                    "runtime",
+                    "LIVE METRICS",
+                    -1,
+                    chips.toString(),
+                    cards.toString(),
+                    trend,
+                    details.toString()
+            );
             perfHudWebView.loadDataWithBaseURL(null, html, "text/html", "utf-8", null);
             perfHudWebView.setVisibility(View.VISIBLE);
             perfHudText.setVisibility(View.GONE);
@@ -2185,7 +2179,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private String buildTrainerHudHtml(String hudText, String progressLine, int progressPercent) {
-        StringBuilder rows = new StringBuilder();
+        StringBuilder details = new StringBuilder();
         String[] lines = hudText.split("\n");
         for (String raw : lines) {
             String line = raw == null ? "" : raw.trim();
@@ -2193,44 +2187,25 @@ public class MainActivity extends AppCompatActivity {
                 continue;
             }
             if (line.startsWith("+") && line.endsWith("+")) {
-                rows.append("<tr class='sep'><td colspan='2'></td></tr>");
+                details.append(hudDetailRow(" ", " "));
                 continue;
             }
             if (line.startsWith("|") && line.endsWith("|") && line.length() > 2) {
                 String content = line.substring(1, line.length() - 1).trim();
                 String[] parts = splitHudColumns(content);
-                rows.append("<tr><td class='left'>")
-                        .append(escapeHtml(parts[0]))
-                        .append("</td><td class='right'>")
-                        .append(escapeHtml(parts[1]))
-                        .append("</td></tr>");
+                details.append(hudDetailRow(parts[0], parts[1]));
             } else {
-                rows.append("<tr><td class='single' colspan='2'>")
-                        .append(escapeHtml(line))
-                        .append("</td></tr>");
+                details.append(hudDetailRow(line, "-"));
             }
         }
-        int safePct = progressPercent < 0 ? 0 : progressPercent;
         String progressText = progressLine == null || progressLine.trim().isEmpty()
                 ? "TRAINING PROGRESS ..."
                 : progressLine.trim();
-        return "<!doctype html><html><head><meta charset='utf-8'/>"
-                + "<style>"
-                + "html,body{margin:0;padding:0;background:transparent;color:#d9fbff;font-family:'JetBrains Mono','IBM Plex Mono',monospace;font-size:11px;}"
-                + ".root{padding:8px;box-sizing:border-box;width:100vw;height:100vh;display:flex;flex-direction:column;gap:8px;}"
-                + ".progress{border:1px solid rgba(126,245,255,.45);background:rgba(2,20,24,.30);padding:6px 8px;}"
-                + ".p-label{font-size:11px;color:#b9f8ff;letter-spacing:.04em;}"
-                + ".p-track{margin-top:6px;height:7px;background:rgba(0,0,0,.35);border:1px solid rgba(126,245,255,.35);}"
-                + ".p-fill{height:100%;width:" + safePct + "%;background:linear-gradient(90deg,#60f2c2,#7dd3fc);}"
-                + "table{width:100%;border-collapse:collapse;table-layout:fixed;background:rgba(2,20,24,.22);}"
-                + "td{border:1px solid rgba(126,245,255,.28);padding:4px 6px;vertical-align:top;word-break:break-word;}"
-                + "td.left{width:58%;color:#dffcff;} td.right{width:42%;text-align:right;color:#b9f8ff;}"
-                + "td.single{color:#9ee8f2;text-align:left;}"
-                + "tr.sep td{height:2px;padding:0;border-left:0;border-right:0;border-bottom:0;border-top:1px solid rgba(126,245,255,.42);}"
-                + "</style></head><body><div class='root'>"
-                + "<div class='progress'><div class='p-label'>" + escapeHtml(progressText) + "</div><div class='p-track'><div class='p-fill'></div></div></div>"
-                + "<table>" + rows + "</table>"
-                + "</div></body></html>";
+        String chips = hudChip("HUD", "TRAINER", "")
+                + hudChip("SOURCE", "TEXT SNAPSHOT", "state-pending")
+                + hudChip("PROGRESS", String.valueOf(clampPercent(progressPercent)) + "%", "");
+        String cards = hudCard("MODE", "fallback", "state-pending");
+        return buildUnifiedHudHtml("trainer", progressText, progressPercent, chips, cards, "text snapshot mode", details.toString());
     }
 
     private String buildTrainerHudHtmlFromJson(JSONObject hud, String progressLine, int progressPercent) {
@@ -2292,57 +2267,125 @@ public class MainActivity extends AppCompatActivity {
         String trendMbps = trends != null ? escapeHtml(trends.optJSONArray("mbps") != null ? trends.optJSONArray("mbps").toString() : "[]") : "[]";
         String statusNote = status != null ? escapeHtml(status.optString("note", "")) : "";
 
-        int safePct = progressPercent < 0 ? 0 : progressPercent;
         String pLabel = progressLine == null || progressLine.trim().isEmpty() ? "TRAINING PROGRESS ..." : progressLine.trim();
+        String chips = hudChip("RUN", runId, "")
+                + hudChip("PROFILE", profile, "")
+                + hudChip("GEN", gIdx + "/" + gTotal, "")
+                + hudChip("TRIAL", trialId + " (" + tIdx + "/" + tTotal + ")", "")
+                + hudChip("ENCODER", encoder, "")
+                + hudChip("SIZE/FPS", size + " @" + fps + " | " + String.format(Locale.US, "%.1f", targetMbps) + " Mbps", "");
+
+        String cards = hudCard("SCORE", Double.isNaN(score) ? "-" : String.format(Locale.US, "%.2f", score), "")
+                + hudCard("PRESENT FPS", Double.isNaN(present) ? "-" : String.format(Locale.US, "%.1f", present), hudToneClass(fpsState))
+                + hudCard("PIPE/DEC FPS", (Double.isNaN(recv) ? "-" : String.format(Locale.US, "%.1f", recv)) + " / " + (Double.isNaN(decode) ? "-" : String.format(Locale.US, "%.1f", decode)), "")
+                + hudCard("LIVE MBPS", Double.isNaN(liveMbps) ? "-" : String.format(Locale.US, "%.2f", liveMbps), hudToneClass(mbpsState))
+                + hudCard("LAT p95 ms", Double.isNaN(latency) ? "-" : String.format(Locale.US, "%.1f", latency), hudToneClass(latState))
+                + hudCard("DROPS/s | QUEUE", (Double.isNaN(drops) ? "-" : String.format(Locale.US, "%.3f", drops)) + " | " + (Double.isNaN(queue) ? "-" : String.format(Locale.US, "%.3f", queue)), hudToneClass(dropState));
+
+        String trend = "layout=" + safeText(layoutMode)
+                + " | quality=" + safeText(qualityState.toUpperCase(Locale.US))
+                + " | score trend: " + trendScore
+                + " | fps trend: " + trendFps
+                + " | mbps trend: " + trendMbps
+                + " | note: " + statusNote;
+
+        return buildUnifiedHudHtml("trainer", pLabel, progressPercent, chips, cards, trend, detailsRows.toString());
+    }
+
+    private String buildUnifiedHudHtml(
+            String mode,
+            String progressLabel,
+            int progressPercent,
+            String chipsHtml,
+            String cardsHtml,
+            String trendText,
+            String detailsRowsHtml
+    ) {
+        int safePct = clampPercent(progressPercent);
+        String modeUpper = safeText(mode).toUpperCase(Locale.US);
+        String progress = safeText(progressLabel);
         return "<!doctype html><html><head><meta charset='utf-8'/>"
                 + "<style>"
                 + "html,body{margin:0;padding:0;background:transparent;color:#d9fbff;font-family:'JetBrains Mono','IBM Plex Mono',monospace;font-size:11px;}"
                 + ".root{padding:8px;box-sizing:border-box;width:100vw;height:100vh;display:grid;grid-template-rows:auto auto 1fr;gap:8px;}"
-                + ".top{display:grid;grid-template-columns:1.2fr repeat(5,1fr);gap:6px;}"
-                + ".chip{border:1px solid rgba(126,245,255,.35);background:rgba(2,20,24,.30);padding:6px 8px;}"
-                + ".chip .k{font-size:10px;color:#9dddea;letter-spacing:.05em;display:block;}"
+                + ".top{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px;}"
+                + ".chip{border:1px solid rgba(126,245,255,.35);background:rgba(2,20,24,.30);padding:6px 8px;min-height:36px;}"
+                + ".chip .k{font-size:10px;color:#9dddea;display:block;letter-spacing:.05em;}"
                 + ".chip .v{font-size:12px;color:#dcf9ff;}"
                 + ".progress{border:1px solid rgba(126,245,255,.45);background:rgba(2,20,24,.30);padding:6px 8px;}"
                 + ".p-label{font-size:11px;color:#b9f8ff;letter-spacing:.04em;}"
                 + ".p-track{margin-top:6px;height:7px;background:rgba(0,0,0,.35);border:1px solid rgba(126,245,255,.35);}"
                 + ".p-fill{height:100%;width:" + safePct + "%;background:linear-gradient(90deg,#60f2c2,#7dd3fc);}"
-                + ".main{display:grid;grid-template-columns:1fr 1fr;gap:8px;min-height:0;}"
+                + ".main{display:grid;grid-template-columns:1.25fr 1fr;gap:8px;min-height:0;}"
                 + ".panel{border:1px solid rgba(126,245,255,.35);background:rgba(2,20,24,.24);padding:6px;min-height:0;overflow:auto;}"
                 + ".kpi{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;}"
                 + ".kpi .item{border:1px solid rgba(126,245,255,.25);padding:6px;background:rgba(0,0,0,.25);}"
                 + ".kpi .item .k{font-size:10px;color:#9dddea;display:block;}"
                 + ".kpi .item .v{font-size:12px;color:#dcf9ff;}"
-                + ".state-ok{color:#6ee7b7;} .state-warn{color:#fbbf24;} .state-risk{color:#f87171;} .state-pending{color:#94a3b8;}"
-                + ".trend{font-size:10px;line-height:1.3;margin-top:6px;color:#9dddea;word-break:break-all;}"
+                + ".trend{font-size:10px;line-height:1.3;margin-top:6px;color:#9dddea;word-break:break-word;}"
                 + ".detail-table{width:100%;border-collapse:collapse;table-layout:fixed;}"
                 + ".detail-table td{border:1px solid rgba(126,245,255,.28);padding:4px 6px;vertical-align:top;word-break:break-word;}"
                 + ".detail-table td:first-child{width:52%;color:#dffcff;} .detail-table td:last-child{text-align:right;color:#b9f8ff;}"
+                + ".state-ok{color:#6ee7b7;} .state-warn{color:#fbbf24;} .state-risk{color:#f87171;} .state-pending{color:#94a3b8;}"
                 + "</style></head><body><div class='root'>"
                 + "<div class='top'>"
-                + "<div class='chip'><span class='k'>RUN</span><span class='v'>" + escapeHtml(runId) + "</span></div>"
-                + "<div class='chip'><span class='k'>PROFILE</span><span class='v'>" + escapeHtml(profile) + "</span></div>"
-                + "<div class='chip'><span class='k'>GEN</span><span class='v'>" + gIdx + "/" + gTotal + "</span></div>"
-                + "<div class='chip'><span class='k'>TRIAL</span><span class='v'>" + escapeHtml(trialId) + " (" + tIdx + "/" + tTotal + ")</span></div>"
-                + "<div class='chip'><span class='k'>ENCODER</span><span class='v'>" + escapeHtml(encoder) + "</span></div>"
-                + "<div class='chip'><span class='k'>SIZE/FPS</span><span class='v'>" + escapeHtml(size) + " @" + fps + " | " + String.format(Locale.US, "%.1f", targetMbps) + " Mbps</span></div>"
+                + hudChip("HUD MODE", modeUpper, "")
+                + chipsHtml
                 + "</div>"
-                + "<div class='progress'><div class='p-label'>" + escapeHtml(pLabel) + "</div><div class='p-track'><div class='p-fill'></div></div></div>"
+                + "<div class='progress'><div class='p-label'>" + escapeHtml(progress.isEmpty() ? "HUD ACTIVE" : progress) + "</div><div class='p-track'><div class='p-fill'></div></div></div>"
                 + "<div class='main'>"
-                + "<div class='panel'>"
-                + "<div class='kpi'>"
-                + "<div class='item'><span class='k'>SCORE</span><span class='v'>" + (Double.isNaN(score) ? "-" : String.format(Locale.US, "%.2f", score)) + "</span></div>"
-                + "<div class='item'><span class='k'>PRESENT FPS</span><span class='v state-" + escapeHtml(fpsState) + "'>" + (Double.isNaN(present) ? "-" : String.format(Locale.US, "%.1f", present)) + "</span></div>"
-                + "<div class='item'><span class='k'>PIPE/DEC FPS</span><span class='v'>" + (Double.isNaN(recv) ? "-" : String.format(Locale.US, "%.1f", recv)) + " / " + (Double.isNaN(decode) ? "-" : String.format(Locale.US, "%.1f", decode)) + "</span></div>"
-                + "<div class='item'><span class='k'>LIVE MBPS</span><span class='v state-" + escapeHtml(mbpsState) + "'>" + (Double.isNaN(liveMbps) ? "-" : String.format(Locale.US, "%.2f", liveMbps)) + "</span></div>"
-                + "<div class='item'><span class='k'>LAT p95 ms</span><span class='v state-" + escapeHtml(latState) + "'>" + (Double.isNaN(latency) ? "-" : String.format(Locale.US, "%.1f", latency)) + "</span></div>"
-                + "<div class='item'><span class='k'>DROPS/s | QUEUE</span><span class='v state-" + escapeHtml(dropState) + "'>" + (Double.isNaN(drops) ? "-" : String.format(Locale.US, "%.3f", drops)) + " | " + (Double.isNaN(queue) ? "-" : String.format(Locale.US, "%.3f", queue)) + "</span></div>"
-                + "</div>"
-                + "<div class='trend'>layout=" + escapeHtml(layoutMode) + " | quality=<span class='state-" + escapeHtml(qualityState) + "'>" + escapeHtml(qualityState.toUpperCase(Locale.US)) + "</span><br/>"
-                + "score trend: " + trendScore + "<br/>fps trend: " + trendFps + "<br/>mbps trend: " + trendMbps + "<br/>note: " + statusNote + "</div>"
-                + "</div>"
-                + "<div class='panel'><table class='detail-table'>" + detailsRows + "</table></div>"
+                + "<div class='panel'><div class='kpi'>" + cardsHtml + "</div><div class='trend'>" + escapeHtml(safeText(trendText)) + "</div></div>"
+                + "<div class='panel'><table class='detail-table'>" + detailsRowsHtml + "</table></div>"
                 + "</div>"
                 + "</div></body></html>";
+    }
+
+    private int clampPercent(int progressPercent) {
+        if (progressPercent < 0) {
+            return 0;
+        }
+        return Math.max(0, Math.min(100, progressPercent));
+    }
+
+    private String safeText(String value) {
+        if (value == null || value.trim().isEmpty()) {
+            return "-";
+        }
+        return value.trim();
+    }
+
+    private String hudToneClass(String tone) {
+        String t = tone == null ? "" : tone.trim().toLowerCase(Locale.US);
+        if ("risk".equals(t) || "bad".equals(t) || "red".equals(t)) {
+            return "state-risk";
+        }
+        if ("warn".equals(t) || "orange".equals(t) || "yellow".equals(t)) {
+            return "state-warn";
+        }
+        if ("ok".equals(t) || "good".equals(t) || "green".equals(t)) {
+            return "state-ok";
+        }
+        return "state-pending";
+    }
+
+    private String hudChip(String key, String value, String toneClass) {
+        String tone = toneClass == null ? "" : toneClass.trim();
+        String cls = tone.isEmpty() ? "v" : "v " + tone;
+        return "<div class='chip'><span class='k'>" + escapeHtml(safeText(key))
+                + "</span><span class='" + escapeHtml(cls) + "'>"
+                + escapeHtml(safeText(value)) + "</span></div>";
+    }
+
+    private String hudCard(String key, String value, String toneClass) {
+        String tone = toneClass == null ? "" : toneClass.trim();
+        String cls = tone.isEmpty() ? "v" : "v " + tone;
+        return "<div class='item'><span class='k'>" + escapeHtml(safeText(key))
+                + "</span><span class='" + escapeHtml(cls) + "'>"
+                + escapeHtml(safeText(value)) + "</span></div>";
+    }
+
+    private String hudDetailRow(String left, String right) {
+        return "<tr><td>" + escapeHtml(safeText(left)) + "</td><td>" + escapeHtml(safeText(right)) + "</td></tr>";
     }
 
     private String[] splitHudColumns(String content) {

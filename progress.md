@@ -2095,3 +2095,17 @@ Status: active
   - `python3 -m py_compile src/domains/training/wizard.py` -> OK
   - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
   - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+
+## In Progress (2026-03-10) - Default HUD maquette + shared shell for all HUD contexts
+- Added persistent default HUD maquette artifact under:
+  - `docs/ui/hud/default-hud.maquette.xml`
+  - (copied from existing trainer maquette for versioned reference).
+- Refactored Android HUD HTML generation into one shared shell builder:
+  - `buildUnifiedHudHtml(...)`
+  - helper atoms: `hudChip(...)`, `hudCard(...)`, `hudDetailRow(...)`, `hudToneClass(...)`
+- Both context renderers now use the same maquette-like shell:
+  - trainer JSON renderer uses shared shell with trainer-specific content blocks,
+  - runtime debug renderer uses shared shell with runtime-specific metrics/trend/detail blocks.
+- Kept one HUD display mechanism and one toggle model (VolUp+VolDown hold), while allowing context-dependent data composition.
+- Validation:
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK

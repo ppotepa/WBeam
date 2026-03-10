@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="hudTitle hudDesc">
+  <title id="hudTitle">WBeam Trainer HUD Maquette</title>
+  <desc id="hudDesc">Mock layout for full-screen Android training HUD with placeholders and threshold states.</desc>
+
+  <defs>
+    <linearGradient id="bgFade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#001418" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#001418" stop-opacity="0.08"/>
+    </linearGradient>
+    <pattern id="gridSmall" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#6ef2ff" stroke-opacity="0.09" stroke-width="1"/>
+    </pattern>
+    <pattern id="gridMajor" width="160" height="160" patternUnits="userSpaceOnUse">
+      <path d="M 160 0 L 0 0 0 160" fill="none" stroke="#6ef2ff" stroke-opacity="0.18" stroke-width="1.2"/>
+    </pattern>
+    <style><![CDATA[
+      .frame { fill: url(#bgFade); stroke: #6ef2ff; stroke-opacity: 0.28; stroke-width: 2; }
+      .panel { fill: #02171b; fill-opacity: 0.18; stroke: #6ef2ff; stroke-opacity: 0.34; stroke-width: 1.4; }
+      .label { fill: #b7f8ff; fill-opacity: 0.86; font-family: "IBM Plex Mono", "JetBrains Mono", "Monospace"; font-size: 21px; font-weight: 600; letter-spacing: 0.5px; }
+      .value { fill: #dcfeff; fill-opacity: 0.96; font-family: "IBM Plex Mono", "JetBrains Mono", "Monospace"; font-size: 31px; font-weight: 700; }
+      .tiny { fill: #b7f8ff; fill-opacity: 0.72; font-family: "IBM Plex Mono", "JetBrains Mono", "Monospace"; font-size: 16px; font-weight: 500; }
+      .ok { fill: #6ee7b7; }
+      .warn { fill: #fbbf24; }
+      .risk { fill: #f87171; }
+      .placeholder { fill: none; stroke: #6ef2ff; stroke-opacity: 0.42; stroke-dasharray: 8 7; stroke-width: 1.2; }
+      .spark { fill: none; stroke: #b7f8ff; stroke-opacity: 0.9; stroke-width: 2; }
+      .bar { fill: #7dd3fc; fill-opacity: 0.65; }
+      .chip { fill: #03242a; fill-opacity: 0.58; stroke: #6ef2ff; stroke-opacity: 0.5; stroke-width: 1; }
+    ]]></style>
+  </defs>
+
+  <rect x="0" y="0" width="1920" height="1080" fill="none"/>
+  <rect x="0" y="0" width="1920" height="1080" fill="url(#gridSmall)"/>
+  <rect x="0" y="0" width="1920" height="1080" fill="url(#gridMajor)"/>
+
+  <rect class="frame" x="24" y="24" width="1872" height="1032" rx="14"/>
+
+  <!-- Top strip -->
+  <rect class="panel" x="48" y="48" width="1824" height="114" rx="10"/>
+  <text class="label" x="72" y="92">WBEAM TRAINER HUD</text>
+  <text class="tiny" x="72" y="124">RUN {run_id} | PROFILE {profile_name}</text>
+
+  <rect class="chip" x="740" y="70" width="182" height="58" rx="8"/>
+  <text class="tiny" x="760" y="93">GENERATION</text>
+  <text class="value" x="760" y="122">{g}/{G}</text>
+
+  <rect class="chip" x="952" y="70" width="228" height="58" rx="8"/>
+  <text class="tiny" x="972" y="93">TRIAL</text>
+  <text class="value" x="972" y="122">{t}/{T}</text>
+
+  <rect class="chip" x="1210" y="70" width="238" height="58" rx="8"/>
+  <text class="tiny" x="1230" y="93">ENCODER</text>
+  <text class="value" x="1230" y="122">{h264|h265|mjpeg}</text>
+
+  <rect class="chip" x="1478" y="70" width="188" height="58" rx="8"/>
+  <text class="tiny" x="1498" y="93">SIZE</text>
+  <text class="value" x="1498" y="122">{WxH}</text>
+
+  <rect class="chip" x="1696" y="70" width="152" height="58" rx="8"/>
+  <text class="tiny" x="1716" y="93">FPS</text>
+  <text class="value" x="1716" y="122">{60}</text>
+
+  <!-- Main metrics row -->
+  <rect class="panel" x="48" y="188" width="896" height="272" rx="10"/>
+  <text class="label" x="72" y="226">LIVE METRICS</text>
+
+  <text class="tiny" x="72" y="266">Present FPS</text>
+  <text class="value" x="72" y="304">{58.9}</text>
+  <text class="label ok" x="260" y="304">OK</text>
+
+  <text class="tiny" x="72" y="346">End-to-end p95</text>
+  <text class="value" x="72" y="384">{42.1 ms}</text>
+  <text class="label warn" x="290" y="384">WARN</text>
+
+  <text class="tiny" x="72" y="426">Drop rate / sec</text>
+  <text class="value" x="72" y="464">{0.004}</text>
+  <text class="label ok" x="290" y="464">OK</text>
+
+  <text class="tiny" x="430" y="266">Live bitrate</text>
+  <text class="value" x="430" y="304">{34.8 Mbps}</text>
+  <text class="label ok" x="706" y="304">OK</text>
+
+  <text class="tiny" x="430" y="346">Queue depth</text>
+  <text class="value" x="430" y="384">{0.36}</text>
+  <text class="label warn" x="706" y="384">WARN</text>
+
+  <text class="tiny" x="430" y="426">Late frames / sec</text>
+  <text class="value" x="430" y="464">{0.11}</text>
+  <text class="label ok" x="706" y="464">OK</text>
+
+  <rect class="placeholder" x="782" y="248" width="132" height="188" rx="8"/>
+  <text class="tiny" x="798" y="278">SPARK</text>
+  <path class="spark" d="M 796 398 L 812 382 L 828 388 L 844 366 L 860 354 L 876 360 L 892 338"/>
+
+  <!-- Trends row -->
+  <rect class="panel" x="976" y="188" width="896" height="272" rx="10"/>
+  <text class="label" x="1000" y="226">TRENDS (LAST N SAMPLES)</text>
+
+  <text class="tiny" x="1000" y="266">FPS trend</text>
+  <path class="spark" d="M 1000 324 L 1040 318 L 1080 310 L 1120 308 L 1160 302 L 1200 306 L 1240 298"/>
+  <text class="tiny" x="1260" y="328">min {54.2}  max {60.3}</text>
+
+  <text class="tiny" x="1000" y="364">Mbps trend</text>
+  <rect class="bar" x="1000" y="380" width="20" height="44"/>
+  <rect class="bar" x="1028" y="392" width="20" height="32"/>
+  <rect class="bar" x="1056" y="366" width="20" height="58"/>
+  <rect class="bar" x="1084" y="356" width="20" height="68"/>
+  <rect class="bar" x="1112" y="372" width="20" height="52"/>
+  <rect class="bar" x="1140" y="350" width="20" height="74"/>
+  <rect class="bar" x="1168" y="362" width="20" height="62"/>
+  <text class="tiny" x="1210" y="416">avg {31.7 Mbps}</text>
+
+  <rect class="placeholder" x="1380" y="252" width="462" height="176" rx="8"/>
+  <text class="tiny" x="1398" y="280">PIPE/DECODE/RENDER P95 PLACEHOLDER</text>
+  <text class="tiny" x="1398" y="316">pipe: {58.1} decode: {57.6} render: {57.1}</text>
+  <text class="tiny" x="1398" y="352">e2e p95: {42.1ms}   timeout mean: {5.2ms}</text>
+
+  <!-- Lower status and legend -->
+  <rect class="panel" x="48" y="488" width="1824" height="378" rx="10"/>
+  <text class="label" x="72" y="526">SESSION + QUALITY STATE</text>
+
+  <rect class="chip" x="72" y="548" width="310" height="58" rx="8"/>
+  <text class="tiny" x="90" y="571">SESSION STATE</text>
+  <text class="value" x="90" y="600">{STREAMING}</text>
+
+  <rect class="chip" x="398" y="548" width="310" height="58" rx="8"/>
+  <text class="tiny" x="416" y="571">BEST TRIAL</text>
+  <text class="value" x="416" y="600">{T05}</text>
+
+  <rect class="chip" x="724" y="548" width="310" height="58" rx="8"/>
+  <text class="tiny" x="742" y="571">BEST SCORE</text>
+  <text class="value" x="742" y="600">{88.27}</text>
+
+  <rect class="chip" x="1050" y="548" width="310" height="58" rx="8"/>
+  <text class="tiny" x="1068" y="571">TARGET BITRATE</text>
+  <text class="value" x="1068" y="600">{40.0 Mbps}</text>
+
+  <rect class="chip" x="1376" y="548" width="310" height="58" rx="8"/>
+  <text class="tiny" x="1394" y="571">LIVE NOTE</text>
+  <text class="value" x="1394" y="600">{ok}</text>
+
+  <rect class="placeholder" x="72" y="628" width="1268" height="212" rx="8"/>
+  <text class="tiny" x="90" y="656">EVENT LOG / SAMPLE MARKERS (placeholder)</text>
+  <text class="tiny" x="90" y="688">{t=12.4s} apply candidate {h265 @ 2000x1200 60fps 35Mbps}</text>
+  <text class="tiny" x="90" y="720">{t=18.7s} sample stable, fps=58.9 mbps=34.8 drop=0.004</text>
+  <text class="tiny" x="90" y="752">{t=24.1s} quality gate pass, score update -> 88.27</text>
+
+  <rect class="placeholder" x="1360" y="628" width="488" height="212" rx="8"/>
+  <text class="tiny" x="1378" y="656">THRESHOLD LEGEND</text>
+  <text class="label ok" x="1378" y="694">OK</text>
+  <text class="tiny" x="1452" y="694">within stable targets</text>
+  <text class="label warn" x="1378" y="730">WARN</text>
+  <text class="tiny" x="1452" y="730">degrading / watch closely</text>
+  <text class="label risk" x="1378" y="766">RISK</text>
+  <text class="tiny" x="1452" y="766">critical / likely reject</text>
+  <text class="tiny" x="1378" y="812">FONT: mono condensed | BG alpha: 0.08-0.28</text>
+</svg>
