@@ -59,6 +59,10 @@ fn user_wbeam_config_path() -> Option<PathBuf> {
     Some(base.join("wbeam/wbeam.conf"))
 }
 
+fn user_wbeam_dir() -> Option<PathBuf> {
+    user_wbeam_config_path().and_then(|p| p.parent().map(PathBuf::from))
+}
+
 fn ensure_user_wbeam_config(root: &Path) -> Option<PathBuf> {
     let user_cfg = user_wbeam_config_path()?;
     if user_cfg.exists() {
@@ -74,6 +78,19 @@ fn ensure_user_wbeam_config(root: &Path) -> Option<PathBuf> {
         let _ = std::fs::write(&user_cfg, "");
     }
     Some(user_cfg)
+}
+
+fn normalize_session_label(label: &str) -> String {
+    label
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
 }
 
 fn load_wbeam_config(root: &Path) -> HashMap<String, String> {
@@ -218,19 +235,13 @@ fn resolve_xauthority_for_capture() -> Option<PathBuf> {
 }
 
 fn runtime_config_path_for_session(root: &Path, session_label: Option<&str>) -> PathBuf {
-    let config_dir = root.join("src/host/rust/config");
+    let config_dir = user_wbeam_dir().unwrap_or_else(|| root.join("src/host/rust/config"));
     if let Some(label) = session_label {
-        let normalized = label
-            .chars()
-            .map(|c| {
-                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                    c
-                } else {
-                    '_'
-                }
-            })
-            .collect::<String>();
+        let normalized = normalize_session_label(label);
         if !normalized.is_empty() {
+            if let Some(serial) = normalized.strip_prefix("serial-") {
+                return config_dir.join("devices").join(format!("{serial}.json"));
+            }
             return config_dir.join(format!("runtime_state.{normalized}.json"));
         }
     }
@@ -495,9 +506,15 @@ impl DaemonCore {
                 presets.insert(k, v);
             }
         }
-        let active_config =
-            config_store::load_runtime_config_with_presets(&runtime_config_path, &presets)
-                .unwrap_or_else(|| default_config_from_presets(&presets));
+        let restored_config =
+            config_store::load_runtime_config_with_presets(&runtime_config_path, &presets);
+        let active_config = restored_config
+            .clone()
+            .unwrap_or_else(|| default_config_from_presets(&presets));
+        if restored_config.is_none() {
+            let _ = config_store::persist_config(&runtime_config_path, &active_config)
+                .map_err(|e| tracing::warn!("persist initial runtime config: {e}"));
+        }
 
         let host_probe = host_probe::HostProbe::detect();
         info!(
