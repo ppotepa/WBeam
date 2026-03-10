@@ -964,3 +964,15 @@ Status: active
 - Validation:
   - `bash -n wbeam devtool redeploy-local redeploy_local` -> OK
   - `./redeploy_local --help` -> OK
+
+## In Progress (2026-03-10) [commit: 8e2cb257] - redeploy all-device verification + preflight build tag
+- Hardened `redeploy-local` Android stage with post-deploy verification per discovered serial:
+  - checks installed `versionName` on every target device against expected `BUILD_REV`,
+  - if mismatch/missing, runs targeted fallback deploy for that serial (`WBEAM_ANDROID_SERIAL=<serial>`),
+  - fails fast if any serial still mismatches after recovery attempt.
+- Added startup/preflight build badge in Android UI:
+  - connection overlay now shows `build <WBEAM_BUILD_REV>` in lower-right corner before streaming starts.
+  - wired via `startupBuildVersion` view + `bindStartupBuildVersion()` in `MainActivity`.
+- Validation:
+  - `bash -n redeploy-local redeploy_local wbeam devtool` -> OK
+  - `cd android && GRADLE_USER_HOME=/home/ppotepa/git/WBeam/.gradle-user ./gradlew :app:compileDebugJavaWithJavac --no-daemon --stacktrace` -> OK
