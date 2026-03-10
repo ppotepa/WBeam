@@ -2,7 +2,7 @@
 
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -400,8 +400,10 @@ fn list_devices_basic() -> DevicesBasicResponse {
     }
 
     let base_stream_port = wbeam_stream_port();
+    let control_port = wbeam_control_port();
     let mut port_map = load_device_port_map();
     let mut port_map_changed = false;
+    let mut used_ports = HashSet::new();
 
     match adb_devices() {
         Ok(serials) => {
@@ -412,20 +414,25 @@ fn list_devices_basic() -> DevicesBasicResponse {
                     !host_apk_version.is_empty() && snap.apk_version == host_apk_version;
                 let apk_matches_daemon =
                     !daemon_apk_version.is_empty() && snap.apk_version == daemon_apk_version;
-                let mut stream_port = port_map.get(&serial).copied().unwrap_or_else(|| {
-                    let mut p = base_stream_port.saturating_add(2 + idx as u16);
-                    let control_port = wbeam_control_port();
-                    if p == control_port {
-                        p = p.saturating_add(1);
-                    }
-                    p
-                });
+                let fallback_port =
+                    default_stream_port_for_index(base_stream_port, control_port, idx);
+                let preferred_port = port_map
+                    .get(&serial)
+                    .copied()
+                    .filter(|p| *p > 0)
+                    .unwrap_or(fallback_port);
+                let mut stream_port =
+                    pick_unique_stream_port(preferred_port, control_port, &used_ports);
+                used_ports.insert(stream_port);
                 let stream_state = if svc.active {
                     let (state, resolved_port) = daemon_stream_state_and_port(&serial, Some(stream_port))
                         .or_else(|| daemon_stream_state_and_port(&serial, None))
                         .unwrap_or_else(|| ("unknown".to_string(), stream_port));
-                    if resolved_port != stream_port {
-                        stream_port = resolved_port;
+                    if resolved_port > 0 && resolved_port != stream_port {
+                        used_ports.remove(&stream_port);
+                        stream_port =
+                            pick_unique_stream_port(resolved_port, control_port, &used_ports);
+                        used_ports.insert(stream_port);
                     }
                     if port_map.get(&serial).copied() != Some(stream_port) {
                         port_map.insert(serial.clone(), stream_port);
@@ -483,6 +490,35 @@ fn list_devices_basic() -> DevicesBasicResponse {
             }
         }
     }
+}
+
+fn default_stream_port_for_index(base_stream_port: u16, control_port: u16, idx: usize) -> u16 {
+    let offset = u16::try_from(idx).unwrap_or(u16::MAX);
+    let mut port = base_stream_port.saturating_add(2).saturating_add(offset);
+    if port == 0 {
+        port = 1;
+    }
+    if port == control_port {
+        port = port.wrapping_add(1);
+        if port == 0 {
+            port = 1;
+        }
+    }
+    port
+}
+
+fn pick_unique_stream_port(start: u16, control_port: u16, used: &HashSet<u16>) -> u16 {
+    let mut port = if start == 0 { 1 } else { start };
+    for _ in 0..=u16::MAX {
+        if port != control_port && !used.contains(&port) {
+            return port;
+        }
+        port = port.wrapping_add(1);
+        if port == 0 {
+            port = 1;
+        }
+    }
+    if control_port == 1 { 2 } else { 1 }
 }
 
 fn load_device_port_map() -> std::collections::HashMap<String, u16> {
