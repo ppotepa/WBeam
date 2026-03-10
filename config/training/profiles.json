@@ -2,22 +2,24 @@
   "version": 1,
   "profiles": {
     "baseline": {
-      "description": "Auto-generated universal baseline profile used as the single production profile.",
+      "description": "Auto-generated single profile from autotune run 20260310-161407. Uses best trial 'g01_01_hist1'. Do not edit manually.",
       "origin": {
-        "generated_at": "2026-02-28T09:11:58Z",
-        "run_stamp": "20260228-091158",
+        "generated_at": "2026-03-10T15:24:00Z",
+        "run_stamp": "20260310-161407",
         "mode": "single-best",
-        "trial": "g05_04_child4",
-        "score": 58.3339,
-        "sender_p50": 60.0,
-        "sender_p20": 58.8,
-        "pipe_p50": 60.8,
-        "timeout_mean": 8.0,
+        "trial": "g01_01_hist1",
+        "score": -100000000.0,
+        "sender_p50": 7.85,
+        "sender_p20": 6.9,
+        "pipe_p50": 8.0,
+        "timeout_mean": 45.7857,
         "stale_p50": 0.0,
-        "samples": 33
+        "drop_ratio_p50": 0.0,
+        "fps_gap_p50": 52.15,
+        "samples": 14
       },
       "values": {
-        "PROTO_CAPTURE_SIZE": "1280x800",
+        "PROTO_CAPTURE_SIZE": "1200x2000",
         "PROTO_CAPTURE_FPS": 60,
         "PROTO_CAPTURE_BITRATE_KBPS": 10000,
         "PROTO_H264_REORDER": 0,
