@@ -1450,3 +1450,14 @@ Status: active
   - `python3 -m py_compile src/domains/training/wizard.py` -> OK
   - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
   - `cd src/apps/trainer-tauri && npm run build` -> OK
+
+## In Progress (2026-03-10) - TrainerV2 update specification document
+- Added comprehensive consolidation document:
+  - `trainer.update.md`
+- Document includes complete agreed direction for:
+  - Tauri-first launcher/app model,
+  - dataset-first run storage and deterministic `Find Optimal Best`,
+  - encoder-parameter genetic search (per encoder + global genes),
+  - required min/max bitrate training contract and visualization implications,
+  - full GUI information architecture (`Train`, `Live HUD`, `Profiles`, `Runs`, `Compare`, `Devices`, `Validation`, `Diagnostics`, `Datasets`),
+  - required API/data/artifact contracts and DoD for first complete Trainer app.
