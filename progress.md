@@ -867,7 +867,7 @@ Status: active
   - `cd src/host/rust && cargo check -p wbeamd-core` -> OK
   - `cd src/apps/desktop-tauri/src-tauri && cargo check` -> OK
 
-## In Progress (2026-03-10) [commit: pending] - sectioned `wbeam.conf` layout + x11 section
+## In Progress (2026-03-10) [commit: d6cf5644] - sectioned `wbeam.conf` layout + x11 section
 - Converted `config/wbeam.conf` to INI-like sectioned format (`[service]`, `[android]`, `[version]`, `[x11]`).
 - Kept runtime keys as `WBEAM_*` to preserve compatibility with existing loaders.
 - Added `x11` section with `WBEAM_X11_ALLOW_MONITOR_OBJECT` and placeholders for future policy unification.
