@@ -1,0 +1,245 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap");
+
+:root {
+  --bg-a: #0d1c2f;
+  --bg-b: #1b3a53;
+  --ink: #f4f7fb;
+  --muted: #b8c7d8;
+  --panel: rgba(7, 16, 29, 0.68);
+  --line: rgba(195, 221, 245, 0.22);
+  --ok: #38d39f;
+  --warn: #f8c75b;
+  --risk: #ff6f61;
+  --accent: #56b6ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+  color: var(--ink);
+  min-height: 100vh;
+  background:
+    radial-gradient(1100px 600px at -5% 10%, rgba(86, 182, 255, 0.22), transparent),
+    radial-gradient(900px 500px at 105% 90%, rgba(56, 211, 159, 0.18), transparent),
+    linear-gradient(145deg, var(--bg-a), var(--bg-b));
+}
+
+.layout {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1.2rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.hero,
+.toolbar,
+.panel {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  backdrop-filter: blur(6px);
+}
+
+.hero {
+  padding: 1rem 1.2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.hero p {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+}
+
+.status {
+  font-size: 0.88rem;
+  font-weight: 700;
+  padding: 0.4rem 0.7rem;
+  border-radius: 999px;
+}
+
+.status.ok {
+  background: rgba(56, 211, 159, 0.2);
+  color: var(--ok);
+}
+
+.status.down {
+  background: rgba(255, 111, 97, 0.2);
+  color: var(--risk);
+}
+
+.toolbar {
+  padding: 0.45rem;
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+button {
+  border: 1px solid var(--line);
+  background: rgba(10, 24, 44, 0.66);
+  color: var(--ink);
+  border-radius: 10px;
+  padding: 0.55rem 0.8rem;
+  cursor: pointer;
+}
+
+button.active {
+  border-color: rgba(86, 182, 255, 0.8);
+  background: rgba(86, 182, 255, 0.16);
+}
+
+button.cta {
+  margin-top: 0.4rem;
+  width: fit-content;
+  border-color: rgba(56, 211, 159, 0.65);
+  background: rgba(56, 211, 159, 0.2);
+  font-weight: 700;
+}
+
+button.ghost {
+  margin-left: auto;
+}
+
+.panel {
+  padding: 1rem;
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+label {
+  display: grid;
+  gap: 0.3rem;
+  margin-bottom: 0.55rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+input,
+select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--ink);
+  padding: 0.52rem 0.65rem;
+}
+
+.device-list {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.device-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.55rem 0.65rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.hint {
+  margin-top: 0.8rem;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.hud-topline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-bottom: 0.9rem;
+}
+
+.hud-topline span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.8rem;
+  padding: 0.2rem 0.55rem;
+}
+
+.hud-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+.hud-grid article {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.65rem;
+}
+
+.hud-grid h3 {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+}
+
+.mini-bar-grid {
+  height: 130px;
+  display: flex;
+  align-items: flex-end;
+  gap: 0.25rem;
+}
+
+.mini-bar {
+  width: 100%;
+  border-radius: 5px 5px 0 0;
+  min-width: 6px;
+}
+
+.mini-bar-good {
+  background: linear-gradient(180deg, rgba(56, 211, 159, 0.95), rgba(56, 211, 159, 0.28));
+}
+
+.mini-bar-warn {
+  background: linear-gradient(180deg, rgba(248, 199, 91, 0.95), rgba(248, 199, 91, 0.24));
+}
+
+.mini-bar-risk {
+  background: linear-gradient(180deg, rgba(255, 111, 97, 0.95), rgba(255, 111, 97, 0.2));
+}
+
+.gates {
+  margin: 0;
+  padding-left: 1rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.gates .pass {
+  color: var(--ok);
+}
+
+.gates .warn {
+  color: var(--warn);
+}
+
+@media (max-width: 900px) {
+  .grid2,
+  .hud-grid {
+    grid-template-columns: 1fr;
+  }
+
+  button.ghost {
+    margin-left: 0;
+  }
+}

@@ -1,5 +1,24 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending, branch `trainerv2`) - Preflight + mode scoring + Trainer GUI scaffold
+- Extended `src/domains/training/wizard.py` with mandatory preflight diagnostics:
+  - ADB push throughput benchmark (`adb push` MB/s),
+  - ADB shell RTT benchmark (`p50/p95`),
+  - stream baseline sampling summary (when daemon is reachable),
+  - derived `recommended_bitrate_kbps` seed from measured link quality.
+- Integrated preflight into run lifecycle:
+  - preflight executes before trial loop,
+  - preflight summary is now persisted in `parameters.json`,
+  - `preflight.json` is written automatically in profile artifact directory.
+- Implemented mode-aware scoring presets and gates in wizard (`quality`, `balanced`, `low_latency`):
+  - per-mode score weights,
+  - per-mode penalty sensitivity,
+  - hard gate style penalties and `gate_failed` notes.
+- Added initial Trainer GUI app scaffold:
+  - `src/apps/trainer-tauri/`
+  - includes Vite/Solid setup, initial tabs (`Train`, `Live HUD`), and HUD placeholder charts,
+  - includes app README and run instructions.
+
 ## Session Update (2026-03-10, pending, branch `trainerv2`) - TrainerV2 foundation slice
 - Started dedicated `trainerv2` branch and implemented first operational TrainerV2 building block.
 - Added new launcher script:

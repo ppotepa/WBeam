@@ -1,0 +1,21 @@
+{
+  "name": "wbeam-trainer-tauri",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 1430",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "solid-js": "^1.9.9"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.0",
+    "vite-plugin-solid": "^2.11.8"
+  }
+}

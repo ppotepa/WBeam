@@ -11,6 +11,7 @@ import re
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -306,13 +307,18 @@ def write_profile_artifacts(
     profile_name: str,
     profile_doc: dict[str, Any],
     parameters: dict[str, Any],
-) -> tuple[Path, Path]:
+) -> tuple[Path, Path, Path | None]:
     out_dir = profile_dir(profile_name)
     profile_path = out_dir / f"{sanitize_profile_name(profile_name)}.json"
     params_path = out_dir / "parameters.json"
     write_json(profile_path, profile_doc)
     write_json(params_path, parameters)
-    return profile_path, params_path
+    preflight_path: Path | None = None
+    preflight = parameters.get("preflight")
+    if isinstance(preflight, dict):
+        preflight_path = out_dir / "preflight.json"
+        write_json(preflight_path, preflight)
+    return profile_path, params_path, preflight_path
 
 
 def parse_num_list(raw: str, *, min_value: int = 1) -> list[int]:
@@ -471,6 +477,96 @@ def mean(values: list[float]) -> float:
     return statistics.fmean(values) if values else 0.0
 
 
+def percentile(values: list[float], q: float) -> float:
+    if not values:
+        return 0.0
+    if q <= 0:
+        return min(values)
+    if q >= 1:
+        return max(values)
+    ordered = sorted(values)
+    idx = q * (len(ordered) - 1)
+    lo = int(idx)
+    hi = min(lo + 1, len(ordered) - 1)
+    if lo == hi:
+        return ordered[lo]
+    frac = idx - lo
+    return ordered[lo] * (1.0 - frac) + ordered[hi] * frac
+
+
+def adb_push_benchmark(serial: str, *, size_mb: int = 8) -> dict[str, Any]:
+    temp_path = Path(tempfile.gettempdir()) / f"wbeam-preflight-{serial}-{int(time.time())}.bin"
+    remote_path = "/data/local/tmp/wbeam-preflight.bin"
+    with temp_path.open("wb") as handle:
+        handle.truncate(size_mb * 1024 * 1024)
+    start = time.monotonic()
+    proc = subprocess.run(
+        ["adb", "-s", serial, "push", str(temp_path), remote_path],
+        cwd=ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=120,
+        text=True,
+        check=False,
+    )
+    elapsed = max(0.001, time.monotonic() - start)
+    output = proc.stdout or ""
+    parsed = re.search(r"\\((\\d+) bytes in ([0-9.]+)s\\)", output)
+    if parsed:
+        sent_bytes = int(parsed.group(1))
+        parsed_elapsed = max(0.001, float(parsed.group(2)))
+        mbps = (sent_bytes / parsed_elapsed) / (1024 * 1024)
+    else:
+        sent_bytes = size_mb * 1024 * 1024
+        mbps = (sent_bytes / elapsed) / (1024 * 1024)
+    subprocess.run(
+        ["adb", "-s", serial, "shell", "rm", "-f", remote_path],
+        cwd=ROOT,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    try:
+        temp_path.unlink()
+    except FileNotFoundError:
+        pass
+    return {
+        "ok": proc.returncode == 0,
+        "size_mb": size_mb,
+        "elapsed_sec": round(elapsed, 4),
+        "throughput_mb_s": round(mbps, 3),
+        "adb_output": output.strip(),
+    }
+
+
+def adb_shell_rtt_benchmark(serial: str, *, loops: int = 10) -> dict[str, Any]:
+    samples_ms: list[float] = []
+    failures = 0
+    for _ in range(max(1, loops)):
+        start = time.monotonic()
+        proc = subprocess.run(
+            ["adb", "-s", serial, "shell", "true"],
+            cwd=ROOT,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=8,
+            check=False,
+        )
+        elapsed_ms = (time.monotonic() - start) * 1000.0
+        if proc.returncode == 0:
+            samples_ms.append(elapsed_ms)
+        else:
+            failures += 1
+    return {
+        "ok": bool(samples_ms),
+        "loops": loops,
+        "failures": failures,
+        "rtt_avg_ms": round(mean(samples_ms), 3),
+        "rtt_p50_ms": round(percentile(samples_ms, 0.50), 3),
+        "rtt_p95_ms": round(percentile(samples_ms, 0.95), 3),
+    }
+
+
 def collect_metrics_samples(
     *,
     control_port: int,
@@ -497,7 +593,151 @@ def collect_metrics_samples(
     return samples
 
 
-def score_trial(config: TrialConfig, samples: list[dict[str, Any]], sample_sec: int, trial_id: str) -> TrialResult:
+def run_preflight(
+    *,
+    serial: str,
+    control_port: int,
+    stream_port: int,
+    daemon_reachable: bool,
+    state: str,
+    current_cfg: dict[str, Any],
+    mode: str,
+    sample_sec: int,
+) -> dict[str, Any]:
+    started_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    print("\n[preflight] ADB link benchmark...")
+    adb_push = adb_push_benchmark(serial, size_mb=8)
+    adb_shell = adb_shell_rtt_benchmark(serial, loops=10)
+
+    link_mbps = as_float(adb_push.get("throughput_mb_s"), 0.0)
+    recommended_bitrate = int(max(4000.0, link_mbps * 1024.0 * 0.62))
+    print(
+        "[preflight] push="
+        f"{adb_push.get('throughput_mb_s', 0.0)}MB/s "
+        f"shell_rtt_p95={adb_shell.get('rtt_p95_ms', 0.0)}ms "
+        f"recommended_bitrate={recommended_bitrate}kbps"
+    )
+
+    stream_baseline: dict[str, Any] = {
+        "ok": False,
+        "note": "daemon_unreachable",
+    }
+    if daemon_reachable:
+        baseline_sec = max(6, min(12, sample_sec))
+        pre_cfg = TrialConfig(
+            encoder=str(current_cfg.get("encoder", "h264")),
+            size=normalize_size(str(current_cfg.get("size", "1280x720"))),
+            fps=max(24, as_int(current_cfg.get("fps"), 60)),
+            bitrate_kbps=max(1000, as_int(current_cfg.get("bitrate_kbps"), 10000)),
+            cursor_mode=str(current_cfg.get("cursor_mode", "embedded")),
+        )
+        try:
+            print(f"[preflight] stream baseline sampling {baseline_sec}s...")
+            samples = collect_metrics_samples(
+                control_port=control_port,
+                serial=serial,
+                stream_port=stream_port,
+                sample_sec=baseline_sec,
+                poll_sec=0.8,
+            )
+            baseline = score_trial(pre_cfg, samples, baseline_sec, "preflight", mode)
+            stream_baseline = {
+                "ok": baseline.notes not in {"no_samples", "stream_unstable"},
+                "state": state,
+                "sample_sec": baseline_sec,
+                "sample_count": baseline.sample_count,
+                "score": round(baseline.score, 3),
+                "present_fps_mean": round(baseline.present_fps_mean, 3),
+                "recv_fps_mean": round(baseline.recv_fps_mean, 3),
+                "decode_fps_mean": round(baseline.decode_fps_mean, 3),
+                "e2e_p95_mean_ms": round(baseline.e2e_p95_mean_ms, 3),
+                "drop_rate_per_sec": round(baseline.drop_rate_per_sec, 5),
+                "late_rate_per_sec": round(baseline.late_rate_per_sec, 5),
+                "notes": baseline.notes,
+            }
+            print(
+                "[preflight] baseline "
+                f"present={baseline.present_fps_mean:.1f} "
+                f"recv={baseline.recv_fps_mean:.1f} "
+                f"e2e95={baseline.e2e_p95_mean_ms:.1f}ms note={baseline.notes}"
+            )
+        except Exception as exc:
+            stream_baseline = {
+                "ok": False,
+                "state": state,
+                "note": f"baseline_failed: {exc}",
+            }
+            print(f"[preflight] baseline failed: {exc}")
+
+    return {
+        "started_at": started_at,
+        "serial": serial,
+        "control_port": control_port,
+        "stream_port": stream_port,
+        "mode": mode,
+        "adb_push": adb_push,
+        "adb_shell_rtt": adb_shell,
+        "stream_baseline": stream_baseline,
+        "recommended_bitrate_kbps": recommended_bitrate,
+    }
+
+
+def scoring_preset(mode: str) -> dict[str, float]:
+    if mode == "low_latency":
+        return {
+            "w_present": 44.0,
+            "w_recv": 14.0,
+            "w_decode": 8.0,
+            "w_latency": 34.0,
+            "drop_penalty": 9.0,
+            "late_penalty": 7.0,
+            "decode_penalty": 1.2,
+            "render_penalty": 1.1,
+            "queue_penalty": 2.1,
+            "gate_present_ratio": 0.86,
+            "gate_recv_ratio": 0.82,
+            "gate_drop_rate": 2.8,
+        }
+    if mode == "balanced":
+        return {
+            "w_present": 50.0,
+            "w_recv": 16.0,
+            "w_decode": 12.0,
+            "w_latency": 22.0,
+            "drop_penalty": 8.2,
+            "late_penalty": 6.0,
+            "decode_penalty": 1.0,
+            "render_penalty": 0.8,
+            "queue_penalty": 1.8,
+            "gate_present_ratio": 0.84,
+            "gate_recv_ratio": 0.80,
+            "gate_drop_rate": 3.2,
+        }
+    # quality default
+    return {
+        "w_present": 56.0,
+        "w_recv": 18.0,
+        "w_decode": 11.0,
+        "w_latency": 15.0,
+        "drop_penalty": 7.8,
+        "late_penalty": 5.0,
+        "decode_penalty": 0.9,
+        "render_penalty": 0.6,
+        "queue_penalty": 1.5,
+        "gate_present_ratio": 0.82,
+        "gate_recv_ratio": 0.78,
+        "gate_drop_rate": 3.8,
+    }
+
+
+def score_trial(
+    config: TrialConfig,
+    samples: list[dict[str, Any]],
+    sample_sec: int,
+    trial_id: str,
+    mode: str,
+) -> TrialResult:
+    preset = scoring_preset(mode)
     present_vals: list[float] = []
     recv_vals: list[float] = []
     decode_vals: list[float] = []
@@ -550,22 +790,28 @@ def score_trial(config: TrialConfig, samples: list[dict[str, Any]], sample_sec: 
     decode_ratio = min(1.2, max(0.0, decode_mean / target))
     latency_bonus = max(0.0, 1.0 - (e2e_p95_mean / 180.0))
     base_score = (
-        present_ratio * 55.0
-        + recv_ratio * 18.0
-        + decode_ratio * 12.0
-        + latency_bonus * 15.0
+        present_ratio * preset["w_present"]
+        + recv_ratio * preset["w_recv"]
+        + decode_ratio * preset["w_decode"]
+        + latency_bonus * preset["w_latency"]
     )
     penalty = (
-        drop_rate * 8.0
-        + late_rate * 5.0
-        + max(0.0, decode_p95_mean - 12.0) * 0.9
-        + max(0.0, render_p95_mean - 8.0) * 0.6
-        + queue_mean * 1.6
+        drop_rate * preset["drop_penalty"]
+        + late_rate * preset["late_penalty"]
+        + max(0.0, decode_p95_mean - 12.0) * preset["decode_penalty"]
+        + max(0.0, render_p95_mean - 8.0) * preset["render_penalty"]
+        + queue_mean * preset["queue_penalty"]
     )
-    if present_mean < target * 0.70:
-        penalty += 18.0
-    if recv_mean < target * 0.70:
-        penalty += 8.0
+    hard_fail = False
+    if present_mean < target * preset["gate_present_ratio"]:
+        penalty += 22.0
+        hard_fail = True
+    if recv_mean < target * preset["gate_recv_ratio"]:
+        penalty += 12.0
+        hard_fail = True
+    if drop_rate > preset["gate_drop_rate"]:
+        penalty += 16.0
+        hard_fail = True
 
     score = base_score - penalty
     notes = "ok"
@@ -573,6 +819,8 @@ def score_trial(config: TrialConfig, samples: list[dict[str, Any]], sample_sec: 
         notes = "no_samples"
     elif present_mean <= 1.0 and recv_mean <= 1.0:
         notes = "stream_unstable"
+    elif hard_fail:
+        notes = "gate_failed"
 
     return TrialResult(
         trial_id=trial_id,
@@ -765,6 +1013,7 @@ def run_proto_autotune_engine(
     stream_port: int,
     detected_size: str | None,
     mode: str,
+    preflight: dict[str, Any],
     current_cfg: dict[str, Any],
     trials: int,
     warmup_sec: int,
@@ -920,6 +1169,7 @@ def run_proto_autotune_engine(
         "warmup_sec": warmup_sec,
         "sample_sec": sample_sec,
         "requested_trials": trials,
+        "preflight": preflight,
         "derived": {
             "population": population,
             "generations": generations,
@@ -938,7 +1188,7 @@ def run_proto_autotune_engine(
             "temp_base": str(temp_base),
         },
     }
-    profile_path, params_path = write_profile_artifacts(
+    profile_path, params_path, preflight_path = write_profile_artifacts(
         profile_name=profile_name,
         profile_doc=profile_doc,
         parameters=parameters_doc,
@@ -948,6 +1198,8 @@ def run_proto_autotune_engine(
     print(f"[proto-engine] best config: {best_cfg_path}")
     print(f"[proto-engine] profile artifact: {profile_path}")
     print(f"[proto-engine] parameters: {params_path}")
+    if preflight_path is not None:
+        print(f"[proto-engine] preflight: {preflight_path}")
     return 0
 
 
@@ -1058,6 +1310,22 @@ def main() -> int:
 
     warmup_sec = max(1, args.warmup_sec)
     sample_sec = max(4, args.sample_sec)
+    mode = args.mode
+    preflight = run_preflight(
+        serial=serial,
+        control_port=args.control_port,
+        stream_port=stream_port,
+        daemon_reachable=daemon_reachable,
+        state=state,
+        current_cfg=current_cfg,
+        mode=mode,
+        sample_sec=sample_sec,
+    )
+    recommended_bitrate = as_int(preflight.get("recommended_bitrate_kbps"), 0)
+    if recommended_bitrate > 0:
+        current_cfg["bitrate_kbps"] = min(200000, max(as_int(current_cfg.get("bitrate_kbps"), 10000), recommended_bitrate))
+        print(f"[preflight] seeded bitrate_kbps={current_cfg['bitrate_kbps']}")
+
     requested_trials = args.trials if args.trials is not None else prompt_int(
         "How many trials to run",
         default=18,
@@ -1072,7 +1340,8 @@ def main() -> int:
             serial=serial,
             stream_port=stream_port,
             detected_size=device_size,
-            mode=args.mode,
+            mode=mode,
+            preflight=preflight,
             current_cfg=current_cfg,
             trials=requested_trials,
             warmup_sec=warmup_sec,
@@ -1100,8 +1369,6 @@ def main() -> int:
         else:
             eprint("[error] live_api engine needs an active stream session.")
             return 1
-
-    mode = args.mode
 
     encoders, sizes, fps_values, bitrate_values, cursor_values = build_trial_space(
         mode=mode,
@@ -1193,7 +1460,7 @@ def main() -> int:
                 sample_sec=sample_sec,
                 poll_sec=max(0.3, args.poll_sec),
             )
-            result = score_trial(cfg, samples, sample_sec, trial_id)
+            result = score_trial(cfg, samples, sample_sec, trial_id, mode)
             results.append(result)
             print(
                 f"[{trial_id}] score={result.score:.2f} present={result.present_fps_mean:.1f} "
@@ -1280,6 +1547,7 @@ def main() -> int:
         "poll_sec": args.poll_sec,
         "trial_count": len(trials),
         "exported_baseline": exported,
+        "preflight": preflight,
         "best": {
             "trial_id": best.trial_id,
             "score": best.score,
@@ -1304,7 +1572,7 @@ def main() -> int:
             for item in ranked
         ],
     }
-    profile_path, params_path = write_profile_artifacts(
+    profile_path, params_path, preflight_path = write_profile_artifacts(
         profile_name=profile_name,
         profile_doc=profile_doc,
         parameters=run_log,
@@ -1313,6 +1581,8 @@ def main() -> int:
     print(f"Run log: {log_path}")
     print(f"Profile artifact: {profile_path}")
     print(f"Parameters: {params_path}")
+    if preflight_path is not None:
+        print(f"Preflight: {preflight_path}")
     return 0
 
 
