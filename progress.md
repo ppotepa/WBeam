@@ -1,5 +1,21 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending) - Train wizard switched to legacy proto autotune core by default
+- Reworked `./wbeam train wizard` default engine to use the proven proto dynamic autotune loop:
+  - new default `--engine proto`,
+  - executes `proto/autotune.py` with single-portal-consent + reuse-device + optional on-screen HUD overlay,
+  - keeps portal consent stable across trials (old behavior user requested).
+- Added engine selection:
+  - `--engine proto` (default, legacy dynamic loop with screen HUD),
+  - `--engine live_api` (existing direct `/v1/apply` + `/v1/metrics` loop retained as fallback).
+- Proto engine integration improvements:
+  - seeds temporary base config per selected ADB serial,
+  - forces native/current capture size + quality bitrate ladder up to `200000 kbps`,
+  - exports baseline to `proto/config/profiles.json` and syncs desktop runtime defaults (`trained-profile-runtime.json`) from generated best config.
+
+## Session Update (2026-03-10, pending) - Trainer wizard metrics null-safety fix
+- Fixed `./wbeam train wizard` trial sampling failure (`'NoneType' object has no attribute 'get'`) when daemon metrics payload contains nullable fields (e.g. idle/no-stream state).
+- `score_trial(...)` now normalizes `metrics`, `kpi`, and `latest_client_metrics` to dicts before reads, preventing per-trial exceptions and allowing stable scoring fallback.
 ## Session Update (2026-03-10, pending) - Trainer defaults switched to max-quality baseline
 - Updated main-lane trainer wizard defaults (`./wbeam train wizard`) to prioritize highest quality out-of-the-box:
   - default mode is now `quality` (no extra prompt needed),

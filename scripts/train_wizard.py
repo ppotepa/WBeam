@@ -556,6 +556,10 @@ def write_profile_baseline(path: Path, best: TrialResult) -> None:
 
 
 def write_desktop_runtime_defaults(path: Path, best: TrialResult) -> None:
+    write_desktop_runtime_defaults_explicit(path, best.config.encoder, best.config.cursor_mode)
+
+
+def write_desktop_runtime_defaults_explicit(path: Path, encoder: str, cursor_mode: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     data: dict[str, Any] = {}
     if path.exists():
@@ -569,8 +573,8 @@ def write_desktop_runtime_defaults(path: Path, best: TrialResult) -> None:
     baseline = defaults.get("baseline")
     if not isinstance(baseline, dict):
         baseline = {}
-    baseline["encoder"] = best.config.encoder
-    baseline["cursorMode"] = best.config.cursor_mode
+    baseline["encoder"] = encoder
+    baseline["cursorMode"] = cursor_mode
     defaults["baseline"] = baseline
     data["defaultsByProfileId"] = defaults
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
@@ -584,8 +588,152 @@ def write_run_log(data: dict[str, Any]) -> Path:
     return out
 
 
+def run_proto_autotune_engine(
+    *,
+    serial: str,
+    detected_size: str | None,
+    current_cfg: dict[str, Any],
+    trials: int,
+    warmup_sec: int,
+    sample_sec: int,
+    overlay: bool,
+) -> int:
+    proto_dir = ROOT / "proto"
+    base_template_path = proto_dir / "config" / "proto.json"
+    best_out_rel = "config/autotune-best.json"
+    profiles_out_rel = "config/profiles.json"
+    if not base_template_path.exists():
+        eprint(f"[error] missing proto base config: {base_template_path}")
+        return 1
+
+    try:
+        base_cfg = json.loads(base_template_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        eprint(f"[error] invalid JSON in {base_template_path}: {exc}")
+        return 1
+    if not isinstance(base_cfg, dict):
+        eprint(f"[error] base config root is not an object: {base_template_path}")
+        return 1
+
+    target_size = detected_size or normalize_size(str(current_cfg.get("size", "1280x720")))
+    target_fps = max(30, as_int(current_cfg.get("fps"), 60))
+    target_bitrate = max(10_000, as_int(current_cfg.get("bitrate_kbps"), 10_000))
+    restore_token = f"/tmp/proto-portal-restore-token-{serial}"
+
+    base_cfg["SERIAL"] = serial
+    base_cfg["PROTO_CAPTURE_SIZE"] = target_size
+    base_cfg["PROTO_CAPTURE_FPS"] = target_fps
+    base_cfg["PROTO_CAPTURE_BITRATE_KBPS"] = max(target_bitrate, 90_000)
+    base_cfg["PROTO_PORTAL_PERSIST_MODE"] = 2
+    base_cfg["PROTO_PORTAL_RESTORE_TOKEN_FILE"] = restore_token
+
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    temp_base = Path("/tmp") / f"wbeam-train-proto-{serial}-{stamp}.json"
+    temp_base.write_text(json.dumps(base_cfg, indent=2) + "\n", encoding="utf-8")
+
+    population = max(4, min(32, trials))
+    generations = 1 if population <= 8 else 2
+    elite = max(2, min(6, population // 3))
+    min_samples = max(8, sample_sec // 2)
+    gate_sender = max(20.0, target_fps * 0.70)
+    gate_pipe = max(20.0, target_fps * 0.78)
+
+    fps_values = dedupe_keep_order([target_fps, 60, 72, 90, 120])
+    fps_values = [v for v in fps_values if 24 <= v <= 240]
+    bitrate_values = dedupe_keep_order(
+        [target_bitrate, 40_000, 60_000, 90_000, 120_000, 150_000, 200_000]
+    )
+    bitrate_values = [v for v in bitrate_values if 1_000 <= v <= 400_000]
+
+    cmd = [
+        "python3",
+        str(proto_dir / "autotune.py"),
+        "--base-config",
+        str(temp_base),
+        "--host-only",
+        "--generations",
+        str(generations),
+        "--population",
+        str(population),
+        "--elite-count",
+        str(elite),
+        "--mutation-rate",
+        "0.34",
+        "--warmup-secs",
+        str(warmup_sec),
+        "--sample-secs",
+        str(sample_sec),
+        "--startup-timeout-secs",
+        "240",
+        "--min-samples",
+        str(min_samples),
+        "--gate-min-sender-p50",
+        f"{gate_sender:.1f}",
+        "--gate-min-pipe-p50",
+        f"{gate_pipe:.1f}",
+        "--gate-max-timeout-mean",
+        "25",
+        "--require-portal-metrics",
+        "--reuse-device",
+        "--single-portal-consent",
+        "--fast-mode",
+        "--fps",
+        str(target_fps),
+        "--fps-values",
+        ",".join(str(v) for v in fps_values),
+        "--bitrate-values",
+        ",".join(str(v) for v in bitrate_values),
+        "--profile-name",
+        "baseline",
+        "--export-profiles",
+        "--profiles-out",
+        profiles_out_rel,
+        "--best-config-out",
+        best_out_rel,
+        "--results",
+        f"autotune-results-main-{stamp}.json",
+    ]
+    cmd.append("--overlay" if overlay else "--no-overlay")
+
+    print("")
+    print("[proto-engine] running legacy autotune core:")
+    print("  " + " ".join(cmd))
+    print("  note: this mode reuses portal consent and shows live HUD on streamed screen.")
+    print("")
+
+    proc = subprocess.run(cmd, cwd=ROOT, text=True, check=False)
+    if proc.returncode != 0:
+        eprint(f"[error] proto autotune failed (exit={proc.returncode})")
+        return proc.returncode
+
+    best_cfg_path = proto_dir / best_out_rel
+    if not best_cfg_path.exists():
+        eprint(f"[error] expected best config not found: {best_cfg_path}")
+        return 1
+
+    try:
+        best_cfg = json.loads(best_cfg_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        eprint(f"[error] invalid best config JSON: {best_cfg_path} ({exc})")
+        return 1
+
+    encoder = "h264" if as_int(best_cfg.get("PROTO_H264"), 1) == 1 else "h265"
+    cursor = str(best_cfg.get("PROTO_CURSOR_MODE", "embedded")).strip() or "embedded"
+    write_desktop_runtime_defaults_explicit(DESKTOP_RUNTIME_FILE, encoder, cursor)
+    print(f"[proto-engine] updated desktop runtime defaults: {DESKTOP_RUNTIME_FILE}")
+    print(f"[proto-engine] profiles: {proto_dir / profiles_out_rel}")
+    print(f"[proto-engine] best config: {best_cfg_path}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="WBeam main-lane trainer wizard.")
+    parser.add_argument(
+        "--engine",
+        choices=["proto", "live_api"],
+        default="proto",
+        help="Training engine: proto=legacy dynamic autotune with on-screen HUD; live_api=current direct daemon loop.",
+    )
     parser.add_argument("--control-port", type=int, default=int(os.environ.get("WBEAM_CONTROL_PORT", "5001")))
     parser.add_argument("--stream-port", type=int, default=None, help="Override stream port for selected serial.")
     parser.add_argument("--serial", default=None, help="Target ADB serial (interactive if omitted).")
@@ -594,21 +742,18 @@ def main() -> int:
     parser.add_argument("--warmup-sec", type=int, default=4)
     parser.add_argument("--sample-sec", type=int, default=12)
     parser.add_argument("--poll-sec", type=float, default=1.0)
+    parser.add_argument(
+        "--overlay",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable on-screen tuning HUD (proto engine).",
+    )
     args = parser.parse_args()
 
     print("== WBeam Main Trainer Wizard ==")
     print(f"root: {ROOT}")
+    print(f"engine: {args.engine}")
     print(f"control API: http://127.0.0.1:{args.control_port}")
-
-    try:
-        health = http_json("/v1/health", control_port=args.control_port, timeout=1.6)
-    except Exception as exc:
-        eprint(f"[error] control API is not reachable: {exc}")
-        return 1
-    print(
-        "daemon: ok="
-        f"{health.get('ok')} state={health.get('state')} build={health.get('build_revision', '?')}"
-    )
 
     try:
         serials = adb_serials()
@@ -628,6 +773,12 @@ def main() -> int:
         idx = prompt_choice("Select target device:", serials, default_idx=0)
         serial = serials[idx]
 
+    device_size = detect_device_size(serial)
+    if device_size:
+        print(f"detected device size: {device_size}")
+    else:
+        print("detected device size: <unknown>")
+
     port_map = read_device_ports()
     stream_port = args.stream_port or infer_stream_port(
         serial,
@@ -638,16 +789,63 @@ def main() -> int:
     )
     print(f"target: serial={serial} stream_port={stream_port}")
 
-    status = http_json(
-        "/v1/status",
-        control_port=args.control_port,
-        serial=serial,
-        stream_port=stream_port,
+    current_cfg: dict[str, Any] = {
+        "profile": "baseline",
+        "encoder": "h264",
+        "cursor_mode": "embedded",
+        "size": device_size or "1280x720",
+        "fps": 60,
+        "bitrate_kbps": 10000,
+    }
+    state = "unknown"
+    daemon_reachable = False
+    try:
+        health = http_json("/v1/health", control_port=args.control_port, timeout=1.6)
+        daemon_reachable = True
+        print(
+            "daemon: ok="
+            f"{health.get('ok')} state={health.get('state')} build={health.get('build_revision', '?')}"
+        )
+    except Exception as exc:
+        print(f"daemon: unreachable ({exc})")
+
+    if daemon_reachable:
+        status = http_json(
+            "/v1/status",
+            control_port=args.control_port,
+            serial=serial,
+            stream_port=stream_port,
+        )
+        status_cfg = status.get("active_config", {})
+        if isinstance(status_cfg, dict):
+            current_cfg.update(status_cfg)
+        state = str(status.get("state", "unknown"))
+        print(f"session state: {state}")
+        print(f"current config: {json.dumps(current_cfg, ensure_ascii=True)}")
+
+    warmup_sec = max(1, args.warmup_sec)
+    sample_sec = max(4, args.sample_sec)
+    requested_trials = args.trials if args.trials is not None else prompt_int(
+        "How many trials to run",
+        default=18,
+        min_value=1,
+        max_value=64,
     )
-    current_cfg = status.get("active_config", {})
-    state = str(status.get("state", "unknown"))
-    print(f"session state: {state}")
-    print(f"current config: {json.dumps(current_cfg, ensure_ascii=True)}")
+
+    if args.engine == "proto":
+        return run_proto_autotune_engine(
+            serial=serial,
+            detected_size=device_size,
+            current_cfg=current_cfg,
+            trials=requested_trials,
+            warmup_sec=warmup_sec,
+            sample_sec=sample_sec,
+            overlay=bool(args.overlay),
+        )
+
+    if not daemon_reachable:
+        eprint("[error] live_api engine requires daemon API to be reachable.")
+        return 1
 
     if state not in {"running", "starting"}:
         if prompt_yes_no("Session is not running. Try to start stream now?", default_yes=True):
@@ -662,14 +860,11 @@ def main() -> int:
             )
             print(f"start result: state={start_resp.get('state')} ok={start_resp.get('ok')}")
             time.sleep(2.0)
+        else:
+            eprint("[error] live_api engine needs an active stream session.")
+            return 1
 
     mode = args.mode
-
-    device_size = detect_device_size(serial)
-    if device_size:
-        print(f"detected device size: {device_size}")
-    else:
-        print("detected device size: <unknown>")
 
     encoders, sizes, fps_values, bitrate_values, cursor_values = build_trial_space(
         mode=mode,
@@ -701,15 +896,7 @@ def main() -> int:
     if mode == "quality":
         combos = sorted(combos, key=quality_priority_key, reverse=True)
 
-    warmup_sec = max(1, args.warmup_sec)
-    sample_sec = max(4, args.sample_sec)
-    default_trials = min(18, len(combos))
-    requested_trials = args.trials if args.trials is not None else prompt_int(
-        "How many trials to run",
-        default=default_trials,
-        min_value=1,
-        max_value=max(1, len(combos)),
-    )
+    requested_trials = max(1, min(requested_trials, len(combos)))
     trials = combos[:requested_trials]
     print(
         f"trial space={len(combos)} running={len(trials)} "
