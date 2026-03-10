@@ -1904,3 +1904,13 @@ Status: active
   - threshold color semantics (`OK/WARN/RISK`).
 - Validation:
   - XML parse check via `xml.etree.ElementTree` -> OK
+
+## In Progress (2026-03-10) - HUD default font refinement
+- Updated Wayland HUD streamer default font to a cleaner condensed monospace style better aligned with trainer HUD look:
+  - `WBEAM_OVERLAY_FONT_DESC` default: `JetBrains Mono SemiBold 13`
+- Existing override behavior preserved:
+  - custom font can still be supplied through `WBEAM_OVERLAY_FONT_DESC` environment variable.
+- Validation:
+  - `python3 -m py_compile src/host/scripts/stream_wayland_portal_h264.py` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK

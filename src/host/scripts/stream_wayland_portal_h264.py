@@ -637,8 +637,8 @@ def make_pipeline(
     if overlays:
         overlay_text = os.getenv("WBEAM_OVERLAY_TEXT", "").strip() or "AUTOTUNE"
         overlay_font = (
-            os.getenv("WBEAM_OVERLAY_FONT_DESC", "Monospace Semi-Bold 12").strip()
-            or "Monospace Semi-Bold 12"
+            os.getenv("WBEAM_OVERLAY_FONT_DESC", "JetBrains Mono SemiBold 13").strip()
+            or "JetBrains Mono SemiBold 13"
         )
         for ov in overlays:
             set_if_supported(ov, "font-desc", overlay_font)
