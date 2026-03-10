@@ -2280,3 +2280,28 @@ Status: active
 - Validation:
   - `cd src/apps/trainer-tauri && npm run build` -> OK
   - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+
+## In Progress (2026-03-10) - H264 investigation + bitrate clamp consistency
+- Investigation outcome (root causes confirmed):
+  - Backend runtime clamps bitrate to `>= 4000 kbps` in two places:
+    - `wbeamd-api` config validation (`cfg.bitrate_kbps.clamp(4_000, ...)`)
+    - `wbeamd-streamer` CLI profile resolution (`bitrate_kbps.clamp(4_000, 300_000)`).
+  - Trainer UI allowed entering `1 Mbps`, which did not reflect effective runtime behavior.
+  - On this host `nvh264enc/nvh265enc` are unavailable; runtime falls back to software encoders (`x264enc/x265enc`), which materially affects low-bitrate quality envelopes.
+  - H264 path currently uses strict low-latency x264 settings (`ultrafast`, `cabac=0`, `ref=1`, `bframes=0`), which favors latency/stability over compression efficiency at low bitrate.
+- Implemented consistency fixes:
+  - Trainer desktop UI bitrate controls aligned to effective backend range:
+    - Live Run target/min/max changed to `4..300 Mbps`,
+    - Train bitrate numeric and slider minimum changed to `4 Mbps / 4000 kbps`,
+    - live normalization now clamps to `4..300`.
+  - Trainer backend start request clamp aligned to same floor:
+    - `src/host/rust/crates/wbeamd-server/src/main.rs`: `bitrate_min_kbps` now clamps to `4_000..400_000`.
+  - Trainer wizard clamp alignment:
+    - `src/domains/training/wizard.py` now normalizes trial and argument bitrate floor to `4000 kbps`.
+- Added diagnostic observability for encoder correctness:
+  - `wbeamd-streamer` now prints concrete encoder backend selection and effective runtime params (requested codec, backend, raw format, fps, bitrate, GOP, intra-only).
+  - x264 path now explicitly logs applied low-latency tuning preset/flags.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-streamer -p wbeamd-server` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK

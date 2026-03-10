@@ -704,7 +704,7 @@ export default function App() {
     changed: "min" | "target" | "max",
     value: number,
   ) {
-    const next = clampNum(Number.isFinite(value) ? value : 1, 1, 300);
+    const next = clampNum(Number.isFinite(value) ? value : 4, 4, 300);
     if (changed === "min") {
       const nextMin = next;
       setLiveMinMbps(nextMin);
@@ -1453,7 +1453,7 @@ export default function App() {
                     Bitrate min (Mbps)
                     <input
                       type="number"
-                      min="1"
+                      min="4"
                       max="400"
                       step="0.1"
                       value={kbpsToMbps(bitrateMinKbps())}
@@ -1464,7 +1464,7 @@ export default function App() {
                     Bitrate max (Mbps)
                     <input
                       type="number"
-                      min="1"
+                      min="4"
                       max="400"
                       step="0.1"
                       value={kbpsToMbps(bitrateMaxKbps())}
@@ -1476,7 +1476,7 @@ export default function App() {
                 <div class="slider-wrap" title="Visual range preview for bitrate min/max.">
                   <input
                     type="range"
-                    min="1000"
+                    min="4000"
                     max="400000"
                     value={bitrateMinKbps()}
                     onInput={(e) => {
@@ -1486,7 +1486,7 @@ export default function App() {
                   />
                   <input
                     type="range"
-                    min="1000"
+                    min="4000"
                     max="400000"
                     value={bitrateMaxKbps()}
                     onInput={(e) => {
@@ -1706,27 +1706,27 @@ export default function App() {
                       <input type="number" min="24" max="120" value={liveFps()} onInput={(e) => setLiveFps(clampNum(Number(e.currentTarget.value || 60), 24, 120))} />
                     </div>
                   </label>
-                  <label title="Live target bitrate. Range: 1..300 Mbps.">
-                    Target Mbps (1..300)
+                  <label title="Live target bitrate. Effective backend range: 4..300 Mbps.">
+                    Target Mbps (4..300)
                     <div class="slider-pair">
-                      <input type="range" min="1" max="300" step="0.5" value={liveTargetMbps()} onInput={(e) => normalizeLiveBitrateBounds("target", Number(e.currentTarget.value || 30))} />
-                      <input type="number" min="1" max="300" step="0.5" value={liveTargetMbps()} onInput={(e) => normalizeLiveBitrateBounds("target", Number(e.currentTarget.value || 30))} />
+                      <input type="range" min="4" max="300" step="0.5" value={liveTargetMbps()} onInput={(e) => normalizeLiveBitrateBounds("target", Number(e.currentTarget.value || 30))} />
+                      <input type="number" min="4" max="300" step="0.5" value={liveTargetMbps()} onInput={(e) => normalizeLiveBitrateBounds("target", Number(e.currentTarget.value || 30))} />
                     </div>
                   </label>
                 </div>
                 <div class="two-col">
-                  <label title="Lower bitrate guardrail used by operator while tuning. Range: 1..300 Mbps.">
-                    Min Mbps (1..300)
+                  <label title="Lower bitrate guardrail used by operator while tuning. Effective backend range: 4..300 Mbps.">
+                    Min Mbps (4..300)
                     <div class="slider-pair">
-                      <input type="range" min="1" max="300" step="0.5" value={liveMinMbps()} onInput={(e) => normalizeLiveBitrateBounds("min", Number(e.currentTarget.value || 8))} />
-                      <input type="number" min="1" max="300" step="0.5" value={liveMinMbps()} onInput={(e) => normalizeLiveBitrateBounds("min", Number(e.currentTarget.value || 8))} />
+                      <input type="range" min="4" max="300" step="0.5" value={liveMinMbps()} onInput={(e) => normalizeLiveBitrateBounds("min", Number(e.currentTarget.value || 8))} />
+                      <input type="number" min="4" max="300" step="0.5" value={liveMinMbps()} onInput={(e) => normalizeLiveBitrateBounds("min", Number(e.currentTarget.value || 8))} />
                     </div>
                   </label>
-                  <label title="Upper bitrate guardrail used by operator while tuning. Range: 1..300 Mbps.">
-                    Max Mbps (1..300)
+                  <label title="Upper bitrate guardrail used by operator while tuning. Effective backend range: 4..300 Mbps.">
+                    Max Mbps (4..300)
                     <div class="slider-pair">
-                      <input type="range" min="1" max="300" step="0.5" value={liveMaxMbps()} onInput={(e) => normalizeLiveBitrateBounds("max", Number(e.currentTarget.value || 120))} />
-                      <input type="number" min="1" max="300" step="0.5" value={liveMaxMbps()} onInput={(e) => normalizeLiveBitrateBounds("max", Number(e.currentTarget.value || 120))} />
+                      <input type="range" min="4" max="300" step="0.5" value={liveMaxMbps()} onInput={(e) => normalizeLiveBitrateBounds("max", Number(e.currentTarget.value || 120))} />
+                      <input type="number" min="4" max="300" step="0.5" value={liveMaxMbps()} onInput={(e) => normalizeLiveBitrateBounds("max", Number(e.currentTarget.value || 120))} />
                     </div>
                   </label>
                 </div>

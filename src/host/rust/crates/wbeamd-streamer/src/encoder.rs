@@ -128,6 +128,9 @@ pub fn configure_encoder(
         let _ = enc.set_property_from_str("speed-preset", "ultrafast");
         let _ = enc.set_property_from_str("tune", "zerolatency");
         let _ = enc.set_property("byte-stream", true);
+        println!(
+            "[wbeam] x264 config: speed-preset=ultrafast tune=zerolatency bframes=0 cabac=0 ref=1"
+        );
         set_gop_key_int_max(enc, gop);
         let option_str = if intra_only {
             "bframes=0:cabac=0:ref=1:8x8dct=0:no-open-gop=1:scenecut=0"

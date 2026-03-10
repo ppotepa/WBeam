@@ -233,6 +233,30 @@ pub fn make_pipeline(
             .field("alignment", if framed { "au" } else { "nal" })
             .build()
     };
+    let effective_gop = if cfg.intra_only {
+        1
+    } else if cfg.h264_gop > 0 {
+        cfg.h264_gop
+    } else {
+        (cfg.fps / 8).max(6)
+    };
+    if !mode_png {
+        println!(
+            "[wbeam] encoder-select requested={} backend={} raw_format={} fps={} bitrate={}kbps gop={} intra_only={}",
+            cfg.encoder,
+            encoder_name,
+            raw_format,
+            cfg.fps,
+            cfg.bitrate_kbps,
+            effective_gop,
+            cfg.intra_only
+        );
+    } else {
+        println!(
+            "[wbeam] encoder-select requested={} backend={} raw_format={} fps={} bitrate={}kbps",
+            cfg.encoder, encoder_name, raw_format, cfg.fps, cfg.bitrate_kbps
+        );
+    }
     if let Some(parse) = &parse {
         parse.set_property("disable-passthrough", false);
         parse.set_property("config-interval", -1i32);

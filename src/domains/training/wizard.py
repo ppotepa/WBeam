@@ -1011,7 +1011,7 @@ def run_preflight(
             encoder=str(current_cfg.get("encoder", "h264")),
             size=normalize_size(str(current_cfg.get("size", "1280x720"))),
             fps=max(24, as_int(current_cfg.get("fps"), 60)),
-            bitrate_kbps=max(1000, as_int(current_cfg.get("bitrate_kbps"), 10000)),
+            bitrate_kbps=max(4000, as_int(current_cfg.get("bitrate_kbps"), 10000)),
             cursor_mode=str(current_cfg.get("cursor_mode", "embedded")),
         )
         try:
@@ -1275,8 +1275,8 @@ def build_trial_space(
         encoders = [encoders[0]]
     sizes = [s for s in dedupe_keep_order(sizes) if "x" in s]
     fps_values = [v for v in dedupe_keep_order([max(24, v) for v in fps_values]) if v <= 240]
-    bitrate_values = [v for v in dedupe_keep_order([max(1000, v) for v in bitrate_values]) if v <= 400000]
-    lo = max(1000, min(bitrate_min_kbps, bitrate_max_kbps))
+    bitrate_values = [v for v in dedupe_keep_order([max(4000, v) for v in bitrate_values]) if v <= 400000]
+    lo = max(4000, min(bitrate_min_kbps, bitrate_max_kbps))
     hi = max(lo, max(bitrate_min_kbps, bitrate_max_kbps))
     bitrate_values = [v for v in bitrate_values if lo <= v <= hi]
     if not bitrate_values:
@@ -1491,7 +1491,7 @@ def main() -> int:
         selected_encoders = ["h264"]
     if args.encoder_mode == "single":
         selected_encoders = selected_encoders[:1]
-    bitrate_min_kbps = max(1000, min(int(args.bitrate_min_kbps), int(args.bitrate_max_kbps)))
+    bitrate_min_kbps = max(4000, min(int(args.bitrate_min_kbps), int(args.bitrate_max_kbps)))
     bitrate_max_kbps = max(bitrate_min_kbps, max(int(args.bitrate_min_kbps), int(args.bitrate_max_kbps)))
     try:
         encoder_params_payload = json.loads(args.encoder_params_json or "{}")

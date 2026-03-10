@@ -1069,7 +1069,7 @@ async fn post_trainer_start(
         .crossover_rate
         .unwrap_or(0.50_f64)
         .clamp(0.0, 1.0);
-    let bitrate_min_kbps = req.bitrate_min_kbps.unwrap_or(10_000).clamp(1_000, 400_000);
+    let bitrate_min_kbps = req.bitrate_min_kbps.unwrap_or(10_000).clamp(4_000, 400_000);
     let bitrate_max_kbps = req
         .bitrate_max_kbps
         .unwrap_or(200_000)
