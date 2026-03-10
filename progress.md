@@ -1,5 +1,13 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending) - Train wizard proto engine now runs realistic prepare flow
+- Fixed unrealistic `proto` wizard run mode where trials could execute without visible tablet stream/HUD:
+  - removed forced `--host-only` from `src/domains/training/wizard.py` when invoking legacy engine.
+- Effect:
+  - legacy engine now performs one-time `--prepare-only` path (deploy/launch setup) when `--reuse-device` is active,
+  - benchmark loop still stays efficient (`reuse-device`), but training starts from a real active stream context,
+  - on-screen trial HUD/overlay is now expected to appear again during tuning.
+
 ## Session Update (2026-03-10, pending) - Training domain cleanup and compatibility wrappers
 - Continued organization of `train` as a first-class app domain:
   - moved legacy autotune engine from `proto/autotune.py` to `src/domains/training/legacy_engine.py`,

@@ -657,7 +657,6 @@ def run_proto_autotune_engine(
         str(engine_script),
         "--base-config",
         str(temp_base),
-        "--host-only",
         "--generations",
         str(generations),
         "--population",
@@ -705,7 +704,10 @@ def run_proto_autotune_engine(
     print("")
     print("[proto-engine] running legacy autotune core:")
     print("  " + " ".join(cmd))
-    print("  note: this mode reuses portal consent and shows live HUD on streamed screen.")
+    print(
+        "  note: this mode does one-time prepare (deploy/launch), "
+        "reuses portal consent and shows live HUD on streamed screen."
+    )
     print("")
 
     proc = subprocess.run(cmd, cwd=ROOT, text=True, check=False)
