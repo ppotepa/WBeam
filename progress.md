@@ -1,5 +1,34 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending, branch `trainerv2`) - Legacy trainer path removed; trainer_v2 only
+- Removed legacy trainer execution path from main wizard flow:
+  - `src/domains/training/wizard.py` no longer supports `--engine` switching,
+  - removed proto/legacy branch and all legacy-engine invocation code,
+  - trainer now runs only one path: `trainer_v2` (daemon live API).
+- Added non-interactive run mode for API-driven execution:
+  - new wizard flags:
+    - `--non-interactive`,
+    - `--apply-best/--no-apply-best`,
+    - `--export-best/--no-export-best`,
+  - when non-interactive:
+    - no prompts,
+    - auto-select defaults,
+    - auto-start session if needed.
+- Added generation-style progress lines in live trainer output:
+  - emits `generation X/Y: population=N (start)` blocks,
+  - emits `done trial=...` summary lines for HUD compatibility.
+- Host Trainer API updated to run only new path:
+  - removed `engine` input from start request contract,
+  - backend now always records `engine=trainer_v2`,
+  - `post_trainer_start` launches wizard with non-interactive + auto apply/export flags.
+- Removed legacy trainer implementation file:
+  - deleted `src/domains/training/legacy_engine.py`.
+- Updated helper scripts/wrappers:
+  - rewrote `src/domains/training/train_max_quality.sh` to invoke `./wbeam train wizard` (new path only),
+  - `proto/autotune.py` now explicitly reports deprecation and exits with guidance.
+- Updated training domain docs:
+  - `src/domains/training/README.md` now documents only `wizard.py` trainer ownership.
+
 ## Session Update (2026-03-10, pending, branch `trainerv2`) - Trainer Tauri shell + parameterized run API + proto HUD wiring
 - Implemented native Trainer desktop shell for Tauri app:
   - added `src/apps/trainer-tauri/src-tauri/` (`Cargo.toml`, `build.rs`, `src/main.rs`, `tauri.conf.json`, capabilities, icon, schemas),

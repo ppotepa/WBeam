@@ -85,7 +85,6 @@ struct TrainerStartRequest {
     serial: String,
     profile_name: String,
     mode: Option<String>,
-    engine: Option<String>,
     trials: Option<u32>,
     warmup_sec: Option<u32>,
     sample_sec: Option<u32>,
@@ -889,7 +888,6 @@ async fn post_trainer_start(
         serial: String::new(),
         profile_name: "baseline".to_string(),
         mode: None,
-        engine: None,
         trials: None,
         warmup_sec: None,
         sample_sec: None,
@@ -923,14 +921,7 @@ async fn post_trainer_start(
         )
             .into_response();
     }
-    let engine = req.engine.unwrap_or_else(|| "proto".to_string());
-    if engine != "proto" {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"ok": false, "error": "only proto engine is supported by Trainer API start endpoint"})),
-        )
-            .into_response();
-    }
+    let engine = "trainer_v2".to_string();
     let trials = req.trials.unwrap_or(18).clamp(1, 128);
     let warmup_sec = req.warmup_sec.unwrap_or(4).clamp(1, 60);
     let sample_sec = req.sample_sec.unwrap_or(12).clamp(4, 180);
@@ -1053,8 +1044,9 @@ async fn post_trainer_start(
     let mut cmd = Command::new(&wbeam_bin);
     cmd.arg("train")
         .arg("wizard")
-        .arg("--engine")
-        .arg(&engine)
+        .arg("--non-interactive")
+        .arg("--apply-best")
+        .arg("--export-best")
         .arg("--serial")
         .arg(&serial)
         .arg("--profile-name")

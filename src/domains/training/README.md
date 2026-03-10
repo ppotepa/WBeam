@@ -5,7 +5,6 @@ This domain owns autotune/training workflows for WBeam.
 ## Entry points
 
 - `wizard.py` - interactive TUI for per-device training (`./wbeam train wizard`)
-- `legacy_engine.py` - dynamic autotune engine (single portal consent + live HUD)
 - `train_max_quality.sh` - two-stage high-quality training helper
 
 ## Data outputs
@@ -14,11 +13,4 @@ This domain owns autotune/training workflows for WBeam.
 - `config/training/autotune-best.json` - latest best trial config
 - `logs/train/` - generated training result reports
 
-## Compatibility wrappers
-
-Legacy paths under `proto/` still exist as thin wrappers:
-
-- `proto/autotune.py`
-- `proto/train-autotune-max-quality.sh`
-
-They forward execution to this domain to keep older commands/scripts working.
+Legacy `proto` autotune path is retired. Training is owned only by `wizard.py` flow.
