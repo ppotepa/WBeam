@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import html
 import itertools
 import json
 import os
@@ -211,6 +212,17 @@ def severity_tag(value: float, warn_at: float, risk_at: float, invert: bool = Fa
     return "OK"
 
 
+def severity_markup(tag: str) -> str:
+    tone = (tag or "").upper()
+    if tone == "OK":
+        return '<span foreground="#6EE7B7">OK</span>'
+    if tone == "WARN":
+        return '<span foreground="#FBBF24">WARN</span>'
+    if tone == "RISK":
+        return '<span foreground="#F87171">RISK</span>'
+    return html.escape(tone or "-")
+
+
 def kv_line(left: str, right: str, width: int = 86) -> str:
     l = left.strip()
     r = right.strip()
@@ -317,9 +329,9 @@ def write_overlay_snapshot(
         drop_state = severity_tag(result.drop_rate_per_sec, 0.06, 0.20)
         lines.extend(
             [
-                box_line(kv_line(f"SCORE {result.score:.2f}", f"FPS {result.present_fps_mean:.1f} [{fps_state}]", width=84)),
-                box_line(kv_line(f"PIPE {result.recv_fps_mean:.1f} | DECODE {result.decode_fps_mean:.1f}", f"LAT {result.e2e_p95_mean_ms:.1f}ms [{lat_state}]", width=84)),
-                box_line(kv_line(f"LIVE Mbps {result.bitrate_mbps_mean:.1f}", f"DROPS/s {result.drop_rate_per_sec:.3f} [{drop_state}]", width=84)),
+                box_line(kv_line(f"SCORE {result.score:.2f}", f"FPS {result.present_fps_mean:.1f} [{severity_markup(fps_state)}]", width=84)),
+                box_line(kv_line(f"PIPE {result.recv_fps_mean:.1f} | DECODE {result.decode_fps_mean:.1f}", f"LAT {result.e2e_p95_mean_ms:.1f}ms [{severity_markup(lat_state)}]", width=84)),
+                box_line(kv_line(f"LIVE Mbps {result.bitrate_mbps_mean:.1f}", f"DROPS/s {result.drop_rate_per_sec:.3f} [{severity_markup(drop_state)}]", width=84)),
                 box_line(kv_line(f"QUEUE {result.queue_depth_mean:.3f}", f"SAMPLES {result.sample_count}", width=84)),
             ]
         )
@@ -342,7 +354,7 @@ def write_overlay_snapshot(
             [
                 box_line(kv_line(f"SCORE TR  {trend_render(valid_scores, chart_mode, width=28)}", f"FPS TR {trend_render(valid_present, chart_mode, width=24)}", width=84)),
                 box_line(kv_line(f"DROP TR   {trend_render(valid_drop, chart_mode, width=28)}", f"MBPS TR {trend_render(valid_bitrate, chart_mode, width=23)}", width=84)),
-                box_line(kv_line(f"E2E/DECODE/RENDER p95: {result.e2e_p95_mean_ms:.1f}/{result.decode_p95_mean_ms:.1f}/{result.render_p95_mean_ms:.1f} ms", f"STATE {quality_state}/{result.notes}", width=84)),
+                box_line(kv_line(f"E2E/DECODE/RENDER p95: {result.e2e_p95_mean_ms:.1f}/{result.decode_p95_mean_ms:.1f}/{result.render_p95_mean_ms:.1f} ms", f"STATE {severity_markup(quality_state)}/{html.escape(result.notes)}", width=84)),
             ]
         )
     else:

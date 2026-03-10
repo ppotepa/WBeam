@@ -1856,3 +1856,16 @@ Status: active
   - `python3 -m py_compile src/domains/training/wizard.py src/host/scripts/stream_wayland_portal_h264.py` -> OK
   - `cd src/apps/trainer-tauri && npm run build` -> OK
   - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+
+## In Progress (2026-03-10) - HUD threshold color rendering (markup + fallback)
+- Extended unified Wayland HUD overlay path to render colored threshold states from trainer markup:
+  - `wizard.py` now emits threshold tags as Pango markup (`OK/WARN/RISK`) with explicit green/amber/red tones,
+  - `stream_wayland_portal_h264.py` enables `textoverlay` markup mode (`use-markup=true`) for `hud_main`.
+- Added robust runtime fallback in overlay updater:
+  - first attempts `set_property("markup", ...)`,
+  - if markup property is unavailable, strips tags and falls back to plain `text` so HUD remains readable.
+- Result: single full-screen HUD keeps transparent style while now visually highlighting metric severity levels.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py src/host/scripts/stream_wayland_portal_h264.py` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK

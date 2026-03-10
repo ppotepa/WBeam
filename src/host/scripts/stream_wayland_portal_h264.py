@@ -642,6 +642,7 @@ def make_pipeline(
         )
         for ov in overlays:
             set_if_supported(ov, "font-desc", overlay_font)
+            set_if_supported(ov, "use-markup", True)
             # Transparent background + light shadow for readability.
             set_if_supported(ov, "shaded-background", False)
             set_if_supported(ov, "draw-shadow", True)
@@ -1006,7 +1007,11 @@ def main():
                     if new_text == overlay_state[key]:
                         continue
                     try:
-                        elem.set_property("text", new_text)
+                        try:
+                            elem.set_property("markup", new_text)
+                        except Exception:
+                            plain_text = re.sub(r"<[^>]+>", "", new_text)
+                            elem.set_property("text", plain_text)
                         overlay_state[key] = new_text
                     except Exception as exc:
                         print(f"[warn] failed to set overlay text ({key}): {exc}", file=sys.stderr)
