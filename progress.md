@@ -874,7 +874,7 @@ Status: active
 - Confirmed shell loader accepts section headers and still reads values:
   - `source src/host/scripts/wbeam_config.sh && wbeam_load_config ...` -> `control=5001 x11_allow=0`
 
-## In Progress (2026-03-10) [commit: pending] - bootstrap user config + user config as runtime source-of-truth
+## In Progress (2026-03-10) [commit: adb5883b] - bootstrap user config + user config as runtime source-of-truth
 - Updated runtime loaders to treat `~/.config/wbeam/wbeam.conf` as canonical source-of-truth.
 - Added startup bootstrap:
   - if user config is missing, create `~/.config/wbeam/` and copy from `config/wbeam.conf`.
