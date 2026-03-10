@@ -2039,3 +2039,26 @@ Status: active
   - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
   - `cd src/apps/trainer-tauri && npm run build` -> OK
   - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+
+## In Progress (2026-03-10) - HUD schema v1 sections + maquette-style Android render
+- Finalized structured HUD payload in trainer wizard with explicit schema tag:
+  - `schema_version: wbeam.hud.v1`
+  - sectioned model under `sections`:
+    - `header` (run/profile/gen/trial)
+    - `config` (encoder/size/fps/target/chart/layout/best)
+    - `kpi` (score/fps/latency/mbps/drop/queue/samples)
+    - `states` (severity tags for fps/latency/drop/mbps/queue/late/quality/note)
+    - `trends` (score/fps/drop/mbps arrays)
+    - `status` (note)
+- Android WebView renderer now prefers sectioned schema and maps it to a maquette-like layout:
+  - top strip chips (run/profile/gen/trial/encoder/size+fps+target),
+  - progress band,
+  - KPI grid with severity colors,
+  - trends/status region,
+  - details table panel.
+- Previous row-based rendering remains as compatibility fallback.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK

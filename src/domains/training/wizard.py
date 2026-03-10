@@ -330,6 +330,14 @@ def write_overlay_snapshot(
             best_trial = ranked[0].trial_id
 
     target_fps = float(cfg.fps if cfg is not None else 60)
+    fps_state = "PENDING"
+    lat_state = "PENDING"
+    drop_state = "PENDING"
+    queue_state = "PENDING"
+    late_state = "PENDING"
+    mbps_state = "PENDING"
+    quality_state = "PENDING"
+    note_state = "PENDING"
     content_w = 84 if layout_mode == "compact" else 108
     frame_w = content_w + 2
     lines: list[str] = ["[MAIN]"]
@@ -464,6 +472,7 @@ def write_overlay_snapshot(
             else:
                 rows.append({"type": "single", "text": content})
         hud_json: dict[str, Any] = {
+            "schema_version": "wbeam.hud.v1",
             "run_id": run_id,
             "profile_name": profile_name,
             "trial_id": trial_id,
@@ -476,6 +485,60 @@ def write_overlay_snapshot(
             "chart_mode": chart_mode,
             "note": note or "",
             "rows": rows,
+            "sections": {
+                "header": {
+                    "title": "WBEAM TRAINER HUD",
+                    "run_id": run_id,
+                    "profile_name": profile_name,
+                    "generation_index": generation_index,
+                    "generation_total": generation_total,
+                    "trial_id": trial_id,
+                    "trial_index": trial_index,
+                    "trial_total": trial_total,
+                },
+                "config": {
+                    "encoder": cfg.encoder if cfg is not None else "",
+                    "size": cfg.size if cfg is not None else "",
+                    "fps": cfg.fps if cfg is not None else int(target_fps),
+                    "target_mbps": round((float(cfg.bitrate_kbps) / 1000.0), 2) if cfg is not None else 0.0,
+                    "cursor_mode": cfg.cursor_mode if cfg is not None else "",
+                    "chart_mode": chart_mode,
+                    "layout_mode": layout_mode,
+                    "best_trial": best_trial,
+                    "best_score": round(best_recent, 2),
+                },
+                "kpi": {
+                    "score": round(result.score, 2) if result is not None else None,
+                    "present_fps": round(result.present_fps_mean, 2) if result is not None else None,
+                    "recv_fps": round(result.recv_fps_mean, 2) if result is not None else None,
+                    "decode_fps": round(result.decode_fps_mean, 2) if result is not None else None,
+                    "live_mbps": round(result.bitrate_mbps_mean, 2) if result is not None else None,
+                    "latency_ms_p95": round(result.e2e_p95_mean_ms, 2) if result is not None else None,
+                    "drops_per_sec": round(result.drop_rate_per_sec, 4) if result is not None else None,
+                    "queue_depth": round(result.queue_depth_mean, 4) if result is not None else None,
+                    "late_per_sec": round(result.late_rate_per_sec, 4) if result is not None else None,
+                    "samples": int(result.sample_count) if result is not None else 0,
+                },
+                "states": {
+                    "fps": fps_state,
+                    "latency": lat_state,
+                    "drop": drop_state,
+                    "queue": queue_state,
+                    "late": late_state,
+                    "mbps": mbps_state,
+                    "quality": quality_state,
+                    "note": note_state,
+                },
+                "trends": {
+                    "score": [round(v, 3) for v in valid_scores[-32:]],
+                    "present_fps": [round(v, 3) for v in valid_present[-32:]],
+                    "drop_pct": [round(v, 3) for v in valid_drop[-32:]],
+                    "mbps": [round(v, 3) for v in valid_bitrate[-32:]],
+                },
+                "status": {
+                    "note": (result.notes if result is not None else ""),
+                },
+            },
         }
         if cfg is not None:
             hud_json["config"] = asdict(cfg)

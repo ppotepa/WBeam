@@ -2099,54 +2099,114 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private String buildTrainerHudHtmlFromJson(JSONObject hud, String progressLine, int progressPercent) {
+        JSONObject sections = hud.optJSONObject("sections");
+        JSONObject header = sections != null ? sections.optJSONObject("header") : null;
+        JSONObject config = sections != null ? sections.optJSONObject("config") : null;
+        JSONObject kpi = sections != null ? sections.optJSONObject("kpi") : null;
+        JSONObject states = sections != null ? sections.optJSONObject("states") : null;
+        JSONObject trends = sections != null ? sections.optJSONObject("trends") : null;
+        JSONObject status = sections != null ? sections.optJSONObject("status") : null;
+
+        String runId = header != null ? header.optString("run_id", hud.optString("run_id", "-")) : hud.optString("run_id", "-");
+        String profile = header != null ? header.optString("profile_name", hud.optString("profile_name", "-")) : hud.optString("profile_name", "-");
+        String trialId = header != null ? header.optString("trial_id", hud.optString("trial_id", "-")) : hud.optString("trial_id", "-");
+        int gIdx = header != null ? header.optInt("generation_index", 0) : hud.optInt("generation_index", 0);
+        int gTotal = header != null ? header.optInt("generation_total", 0) : hud.optInt("generation_total", 0);
+        int tIdx = header != null ? header.optInt("trial_index", 0) : hud.optInt("trial_index", 0);
+        int tTotal = header != null ? header.optInt("trial_total", 0) : hud.optInt("trial_total", 0);
+
+        String encoder = config != null ? config.optString("encoder", "-") : "-";
+        String size = config != null ? config.optString("size", "-") : "-";
+        int fps = config != null ? config.optInt("fps", 0) : 0;
+        double targetMbps = config != null ? config.optDouble("target_mbps", 0.0) : 0.0;
+        String layoutMode = config != null ? config.optString("layout_mode", hud.optString("layout_mode", "wide")) : hud.optString("layout_mode", "wide");
+
+        double score = kpi != null ? kpi.optDouble("score", Double.NaN) : Double.NaN;
+        double present = kpi != null ? kpi.optDouble("present_fps", Double.NaN) : Double.NaN;
+        double recv = kpi != null ? kpi.optDouble("recv_fps", Double.NaN) : Double.NaN;
+        double decode = kpi != null ? kpi.optDouble("decode_fps", Double.NaN) : Double.NaN;
+        double liveMbps = kpi != null ? kpi.optDouble("live_mbps", Double.NaN) : Double.NaN;
+        double latency = kpi != null ? kpi.optDouble("latency_ms_p95", Double.NaN) : Double.NaN;
+        double drops = kpi != null ? kpi.optDouble("drops_per_sec", Double.NaN) : Double.NaN;
+        double queue = kpi != null ? kpi.optDouble("queue_depth", Double.NaN) : Double.NaN;
+
+        String fpsState = states != null ? states.optString("fps", "PENDING").toLowerCase(Locale.US) : "pending";
+        String latState = states != null ? states.optString("latency", "PENDING").toLowerCase(Locale.US) : "pending";
+        String mbpsState = states != null ? states.optString("mbps", "PENDING").toLowerCase(Locale.US) : "pending";
+        String dropState = states != null ? states.optString("drop", "PENDING").toLowerCase(Locale.US) : "pending";
+        String qualityState = states != null ? states.optString("quality", "PENDING").toLowerCase(Locale.US) : "pending";
+
         JSONArray rows = hud.optJSONArray("rows");
-        StringBuilder tableRows = new StringBuilder();
+        StringBuilder detailsRows = new StringBuilder();
         if (rows != null) {
             for (int i = 0; i < rows.length(); i++) {
                 JSONObject row = rows.optJSONObject(i);
-                if (row == null) {
-                    continue;
-                }
+                if (row == null) continue;
                 String type = row.optString("type", "single");
-                if ("sep".equals(type)) {
-                    tableRows.append("<tr class='sep'><td colspan='2'></td></tr>");
-                    continue;
-                }
                 if ("pair".equals(type)) {
-                    String level = row.optString("level", "info");
-                    tableRows.append("<tr><td class='left'>")
+                    detailsRows.append("<tr><td>")
                             .append(escapeHtml(row.optString("left", "")))
-                            .append("</td><td class='right ")
-                            .append(escapeHtml(level))
-                            .append("'>")
+                            .append("</td><td>")
                             .append(escapeHtml(row.optString("right", "")))
                             .append("</td></tr>");
-                    continue;
                 }
-                tableRows.append("<tr><td class='single' colspan='2'>")
-                        .append(escapeHtml(row.optString("text", "")))
-                        .append("</td></tr>");
             }
         }
+        String trendScore = trends != null ? escapeHtml(trends.optJSONArray("score") != null ? trends.optJSONArray("score").toString() : "[]") : "[]";
+        String trendFps = trends != null ? escapeHtml(trends.optJSONArray("present_fps") != null ? trends.optJSONArray("present_fps").toString() : "[]") : "[]";
+        String trendMbps = trends != null ? escapeHtml(trends.optJSONArray("mbps") != null ? trends.optJSONArray("mbps").toString() : "[]") : "[]";
+        String statusNote = status != null ? escapeHtml(status.optString("note", "")) : "";
+
         int safePct = progressPercent < 0 ? 0 : progressPercent;
         String pLabel = progressLine == null || progressLine.trim().isEmpty() ? "TRAINING PROGRESS ..." : progressLine.trim();
         return "<!doctype html><html><head><meta charset='utf-8'/>"
                 + "<style>"
                 + "html,body{margin:0;padding:0;background:transparent;color:#d9fbff;font-family:'JetBrains Mono','IBM Plex Mono',monospace;font-size:11px;}"
-                + ".root{padding:8px;box-sizing:border-box;width:100vw;height:100vh;display:flex;flex-direction:column;gap:8px;}"
+                + ".root{padding:8px;box-sizing:border-box;width:100vw;height:100vh;display:grid;grid-template-rows:auto auto 1fr;gap:8px;}"
+                + ".top{display:grid;grid-template-columns:1.2fr repeat(5,1fr);gap:6px;}"
+                + ".chip{border:1px solid rgba(126,245,255,.35);background:rgba(2,20,24,.30);padding:6px 8px;}"
+                + ".chip .k{font-size:10px;color:#9dddea;letter-spacing:.05em;display:block;}"
+                + ".chip .v{font-size:12px;color:#dcf9ff;}"
                 + ".progress{border:1px solid rgba(126,245,255,.45);background:rgba(2,20,24,.30);padding:6px 8px;}"
                 + ".p-label{font-size:11px;color:#b9f8ff;letter-spacing:.04em;}"
                 + ".p-track{margin-top:6px;height:7px;background:rgba(0,0,0,.35);border:1px solid rgba(126,245,255,.35);}"
                 + ".p-fill{height:100%;width:" + safePct + "%;background:linear-gradient(90deg,#60f2c2,#7dd3fc);}"
-                + "table{width:100%;border-collapse:collapse;table-layout:fixed;background:rgba(2,20,24,.22);}"
-                + "td{border:1px solid rgba(126,245,255,.28);padding:4px 6px;vertical-align:top;word-break:break-word;}"
-                + "td.left{width:58%;color:#dffcff;} td.right{width:42%;text-align:right;color:#b9f8ff;}"
-                + "td.right.ok{color:#6ee7b7;} td.right.warn{color:#fbbf24;} td.right.risk{color:#f87171;}"
-                + "td.single{color:#9ee8f2;text-align:left;}"
-                + "tr.sep td{height:2px;padding:0;border-left:0;border-right:0;border-bottom:0;border-top:1px solid rgba(126,245,255,.42);}"
+                + ".main{display:grid;grid-template-columns:1fr 1fr;gap:8px;min-height:0;}"
+                + ".panel{border:1px solid rgba(126,245,255,.35);background:rgba(2,20,24,.24);padding:6px;min-height:0;overflow:auto;}"
+                + ".kpi{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;}"
+                + ".kpi .item{border:1px solid rgba(126,245,255,.25);padding:6px;background:rgba(0,0,0,.25);}"
+                + ".kpi .item .k{font-size:10px;color:#9dddea;display:block;}"
+                + ".kpi .item .v{font-size:12px;color:#dcf9ff;}"
+                + ".state-ok{color:#6ee7b7;} .state-warn{color:#fbbf24;} .state-risk{color:#f87171;} .state-pending{color:#94a3b8;}"
+                + ".trend{font-size:10px;line-height:1.3;margin-top:6px;color:#9dddea;word-break:break-all;}"
+                + ".detail-table{width:100%;border-collapse:collapse;table-layout:fixed;}"
+                + ".detail-table td{border:1px solid rgba(126,245,255,.28);padding:4px 6px;vertical-align:top;word-break:break-word;}"
+                + ".detail-table td:first-child{width:52%;color:#dffcff;} .detail-table td:last-child{text-align:right;color:#b9f8ff;}"
                 + "</style></head><body><div class='root'>"
+                + "<div class='top'>"
+                + "<div class='chip'><span class='k'>RUN</span><span class='v'>" + escapeHtml(runId) + "</span></div>"
+                + "<div class='chip'><span class='k'>PROFILE</span><span class='v'>" + escapeHtml(profile) + "</span></div>"
+                + "<div class='chip'><span class='k'>GEN</span><span class='v'>" + gIdx + "/" + gTotal + "</span></div>"
+                + "<div class='chip'><span class='k'>TRIAL</span><span class='v'>" + escapeHtml(trialId) + " (" + tIdx + "/" + tTotal + ")</span></div>"
+                + "<div class='chip'><span class='k'>ENCODER</span><span class='v'>" + escapeHtml(encoder) + "</span></div>"
+                + "<div class='chip'><span class='k'>SIZE/FPS</span><span class='v'>" + escapeHtml(size) + " @" + fps + " | " + String.format(Locale.US, "%.1f", targetMbps) + " Mbps</span></div>"
+                + "</div>"
                 + "<div class='progress'><div class='p-label'>" + escapeHtml(pLabel) + "</div><div class='p-track'><div class='p-fill'></div></div></div>"
-                + "<table>" + tableRows + "</table>"
+                + "<div class='main'>"
+                + "<div class='panel'>"
+                + "<div class='kpi'>"
+                + "<div class='item'><span class='k'>SCORE</span><span class='v'>" + (Double.isNaN(score) ? "-" : String.format(Locale.US, "%.2f", score)) + "</span></div>"
+                + "<div class='item'><span class='k'>PRESENT FPS</span><span class='v state-" + escapeHtml(fpsState) + "'>" + (Double.isNaN(present) ? "-" : String.format(Locale.US, "%.1f", present)) + "</span></div>"
+                + "<div class='item'><span class='k'>PIPE/DEC FPS</span><span class='v'>" + (Double.isNaN(recv) ? "-" : String.format(Locale.US, "%.1f", recv)) + " / " + (Double.isNaN(decode) ? "-" : String.format(Locale.US, "%.1f", decode)) + "</span></div>"
+                + "<div class='item'><span class='k'>LIVE MBPS</span><span class='v state-" + escapeHtml(mbpsState) + "'>" + (Double.isNaN(liveMbps) ? "-" : String.format(Locale.US, "%.2f", liveMbps)) + "</span></div>"
+                + "<div class='item'><span class='k'>LAT p95 ms</span><span class='v state-" + escapeHtml(latState) + "'>" + (Double.isNaN(latency) ? "-" : String.format(Locale.US, "%.1f", latency)) + "</span></div>"
+                + "<div class='item'><span class='k'>DROPS/s | QUEUE</span><span class='v state-" + escapeHtml(dropState) + "'>" + (Double.isNaN(drops) ? "-" : String.format(Locale.US, "%.3f", drops)) + " | " + (Double.isNaN(queue) ? "-" : String.format(Locale.US, "%.3f", queue)) + "</span></div>"
+                + "</div>"
+                + "<div class='trend'>layout=" + escapeHtml(layoutMode) + " | quality=<span class='state-" + escapeHtml(qualityState) + "'>" + escapeHtml(qualityState.toUpperCase(Locale.US)) + "</span><br/>"
+                + "score trend: " + trendScore + "<br/>fps trend: " + trendFps + "<br/>mbps trend: " + trendMbps + "<br/>note: " + statusNote + "</div>"
+                + "</div>"
+                + "<div class='panel'><table class='detail-table'>" + detailsRows + "</table></div>"
+                + "</div>"
                 + "</div></body></html>";
     }
 
