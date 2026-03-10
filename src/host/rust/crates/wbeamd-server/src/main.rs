@@ -739,7 +739,26 @@ async fn get_metrics(
         .resolve_core_readonly(serial, query.stream_port)
         .await
         .unwrap_or_else(|| state.sessions.default_core());
-    Json(core.metrics().await)
+    let mut payload = serde_json::to_value(core.metrics().await)
+        .unwrap_or_else(|_| serde_json::json!({}));
+    if let Value::Object(ref mut obj) = payload {
+        let stream_port = query.stream_port.unwrap_or(state.sessions.base_stream_port);
+        if let Some(serial_val) = query.serial.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            let hud_text = read_trainer_overlay_text(serial_val, stream_port);
+            obj.insert(
+                "trainer_hud_active".to_string(),
+                Value::Bool(hud_text.as_ref().is_some_and(|txt| !txt.trim().is_empty())),
+            );
+            obj.insert(
+                "trainer_hud_text".to_string(),
+                Value::String(hud_text.unwrap_or_default()),
+            );
+        } else {
+            obj.insert("trainer_hud_active".to_string(), Value::Bool(false));
+            obj.insert("trainer_hud_text".to_string(), Value::String(String::new()));
+        }
+    }
+    Json(payload)
 }
 
 #[derive(Debug, Deserialize)]
@@ -2192,6 +2211,45 @@ fn sanitize_profile_name(raw: &str) -> String {
         "profile".to_string()
     } else {
         out
+    }
+}
+
+fn session_suffix(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    for ch in raw.trim().chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+    let out = out.trim_matches('_').to_string();
+    if out.is_empty() {
+        "default".to_string()
+    } else {
+        out
+    }
+}
+
+fn read_trainer_overlay_text(serial: &str, stream_port: u16) -> Option<String> {
+    let suffix = session_suffix(serial);
+    let marker = PathBuf::from(format!(
+        "/tmp/wbeam-trainer-active-{}-{}.flag",
+        suffix, stream_port
+    ));
+    if !marker.exists() {
+        return None;
+    }
+    let overlay = PathBuf::from(format!(
+        "/tmp/wbeam-trainer-overlay-{}-{}.txt",
+        suffix, stream_port
+    ));
+    let text = fs::read_to_string(overlay).ok()?;
+    let trimmed = text.trim().to_string();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
     }
 }
 

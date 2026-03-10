@@ -57,6 +57,8 @@ import java.io.IOException;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import okhttp3.Request;
 import okhttp3.Response;
@@ -75,6 +77,8 @@ public class MainActivity extends AppCompatActivity {
     private static final int DECODE_QUEUE_MAX_FRAMES = 2;
     private static final int RENDER_QUEUE_MAX_FRAMES = 1;
     private static final int BANDWIDTH_TEST_MB = 64;
+    private static final Pattern TRAINER_TRIAL_PROGRESS_RE =
+            Pattern.compile("TRIAL\\s+[^\\[]*\\[(\\d+)/(\\d+)]");
     private static final String TEST_VIDEO_URL =
             "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4";
 
@@ -972,6 +976,12 @@ public class MainActivity extends AppCompatActivity {
                 debugInfoPanel.setAlpha(DEBUG_INFO_ALPHA_IDLE);
             }
         }
+        if (perfHudPanel != null) {
+            perfHudPanel.setVisibility(visibility);
+            if (visible) {
+                perfHudPanel.setAlpha(0.95f);
+            }
+        }
     }
 
     private void updateActionButtonsEnabled() {
@@ -1720,6 +1730,11 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         lastPerfMetricsAtMs = nowMs;
+        String trainerHudText = metrics.optString("trainer_hud_text", "");
+        if (trainerHudText != null && !trainerHudText.trim().isEmpty()) {
+            renderTrainerHudOverlay(trainerHudText);
+            return;
+        }
 
         JSONObject kpi = metrics.optJSONObject("kpi");
         JSONObject latest = metrics.optJSONObject("latest_client_metrics");
@@ -1900,6 +1915,47 @@ public class MainActivity extends AppCompatActivity {
                         : daemonLastError)
         );
         emitHudDebugAdb(compact);
+    }
+
+    private void renderTrainerHudOverlay(String rawHudText) {
+        if (perfHudText == null) {
+            return;
+        }
+        String hudText = rawHudText == null ? "" : rawHudText.replace("\r", "");
+        hudText = hudText.replace("[MAIN]\n", "").replace("[MAIN]", "").trim();
+        if (hudText.isEmpty()) {
+            return;
+        }
+
+        String progressLine = buildTrainerProgressLine(hudText);
+        String finalText = progressLine.isEmpty() ? hudText : progressLine + "\n" + hudText;
+        perfHudText.setText(finalText);
+        perfHudText.setTextColor(Color.parseColor("#B3EAF4FF"));
+        if (perfHudPanel != null) {
+            perfHudPanel.setAlpha(0.92f);
+        }
+        lastHudCompactLine = progressLine.isEmpty() ? "hud: trainer overlay active" : progressLine;
+        refreshDebugInfoOverlay();
+    }
+
+    private String buildTrainerProgressLine(String hudText) {
+        Matcher matcher = TRAINER_TRIAL_PROGRESS_RE.matcher(hudText);
+        if (!matcher.find()) {
+            return "";
+        }
+        int cur;
+        int total;
+        try {
+            cur = Integer.parseInt(matcher.group(1));
+            total = Integer.parseInt(matcher.group(2));
+        } catch (Exception ignored) {
+            return "";
+        }
+        if (total <= 0 || cur <= 0) {
+            return "";
+        }
+        int pct = Math.max(0, Math.min(100, (int) Math.round((cur * 100.0) / total)));
+        return String.format(Locale.US, "TRAINING PROGRESS %d%%  (trial %d/%d)", pct, cur, total);
     }
 
     private void refreshDebugInfoOverlay() {

@@ -1959,3 +1959,23 @@ Status: active
   - `python3 -m py_compile src/domains/training/wizard.py src/host/scripts/stream_wayland_portal_h264.py` -> OK
   - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
   - `cd src/apps/trainer-tauri && npm run build` -> OK
+
+## In Progress (2026-03-10) - Full-screen Android-native trainer HUD overlay (host-fed)
+- Implemented Android-native HUD render path for trainer sessions (instead of relying solely on burned-in GStreamer text):
+  - `MainActivity.updatePerfHud()` now consumes `trainer_hud_text` from `/v1/metrics`,
+  - renders full HUD payload directly in app overlay layer (`perfHudText`) with transparent fullscreen panel,
+  - prepends computed training progress line (`TRAINING PROGRESS X% (trial a/b)`) parsed from trial counters.
+- Added backend propagation in `wbeamd-server` metrics endpoint:
+  - `/v1/metrics` now augments payload with:
+    - `trainer_hud_active` (bool),
+    - `trainer_hud_text` (string),
+  - values are read from active trainer marker/overlay files under `/tmp/wbeam-trainer-*` for queried serial+stream_port.
+- UI layout update on Android:
+  - `perfHudPanel` made full-screen transparent layer,
+  - `perfHudText` now fills the screen with smaller monospace font for table-style HUD composition.
+- Debug overlay behavior update:
+  - toggling debug overlay now also shows/hides HUD overlay panel in DEBUG builds.
+- Validation:
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK

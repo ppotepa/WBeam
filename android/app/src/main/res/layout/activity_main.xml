@@ -194,21 +194,22 @@
     <LinearLayout
         android:id="@+id/perfHudPanel"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="match_parent"
         android:layout_gravity="top"
-        android:layout_margin="10dp"
-        android:background="#AA0B1220"
+        android:background="@android:color/transparent"
         android:orientation="vertical"
-        android:padding="8dp">
+        android:padding="12dp">
 
         <TextView
             android:id="@+id/perfHudText"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:fontFamily="monospace"
+            android:gravity="top|start"
+            android:lineSpacingExtra="1dp"
             android:text="HUD OFFLINE"
-            android:textColor="#FCA5A5"
-            android:textSize="11sp" />
+            android:textColor="#B3EAF4FF"
+            android:textSize="9sp" />
     </LinearLayout>
 
     <!-- ── Startup / preflight full-screen modal ─────────────────────────── -->
