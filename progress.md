@@ -997,3 +997,14 @@ Status: active
   - `./redeploy-local`
 - Validation:
   - `bash -n redeploy-local` -> OK
+
+## In Progress (2026-03-10) [commit: ee9702df] - robust adb install failure detection for certificate mismatch
+- Fixed Android install handling in `wbeam`:
+  - `adb install` output containing `Failure [...]` is now treated as a hard failure even if command exit code is zero.
+  - Added recovery trigger for `INSTALL_PARSE_FAILED_INCONSISTENT_CERTIFICATES` in addition to `INSTALL_FAILED_UPDATE_INCOMPATIBLE`.
+- On signature/certificate mismatch:
+  - script now force-uninstalls existing package and retries install,
+  - retry result is also validated against `Failure [...]`.
+- This prevents false-positive per-device `OK` status in `deploy-all` when install actually failed.
+- Validation:
+  - `bash -n wbeam redeploy-local` -> OK
