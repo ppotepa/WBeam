@@ -224,6 +224,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean cursorOverlayEnabled = true;
     private boolean debugControlsVisible = false;
     private boolean debugOverlayVisible = false;
+    private boolean trainerHudSessionActive = false;
     private boolean volumeUpHeld = false;
     private boolean volumeDownHeld = false;
     private boolean debugOverlayToggleArmed = false;
@@ -1759,12 +1760,24 @@ public class MainActivity extends AppCompatActivity {
         }
         lastPerfMetricsAtMs = nowMs;
         JSONObject trainerHudJson = metrics.optJSONObject("trainer_hud_json");
-        if (trainerHudJson != null && trainerHudJson.length() > 0) {
+        boolean trainerHudFromJson = trainerHudJson != null && trainerHudJson.length() > 0;
+        String trainerHudText = metrics.optString("trainer_hud_text", "");
+        boolean trainerHudFromText = trainerHudText != null && !trainerHudText.trim().isEmpty();
+        boolean trainerHudActive = trainerHudFromJson || trainerHudFromText;
+        if (trainerHudActive && !trainerHudSessionActive) {
+            trainerHudSessionActive = true;
+            if (BuildConfig.DEBUG && !debugOverlayVisible) {
+                setDebugOverlayVisible(true);
+            }
+        } else if (!trainerHudActive && trainerHudSessionActive) {
+            trainerHudSessionActive = false;
+        }
+
+        if (trainerHudFromJson) {
             renderTrainerHudOverlayJson(trainerHudJson);
             return;
         }
-        String trainerHudText = metrics.optString("trainer_hud_text", "");
-        if (trainerHudText != null && !trainerHudText.trim().isEmpty()) {
+        if (trainerHudFromText) {
             renderTrainerHudOverlay(trainerHudText);
             return;
         }
@@ -1978,7 +1991,6 @@ public class MainActivity extends AppCompatActivity {
             perfHudText.setVisibility(View.VISIBLE);
         }
         if (perfHudPanel != null) {
-            perfHudPanel.setVisibility(View.VISIBLE);
             perfHudPanel.setAlpha(0.92f);
         }
         lastHudCompactLine = progressLine.isEmpty() ? "hud: trainer overlay active" : progressLine;
@@ -2007,7 +2019,6 @@ public class MainActivity extends AppCompatActivity {
             perfHudText.setVisibility(View.VISIBLE);
         }
         if (perfHudPanel != null) {
-            perfHudPanel.setVisibility(View.VISIBLE);
             perfHudPanel.setAlpha(0.92f);
         }
         lastHudCompactLine = progressText;

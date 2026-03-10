@@ -2069,3 +2069,12 @@ Status: active
 - Result: during training, HUD overlay now appears regardless of manual debug overlay toggle.
 - Validation:
   - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+
+## In Progress (2026-03-10) - Trainer HUD default-on via debug overlay toggle semantics
+- Updated Android HUD behavior to reuse existing debug-overlay control path:
+  - on first detection of active trainer HUD payload in a run, debug overlay auto-enables once,
+  - user can still toggle overlay on/off with VolUp+VolDown during the same run.
+- Removed unconditional panel-forcing from render methods to avoid fighting manual toggle.
+- Added `trainerHudSessionActive` run-state flag to detect rising edge of trainer HUD activity.
+- Validation:
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
