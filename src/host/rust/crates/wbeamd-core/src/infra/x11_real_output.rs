@@ -70,7 +70,6 @@ pub fn probe(is_remote: bool) -> X11RealOutputProbe {
             missing_deps: vec!["real-output-disabled".to_string()],
         };
     }
-
     if is_remote {
         return X11RealOutputProbe {
             supported: false,
@@ -110,6 +109,14 @@ pub fn probe(is_remote: bool) -> X11RealOutputProbe {
     };
     let disp = display.clone();
     debug!(x_display = %disp, providers = providers.len(), "x11 real-output probe: providers");
+    if let Some(reason) = reject_unsafe_provider_topology(&providers) {
+        warn!("{reason}");
+        return X11RealOutputProbe {
+            supported: false,
+            reason,
+            missing_deps: vec!["xrandr-safe-topology".to_string()],
+        };
+    }
 
     let source_provider = choose_source_provider(&providers);
     if source_provider.is_none() {
@@ -129,13 +136,37 @@ pub fn probe(is_remote: bool) -> X11RealOutputProbe {
         };
     }
 
-    let sink_provider = choose_sink_provider(&providers, source_provider.unwrap());
-    if sink_provider.is_none() {
-        warn!("x11 real-output probe: no sink provider for provider link");
+    let source_provider = source_provider.unwrap();
+    if let Some(reason) = reject_unsafe_source_provider(source_provider) {
+        warn!(
+            source_provider_id = %source_provider.id,
+            source_provider_name = %source_provider.name,
+            "{reason}"
+        );
         return X11RealOutputProbe {
             supported: false,
-            reason: "no sink provider found for provider link".to_string(),
-            missing_deps: vec!["xrandr-sink-provider".to_string()],
+            reason,
+            missing_deps: vec!["xrandr-virtual-source-provider".to_string()],
+        };
+    }
+    let sink_provider = choose_sink_provider(&providers, source_provider);
+    if sink_provider.is_none() {
+        warn!("x11 real-output probe: no Intel/AMD (non-NVIDIA) sink provider for provider link");
+        return X11RealOutputProbe {
+            supported: false,
+            reason: "no Intel/AMD (non-NVIDIA) sink provider found for provider link".to_string(),
+            missing_deps: vec!["xrandr-igpu-sink-provider".to_string()],
+        };
+    }
+    let sink_provider = sink_provider.unwrap();
+    if should_block_real_output_on_nvidia_evdi(sink_provider) {
+        return X11RealOutputProbe {
+            supported: false,
+            reason: format!(
+                "real-output backend auto-disabled on NVIDIA+EVDI with NVIDIA sink provider ({})",
+                sink_provider.name
+            ),
+            missing_deps: Vec::new(),
         };
     }
 
@@ -187,12 +218,16 @@ pub fn probe(is_remote: bool) -> X11RealOutputProbe {
 }
 
 fn policy_flag_enabled(key: &str) -> bool {
+    policy_flag_value(key).unwrap_or(false)
+}
+
+fn policy_flag_value(key: &str) -> Option<bool> {
     let path = policy_file_path();
     let Some(path) = path else {
-        return false;
+        return None;
     };
     let Ok(raw) = fs::read_to_string(path) else {
-        return false;
+        return None;
     };
     for line in raw.lines() {
         let line = line.trim();
@@ -206,9 +241,54 @@ fn policy_flag_enabled(key: &str) -> bool {
             continue;
         }
         let low = v.trim().to_ascii_lowercase();
-        return low == "1" || low == "true" || low == "on" || low == "yes";
+        return Some(low == "1" || low == "true" || low == "on" || low == "yes");
     }
-    false
+    None
+}
+
+fn require_virtual_source_provider() -> bool {
+    policy_flag_value("REQUIRE_VIRTUAL_SOURCE_PROVIDER").unwrap_or(true)
+}
+
+fn block_provider_link_when_nvidia_present() -> bool {
+    policy_flag_value("BLOCK_PROVIDER_LINK_WHEN_NVIDIA_PRESENT").unwrap_or(true)
+}
+
+fn has_nvidia_provider(providers: &[ProviderInfo]) -> bool {
+    providers.iter().any(|p| is_nvidia_provider_name(&p.name))
+}
+
+fn should_block_provider_topology(providers: &[ProviderInfo], nvidia_evdi_combo: bool) -> bool {
+    nvidia_evdi_combo && has_nvidia_provider(providers)
+}
+
+fn reject_unsafe_provider_topology(providers: &[ProviderInfo]) -> Option<String> {
+    if !block_provider_link_when_nvidia_present() {
+        return None;
+    }
+    if should_block_provider_topology(providers, is_nvidia_evdi_combo()) {
+        return Some(
+            "refusing provider-link: detected NVIDIA+EVDI provider topology (known Xorg crash path)"
+                .to_string(),
+        );
+    }
+    None
+}
+
+fn reject_unsafe_source_provider(source: &ProviderInfo) -> Option<String> {
+    if is_nvidia_provider_name(&source.name) {
+        return Some(format!(
+            "refusing provider-link: source provider is NVIDIA ({})",
+            source.name
+        ));
+    }
+    if require_virtual_source_provider() && !looks_virtual_provider_name(&source.name) {
+        return Some(format!(
+            "refusing provider-link: source provider is not virtual-capable ({})",
+            source.name
+        ));
+    }
+    None
 }
 
 fn policy_file_path() -> Option<PathBuf> {
@@ -241,6 +321,34 @@ fn policy_file_location_hint() -> String {
         .unwrap_or_else(|| "<unknown-policy-path>".to_string())
 }
 
+fn is_nvidia_evdi_combo() -> bool {
+    has_nvidia_kernel_driver() && is_evdi_loaded()
+}
+
+fn should_block_real_output_on_nvidia_evdi(sink: &ProviderInfo) -> bool {
+    is_nvidia_evdi_combo() && is_nvidia_provider_name(&sink.name)
+}
+
+fn has_nvidia_kernel_driver() -> bool {
+    if !command_exists("lspci") {
+        return false;
+    }
+    Command::new("lspci")
+        .arg("-k")
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .map(|s| s.contains("Kernel driver in use: nvidia"))
+        .unwrap_or(false)
+}
+
+fn is_evdi_loaded() -> bool {
+    fs::read_to_string("/proc/modules")
+        .ok()
+        .map(|raw| raw.lines().any(|l| l.starts_with("evdi ")))
+        .unwrap_or(false)
+}
+
 pub fn create(_serial: &str, size: &str) -> Result<X11RealOutputHandle, String> {
     let display = detect_x11_display().unwrap_or_default();
     if display.trim().is_empty() {
@@ -252,10 +360,22 @@ pub fn create(_serial: &str, size: &str) -> Result<X11RealOutputHandle, String> 
         .map_err(|e| format!("xrandr --listproviders failed: {e}"))?;
     let providers = parse_providers(&providers_raw);
     debug!(providers = providers.len(), "x11 real-output create: parsed providers");
+    if let Some(reason) = reject_unsafe_provider_topology(&providers) {
+        return Err(reason);
+    }
     let source = choose_source_provider(&providers)
         .ok_or_else(|| "no source provider found for virtual output".to_string())?;
+    if let Some(reason) = reject_unsafe_source_provider(source) {
+        return Err(reason);
+    }
     let sink = choose_sink_provider(&providers, source)
-        .ok_or_else(|| "no sink provider found for source provider".to_string())?;
+        .ok_or_else(|| "no Intel/AMD (non-NVIDIA) sink provider found for source provider".to_string())?;
+    if should_block_real_output_on_nvidia_evdi(sink) {
+        return Err(format!(
+            "refusing provider-link on NVIDIA+EVDI with NVIDIA sink provider ({})",
+            sink.name
+        ));
+    }
     info!(
         source_provider_id = %source.id,
         source_provider_name = %source.name,
@@ -553,6 +673,14 @@ fn choose_source_provider<'a>(providers: &'a [ProviderInfo]) -> Option<&'a Provi
     }
 
     if has_aux_sink_only_provider(providers) {
+        let non_nvidia = providers
+            .iter()
+            .filter(|p| has_cap(p.caps, CAP_SOURCE_OUTPUT))
+            .filter(|p| !is_nvidia_provider_name(&p.name))
+            .max_by_key(|p| score_source_provider(p));
+        if non_nvidia.is_some() {
+            return non_nvidia;
+        }
         return providers
             .iter()
             .filter(|p| has_cap(p.caps, CAP_SOURCE_OUTPUT))
@@ -577,15 +705,16 @@ fn choose_sink_provider<'a>(
         .iter()
         .filter(|p| p.id != source.id)
         .filter(|p| has_cap(p.caps, CAP_SINK_OUTPUT))
-        .max_by_key(|p| score_sink_provider(p));
-    if strict.is_some() {
-        return strict;
+        .filter(|p| is_igpu_like_sink_provider_name(&p.name))
+        .collect::<Vec<_>>();
+    if !strict.is_empty() {
+        return strict.into_iter().max_by_key(|p| score_sink_provider(p));
     }
 
     providers
         .iter()
         .filter(|p| p.id != source.id)
-        .filter(|p| is_modesetting_name(&p.name) || looks_gpu_provider_name(&p.name))
+        .filter(|p| is_igpu_like_sink_provider_name(&p.name))
         .max_by_key(|p| score_sink_provider(p))
 }
 
@@ -621,6 +750,15 @@ fn score_source_provider(provider: &ProviderInfo) -> i32 {
     if looks_gpu_provider_name(&provider.name) {
         score -= 40;
     }
+    if is_modesetting_name(&provider.name) || is_intel_provider_name(&provider.name) {
+        score += 20;
+    }
+    if is_amd_provider_name(&provider.name) {
+        score += 15;
+    }
+    if is_nvidia_provider_name(&provider.name) {
+        score -= 200;
+    }
     score
 }
 
@@ -631,6 +769,15 @@ fn score_sink_provider(provider: &ProviderInfo) -> i32 {
     }
     if is_modesetting_name(&provider.name) {
         score += 20;
+    }
+    if is_intel_provider_name(&provider.name) {
+        score += 35;
+    }
+    if is_amd_provider_name(&provider.name) {
+        score += 35;
+    }
+    if is_nvidia_provider_name(&provider.name) {
+        score -= 200;
     }
     if is_evdi_name(&provider.name) {
         score -= 50;
@@ -858,6 +1005,23 @@ fn looks_gpu_provider_name(name: &str) -> bool {
         || low.contains("modesetting")
 }
 
+fn is_nvidia_provider_name(name: &str) -> bool {
+    name.to_ascii_lowercase().contains("nvidia")
+}
+
+fn is_amd_provider_name(name: &str) -> bool {
+    let low = name.to_ascii_lowercase();
+    low.contains("amd") || low.contains("radeon") || low.contains("amdgpu")
+}
+
+fn is_intel_provider_name(name: &str) -> bool {
+    name.to_ascii_lowercase().contains("intel")
+}
+
+fn is_igpu_like_sink_provider_name(name: &str) -> bool {
+    is_modesetting_name(name) || is_intel_provider_name(name) || is_amd_provider_name(name)
+}
+
 fn looks_virtual_provider_name(name: &str) -> bool {
     let low = name.to_ascii_lowercase();
     low.contains("evdi")
@@ -1001,6 +1165,48 @@ Provider 1: id: 0x48 cap: 0xf, Source Output, Sink Output, Source Offload, Sink 
     }
 
     #[test]
+    fn choose_sink_prefers_non_nvidia_when_multiple_sink_candidates_exist() {
+        let source = ProviderInfo {
+            id: "0x6f".to_string(),
+            name: "evdi".to_string(),
+            caps: CAP_SOURCE_OUTPUT,
+        };
+        let providers = vec![
+            source.clone(),
+            ProviderInfo {
+                id: "0x48".to_string(),
+                name: "NVIDIA-0".to_string(),
+                caps: CAP_SINK_OUTPUT | CAP_SOURCE_OUTPUT,
+            },
+            ProviderInfo {
+                id: "0x49".to_string(),
+                name: "modesetting".to_string(),
+                caps: CAP_SINK_OUTPUT | CAP_SOURCE_OUTPUT,
+            },
+        ];
+        let sink = choose_sink_provider(&providers, &source).expect("sink");
+        assert_eq!(sink.name, "modesetting");
+    }
+
+    #[test]
+    fn choose_sink_rejects_nvidia_only_sink_topology() {
+        let source = ProviderInfo {
+            id: "0x6f".to_string(),
+            name: "evdi".to_string(),
+            caps: CAP_SOURCE_OUTPUT,
+        };
+        let providers = vec![
+            source.clone(),
+            ProviderInfo {
+                id: "0x48".to_string(),
+                name: "NVIDIA-0".to_string(),
+                caps: CAP_SINK_OUTPUT | CAP_SOURCE_OUTPUT,
+            },
+        ];
+        assert!(choose_sink_provider(&providers, &source).is_none());
+    }
+
+    #[test]
     fn choose_candidate_output_prefers_disconnected_virtual() {
         let outputs = vec![
             OutputInfo {
@@ -1055,6 +1261,83 @@ Provider 1: id: 0x48 cap: 0xf, Source Output, Sink Output, Source Offload, Sink 
     }
 
     #[test]
+    fn choose_source_avoids_nvidia_when_aux_sink_only_provider_exists() {
+        let providers = vec![
+            ProviderInfo {
+                id: "0x1b7".to_string(),
+                name: "NVIDIA-0".to_string(),
+                caps: CAP_SOURCE_OUTPUT,
+            },
+            ProviderInfo {
+                id: "0x205".to_string(),
+                name: "modesetting".to_string(),
+                caps: CAP_SOURCE_OUTPUT | CAP_SINK_OUTPUT,
+            },
+            ProviderInfo {
+                id: "0x236".to_string(),
+                name: "modesetting".to_string(),
+                caps: CAP_SINK_OUTPUT,
+            },
+        ];
+        let source = choose_source_provider(&providers).expect("source");
+        assert_eq!(source.id, "0x205");
+    }
+
+    #[test]
+    fn reject_unsafe_source_provider_rejects_nvidia() {
+        let source = ProviderInfo {
+            id: "0x48".to_string(),
+            name: "NVIDIA-0".to_string(),
+            caps: CAP_SOURCE_OUTPUT,
+        };
+        assert!(reject_unsafe_source_provider(&source).is_some());
+    }
+
+    #[test]
+    fn reject_unsafe_source_provider_accepts_evdi() {
+        let source = ProviderInfo {
+            id: "0x6f".to_string(),
+            name: "evdi".to_string(),
+            caps: CAP_SOURCE_OUTPUT,
+        };
+        assert!(reject_unsafe_source_provider(&source).is_none());
+    }
+
+    #[test]
+    fn should_block_provider_topology_when_nvidia_present_and_combo_enabled() {
+        let providers = vec![
+            ProviderInfo {
+                id: "0x6f".to_string(),
+                name: "evdi".to_string(),
+                caps: CAP_SOURCE_OUTPUT,
+            },
+            ProviderInfo {
+                id: "0x48".to_string(),
+                name: "NVIDIA-0".to_string(),
+                caps: CAP_SOURCE_OUTPUT | CAP_SINK_OUTPUT,
+            },
+        ];
+        assert!(should_block_provider_topology(&providers, true));
+    }
+
+    #[test]
+    fn should_not_block_provider_topology_without_nvidia_provider() {
+        let providers = vec![
+            ProviderInfo {
+                id: "0x6f".to_string(),
+                name: "evdi".to_string(),
+                caps: CAP_SOURCE_OUTPUT,
+            },
+            ProviderInfo {
+                id: "0x49".to_string(),
+                name: "modesetting".to_string(),
+                caps: CAP_SOURCE_OUTPUT | CAP_SINK_OUTPUT,
+            },
+        ];
+        assert!(!should_block_provider_topology(&providers, true));
+    }
+
+    #[test]
     fn parse_connected_geometry_and_fb() {
         let line = "eDP-1 connected primary 1920x1080+0+0 (normal left inverted right x axis y axis)";
         assert_eq!(parse_connected_geometry(line), Some((0, 0, 1920, 1080)));
@@ -1070,6 +1353,7 @@ fn resolve_xauthority_for_display(display: &str) -> Option<PathBuf> {
         .filter(|v| !v.trim().is_empty())
         .or_else(|| std::env::var("EUID").ok())
         .unwrap_or_else(|| "1000".to_string());
+    let uid_num = uid.parse::<u32>().ok();
     let mut candidates: Vec<PathBuf> = Vec::new();
 
     // Prefer current process env first (set by run_wbeamd.sh after probe),
@@ -1092,6 +1376,16 @@ fn resolve_xauthority_for_display(display: &str) -> Option<PathBuf> {
                         .map(|n| n.starts_with("xauth_"))
                         .unwrap_or(false)
             })
+            .filter(|p| {
+                if let Some(expect_uid) = uid_num {
+                    if let Ok(meta) = fs::metadata(p) {
+                        use std::os::unix::fs::MetadataExt;
+                        return meta.uid() == expect_uid;
+                    }
+                    return false;
+                }
+                true
+            })
             .collect();
         tmp_candidates.sort_by_key(|p| {
             std::fs::metadata(p)
@@ -1111,6 +1405,14 @@ fn resolve_xauthority_for_display(display: &str) -> Option<PathBuf> {
                 let path = entry.path();
                 if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                     if name.starts_with("xauth_") && path.is_file() {
+                        if let Some(expect_uid) = uid_num {
+                            if let Ok(meta) = fs::metadata(&path) {
+                                use std::os::unix::fs::MetadataExt;
+                                if meta.uid() != expect_uid {
+                                    continue;
+                                }
+                            }
+                        }
                         run_candidates.push(path);
                     }
                 }
@@ -1141,5 +1443,5 @@ fn resolve_xauthority_for_display(display: &str) -> Option<PathBuf> {
         }
     }
 
-    candidates.into_iter().next()
+    None
 }

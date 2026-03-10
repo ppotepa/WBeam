@@ -32,11 +32,11 @@ Run from repo root:
 ```
 
 Behavior:
-- defaults to strict real-output mode, but auto-enables monitor-object fallback on `X11 + NVIDIA + EVDI`
-- `start` requires `resolver=linux_x11_real_output`, or `linux_x11_monitor_object_experimental` when fallback is enabled
+- defaults to strict real-output mode (`monitor-object` fallback disabled)
+- `start` requires `resolver=linux_x11_real_output`
+- sink policy for real-output is non-NVIDIA only (Intel/AMD/modesetting)
 - fails fast with explicit dependency hint when real output is not ready
 - `acceptance` asserts topology changed (`xrandr --query`) after start and reverts on stop
-  (fallback mode skips topology assertion and checks STREAMING only)
 
 Wrappers are also available:
 - `proto_x11/probe-host.sh`, `proto_x11/doctor.sh`, `proto_x11/status.sh`
@@ -44,6 +44,9 @@ Wrappers are also available:
 - `proto_x11/deploy-and-start.sh` (single-device deploy + start)
 - `proto_x11/android-build.sh`, `proto_x11/android-deploy.sh`
 - `proto_x11/service-status.sh`, `proto_x11/service-restart.sh`, `proto_x11/logs.sh`
+
+`deploy-and-start.sh` now writes a per-run log file under `logs/`:
+- `YYYYMMDD-HHMMSS.proto-x11-deploy.<pid>.log`
 
 Compatibility note:
 - `proto_x11/run.sh` is kept as alias to `proto_x11/run`.
@@ -54,6 +57,8 @@ Policy file:
   - `ENABLE_SETMONITOR_FALLBACK=0|1`
   - `ALLOW_MONITOR_OBJECT=0|1`
   - `DISABLE_REAL_OUTPUT_BACKEND=0|1`
+  - `REQUIRE_VIRTUAL_SOURCE_PROVIDER=0|1` (default in proto flow: `1`)
+  - `BLOCK_PROVIDER_LINK_WHEN_NVIDIA_PRESENT=0|1` (default in proto flow: `1`)
 
 ## android x11 APK
 

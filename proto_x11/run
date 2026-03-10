@@ -65,23 +65,14 @@ configure_x11_virtual_policy() {
   local disable_real=0
 
   local has_nvidia=0
-  local has_evdi=0
   if command -v lspci >/dev/null 2>&1; then
     if lspci -k 2>/dev/null | rg -qi "Kernel driver in use:\\s*nvidia"; then
       has_nvidia=1
     fi
   fi
-  if command -v lsmod >/dev/null 2>&1; then
-    if lsmod 2>/dev/null | rg -q '^evdi\\s'; then
-      has_evdi=1
-    fi
-  fi
 
-  if [[ "$has_nvidia" == "1" && "$has_evdi" == "1" ]]; then
-    enable_setmonitor=1
-    allow_monitor=1
-    disable_real=1
-    echo "[proto_x11] detected NVIDIA + EVDI; forcing monitor-object fallback safety"
+  if [[ "$has_nvidia" == "1" ]]; then
+    echo "[proto_x11] detected NVIDIA GPU; real-output will require non-NVIDIA sink provider (Intel/AMD/modesetting)"
   fi
 
   mkdir -p "$POLICY_DIR"
@@ -90,6 +81,8 @@ configure_x11_virtual_policy() {
 ENABLE_SETMONITOR_FALLBACK=${enable_setmonitor}
 ALLOW_MONITOR_OBJECT=${allow_monitor}
 DISABLE_REAL_OUTPUT_BACKEND=${disable_real}
+REQUIRE_VIRTUAL_SOURCE_PROVIDER=1
+BLOCK_PROVIDER_LINK_WHEN_NVIDIA_PRESENT=1
 EOF
   echo "[proto_x11] wrote virtual policy config: $POLICY_FILE"
 }

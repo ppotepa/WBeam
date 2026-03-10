@@ -77,7 +77,7 @@ impl X11VirtualOutputBackend for MonitorObjectBackend {
                 missing_deps: Vec::new(),
             };
         }
-        let enabled = read_policy_bool("ENABLE_SETMONITOR_FALLBACK");
+        let enabled = read_policy_bool_with_default("ENABLE_SETMONITOR_FALLBACK", true);
         if enabled {
             BackendProbe {
                 supported: true,
@@ -142,12 +142,12 @@ fn policy_file_path() -> Option<PathBuf> {
     None
 }
 
-fn read_policy_bool(key: &str) -> bool {
+fn read_policy_bool_with_default(key: &str, default: bool) -> bool {
     let Some(path) = policy_file_path() else {
-        return false;
+        return default;
     };
     let Ok(raw) = fs::read_to_string(path) else {
-        return false;
+        return default;
     };
     for line in raw.lines() {
         let line = line.trim();
@@ -163,7 +163,7 @@ fn read_policy_bool(key: &str) -> bool {
         let low = v.trim().to_ascii_lowercase();
         return low == "1" || low == "true" || low == "on" || low == "yes";
     }
-    false
+    default
 }
 
 fn policy_location_hint() -> String {
@@ -219,7 +219,7 @@ mod tests {
         set_test_policy(None);
         let backend = MonitorObjectBackend;
         let probe = backend.probe(&local_x11_probe());
-        assert!(!probe.supported);
+        assert!(probe.supported);
     }
 
     #[test]

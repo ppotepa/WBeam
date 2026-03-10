@@ -2,11 +2,13 @@
 set -euo pipefail
 
 X11_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$X11_DIR/.." && pwd)"
 STREAM_PORT="${WBEAM_X11_STREAM_PORT:-5002}"
 SKIP_SERVICE_RESTART=0
 CONTROL_PORT="${WBEAM_CONTROL_PORT:-5001}"
 CONTROL_WAIT_SEC="${WBEAM_X11_CONTROL_WAIT_SEC:-20}"
 AUTO_LOAD_EVDI=1
+RUN_LOG="${WBEAM_X11_RUN_LOG_FILE:-}"
 
 usage() {
   cat <<USAGE
@@ -60,6 +62,13 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
+
+if [[ -z "$RUN_LOG" ]]; then
+  mkdir -p "$ROOT_DIR/logs"
+  RUN_LOG="$ROOT_DIR/logs/$(date +%Y%m%d-%H%M%S).proto-x11-deploy.$$.log"
+fi
+exec > >(tee -a "$RUN_LOG") 2>&1
+echo "[proto_x11] run log: $RUN_LOG"
 
 wait_control_api() {
   if ! command -v curl >/dev/null 2>&1; then

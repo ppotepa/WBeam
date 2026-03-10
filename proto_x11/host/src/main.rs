@@ -357,7 +357,7 @@ fn start_session(opts: &Opts) -> Result<Value, String> {
 }
 
 fn allow_monitor_object() -> bool {
-    read_policy_bool("ALLOW_MONITOR_OBJECT")
+    read_policy_bool("ALLOW_MONITOR_OBJECT", true)
 }
 
 fn is_supported_virtual_resolver(resolver: &str) -> bool {
@@ -365,7 +365,7 @@ fn is_supported_virtual_resolver(resolver: &str) -> bool {
         || (allow_monitor_object() && resolver == MONITOR_OBJECT_RESOLVER)
 }
 
-fn read_policy_bool(key: &str) -> bool {
+fn read_policy_bool(key: &str, default: bool) -> bool {
     let path = env::var("XDG_CONFIG_HOME")
         .ok()
         .filter(|v| !v.trim().is_empty())
@@ -383,10 +383,10 @@ fn read_policy_bool(key: &str) -> bool {
                 .map(|user| PathBuf::from(format!("/home/{user}")).join(".config/wbeam/x11-virtual-policy.conf"))
         });
     let Some(path) = path else {
-        return false;
+        return default;
     };
     let Ok(raw) = fs::read_to_string(path) else {
-        return false;
+        return default;
     };
     for line in raw.lines() {
         let line = line.trim();
@@ -402,7 +402,7 @@ fn read_policy_bool(key: &str) -> bool {
         let low = v.trim().to_ascii_lowercase();
         return low == "1" || low == "true" || low == "on" || low == "yes";
     }
-    false
+    default
 }
 
 fn stop_session(opts: &Opts) -> Result<Value, String> {
