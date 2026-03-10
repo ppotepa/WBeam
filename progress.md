@@ -1,5 +1,16 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending) - Unified debug overlay toggle via volume-key hold
+- Android debug overlay toggle input was unified across API levels in `MainActivity`:
+  - replaced separate single-key behavior (`Vol+` ON, `Vol-` OFF) with one consistent chord:
+    hold `Vol+` + `Vol-` together for ~650ms to toggle overlay `ON/OFF`,
+  - toggle remains gated by `BuildConfig.DEBUG` (debug builds only),
+  - added key-up/key-down state tracking and debouncing so one hold produces one toggle until keys are released.
+- Lifecycle safety:
+  - added cleanup for pending toggle runnable in `onDestroy`.
+- Validation:
+  - `./gradlew :app:compileDebugJavaWithJavac --no-daemon --stacktrace` -> BUILD SUCCESSFUL.
+
 ## Session Update (2026-03-10, pending) - Vite/esbuild EPIPE mitigation
 - Hardened desktop Vite dev config against sporadic esbuild `write EPIPE` failures:
   - disabled HMR error overlay (`server.hmr.overlay = false`) so desktop UI is not blocked by modal overlay during transient dev worker crashes,

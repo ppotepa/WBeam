@@ -132,6 +132,7 @@ public class MainActivity extends AppCompatActivity {
     private static final long DEBUG_INFO_ALPHA_RESET_MS = 1300L;
     private static final long DEBUG_FPS_SAMPLE_MS = 1000L;
     private static final int DEBUG_FPS_GRAPH_POINTS = 180;
+    private static final long DEBUG_OVERLAY_TOGGLE_HOLD_MS = 650L;
 
     // ── Views ──────────────────────────────────────────────────────────────────
     private View rootLayout;
@@ -219,6 +220,9 @@ public class MainActivity extends AppCompatActivity {
     private boolean cursorOverlayEnabled = true;
     private boolean debugControlsVisible = false;
     private boolean debugOverlayVisible = false;
+    private boolean volumeUpHeld = false;
+    private boolean volumeDownHeld = false;
+    private boolean debugOverlayToggleArmed = false;
     private boolean liveLogVisible = false;
     private long lastHudAdbLogAt = 0L;
     private String lastHudAdbSnapshot = "";
@@ -299,6 +303,21 @@ public class MainActivity extends AppCompatActivity {
                 debugFpsGraphView.addSample(latestTargetFps, latestPresentFps);
             }
             uiHandler.postDelayed(this, DEBUG_FPS_SAMPLE_MS);
+        }
+    };
+    private final Runnable debugOverlayToggleTask = () -> {
+        if (!BuildConfig.DEBUG) {
+            return;
+        }
+        if (volumeUpHeld && volumeDownHeld && !debugOverlayToggleArmed) {
+            debugOverlayToggleArmed = true;
+            boolean nextVisible = !debugOverlayVisible;
+            setDebugOverlayVisible(nextVisible);
+            Toast.makeText(
+                    this,
+                    nextVisible ? "Debug overlay ON" : "Debug overlay OFF",
+                    Toast.LENGTH_SHORT
+            ).show();
         }
     };
 
@@ -553,6 +572,7 @@ public class MainActivity extends AppCompatActivity {
         uiHandler.removeCallbacks(simpleMenuAutoHideTask);
         uiHandler.removeCallbacks(debugInfoFadeTask);
         uiHandler.removeCallbacks(debugGraphSampleTask);
+        uiHandler.removeCallbacks(debugOverlayToggleTask);
         videoTestController.release();
         stopLiveView();
         ioExecutor.shutdownNow();
@@ -578,23 +598,42 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (BuildConfig.DEBUG) {
-            if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
-                if (event.getRepeatCount() == 0 && !debugOverlayVisible) {
-                    setDebugOverlayVisible(true);
-                    Toast.makeText(this, "Debug overlay ON", Toast.LENGTH_SHORT).show();
+        if (BuildConfig.DEBUG
+                && (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)) {
+            if (event.getRepeatCount() == 0) {
+                if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+                    volumeUpHeld = true;
+                } else if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+                    volumeDownHeld = true;
                 }
-                return true;
-            }
-            if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-                if (event.getRepeatCount() == 0 && debugOverlayVisible) {
-                    setDebugOverlayVisible(false);
-                    Toast.makeText(this, "Debug overlay OFF", Toast.LENGTH_SHORT).show();
+                if (volumeUpHeld && volumeDownHeld && !debugOverlayToggleArmed) {
+                    uiHandler.removeCallbacks(debugOverlayToggleTask);
+                    uiHandler.postDelayed(debugOverlayToggleTask, DEBUG_OVERLAY_TOGGLE_HOLD_MS);
                 }
-                return true;
             }
+            return true;
         }
         return super.onKeyDown(keyCode, event);
+    }
+
+    @Override
+    public boolean onKeyUp(int keyCode, KeyEvent event) {
+        if (BuildConfig.DEBUG
+                && (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)) {
+            if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+                volumeUpHeld = false;
+            } else if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+                volumeDownHeld = false;
+            }
+            if (!volumeUpHeld || !volumeDownHeld) {
+                uiHandler.removeCallbacks(debugOverlayToggleTask);
+            }
+            if (!volumeUpHeld && !volumeDownHeld) {
+                debugOverlayToggleArmed = false;
+            }
+            return true;
+        }
+        return super.onKeyUp(keyCode, event);
     }
 
     // ══════════════════════════════════════════════════════════════════════════
