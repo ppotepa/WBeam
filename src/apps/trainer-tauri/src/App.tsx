@@ -134,6 +134,10 @@ function parseHud(lines: string[]): HudSnapshot {
   const trialScoreRe =
     /^\[(t\d+)] score=([0-9.\-]+) present=([0-9.\-]+) recv=([0-9.\-]+) e2e95=([0-9.\-]+)ms drops\/s=([0-9.\-]+)/;
   const progressRe = /^trial space=(\d+) running=(\d+)/;
+  const protoTrialRe = /\btrial=([A-Za-z0-9_.:-]+)/;
+  const protoDoneRe =
+    /done trial=([A-Za-z0-9_.:-]+) score=([0-9.\-]+).*sender_p50=([0-9.\-]+).*pipe_p50=([0-9.\-]+).*timeout_mean=([0-9.\-]+).*drop=([0-9.\-]+)%/;
+  const protoGenRe = /generation\s+(\d+)\/(\d+):\s+population=(\d+)\s+\(start\)/;
 
   for (const line of lines) {
     const start = line.match(trialStartRe);
@@ -152,6 +156,23 @@ function parseHud(lines: string[]): HudSnapshot {
     const p = line.match(progressRe);
     if (p) {
       progress = `${p[2]}/${p[1]}`;
+    }
+    const protoTrial = line.match(protoTrialRe);
+    if (protoTrial) {
+      trialId = protoTrial[1];
+    }
+    const protoDone = line.match(protoDoneRe);
+    if (protoDone) {
+      trialId = protoDone[1];
+      score = protoDone[2];
+      presentFps = protoDone[3];
+      recvFps = protoDone[4];
+      e2eP95Ms = protoDone[5];
+      dropsPerSec = `${protoDone[6]}%`;
+    }
+    const protoGen = line.match(protoGenRe);
+    if (protoGen) {
+      progress = `gen ${protoGen[1]}/${protoGen[2]} pop ${protoGen[3]}`;
     }
   }
   return { trialId, score, presentFps, recvFps, e2eP95Ms, dropsPerSec, progress };
@@ -172,7 +193,19 @@ export default function App() {
   const [serial, setSerial] = createSignal("");
   const [profileName, setProfileName] = createSignal("baseline");
   const [mode, setMode] = createSignal("quality");
-  const [trials, setTrials] = createSignal(24);
+  const [trials, setTrials] = createSignal(18);
+  const [generations, setGenerations] = createSignal(2);
+  const [population, setPopulation] = createSignal(18);
+  const [eliteCount, setEliteCount] = createSignal(6);
+  const [mutationRate, setMutationRate] = createSignal(0.34);
+  const [crossoverRate, setCrossoverRate] = createSignal(0.5);
+  const [bitrateMinKbps, setBitrateMinKbps] = createSignal(10000);
+  const [bitrateMaxKbps, setBitrateMaxKbps] = createSignal(200000);
+  const [encoderMode, setEncoderMode] = createSignal("multi");
+  const [encH264, setEncH264] = createSignal(true);
+  const [encH265, setEncH265] = createSignal(true);
+  const [encRawpng, setEncRawpng] = createSignal(false);
+  const [encMjpeg, setEncMjpeg] = createSignal(false);
   const [overlay, setOverlay] = createSignal(true);
   const [selectedRunId, setSelectedRunId] = createSignal("");
   const [leftProfile, setLeftProfile] = createSignal("");
@@ -286,6 +319,21 @@ export default function App() {
 
   async function startTraining() {
     await withUiGuard(async () => {
+      const selectedEncoders = [
+        encH264() ? "h264" : "",
+        encH265() ? "h265" : "",
+        encRawpng() ? "rawpng" : "",
+        encMjpeg() ? "mjpeg" : "",
+      ].filter(Boolean);
+      const encoders =
+        encoderMode() === "single"
+          ? [selectedEncoders[0] || "h264"]
+          : selectedEncoders.length
+            ? selectedEncoders
+            : ["h264"];
+      if (bitrateMinKbps() > bitrateMaxKbps()) {
+        throw new Error("bitrate min must be <= bitrate max");
+      }
       const resp = await fetch("/v1/trainer/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -296,6 +344,15 @@ export default function App() {
           trials: Number(trials()),
           warmup_sec: 4,
           sample_sec: 12,
+          generations: Number(generations()),
+          population: Number(population()),
+          elite_count: Number(eliteCount()),
+          mutation_rate: Number(mutationRate()),
+          crossover_rate: Number(crossoverRate()),
+          bitrate_min_kbps: Number(bitrateMinKbps()),
+          bitrate_max_kbps: Number(bitrateMaxKbps()),
+          encoder_mode: encoderMode(),
+          encoders,
           overlay: overlay(),
         }),
       });
@@ -418,8 +475,62 @@ export default function App() {
             </label>
             <label>
               Trial budget
-              <input type="number" min="1" max="128" value={trials()} onInput={(e) => setTrials(Number(e.currentTarget.value || 24))} />
+              <input type="number" min="1" max="128" value={trials()} onInput={(e) => setTrials(Number(e.currentTarget.value || 18))} />
             </label>
+            <label>
+              Generations
+              <input type="number" min="1" max="32" value={generations()} onInput={(e) => setGenerations(Number(e.currentTarget.value || 2))} />
+            </label>
+            <label>
+              Population
+              <input type="number" min="2" max="256" value={population()} onInput={(e) => setPopulation(Number(e.currentTarget.value || 18))} />
+            </label>
+            <label>
+              Elite count
+              <input type="number" min="1" max="128" value={eliteCount()} onInput={(e) => setEliteCount(Number(e.currentTarget.value || 6))} />
+            </label>
+            <label>
+              Mutation rate
+              <input type="number" min="0" max="1" step="0.01" value={mutationRate()} onInput={(e) => setMutationRate(Number(e.currentTarget.value || 0.34))} />
+            </label>
+            <label>
+              Crossover rate
+              <input type="number" min="0" max="1" step="0.01" value={crossoverRate()} onInput={(e) => setCrossoverRate(Number(e.currentTarget.value || 0.5))} />
+            </label>
+            <label>
+              Bitrate min (kbps)
+              <input type="number" min="1000" max="400000" value={bitrateMinKbps()} onInput={(e) => setBitrateMinKbps(Number(e.currentTarget.value || 10000))} />
+            </label>
+            <label>
+              Bitrate max (kbps)
+              <input type="number" min="1000" max="400000" value={bitrateMaxKbps()} onInput={(e) => setBitrateMaxKbps(Number(e.currentTarget.value || 200000))} />
+            </label>
+            <label>
+              Encoder mode
+              <select value={encoderMode()} onInput={(e) => setEncoderMode(e.currentTarget.value)}>
+                <option value="multi">multi</option>
+                <option value="single">single</option>
+              </select>
+            </label>
+            <label>Encoders</label>
+            <div class="actions">
+              <label class="checkbox">
+                <input type="checkbox" checked={encH264()} onInput={(e) => setEncH264(e.currentTarget.checked)} />
+                h264
+              </label>
+              <label class="checkbox">
+                <input type="checkbox" checked={encH265()} onInput={(e) => setEncH265(e.currentTarget.checked)} />
+                h265
+              </label>
+              <label class="checkbox">
+                <input type="checkbox" checked={encRawpng()} onInput={(e) => setEncRawpng(e.currentTarget.checked)} />
+                rawpng
+              </label>
+              <label class="checkbox">
+                <input type="checkbox" checked={encMjpeg()} onInput={(e) => setEncMjpeg(e.currentTarget.checked)} />
+                mjpeg
+              </label>
+            </div>
             <label class="checkbox">
               <input type="checkbox" checked={overlay()} onInput={(e) => setOverlay(e.currentTarget.checked)} />
               Show on-stream tuning overlay
@@ -434,6 +545,9 @@ export default function App() {
             <div class="device-card"><strong>Service state</strong><span>{health().state || "-"}</span></div>
             <div class="device-card"><strong>Build revision</strong><span>{health().build_revision || "-"}</span></div>
             <div class="device-card"><strong>Selected serial</strong><span>{serial() || "-"}</span></div>
+            <div class="device-card"><strong>Encoder mode</strong><span>{encoderMode()}</span></div>
+            <div class="device-card"><strong>Bitrate range</strong><span>{bitrateMinKbps()}..{bitrateMaxKbps()} kbps</span></div>
+            <div class="device-card"><strong>GA setup</strong><span>g{generations()} p{population()} e{eliteCount()} m{mutationRate().toFixed(2)} c{crossoverRate().toFixed(2)}</span></div>
             <div class="device-card"><strong>Preflight</strong><span>{preflightText()}</span></div>
           </article>
         </section>
@@ -451,10 +565,10 @@ export default function App() {
           </div>
           <div class="grid2">
             <div class="device-card"><strong>Score</strong><span>{hud().score}</span></div>
-            <div class="device-card"><strong>Present FPS</strong><span>{hud().presentFps}</span></div>
-            <div class="device-card"><strong>Recv FPS</strong><span>{hud().recvFps}</span></div>
-            <div class="device-card"><strong>E2E p95 (ms)</strong><span>{hud().e2eP95Ms}</span></div>
-            <div class="device-card"><strong>Drops/s</strong><span>{hud().dropsPerSec}</span></div>
+            <div class="device-card"><strong>Primary FPS</strong><span>{hud().presentFps}</span></div>
+            <div class="device-card"><strong>Pipeline FPS</strong><span>{hud().recvFps}</span></div>
+            <div class="device-card"><strong>Timeout/E2E (ms)</strong><span>{hud().e2eP95Ms}</span></div>
+            <div class="device-card"><strong>Drops</strong><span>{hud().dropsPerSec}</span></div>
             <div class="device-card"><strong>Gate note</strong><span>{hud().presentFps === "-" ? "waiting for metrics" : "stream active"}</span></div>
           </div>
           <h3>Live Event Log</h3>

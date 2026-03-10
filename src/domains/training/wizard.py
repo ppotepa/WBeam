@@ -373,6 +373,19 @@ def parse_size_list(raw: str) -> list[str]:
     return dedupe_keep_order(out)
 
 
+def parse_encoder_list(raw: str) -> list[str]:
+    out: list[str] = []
+    for part in raw.replace(";", ",").split(","):
+        token = part.strip().lower()
+        if not token:
+            continue
+        if token == "jpeg":
+            token = "mjpeg"
+        if token in {"h264", "h265", "rawpng", "mjpeg"}:
+            out.append(token)
+    return dedupe_keep_order(out)
+
+
 def dedupe_keep_order(items: list[Any]) -> list[Any]:
     seen: set[Any] = set()
     out: list[Any] = []
@@ -868,6 +881,10 @@ def build_trial_space(
     mode: str,
     current: dict[str, Any],
     device_size: str | None,
+    encoder_mode: str,
+    selected_encoders: list[str] | None,
+    bitrate_min_kbps: int,
+    bitrate_max_kbps: int,
 ) -> tuple[list[str], list[str], list[int], list[int], list[str]]:
     current_size = normalize_size(str(current.get("size", "1280x720")))
     current_fps = max(30, as_int(current.get("fps"), 60))
@@ -893,10 +910,23 @@ def build_trial_space(
         fps_values = [current_fps, 45, 60, 72]
         bitrate_values = [current_bitrate, 8000, 12000, 16000, 24000, 32000]
 
-    encoders = [e for e in dedupe_keep_order(encoders) if e in {"h264", "h265", "rawpng"}]
+    encoders = [e for e in dedupe_keep_order(encoders) if e in {"h264", "h265", "rawpng", "mjpeg"}]
+    if selected_encoders:
+        allowed = {e for e in selected_encoders if e in {"h264", "h265", "rawpng", "mjpeg"}}
+        if allowed:
+            encoders = [e for e in encoders if e in allowed]
+            if not encoders:
+                encoders = sorted(allowed)
+    if encoder_mode == "single" and encoders:
+        encoders = [encoders[0]]
     sizes = [s for s in dedupe_keep_order(sizes) if "x" in s]
     fps_values = [v for v in dedupe_keep_order([max(24, v) for v in fps_values]) if v <= 240]
     bitrate_values = [v for v in dedupe_keep_order([max(1000, v) for v in bitrate_values]) if v <= 400000]
+    lo = max(1000, min(bitrate_min_kbps, bitrate_max_kbps))
+    hi = max(lo, max(bitrate_min_kbps, bitrate_max_kbps))
+    bitrate_values = [v for v in bitrate_values if lo <= v <= hi]
+    if not bitrate_values:
+        bitrate_values = [min(hi, max(lo, current_bitrate))]
     cursor_values = [cursor_mode] if cursor_mode in {"hidden", "embedded", "metadata"} else ["embedded"]
     return encoders, sizes, fps_values, bitrate_values, cursor_values
 
@@ -1040,6 +1070,15 @@ def run_proto_autotune_engine(
     preflight: dict[str, Any],
     current_cfg: dict[str, Any],
     trials: int,
+    generations: int,
+    population: int,
+    elite_count: int,
+    mutation_rate: float,
+    crossover_rate: float,
+    encoder_mode: str,
+    selected_encoders: list[str],
+    bitrate_min_kbps: int,
+    bitrate_max_kbps: int,
     warmup_sec: int,
     sample_sec: int,
     overlay: bool,
@@ -1080,11 +1119,12 @@ def run_proto_autotune_engine(
 
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     temp_base = Path("/tmp") / f"wbeam-train-proto-{serial}-{stamp}.json"
-    temp_base.write_text(json.dumps(base_cfg, indent=2) + "\n", encoding="utf-8")
 
-    population = max(4, min(32, trials))
-    generations = 1 if population <= 8 else 2
-    elite = max(2, min(6, population // 3))
+    population = max(2, min(256, population))
+    generations = max(1, min(64, generations))
+    elite = max(1, min(population - 1, elite_count))
+    mutation_rate = min(1.0, max(0.0, mutation_rate))
+    crossover_rate = min(1.0, max(0.0, crossover_rate))
     min_samples = max(8, sample_sec // 2)
     gate_sender = max(20.0, target_fps * 0.70)
     gate_pipe = max(20.0, target_fps * 0.78)
@@ -1094,7 +1134,19 @@ def run_proto_autotune_engine(
     bitrate_values = dedupe_keep_order(
         [target_bitrate, 40_000, 60_000, 90_000, 120_000, 150_000, 200_000]
     )
-    bitrate_values = [v for v in bitrate_values if 1_000 <= v <= 400_000]
+    lo = max(1_000, min(bitrate_min_kbps, bitrate_max_kbps))
+    hi = max(lo, max(bitrate_min_kbps, bitrate_max_kbps))
+    bitrate_values = [v for v in bitrate_values if lo <= v <= hi]
+    if not bitrate_values:
+        bitrate_values = [min(hi, max(lo, target_bitrate))]
+
+    requested_encoders = [e for e in selected_encoders if e in {"h264", "h265"}]
+    if encoder_mode == "single" and requested_encoders:
+        requested_encoders = requested_encoders[:1]
+    if requested_encoders:
+        force_h264 = requested_encoders[0] == "h264"
+        base_cfg["PROTO_H264"] = 1 if force_h264 else 0
+    temp_base.write_text(json.dumps(base_cfg, indent=2) + "\n", encoding="utf-8")
 
     results_name = f"autotune-results-main-{stamp}.json"
     cmd = [
@@ -1109,7 +1161,9 @@ def run_proto_autotune_engine(
         "--elite-count",
         str(elite),
         "--mutation-rate",
-        "0.34",
+        f"{mutation_rate:.4f}",
+        "--crossover-rate",
+        f"{crossover_rate:.4f}",
         "--warmup-secs",
         str(warmup_sec),
         "--sample-secs",
@@ -1194,11 +1248,17 @@ def run_proto_autotune_engine(
         "warmup_sec": warmup_sec,
         "sample_sec": sample_sec,
         "requested_trials": trials,
+        "generations": generations,
+        "population": population,
+        "elite_count": elite,
+        "mutation_rate": mutation_rate,
+        "crossover_rate": crossover_rate,
+        "encoder_mode": encoder_mode,
+        "selected_encoders": selected_encoders,
+        "bitrate_min_kbps": bitrate_min_kbps,
+        "bitrate_max_kbps": bitrate_max_kbps,
         "preflight": preflight,
         "derived": {
-            "population": population,
-            "generations": generations,
-            "elite_count": elite,
             "min_samples": min_samples,
             "gate_sender_p50_min": gate_sender,
             "gate_pipe_p50_min": gate_pipe,
@@ -1271,6 +1331,15 @@ def main() -> int:
     )
     parser.add_argument("--mode", choices=["balanced", "quality", "latency", "custom"], default="quality")
     parser.add_argument("--trials", type=int, default=None)
+    parser.add_argument("--generations", type=int, default=2)
+    parser.add_argument("--population", type=int, default=24)
+    parser.add_argument("--elite-count", type=int, default=6)
+    parser.add_argument("--mutation-rate", type=float, default=0.34)
+    parser.add_argument("--crossover-rate", type=float, default=0.50)
+    parser.add_argument("--encoder-mode", choices=["single", "multi"], default="multi")
+    parser.add_argument("--encoders", default="h265,h264", help="CSV encoders: h264,h265,mjpeg,rawpng")
+    parser.add_argument("--bitrate-min-kbps", type=int, default=10000)
+    parser.add_argument("--bitrate-max-kbps", type=int, default=200000)
     parser.add_argument("--warmup-sec", type=int, default=4)
     parser.add_argument("--sample-sec", type=int, default=12)
     parser.add_argument("--poll-sec", type=float, default=1.0)
@@ -1282,6 +1351,18 @@ def main() -> int:
     )
     args = parser.parse_args()
     run_id = sanitize_profile_name(args.run_id or f"run-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
+    generations = max(1, min(64, int(args.generations)))
+    population = max(2, min(256, int(args.population)))
+    elite_count = max(1, min(population - 1, int(args.elite_count)))
+    mutation_rate = min(1.0, max(0.0, float(args.mutation_rate)))
+    crossover_rate = min(1.0, max(0.0, float(args.crossover_rate)))
+    selected_encoders = parse_encoder_list(args.encoders)
+    if not selected_encoders:
+        selected_encoders = ["h264"]
+    if args.encoder_mode == "single":
+        selected_encoders = selected_encoders[:1]
+    bitrate_min_kbps = max(1000, min(int(args.bitrate_min_kbps), int(args.bitrate_max_kbps)))
+    bitrate_max_kbps = max(bitrate_min_kbps, max(int(args.bitrate_min_kbps), int(args.bitrate_max_kbps)))
 
     print("== WBeam Main Trainer Wizard ==")
     print(f"root: {ROOT}")
@@ -1324,6 +1405,13 @@ def main() -> int:
     profile_name_raw = args.profile_name or prompt_text("Profile name", "baseline")
     profile_name = sanitize_profile_name(profile_name_raw)
     print(f"profile: {profile_name}")
+    print(
+        "tuning: "
+        f"enc_mode={args.encoder_mode} encoders={','.join(selected_encoders)} "
+        f"gen={generations} pop={population} elite={elite_count} "
+        f"mut={mutation_rate:.2f} cross={crossover_rate:.2f} "
+        f"bitrate=[{bitrate_min_kbps},{bitrate_max_kbps}]kbps"
+    )
 
     current_cfg: dict[str, Any] = {
         "profile": "baseline",
@@ -1396,6 +1484,15 @@ def main() -> int:
             preflight=preflight,
             current_cfg=current_cfg,
             trials=requested_trials,
+            generations=generations,
+            population=population,
+            elite_count=elite_count,
+            mutation_rate=mutation_rate,
+            crossover_rate=crossover_rate,
+            encoder_mode=args.encoder_mode,
+            selected_encoders=selected_encoders,
+            bitrate_min_kbps=bitrate_min_kbps,
+            bitrate_max_kbps=bitrate_max_kbps,
             warmup_sec=warmup_sec,
             sample_sec=sample_sec,
             overlay=bool(args.overlay),
@@ -1426,6 +1523,10 @@ def main() -> int:
         mode=mode,
         current=current_cfg,
         device_size=device_size,
+        encoder_mode=args.encoder_mode,
+        selected_encoders=selected_encoders,
+        bitrate_min_kbps=bitrate_min_kbps,
+        bitrate_max_kbps=bitrate_max_kbps,
     )
 
     if mode == "custom":
@@ -1595,6 +1696,15 @@ def main() -> int:
         "stream_port": stream_port,
         "profile_name": profile_name,
         "mode": mode,
+        "encoder_mode": args.encoder_mode,
+        "encoders": selected_encoders,
+        "generations": generations,
+        "population": population,
+        "elite_count": elite_count,
+        "mutation_rate": mutation_rate,
+        "crossover_rate": crossover_rate,
+        "bitrate_min_kbps": bitrate_min_kbps,
+        "bitrate_max_kbps": bitrate_max_kbps,
         "warmup_sec": warmup_sec,
         "sample_sec": sample_sec,
         "poll_sec": args.poll_sec,

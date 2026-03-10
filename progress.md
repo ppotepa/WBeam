@@ -1,5 +1,49 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending, branch `trainerv2`) - Trainer Tauri shell + parameterized run API + proto HUD wiring
+- Implemented native Trainer desktop shell for Tauri app:
+  - added `src/apps/trainer-tauri/src-tauri/` (`Cargo.toml`, `build.rs`, `src/main.rs`, `tauri.conf.json`, capabilities, icon, schemas),
+  - extended `src/apps/trainer-tauri/package.json` with:
+    - `tauri:dev`
+    - `tauri:build`.
+- Upgraded `trainer.sh` launcher:
+  - `--ui` (default) now runs Tauri trainer app (`npm run tauri:dev`),
+  - `--web` keeps Vite-only mode,
+  - command help and mode descriptions updated.
+- Extended trainer start contract in host daemon (`wbeamd-server`) with explicit GA/encoder/bitrate controls:
+  - new request fields:
+    - `generations`, `population`, `elite_count`,
+    - `mutation_rate`, `crossover_rate`,
+    - `bitrate_min_kbps`, `bitrate_max_kbps`,
+    - `encoder_mode` (`single|multi`), `encoders[]`,
+  - added validation/sanitization for mode and codec list,
+  - wired all new parameters into wizard invocation and persisted run artifacts (`run.json` + in-memory run state).
+- Extended `src/domains/training/wizard.py` to accept and persist new runtime knobs:
+  - new CLI args mirror server contract (GA + encoder mode/list + bitrate range),
+  - live-api search space now filters/clamps encoders and bitrate ladder to requested range,
+  - proto engine call now forwards GA controls (including crossover rate) and bitrate bounds,
+  - fixed proto temp config emission ordering so forced codec (`PROTO_H264`) is written before run.
+- Extended legacy autotune core (`src/domains/training/legacy_engine.py`):
+  - added `--crossover-rate`,
+  - generation crossover now uses configured probability (instead of hardcoded `0.50`),
+  - report metadata now persists `crossover_rate`.
+- Trainer UI (`src/apps/trainer-tauri/src/App.tsx`) improvements:
+  - added training controls for:
+    - generations, population, elite, mutation, crossover,
+    - bitrate min/max,
+    - encoder mode + codec selection (`h264/h265/rawpng/mjpeg`),
+  - start payload now sends full parameter set to `/v1/trainer/start`,
+  - added local bitrate range guard (`min <= max`),
+  - upgraded HUD parser to handle both:
+    - live_api lines (`[tNN] score=...`)
+    - proto autotune lines (`done trial=... sender_p50=... pipe_p50=...` + generation progress).
+- Verification:
+  - `python3 -m py_compile src/domains/training/wizard.py src/domains/training/legacy_engine.py` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd src/apps/trainer-tauri && npm ci && npm run build` -> OK
+  - `cd src/apps/trainer-tauri/src-tauri && cargo check` -> OK
+  - `bash -n trainer.sh` and `./trainer.sh --help` -> OK
+
 ## Session Update (2026-03-10, pending, branch `trainerv2`) - Preflight + mode scoring + Trainer GUI scaffold
 - Extended `src/domains/training/wizard.py` with mandatory preflight diagnostics:
   - ADB push throughput benchmark (`adb push` MB/s),

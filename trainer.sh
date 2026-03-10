@@ -19,13 +19,15 @@ Usage: ./trainer.sh [options] [-- args...]
 Options:
   --start-service          Try to start daemon service if health check fails.
   --control-port <port>   Control API port (default: 5001 or WBEAM_CONTROL_PORT).
-  --ui                    Launch Trainer UI app (default).
+  --ui                    Launch Trainer Tauri desktop app (default).
+  --web                   Launch web-only Vite dev server.
   --wizard                Run wizard bridge mode.
   --verbose               Print extra diagnostics.
   -h, --help              Show help.
 
 Modes:
-  --ui      -> npm run dev in src/apps/trainer-tauri
+  --ui      -> npm run tauri:dev in src/apps/trainer-tauri
+  --web     -> npm run dev in src/apps/trainer-tauri
   --wizard  -> ./wbeam train wizard
 
 Remaining args are forwarded to selected mode command.
@@ -52,6 +54,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --ui)
       MODE="ui"
+      shift
+      ;;
+    --web)
+      MODE="web"
       shift
       ;;
     --wizard)
@@ -135,8 +141,8 @@ mkdir -p "${LOG_DIR}"
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
 LOG_FILE="${LOG_DIR}/${STAMP}.trainer.log"
 
-if [[ "${MODE}" == "ui" ]]; then
-  log "launching trainer UI (src/apps/trainer-tauri)"
+if [[ "${MODE}" == "ui" || "${MODE}" == "web" ]]; then
+  log "launching trainer UI (src/apps/trainer-tauri, mode=${MODE})"
   if [[ ! -f "${ROOT_DIR}/src/apps/trainer-tauri/package.json" ]]; then
     log "trainer UI app is missing"
     exit 1
@@ -145,11 +151,19 @@ if [[ "${MODE}" == "ui" ]]; then
     log "npm is required to run trainer UI"
     exit 1
   fi
+  if [[ ! -d "${ROOT_DIR}/src/apps/trainer-tauri/node_modules" ]]; then
+    log "node_modules missing; running npm ci"
+    (cd "${ROOT_DIR}/src/apps/trainer-tauri" && npm ci >/dev/null 2>&1 || npm install >/dev/null 2>&1)
+  fi
   log "log=${LOG_FILE}"
   set +e
   (
     cd "${ROOT_DIR}/src/apps/trainer-tauri"
-    npm run dev -- "${PASSTHRU[@]}"
+    if [[ "${MODE}" == "ui" ]]; then
+      npm run tauri:dev -- "${PASSTHRU[@]}"
+    else
+      npm run dev -- "${PASSTHRU[@]}"
+    fi
   ) 2>&1 | tee -a "${LOG_FILE}"
   rc=${PIPESTATUS[0]}
   set -e

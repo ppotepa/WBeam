@@ -7,7 +7,9 @@
     "dev": "vite --port 1430",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "dependencies": {
     "solid-js": "^1.9.9"

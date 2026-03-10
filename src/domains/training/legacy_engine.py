@@ -1278,6 +1278,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--population", type=int, default=7)
     p.add_argument("--elite-count", type=int, default=2)
     p.add_argument("--mutation-rate", type=float, default=0.35)
+    p.add_argument("--crossover-rate", type=float, default=0.50)
     p.add_argument("--seed", type=int, default=1337)
     p.add_argument("--warmup-secs", type=int, default=12)
     p.add_argument("--sample-secs", type=int, default=24)
@@ -1414,6 +1415,7 @@ def main(argv: list[str]) -> int:
     population = max(1, int(args.population))
     elite_count = max(1, int(args.elite_count))
     mutation_rate = min(1.0, max(0.0, float(args.mutation_rate)))
+    crossover_rate = min(1.0, max(0.0, float(args.crossover_rate)))
     history_seed_count = max(0, int(args.history_seed_count))
     history_max_entries = max(1, int(args.history_max_entries))
     gate_min_sender_p50 = max(0.0, float(args.gate_min_sender_p50))
@@ -1484,7 +1486,8 @@ def main(argv: list[str]) -> int:
         single_portal_consent = True
     log(
         "settings: "
-        f"gen={generations} pop={population} elite={elite_count} mut={mutation_rate:.2f} "
+        f"gen={generations} pop={population} elite={elite_count} "
+        f"mut={mutation_rate:.2f} cross={crossover_rate:.2f} "
         f"warmup={max(0, args.warmup_secs)}s sample={max(5, args.sample_secs)}s "
         f"reuse_device={requested_reuse_device} host_only={bool(args.host_only)} "
         f"overlay={show_overlay} single_portal_consent={single_portal_consent} "
@@ -1694,7 +1697,7 @@ def main(argv: list[str]) -> int:
         while len(next_candidates) < population:
             parent_a = rng.choice(parent_cfgs)
             child = dict(parent_a)
-            if len(parent_cfgs) >= 2 and rng.random() < 0.50:
+            if len(parent_cfgs) >= 2 and rng.random() < crossover_rate:
                 parent_b = rng.choice(parent_cfgs)
                 child = crossover_config(parent_a, parent_b, rng, tunable_keys=tunable_keys)
             child = mutate_config(child, rng, mutation_rate, tunable_keys=tunable_keys)
@@ -1905,6 +1908,7 @@ def main(argv: list[str]) -> int:
         "population": population,
         "elite_count": elite_count,
         "mutation_rate": mutation_rate,
+        "crossover_rate": crossover_rate,
         "gate_min_sender_p50": gate_min_sender_p50,
         "gate_min_pipe_p50": gate_min_pipe_p50,
         "gate_max_timeout_mean": gate_max_timeout_mean,

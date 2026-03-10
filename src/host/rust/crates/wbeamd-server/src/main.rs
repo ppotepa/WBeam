@@ -60,6 +60,15 @@ struct TrainerRun {
     log_path: String,
     profile_dir: String,
     run_artifacts_dir: String,
+    generations: u32,
+    population: u32,
+    elite_count: u32,
+    mutation_rate: f64,
+    crossover_rate: f64,
+    bitrate_min_kbps: u32,
+    bitrate_max_kbps: u32,
+    encoder_mode: String,
+    encoders: Vec<String>,
     exit_code: Option<i32>,
     pid: Option<u32>,
     error: Option<String>,
@@ -82,6 +91,15 @@ struct TrainerStartRequest {
     sample_sec: Option<u32>,
     overlay: Option<bool>,
     stream_port: Option<u16>,
+    generations: Option<u32>,
+    population: Option<u32>,
+    elite_count: Option<u32>,
+    mutation_rate: Option<f64>,
+    crossover_rate: Option<f64>,
+    bitrate_min_kbps: Option<u32>,
+    bitrate_max_kbps: Option<u32>,
+    encoder_mode: Option<String>,
+    encoders: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -877,6 +895,15 @@ async fn post_trainer_start(
         sample_sec: None,
         overlay: None,
         stream_port: None,
+        generations: None,
+        population: None,
+        elite_count: None,
+        mutation_rate: None,
+        crossover_rate: None,
+        bitrate_min_kbps: None,
+        bitrate_max_kbps: None,
+        encoder_mode: None,
+        encoders: None,
     });
 
     let serial = req.serial.trim().to_string();
@@ -908,6 +935,63 @@ async fn post_trainer_start(
     let warmup_sec = req.warmup_sec.unwrap_or(4).clamp(1, 60);
     let sample_sec = req.sample_sec.unwrap_or(12).clamp(4, 180);
     let overlay = req.overlay.unwrap_or(true);
+    let generations = req.generations.unwrap_or(2).clamp(1, 32);
+    let population = req.population.unwrap_or(trials.max(4)).clamp(2, 256);
+    let elite_count = req
+        .elite_count
+        .unwrap_or((population / 3).max(2))
+        .clamp(1, population.saturating_sub(1).max(1));
+    let mutation_rate = req
+        .mutation_rate
+        .unwrap_or(0.34_f64)
+        .clamp(0.0, 1.0);
+    let crossover_rate = req
+        .crossover_rate
+        .unwrap_or(0.50_f64)
+        .clamp(0.0, 1.0);
+    let bitrate_min_kbps = req.bitrate_min_kbps.unwrap_or(10_000).clamp(1_000, 400_000);
+    let bitrate_max_kbps = req
+        .bitrate_max_kbps
+        .unwrap_or(200_000)
+        .clamp(bitrate_min_kbps, 400_000);
+    let encoder_mode = req
+        .encoder_mode
+        .as_deref()
+        .unwrap_or("multi")
+        .trim()
+        .to_ascii_lowercase();
+    if !matches!(encoder_mode.as_str(), "single" | "multi") {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"ok": false, "error": "invalid encoder_mode (use single|multi)"})),
+        )
+            .into_response();
+    }
+    let mut encoders = req
+        .encoders
+        .unwrap_or_else(|| vec!["h265".to_string(), "h264".to_string()])
+        .into_iter()
+        .map(|v| v.trim().to_ascii_lowercase())
+        .filter_map(|v| match v.as_str() {
+            "h264" => Some("h264".to_string()),
+            "h265" => Some("h265".to_string()),
+            "rawpng" => Some("rawpng".to_string()),
+            "jpeg" | "mjpeg" => Some("mjpeg".to_string()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if encoders.is_empty() {
+        encoders = vec!["h264".to_string()];
+    }
+    encoders.sort();
+    encoders.dedup();
+    if encoder_mode == "single" && encoders.len() != 1 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"ok": false, "error": "single encoder_mode requires exactly one encoder"})),
+        )
+            .into_response();
+    }
     let stream_port = req
         .stream_port
         .unwrap_or_else(|| state.sessions.base_stream_port + 2);
@@ -983,6 +1067,24 @@ async fn post_trainer_start(
         .arg(warmup_sec.to_string())
         .arg("--sample-sec")
         .arg(sample_sec.to_string())
+        .arg("--generations")
+        .arg(generations.to_string())
+        .arg("--population")
+        .arg(population.to_string())
+        .arg("--elite-count")
+        .arg(elite_count.to_string())
+        .arg("--mutation-rate")
+        .arg(format!("{mutation_rate:.4}"))
+        .arg("--crossover-rate")
+        .arg(format!("{crossover_rate:.4}"))
+        .arg("--bitrate-min-kbps")
+        .arg(bitrate_min_kbps.to_string())
+        .arg("--bitrate-max-kbps")
+        .arg(bitrate_max_kbps.to_string())
+        .arg("--encoder-mode")
+        .arg(&encoder_mode)
+        .arg("--encoders")
+        .arg(encoders.join(","))
         .arg("--stream-port")
         .arg(stream_port.to_string())
         .arg("--control-port")
@@ -1021,6 +1123,15 @@ async fn post_trainer_start(
         log_path: log_path.to_string_lossy().to_string(),
         profile_dir: profile_dir.to_string_lossy().to_string(),
         run_artifacts_dir: run_artifacts_dir.to_string_lossy().to_string(),
+        generations,
+        population,
+        elite_count,
+        mutation_rate,
+        crossover_rate,
+        bitrate_min_kbps,
+        bitrate_max_kbps,
+        encoder_mode: encoder_mode.clone(),
+        encoders: encoders.clone(),
         exit_code: None,
         pid: Some(pid),
         error: None,
@@ -1039,6 +1150,15 @@ async fn post_trainer_start(
         "log_path": run.log_path,
         "profile_dir": run.profile_dir,
         "run_artifacts_dir": run.run_artifacts_dir,
+        "generations": run.generations,
+        "population": run.population,
+        "elite_count": run.elite_count,
+        "mutation_rate": run.mutation_rate,
+        "crossover_rate": run.crossover_rate,
+        "bitrate_min_kbps": run.bitrate_min_kbps,
+        "bitrate_max_kbps": run.bitrate_max_kbps,
+        "encoder_mode": run.encoder_mode,
+        "encoders": run.encoders,
         "stream_port": stream_port,
     });
     let _ = fs::write(
@@ -1649,6 +1769,15 @@ fn persist_trainer_run_artifacts(run: &TrainerRun) {
         "log_path": run.log_path,
         "profile_dir": run.profile_dir,
         "run_artifacts_dir": run.run_artifacts_dir,
+        "generations": run.generations,
+        "population": run.population,
+        "elite_count": run.elite_count,
+        "mutation_rate": run.mutation_rate,
+        "crossover_rate": run.crossover_rate,
+        "bitrate_min_kbps": run.bitrate_min_kbps,
+        "bitrate_max_kbps": run.bitrate_max_kbps,
+        "encoder_mode": run.encoder_mode,
+        "encoders": run.encoders,
         "exit_code": run.exit_code,
         "error": run.error,
     });
