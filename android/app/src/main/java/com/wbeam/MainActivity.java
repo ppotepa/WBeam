@@ -57,6 +57,7 @@ import org.json.JSONObject;
 
 import java.io.BufferedInputStream;
 import java.io.IOException;
+import java.util.ArrayDeque;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -136,6 +137,7 @@ public class MainActivity extends AppCompatActivity {
     private static final long DEBUG_OVERLAY_TOGGLE_HOLD_MS = 650L;
     private static final long PRESENT_FPS_STALE_GRACE_MS = 2500L;
     private static final long METRICS_STALE_GRACE_MS = 3000L;
+    private static final int HUD_RESOURCE_SERIES_MAX = 42;
 
     // ── Views ──────────────────────────────────────────────────────────────────
     private View rootLayout;
@@ -265,6 +267,14 @@ public class MainActivity extends AppCompatActivity {
     private long latestStablePresentFpsAtMs = 0L;
     private long lastPerfMetricsAtMs = 0L;
     private final SpannableStringBuilder liveLogBuffer = new SpannableStringBuilder();
+    private long usageSampleLastRealtimeMs = 0L;
+    private long usageSampleLastCpuMs = 0L;
+    private double usageCpuPct = 0.0;
+    private double usageMemMb = 0.0;
+    private double usageGpuPct = 0.0;
+    private final ArrayDeque<Double> usageCpuSeries = new ArrayDeque<>();
+    private final ArrayDeque<Double> usageMemSeries = new ArrayDeque<>();
+    private final ArrayDeque<Double> usageGpuSeries = new ArrayDeque<>();
 
     // ── Daemon state (updated via StatusPoller.Callbacks) ──────────────────────
     private boolean daemonReachable = false;
@@ -2014,6 +2024,8 @@ public class MainActivity extends AppCompatActivity {
             String reason,
             String tone
     ) {
+        sampleDeviceResourceUsage(targetFps, renderP95);
+        String resourceRows = buildResourceRowsHtml();
         if (perfHudWebView != null) {
             StringBuilder chips = new StringBuilder();
             chips.append(hudChip("HUD", "RUNTIME", ""));
@@ -2050,6 +2062,7 @@ public class MainActivity extends AppCompatActivity {
                     cards.toString(),
                     trend,
                     details.toString(),
+                    resourceRows,
                     "scale-1x"
             );
             perfHudWebView.loadDataWithBaseURL(null, html, "text/html", "utf-8", null);
@@ -2167,6 +2180,8 @@ public class MainActivity extends AppCompatActivity {
                 + hudDetailRow("LIVE MBPS", "PENDING")
                 + hudDetailRow("TARGET MBPS", "PENDING")
                 + hudDetailRow("NOTE", "Template is active to avoid blank overlay");
+        sampleDeviceResourceUsage(latestTargetFps > 1.0 ? latestTargetFps : 60.0, 0.0);
+        String resourceRows = buildResourceRowsHtml();
         String html = buildUnifiedHudHtml(
                 "trainer",
                 "TRAINING PROGRESS ...",
@@ -2175,6 +2190,7 @@ public class MainActivity extends AppCompatActivity {
                 cards,
                 "trainer feed pending | placeholders visible",
                 details,
+                resourceRows,
                 "scale-2x"
         );
         if (perfHudWebView != null) {
@@ -2257,7 +2273,9 @@ public class MainActivity extends AppCompatActivity {
                 + hudChip("SOURCE", "TEXT SNAPSHOT", "state-pending")
                 + hudChip("PROGRESS", String.valueOf(clampPercent(progressPercent)) + "%", "");
         String cards = hudCard("MODE", "fallback", "state-pending");
-        return buildUnifiedHudHtml("trainer", progressText, progressPercent, chips, cards, "text snapshot mode", details.toString(), "scale-2x");
+        sampleDeviceResourceUsage(latestTargetFps > 1.0 ? latestTargetFps : 60.0, 0.0);
+        String resourceRows = buildResourceRowsHtml();
+        return buildUnifiedHudHtml("trainer", progressText, progressPercent, chips, cards, "text snapshot mode", details.toString(), resourceRows, "scale-2x");
     }
 
     private String buildTrainerHudHtmlFromJson(JSONObject hud, String progressLine, int progressPercent) {
@@ -2295,6 +2313,10 @@ public class MainActivity extends AppCompatActivity {
         double latency = kpi != null ? kpi.optDouble("latency_ms_p95", Double.NaN) : Double.NaN;
         double drops = kpi != null ? kpi.optDouble("drops_per_sec", Double.NaN) : Double.NaN;
         double queue = kpi != null ? kpi.optDouble("queue_depth", Double.NaN) : Double.NaN;
+        double renderMs = kpi != null ? kpi.optDouble("render_time_ms_p95", Double.NaN) : Double.NaN;
+        if (Double.isNaN(renderMs)) {
+            renderMs = kpi != null ? kpi.optDouble("render_ms_p95", 0.0) : 0.0;
+        }
 
         String fpsState = states != null ? states.optString("fps", "PENDING").toLowerCase(Locale.US) : "pending";
         String latState = states != null ? states.optString("latency", "PENDING").toLowerCase(Locale.US) : "pending";
@@ -2354,8 +2376,9 @@ public class MainActivity extends AppCompatActivity {
                 + " | fps trend: " + trendFps
                 + " | mbps trend: " + trendMbps
                 + " | note: " + statusNote;
-
-        return buildUnifiedHudHtml("trainer", pLabel, progressPercent, chips, cards, trend, detailsRows.toString(), trainerScaleClass(fontProfile));
+        sampleDeviceResourceUsage(fps > 1 ? fps : (latestTargetFps > 1.0 ? latestTargetFps : 60.0), Double.isNaN(renderMs) ? 0.0 : renderMs);
+        String resourceRows = buildResourceRowsHtml();
+        return buildUnifiedHudHtml("trainer", pLabel, progressPercent, chips, cards, trend, detailsRows.toString(), resourceRows, trainerScaleClass(fontProfile));
     }
 
     private String buildUnifiedHudHtml(
@@ -2366,6 +2389,7 @@ public class MainActivity extends AppCompatActivity {
             String cardsHtml,
             String trendText,
             String detailsRowsHtml,
+            String resourceRowsHtml,
             String scaleClass
     ) {
         boolean isTrainer = "trainer".equalsIgnoreCase(mode);
@@ -2394,6 +2418,15 @@ public class MainActivity extends AppCompatActivity {
                 + ".kpi .item .k{font-size:10px;color:#9dddea;display:block;}"
                 + ".kpi .item .v{font-size:12px;color:#dcf9ff;}"
                 + ".trend{font-size:10px;line-height:1.3;margin-top:6px;color:#9dddea;word-break:break-word;}"
+                + ".resource{margin-top:7px;border:1px solid rgba(126,245,255,.35);padding:6px;background:rgba(2,10,14,.35);display:grid;gap:5px;}"
+                + ".resource .title{font-size:10px;color:#9dddea;letter-spacing:.05em;}"
+                + ".res-row{display:grid;grid-template-columns:42px 62px minmax(0,1fr);align-items:center;gap:6px;}"
+                + ".res-row .rk{font-size:10px;color:#9dddea;}"
+                + ".res-row .rv{font-size:11px;color:#dcf9ff;}"
+                + ".spark{height:22px;display:flex;align-items:flex-end;gap:1px;border:1px solid rgba(126,245,255,.24);padding:2px;background:rgba(0,0,0,.26);overflow:hidden;}"
+                + ".spark-bar{width:3px;border-radius:2px 2px 0 0;background:linear-gradient(180deg,rgba(110,231,183,.96),rgba(110,231,183,.2));}"
+                + ".spark-bar.state-warn{background:linear-gradient(180deg,rgba(251,191,36,.96),rgba(251,191,36,.2));}"
+                + ".spark-bar.state-risk{background:linear-gradient(180deg,rgba(248,113,113,.96),rgba(248,113,113,.2));}"
                 + ".detail-table{width:100%;border-collapse:collapse;table-layout:fixed;}"
                 + ".detail-table td{border:1px solid rgba(126,245,255,.36);padding:4px 6px;vertical-align:top;word-break:break-word;}"
                 + ".detail-table td:first-child{width:52%;color:#dffcff;} .detail-table td:last-child{text-align:right;color:#b9f8ff;}"
@@ -2406,6 +2439,10 @@ public class MainActivity extends AppCompatActivity {
                 + ".trainer.scale-2x .kpi .item .v{font-size:23px;line-height:1.1;}"
                 + ".trainer.scale-2x .detail-table td{font-size:18px;padding:6px 8px;}"
                 + ".trainer.scale-2x .trend{font-size:16px;line-height:1.35;}"
+                + ".trainer.scale-2x .res-row .rk{font-size:16px;}"
+                + ".trainer.scale-2x .res-row .rv{font-size:18px;}"
+                + ".trainer.scale-2x .spark{height:30px;}"
+                + ".trainer.scale-2x .spark-bar{width:4px;}"
                 + ".trainer.scale-15x .chip .k{font-size:14px;letter-spacing:.04em;}"
                 + ".trainer.scale-15x .chip .v{font-size:18px;line-height:1.1;}"
                 + ".trainer.scale-15x .p-label{font-size:16px;}"
@@ -2414,6 +2451,9 @@ public class MainActivity extends AppCompatActivity {
                 + ".trainer.scale-15x .kpi .item .v{font-size:17px;line-height:1.1;}"
                 + ".trainer.scale-15x .detail-table td{font-size:14px;padding:5px 7px;}"
                 + ".trainer.scale-15x .trend{font-size:13px;line-height:1.3;}"
+                + ".trainer.scale-15x .res-row .rk{font-size:13px;}"
+                + ".trainer.scale-15x .res-row .rv{font-size:14px;}"
+                + ".trainer.scale-15x .spark{height:26px;}"
                 + "</style></head><body class='" + bodyClass + "'><div class='root'>"
                 + "<div class='top'>"
                 + hudChip("HUD MODE", modeUpper, "")
@@ -2421,7 +2461,7 @@ public class MainActivity extends AppCompatActivity {
                 + "</div>"
                 + "<div class='progress'><div class='p-head'><span class='p-label'>" + escapeHtml(progress.isEmpty() ? "HUD ACTIVE" : progress) + "</span><span class='p-pct'>" + safePct + "%</span></div><div class='p-track'><div class='p-fill'></div></div></div>"
                 + "<div class='main'>"
-                + "<div class='panel'><div class='kpi'>" + cardsHtml + "</div><div class='trend'>" + escapeHtml(safeText(trendText)) + "</div></div>"
+                + "<div class='panel'><div class='kpi'>" + cardsHtml + "</div><div class='trend'>" + escapeHtml(safeText(trendText)) + "</div><div class='resource'><div class='title'>DEVICE RESOURCES (* GPU proxy from render time)</div>" + resourceRowsHtml + "</div></div>"
                 + "<div class='panel'><table class='detail-table'>" + detailsRowsHtml + "</table></div>"
                 + "</div>"
                 + "</div></body></html>";
@@ -2440,6 +2480,100 @@ public class MainActivity extends AppCompatActivity {
             return 0;
         }
         return Math.max(0, Math.min(100, progressPercent));
+    }
+
+    private double clampDouble(double value, double min, double max) {
+        if (Double.isNaN(value) || Double.isInfinite(value)) {
+            return min;
+        }
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private void appendSeriesSample(ArrayDeque<Double> series, double value) {
+        if (series == null) {
+            return;
+        }
+        series.addLast(value);
+        while (series.size() > HUD_RESOURCE_SERIES_MAX) {
+            series.removeFirst();
+        }
+    }
+
+    private void sampleDeviceResourceUsage(double targetFps, double renderP95Ms) {
+        long nowMs = SystemClock.elapsedRealtime();
+        long procCpuNow = android.os.Process.getElapsedCpuTime();
+        if (usageSampleLastRealtimeMs > 0L && usageSampleLastCpuMs > 0L) {
+            long dWall = Math.max(1L, nowMs - usageSampleLastRealtimeMs);
+            long dCpu = Math.max(0L, procCpuNow - usageSampleLastCpuMs);
+            int cores = Math.max(1, Runtime.getRuntime().availableProcessors());
+            usageCpuPct = clampDouble((dCpu * 100.0) / (dWall * cores), 0.0, 100.0);
+        }
+        usageSampleLastRealtimeMs = nowMs;
+        usageSampleLastCpuMs = procCpuNow;
+
+        Runtime rt = Runtime.getRuntime();
+        double usedMb = (rt.totalMemory() - rt.freeMemory()) / (1024.0 * 1024.0);
+        usageMemMb = Math.max(0.0, usedMb);
+        double maxMb = Math.max(1.0, rt.maxMemory() / (1024.0 * 1024.0));
+        double memPct = clampDouble((usageMemMb / maxMb) * 100.0, 0.0, 100.0);
+
+        double frameBudgetMs = targetFps > 1.0 ? (1000.0 / targetFps) : 16.67;
+        usageGpuPct = clampDouble((Math.max(0.0, renderP95Ms) / Math.max(1.0, frameBudgetMs)) * 100.0, 0.0, 100.0);
+
+        appendSeriesSample(usageCpuSeries, usageCpuPct);
+        appendSeriesSample(usageMemSeries, memPct);
+        appendSeriesSample(usageGpuSeries, usageGpuPct);
+    }
+
+    private String buildSparkBarsHtml(ArrayDeque<Double> series, String toneClass) {
+        if (series == null || series.isEmpty()) {
+            return "<span class='spark-bar " + escapeHtml(toneClass) + "' style='height:12%'></span>";
+        }
+        StringBuilder bars = new StringBuilder();
+        for (Double sample : series) {
+            double v = sample == null ? 0.0 : sample;
+            int height = (int) Math.round(clampDouble(v, 0.0, 100.0));
+            if (height < 8) {
+                height = 8;
+            }
+            bars.append("<span class='spark-bar ")
+                    .append(escapeHtml(toneClass))
+                    .append("' style='height:")
+                    .append(height)
+                    .append("%'></span>");
+        }
+        return bars.toString();
+    }
+
+    private String buildResourceRowsHtml() {
+        String cpuTone = usageCpuPct > 85.0 ? "state-risk" : (usageCpuPct > 65.0 ? "state-warn" : "state-ok");
+        double memPct = usageMemSeries.isEmpty() ? 0.0 : (usageMemSeries.peekLast() != null ? usageMemSeries.peekLast() : 0.0);
+        String memTone = memPct > 88.0 ? "state-risk" : (memPct > 70.0 ? "state-warn" : "state-ok");
+        String gpuTone = usageGpuPct > 90.0 ? "state-risk" : (usageGpuPct > 70.0 ? "state-warn" : "state-ok");
+
+        StringBuilder html = new StringBuilder();
+        html.append("<div class='res-row'><span class='rk'>CPU</span><span class='rv ")
+                .append(cpuTone)
+                .append("'>")
+                .append(String.format(Locale.US, "%.0f%%", usageCpuPct))
+                .append("</span><div class='spark'>")
+                .append(buildSparkBarsHtml(usageCpuSeries, cpuTone))
+                .append("</div></div>");
+        html.append("<div class='res-row'><span class='rk'>MEM</span><span class='rv ")
+                .append(memTone)
+                .append("'>")
+                .append(String.format(Locale.US, "%.0f MB", usageMemMb))
+                .append("</span><div class='spark'>")
+                .append(buildSparkBarsHtml(usageMemSeries, memTone))
+                .append("</div></div>");
+        html.append("<div class='res-row'><span class='rk'>GPU*</span><span class='rv ")
+                .append(gpuTone)
+                .append("'>")
+                .append(String.format(Locale.US, "%.0f%%", usageGpuPct))
+                .append("</span><div class='spark'>")
+                .append(buildSparkBarsHtml(usageGpuSeries, gpuTone))
+                .append("</div></div>");
+        return html.toString();
     }
 
     private String fmtDoubleOrPlaceholder(double value, String pattern, String fallback) {

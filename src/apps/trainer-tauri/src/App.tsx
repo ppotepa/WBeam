@@ -140,6 +140,14 @@ type LiveStage = {
   level: "info" | "warn" | "risk" | "ok";
 };
 
+type LivePatchChange = {
+  key: string;
+  label: string;
+  from: string;
+  to: string;
+  restart: boolean;
+};
+
 type DatasetTrialPoint = {
   trial_id: string;
   score: number;
@@ -294,6 +302,10 @@ function parseHudMetric(value: string): number | null {
   const cleaned = value.replace(/[^0-9.+-]/g, "");
   const num = Number(cleaned);
   return Number.isFinite(num) ? num : null;
+}
+
+function clampNum(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
 function pickRuntimeValue(profile: Record<string, unknown>, key: string): string {
@@ -654,6 +666,16 @@ export default function App() {
     };
   });
   const hasLiveSeries = createMemo(() => liveSeries().present.length > 0 || hudSeries().present.length > 0);
+  const liveActiveConfig = createMemo(
+    () => (valueAt(liveStatus(), ["base", "active_config"]) as Record<string, unknown>) || null,
+  );
+  const liveConnectionQuality = createMemo(() => {
+    const kpi = liveKpi();
+    const fpsRatio = kpi.present > 0 ? kpi.present / Math.max(1, liveFps()) : 0;
+    if (kpi.drop > 0.02 || kpi.latency > 80 || fpsRatio < 0.7) return { label: "degraded", tone: "risk" as const };
+    if (kpi.drop > 0.008 || kpi.latency > 45 || fpsRatio < 0.9) return { label: "warming", tone: "warn" as const };
+    return { label: "stable", tone: "ok" as const };
+  });
 
   function sessionPath(path: string): string {
     const params = new URLSearchParams();
@@ -670,11 +692,68 @@ export default function App() {
     return `${w}x${h}`;
   }
 
+  function resolvedLiveProfile(): string {
+    const active = String(valueAt(liveStatus(), ["base", "active_config", "profile"]) || "").trim();
+    const requested = profileName().trim();
+    if (requested.toLowerCase() === "baseline") return "baseline";
+    if (active) return active;
+    return "baseline";
+  }
+
+  function normalizeLiveBitrateBounds(
+    changed: "min" | "target" | "max",
+    value: number,
+  ) {
+    const next = clampNum(Number.isFinite(value) ? value : 1, 1, 300);
+    if (changed === "min") {
+      const nextMin = next;
+      setLiveMinMbps(nextMin);
+      if (liveTargetMbps() < nextMin) setLiveTargetMbps(nextMin);
+      if (liveMaxMbps() < nextMin) setLiveMaxMbps(nextMin);
+      return;
+    }
+    if (changed === "max") {
+      const nextMax = next;
+      setLiveMaxMbps(nextMax);
+      if (liveTargetMbps() > nextMax) setLiveTargetMbps(nextMax);
+      if (liveMinMbps() > nextMax) setLiveMinMbps(nextMax);
+      return;
+    }
+    setLiveTargetMbps(clampNum(next, liveMinMbps(), liveMaxMbps()));
+  }
+
+  function setLiveQualityPreset(kind: "latency" | "balanced" | "quality") {
+    if (kind === "latency") {
+      setLiveFps(60);
+      setLiveMinMbps(10);
+      setLiveTargetMbps(25);
+      setLiveMaxMbps(45);
+      setLiveIntraOnly(false);
+      setLiveActionText("Preset: low latency (60 FPS / 25 Mbps target).");
+      return;
+    }
+    if (kind === "quality") {
+      setLiveFps(90);
+      setLiveMinMbps(35);
+      setLiveTargetMbps(90);
+      setLiveMaxMbps(180);
+      setLiveIntraOnly(false);
+      setLiveActionText("Preset: quality (90 FPS / 90 Mbps target).");
+      return;
+    }
+    setLiveFps(72);
+    setLiveMinMbps(18);
+    setLiveTargetMbps(55);
+    setLiveMaxMbps(120);
+    setLiveIntraOnly(false);
+    setLiveActionText("Preset: balanced (72 FPS / 55 Mbps target).");
+  }
+
   function buildLivePatchPayload(): Record<string, unknown> {
     const payload: Record<string, unknown> = {
       serial: serial().trim(),
       stream_port: currentStreamPort(),
-      profile: profileName().trim() || "baseline",
+      profile: resolvedLiveProfile(),
       encoder: selectedEncoder(),
       fps: Number(liveFps()),
       bitrate_kbps: mbpsToKbps(Number(liveTargetMbps())),
@@ -685,6 +764,64 @@ export default function App() {
     if (size) payload.size = size;
     return payload;
   }
+
+  function compareLiveValue(
+    active: Record<string, unknown> | null,
+    key: string,
+    nextValue: unknown,
+    label: string,
+    restart: boolean,
+  ): LivePatchChange | null {
+    const prev = active ? active[key] : undefined;
+    const prevNorm = prev === undefined || prev === null ? "" : String(prev);
+    const nextNorm = nextValue === undefined || nextValue === null ? "" : String(nextValue);
+    if (prevNorm === nextNorm) return null;
+    return { key, label, from: prevNorm || "-", to: nextNorm || "-", restart };
+  }
+
+  const livePatchPlan = createMemo(() => {
+    const active = liveActiveConfig();
+    const size = resolvedLiveSize();
+    const desired: Record<string, unknown> = {
+      profile: resolvedLiveProfile(),
+      encoder: selectedEncoder(),
+      cursor_mode: liveCursorMode(),
+      fps: Number(liveFps()),
+      bitrate_kbps: mbpsToKbps(Number(liveTargetMbps())),
+      intra_only: Boolean(liveIntraOnly()),
+    };
+    if (size) desired.size = size;
+
+    const changes: LivePatchChange[] = [];
+    const defs: Array<{ key: string; label: string; restart: boolean }> = [
+      { key: "profile", label: "Profile", restart: true },
+      { key: "encoder", label: "Encoder", restart: true },
+      { key: "size", label: "Size", restart: true },
+      { key: "fps", label: "FPS", restart: true },
+      { key: "bitrate_kbps", label: "Bitrate", restart: true },
+      { key: "intra_only", label: "Intra-only", restart: true },
+      { key: "cursor_mode", label: "Cursor mode", restart: true },
+    ];
+    for (const def of defs) {
+      if (desired[def.key] === undefined) continue;
+      const diff = compareLiveValue(active, def.key, desired[def.key], def.label, def.restart);
+      if (diff) changes.push(diff);
+    }
+
+    const patch: Record<string, unknown> = {
+      serial: serial().trim(),
+      stream_port: currentStreamPort(),
+    };
+    for (const item of changes) {
+      patch[item.key] = desired[item.key];
+    }
+
+    return {
+      patch,
+      changes,
+      restartRequired: changes.some((item) => item.restart),
+    };
+  });
 
   function appendLiveSeriesPoint(point: {
     present: number;
@@ -870,6 +1007,7 @@ export default function App() {
   async function startLiveRun() {
     await withUiGuard("Starting live run", async () => {
       if (!serial().trim()) throw new Error("Select a device first.");
+      setLiveSeries({ present: [], recv: [], drop: [], mbps: [], latency: [], score: [] });
       const resp = await fetch("/v1/trainer/live/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -886,14 +1024,21 @@ export default function App() {
   async function applyLiveConfig() {
     await withUiGuard("Applying live config", async () => {
       if (!serial().trim()) throw new Error("Select a device first.");
+      const plan = livePatchPlan();
+      if (plan.changes.length === 0) {
+        setLiveActionText("No live changes to apply.");
+        return;
+      }
       const resp = await fetch("/v1/trainer/live/apply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildLivePatchPayload()),
+        body: JSON.stringify(plan.patch),
       });
       const body = (await resp.json()) as Record<string, unknown>;
       if (!resp.ok) throw new Error(String(body.error || "live apply failed"));
-      setLiveActionText("Live config applied.");
+      setLiveActionText(
+        `Live config applied (${plan.changes.length} field${plan.changes.length === 1 ? "" : "s"}${plan.restartRequired ? ", restart required" : ", hot"}).`,
+      );
       await refreshLiveSession();
     });
   }
@@ -1522,6 +1667,16 @@ export default function App() {
                   <div class="meta-item"><strong>Device</strong><span>{serial() || "-"}</span></div>
                   <div class="meta-item"><strong>Stream port</strong><span>{currentStreamPort()}</span></div>
                   <div class="meta-item"><strong>Active encoder</strong><span>{String(valueAt(liveStatus(), ["base", "active_config", "encoder"]) || selectedEncoder())}</span></div>
+                  <div class="meta-item">
+                    <strong>Apply mode</strong>
+                    <span class={`live-pill ${livePatchPlan().restartRequired ? "warn" : "ok"}`}>
+                      {livePatchPlan().restartRequired ? "restart required" : "hot apply"}
+                    </span>
+                  </div>
+                  <div class="meta-item">
+                    <strong>Connection quality</strong>
+                    <span class={`live-pill ${liveConnectionQuality().tone}`}>{liveConnectionQuality().label}</span>
+                  </div>
                 </div>
                 <div class="two-col">
                   <label title="Used for Save Profile action.">
@@ -1538,28 +1693,45 @@ export default function App() {
                     </select>
                   </label>
                 </div>
+                <div class="actions-row">
+                  <button class="quiet" onClick={() => setLiveQualityPreset("latency")}>Preset: latency</button>
+                  <button class="quiet" onClick={() => setLiveQualityPreset("balanced")}>Preset: balanced</button>
+                  <button class="quiet" onClick={() => setLiveQualityPreset("quality")}>Preset: quality</button>
+                </div>
                 <div class="two-col">
-                  <label>
-                    FPS
-                    <input type="number" min="1" max="144" value={liveFps()} onInput={(e) => setLiveFps(Number(e.currentTarget.value || 60))} />
+                  <label title="Frame rate target for active stream. Range: 24..120 FPS.">
+                    FPS (24..120)
+                    <div class="slider-pair">
+                      <input type="range" min="24" max="120" step="1" value={liveFps()} onInput={(e) => setLiveFps(Number(e.currentTarget.value || 60))} />
+                      <input type="number" min="24" max="120" value={liveFps()} onInput={(e) => setLiveFps(clampNum(Number(e.currentTarget.value || 60), 24, 120))} />
+                    </div>
                   </label>
-                  <label>
-                    Target Mbps
-                    <input type="number" min="1" max="300" step="0.5" value={liveTargetMbps()} onInput={(e) => setLiveTargetMbps(Number(e.currentTarget.value || 30))} />
+                  <label title="Live target bitrate. Range: 1..300 Mbps.">
+                    Target Mbps (1..300)
+                    <div class="slider-pair">
+                      <input type="range" min="1" max="300" step="0.5" value={liveTargetMbps()} onInput={(e) => normalizeLiveBitrateBounds("target", Number(e.currentTarget.value || 30))} />
+                      <input type="number" min="1" max="300" step="0.5" value={liveTargetMbps()} onInput={(e) => normalizeLiveBitrateBounds("target", Number(e.currentTarget.value || 30))} />
+                    </div>
                   </label>
                 </div>
                 <div class="two-col">
-                  <label>
-                    Min Mbps
-                    <input type="number" min="1" max="300" step="0.5" value={liveMinMbps()} onInput={(e) => setLiveMinMbps(Number(e.currentTarget.value || 8))} />
+                  <label title="Lower bitrate guardrail used by operator while tuning. Range: 1..300 Mbps.">
+                    Min Mbps (1..300)
+                    <div class="slider-pair">
+                      <input type="range" min="1" max="300" step="0.5" value={liveMinMbps()} onInput={(e) => normalizeLiveBitrateBounds("min", Number(e.currentTarget.value || 8))} />
+                      <input type="number" min="1" max="300" step="0.5" value={liveMinMbps()} onInput={(e) => normalizeLiveBitrateBounds("min", Number(e.currentTarget.value || 8))} />
+                    </div>
                   </label>
-                  <label>
-                    Max Mbps
-                    <input type="number" min="1" max="300" step="0.5" value={liveMaxMbps()} onInput={(e) => setLiveMaxMbps(Number(e.currentTarget.value || 120))} />
+                  <label title="Upper bitrate guardrail used by operator while tuning. Range: 1..300 Mbps.">
+                    Max Mbps (1..300)
+                    <div class="slider-pair">
+                      <input type="range" min="1" max="300" step="0.5" value={liveMaxMbps()} onInput={(e) => normalizeLiveBitrateBounds("max", Number(e.currentTarget.value || 120))} />
+                      <input type="number" min="1" max="300" step="0.5" value={liveMaxMbps()} onInput={(e) => normalizeLiveBitrateBounds("max", Number(e.currentTarget.value || 120))} />
+                    </div>
                   </label>
                 </div>
                 <div class="two-col">
-                  <label>
+                  <label title="Resolution source. Auto-native keeps current running resolution.">
                     Resolution mode
                     <select value={liveResolutionMode()} onInput={(e) => setLiveResolutionMode(e.currentTarget.value)}>
                       <option value="auto_native">auto_native</option>
@@ -1568,7 +1740,7 @@ export default function App() {
                     </select>
                   </label>
                   <Show when={liveResolutionMode() === "preset"}>
-                    <label>
+                    <label title="Explicit capture size preset. Restart required when changed.">
                       Size preset
                       <select value={livePresetSize()} onInput={(e) => setLivePresetSize(e.currentTarget.value)}>
                         <option value="1280x720">1280x720</option>
@@ -1582,25 +1754,26 @@ export default function App() {
                 </div>
                 <Show when={liveResolutionMode() === "custom"}>
                   <div class="two-col">
-                    <label>
+                    <label title="Custom width in pixels. Range: 320..7680.">
                       Width
                       <input type="number" min="320" max="7680" value={liveCustomWidth()} onInput={(e) => setLiveCustomWidth(Number(e.currentTarget.value || 2000))} />
                     </label>
-                    <label>
+                    <label title="Custom height in pixels. Range: 240..4320.">
                       Height
                       <input type="number" min="240" max="4320" value={liveCustomHeight()} onInput={(e) => setLiveCustomHeight(Number(e.currentTarget.value || 1200))} />
                     </label>
                   </div>
                 </Show>
                 <div class="two-col">
-                  <label>
+                  <label title="Cursor transport mode. Hot apply only.">
                     Cursor mode
                     <select value={liveCursorMode()} onInput={(e) => setLiveCursorMode(e.currentTarget.value)}>
                       <option value="embedded">embedded</option>
-                      <option value="none">none</option>
+                      <option value="hidden">hidden</option>
+                      <option value="metadata">metadata</option>
                     </select>
                   </label>
-                  <label class="switch">
+                  <label class="switch" title="All-intra keyframes. Improves recovery, increases bitrate.">
                     <input type="checkbox" checked={liveIntraOnly()} onInput={(e) => setLiveIntraOnly(e.currentTarget.checked)} />
                     <span>Intra-only</span>
                   </label>
@@ -1649,6 +1822,20 @@ export default function App() {
                 </div>
                 <Show when={liveActionText()}>
                   <p class="hint">{liveActionText()}</p>
+                </Show>
+                <Show when={livePatchPlan().changes.length > 0}>
+                  <div class="list-block warn">
+                    <h3>Apply preview ({livePatchPlan().changes.length} change{livePatchPlan().changes.length === 1 ? "" : "s"})</h3>
+                    <ul>
+                      <For each={livePatchPlan().changes}>
+                        {(change) => (
+                          <li>
+                            {change.label}: {change.from} → {change.to} [{change.restart ? "RESTART" : "HOT"}]
+                          </li>
+                        )}
+                      </For>
+                    </ul>
+                  </div>
                 </Show>
               </article>
 

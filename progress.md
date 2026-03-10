@@ -2247,3 +2247,36 @@ Status: active
 - Validation:
   - `cd src/apps/trainer-tauri && npm run build` -> OK
   - `cd android && ./gradlew :app:compileDebugJavaWithJavac` -> FAIL in this shell due Java/Gradle class-version mismatch (`Unsupported class file major version 69`), requires running with project-supported JDK (Java 17 as used in deploy scripts).
+
+## In Progress (2026-03-10) - Live Run hot-restart quality upgrade + Android resource HUD
+- Live Run patch planner added (`livePatchPlan`) with diff preview before apply:
+  - per-field from/to values,
+  - restart impact labels,
+  - changed-field count in apply confirmation.
+- Apply path now sends minimal patch only (changed fields) instead of full payload every time.
+- New guard: `Apply Live` exits early with `No live changes to apply.` when config is unchanged.
+- Start Live now clears previous live chart series to avoid stale carry-over between runs.
+- Live profile resolution hardened:
+  - live start/apply now resolve profile safely to active/baseline, reducing `invalid profile` failures.
+- Live bitrate controls improved with hard ranges and clamping:
+  - min/target/max Mbps are mutually normalized (`min <= target <= max`).
+- Live Run quality presets added:
+  - `latency`, `balanced`, `quality` quick buttons with tuned FPS/bitrate envelopes.
+- Live Run controls upgraded to operator-friendly ranges/tooltips:
+  - FPS as slider+numeric pair (`24..120`),
+  - Target/Min/Max bitrate as slider+numeric pairs (`1..300`).
+- Cursor mode options aligned with API contract (`embedded|hidden|metadata`).
+- Live context panel extended with:
+  - apply-mode badge (`restart required` / `hot apply`),
+  - live connection quality badge (`stable|warming|degraded`).
+- Android unified HUD expanded with device resource telemetry:
+  - CPU usage sampling (%),
+  - memory usage sampling (MB + normalized history),
+  - GPU proxy usage (% from render-time/frame-budget ratio).
+- Android HUD now renders mini sparkline graphs for CPU/MEM/GPU in both runtime and trainer overlays.
+- Android HUD WebView hardening/visibility:
+  - software layer forced for text/overlay reliability,
+  - resource panel integrated into unified HUD layout.
+- Validation:
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
