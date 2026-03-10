@@ -3,6 +3,12 @@ set -euo pipefail
 
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+WBEAM_CONFIG_HELPER="$ROOT_DIR/src/host/scripts/wbeam_config.sh"
+if [[ -f "$WBEAM_CONFIG_HELPER" ]]; then
+  # shellcheck source=src/host/scripts/wbeam_config.sh
+  source "$WBEAM_CONFIG_HELPER"
+  wbeam_load_config "$ROOT_DIR"
+fi
 
 usage() {
   cat <<'USAGE'

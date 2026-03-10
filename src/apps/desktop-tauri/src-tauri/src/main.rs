@@ -116,6 +116,110 @@ static ADB_CMD_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 static DEVICE_SNAPSHOT_CACHE: OnceLock<Mutex<HashMap<String, CachedDeviceSnapshot>>> =
     OnceLock::new();
 static SESSION_LOGS: OnceLock<SessionLogs> = OnceLock::new();
+static WBEAM_CONFIG_CACHE: OnceLock<HashMap<String, String>> = OnceLock::new();
+
+fn wbeam_config_cache() -> &'static HashMap<String, String> {
+    WBEAM_CONFIG_CACHE.get_or_init(|| {
+        let root = repo_root();
+        let mut files: Vec<PathBuf> = Vec::new();
+
+        if let Ok(path) = std::env::var("WBEAM_CONFIG_FILE") {
+            let trimmed = path.trim();
+            if !trimmed.is_empty() {
+                files.push(PathBuf::from(trimmed));
+            }
+        }
+
+        let user_cfg = std::env::var("XDG_CONFIG_HOME")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var("HOME")
+                    .ok()
+                    .filter(|v| !v.trim().is_empty())
+                    .map(|h| PathBuf::from(h).join(".config"))
+            })
+            .map(|base| base.join("wbeam/wbeam.conf"));
+        if let Some(path) = user_cfg {
+            files.push(path);
+        }
+
+        files.push(root.join(".wbeam.conf"));
+        files.push(root.join("config/wbeam.conf"));
+
+        let mut map = HashMap::new();
+        for file in files {
+            let Ok(raw) = fs::read_to_string(&file) else {
+                continue;
+            };
+            for line in raw.lines() {
+                let line = line.trim();
+                if line.is_empty() || line.starts_with('#') {
+                    continue;
+                }
+                let Some((k, v)) = line.split_once('=') else {
+                    continue;
+                };
+                let key = k.trim();
+                if !key.starts_with("WBEAM_") {
+                    continue;
+                }
+                if map.contains_key(key) {
+                    continue;
+                }
+                let mut value = v.trim().to_string();
+                let bytes = value.as_bytes();
+                if bytes.len() >= 2
+                    && ((bytes[0] == b'"' && bytes[bytes.len() - 1] == b'"')
+                        || (bytes[0] == b'\'' && bytes[bytes.len() - 1] == b'\''))
+                {
+                    value = value[1..value.len() - 1].to_string();
+                }
+                map.insert(key.to_string(), value);
+            }
+        }
+        map
+    })
+}
+
+fn wbeam_config_value(key: &str) -> Option<String> {
+    if let Ok(value) = std::env::var(key) {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+    wbeam_config_cache()
+        .get(key)
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+fn wbeam_config_u16(key: &str, default: u16) -> u16 {
+    wbeam_config_value(key)
+        .and_then(|v| v.parse::<u16>().ok())
+        .unwrap_or(default)
+}
+
+fn wbeam_config_bool(key: &str, default: bool) -> bool {
+    wbeam_config_value(key)
+        .map(|v| {
+            matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(default)
+}
+
+fn wbeam_control_port() -> u16 {
+    wbeam_config_u16("WBEAM_CONTROL_PORT", 5001)
+}
+
+fn wbeam_stream_port() -> u16 {
+    wbeam_config_u16("WBEAM_STREAM_PORT", 5000)
+}
 
 #[derive(Clone, Debug)]
 struct CachedDeviceSnapshot {
@@ -284,10 +388,7 @@ fn list_devices_basic() -> DevicesBasicResponse {
         };
     }
 
-    let base_stream_port = std::env::var("WBEAM_STREAM_PORT")
-        .ok()
-        .and_then(|v| v.trim().parse::<u16>().ok())
-        .unwrap_or(5000);
+    let base_stream_port = wbeam_stream_port();
     let mut port_map = load_device_port_map();
     let mut port_map_changed = false;
 
@@ -302,10 +403,7 @@ fn list_devices_basic() -> DevicesBasicResponse {
                     !daemon_apk_version.is_empty() && snap.apk_version == daemon_apk_version;
                 let mut stream_port = port_map.get(&serial).copied().unwrap_or_else(|| {
                     let mut p = base_stream_port.saturating_add(2 + idx as u16);
-                    let control_port = std::env::var("WBEAM_CONTROL_PORT")
-                        .ok()
-                        .and_then(|v| v.trim().parse::<u16>().ok())
-                        .unwrap_or(5001);
+                    let control_port = wbeam_control_port();
                     if p == control_port {
                         p = p.saturating_add(1);
                     }
@@ -424,7 +522,7 @@ fn host_expected_apk_version() -> String {
         }
     }
 
-    if let Ok(explicit) = std::env::var("WBEAM_HOST_APK_VERSION") {
+    if let Some(explicit) = wbeam_config_value("WBEAM_HOST_APK_VERSION") {
         let trimmed = explicit.trim();
         if !trimmed.is_empty() {
             return trimmed.to_string();
@@ -441,7 +539,7 @@ fn host_expected_apk_version() -> String {
 }
 
 fn host_build_revision_from_health() -> Option<String> {
-    let control_port = std::env::var("WBEAM_CONTROL_PORT").unwrap_or_else(|_| "5001".to_string());
+    let control_port = wbeam_control_port();
     let url = format!("http://127.0.0.1:{control_port}/health");
     let output = Command::new("curl")
         .args(["-fsS", "--max-time", "1", &url])
@@ -458,7 +556,7 @@ fn host_build_revision_from_health() -> Option<String> {
 }
 
 fn daemon_stream_state_and_port(serial: &str, stream_port: Option<u16>) -> Option<(String, u16)> {
-    let control_port = std::env::var("WBEAM_CONTROL_PORT").unwrap_or_else(|_| "5001".to_string());
+    let control_port = wbeam_control_port();
     let mut url = format!("http://127.0.0.1:{control_port}/v1/status?serial={serial}");
     if let Some(port) = stream_port {
         url.push_str(&format!("&stream_port={port}"));
@@ -491,7 +589,7 @@ fn daemon_post_action(
     stream_port: u16,
     display_mode: Option<&str>,
 ) -> Result<String, String> {
-    let control_port = std::env::var("WBEAM_CONTROL_PORT").unwrap_or_else(|_| "5001".to_string());
+    let control_port = wbeam_control_port();
     let mut url = format!(
         "http://127.0.0.1:{control_port}/v1/{action}?serial={serial}&stream_port={stream_port}"
     );
@@ -621,10 +719,7 @@ fn adb_api_level(serial: &str) -> Option<u32> {
 }
 
 fn adb_prepare_connect(serial: &str, stream_port: u16) -> Result<(), String> {
-    let control_port = std::env::var("WBEAM_CONTROL_PORT")
-        .ok()
-        .and_then(|v| v.trim().parse::<u16>().ok())
-        .unwrap_or(5001);
+    let control_port = wbeam_control_port();
     connect_log(
         serial,
         stream_port,
@@ -969,7 +1064,7 @@ fn process_name_matches(pid: u32, needle: &str) -> bool {
 #[tauri::command]
 fn host_probe_brief() -> HostProbeBrief {
     ui_service_log("host_probe_brief", "begin", "");
-    let control_port = std::env::var("WBEAM_CONTROL_PORT").unwrap_or_else(|_| "5001".to_string());
+    let control_port = wbeam_control_port();
     let url = format!("http://127.0.0.1:{control_port}/host-probe");
     let output = Command::new("curl")
         .args(["-fsS", "--max-time", "1", &url])
@@ -1044,7 +1139,7 @@ fn virtual_doctor(
     serial: Option<String>,
     stream_port: Option<u16>,
 ) -> Result<VirtualDoctor, String> {
-    let control_port = std::env::var("WBEAM_CONTROL_PORT").unwrap_or_else(|_| "5001".to_string());
+    let control_port = wbeam_control_port();
     let mut url = format!("http://127.0.0.1:{control_port}/v1/virtual/doctor");
     let mut params: Vec<String> = Vec::new();
     if let Some(s) = serial {
@@ -1294,13 +1389,7 @@ fn device_connect(
             return Err(msg);
         }
         if is_monitor_object {
-            let allow_monitor_object = std::env::var("WBEAM_X11_ALLOW_MONITOR_OBJECT")
-                .ok()
-                .map(|v| {
-                    let low = v.trim().to_ascii_lowercase();
-                    low == "1" || low == "true" || low == "on" || low == "yes"
-                })
-                .unwrap_or(false);
+            let allow_monitor_object = wbeam_config_bool("WBEAM_X11_ALLOW_MONITOR_OBJECT", false);
             if !allow_monitor_object {
                 let msg = "Virtual monitor fallback (xrandr --setmonitor) is experimental and disabled by default. Use a real RandR output backend (EVDI) or explicitly set WBEAM_X11_ALLOW_MONITOR_OBJECT=1.".to_string();
                 ui_service_log(
@@ -1367,7 +1456,7 @@ fn device_disconnect(serial: String, stream_port: u16) -> Result<String, String>
     let mut res = daemon_post_action("stop", &serial, stream_port, None);
     if res.is_err() {
         // Fallback: stream port may have drifted from stale UI mapping.
-        let control_port = std::env::var("WBEAM_CONTROL_PORT").unwrap_or_else(|_| "5001".to_string());
+        let control_port = wbeam_control_port();
         let url = format!("http://127.0.0.1:{control_port}/v1/stop?serial={serial}");
         let output = Command::new("curl")
             .args(["-sS", "--max-time", "3", "-X", "POST", &url])
@@ -1439,10 +1528,7 @@ fn service_start() -> Result<ServiceStatus, String> {
         fs::write(&unit_path, expected).map_err(|e| format!("cannot rewrite unit file: {e}"))?;
         systemctl_user(&["daemon-reload"])?;
     }
-    let control_port = std::env::var("WBEAM_CONTROL_PORT")
-        .ok()
-        .and_then(|v| v.trim().parse::<u16>().ok())
-        .unwrap_or(5001);
+    let control_port = wbeam_control_port();
     stop_conflicting_port_holder(control_port);
     stop_conflicting_lock_holder();
     let _ = systemctl_user(&["reset-failed", SERVICE_NAME]);
@@ -1553,17 +1639,19 @@ fn unit_file_path() -> PathBuf {
 }
 
 fn service_unit_content() -> String {
-    let daemon_bin_override = std::env::var("WBEAM_DAEMON_BIN")
-        .ok()
-        .filter(|v| !v.trim().is_empty());
+    let daemon_bin_override = wbeam_config_value("WBEAM_DAEMON_BIN");
     let default_runner = repo_root()
         .join("src/host/scripts/run_wbeamd.sh")
         .to_string_lossy()
         .to_string();
-    let control_port = std::env::var("WBEAM_CONTROL_PORT").unwrap_or_else(|_| "5001".to_string());
-    let stream_port = std::env::var("WBEAM_STREAM_PORT").unwrap_or_else(|_| "5000".to_string());
+    let control_port = wbeam_control_port();
+    let stream_port = wbeam_stream_port();
     let service_lock_file = format!("/tmp/wbeamd-service-{control_port}.lock");
     let root = repo_root().to_string_lossy().to_string();
+    let config_file = repo_root()
+        .join("config/wbeam.conf")
+        .to_string_lossy()
+        .to_string();
     let exec_start = if let Some(bin) = daemon_bin_override {
         // Backward compatible override for prebuilt daemon binaries.
         format!("{bin} --control-port {control_port} --stream-port {stream_port} --root {root}")
@@ -1572,7 +1660,7 @@ fn service_unit_content() -> String {
         format!("{default_runner} {control_port} {stream_port}")
     };
     format!(
-        "[Unit]\nDescription=WBeam Screen Streaming Daemon\nAfter=graphical-session.target\n\n[Service]\nType=simple\nExecStart={exec_start}\nRestart=on-failure\nRestartSec=3\nEnvironment=RUST_LOG=info\nEnvironment=WBEAM_DAEMON_IMPL=rust\nEnvironment=WBEAM_USE_RUST_STREAMER=1\nEnvironment=WBEAM_ROOT={root}\nEnvironment=WBEAM_LOCK_FILE={service_lock_file}\n\n[Install]\nWantedBy=default.target\n"
+        "[Unit]\nDescription=WBeam Screen Streaming Daemon\nAfter=graphical-session.target\n\n[Service]\nType=simple\nExecStart={exec_start}\nRestart=on-failure\nRestartSec=3\nEnvironment=RUST_LOG=info\nEnvironment=WBEAM_ROOT={root}\nEnvironment=WBEAM_CONFIG_FILE={config_file}\nEnvironment=WBEAM_LOCK_FILE={service_lock_file}\n\n[Install]\nWantedBy=default.target\n"
     )
 }
 

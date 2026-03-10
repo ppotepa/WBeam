@@ -1,13 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CONTROL_PORT="${1:-5001}"
-STREAM_PORT="${2:-5000}"
-DAEMON_IMPL="${WBEAM_DAEMON_IMPL:-auto}" # auto|rust|python
-ANDROID_SERIAL="${WBEAM_ANDROID_SERIAL:-}"
-
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+WBEAM_CONFIG_HELPER="$ROOT_DIR/src/host/scripts/wbeam_config.sh"
+if [[ -f "$WBEAM_CONFIG_HELPER" ]]; then
+  # shellcheck source=src/host/scripts/wbeam_config.sh
+  source "$WBEAM_CONFIG_HELPER"
+  wbeam_load_config "$ROOT_DIR"
+fi
+
+CONTROL_PORT="${1:-${WBEAM_CONTROL_PORT:-5001}}"
+STREAM_PORT="${2:-${WBEAM_STREAM_PORT:-5000}}"
+DAEMON_IMPL="${WBEAM_DAEMON_IMPL:-auto}" # auto|rust|python
+ANDROID_SERIAL="${WBEAM_ANDROID_SERIAL:-}"
 DEFAULT_LOCK_FILE=""
 if [[ -n "${WBEAM_LOCK_FILE:-}" ]]; then
   DEFAULT_LOCK_FILE="$WBEAM_LOCK_FILE"

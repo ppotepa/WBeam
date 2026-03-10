@@ -76,6 +76,7 @@ codebase_concat*.txt
 concat*.txt
 ALL_CODE*
 .wbeam_android_pipeline
+.wbeam.conf
 .wbeam_build_version
 .wbeam_buildno
 .wbeam_device_ports

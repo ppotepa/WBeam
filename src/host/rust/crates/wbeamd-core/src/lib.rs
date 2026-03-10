@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::os::fd::AsRawFd;
@@ -44,6 +44,95 @@ const NO_PRESENT_RESTART_COOLDOWN: Duration = Duration::from_secs(15);
 const NO_PRESENT_MIN_RECV_FPS: f64 = 10.0;
 const NO_PRESENT_MAX_PRESENT_FPS: f64 = 1.0;
 const REVERSE_REFRESH_BACKSTOP: Duration = Duration::from_secs(120);
+
+fn load_wbeam_config(root: &Path) -> HashMap<String, String> {
+    let mut files: Vec<PathBuf> = Vec::new();
+    if let Ok(path) = std::env::var("WBEAM_CONFIG_FILE") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            files.push(PathBuf::from(trimmed));
+        }
+    }
+    let user_cfg = std::env::var("XDG_CONFIG_HOME")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .map(|home| PathBuf::from(home).join(".config"))
+        })
+        .map(|base| base.join("wbeam/wbeam.conf"));
+    if let Some(path) = user_cfg {
+        files.push(path);
+    }
+    files.push(root.join(".wbeam.conf"));
+    files.push(root.join("config/wbeam.conf"));
+
+    let mut map = HashMap::new();
+    for file in files {
+        let Ok(raw) = std::fs::read_to_string(file) else {
+            continue;
+        };
+        for line in raw.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let Some((k, v)) = line.split_once('=') else {
+                continue;
+            };
+            let key = k.trim();
+            if !key.starts_with("WBEAM_") {
+                continue;
+            }
+            if map.contains_key(key) {
+                continue;
+            }
+            let mut value = v.trim().to_string();
+            let bytes = value.as_bytes();
+            if bytes.len() >= 2
+                && ((bytes[0] == b'"' && bytes[bytes.len() - 1] == b'"')
+                    || (bytes[0] == b'\'' && bytes[bytes.len() - 1] == b'\''))
+            {
+                value = value[1..value.len() - 1].to_string();
+            }
+            map.insert(key.to_string(), value);
+        }
+    }
+    map
+}
+
+fn wbeam_setting(settings: &HashMap<String, String>, key: &str) -> Option<String> {
+    if let Ok(value) = std::env::var(key) {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+    settings
+        .get(key)
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+fn wbeam_setting_bool(settings: &HashMap<String, String>, key: &str, default: bool) -> bool {
+    wbeam_setting(settings, key)
+        .map(|v| {
+            matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(default)
+}
+
+fn wbeam_setting_u64(settings: &HashMap<String, String>, key: &str, default: u64) -> u64 {
+    wbeam_setting(settings, key)
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(default)
+}
 
 fn resolve_xauthority_for_capture() -> Option<PathBuf> {
     let uid = std::env::var("UID")
@@ -309,6 +398,7 @@ impl Drop for InstanceLock {
 pub struct DaemonCore {
     inner: Arc<Mutex<Inner>>,
     root: PathBuf,
+    settings: Arc<HashMap<String, String>>,
     runtime_config_path: PathBuf,
     host_probe: host_probe::HostProbe,
     stream_port: u16,
@@ -375,6 +465,7 @@ impl DaemonCore {
         session_label: Option<String>,
         target_serial: Option<String>,
     ) -> Self {
+        let settings = Arc::new(load_wbeam_config(&root));
         let host_name = hostname::get()
             .ok()
             .and_then(|h| h.into_string().ok())
@@ -411,6 +502,7 @@ impl DaemonCore {
         let core = Self {
             inner: Arc::new(Mutex::new(Inner::new(host_name, active_config, presets))),
             root,
+            settings: settings.clone(),
             runtime_config_path,
             host_probe,
             stream_port,
@@ -418,17 +510,18 @@ impl DaemonCore {
             target_serial,
             exit_tx,
             auto_start: true,
-            allow_live_adaptive_restart: std::env::var("WBEAM_ALLOW_LIVE_ADAPTIVE_RESTART")
-                .ok()
-                .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "on"))
-                .unwrap_or(false),
+            allow_live_adaptive_restart: wbeam_setting_bool(
+                &settings,
+                "WBEAM_ALLOW_LIVE_ADAPTIVE_RESTART",
+                false,
+            ),
             reconnect_backoff: Duration::from_secs(1),
             stop_cooldown: Duration::from_secs(12),
-            start_timeout: std::env::var("WBEAM_START_TIMEOUT_SEC")
-                .ok()
-                .and_then(|v| v.parse::<u64>().ok())
-                .map(Duration::from_secs)
-                .unwrap_or(DEFAULT_START_TIMEOUT),
+            start_timeout: Duration::from_secs(wbeam_setting_u64(
+                &settings,
+                "WBEAM_START_TIMEOUT_SEC",
+                DEFAULT_START_TIMEOUT.as_secs(),
+            )),
         };
 
         let supervisor = core.clone();
@@ -1070,12 +1163,9 @@ impl DaemonCore {
             return Err(err);
         }
 
-        let use_rust_streamer = std::env::var("WBEAM_USE_RUST_STREAMER")
-            .ok()
-            .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "on"))
-            .unwrap_or(true);
-        let rust_streamer_bin = std::env::var("WBEAM_RUST_STREAMER_BIN")
-            .ok()
+        let use_rust_streamer =
+            wbeam_setting_bool(&self.settings, "WBEAM_USE_RUST_STREAMER", true);
+        let rust_streamer_bin = wbeam_setting(&self.settings, "WBEAM_RUST_STREAMER_BIN")
             .map(PathBuf::from)
             .unwrap_or_else(|| {
                 self.root

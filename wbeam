@@ -3,6 +3,12 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOST_SCRIPTS_DIR="$ROOT_DIR/src/host/scripts"
+WBEAM_CONFIG_HELPER="$HOST_SCRIPTS_DIR/wbeam_config.sh"
+if [[ -f "$WBEAM_CONFIG_HELPER" ]]; then
+  # shellcheck source=src/host/scripts/wbeam_config.sh
+  source "$WBEAM_CONFIG_HELPER"
+  wbeam_load_config "$ROOT_DIR"
+fi
 
 CONTROL_PORT="${WBEAM_CONTROL_PORT:-5001}"
 STREAM_PORT="${WBEAM_STREAM_PORT:-5000}"

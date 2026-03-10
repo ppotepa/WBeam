@@ -797,3 +797,72 @@ Status: active
 - Kept virtual/isolated/duplicate mode selection path unchanged; connect still goes through explicit mode validation.
 - Validation:
   - `cd src/apps/desktop-tauri && npm run build` -> OK
+
+## Backfill (2026-03-08) [commit: 59fac9a4] - docs hash sync for sid/display targeting
+- Recorded progress hash for remote session sid/display targeting milestone.
+
+## Backfill (2026-03-08) [commit: 39876079] - docs hash sync for local auto-detection hardening
+- Recorded progress hash for local GUI auto-detection hardening milestone.
+
+## Backfill (2026-03-08) [commit: 1aec1f09] - docs hash sync for session UX fixes
+- Recorded progress hash for session UX fixes milestone.
+
+## Backfill (2026-03-09) [commit: e24e789f] - cleanup accidental script artifacts
+- Removed unintended helper/script files accidentally added during troubleshooting.
+
+## Backfill (2026-03-09) [commit: e51d8854] - docs update for X11 virtual monitor investigation
+- Synced progress notes for X11 virtual monitor investigation milestone.
+
+## Backfill (2026-03-09) [commit: 1b6c9aca] - x265 key-int-max crash and startup error visibility
+- Fixed x265 `key-int-max` crash path and surfaced stream startup errors in diagnostics.
+
+## Backfill (2026-03-09) [commit: 0030d0fb] - docs update for backend split
+- Synced progress notes for backend split work.
+
+## Backfill (2026-03-09) [commit: 9799b75e] - display backend activation logging
+- Added backend activation logs emitted at stream start.
+
+## Backfill (2026-03-09) [commit: c19e0335] - docs update for platform/mode backend split
+- Synced progress notes for backend platform/mode split.
+
+## Backfill (2026-03-09) [commit: b56b0f82] - docs update for linux backend layer refactor
+- Synced progress notes for linux backend layer refactor.
+
+## Backfill (2026-03-09) [commit: 577e6b4c] - docs for X11 virtual stream diagnosis
+- Synced progress notes for X11 capture/type fix diagnostics.
+
+## Backfill (2026-03-09) [commit: c28c9711] - docs for connect-mode modal reliability
+- Synced progress notes for connect-mode modal reliability fix.
+
+## Backfill (2026-03-10) [commit: 3cf36804] - separate `proto_x11` virtual-desktop prototype lane
+- Added independent `proto_x11` lane for focused X11 virtual output prototyping.
+
+## Backfill (2026-03-10) [commit: f96b09b6] - proto_x11 deploy/start hardening and X11 auth selection
+- Hardened `proto_x11` deploy/start orchestration and improved X11 auth candidate selection.
+
+## Backfill (2026-03-10) [commit: 83c36bca] - initial env-to-conf move in proto/domain
+- Replaced selected env toggles with policy/config-file driven controls.
+
+## In Progress (2026-03-10) [commit: pending] - main-lane config-first runtime wiring (no `proto_x11`)
+- Added shared config defaults file:
+  - `config/wbeam.conf`
+- Added shared shell loader:
+  - `src/host/scripts/wbeam_config.sh`
+  - supports `WBEAM_CONFIG_FILE`, user config (`~/.config/wbeam/wbeam.conf`), repo local (`.wbeam.conf`), repo defaults (`config/wbeam.conf`)
+  - keeps ENV override compatibility while moving defaults to conf.
+- Wired main scripts to load config defaults before runtime variable resolution:
+  - `wbeam`, `devtool`, `desktop.sh`, `start-remote`, `runas-remote`, `redeploy-local`, `src/host/scripts/run_wbeamd.sh`, `src/host/scripts/run_wbeamd_debug.sh`
+- Wired Tauri desktop backend to read `WBEAM_*` from config helper instead of direct env-only lookups:
+  - control/stream port resolution
+  - monitor-object allow flag
+  - daemon binary override
+  - generated systemd unit now points to `WBEAM_CONFIG_FILE=<repo>/config/wbeam.conf`.
+- Wired host Rust core to use config-first settings for daemon behavior:
+  - `WBEAM_ALLOW_LIVE_ADAPTIVE_RESTART`
+  - `WBEAM_START_TIMEOUT_SEC`
+  - `WBEAM_USE_RUST_STREAMER`
+  - `WBEAM_RUST_STREAMER_BIN`
+- Validation:
+  - `bash -n wbeam devtool start-remote runas-remote redeploy-local desktop.sh src/host/scripts/run_wbeamd.sh src/host/scripts/run_wbeamd_debug.sh src/host/scripts/wbeam_config.sh` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-core` -> OK
+  - `cd src/apps/desktop-tauri/src-tauri && cargo check` -> OK
