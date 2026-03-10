@@ -47,6 +47,7 @@ Groups:
   daemon    up | down | status   (alias for host)
   android   build | install | launch | deploy | deploy-all | build-release | install-release | deploy-release
   x11proto  probe-host | doctor | status | start | stop | smoke | acceptance | android-build | android-deploy
+  train     wizard
   deps      virtual check [--json] | virtual install [--dry-run] [--yes]
   version   new | current | doctor
   watch     devices | connections | streaming | service | logs | status | health | doctor | tui
@@ -68,6 +69,7 @@ Examples:
   ./wbeam android install-release
   ./wbeam android deploy-release
   ./wbeam x11proto doctor --serial <serial> --stream-port 5002
+  ./wbeam train wizard
   ./wbeam x11proto smoke --serial <serial> --stream-port 5002
   ./wbeam x11proto acceptance --serial <serial> --stream-port 5002
   ./wbeam x11proto android-deploy
@@ -2060,6 +2062,11 @@ x11proto_android_deploy() {
   )
 }
 
+train_wizard() {
+  require_cmd python3
+  "$ROOT_DIR/scripts/train_wizard.py" "$@"
+}
+
 group="${1:-}"
 cmd="${2:-}"
 
@@ -2116,6 +2123,12 @@ case "$group" in
       doctor|status|start|stop|smoke|acceptance) shift 2; x11proto_run "$cmd" "$@" ;;
       android-build) x11proto_android_build ;;
       android-deploy) x11proto_android_deploy ;;
+      *) print_help; exit 1 ;;
+    esac
+    ;;
+  train)
+    case "$cmd" in
+      wizard|tui|run) shift 2; train_wizard "$@" ;;
       *) print_help; exit 1 ;;
     esac
     ;;

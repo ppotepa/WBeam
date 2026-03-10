@@ -1,5 +1,20 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending) - Main-lane trainer wizard (`wbeam train wizard`)
+- Added a new interactive trainer in the main path:
+  - `./wbeam train wizard` (aliases: `train tui`, `train run`),
+  - implemented as `scripts/train_wizard.py` and integrated into `./wbeam`.
+- Wizard scope is current production stack (not proto run loop):
+  - targets selected ADB serial + per-device stream port,
+  - runs live trials against daemon API (`/v1/apply`, `/v1/metrics`, optional `/v1/start`),
+  - computes score from real runtime KPIs (present/recv/decode FPS, e2e/decode/render timings, drops, late frames, queue pressure),
+  - ranks and applies best config directly to active session.
+- Export path is aligned with current app state:
+  - writes winning baseline profile to `proto/config/profiles.json` (single `baseline` profile),
+  - updates desktop runtime defaults in `src/apps/desktop-tauri/src/config/trained-profile-runtime.json` (baseline encoder/cursor),
+  - stores full trial report in `logs/*.train-wizard.json`.
+- Added help/docs entry in `./wbeam` usage output for `train wizard`.
+
 ## Session Update (2026-03-10, pending) - Android fullscreen+awake hardening and max-quality autotune training flow
 - Android app runtime hardening for continuous kiosk-style streaming:
   - forced immersive fullscreen in both debug and release paths (`MainActivity.applyBuildVariantUi -> setFullscreen(true)`),
