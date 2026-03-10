@@ -310,6 +310,7 @@ def write_overlay_snapshot(
     history: list[TrialResult] | None = None,
     note: str = "",
     chart_mode: str = "bars",
+    layout_mode: str = "wide",
 ) -> None:
     recent = history or []
     valid_scores = [item.score for item in recent if item.score > -900.0]
@@ -324,37 +325,46 @@ def write_overlay_snapshot(
             best_trial = ranked[0].trial_id
 
     target_fps = float(cfg.fps if cfg is not None else 60)
+    content_w = 84 if layout_mode == "compact" else 108
+    frame_w = content_w + 2
     lines: list[str] = ["[MAIN]"]
-    lines.append(box_sep())
-    lines.append(box_line(kv_line("WBEAM TRAINER HUD", f"RUN {run_id}", width=84)))
-    lines.append(box_line(kv_line(f"PROFILE {profile_name}", f"GEN {generation_index}/{generation_total}", width=84)))
-    lines.append(box_line(kv_line(f"TRIAL {trial_id} [{trial_index}/{trial_total}]", f"NOTE {note or 'running'}", width=84)))
+    lines.append(box_sep(width=frame_w))
+    lines.append(box_line(kv_line("WBEAM TRAINER HUD", f"RUN {run_id}", width=content_w), width=frame_w))
+    lines.append(box_line(kv_line(f"PROFILE {profile_name}", f"GEN {generation_index}/{generation_total}", width=content_w), width=frame_w))
+    lines.append(box_line(kv_line(f"TRIAL {trial_id} [{trial_index}/{trial_total}]", f"NOTE {note or 'running'}", width=content_w), width=frame_w))
     lines.append(
         box_line(
             kv_line(
                 f"LEGEND {severity_markup('OK')} stable",
                 f"{severity_markup('WARN')} watch  {severity_markup('RISK')} critical",
-                width=84,
-            )
+                width=content_w,
+            ),
+            width=frame_w,
         )
     )
-    lines.append(box_sep())
+    lines.append(box_sep(width=frame_w))
     if cfg is not None:
         lines.append(
             box_line(
                 kv_line(
                     f"CODEC {cfg.encoder.upper()} | SIZE {cfg.size} | FPS {cfg.fps}",
                     f"TARGET {fmt_mbps_from_kbps(cfg.bitrate_kbps)}",
-                    width=84,
-                )
+                    width=content_w,
+                ),
+                width=frame_w,
             )
         )
-        lines.append(box_line(kv_line(f"CURSOR {cfg.cursor_mode}", f"CHART {chart_mode.upper()}", width=84)))
+        lines.append(
+            box_line(
+                kv_line(f"CURSOR {cfg.cursor_mode}", f"CHART {chart_mode.upper()} | LAYOUT {layout_mode.upper()}", width=content_w),
+                width=frame_w,
+            )
+        )
     else:
-        lines.append(box_line("STREAM CONFIG pending..."))
+        lines.append(box_line("STREAM CONFIG pending...", width=frame_w))
     if best_trial:
-        lines.append(box_line(kv_line(f"BEST {best_trial}", f"SCORE {best_recent:.2f}", width=84)))
-    lines.append(box_sep())
+        lines.append(box_line(kv_line(f"BEST {best_trial}", f"SCORE {best_recent:.2f}", width=content_w), width=frame_w))
+    lines.append(box_sep(width=frame_w))
     if result is not None:
         fps_state = severity_tag(result.present_fps_mean, target_fps * 0.75, target_fps * 0.55, invert=True)
         lat_state = severity_tag(result.e2e_p95_mean_ms, 70.0, 120.0)
@@ -369,22 +379,22 @@ def write_overlay_snapshot(
         )
         lines.extend(
             [
-                box_line(kv_line(f"SCORE {result.score:.2f}", f"FPS {result.present_fps_mean:.1f} [{severity_markup(fps_state)}]", width=84)),
-                box_line(kv_line(f"PIPE {result.recv_fps_mean:.1f} | DECODE {result.decode_fps_mean:.1f}", f"LAT {result.e2e_p95_mean_ms:.1f}ms [{severity_markup(lat_state)}]", width=84)),
-                box_line(kv_line(f"LIVE Mbps {result.bitrate_mbps_mean:.1f} [{severity_markup(mbps_state)}]", f"DROPS/s {result.drop_rate_per_sec:.3f} [{severity_markup(drop_state)}]", width=84)),
-                box_line(kv_line(f"QUEUE {result.queue_depth_mean:.3f} [{severity_markup(queue_state)}]", f"LATE/s {result.late_rate_per_sec:.3f} [{severity_markup(late_state)}]", width=84)),
-                box_line(kv_line(f"SAMPLES {result.sample_count}", f"NOTE {html.escape(result.notes)}", width=84)),
+                box_line(kv_line(f"SCORE {result.score:.2f}", f"FPS {result.present_fps_mean:.1f} [{severity_markup(fps_state)}]", width=content_w), width=frame_w),
+                box_line(kv_line(f"PIPE {result.recv_fps_mean:.1f} | DECODE {result.decode_fps_mean:.1f}", f"LAT {result.e2e_p95_mean_ms:.1f}ms [{severity_markup(lat_state)}]", width=content_w), width=frame_w),
+                box_line(kv_line(f"LIVE Mbps {result.bitrate_mbps_mean:.1f} [{severity_markup(mbps_state)}]", f"DROPS/s {result.drop_rate_per_sec:.3f} [{severity_markup(drop_state)}]", width=content_w), width=frame_w),
+                box_line(kv_line(f"QUEUE {result.queue_depth_mean:.3f} [{severity_markup(queue_state)}]", f"LATE/s {result.late_rate_per_sec:.3f} [{severity_markup(late_state)}]", width=content_w), width=frame_w),
+                box_line(kv_line(f"SAMPLES {result.sample_count}", f"NOTE {html.escape(result.notes)}", width=content_w), width=frame_w),
             ]
         )
     else:
         lines.extend(
             [
-                box_line(kv_line("SCORE <sampling>", f"FPS 0.0/{target_fps:.1f} [PENDING]", width=84)),
-                box_line("PIPE/DECODE/LAT pending..."),
-                box_line("LIVE Mbps pending..."),
+                box_line(kv_line("SCORE <sampling>", f"FPS 0.0/{target_fps:.1f} [PENDING]", width=content_w), width=frame_w),
+                box_line("PIPE/DECODE/LAT pending...", width=frame_w),
+                box_line("LIVE Mbps pending...", width=frame_w),
             ]
         )
-    lines.append(box_sep())
+    lines.append(box_sep(width=frame_w))
     if result is not None:
         quality_state = "OK"
         if result.drop_rate_per_sec > 0.20 or result.e2e_p95_mean_ms > 120.0 or result.queue_depth_mean > 1.60:
@@ -394,20 +404,20 @@ def write_overlay_snapshot(
         note_state = note_severity(result.notes)
         lines.extend(
             [
-                box_line(kv_line(f"SCORE TR  {trend_render(valid_scores, chart_mode, width=28)}", f"FPS TR {trend_render(valid_present, chart_mode, width=24)}", width=84)),
-                box_line(kv_line(f"DROP TR   {trend_render(valid_drop, chart_mode, width=28)}", f"MBPS TR {trend_render(valid_bitrate, chart_mode, width=23)}", width=84)),
-                box_line(kv_line(f"E2E/DECODE/RENDER p95: {result.e2e_p95_mean_ms:.1f}/{result.decode_p95_mean_ms:.1f}/{result.render_p95_mean_ms:.1f} ms", f"STATE {severity_markup(quality_state)} | NOTE {severity_markup(note_state)}", width=84)),
+                box_line(kv_line(f"SCORE TR  {trend_render(valid_scores, chart_mode, width=32 if layout_mode == 'wide' else 24)}", f"FPS TR {trend_render(valid_present, chart_mode, width=28 if layout_mode == 'wide' else 22)}", width=content_w), width=frame_w),
+                box_line(kv_line(f"DROP TR   {trend_render(valid_drop, chart_mode, width=32 if layout_mode == 'wide' else 24)}", f"MBPS TR {trend_render(valid_bitrate, chart_mode, width=28 if layout_mode == 'wide' else 22)}", width=content_w), width=frame_w),
+                box_line(kv_line(f"E2E/DECODE/RENDER p95: {result.e2e_p95_mean_ms:.1f}/{result.decode_p95_mean_ms:.1f}/{result.render_p95_mean_ms:.1f} ms", f"STATE {severity_markup(quality_state)} | NOTE {severity_markup(note_state)}", width=content_w), width=frame_w),
             ]
         )
     else:
         lines.extend(
             [
-                box_line(kv_line(f"SCORE TR  {trend_render(valid_scores, chart_mode, width=28)}", f"FPS TR {trend_render(valid_present, chart_mode, width=24)}", width=84)),
-                box_line(kv_line(f"DROP TR   {trend_render(valid_drop, chart_mode, width=28)}", f"MBPS TR {trend_render(valid_bitrate, chart_mode, width=23)}", width=84)),
-                box_line("STATE PENDING / waiting for metrics..."),
+                box_line(kv_line(f"SCORE TR  {trend_render(valid_scores, chart_mode, width=32 if layout_mode == 'wide' else 24)}", f"FPS TR {trend_render(valid_present, chart_mode, width=28 if layout_mode == 'wide' else 22)}", width=content_w), width=frame_w),
+                box_line(kv_line(f"DROP TR   {trend_render(valid_drop, chart_mode, width=32 if layout_mode == 'wide' else 24)}", f"MBPS TR {trend_render(valid_bitrate, chart_mode, width=28 if layout_mode == 'wide' else 22)}", width=content_w), width=frame_w),
+                box_line("STATE PENDING / waiting for metrics...", width=frame_w),
             ]
         )
-    lines.append(box_sep())
+    lines.append(box_sep(width=frame_w))
     payload = "\n".join(lines).strip() + "\n"
     try:
         path.write_text(payload, encoding="utf-8")
@@ -1324,6 +1334,12 @@ def main() -> int:
         default="bars",
         help="On-device HUD trend style.",
     )
+    parser.add_argument(
+        "--overlay-layout",
+        choices=["compact", "wide"],
+        default="wide",
+        help="On-device HUD layout width preset.",
+    )
     args = parser.parse_args()
     run_id = sanitize_profile_name(args.run_id or f"run-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
     generations = max(1, min(64, int(args.generations)))
@@ -1545,6 +1561,7 @@ def main() -> int:
             history=[],
             note="initializing",
             chart_mode=args.overlay_chart,
+            layout_mode=args.overlay_layout,
         )
 
     try:
@@ -1570,6 +1587,7 @@ def main() -> int:
                     history=results,
                     note="apply -> warmup -> sample",
                     chart_mode=args.overlay_chart,
+                    layout_mode=args.overlay_layout,
                 )
             print(
                 f"\n[{trial_id}] apply encoder={cfg.encoder} size={cfg.size} "
@@ -1620,6 +1638,7 @@ def main() -> int:
                         history=results,
                         note="apply failed",
                         chart_mode=args.overlay_chart,
+                        layout_mode=args.overlay_layout,
                     )
                 continue
 
@@ -1655,6 +1674,7 @@ def main() -> int:
                         history=results + [partial],
                         note=f"sampling {elapsed_sec:.1f}s",
                         chart_mode=args.overlay_chart,
+                        layout_mode=args.overlay_layout,
                     )
 
                 samples = collect_metrics_samples(
@@ -1682,6 +1702,7 @@ def main() -> int:
                         history=results,
                         note="sample complete",
                         chart_mode=args.overlay_chart,
+                        layout_mode=args.overlay_layout,
                     )
                 print(
                     f"[{trial_id}] score={result.score:.2f} present={result.present_fps_mean:.1f} "
@@ -1732,6 +1753,7 @@ def main() -> int:
                         history=results,
                         note="sample failed",
                         chart_mode=args.overlay_chart,
+                        layout_mode=args.overlay_layout,
                     )
 
         if not results:
@@ -1767,6 +1789,7 @@ def main() -> int:
                 history=results,
                 note="best candidate",
                 chart_mode=args.overlay_chart,
+                layout_mode=args.overlay_layout,
             )
         should_apply_best = args.apply_best
         if should_apply_best is None:
@@ -1833,6 +1856,7 @@ def main() -> int:
             "non_interactive": bool(args.non_interactive),
             "overlay": bool(args.overlay),
             "overlay_chart": args.overlay_chart,
+            "overlay_layout": args.overlay_layout,
             "trial_count": len(trials),
             "exported_baseline": exported,
             "preflight": preflight,

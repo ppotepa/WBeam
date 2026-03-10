@@ -367,6 +367,14 @@ select:focus {
   gap: 5px;
 }
 
+.hud-font-preview.layout-wide {
+  max-width: 100%;
+}
+
+.hud-font-preview.layout-compact {
+  max-width: 520px;
+}
+
 .hud-font-preview .preview-title {
   font-size: 0.68rem;
   color: var(--text-muted);

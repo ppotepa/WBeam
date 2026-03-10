@@ -35,6 +35,7 @@ type RunItem = {
   run_artifacts_dir: string;
   hud_chart_mode?: string;
   hud_font_preset?: string;
+  hud_layout?: string;
   exit_code?: number | null;
   error?: string | null;
 };
@@ -490,6 +491,7 @@ export default function App() {
   const [overlay, setOverlay] = createSignal(true);
   const [hudChartMode, setHudChartMode] = createSignal("bars");
   const [hudFontPreset, setHudFontPreset] = createSignal("compact");
+  const [hudLayout, setHudLayout] = createSignal("wide");
   const [selectedRunId, setSelectedRunId] = createSignal("");
   const [leftProfile, setLeftProfile] = createSignal("");
   const [rightProfile, setRightProfile] = createSignal("");
@@ -762,6 +764,7 @@ export default function App() {
           overlay: overlay(),
           hud_chart_mode: hudChartMode(),
           hud_font_preset: hudFontPreset(),
+          hud_layout: hudLayout(),
         }),
       });
       const body = (await resp.json()) as Record<string, unknown>;
@@ -1138,7 +1141,14 @@ export default function App() {
                         <option value="system">system mono</option>
                       </select>
                     </label>
-                    <div class="hud-font-preview" title="Preview of typography style used by Android HUD overlay." style={hudFontPreviewStyle()}>
+                    <label title="Horizontal density of Android HUD composition. Wide spreads data more evenly on full screen.">
+                      HUD layout
+                      <select value={hudLayout()} onInput={(e) => setHudLayout(e.currentTarget.value)}>
+                        <option value="wide">wide</option>
+                        <option value="compact">compact</option>
+                      </select>
+                    </label>
+                    <div class={`hud-font-preview ${hudLayout() === "wide" ? "layout-wide" : "layout-compact"}`} title="Preview of typography style used by Android HUD overlay." style={hudFontPreviewStyle()}>
                       <div class="preview-title">HUD font preview</div>
                       <div class="preview-row">TRIAL t05 | GEN 2/4 | FPS 58.9 <span class="state ok">OK</span></div>
                       <div class="preview-row">LIVE 34.8 Mbps | LAT 42.1ms <span class="state warn">WARN</span></div>
@@ -1203,6 +1213,7 @@ export default function App() {
                   <div class="meta-item"><strong>Progress</strong><span>{hud().progress}</span></div>
                   <div class="meta-item"><strong>HUD charts</strong><span>{activeRun()?.hud_chart_mode || hudChartMode()}</span></div>
                   <div class="meta-item"><strong>HUD font</strong><span>{activeRun()?.hud_font_preset || hudFontPreset()}</span></div>
+                  <div class="meta-item"><strong>HUD layout</strong><span>{activeRun()?.hud_layout || hudLayout()}</span></div>
                   <div class="meta-item">
                     <strong>Live health</strong>
                     <span class={`live-pill ${liveHealth().tone}`}>{liveHealth().state}</span>

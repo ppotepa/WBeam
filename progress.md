@@ -1941,3 +1941,21 @@ Status: active
 - Validation:
   - `cd src/apps/trainer-tauri && npm run build` -> OK
   - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+
+## In Progress (2026-03-10) - HUD layout presets (compact/wide) end-to-end
+- Added new HUD layout control from Trainer UI to runtime:
+  - new `HUD layout` selector in `Train` advanced panel: `wide` / `compact`.
+- Trainer API (`/v1/trainer/start`) extended with `hud_layout` field:
+  - validated in backend (`wbeamd-server`): `compact|wide`.
+- Runtime integration:
+  - backend passes `--overlay-layout` to `wbeam train wizard` process,
+  - run metadata now stores `hud_layout` and exposes it in `Live Run` context.
+- Wizard HUD renderer (`wizard.py`) now adapts overlay width/spacing to layout mode:
+  - `wide`: broader content width and longer trend lines,
+  - `compact`: denser table-like width.
+  - layout marker shown in HUD config row (`LAYOUT WIDE/COMPACT`).
+- UI preview card now reflects chosen layout (`layout-wide` / `layout-compact`) to previsualize composition density.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py src/host/scripts/stream_wayland_portal_h264.py` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK

@@ -71,6 +71,7 @@ struct TrainerRun {
     encoders: Vec<String>,
     hud_chart_mode: String,
     hud_font_preset: String,
+    hud_layout: String,
     exit_code: Option<i32>,
     pid: Option<u32>,
     error: Option<String>,
@@ -103,6 +104,7 @@ struct TrainerStartRequest {
     encoders: Option<Vec<String>>,
     hud_chart_mode: Option<String>,
     hud_font_preset: Option<String>,
+    hud_layout: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -965,6 +967,7 @@ async fn post_trainer_start(
         encoders: None,
         hud_chart_mode: None,
         hud_font_preset: None,
+        hud_layout: None,
     });
 
     let serial = req.serial.trim().to_string();
@@ -1074,6 +1077,19 @@ async fn post_trainer_start(
         )
             .into_response();
     }
+    let hud_layout = req
+        .hud_layout
+        .as_deref()
+        .unwrap_or("wide")
+        .trim()
+        .to_ascii_lowercase();
+    if !matches!(hud_layout.as_str(), "compact" | "wide") {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"ok": false, "error": "invalid hud_layout (use compact|wide)"})),
+        )
+            .into_response();
+    }
     let stream_port = req
         .stream_port
         .unwrap_or_else(|| state.sessions.base_stream_port + 2);
@@ -1170,6 +1186,8 @@ async fn post_trainer_start(
         .arg(encoders.join(","))
         .arg("--overlay-chart")
         .arg(&hud_chart_mode)
+        .arg("--overlay-layout")
+        .arg(&hud_layout)
         .arg("--stream-port")
         .arg(stream_port.to_string())
         .arg("--control-port")
@@ -1229,6 +1247,7 @@ async fn post_trainer_start(
         encoders: encoders.clone(),
         hud_chart_mode: hud_chart_mode.clone(),
         hud_font_preset: hud_font_preset.clone(),
+        hud_layout: hud_layout.clone(),
         exit_code: None,
         pid: Some(pid),
         error: None,
@@ -1257,6 +1276,8 @@ async fn post_trainer_start(
         "encoder_mode": run.encoder_mode,
         "encoders": run.encoders,
         "hud_chart_mode": run.hud_chart_mode,
+        "hud_font_preset": run.hud_font_preset.clone(),
+        "hud_layout": run.hud_layout.clone(),
         "stream_port": stream_port,
     });
     let _ = fs::write(
