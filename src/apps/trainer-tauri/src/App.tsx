@@ -617,6 +617,8 @@ export default function App() {
   async function startTraining() {
     await withUiGuard("Starting training", async () => {
       if (!canStart()) throw new Error(hardBlockers().join("; "));
+      setTail(null);
+      setSelectedRunId("");
       const encoders =
         encoderMode() === "single" ? [selectedEncoders()[0] || "h264"] : selectedEncoders();
       const resp = await fetch("/v1/trainer/start", {
@@ -643,7 +645,11 @@ export default function App() {
       });
       const body = (await resp.json()) as Record<string, unknown>;
       if (!resp.ok) throw new Error(String(body.error || "start failed"));
+      const newRunId = String(body.run_id || "").trim();
       await refreshRuns();
+      if (newRunId) {
+        setSelectedRunId(newRunId);
+      }
       await refreshProfiles();
       await refreshTail();
       if (settings().autoOpenLiveTab) setTab("live");

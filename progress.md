@@ -1747,3 +1747,18 @@ Status: active
   - `cd src/apps/trainer-tauri && npm run build` -> OK
   - `bash -n trainer.sh` -> OK
   - `bash -n desktop.sh` -> OK
+
+## In Progress (2026-03-10) - Trainer run stability: live reset + wayland portal profile/encoder normalization
+- Fixed `stream_wayland_portal_h264.py` argument robustness to prevent hard aborts during trainer-driven restarts:
+  - added `baseline` profile defaults,
+  - removed strict argparse `choices` for `--profile` and `--encoder` in favor of runtime normalization,
+  - added profile alias mapping (`safe_60`, `balanced60`, `quality60`, etc.) to valid defaults,
+  - unknown profile now warns and falls back to `baseline` instead of exiting with code 2,
+  - unsupported encoder names (`h265`, `rawpng`, `mjpeg`, etc.) now warn and fallback to `auto` for portal-h264 helper.
+- Improved Trainer UI run transition behavior (`src/apps/trainer-tauri/src/App.tsx`):
+  - live tail is cleared immediately when a new run starts,
+  - selected run is explicitly switched to the newly created `run_id` returned by API,
+  - this prevents stale Live View data from previous runs.
+- Validation:
+  - `python3 -m py_compile src/host/scripts/stream_wayland_portal_h264.py src/domains/training/wizard.py` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
