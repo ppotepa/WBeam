@@ -924,7 +924,7 @@ Status: active
   - `bash -n desktop.sh` -> OK
   - `./desktop.sh --help` -> OK
 
-## In Progress (2026-03-10) [commit: pending] - desktop launcher auto-reexec into graphical session
+## In Progress (2026-03-10) [commit: a44db282] - desktop launcher auto-reexec into graphical session
 - Hardened `desktop.sh` against GTK init failures from tty shells:
   - detects missing graphical env (`DISPLAY`/`WAYLAND_DISPLAY`) or `XDG_SESSION_TYPE=tty`,
   - auto re-launches via `runas-remote` into active GUI session (default enabled),
