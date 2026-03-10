@@ -2,14 +2,95 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WBEAM_CONFIG_HELPER="${ROOT_DIR}/src/host/scripts/wbeam_config.sh"
+if [[ -f "${WBEAM_CONFIG_HELPER}" ]]; then
+  # shellcheck source=src/host/scripts/wbeam_config.sh
+  source "${WBEAM_CONFIG_HELPER}"
+  wbeam_load_config "${ROOT_DIR}"
+fi
 CONTROL_PORT="${WBEAM_CONTROL_PORT:-5001}"
 START_SERVICE=0
 VERBOSE=0
 MODE="ui"
 PASSTHRU=()
+ORIGINAL_ARGS=("$@")
 
 log() {
   printf '[trainer] %s\n' "$*"
+}
+
+has_graphical_env() {
+  if [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
+    return 0
+  fi
+  if [[ -n "${DISPLAY:-}" ]]; then
+    return 0
+  fi
+  return 1
+}
+
+ensure_graphical_context() {
+  local -a launch_args
+  launch_args=("$@")
+
+  if has_graphical_env && [[ "${XDG_SESSION_TYPE:-}" != "tty" ]]; then
+    return 0
+  fi
+
+  if [[ "${WBEAM_TRAINER_REEXEC:-0}" == "1" ]]; then
+    log "failed to enter graphical session context (DISPLAY/WAYLAND missing)"
+    log "run './runas-remote <user> ./trainer.sh --ui' and verify active GUI session"
+    return 1
+  fi
+
+  if [[ "${WBEAM_TRAINER_AUTO_REEXEC:-1}" != "1" ]]; then
+    log "no graphical session in current shell (DISPLAY/WAYLAND missing)"
+    log "run './runas-remote <user> ./trainer.sh --ui' or set WBEAM_TRAINER_AUTO_REEXEC=1"
+    return 1
+  fi
+
+  local target_user="${WBEAM_DEV_REMOTE_USER:-$(id -un)}"
+  local runas="${ROOT_DIR}/runas-remote"
+  if [[ ! -x "${runas}" ]]; then
+    log "missing executable: ${runas}"
+    return 1
+  fi
+
+  log "no graphical session in current shell; re-launching via runas-remote user=${target_user}"
+  exec env \
+    RUNAS_REMOTE_QUIET=1 \
+    RUNAS_REMOTE_SESSION_REMOTE="${RUNAS_REMOTE_SESSION_REMOTE:-no}" \
+    WBEAM_TRAINER_REEXEC=1 \
+    "${runas}" "${target_user}" "${ROOT_DIR}/trainer.sh" -- "${launch_args[@]}"
+}
+
+apply_tauri_stability_env() {
+  local xa
+
+  export WEBKIT_DISABLE_DMABUF_RENDERER="${WEBKIT_DISABLE_DMABUF_RENDERER:-1}"
+
+  if [[ "${XDG_SESSION_TYPE:-}" == "wayland" && "${WBEAM_TAURI_NATIVE_WAYLAND:-0}" != "1" ]]; then
+    export GDK_BACKEND="${GDK_BACKEND:-x11}"
+    export WINIT_UNIX_BACKEND="${WINIT_UNIX_BACKEND:-x11}"
+    log "wayland detected; forcing x11 backend for Tauri stability (set WBEAM_TAURI_NATIVE_WAYLAND=1 to disable)"
+  fi
+
+  if [[ "${GDK_BACKEND:-}" == "x11" && -z "${XAUTHORITY:-}" ]]; then
+    xa=""
+    if [[ -n "${XDG_RUNTIME_DIR:-}" ]]; then
+      for candidate in "${XDG_RUNTIME_DIR}"/xauth_*; do
+        [[ -f "${candidate}" ]] || continue
+        xa="${candidate}"
+        break
+      done
+    fi
+    if [[ -z "${xa}" && -n "${HOME:-}" && -f "${HOME}/.Xauthority" ]]; then
+      xa="${HOME}/.Xauthority"
+    fi
+    if [[ -n "${xa}" ]]; then
+      export XAUTHORITY="${xa}"
+    fi
+  fi
 }
 
 usage() {
@@ -79,6 +160,10 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "${MODE}" == "ui" ]]; then
+  ensure_graphical_context "${ORIGINAL_ARGS[@]}"
+fi
 
 health_url="http://127.0.0.1:${CONTROL_PORT}/v1/health"
 
@@ -160,6 +245,7 @@ if [[ "${MODE}" == "ui" || "${MODE}" == "web" ]]; then
   (
     cd "${ROOT_DIR}/src/apps/trainer-tauri"
     if [[ "${MODE}" == "ui" ]]; then
+      apply_tauri_stability_env
       npm run tauri:dev -- "${PASSTHRU[@]}"
     else
       npm run dev -- "${PASSTHRU[@]}"

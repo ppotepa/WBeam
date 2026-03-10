@@ -1,5 +1,22 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending, branch `trainerv2`) - Tauri launcher stability on Wayland (desktop + trainer)
+- Fixed Linux Tauri launcher stability path to avoid silent/no-window startup on problematic Wayland sessions:
+  - `desktop.sh`:
+    - added `desktop_apply_tauri_stability_env`,
+    - keeps `WEBKIT_DISABLE_DMABUF_RENDERER=1`,
+    - when `XDG_SESSION_TYPE=wayland`, now defaults to X11 backend for Tauri (`GDK_BACKEND=x11`, `WINIT_UNIX_BACKEND=x11`) unless explicitly disabled with `WBEAM_TAURI_NATIVE_WAYLAND=1`.
+    - auto-resolves `XAUTHORITY` (runtime `xauth_*` or `~/.Xauthority`) when X11 backend is active to avoid GTK init failure.
+  - `trainer.sh`:
+    - now loads shared WBeam config via `wbeam_config.sh`,
+    - added GUI context auto-reexec through `runas-remote` for `--ui` mode (same behavior class as desktop launcher),
+    - added Tauri stability env setup identical to desktop path (`WEBKIT_DISABLE_DMABUF_RENDERER`, X11 backend fallback on Wayland),
+    - auto-resolves `XAUTHORITY` when X11 fallback is active to prevent `Authorization required` GTK startup crash,
+    - added clear runtime log note when fallback is applied.
+- Goal of this change:
+  - prevent `Gdk-Message: Error 71 (Protocol error) dispatching to Wayland display`,
+  - prevent “process starts but no visible app window” in both desktop and trainer launch paths.
+
 ## Session Update (2026-03-10, pending, branch `trainerv2`) - Legacy trainer path removed; trainer_v2 only
 - Removed legacy trainer execution path from main wizard flow:
   - `src/domains/training/wizard.py` no longer supports `--engine` switching,
