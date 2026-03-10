@@ -2299,9 +2299,11 @@ public class MainActivity extends AppCompatActivity {
             String trendText,
             String detailsRowsHtml
     ) {
+        boolean isTrainer = "trainer".equalsIgnoreCase(mode);
         int safePct = clampPercent(progressPercent);
         String modeUpper = safeText(mode).toUpperCase(Locale.US);
         String progress = safeText(progressLabel);
+        String bodyClass = isTrainer ? "trainer" : "runtime";
         return "<!doctype html><html><head><meta charset='utf-8'/>"
                 + "<style>"
                 + "html,body{margin:0;padding:0;background:transparent;color:#d9fbff;font-family:'JetBrains Mono','IBM Plex Mono',monospace;font-size:11px;}"
@@ -2311,7 +2313,9 @@ public class MainActivity extends AppCompatActivity {
                 + ".chip .k{font-size:10px;color:#9dddea;display:block;letter-spacing:.05em;}"
                 + ".chip .v{font-size:12px;color:#dcf9ff;}"
                 + ".progress{border:1px solid rgba(126,245,255,.35);background:rgba(2,20,24,.14);padding:5px 7px;}"
+                + ".p-head{display:flex;align-items:center;justify-content:space-between;gap:8px;}"
                 + ".p-label{font-size:11px;color:#b9f8ff;letter-spacing:.04em;}"
+                + ".p-pct{font-size:12px;color:#dcf9ff;font-weight:700;}"
                 + ".p-track{margin-top:6px;height:7px;background:rgba(0,0,0,.35);border:1px solid rgba(126,245,255,.35);}"
                 + ".p-fill{height:100%;width:" + safePct + "%;background:linear-gradient(90deg,#60f2c2,#7dd3fc);}"
                 + ".main{display:grid;grid-template-columns:1.25fr 1fr;gap:6px;min-height:0;}"
@@ -2325,12 +2329,20 @@ public class MainActivity extends AppCompatActivity {
                 + ".detail-table td{border:1px solid rgba(126,245,255,.28);padding:4px 6px;vertical-align:top;word-break:break-word;}"
                 + ".detail-table td:first-child{width:52%;color:#dffcff;} .detail-table td:last-child{text-align:right;color:#b9f8ff;}"
                 + ".state-ok{color:#6ee7b7;} .state-warn{color:#fbbf24;} .state-risk{color:#f87171;} .state-pending{color:#94a3b8;}"
-                + "</style></head><body><div class='root'>"
+                + ".trainer .chip .k{font-size:18px;letter-spacing:.03em;}"
+                + ".trainer .chip .v{font-size:24px;line-height:1.1;}"
+                + ".trainer .p-label{font-size:20px;}"
+                + ".trainer .p-pct{font-size:28px;}"
+                + ".trainer .kpi .item .k{font-size:17px;}"
+                + ".trainer .kpi .item .v{font-size:23px;line-height:1.1;}"
+                + ".trainer .detail-table td{font-size:18px;padding:6px 8px;}"
+                + ".trainer .trend{font-size:16px;line-height:1.35;}"
+                + "</style></head><body class='" + bodyClass + "'><div class='root'>"
                 + "<div class='top'>"
                 + hudChip("HUD MODE", modeUpper, "")
                 + chipsHtml
                 + "</div>"
-                + "<div class='progress'><div class='p-label'>" + escapeHtml(progress.isEmpty() ? "HUD ACTIVE" : progress) + "</div><div class='p-track'><div class='p-fill'></div></div></div>"
+                + "<div class='progress'><div class='p-head'><span class='p-label'>" + escapeHtml(progress.isEmpty() ? "HUD ACTIVE" : progress) + "</span><span class='p-pct'>" + safePct + "%</span></div><div class='p-track'><div class='p-fill'></div></div></div>"
                 + "<div class='main'>"
                 + "<div class='panel'><div class='kpi'>" + cardsHtml + "</div><div class='trend'>" + escapeHtml(safeText(trendText)) + "</div></div>"
                 + "<div class='panel'><table class='detail-table'>" + detailsRowsHtml + "</table></div>"

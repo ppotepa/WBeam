@@ -2125,3 +2125,14 @@ Status: active
 - Validation:
   - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
   - `cd src/apps/trainer-tauri && npm run build` -> OK
+
+## In Progress (2026-03-10) - Trainer HUD progress visibility + 2x font scale
+- Enhanced training-mode HUD readability in unified overlay:
+  - added always-visible percentage badge in progress strip (`NN%`),
+  - training mode now uses larger typography profile (approximately 2x vs runtime) for chips, KPI values, table rows, trend text.
+- Kept runtime HUD density unchanged while applying bigger visual scale only when `mode=trainer`.
+- Training progress now remains explicit in both:
+  - progress label text (`TRAINING PROGRESS ...`),
+  - numeric percent indicator (right side of progress header).
+- Validation:
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
