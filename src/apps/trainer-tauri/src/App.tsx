@@ -2,13 +2,15 @@ import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-j
 
 type Tab =
   | "train"
-  | "hud"
-  | "profiles"
+  | "live"
   | "runs"
+  | "profiles"
+  | "datasets"
   | "compare"
   | "devices"
   | "validation"
-  | "diagnostics";
+  | "diagnostics"
+  | "settings";
 
 type Health = {
   ok?: boolean;
@@ -88,6 +90,23 @@ type HudSnapshot = {
   e2eP95Ms: string;
   dropsPerSec: string;
   progress: string;
+  generation: string;
+  mode: string;
+};
+
+type HudSeries = {
+  score: number[];
+  present: number[];
+  recv: number[];
+  drops: number[];
+};
+
+type SettingsModel = {
+  compactDensity: boolean;
+  animateUi: boolean;
+  autoOpenLiveTab: boolean;
+  autoOpenRunResults: boolean;
+  pollingMs: number;
 };
 
 function formatTs(ms?: number | null): string {
@@ -97,11 +116,38 @@ function formatTs(ms?: number | null): string {
   return date.toLocaleString();
 }
 
+function parseNum(value: string): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function toBars(values: number[], dangerAbove = false): { value: number; pct: number; cls: string }[] {
+  if (!values.length) {
+    return [];
+  }
+  const maxValue = Math.max(1, ...values);
+  return values.map((item) => {
+    const pct = Math.max(4, Math.min(100, (item / maxValue) * 100));
+    const cls = dangerAbove
+      ? item > maxValue * 0.65
+        ? "risk"
+        : item > maxValue * 0.4
+          ? "warn"
+          : "good"
+      : item < maxValue * 0.35
+        ? "risk"
+        : item < maxValue * 0.6
+          ? "warn"
+          : "good";
+    return { value: item, pct, cls };
+  });
+}
+
 async function fetchJson<T>(path: string): Promise<T> {
   const resp = await fetch(path);
   if (!resp.ok) {
     const body = await resp.text();
-    throw new Error(`${resp.status} ${resp.statusText}: ${body}`.slice(0, 300));
+    throw new Error(`${resp.status} ${resp.statusText}: ${body}`.slice(0, 320));
   }
   return (await resp.json()) as T;
 }
@@ -129,6 +175,8 @@ function parseHud(lines: string[]): HudSnapshot {
   let e2eP95Ms = "-";
   let dropsPerSec = "-";
   let progress = "-";
+  let generation = "-";
+  let mode = "-";
 
   const trialStartRe = /^\[(t\d+)] apply /;
   const trialScoreRe =
@@ -138,12 +186,12 @@ function parseHud(lines: string[]): HudSnapshot {
   const protoDoneRe =
     /done trial=([A-Za-z0-9_.:-]+) score=([0-9.\-]+).*sender_p50=([0-9.\-]+).*pipe_p50=([0-9.\-]+).*timeout_mean=([0-9.\-]+).*drop=([0-9.\-]+)%/;
   const protoGenRe = /generation\s+(\d+)\/(\d+):\s+population=(\d+)\s+\(start\)/;
+  const modeRe = /"mode"\s*:\s*"([^"]+)"/;
 
   for (const line of lines) {
     const start = line.match(trialStartRe);
-    if (start) {
-      trialId = start[1];
-    }
+    if (start) trialId = start[1];
+
     const scoreMatch = line.match(trialScoreRe);
     if (scoreMatch) {
       trialId = scoreMatch[1];
@@ -153,14 +201,13 @@ function parseHud(lines: string[]): HudSnapshot {
       e2eP95Ms = scoreMatch[5];
       dropsPerSec = scoreMatch[6];
     }
+
     const p = line.match(progressRe);
-    if (p) {
-      progress = `${p[2]}/${p[1]}`;
-    }
+    if (p) progress = `${p[2]}/${p[1]}`;
+
     const protoTrial = line.match(protoTrialRe);
-    if (protoTrial) {
-      trialId = protoTrial[1];
-    }
+    if (protoTrial) trialId = protoTrial[1];
+
     const protoDone = line.match(protoDoneRe);
     if (protoDone) {
       trialId = protoDone[1];
@@ -170,15 +217,72 @@ function parseHud(lines: string[]): HudSnapshot {
       e2eP95Ms = protoDone[5];
       dropsPerSec = `${protoDone[6]}%`;
     }
+
     const protoGen = line.match(protoGenRe);
     if (protoGen) {
+      generation = `${protoGen[1]}/${protoGen[2]}`;
       progress = `gen ${protoGen[1]}/${protoGen[2]} pop ${protoGen[3]}`;
     }
+
+    const parsedMode = line.match(modeRe);
+    if (parsedMode) {
+      mode = parsedMode[1];
+    }
   }
-  return { trialId, score, presentFps, recvFps, e2eP95Ms, dropsPerSec, progress };
+
+  return { trialId, score, presentFps, recvFps, e2eP95Ms, dropsPerSec, progress, generation, mode };
+}
+
+function parseHudSeries(lines: string[]): HudSeries {
+  const trialScoreRe =
+    /^\[(t\d+)] score=([0-9.\-]+) present=([0-9.\-]+) recv=([0-9.\-]+) e2e95=([0-9.\-]+)ms drops\/s=([0-9.\-]+)/;
+  const protoDoneRe =
+    /done trial=([A-Za-z0-9_.:-]+) score=([0-9.\-]+).*sender_p50=([0-9.\-]+).*pipe_p50=([0-9.\-]+).*timeout_mean=([0-9.\-]+).*drop=([0-9.\-]+)%/;
+  const series: HudSeries = { score: [], present: [], recv: [], drops: [] };
+  for (const line of lines) {
+    const match = line.match(trialScoreRe);
+    if (match) {
+      series.score.push(Number(match[2]));
+      series.present.push(Number(match[3]));
+      series.recv.push(Number(match[4]));
+      series.drops.push(Number(match[6]));
+      continue;
+    }
+    const protoDone = line.match(protoDoneRe);
+    if (protoDone) {
+      series.score.push(Number(protoDone[2]));
+      series.present.push(Number(protoDone[3]));
+      series.recv.push(Number(protoDone[4]));
+      series.drops.push(Number(protoDone[6]));
+    }
+  }
+  const keep = 22;
+  return {
+    score: series.score.slice(-keep),
+    present: series.present.slice(-keep),
+    recv: series.recv.slice(-keep),
+    drops: series.drops.slice(-keep),
+  };
+}
+
+function profileUpdatedAt(item: ProfileItem): number {
+  return Number(item.updated_at_unix_ms || 0);
 }
 
 export default function App() {
+  const tabs: Array<{ id: Tab; label: string; hint: string }> = [
+    { id: "train", label: "Train", hint: "Configure and start" },
+    { id: "live", label: "Live Run", hint: "Live HUD and events" },
+    { id: "runs", label: "Runs", hint: "History and stop control" },
+    { id: "profiles", label: "Profiles", hint: "Saved outputs" },
+    { id: "datasets", label: "Datasets", hint: "Run artifacts and recompute" },
+    { id: "compare", label: "Compare", hint: "Side-by-side profiles" },
+    { id: "devices", label: "Devices", hint: "ADB inventory" },
+    { id: "validation", label: "Validation", hint: "Quick profile check" },
+    { id: "diagnostics", label: "Diagnostics", hint: "System internals" },
+    { id: "settings", label: "Settings", hint: "UI behavior" },
+  ];
+
   const [tab, setTab] = createSignal<Tab>("train");
   const [health, setHealth] = createSignal<Health>({});
   const [runs, setRuns] = createSignal<RunItem[]>([]);
@@ -186,9 +290,10 @@ export default function App() {
   const [devices, setDevices] = createSignal<DeviceInfo[]>([]);
   const [diagnostics, setDiagnostics] = createSignal<Diagnostics | null>(null);
   const [tail, setTail] = createSignal<RunTail | null>(null);
-  const [busy, setBusy] = createSignal(false);
+  const [busyAction, setBusyAction] = createSignal("");
   const [lastError, setLastError] = createSignal("");
   const [preflightText, setPreflightText] = createSignal("not started");
+  const [showAdvanced, setShowAdvanced] = createSignal(false);
 
   const [serial, setSerial] = createSignal("");
   const [profileName, setProfileName] = createSignal("baseline");
@@ -212,18 +317,68 @@ export default function App() {
   const [rightProfile, setRightProfile] = createSignal("");
   const [leftDetail, setLeftDetail] = createSignal<ProfileDetail | null>(null);
   const [rightDetail, setRightDetail] = createSignal<ProfileDetail | null>(null);
+  const [settings, setSettings] = createSignal<SettingsModel>({
+    compactDensity: true,
+    animateUi: true,
+    autoOpenLiveTab: true,
+    autoOpenRunResults: true,
+    pollingMs: 2000,
+  });
 
   let pollId: number | undefined;
 
   const serviceOnline = createMemo(() => Boolean(health().ok));
+  const runningRuns = createMemo(() =>
+    runs().filter((item) => item.status === "running" || item.status === "stopping"),
+  );
+  const selectedEncoders = createMemo(() =>
+    [
+      encH264() ? "h264" : "",
+      encH265() ? "h265" : "",
+      encRawpng() ? "rawpng" : "",
+      encMjpeg() ? "mjpeg" : "",
+    ].filter(Boolean),
+  );
   const activeRun = createMemo(() => {
     const selected = selectedRunId();
-    if (selected) {
-      return runs().find((r) => r.run_id === selected) || runs()[0];
-    }
+    if (selected) return runs().find((r) => r.run_id === selected) || runs()[0];
+    if (runningRuns().length) return runningRuns()[0];
     return runs()[0];
   });
   const hud = createMemo(() => parseHud(tail()?.lines || []));
+  const hudSeries = createMemo(() => parseHudSeries(tail()?.lines || []));
+
+  const hardBlockers = createMemo(() => {
+    const problems: string[] = [];
+    if (!serviceOnline()) problems.push("Service is offline");
+    if (!serial()) problems.push("Select a device");
+    if (!profileName().trim()) problems.push("Profile name is required");
+    if (selectedEncoders().length === 0) problems.push("At least one encoder must be selected");
+    if (encoderMode() === "single" && selectedEncoders().length !== 1) {
+      problems.push("Single encoder mode requires exactly one encoder");
+    }
+    if (bitrateMinKbps() > bitrateMaxKbps()) problems.push("Bitrate min must be <= bitrate max");
+    if (generations() <= 0) problems.push("Generations must be greater than 0");
+    if (population() <= 1) problems.push("Population must be greater than 1");
+    if (eliteCount() <= 0 || eliteCount() >= population()) {
+      problems.push("Elite count must be > 0 and < population");
+    }
+    return problems;
+  });
+
+  const softWarnings = createMemo(() => {
+    const warnings: string[] = [];
+    const selected = devices().find((item) => item.serial === serial());
+    if (!selected) return warnings;
+    if (selected.state !== "device") warnings.push(`Device state is '${selected.state}'`);
+    if ((selected.api_level || 0) <= 19 && encH265()) warnings.push("h265 may underperform on low API devices");
+    if (bitrateMaxKbps() > 150000) warnings.push("Very high max bitrate can destabilize weaker USB links");
+    if (trials() < 8) warnings.push("Low trial budget can reduce result quality");
+    return warnings;
+  });
+
+  const canPreflight = createMemo(() => serviceOnline() && !!serial() && selectedEncoders().length > 0);
+  const canStart = createMemo(() => hardBlockers().length === 0);
 
   async function refreshHealth() {
     const data = await fetchJson<Health>("/v1/health");
@@ -232,20 +387,24 @@ export default function App() {
 
   async function refreshRuns() {
     const data = await fetchJson<{ ok: boolean; runs: RunItem[] }>("/v1/trainer/runs");
-    setRuns(data.runs || []);
-    if (!selectedRunId() && data.runs?.length) {
-      setSelectedRunId(data.runs[0].run_id);
+    const incoming = data.runs || [];
+    setRuns(incoming);
+    if (!selectedRunId() && incoming.length > 0) {
+      setSelectedRunId(incoming[0].run_id);
     }
   }
 
   async function refreshProfiles() {
     const data = await fetchJson<{ ok: boolean; profiles: ProfileItem[] }>("/v1/trainer/profiles");
-    setProfiles(data.profiles || []);
-    if (!leftProfile() && data.profiles?.length) {
-      setLeftProfile(data.profiles[0].profile_name);
+    const sorted = [...(data.profiles || [])].sort((a, b) => profileUpdatedAt(b) - profileUpdatedAt(a));
+    setProfiles(sorted);
+    if (!leftProfile() && sorted.length) {
+      setLeftProfile(sorted[0].profile_name);
+      void loadProfileDetail("left", sorted[0].profile_name);
     }
-    if (!rightProfile() && data.profiles?.length > 1) {
-      setRightProfile(data.profiles[1].profile_name);
+    if (!rightProfile() && sorted.length > 1) {
+      setRightProfile(sorted[1].profile_name);
+      void loadProfileDetail("right", sorted[1].profile_name);
     }
   }
 
@@ -269,47 +428,47 @@ export default function App() {
       setTail(null);
       return;
     }
-    const data = await fetchJson<RunTail>(`/v1/trainer/runs/${encodeURIComponent(run.run_id)}/tail?lines=220`);
+    const data = await fetchJson<RunTail>(
+      `/v1/trainer/runs/${encodeURIComponent(run.run_id)}/tail?lines=280`,
+    );
     setTail(data);
   }
 
   async function loadProfileDetail(which: "left" | "right", name: string) {
     if (!name) return;
     const data = await fetchJson<ProfileDetail>(`/v1/trainer/profiles/${encodeURIComponent(name)}`);
-    if (which === "left") {
-      setLeftDetail(data);
-    } else {
-      setRightDetail(data);
-    }
+    if (which === "left") setLeftDetail(data);
+    else setRightDetail(data);
   }
 
-  async function withUiGuard(fn: () => Promise<void>) {
-    setBusy(true);
+  async function withUiGuard(actionLabel: string, fn: () => Promise<void>) {
+    setBusyAction(actionLabel);
     try {
       await fn();
       setLastError("");
     } catch (err) {
       setLastError(String(err));
     } finally {
-      setBusy(false);
+      setBusyAction("");
     }
   }
 
   async function runPreflight() {
-    await withUiGuard(async () => {
+    await withUiGuard("Running preflight", async () => {
+      if (!canPreflight()) {
+        throw new Error("Preflight requires online service, selected device and at least one encoder.");
+      }
       const resp = await fetch("/v1/trainer/preflight", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           serial: serial(),
           adb_push_mb: 8,
-          shell_rtt_loops: 10,
+          shell_rtt_loops: 12,
         }),
       });
       const body = (await resp.json()) as Record<string, unknown>;
-      if (!resp.ok) {
-        throw new Error(String(body.error || "preflight failed"));
-      }
+      if (!resp.ok) throw new Error(String(body.error || "preflight failed"));
       const push = Number(valueAt(body, ["adb_push", "throughput_mb_s"]) || 0);
       const rtt = Number(valueAt(body, ["adb_shell_rtt", "rtt_p95_ms"]) || 0);
       setPreflightText(`push=${push.toFixed(2)}MB/s, shell_rtt_p95=${rtt.toFixed(2)}ms`);
@@ -318,28 +477,16 @@ export default function App() {
   }
 
   async function startTraining() {
-    await withUiGuard(async () => {
-      const selectedEncoders = [
-        encH264() ? "h264" : "",
-        encH265() ? "h265" : "",
-        encRawpng() ? "rawpng" : "",
-        encMjpeg() ? "mjpeg" : "",
-      ].filter(Boolean);
+    await withUiGuard("Starting training", async () => {
+      if (!canStart()) throw new Error(hardBlockers().join("; "));
       const encoders =
-        encoderMode() === "single"
-          ? [selectedEncoders[0] || "h264"]
-          : selectedEncoders.length
-            ? selectedEncoders
-            : ["h264"];
-      if (bitrateMinKbps() > bitrateMaxKbps()) {
-        throw new Error("bitrate min must be <= bitrate max");
-      }
+        encoderMode() === "single" ? [selectedEncoders()[0] || "h264"] : selectedEncoders();
       const resp = await fetch("/v1/trainer/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           serial: serial(),
-          profile_name: profileName(),
+          profile_name: profileName().trim(),
           mode: mode(),
           trials: Number(trials()),
           warmup_sec: 4,
@@ -357,33 +504,30 @@ export default function App() {
         }),
       });
       const body = (await resp.json()) as Record<string, unknown>;
-      if (!resp.ok) {
-        throw new Error(String(body.error || "start failed"));
-      }
+      if (!resp.ok) throw new Error(String(body.error || "start failed"));
       await refreshRuns();
       await refreshProfiles();
       await refreshTail();
+      if (settings().autoOpenLiveTab) setTab("live");
     });
   }
 
   async function stopRun(runId: string) {
-    await withUiGuard(async () => {
+    await withUiGuard("Stopping run", async () => {
       const resp = await fetch("/v1/trainer/stop", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ run_id: runId }),
       });
       const body = (await resp.json()) as Record<string, unknown>;
-      if (!resp.ok) {
-        throw new Error(String(body.error || "stop failed"));
-      }
+      if (!resp.ok) throw new Error(String(body.error || "stop failed"));
       await refreshRuns();
       await refreshTail();
     });
   }
 
   onMount(async () => {
-    await withUiGuard(async () => {
+    await withUiGuard("Loading trainer", async () => {
       await refreshHealth();
       await refreshRuns();
       await refreshProfiles();
@@ -396,372 +540,717 @@ export default function App() {
         await refreshHealth();
         await refreshRuns();
         await refreshDevices();
-        if (tab() === "profiles" || tab() === "compare") {
-          await refreshProfiles();
-        }
-        if (tab() === "hud" || tab() === "runs") {
-          await refreshTail();
-        }
-        if (tab() === "diagnostics") {
-          await refreshDiagnostics();
-        }
+        if (tab() === "profiles" || tab() === "compare") await refreshProfiles();
+        if (tab() === "live" || tab() === "runs" || runningRuns().length > 0) await refreshTail();
+        if (tab() === "diagnostics") await refreshDiagnostics();
       } catch (err) {
         setLastError(String(err));
       }
-    }, 2200);
+    }, settings().pollingMs);
   });
 
   onCleanup(() => {
     if (pollId) window.clearInterval(pollId);
   });
 
+  const scoreBars = createMemo(() => toBars(hudSeries().score));
+  const presentBars = createMemo(() => toBars(hudSeries().present));
+  const recvBars = createMemo(() => toBars(hudSeries().recv));
+  const dropBars = createMemo(() => toBars(hudSeries().drops, true));
+  const selectedDevice = createMemo(() => devices().find((item) => item.serial === serial()));
+
   return (
-    <main class="layout">
-      <header class="hero">
-        <div>
-          <h1>WBeam Trainer V2</h1>
-          <p>Dedicated training workstation: preflight, runs, HUD, profiles, compare, validation.</p>
+    <main class={`trainer-shell ${settings().compactDensity ? "density-compact" : "density-roomy"} ${settings().animateUi ? "animate-on" : "animate-off"}`}>
+      <header class="topbar">
+        <div class="brand">
+          <h1>WBeam Trainer</h1>
+          <p>Profile lab and live optimization console</p>
         </div>
-        <div class={`status ${serviceOnline() ? "ok" : "down"}`}>{serviceOnline() ? "Service: Online" : "Service: Offline"}</div>
+        <div class="topbar-statuses">
+          <span class={`badge ${serviceOnline() ? "ok" : "risk"}`}>{serviceOnline() ? "Service online" : "Service offline"}</span>
+          <span class="badge info">Runs: {runs().length}</span>
+          <span class="badge info">Devices: {devices().length}</span>
+          <span class="badge info">Build: {health().build_revision || "-"}</span>
+        </div>
+        <div class="topbar-actions">
+          <button
+            class="quiet"
+            disabled={!!busyAction()}
+            title="Refresh health, runs, profiles, devices and diagnostics"
+            onClick={() =>
+              void withUiGuard("Refreshing data", async () => {
+                await refreshHealth();
+                await refreshRuns();
+                await refreshProfiles();
+                await refreshDevices();
+                await refreshDiagnostics();
+                await refreshTail();
+              })
+            }
+          >
+            Refresh
+          </button>
+        </div>
       </header>
 
-      <section class="toolbar">
-        <button class={tab() === "train" ? "active" : ""} onClick={() => setTab("train")}>Train</button>
-        <button class={tab() === "hud" ? "active" : ""} onClick={() => setTab("hud")}>Live HUD</button>
-        <button class={tab() === "profiles" ? "active" : ""} onClick={() => setTab("profiles")}>Profiles</button>
-        <button class={tab() === "runs" ? "active" : ""} onClick={() => setTab("runs")}>Runs</button>
-        <button class={tab() === "compare" ? "active" : ""} onClick={() => setTab("compare")}>Compare</button>
-        <button class={tab() === "devices" ? "active" : ""} onClick={() => setTab("devices")}>Devices</button>
-        <button class={tab() === "validation" ? "active" : ""} onClick={() => setTab("validation")}>Validation</button>
-        <button class={tab() === "diagnostics" ? "active" : ""} onClick={() => setTab("diagnostics")}>Diagnostics</button>
-        <button class="ghost" onClick={() => void withUiGuard(async () => {
-          await refreshHealth();
-          await refreshRuns();
-          await refreshProfiles();
-          await refreshDevices();
-          await refreshDiagnostics();
-          await refreshTail();
-        })}>Refresh</button>
-      </section>
+      <div class="shell-body">
+        <aside class="nav-rail">
+          <For each={tabs}>
+            {(item) => (
+              <button
+                class={`nav-btn ${tab() === item.id ? "active" : ""}`}
+                title={item.hint}
+                onClick={() => setTab(item.id)}
+              >
+                <span>{item.label}</span>
+                <Show when={item.id === "live" && runningRuns().length > 0}>
+                  <small class="pulse-dot">live</small>
+                </Show>
+              </button>
+            )}
+          </For>
+        </aside>
 
-      <Show when={lastError()}>
-        <section class="panel error-panel">{lastError()}</section>
-      </Show>
+        <section class="content-zone">
+          <Show when={busyAction()}>
+            <div class="busy-banner">{busyAction()}...</div>
+          </Show>
+          <Show when={lastError()}>
+            <div class="error-banner">{lastError()}</div>
+          </Show>
 
-      <Show when={tab() === "train"}>
-        <section class="panel grid2">
-          <article>
-            <h2>Quick Start</h2>
-            <label>
-              Device
-              <select value={serial()} onInput={(e) => setSerial(e.currentTarget.value)}>
-                <For each={devices()}>
-                  {(d) => <option value={d.serial}>{d.serial} ({d.model || "unknown"}, api {d.api_level || "?"})</option>}
-                </For>
-              </select>
-            </label>
-            <label>
-              Profile name
-              <input value={profileName()} onInput={(e) => setProfileName(e.currentTarget.value)} />
-            </label>
-            <label>
-              Goal mode
-              <select value={mode()} onInput={(e) => setMode(e.currentTarget.value)}>
-                <option value="quality">max_quality</option>
-                <option value="balanced">balanced</option>
-                <option value="latency">low_latency</option>
-                <option value="custom">custom</option>
-              </select>
-            </label>
-            <label>
-              Trial budget
-              <input type="number" min="1" max="128" value={trials()} onInput={(e) => setTrials(Number(e.currentTarget.value || 18))} />
-            </label>
-            <label>
-              Generations
-              <input type="number" min="1" max="32" value={generations()} onInput={(e) => setGenerations(Number(e.currentTarget.value || 2))} />
-            </label>
-            <label>
-              Population
-              <input type="number" min="2" max="256" value={population()} onInput={(e) => setPopulation(Number(e.currentTarget.value || 18))} />
-            </label>
-            <label>
-              Elite count
-              <input type="number" min="1" max="128" value={eliteCount()} onInput={(e) => setEliteCount(Number(e.currentTarget.value || 6))} />
-            </label>
-            <label>
-              Mutation rate
-              <input type="number" min="0" max="1" step="0.01" value={mutationRate()} onInput={(e) => setMutationRate(Number(e.currentTarget.value || 0.34))} />
-            </label>
-            <label>
-              Crossover rate
-              <input type="number" min="0" max="1" step="0.01" value={crossoverRate()} onInput={(e) => setCrossoverRate(Number(e.currentTarget.value || 0.5))} />
-            </label>
-            <label>
-              Bitrate min (kbps)
-              <input type="number" min="1000" max="400000" value={bitrateMinKbps()} onInput={(e) => setBitrateMinKbps(Number(e.currentTarget.value || 10000))} />
-            </label>
-            <label>
-              Bitrate max (kbps)
-              <input type="number" min="1000" max="400000" value={bitrateMaxKbps()} onInput={(e) => setBitrateMaxKbps(Number(e.currentTarget.value || 200000))} />
-            </label>
-            <label>
-              Encoder mode
-              <select value={encoderMode()} onInput={(e) => setEncoderMode(e.currentTarget.value)}>
-                <option value="multi">multi</option>
-                <option value="single">single</option>
-              </select>
-            </label>
-            <label>Encoders</label>
-            <div class="actions">
-              <label class="checkbox">
-                <input type="checkbox" checked={encH264()} onInput={(e) => setEncH264(e.currentTarget.checked)} />
-                h264
-              </label>
-              <label class="checkbox">
-                <input type="checkbox" checked={encH265()} onInput={(e) => setEncH265(e.currentTarget.checked)} />
-                h265
-              </label>
-              <label class="checkbox">
-                <input type="checkbox" checked={encRawpng()} onInput={(e) => setEncRawpng(e.currentTarget.checked)} />
-                rawpng
-              </label>
-              <label class="checkbox">
-                <input type="checkbox" checked={encMjpeg()} onInput={(e) => setEncMjpeg(e.currentTarget.checked)} />
-                mjpeg
-              </label>
+          <Show when={tab() === "train"}>
+            <div class="train-grid">
+              <article class="panel card">
+                <h2>Run Setup</h2>
+
+                <label>
+                  Device
+                  <select value={serial()} onInput={(e) => setSerial(e.currentTarget.value)}>
+                    <For each={devices()}>
+                      {(d) => (
+                        <option value={d.serial}>
+                          {d.serial} ({d.model || "unknown"}, api {d.api_level || "?"}, {d.state})
+                        </option>
+                      )}
+                    </For>
+                  </select>
+                </label>
+
+                <label title="Profile folder name used for persistent outputs and run artifacts.">
+                  Profile name
+                  <input value={profileName()} onInput={(e) => setProfileName(e.currentTarget.value)} />
+                </label>
+
+                <div class="two-col">
+                  <label title="Optimization objective used to score and rank trials.">
+                    Goal mode
+                    <select value={mode()} onInput={(e) => setMode(e.currentTarget.value)}>
+                      <option value="quality">max_quality</option>
+                      <option value="balanced">balanced</option>
+                      <option value="latency">low_latency</option>
+                      <option value="custom">custom</option>
+                    </select>
+                  </label>
+
+                  <label title="Single mode enforces one codec, multi mode explores all selected codecs.">
+                    Encoder mode
+                    <select value={encoderMode()} onInput={(e) => setEncoderMode(e.currentTarget.value)}>
+                      <option value="multi">multi</option>
+                      <option value="single">single</option>
+                    </select>
+                  </label>
+                </div>
+
+                <div class="chip-row">
+                  <label class={`chip ${encH264() ? "on" : ""}`} title="H.264 is broadly compatible and usually stable.">
+                    <input type="checkbox" checked={encH264()} onInput={(e) => setEncH264(e.currentTarget.checked)} />
+                    h264
+                  </label>
+                  <label class={`chip ${encH265() ? "on" : ""}`} title="H.265 can improve quality at same bitrate.">
+                    <input type="checkbox" checked={encH265()} onInput={(e) => setEncH265(e.currentTarget.checked)} />
+                    h265
+                  </label>
+                  <label class={`chip ${encRawpng() ? "on" : ""}`} title="Raw PNG path for diagnostics, heavy bandwidth usage.">
+                    <input type="checkbox" checked={encRawpng()} onInput={(e) => setEncRawpng(e.currentTarget.checked)} />
+                    rawpng
+                  </label>
+                  <label class={`chip ${encMjpeg() ? "on" : ""}`} title="MJPEG fallback path, useful for compatibility probes.">
+                    <input type="checkbox" checked={encMjpeg()} onInput={(e) => setEncMjpeg(e.currentTarget.checked)} />
+                    mjpeg
+                  </label>
+                </div>
+
+                <div class="slider-row">
+                  <label title="Lower tested bitrate bound.">
+                    Bitrate min (kbps)
+                    <input
+                      type="number"
+                      min="1000"
+                      max="400000"
+                      value={bitrateMinKbps()}
+                      onInput={(e) => setBitrateMinKbps(Number(e.currentTarget.value || 10000))}
+                    />
+                  </label>
+                  <label title="Upper tested bitrate bound.">
+                    Bitrate max (kbps)
+                    <input
+                      type="number"
+                      min="1000"
+                      max="400000"
+                      value={bitrateMaxKbps()}
+                      onInput={(e) => setBitrateMaxKbps(Number(e.currentTarget.value || 200000))}
+                    />
+                  </label>
+                </div>
+
+                <div class="slider-wrap" title="Visual range preview for bitrate min/max.">
+                  <input
+                    type="range"
+                    min="1000"
+                    max="400000"
+                    value={bitrateMinKbps()}
+                    onInput={(e) => {
+                      const val = parseNum(e.currentTarget.value);
+                      if (val !== null) setBitrateMinKbps(Math.min(val, bitrateMaxKbps()));
+                    }}
+                  />
+                  <input
+                    type="range"
+                    min="1000"
+                    max="400000"
+                    value={bitrateMaxKbps()}
+                    onInput={(e) => {
+                      const val = parseNum(e.currentTarget.value);
+                      if (val !== null) setBitrateMaxKbps(Math.max(val, bitrateMinKbps()));
+                    }}
+                  />
+                </div>
+
+                <div class="two-col">
+                  <label title="Approximate candidate count for first-stage sampling.">
+                    Trial budget
+                    <input type="number" min="1" max="128" value={trials()} onInput={(e) => setTrials(Number(e.currentTarget.value || 18))} />
+                  </label>
+                  <label title="Number of evolution loops.">
+                    Generations
+                    <input type="number" min="1" max="32" value={generations()} onInput={(e) => setGenerations(Number(e.currentTarget.value || 2))} />
+                  </label>
+                </div>
+
+                <button class="toggle-advanced" onClick={() => setShowAdvanced((prev) => !prev)}>
+                  {showAdvanced() ? "Hide advanced tuning" : "Show advanced tuning"}
+                </button>
+
+                <Show when={showAdvanced()}>
+                  <div class="advanced-box">
+                    <div class="two-col">
+                      <label title="Population size per generation.">
+                        Population
+                        <input
+                          type="number"
+                          min="2"
+                          max="256"
+                          value={population()}
+                          onInput={(e) => setPopulation(Number(e.currentTarget.value || 18))}
+                        />
+                      </label>
+                      <label title="Elite candidates carried to next generation. Must stay below population.">
+                        Elite count
+                        <input
+                          type="number"
+                          min="1"
+                          max="128"
+                          value={eliteCount()}
+                          onInput={(e) => setEliteCount(Number(e.currentTarget.value || 6))}
+                        />
+                      </label>
+                    </div>
+
+                    <label title="Higher values explore more aggressively but can destabilize search convergence.">
+                      Mutation rate ({mutationRate().toFixed(2)})
+                      <div class="slider-pair">
+                        <input
+                          type="range"
+                          min="0"
+                          max="1"
+                          step="0.01"
+                          value={mutationRate()}
+                          onInput={(e) => setMutationRate(Number(e.currentTarget.value || 0.34))}
+                        />
+                        <input
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.01"
+                          value={mutationRate()}
+                          onInput={(e) => setMutationRate(Number(e.currentTarget.value || 0.34))}
+                        />
+                      </div>
+                    </label>
+
+                    <label title="Controls how often child candidates merge parameters from two parents.">
+                      Crossover rate ({crossoverRate().toFixed(2)})
+                      <div class="slider-pair">
+                        <input
+                          type="range"
+                          min="0"
+                          max="1"
+                          step="0.01"
+                          value={crossoverRate()}
+                          onInput={(e) => setCrossoverRate(Number(e.currentTarget.value || 0.5))}
+                        />
+                        <input
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.01"
+                          value={crossoverRate()}
+                          onInput={(e) => setCrossoverRate(Number(e.currentTarget.value || 0.5))}
+                        />
+                      </div>
+                    </label>
+
+                    <label class="switch" title="Streams a multi-corner HUD overlay on the Android display during training.">
+                      <input type="checkbox" checked={overlay()} onInput={(e) => setOverlay(e.currentTarget.checked)} />
+                      <span>Show on-device HUD overlay</span>
+                    </label>
+                  </div>
+                </Show>
+              </article>
+
+              <article class="panel card">
+                <h2>Readiness</h2>
+                <div class="meta-grid">
+                  <div class="meta-item"><strong>Service</strong><span>{health().state || "-"}</span></div>
+                  <div class="meta-item"><strong>Build</strong><span class="mono">{health().build_revision || "-"}</span></div>
+                  <div class="meta-item"><strong>Selected device</strong><span>{serial() || "-"}</span></div>
+                  <div class="meta-item"><strong>Device state</strong><span>{selectedDevice()?.state || "-"}</span></div>
+                  <div class="meta-item"><strong>Preflight</strong><span>{preflightText()}</span></div>
+                  <div class="meta-item"><strong>Encoders</strong><span>{selectedEncoders().join(", ") || "-"}</span></div>
+                </div>
+
+                <Show when={hardBlockers().length > 0}>
+                  <div class="list-block risk">
+                    <h3>Blocking issues</h3>
+                    <ul>
+                      <For each={hardBlockers()}>{(problem) => <li>{problem}</li>}</For>
+                    </ul>
+                  </div>
+                </Show>
+
+                <Show when={softWarnings().length > 0}>
+                  <div class="list-block warn">
+                    <h3>Warnings</h3>
+                    <ul>
+                      <For each={softWarnings()}>{(warning) => <li>{warning}</li>}</For>
+                    </ul>
+                  </div>
+                </Show>
+
+                <div class="actions-row">
+                  <button class="primary" disabled={!!busyAction() || !canPreflight()} onClick={() => void runPreflight()}>
+                    Run Preflight
+                  </button>
+                  <button class="primary strong" disabled={!!busyAction() || !canStart()} onClick={() => void startTraining()}>
+                    Start Training
+                  </button>
+                </div>
+              </article>
             </div>
-            <label class="checkbox">
-              <input type="checkbox" checked={overlay()} onInput={(e) => setOverlay(e.currentTarget.checked)} />
-              Show on-stream tuning overlay
-            </label>
-            <div class="actions">
-              <button class="cta" disabled={busy()} onClick={() => void runPreflight()}>Run Preflight</button>
-              <button class="cta" disabled={busy()} onClick={() => void startTraining()}>Start Training</button>
+          </Show>
+
+          <Show when={tab() === "live"}>
+            <div class="live-layout">
+              <article class="panel card fixed-left">
+                <h2>Run Context</h2>
+                <div class="meta-grid">
+                  <div class="meta-item"><strong>Run</strong><span class="mono">{activeRun()?.run_id || "-"}</span></div>
+                  <div class="meta-item"><strong>Status</strong><span>{activeRun()?.status || "idle"}</span></div>
+                  <div class="meta-item"><strong>Profile</strong><span>{activeRun()?.profile_name || profileName()}</span></div>
+                  <div class="meta-item"><strong>Device</strong><span>{activeRun()?.serial || serial() || "-"}</span></div>
+                  <div class="meta-item"><strong>Mode</strong><span>{hud().mode !== "-" ? hud().mode : activeRun()?.mode || "-"}</span></div>
+                  <div class="meta-item"><strong>Generation</strong><span>{hud().generation}</span></div>
+                  <div class="meta-item"><strong>Progress</strong><span>{hud().progress}</span></div>
+                </div>
+                <Show when={activeRun() && (activeRun()!.status === "running" || activeRun()!.status === "stopping")}>
+                  <button class="danger" disabled={!!busyAction()} onClick={() => void stopRun(activeRun()!.run_id)}>
+                    Stop Run
+                  </button>
+                </Show>
+              </article>
+
+              <article class="panel card live-center">
+                <h2>Live HUD</h2>
+                <div class="kpi-grid">
+                  <div class="kpi-card">
+                    <span>Trial</span>
+                    <strong>{hud().trialId}</strong>
+                  </div>
+                  <div class="kpi-card">
+                    <span>Score</span>
+                    <strong>{hud().score}</strong>
+                  </div>
+                  <div class="kpi-card">
+                    <span>Present FPS</span>
+                    <strong>{hud().presentFps}</strong>
+                  </div>
+                  <div class="kpi-card">
+                    <span>Pipe FPS</span>
+                    <strong>{hud().recvFps}</strong>
+                  </div>
+                  <div class="kpi-card">
+                    <span>E2E p95 (ms)</span>
+                    <strong>{hud().e2eP95Ms}</strong>
+                  </div>
+                  <div class="kpi-card">
+                    <span>Drops</span>
+                    <strong>{hud().dropsPerSec}</strong>
+                  </div>
+                </div>
+
+                <div class="chart-grid">
+                  <section class="chart-card">
+                    <h3>Score trend</h3>
+                    <div class="bar-row">
+                      <For each={scoreBars()}>
+                        {(bar) => <span class={`bar ${bar.cls}`} style={{ height: `${bar.pct}%` }} title={bar.value.toFixed(2)} />}
+                      </For>
+                    </div>
+                  </section>
+                  <section class="chart-card">
+                    <h3>Present FPS trend</h3>
+                    <div class="bar-row">
+                      <For each={presentBars()}>
+                        {(bar) => <span class={`bar ${bar.cls}`} style={{ height: `${bar.pct}%` }} title={bar.value.toFixed(2)} />}
+                      </For>
+                    </div>
+                  </section>
+                  <section class="chart-card">
+                    <h3>Pipeline FPS trend</h3>
+                    <div class="bar-row">
+                      <For each={recvBars()}>
+                        {(bar) => <span class={`bar ${bar.cls}`} style={{ height: `${bar.pct}%` }} title={bar.value.toFixed(2)} />}
+                      </For>
+                    </div>
+                  </section>
+                  <section class="chart-card">
+                    <h3>Drop trend</h3>
+                    <div class="bar-row">
+                      <For each={dropBars()}>
+                        {(bar) => <span class={`bar ${bar.cls}`} style={{ height: `${bar.pct}%` }} title={bar.value.toFixed(2)} />}
+                      </For>
+                    </div>
+                  </section>
+                </div>
+              </article>
+
+              <article class="panel card fixed-right">
+                <h2>Event Log</h2>
+                <pre class="log-tail">
+                  <For each={tail()?.lines || []}>{(line) => <div>{line}</div>}</For>
+                </pre>
+              </article>
             </div>
-          </article>
-          <article>
-            <h2>Run Context</h2>
-            <div class="device-card"><strong>Service state</strong><span>{health().state || "-"}</span></div>
-            <div class="device-card"><strong>Build revision</strong><span>{health().build_revision || "-"}</span></div>
-            <div class="device-card"><strong>Selected serial</strong><span>{serial() || "-"}</span></div>
-            <div class="device-card"><strong>Encoder mode</strong><span>{encoderMode()}</span></div>
-            <div class="device-card"><strong>Bitrate range</strong><span>{bitrateMinKbps()}..{bitrateMaxKbps()} kbps</span></div>
-            <div class="device-card"><strong>GA setup</strong><span>g{generations()} p{population()} e{eliteCount()} m{mutationRate().toFixed(2)} c{crossoverRate().toFixed(2)}</span></div>
-            <div class="device-card"><strong>Preflight</strong><span>{preflightText()}</span></div>
-          </article>
-        </section>
-      </Show>
+          </Show>
 
-      <Show when={tab() === "hud"}>
-        <section class="panel">
-          <h2>Live HUD</h2>
-          <div class="hud-topline">
-            <span>run={activeRun()?.run_id || "-"}</span>
-            <span>status={activeRun()?.status || "idle"}</span>
-            <span>trial={hud().trialId}</span>
-            <span>progress={hud().progress}</span>
-            <span>profile={activeRun()?.profile_name || profileName()}</span>
-          </div>
-          <div class="grid2">
-            <div class="device-card"><strong>Score</strong><span>{hud().score}</span></div>
-            <div class="device-card"><strong>Primary FPS</strong><span>{hud().presentFps}</span></div>
-            <div class="device-card"><strong>Pipeline FPS</strong><span>{hud().recvFps}</span></div>
-            <div class="device-card"><strong>Timeout/E2E (ms)</strong><span>{hud().e2eP95Ms}</span></div>
-            <div class="device-card"><strong>Drops</strong><span>{hud().dropsPerSec}</span></div>
-            <div class="device-card"><strong>Gate note</strong><span>{hud().presentFps === "-" ? "waiting for metrics" : "stream active"}</span></div>
-          </div>
-          <h3>Live Event Log</h3>
-          <pre class="log-tail"><For each={tail()?.lines || []}>{(line) => <div>{line}</div>}</For></pre>
-        </section>
-      </Show>
-
-      <Show when={tab() === "profiles"}>
-        <section class="panel">
-          <h2>Profiles</h2>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Engine</th>
-                  <th>Serial</th>
-                  <th>Best score</th>
-                  <th>Preflight</th>
-                  <th>Updated</th>
-                  <th>Path</th>
-                </tr>
-              </thead>
-              <tbody>
-                <For each={profiles()}>
-                  {(p) => (
+          <Show when={tab() === "runs"}>
+            <article class="panel card">
+              <h2>Runs</h2>
+              <div class="table-wrap">
+                <table>
+                  <thead>
                     <tr>
-                      <td>{p.profile_name}</td>
-                      <td>{p.engine || "-"}</td>
-                      <td>{p.serial || "-"}</td>
-                      <td>{typeof p.best_score === "number" ? p.best_score.toFixed(2) : "-"}</td>
-                      <td>{p.has_preflight ? "yes" : "no"}</td>
-                      <td>{formatTs(p.updated_at_unix_ms || undefined)}</td>
-                      <td class="mono">{p.path}</td>
+                      <th>Run ID</th>
+                      <th>Status</th>
+                      <th>Profile</th>
+                      <th>Device</th>
+                      <th>Mode</th>
+                      <th>Started</th>
+                      <th>Finished</th>
+                      <th>Action</th>
                     </tr>
-                  )}
-                </For>
-              </tbody>
-            </table>
-          </div>
-        </section>
-      </Show>
-
-      <Show when={tab() === "runs"}>
-        <section class="panel">
-          <h2>Runs</h2>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Run ID</th>
-                  <th>Status</th>
-                  <th>Profile</th>
-                  <th>Serial</th>
-                  <th>Started</th>
-                  <th>Finished</th>
-                  <th>Artifacts</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                <For each={runs()}>
-                  {(r) => (
-                    <tr>
-                      <td>
-                        <button onClick={() => {
-                          setSelectedRunId(r.run_id);
-                          void refreshTail();
-                        }}>{r.run_id}</button>
-                      </td>
-                      <td>{r.status}</td>
-                      <td>{r.profile_name}</td>
-                      <td>{r.serial}</td>
-                      <td>{formatTs(r.started_at_unix_ms)}</td>
-                      <td>{formatTs(r.finished_at_unix_ms)}</td>
-                      <td class="mono">{r.run_artifacts_dir}</td>
-                      <td>
-                        <Show when={r.status === "running" || r.status === "stopping"}>
-                          <button onClick={() => void stopRun(r.run_id)}>Stop</button>
-                        </Show>
-                      </td>
-                    </tr>
-                  )}
-                </For>
-              </tbody>
-            </table>
-          </div>
-          <h3>Selected Run Tail</h3>
-          <pre class="log-tail"><For each={tail()?.lines || []}>{(line) => <div>{line}</div>}</For></pre>
-        </section>
-      </Show>
-
-      <Show when={tab() === "compare"}>
-        <section class="panel grid2">
-          <article>
-            <h2>Left Profile</h2>
-            <select value={leftProfile()} onInput={(e) => {
-              const name = e.currentTarget.value;
-              setLeftProfile(name);
-              void withUiGuard(async () => loadProfileDetail("left", name));
-            }}>
-              <For each={profiles()}>{(p) => <option value={p.profile_name}>{p.profile_name}</option>}</For>
-            </select>
-            <Show when={leftDetail()}>
-              <div class="device-list">
-                <div class="device-card"><strong>Encoder</strong><span>{pickRuntimeValue(leftDetail()!.profile, "encoder")}</span></div>
-                <div class="device-card"><strong>Size</strong><span>{pickRuntimeValue(leftDetail()!.profile, "size")}</span></div>
-                <div class="device-card"><strong>FPS</strong><span>{pickRuntimeValue(leftDetail()!.profile, "fps")}</span></div>
-                <div class="device-card"><strong>Bitrate</strong><span>{pickRuntimeValue(leftDetail()!.profile, "bitrate_kbps")}</span></div>
+                  </thead>
+                  <tbody>
+                    <For each={runs()}>
+                      {(r) => (
+                        <tr class={selectedRunId() === r.run_id ? "selected-row" : ""}>
+                          <td>
+                            <button
+                              class="link-btn"
+                              onClick={() => {
+                                setSelectedRunId(r.run_id);
+                                setTab("live");
+                                void refreshTail();
+                              }}
+                            >
+                              {r.run_id}
+                            </button>
+                          </td>
+                          <td>{r.status}</td>
+                          <td>{r.profile_name}</td>
+                          <td>{r.serial}</td>
+                          <td>{r.mode}</td>
+                          <td>{formatTs(r.started_at_unix_ms)}</td>
+                          <td>{formatTs(r.finished_at_unix_ms)}</td>
+                          <td>
+                            <Show when={r.status === "running" || r.status === "stopping"}>
+                              <button class="danger quiet" onClick={() => void stopRun(r.run_id)}>
+                                Stop
+                              </button>
+                            </Show>
+                          </td>
+                        </tr>
+                      )}
+                    </For>
+                  </tbody>
+                </table>
               </div>
-            </Show>
-          </article>
-          <article>
-            <h2>Right Profile</h2>
-            <select value={rightProfile()} onInput={(e) => {
-              const name = e.currentTarget.value;
-              setRightProfile(name);
-              void withUiGuard(async () => loadProfileDetail("right", name));
-            }}>
-              <For each={profiles()}>{(p) => <option value={p.profile_name}>{p.profile_name}</option>}</For>
-            </select>
-            <Show when={rightDetail()}>
-              <div class="device-list">
-                <div class="device-card"><strong>Encoder</strong><span>{pickRuntimeValue(rightDetail()!.profile, "encoder")}</span></div>
-                <div class="device-card"><strong>Size</strong><span>{pickRuntimeValue(rightDetail()!.profile, "size")}</span></div>
-                <div class="device-card"><strong>FPS</strong><span>{pickRuntimeValue(rightDetail()!.profile, "fps")}</span></div>
-                <div class="device-card"><strong>Bitrate</strong><span>{pickRuntimeValue(rightDetail()!.profile, "bitrate_kbps")}</span></div>
-              </div>
-            </Show>
-          </article>
-        </section>
-      </Show>
+            </article>
+          </Show>
 
-      <Show when={tab() === "devices"}>
-        <section class="panel">
-          <h2>ADB Devices</h2>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Serial</th>
-                  <th>State</th>
-                  <th>Model</th>
-                  <th>API</th>
-                  <th>Android</th>
-                  <th>Stream port</th>
-                </tr>
-              </thead>
-              <tbody>
-                <For each={devices()}>
-                  {(d) => (
+          <Show when={tab() === "profiles"}>
+            <article class="panel card">
+              <h2>Profiles</h2>
+              <div class="table-wrap">
+                <table>
+                  <thead>
                     <tr>
-                      <td class="mono">{d.serial}</td>
-                      <td>{d.state}</td>
-                      <td>{d.model || "-"}</td>
-                      <td>{d.api_level || "-"}</td>
-                      <td>{d.android_release || "-"}</td>
-                      <td>{d.stream_port || "-"}</td>
+                      <th>Name</th>
+                      <th>Engine</th>
+                      <th>Serial</th>
+                      <th>Best score</th>
+                      <th>Preflight</th>
+                      <th>Updated</th>
+                      <th>Path</th>
                     </tr>
-                  )}
-                </For>
-              </tbody>
-            </table>
-          </div>
-        </section>
-      </Show>
+                  </thead>
+                  <tbody>
+                    <For each={profiles()}>
+                      {(p) => (
+                        <tr>
+                          <td>{p.profile_name}</td>
+                          <td>{p.engine || "-"}</td>
+                          <td>{p.serial || "-"}</td>
+                          <td>{typeof p.best_score === "number" ? p.best_score.toFixed(2) : "-"}</td>
+                          <td>{p.has_preflight ? "yes" : "no"}</td>
+                          <td>{formatTs(p.updated_at_unix_ms || undefined)}</td>
+                          <td class="mono">{p.path}</td>
+                        </tr>
+                      )}
+                    </For>
+                  </tbody>
+                </table>
+              </div>
+            </article>
+          </Show>
 
-      <Show when={tab() === "validation"}>
-        <section class="panel">
-          <h2>Validation</h2>
-          <p class="hint">Validation currently runs quick preflight on the selected device/profile pair.</p>
-          <div class="device-card"><strong>Selected profile</strong><span>{profileName()}</span></div>
-          <div class="device-card"><strong>Selected device</strong><span>{serial() || "-"}</span></div>
-          <div class="actions">
-            <button class="cta" disabled={busy()} onClick={() => void runPreflight()}>Run Quick Validation</button>
-          </div>
-          <p class="hint">{preflightText()}</p>
-        </section>
-      </Show>
+          <Show when={tab() === "datasets"}>
+            <article class="panel card">
+              <h2>Datasets</h2>
+              <p class="hint">
+                Current backend stores datasets per run artifact directory. This view maps dataset entries from known runs.
+              </p>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Run ID</th>
+                      <th>Profile</th>
+                      <th>Status</th>
+                      <th>Artifacts</th>
+                      <th>Log</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <For each={runs()}>
+                      {(item) => (
+                        <tr>
+                          <td class="mono">{item.run_id}</td>
+                          <td>{item.profile_name}</td>
+                          <td>{item.status}</td>
+                          <td class="mono">{item.run_artifacts_dir}</td>
+                          <td class="mono">{item.log_path}</td>
+                        </tr>
+                      )}
+                    </For>
+                  </tbody>
+                </table>
+              </div>
+            </article>
+          </Show>
 
-      <Show when={tab() === "diagnostics"}>
-        <section class="panel">
-          <h2>Diagnostics</h2>
-          <div class="device-card"><strong>Runs in memory</strong><span>{diagnostics()?.runs_count ?? "-"}</span></div>
-          <div class="device-card"><strong>Profile root</strong><span class="mono">{diagnostics()?.profile_root || "-"}</span></div>
-          <h3>ADB Version</h3>
-          <pre class="log-tail">{diagnostics()?.adb_version || "-"}</pre>
-          <h3>ADB Devices Raw</h3>
-          <pre class="log-tail">{diagnostics()?.adb_devices_raw || "-"}</pre>
-          <h3>Daemon Health Snapshot</h3>
-          <pre class="log-tail">{JSON.stringify(diagnostics()?.daemon_health || {}, null, 2)}</pre>
+          <Show when={tab() === "compare"}>
+            <div class="train-grid">
+              <article class="panel card">
+                <h2>Left profile</h2>
+                <select
+                  value={leftProfile()}
+                  onInput={(e) => {
+                    const name = e.currentTarget.value;
+                    setLeftProfile(name);
+                    void withUiGuard("Loading profile", async () => loadProfileDetail("left", name));
+                  }}
+                >
+                  <For each={profiles()}>{(p) => <option value={p.profile_name}>{p.profile_name}</option>}</For>
+                </select>
+                <Show when={leftDetail()}>
+                  <div class="meta-grid">
+                    <div class="meta-item"><strong>Encoder</strong><span>{pickRuntimeValue(leftDetail()!.profile, "encoder")}</span></div>
+                    <div class="meta-item"><strong>Size</strong><span>{pickRuntimeValue(leftDetail()!.profile, "size")}</span></div>
+                    <div class="meta-item"><strong>FPS</strong><span>{pickRuntimeValue(leftDetail()!.profile, "fps")}</span></div>
+                    <div class="meta-item"><strong>Bitrate</strong><span>{pickRuntimeValue(leftDetail()!.profile, "bitrate_kbps")}</span></div>
+                  </div>
+                </Show>
+              </article>
+
+              <article class="panel card">
+                <h2>Right profile</h2>
+                <select
+                  value={rightProfile()}
+                  onInput={(e) => {
+                    const name = e.currentTarget.value;
+                    setRightProfile(name);
+                    void withUiGuard("Loading profile", async () => loadProfileDetail("right", name));
+                  }}
+                >
+                  <For each={profiles()}>{(p) => <option value={p.profile_name}>{p.profile_name}</option>}</For>
+                </select>
+                <Show when={rightDetail()}>
+                  <div class="meta-grid">
+                    <div class="meta-item"><strong>Encoder</strong><span>{pickRuntimeValue(rightDetail()!.profile, "encoder")}</span></div>
+                    <div class="meta-item"><strong>Size</strong><span>{pickRuntimeValue(rightDetail()!.profile, "size")}</span></div>
+                    <div class="meta-item"><strong>FPS</strong><span>{pickRuntimeValue(rightDetail()!.profile, "fps")}</span></div>
+                    <div class="meta-item"><strong>Bitrate</strong><span>{pickRuntimeValue(rightDetail()!.profile, "bitrate_kbps")}</span></div>
+                  </div>
+                </Show>
+              </article>
+            </div>
+          </Show>
+
+          <Show when={tab() === "devices"}>
+            <article class="panel card">
+              <h2>Devices</h2>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Serial</th>
+                      <th>State</th>
+                      <th>Model</th>
+                      <th>API</th>
+                      <th>Android</th>
+                      <th>Stream port</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <For each={devices()}>
+                      {(d) => (
+                        <tr class={serial() === d.serial ? "selected-row" : ""}>
+                          <td class="mono">{d.serial}</td>
+                          <td>{d.state}</td>
+                          <td>{d.model || "-"}</td>
+                          <td>{d.api_level || "-"}</td>
+                          <td>{d.android_release || "-"}</td>
+                          <td>{d.stream_port || "-"}</td>
+                        </tr>
+                      )}
+                    </For>
+                  </tbody>
+                </table>
+              </div>
+            </article>
+          </Show>
+
+          <Show when={tab() === "validation"}>
+            <article class="panel card">
+              <h2>Validation</h2>
+              <p class="hint">Validation runs quick preflight for the selected profile and device pair.</p>
+              <div class="meta-grid">
+                <div class="meta-item"><strong>Profile</strong><span>{profileName()}</span></div>
+                <div class="meta-item"><strong>Device</strong><span>{serial() || "-"}</span></div>
+                <div class="meta-item"><strong>Result</strong><span>{preflightText()}</span></div>
+              </div>
+              <button class="primary strong" disabled={!!busyAction() || !canPreflight()} onClick={() => void runPreflight()}>
+                Run Quick Validation
+              </button>
+            </article>
+          </Show>
+
+          <Show when={tab() === "diagnostics"}>
+            <article class="panel card">
+              <h2>Diagnostics</h2>
+              <div class="meta-grid">
+                <div class="meta-item"><strong>Runs in memory</strong><span>{diagnostics()?.runs_count ?? "-"}</span></div>
+                <div class="meta-item"><strong>Profile root</strong><span class="mono">{diagnostics()?.profile_root || "-"}</span></div>
+              </div>
+              <h3>ADB Version</h3>
+              <pre class="log-tail">{diagnostics()?.adb_version || "-"}</pre>
+              <h3>ADB Devices Raw</h3>
+              <pre class="log-tail">{diagnostics()?.adb_devices_raw || "-"}</pre>
+              <h3>Daemon Health Snapshot</h3>
+              <pre class="log-tail">{JSON.stringify(diagnostics()?.daemon_health || {}, null, 2)}</pre>
+            </article>
+          </Show>
+
+          <Show when={tab() === "settings"}>
+            <article class="panel card">
+              <h2>Settings</h2>
+              <div class="switch-grid">
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    checked={settings().compactDensity}
+                    onInput={(e) => setSettings((prev) => ({ ...prev, compactDensity: e.currentTarget.checked }))}
+                  />
+                  <span>Compact density</span>
+                </label>
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    checked={settings().animateUi}
+                    onInput={(e) => setSettings((prev) => ({ ...prev, animateUi: e.currentTarget.checked }))}
+                  />
+                  <span>Enable UI animations</span>
+                </label>
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    checked={settings().autoOpenLiveTab}
+                    onInput={(e) => setSettings((prev) => ({ ...prev, autoOpenLiveTab: e.currentTarget.checked }))}
+                  />
+                  <span>Auto-open Live Run on start</span>
+                </label>
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    checked={settings().autoOpenRunResults}
+                    onInput={(e) => setSettings((prev) => ({ ...prev, autoOpenRunResults: e.currentTarget.checked }))}
+                  />
+                  <span>Auto-open run result summary</span>
+                </label>
+              </div>
+              <label title="Refresh interval for trainer polling.">
+                Polling (ms)
+                <select
+                  value={String(settings().pollingMs)}
+                  onInput={(e) => {
+                    const val = Number(e.currentTarget.value || "2000");
+                    setSettings((prev) => ({ ...prev, pollingMs: val }));
+                  }}
+                >
+                  <option value="1200">1200</option>
+                  <option value="1600">1600</option>
+                  <option value="2000">2000</option>
+                  <option value="2600">2600</option>
+                  <option value="3200">3200</option>
+                </select>
+              </label>
+              <p class="hint">Settings apply instantly to visual behavior. Polling change takes effect after restart.</p>
+            </article>
+          </Show>
         </section>
-      </Show>
+      </div>
     </main>
   );
 }

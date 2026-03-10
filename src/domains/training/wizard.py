@@ -189,6 +189,26 @@ def bar_line(value: float, max_value: float, width: int = 24) -> str:
     return f"[{'#' * fill}{'-' * (width - fill)}] {value:.1f}/{max_value:.1f}"
 
 
+def spark_ascii(values: list[float], width: int = 24) -> str:
+    if not values:
+        return "." * max(6, width)
+    chars = " .:-=+*#%@"
+    if width <= 0:
+        width = len(values)
+    tail = values[-width:]
+    lo = min(tail)
+    hi = max(tail)
+    span = hi - lo
+    if span <= 1e-9:
+        return "=" * len(tail)
+    out: list[str] = []
+    for item in tail:
+        ratio = max(0.0, min(1.0, (item - lo) / span))
+        idx = int(round(ratio * (len(chars) - 1)))
+        out.append(chars[idx])
+    return "".join(out)
+
+
 def write_overlay_snapshot(
     path: Path,
     *,
@@ -201,8 +221,20 @@ def write_overlay_snapshot(
     generation_total: int,
     cfg: TrialConfig | None = None,
     result: TrialResult | None = None,
+    history: list[TrialResult] | None = None,
     note: str = "",
 ) -> None:
+    recent = history or []
+    valid_scores = [item.score for item in recent if item.score > -900.0]
+    valid_present = [item.present_fps_mean for item in recent if item.present_fps_mean > 0.0]
+    valid_drop = [item.drop_rate_per_sec * 100.0 for item in recent if item.sample_count > 0]
+    best_recent = max(valid_scores) if valid_scores else 0.0
+    best_trial = ""
+    if recent:
+        ranked = sorted((item for item in recent if item.score > -900.0), key=lambda x: x.score, reverse=True)
+        if ranked:
+            best_trial = ranked[0].trial_id
+
     lines: list[str] = []
     lines.extend(
         [
@@ -230,6 +262,8 @@ def write_overlay_snapshot(
         lines.append("config=<pending>")
     if note:
         lines.append(f"note={note}")
+    if best_trial:
+        lines.append(f"best_so_far={best_trial} ({best_recent:.2f})")
     lines.extend(["", "[BL]"])
     if result is not None:
         lines.extend(
@@ -238,6 +272,8 @@ def write_overlay_snapshot(
                 f"present  {bar_line(result.present_fps_mean, max(1.0, float(result.config.fps)))}",
                 f"recv     {bar_line(result.recv_fps_mean, max(1.0, float(result.config.fps)))}",
                 f"decode   {bar_line(result.decode_fps_mean, max(1.0, float(result.config.fps)))}",
+                f"score_tr {spark_ascii(valid_scores, width=28)}",
+                f"fps_tr   {spark_ascii(valid_present, width=28)}",
             ]
         )
     else:
@@ -247,10 +283,17 @@ def write_overlay_snapshot(
                 "present  [------------------------] 0.0/1.0",
                 "recv     [------------------------] 0.0/1.0",
                 "decode   [------------------------] 0.0/1.0",
+                f"score_tr {spark_ascii(valid_scores, width=28)}",
+                f"fps_tr   {spark_ascii(valid_present, width=28)}",
             ]
         )
     lines.extend(["", "[BR]"])
     if result is not None:
+        quality_state = "good"
+        if result.drop_rate_per_sec > 0.20 or result.e2e_p95_mean_ms > 120.0:
+            quality_state = "risk"
+        elif result.drop_rate_per_sec > 0.06 or result.e2e_p95_mean_ms > 70.0:
+            quality_state = "warn"
         lines.extend(
             [
                 f"e2e_p95_ms={result.e2e_p95_mean_ms:.1f}",
@@ -259,12 +302,20 @@ def write_overlay_snapshot(
                 f"drops_per_s={result.drop_rate_per_sec:.3f}",
                 f"late_per_s={result.late_rate_per_sec:.3f}",
                 f"queue_mean={result.queue_depth_mean:.3f}",
+                f"drop_tr  {spark_ascii(valid_drop, width=28)}",
                 f"samples={result.sample_count}",
+                f"quality_state={quality_state}",
                 f"state={result.notes}",
             ]
         )
     else:
-        lines.append("waiting for metrics...")
+        lines.extend(
+            [
+                f"drop_tr  {spark_ascii(valid_drop, width=28)}",
+                "quality_state=pending",
+                "waiting for metrics...",
+            ]
+        )
     payload = "\n".join(lines).strip() + "\n"
     try:
         path.write_text(payload, encoding="utf-8")
@@ -1378,6 +1429,7 @@ def main() -> int:
             generation_total=generations,
             cfg=None,
             result=None,
+            history=[],
             note="initializing",
         )
 
@@ -1401,6 +1453,7 @@ def main() -> int:
                     generation_total=generations,
                     cfg=cfg,
                     result=None,
+                    history=results,
                     note="apply -> warmup -> sample",
                 )
             print(
@@ -1448,6 +1501,7 @@ def main() -> int:
                         generation_total=generations,
                         cfg=cfg,
                         result=failed,
+                        history=results,
                         note="apply failed",
                     )
                 continue
@@ -1479,6 +1533,7 @@ def main() -> int:
                         generation_total=generations,
                         cfg=cfg,
                         result=result,
+                        history=results,
                         note="sample complete",
                     )
                 print(
@@ -1525,6 +1580,7 @@ def main() -> int:
                         generation_total=generations,
                         cfg=cfg,
                         result=failed,
+                        history=results,
                         note="sample failed",
                     )
 
@@ -1558,6 +1614,7 @@ def main() -> int:
                 generation_total=generations,
                 cfg=best.config,
                 result=best,
+                history=results,
                 note="best candidate",
             )
         should_apply_best = args.apply_best

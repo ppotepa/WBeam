@@ -1,5 +1,42 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending, branch `trainerv2`) - Trainer UI implementation pass + richer Android training HUD
+- Implemented a substantial trainer desktop UI pass in `src/apps/trainer-tauri`:
+  - rewrote `src/apps/trainer-tauri/src/App.tsx` into a workstation-style shell with:
+    - top status bar,
+    - left navigation rail,
+    - dedicated content zones for `Train`, `Live Run`, `Runs`, `Profiles`, `Datasets`, `Compare`, `Devices`, `Validation`, `Diagnostics`, and `Settings`,
+  - added explicit busy/error feedback surfaces:
+    - global busy banner,
+    - error banner,
+    - action-specific busy labeling via guarded async wrappers,
+  - added stronger train-form UX:
+    - hard blockers and warnings panel,
+    - encoder selection semantics (`single` vs `multi`),
+    - bitrate min/max with dual sliders + numeric fields,
+    - advanced tuning accordion section (GA and overlay controls),
+  - improved live screen readability:
+    - KPI cards,
+    - trend bar panels derived from run-tail metrics,
+    - always-visible run context and stop action,
+    - dedicated event log column.
+- Replaced `src/apps/trainer-tauri/src/styles.css` to match the new UI model:
+  - compact futuristic theme with explicit semantic colors,
+  - card/grid layout with responsive fallbacks,
+  - motion and transition behavior (`animate-on`/`animate-off`),
+  - table, chart-bar, chip, and panel styling for dense operator workflows.
+- Expanded Android-visible training HUD payload in `src/domains/training/wizard.py`:
+  - added ASCII trend lines for:
+    - score,
+    - FPS,
+    - drop behavior,
+  - added best-so-far summary in overlay context,
+  - added `quality_state` classification (`good`/`warn`/`risk`),
+  - extended overlay updates to pass per-run history into snapshots for richer live context.
+- Verification:
+  - `python3 -m py_compile src/domains/training/wizard.py` -> OK,
+  - `cd src/apps/trainer-tauri && npm ci && npm run build` -> OK.
+
 ## Session Update (2026-03-10, pending, branch `trainerv2`) - Trainer UI blueprint expanded with field-level interaction contract
 - Expanded `trainer.ui.md` from high-level UX blueprint into detailed interaction spec:
   - added global control taxonomy describing where to use:
