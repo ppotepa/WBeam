@@ -1978,6 +1978,7 @@ public class MainActivity extends AppCompatActivity {
             perfHudText.setVisibility(View.VISIBLE);
         }
         if (perfHudPanel != null) {
+            perfHudPanel.setVisibility(View.VISIBLE);
             perfHudPanel.setAlpha(0.92f);
         }
         lastHudCompactLine = progressLine.isEmpty() ? "hud: trainer overlay active" : progressLine;
@@ -2006,6 +2007,7 @@ public class MainActivity extends AppCompatActivity {
             perfHudText.setVisibility(View.VISIBLE);
         }
         if (perfHudPanel != null) {
+            perfHudPanel.setVisibility(View.VISIBLE);
             perfHudPanel.setAlpha(0.92f);
         }
         lastHudCompactLine = progressText;

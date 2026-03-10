@@ -2062,3 +2062,10 @@ Status: active
   - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
   - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
   - `cd src/apps/trainer-tauri && npm run build` -> OK
+
+## In Progress (2026-03-10) - Fix trainer HUD visibility regression on Android
+- Fixed regression where trainer HUD content was rendered but not visible because `perfHudPanel` visibility followed debug-toggle state.
+- Updated both trainer HUD render paths (`renderTrainerHudOverlay` and `renderTrainerHudOverlayJson`) to force `perfHudPanel` visible when trainer HUD data is active.
+- Result: during training, HUD overlay now appears regardless of manual debug overlay toggle.
+- Validation:
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
