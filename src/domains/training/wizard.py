@@ -157,6 +157,121 @@ def sanitize_profile_name(raw: str) -> str:
     return token or "profile"
 
 
+def session_suffix(serial: str) -> str:
+    token = re.sub(r"[^A-Za-z0-9_-]+", "_", serial.strip())
+    token = re.sub(r"_+", "_", token).strip("_")
+    return token or "default"
+
+
+def trainer_overlay_path(serial: str, stream_port: int) -> Path:
+    return Path(f"/tmp/wbeam-trainer-overlay-{session_suffix(serial)}-{stream_port}.txt")
+
+
+def trainer_active_marker_path(serial: str, stream_port: int) -> Path:
+    return Path(f"/tmp/wbeam-trainer-active-{session_suffix(serial)}-{stream_port}.flag")
+
+
+def unlink_if_exists(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
+    except Exception:
+        return
+
+
+def bar_line(value: float, max_value: float, width: int = 24) -> str:
+    if max_value <= 0:
+        max_value = 1.0
+    ratio = max(0.0, min(1.0, value / max_value))
+    fill = int(round(ratio * width))
+    fill = max(0, min(width, fill))
+    return f"[{'#' * fill}{'-' * (width - fill)}] {value:.1f}/{max_value:.1f}"
+
+
+def write_overlay_snapshot(
+    path: Path,
+    *,
+    run_id: str,
+    profile_name: str,
+    trial_id: str,
+    trial_index: int,
+    trial_total: int,
+    generation_index: int,
+    generation_total: int,
+    cfg: TrialConfig | None = None,
+    result: TrialResult | None = None,
+    note: str = "",
+) -> None:
+    lines: list[str] = []
+    lines.extend(
+        [
+            "[TL]",
+            "WBEAM TRAINER V2",
+            f"run={run_id}",
+            f"profile={profile_name}",
+            f"trial={trial_id} ({trial_index}/{trial_total})",
+            f"generation={generation_index}/{generation_total}",
+            "",
+            "[TR]",
+        ]
+    )
+    if cfg is not None:
+        lines.extend(
+            [
+                f"encoder={cfg.encoder}",
+                f"size={cfg.size}",
+                f"fps={cfg.fps}",
+                f"bitrate={cfg.bitrate_kbps} kbps",
+                f"cursor={cfg.cursor_mode}",
+            ]
+        )
+    else:
+        lines.append("config=<pending>")
+    if note:
+        lines.append(f"note={note}")
+    lines.extend(["", "[BL]"])
+    if result is not None:
+        lines.extend(
+            [
+                f"score={result.score:.2f}",
+                f"present  {bar_line(result.present_fps_mean, max(1.0, float(result.config.fps)))}",
+                f"recv     {bar_line(result.recv_fps_mean, max(1.0, float(result.config.fps)))}",
+                f"decode   {bar_line(result.decode_fps_mean, max(1.0, float(result.config.fps)))}",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "score=<sampling>",
+                "present  [------------------------] 0.0/1.0",
+                "recv     [------------------------] 0.0/1.0",
+                "decode   [------------------------] 0.0/1.0",
+            ]
+        )
+    lines.extend(["", "[BR]"])
+    if result is not None:
+        lines.extend(
+            [
+                f"e2e_p95_ms={result.e2e_p95_mean_ms:.1f}",
+                f"decode_p95_ms={result.decode_p95_mean_ms:.1f}",
+                f"render_p95_ms={result.render_p95_mean_ms:.1f}",
+                f"drops_per_s={result.drop_rate_per_sec:.3f}",
+                f"late_per_s={result.late_rate_per_sec:.3f}",
+                f"queue_mean={result.queue_depth_mean:.3f}",
+                f"samples={result.sample_count}",
+                f"state={result.notes}",
+            ]
+        )
+    else:
+        lines.append("waiting for metrics...")
+    payload = "\n".join(lines).strip() + "\n"
+    try:
+        path.write_text(payload, encoding="utf-8")
+    except Exception:
+        return
+
+
 def profile_dir(profile_name: str) -> Path:
     return PROFILE_OUTPUT_DIR / sanitize_profile_name(profile_name)
 
@@ -1240,31 +1355,71 @@ def main() -> int:
         f"(warmup={warmup_sec}s sample={sample_sec}s poll={args.poll_sec:.2f}s)"
     )
 
-    results: list[TrialResult] = []
-    started_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    for idx, cfg in enumerate(trials, start=1):
-        trial_id = f"t{idx:02d}"
-        generation_idx = min(generations, ((idx - 1) // max(1, population)) + 1)
-        if (idx - 1) % max(1, population) == 0:
-            print(f"generation {generation_idx}/{generations}: population={population} (start)")
-        print(
-            f"\n[{trial_id}] apply encoder={cfg.encoder} size={cfg.size} "
-            f"fps={cfg.fps} bitrate={cfg.bitrate_kbps}"
+    marker_path = trainer_active_marker_path(serial, stream_port)
+    overlay_path = trainer_overlay_path(serial, stream_port) if args.overlay else None
+    marker_payload = {
+        "run_id": run_id,
+        "profile_name": profile_name,
+        "serial": serial,
+        "stream_port": stream_port,
+        "mode": mode,
+        "started_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    }
+    marker_path.write_text(json.dumps(marker_payload, ensure_ascii=True) + "\n", encoding="utf-8")
+    if overlay_path is not None:
+        write_overlay_snapshot(
+            overlay_path,
+            run_id=run_id,
+            profile_name=profile_name,
+            trial_id="t00",
+            trial_index=0,
+            trial_total=len(trials),
+            generation_index=0,
+            generation_total=generations,
+            cfg=None,
+            result=None,
+            note="initializing",
         )
-        try:
-            http_json(
-                "/v1/apply",
-                control_port=args.control_port,
-                serial=serial,
-                stream_port=stream_port,
-                method="POST",
-                payload=patch_payload(cfg),
-                timeout=3.0,
+
+    try:
+        results: list[TrialResult] = []
+        started_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        for idx, cfg in enumerate(trials, start=1):
+            trial_id = f"t{idx:02d}"
+            generation_idx = min(generations, ((idx - 1) // max(1, population)) + 1)
+            if (idx - 1) % max(1, population) == 0:
+                print(f"generation {generation_idx}/{generations}: population={population} (start)")
+            if overlay_path is not None:
+                write_overlay_snapshot(
+                    overlay_path,
+                    run_id=run_id,
+                    profile_name=profile_name,
+                    trial_id=trial_id,
+                    trial_index=idx,
+                    trial_total=len(trials),
+                    generation_index=generation_idx,
+                    generation_total=generations,
+                    cfg=cfg,
+                    result=None,
+                    note="apply -> warmup -> sample",
+                )
+            print(
+                f"\n[{trial_id}] apply encoder={cfg.encoder} size={cfg.size} "
+                f"fps={cfg.fps} bitrate={cfg.bitrate_kbps}"
             )
-        except Exception as exc:
-            print(f"[{trial_id}] apply failed: {exc}")
-            results.append(
-                TrialResult(
+            try:
+                http_json(
+                    "/v1/apply",
+                    control_port=args.control_port,
+                    serial=serial,
+                    stream_port=stream_port,
+                    method="POST",
+                    payload=patch_payload(cfg),
+                    timeout=3.0,
+                )
+            except Exception as exc:
+                print(f"[{trial_id}] apply failed: {exc}")
+                failed = TrialResult(
                     trial_id=trial_id,
                     config=cfg,
                     score=-999.0,
@@ -1280,41 +1435,68 @@ def main() -> int:
                     sample_count=0,
                     notes="apply_failed",
                 )
-            )
-            continue
+                results.append(failed)
+                if overlay_path is not None:
+                    write_overlay_snapshot(
+                        overlay_path,
+                        run_id=run_id,
+                        profile_name=profile_name,
+                        trial_id=trial_id,
+                        trial_index=idx,
+                        trial_total=len(trials),
+                        generation_index=generation_idx,
+                        generation_total=generations,
+                        cfg=cfg,
+                        result=failed,
+                        note="apply failed",
+                    )
+                continue
 
-        if warmup_sec > 0:
-            print(f"[{trial_id}] warmup {warmup_sec}s...")
-            time.sleep(warmup_sec)
+            if warmup_sec > 0:
+                print(f"[{trial_id}] warmup {warmup_sec}s...")
+                time.sleep(warmup_sec)
 
-        print(f"[{trial_id}] sampling {sample_sec}s...")
-        try:
-            samples = collect_metrics_samples(
-                control_port=args.control_port,
-                serial=serial,
-                stream_port=stream_port,
-                sample_sec=sample_sec,
-                poll_sec=max(0.3, args.poll_sec),
-            )
-            result = score_trial(cfg, samples, sample_sec, trial_id, mode)
-            results.append(result)
-            print(
-                f"[{trial_id}] score={result.score:.2f} present={result.present_fps_mean:.1f} "
-                f"recv={result.recv_fps_mean:.1f} e2e95={result.e2e_p95_mean_ms:.1f}ms "
-                f"drops/s={result.drop_rate_per_sec:.3f}"
-            )
-            print(
-                "done "
-                f"trial={trial_id} score={result.score:.2f} "
-                f"sender_p50={result.present_fps_mean:.1f} "
-                f"pipe_p50={result.recv_fps_mean:.1f} "
-                f"timeout_mean={result.e2e_p95_mean_ms:.1f} "
-                f"drop={result.drop_rate_per_sec * 100.0:.1f}%"
-            )
-        except Exception as exc:
-            print(f"[{trial_id}] sample failed: {exc}")
-            results.append(
-                TrialResult(
+            print(f"[{trial_id}] sampling {sample_sec}s...")
+            try:
+                samples = collect_metrics_samples(
+                    control_port=args.control_port,
+                    serial=serial,
+                    stream_port=stream_port,
+                    sample_sec=sample_sec,
+                    poll_sec=max(0.3, args.poll_sec),
+                )
+                result = score_trial(cfg, samples, sample_sec, trial_id, mode)
+                results.append(result)
+                if overlay_path is not None:
+                    write_overlay_snapshot(
+                        overlay_path,
+                        run_id=run_id,
+                        profile_name=profile_name,
+                        trial_id=trial_id,
+                        trial_index=idx,
+                        trial_total=len(trials),
+                        generation_index=generation_idx,
+                        generation_total=generations,
+                        cfg=cfg,
+                        result=result,
+                        note="sample complete",
+                    )
+                print(
+                    f"[{trial_id}] score={result.score:.2f} present={result.present_fps_mean:.1f} "
+                    f"recv={result.recv_fps_mean:.1f} e2e95={result.e2e_p95_mean_ms:.1f}ms "
+                    f"drops/s={result.drop_rate_per_sec:.3f}"
+                )
+                print(
+                    "done "
+                    f"trial={trial_id} score={result.score:.2f} "
+                    f"sender_p50={result.present_fps_mean:.1f} "
+                    f"pipe_p50={result.recv_fps_mean:.1f} "
+                    f"timeout_mean={result.e2e_p95_mean_ms:.1f} "
+                    f"drop={result.drop_rate_per_sec * 100.0:.1f}%"
+                )
+            except Exception as exc:
+                print(f"[{trial_id}] sample failed: {exc}")
+                failed = TrialResult(
                     trial_id=trial_id,
                     config=cfg,
                     score=-999.0,
@@ -1330,149 +1512,181 @@ def main() -> int:
                     sample_count=0,
                     notes="sample_failed",
                 )
+                results.append(failed)
+                if overlay_path is not None:
+                    write_overlay_snapshot(
+                        overlay_path,
+                        run_id=run_id,
+                        profile_name=profile_name,
+                        trial_id=trial_id,
+                        trial_index=idx,
+                        trial_total=len(trials),
+                        generation_index=generation_idx,
+                        generation_total=generations,
+                        cfg=cfg,
+                        result=failed,
+                        note="sample failed",
+                    )
+
+        if not results:
+            eprint("[error] no trial results produced.")
+            return 1
+
+        ranked = sorted(results, key=lambda item: item.score, reverse=True)
+        best = ranked[0]
+        print("\nTop results:")
+        for rank, item in enumerate(ranked[:5], start=1):
+            print(
+                f"  {rank}. {item.trial_id} score={item.score:.2f} "
+                f"{item.config.encoder} {item.config.size} {item.config.fps}fps "
+                f"{item.config.bitrate_kbps}kbps note={item.notes}"
             )
 
-    if not results:
-        eprint("[error] no trial results produced.")
-        return 1
-
-    ranked = sorted(results, key=lambda item: item.score, reverse=True)
-    best = ranked[0]
-    print("\nTop results:")
-    for rank, item in enumerate(ranked[:5], start=1):
         print(
-            f"  {rank}. {item.trial_id} score={item.score:.2f} "
-            f"{item.config.encoder} {item.config.size} {item.config.fps}fps "
-            f"{item.config.bitrate_kbps}kbps note={item.notes}"
+            f"\nBEST: {best.trial_id} score={best.score:.2f} "
+            f"{best.config.encoder} {best.config.size} {best.config.fps}fps {best.config.bitrate_kbps}kbps"
         )
+        if overlay_path is not None:
+            write_overlay_snapshot(
+                overlay_path,
+                run_id=run_id,
+                profile_name=profile_name,
+                trial_id=best.trial_id,
+                trial_index=len(trials),
+                trial_total=len(trials),
+                generation_index=generations,
+                generation_total=generations,
+                cfg=best.config,
+                result=best,
+                note="best candidate",
+            )
+        should_apply_best = args.apply_best
+        if should_apply_best is None:
+            should_apply_best = True if args.non_interactive else prompt_yes_no(
+                "Apply best config to current running session now?",
+                default_yes=True,
+            )
+        if should_apply_best:
+            http_json(
+                "/v1/apply",
+                control_port=args.control_port,
+                serial=serial,
+                stream_port=stream_port,
+                method="POST",
+                payload=patch_payload(best.config),
+                timeout=3.0,
+            )
+            print("Applied best config.")
 
-    print(
-        f"\nBEST: {best.trial_id} score={best.score:.2f} "
-        f"{best.config.encoder} {best.config.size} {best.config.fps}fps {best.config.bitrate_kbps}kbps"
-    )
-    should_apply_best = args.apply_best
-    if should_apply_best is None:
-        should_apply_best = True if args.non_interactive else prompt_yes_no(
-            "Apply best config to current running session now?",
-            default_yes=True,
-        )
-    if should_apply_best:
-        http_json(
-            "/v1/apply",
-            control_port=args.control_port,
+        exported = False
+        should_export_best = args.export_best
+        if should_export_best is None:
+            should_export_best = True if args.non_interactive else prompt_yes_no(
+                "Export winner as baseline profile for main app path?",
+                default_yes=True,
+            )
+        if should_export_best:
+            write_profile_baseline(PROFILE_FILE, best)
+            write_desktop_runtime_defaults(DESKTOP_RUNTIME_FILE, best)
+            exported = True
+            print(f"Updated {PROFILE_FILE}")
+            print(f"Updated {DESKTOP_RUNTIME_FILE}")
+
+        profile_doc = trial_to_profile_doc(
+            profile_name=profile_name,
+            best=best,
+            mode=mode,
             serial=serial,
             stream_port=stream_port,
-            method="POST",
-            payload=patch_payload(best.config),
-            timeout=3.0,
         )
-        print("Applied best config.")
 
-    exported = False
-    should_export_best = args.export_best
-    if should_export_best is None:
-        should_export_best = True if args.non_interactive else prompt_yes_no(
-            "Export winner as baseline profile for main app path?",
-            default_yes=True,
+        run_log = {
+            "started_at": started_at,
+            "run_id": run_id,
+            "finished_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+            "control_port": args.control_port,
+            "engine": "trainer_v2",
+            "serial": serial,
+            "stream_port": stream_port,
+            "profile_name": profile_name,
+            "mode": mode,
+            "encoder_mode": args.encoder_mode,
+            "encoders": selected_encoders,
+            "generations": generations,
+            "population": population,
+            "elite_count": elite_count,
+            "mutation_rate": mutation_rate,
+            "crossover_rate": crossover_rate,
+            "bitrate_min_kbps": bitrate_min_kbps,
+            "bitrate_max_kbps": bitrate_max_kbps,
+            "warmup_sec": warmup_sec,
+            "sample_sec": sample_sec,
+            "poll_sec": args.poll_sec,
+            "non_interactive": bool(args.non_interactive),
+            "overlay": bool(args.overlay),
+            "trial_count": len(trials),
+            "exported_baseline": exported,
+            "preflight": preflight,
+            "best": {
+                "trial_id": best.trial_id,
+                "score": best.score,
+                "config": asdict(best.config),
+                "notes": best.notes,
+            },
+            "results": [
+                {
+                    "trial_id": item.trial_id,
+                    "score": item.score,
+                    "config": asdict(item.config),
+                    "present_fps_mean": item.present_fps_mean,
+                    "recv_fps_mean": item.recv_fps_mean,
+                    "decode_fps_mean": item.decode_fps_mean,
+                    "e2e_p95_mean_ms": item.e2e_p95_mean_ms,
+                    "drop_rate_per_sec": item.drop_rate_per_sec,
+                    "late_rate_per_sec": item.late_rate_per_sec,
+                    "queue_depth_mean": item.queue_depth_mean,
+                    "sample_count": item.sample_count,
+                    "notes": item.notes,
+                }
+                for item in ranked
+            ],
+        }
+        profile_path, params_path, preflight_path = write_profile_artifacts(
+            profile_name=profile_name,
+            profile_doc=profile_doc,
+            parameters=run_log,
         )
-    if should_export_best:
-        write_profile_baseline(PROFILE_FILE, best)
-        write_desktop_runtime_defaults(DESKTOP_RUNTIME_FILE, best)
-        exported = True
-        print(f"Updated {PROFILE_FILE}")
-        print(f"Updated {DESKTOP_RUNTIME_FILE}")
-
-    profile_doc = trial_to_profile_doc(
-        profile_name=profile_name,
-        best=best,
-        mode=mode,
-        serial=serial,
-        stream_port=stream_port,
-    )
-
-    run_log = {
-        "started_at": started_at,
-        "run_id": run_id,
-        "finished_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-        "control_port": args.control_port,
-        "engine": "trainer_v2",
-        "serial": serial,
-        "stream_port": stream_port,
-        "profile_name": profile_name,
-        "mode": mode,
-        "encoder_mode": args.encoder_mode,
-        "encoders": selected_encoders,
-        "generations": generations,
-        "population": population,
-        "elite_count": elite_count,
-        "mutation_rate": mutation_rate,
-        "crossover_rate": crossover_rate,
-        "bitrate_min_kbps": bitrate_min_kbps,
-        "bitrate_max_kbps": bitrate_max_kbps,
-        "warmup_sec": warmup_sec,
-        "sample_sec": sample_sec,
-        "poll_sec": args.poll_sec,
-        "non_interactive": bool(args.non_interactive),
-        "overlay": bool(args.overlay),
-        "trial_count": len(trials),
-        "exported_baseline": exported,
-        "preflight": preflight,
-        "best": {
-            "trial_id": best.trial_id,
-            "score": best.score,
-            "config": asdict(best.config),
-            "notes": best.notes,
-        },
-        "results": [
-            {
-                "trial_id": item.trial_id,
-                "score": item.score,
-                "config": asdict(item.config),
-                "present_fps_mean": item.present_fps_mean,
-                "recv_fps_mean": item.recv_fps_mean,
-                "decode_fps_mean": item.decode_fps_mean,
-                "e2e_p95_mean_ms": item.e2e_p95_mean_ms,
-                "drop_rate_per_sec": item.drop_rate_per_sec,
-                "late_rate_per_sec": item.late_rate_per_sec,
-                "queue_depth_mean": item.queue_depth_mean,
-                "sample_count": item.sample_count,
-                "notes": item.notes,
-            }
-            for item in ranked
-        ],
-    }
-    profile_path, params_path, preflight_path = write_profile_artifacts(
-        profile_name=profile_name,
-        profile_doc=profile_doc,
-        parameters=run_log,
-    )
-    log_path = write_run_log(run_log)
-    print(f"Run log: {log_path}")
-    print(f"Profile artifact: {profile_path}")
-    print(f"Parameters: {params_path}")
-    if preflight_path is not None:
-        print(f"Preflight: {preflight_path}")
-    run_doc = {
-        "run_id": run_id,
-        "engine": "trainer_v2",
-        "profile_name": profile_name,
-        "serial": serial,
-        "stream_port": stream_port,
-        "mode": mode,
-        "status": "completed",
-        "started_at": started_at,
-        "finished_at": run_log["finished_at"],
-    }
-    run_dir = write_run_artifacts(
-        profile_name=profile_name,
-        run_id=run_id,
-        run_doc=run_doc,
-        profile_doc=profile_doc,
-        parameters_doc=run_log,
-        preflight=preflight,
-    )
-    print(f"Run artifacts: {run_dir}")
-    return 0
+        log_path = write_run_log(run_log)
+        print(f"Run log: {log_path}")
+        print(f"Profile artifact: {profile_path}")
+        print(f"Parameters: {params_path}")
+        if preflight_path is not None:
+            print(f"Preflight: {preflight_path}")
+        run_doc = {
+            "run_id": run_id,
+            "engine": "trainer_v2",
+            "profile_name": profile_name,
+            "serial": serial,
+            "stream_port": stream_port,
+            "mode": mode,
+            "status": "completed",
+            "started_at": started_at,
+            "finished_at": run_log["finished_at"],
+        }
+        run_dir = write_run_artifacts(
+            profile_name=profile_name,
+            run_id=run_id,
+            run_doc=run_doc,
+            profile_doc=profile_doc,
+            parameters_doc=run_log,
+            preflight=preflight,
+        )
+        print(f"Run artifacts: {run_dir}")
+        return 0
+    finally:
+        unlink_if_exists(marker_path)
+        if overlay_path is not None:
+            unlink_if_exists(overlay_path)
 
 
 if __name__ == "__main__":

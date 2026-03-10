@@ -1,5 +1,26 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending, branch `trainerv2`) - Trainer run stability (single portal consent + live HUD visibility)
+- Fixed trainer run behavior where each profile apply could trigger another Wayland portal chooser:
+  - `src/domains/training/wizard.py` now creates per-session trainer marker file:
+    - `/tmp/wbeam-trainer-active-<serial>-<stream_port>.flag`
+  - `src/host/rust/crates/wbeamd-core/src/lib.rs` now detects that marker for Wayland sessions and forces legacy Python streamer during active trainer runs, so portal restore-token flow is used across trial restarts.
+- Added restore-token support to Rust streamer path as well (defensive consistency):
+  - `src/host/rust/crates/wbeamd-streamer/src/cli.rs` new args:
+    - `--restore-token-file`
+    - `--portal-persist-mode`
+  - `src/host/rust/crates/wbeamd-streamer/src/capture.rs` now:
+    - loads restore token from file,
+    - retries without token when token restore fails,
+    - saves new restore token returned by portal start response.
+- Implemented training overlay HUD payload generation in wizard:
+  - `wizard.py` now writes structured overlay text snapshots (TL/TR/BL/BR sections with live metrics and ASCII bars) to:
+    - `/tmp/wbeam-trainer-overlay-<serial>-<stream_port>.txt`
+  - overlay + marker files are cleaned up in `finally` block when run exits.
+  - core passes `WBEAM_OVERLAY_TEXT_FILE` to streamer process when overlay file exists (Python path consumes it live).
+- Fixed trainer desktop HUD “no live updates” symptom:
+  - `src/host/rust/crates/wbeamd-server/src/main.rs` now spawns `wbeam train wizard` with `PYTHONUNBUFFERED=1`, so tail polling sees incremental logs instead of delayed buffered output.
+
 ## Session Update (2026-03-10, pending, branch `trainerv2`) - Tauri launcher stability on Wayland (desktop + trainer)
 - Fixed Linux Tauri launcher stability path to avoid silent/no-window startup on problematic Wayland sessions:
   - `desktop.sh`:

@@ -1083,6 +1083,7 @@ async fn post_trainer_start(
         .arg(stream_port.to_string())
         .arg("--control-port")
         .arg(state.trainer.control_port.to_string())
+        .env("PYTHONUNBUFFERED", "1")
         .stdout(Stdio::from(log_file))
         .stderr(Stdio::from(log_file_err))
         .current_dir(&state.trainer.root);

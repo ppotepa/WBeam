@@ -1204,7 +1204,7 @@ impl DaemonCore {
             return Err(err);
         }
 
-        let use_rust_streamer =
+        let mut use_rust_streamer =
             wbeam_setting_bool(&self.settings, "WBEAM_USE_RUST_STREAMER", true);
         let rust_streamer_bin = wbeam_setting(&self.settings, "WBEAM_RUST_STREAMER_BIN")
             .map(PathBuf::from)
@@ -1256,6 +1256,39 @@ impl DaemonCore {
             inner.display_runtime = Some(runtime_handle);
         }
 
+        let session_suffix = self
+            .target_serial
+            .as_deref()
+            .unwrap_or("default")
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                    ch
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>();
+        let restore_token_file =
+            format!("/tmp/wbeam-portal-restore-token-{}-{}", session_suffix, self.stream_port);
+        let trainer_active_marker =
+            format!("/tmp/wbeam-trainer-active-{}-{}.flag", session_suffix, self.stream_port);
+        let trainer_overlay_file =
+            format!("/tmp/wbeam-trainer-overlay-{}-{}.txt", session_suffix, self.stream_port);
+        let trainer_run_active = Path::new(&trainer_active_marker).exists();
+        let trainer_overlay_active = Path::new(&trainer_overlay_file).exists();
+
+        if capture_backend == "wayland_portal" && trainer_run_active {
+            if use_rust_streamer {
+                warn!(
+                    serial = session_suffix,
+                    marker = %trainer_active_marker,
+                    "trainer run marker detected; forcing python streamer to keep one portal consent"
+                );
+            }
+            use_rust_streamer = false;
+        }
+
         if use_rust_streamer {
             if !rust_streamer_bin.exists() {
                 error!(
@@ -1292,10 +1325,19 @@ impl DaemonCore {
                 .arg(cfg.fps.to_string())
                 .arg("--bitrate-kbps")
                 .arg(cfg.bitrate_kbps.to_string())
+                .arg("--restore-token-file")
+                .arg(&restore_token_file)
+                .arg("--portal-persist-mode")
+                .arg("2")
                 .arg("--debug-dir")
                 .arg("/tmp/wbeam-frames")
                 .arg("--debug-fps")
                 .arg(cfg.debug_fps.to_string());
+            if trainer_overlay_active {
+                cmd.env("WBEAM_OVERLAY_TEXT_FILE", &trainer_overlay_file);
+            } else {
+                cmd.env_remove("WBEAM_OVERLAY_TEXT_FILE");
+            }
             if cfg.intra_only {
                 cmd.arg("--intra-only");
             }
@@ -1335,21 +1377,6 @@ impl DaemonCore {
             let stream_script = self
                 .root
                 .join("src/host/scripts/stream_wayland_portal_h264.py");
-            let session_suffix = self
-                .target_serial
-                .as_deref()
-                .unwrap_or("default")
-                .chars()
-                .map(|ch| {
-                    if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
-                        ch
-                    } else {
-                        '_'
-                    }
-                })
-                .collect::<String>();
-            let restore_token_file =
-                format!("/tmp/wbeam-portal-restore-token-{}-{}", session_suffix, self.stream_port);
             cmd = Command::new("python3");
             cmd.arg("-u")
                 .arg(stream_script)
@@ -1377,6 +1404,11 @@ impl DaemonCore {
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
+            if trainer_overlay_active {
+                cmd.env("WBEAM_OVERLAY_TEXT_FILE", &trainer_overlay_file);
+            } else {
+                cmd.env_remove("WBEAM_OVERLAY_TEXT_FILE");
+            }
             // C3: framed-only transport (legacy parser disabled on Android path).
             cmd.arg("--framed");
         }

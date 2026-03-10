@@ -61,6 +61,10 @@ pub struct Args {
     /// ~3-4x higher bitrate vs. P-frame HEVC — well within 300 Mbps USB.
     #[arg(long, default_value_t = false)]
     pub intra_only: bool,
+    #[arg(long)]
+    pub restore_token_file: Option<String>,
+    #[arg(long, default_value_t = 2)]
+    pub portal_persist_mode: u32,
 }
 
 /// Fully-resolved configuration after applying profile defaults.
@@ -87,6 +91,8 @@ pub struct ResolvedConfig {
     pub videorate_drop_only: bool,
     pub pipewire_keepalive_ms: i32,
     pub h264_gop: u32,
+    pub restore_token_file: Option<String>,
+    pub portal_persist_mode: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -393,5 +399,11 @@ pub fn resolve_profile(args: &Args) -> Result<ResolvedConfig> {
         videorate_drop_only: defaults.videorate_drop_only,
         pipewire_keepalive_ms: defaults.pipewire_keepalive_ms,
         h264_gop: defaults.h264_gop,
+        restore_token_file: args
+            .restore_token_file
+            .as_ref()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty()),
+        portal_persist_mode: args.portal_persist_mode.min(2),
     })
 }
