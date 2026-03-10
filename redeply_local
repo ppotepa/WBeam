@@ -4,5 +4,5 @@ set -euo pipefail
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 
-# Compatibility wrapper for underscore variant.
+# Compatibility wrapper for historical typo.
 exec "$ROOT_DIR/redeploy-local" "$@"
