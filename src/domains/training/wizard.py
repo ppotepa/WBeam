@@ -162,6 +162,10 @@ def profile_dir(profile_name: str) -> Path:
     return PROFILE_OUTPUT_DIR / sanitize_profile_name(profile_name)
 
 
+def profile_run_dir(profile_name: str, run_id: str) -> Path:
+    return profile_dir(profile_name) / "runs" / sanitize_profile_name(run_id)
+
+
 def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -319,6 +323,25 @@ def write_profile_artifacts(
         preflight_path = out_dir / "preflight.json"
         write_json(preflight_path, preflight)
     return profile_path, params_path, preflight_path
+
+
+def write_run_artifacts(
+    *,
+    profile_name: str,
+    run_id: str,
+    run_doc: dict[str, Any],
+    profile_doc: dict[str, Any],
+    parameters_doc: dict[str, Any],
+    preflight: dict[str, Any] | None,
+) -> Path:
+    out_dir = profile_run_dir(profile_name, run_id)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    write_json(out_dir / "run.json", run_doc)
+    write_json(out_dir / "parameters.json", parameters_doc)
+    write_json(out_dir / f"{sanitize_profile_name(profile_name)}.json", profile_doc)
+    if isinstance(preflight, dict):
+        write_json(out_dir / "preflight.json", preflight)
+    return out_dir
 
 
 def parse_num_list(raw: str, *, min_value: int = 1) -> list[int]:
@@ -1007,6 +1030,7 @@ def write_run_log(data: dict[str, Any]) -> Path:
 
 def run_proto_autotune_engine(
     *,
+    run_id: str,
     profile_name: str,
     control_port: int,
     serial: str,
@@ -1158,6 +1182,7 @@ def run_proto_autotune_engine(
     )
     parameters_doc = {
         "schema_version": 1,
+        "run_id": run_id,
         "engine": "proto",
         "profile_name": profile_name,
         "started_at": stamp,
@@ -1200,6 +1225,26 @@ def run_proto_autotune_engine(
     print(f"[proto-engine] parameters: {params_path}")
     if preflight_path is not None:
         print(f"[proto-engine] preflight: {preflight_path}")
+    run_doc = {
+        "run_id": run_id,
+        "engine": "proto",
+        "profile_name": profile_name,
+        "serial": serial,
+        "stream_port": stream_port,
+        "mode": mode,
+        "status": "completed",
+        "started_at": stamp,
+        "finished_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    }
+    run_dir = write_run_artifacts(
+        profile_name=profile_name,
+        run_id=run_id,
+        run_doc=run_doc,
+        profile_doc=profile_doc,
+        parameters_doc=parameters_doc,
+        preflight=preflight,
+    )
+    print(f"[proto-engine] run artifacts: {run_dir}")
     return 0
 
 
@@ -1214,6 +1259,11 @@ def main() -> int:
     parser.add_argument("--control-port", type=int, default=int(os.environ.get("WBEAM_CONTROL_PORT", "5001")))
     parser.add_argument("--stream-port", type=int, default=None, help="Override stream port for selected serial.")
     parser.add_argument("--serial", default=None, help="Target ADB serial (interactive if omitted).")
+    parser.add_argument(
+        "--run-id",
+        default=None,
+        help="Optional deterministic run id for artifact storage (profiles/<name>/runs/<run_id>).",
+    )
     parser.add_argument(
         "--profile-name",
         default=None,
@@ -1231,6 +1281,7 @@ def main() -> int:
         help="Enable on-screen tuning HUD (proto engine).",
     )
     args = parser.parse_args()
+    run_id = sanitize_profile_name(args.run_id or f"run-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
 
     print("== WBeam Main Trainer Wizard ==")
     print(f"root: {ROOT}")
@@ -1336,6 +1387,7 @@ def main() -> int:
     if args.engine == "proto":
         return run_proto_autotune_engine(
             profile_name=profile_name,
+            run_id=run_id,
             control_port=args.control_port,
             serial=serial,
             stream_port=stream_port,
@@ -1536,6 +1588,7 @@ def main() -> int:
 
     run_log = {
         "started_at": started_at,
+        "run_id": run_id,
         "finished_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
         "control_port": args.control_port,
         "serial": serial,
@@ -1583,6 +1636,26 @@ def main() -> int:
     print(f"Parameters: {params_path}")
     if preflight_path is not None:
         print(f"Preflight: {preflight_path}")
+    run_doc = {
+        "run_id": run_id,
+        "engine": "live_api",
+        "profile_name": profile_name,
+        "serial": serial,
+        "stream_port": stream_port,
+        "mode": mode,
+        "status": "completed",
+        "started_at": started_at,
+        "finished_at": run_log["finished_at"],
+    }
+    run_dir = write_run_artifacts(
+        profile_name=profile_name,
+        run_id=run_id,
+        run_doc=run_doc,
+        profile_doc=profile_doc,
+        parameters_doc=run_log,
+        preflight=preflight,
+    )
+    print(f"Run artifacts: {run_dir}")
     return 0
 
 

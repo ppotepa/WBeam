@@ -1415,3 +1415,38 @@ Status: active
   - `cargo check -p wbeamd-api -p wbeamd-core -p wbeamd-streamer` -> OK
   - `cd src/apps/desktop-tauri && npm run build` -> OK
   - `cd android && GRADLE_USER_HOME=/home/ppotepa/git/WBeam/.gradle-user ./gradlew :app:compileDebugJavaWithJavac --no-daemon --stacktrace` -> OK
+
+## In Progress (2026-03-10) - TrainerV2 domain implementation (API + GUI + run artifacts)
+- Extended Rust host daemon (`wbeamd-server`) with trainer API surface:
+  - `POST /v1/trainer/preflight`
+  - `POST /v1/trainer/start`
+  - `POST /v1/trainer/stop`
+  - `GET /v1/trainer/runs`
+  - `GET /v1/trainer/runs/{run_id}`
+  - `GET /v1/trainer/runs/{run_id}/tail`
+  - `GET /v1/trainer/profiles`
+  - `GET /v1/trainer/profiles/{profile_name}`
+  - `GET /v1/trainer/devices`
+  - `GET /v1/trainer/diagnostics`
+- Added trainer run state registry in daemon:
+  - in-memory run catalog with PID/status/lifecycle fields,
+  - stop support via signal,
+  - deterministic run IDs.
+- Added deterministic per-run artifact persistence:
+  - run artifact directory under `config/training/profiles/<profile>/runs/<run_id>/`,
+  - persisted `run.json`, copied trainer log (`logs.txt`), and profile/parameters/preflight snapshots.
+- Updated wizard (`src/domains/training/wizard.py`) for run-id aware artifact layout:
+  - new `--run-id`,
+  - writes run-level artifacts for both `proto` and `live_api` paths.
+- Upgraded Trainer GUI (`src/apps/trainer-tauri`):
+  - tabs: `Train`, `Live HUD`, `Profiles`, `Runs`, `Compare`, `Devices`, `Validation`, `Diagnostics`,
+  - wired to live trainer API endpoints,
+  - run tail rendering for live HUD/event log,
+  - profile compare panel and diagnostics snapshot views.
+- Updated launcher and dev wiring:
+  - `trainer.sh` now defaults to GUI mode (`--ui`) with `--wizard` fallback,
+  - Vite proxy routes `/v1` to local daemon.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK

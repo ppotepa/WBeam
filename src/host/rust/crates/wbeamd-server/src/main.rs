@@ -1,17 +1,21 @@
 use std::collections::{HashMap, HashSet};
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use axum::extract::{Query, State};
+use axum::extract::{Path as AxPath, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use clap::Parser;
 use serde::Deserialize;
+use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
@@ -37,6 +41,169 @@ struct Args {
 #[derive(Clone)]
 struct AppState {
     sessions: Arc<SessionRegistry>,
+    trainer: Arc<TrainerState>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+struct TrainerRun {
+    run_id: String,
+    profile_name: String,
+    serial: String,
+    mode: String,
+    engine: String,
+    status: String,
+    started_at_unix_ms: u128,
+    finished_at_unix_ms: Option<u128>,
+    trials: u32,
+    warmup_sec: u32,
+    sample_sec: u32,
+    log_path: String,
+    profile_dir: String,
+    run_artifacts_dir: String,
+    exit_code: Option<i32>,
+    pid: Option<u32>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct TrainerRunsResponse {
+    ok: bool,
+    runs: Vec<TrainerRun>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TrainerStartRequest {
+    serial: String,
+    profile_name: String,
+    mode: Option<String>,
+    engine: Option<String>,
+    trials: Option<u32>,
+    warmup_sec: Option<u32>,
+    sample_sec: Option<u32>,
+    overlay: Option<bool>,
+    stream_port: Option<u16>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TrainerStopRequest {
+    run_id: String,
+}
+
+#[derive(Debug, Serialize)]
+struct TrainerStartResponse {
+    ok: bool,
+    run_id: String,
+    status: String,
+    log_path: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct TrainerPreflightRequest {
+    serial: String,
+    stream_port: Option<u16>,
+    adb_push_mb: Option<u32>,
+    shell_rtt_loops: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
+struct TrainerPreflightResponse {
+    ok: bool,
+    serial: String,
+    stream_port: u16,
+    daemon_health: Value,
+    adb_push: Value,
+    adb_shell_rtt: Value,
+}
+
+#[derive(Debug, Serialize)]
+struct TrainerProfileSummary {
+    profile_name: String,
+    path: String,
+    has_profile: bool,
+    has_parameters: bool,
+    has_preflight: bool,
+    best_score: Option<f64>,
+    engine: Option<String>,
+    serial: Option<String>,
+    updated_at_unix_ms: Option<u128>,
+}
+
+#[derive(Debug, Serialize)]
+struct TrainerProfilesResponse {
+    ok: bool,
+    profiles: Vec<TrainerProfileSummary>,
+}
+
+#[derive(Debug, Serialize)]
+struct TrainerProfileDetailResponse {
+    ok: bool,
+    profile_name: String,
+    profile: Value,
+    parameters: Value,
+    preflight: Value,
+}
+
+#[derive(Debug, Serialize)]
+struct TrainerRunTailResponse {
+    ok: bool,
+    run_id: String,
+    line_count: usize,
+    lines: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct TrainerDeviceInfo {
+    serial: String,
+    state: String,
+    model: Option<String>,
+    api_level: Option<u32>,
+    android_release: Option<String>,
+    stream_port: Option<u16>,
+}
+
+#[derive(Debug, Serialize)]
+struct TrainerDevicesResponse {
+    ok: bool,
+    devices: Vec<TrainerDeviceInfo>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct TrainerRunTailQuery {
+    lines: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+struct TrainerDiagnosticsResponse {
+    ok: bool,
+    daemon_health: Value,
+    adb_version: String,
+    adb_devices_raw: String,
+    profile_root: String,
+    runs_count: usize,
+}
+
+struct TrainerState {
+    root: PathBuf,
+    control_port: u16,
+    runs: Mutex<HashMap<String, TrainerRun>>,
+    run_counter: AtomicU64,
+}
+
+impl TrainerState {
+    fn new(root: PathBuf, control_port: u16) -> Self {
+        Self {
+            root,
+            control_port,
+            runs: Mutex::new(HashMap::new()),
+            run_counter: AtomicU64::new(0),
+        }
+    }
+
+    fn next_run_id(&self) -> String {
+        let ctr = self.run_counter.fetch_add(1, Ordering::Relaxed) + 1;
+        let ts = now_unix_ms();
+        format!("run-{ts}-{ctr:04}")
+    }
 }
 
 #[derive(Debug, Deserialize, Default, Clone)]
@@ -100,9 +267,9 @@ impl SessionRegistry {
                     return existing.core.clone();
                 }
 
-                let stream_port = requested_stream_port
-                    .filter(|p| *p > 0)
-                    .unwrap_or_else(|| self.base_stream_port.saturating_add(2 + guard.len() as u16));
+                let stream_port = requested_stream_port.filter(|p| *p > 0).unwrap_or_else(|| {
+                    self.base_stream_port.saturating_add(2 + guard.len() as u16)
+                });
                 let stream_port = if stream_port == self.control_port {
                     stream_port.saturating_add(1)
                 } else {
@@ -347,7 +514,8 @@ async fn main() {
         args.control_port,
         core.clone(),
     ));
-    let app_state = AppState { sessions };
+    let trainer = Arc::new(TrainerState::new(root.clone(), args.control_port));
+    let app_state = AppState { sessions, trainer };
 
     let app = Router::new()
         .route("/status", get(get_status))
@@ -363,6 +531,16 @@ async fn main() {
         .route("/apply", post(post_apply))
         .route("/client-metrics", post(post_client_metrics))
         .route("/client-hello", post(post_client_hello))
+        .route("/trainer/preflight", post(post_trainer_preflight))
+        .route("/trainer/start", post(post_trainer_start))
+        .route("/trainer/stop", post(post_trainer_stop))
+        .route("/trainer/runs", get(get_trainer_runs))
+        .route("/trainer/runs/{run_id}", get(get_trainer_run))
+        .route("/trainer/runs/{run_id}/tail", get(get_trainer_run_tail))
+        .route("/trainer/profiles", get(get_trainer_profiles))
+        .route("/trainer/profiles/{profile_name}", get(get_trainer_profile))
+        .route("/trainer/devices", get(get_trainer_devices))
+        .route("/trainer/diagnostics", get(get_trainer_diagnostics))
         .route("/v1/status", get(get_status))
         .route("/v1/host-probe", get(get_host_probe))
         .route("/v1/health", get(get_health))
@@ -376,6 +554,19 @@ async fn main() {
         .route("/v1/apply", post(post_apply))
         .route("/v1/client-metrics", post(post_client_metrics))
         .route("/v1/client-hello", post(post_client_hello))
+        .route("/v1/trainer/preflight", post(post_trainer_preflight))
+        .route("/v1/trainer/start", post(post_trainer_start))
+        .route("/v1/trainer/stop", post(post_trainer_stop))
+        .route("/v1/trainer/runs", get(get_trainer_runs))
+        .route("/v1/trainer/runs/{run_id}", get(get_trainer_run))
+        .route("/v1/trainer/runs/{run_id}/tail", get(get_trainer_run_tail))
+        .route("/v1/trainer/profiles", get(get_trainer_profiles))
+        .route(
+            "/v1/trainer/profiles/{profile_name}",
+            get(get_trainer_profile),
+        )
+        .route("/v1/trainer/devices", get(get_trainer_devices))
+        .route("/v1/trainer/diagnostics", get(get_trainer_diagnostics))
         .with_state(app_state.clone());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], args.control_port));
@@ -628,6 +819,490 @@ async fn post_client_hello(
     (StatusCode::OK, Json(resp)).into_response()
 }
 
+async fn post_trainer_preflight(
+    State(state): State<AppState>,
+    body: Option<Json<TrainerPreflightRequest>>,
+) -> impl IntoResponse {
+    let req = body.map(|Json(v)| v).unwrap_or(TrainerPreflightRequest {
+        serial: String::new(),
+        stream_port: None,
+        adb_push_mb: None,
+        shell_rtt_loops: None,
+    });
+    let serial = req.serial.trim().to_string();
+    if serial.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"ok": false, "error": "serial is required"})),
+        )
+            .into_response();
+    }
+
+    let stream_port = req.stream_port.unwrap_or(state.sessions.base_stream_port);
+    let health = {
+        let core = state
+            .sessions
+            .resolve_core_readonly(Some(serial.as_str()), Some(stream_port))
+            .await
+            .unwrap_or_else(|| state.sessions.default_core());
+        serde_json::to_value(core.health().await).unwrap_or(Value::Null)
+    };
+    let push_mb = req.adb_push_mb.unwrap_or(8).clamp(1, 64);
+    let rtt_loops = req.shell_rtt_loops.unwrap_or(10).clamp(1, 50);
+    let adb_push = adb_push_benchmark(&serial, push_mb);
+    let adb_shell_rtt = adb_shell_rtt_benchmark(&serial, rtt_loops);
+
+    let resp = TrainerPreflightResponse {
+        ok: true,
+        serial,
+        stream_port,
+        daemon_health: health,
+        adb_push,
+        adb_shell_rtt,
+    };
+    (StatusCode::OK, Json(resp)).into_response()
+}
+
+async fn post_trainer_start(
+    State(state): State<AppState>,
+    body: Option<Json<TrainerStartRequest>>,
+) -> impl IntoResponse {
+    let req = body.map(|Json(v)| v).unwrap_or(TrainerStartRequest {
+        serial: String::new(),
+        profile_name: "baseline".to_string(),
+        mode: None,
+        engine: None,
+        trials: None,
+        warmup_sec: None,
+        sample_sec: None,
+        overlay: None,
+        stream_port: None,
+    });
+
+    let serial = req.serial.trim().to_string();
+    if serial.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"ok": false, "error": "serial is required"})),
+        )
+            .into_response();
+    }
+    let profile_name = sanitize_profile_name(&req.profile_name);
+    let mode = req.mode.as_deref().unwrap_or("quality").trim().to_string();
+    if !matches!(mode.as_str(), "quality" | "balanced" | "latency" | "custom") {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"ok": false, "error": "invalid mode"})),
+        )
+            .into_response();
+    }
+    let engine = req.engine.unwrap_or_else(|| "proto".to_string());
+    if engine != "proto" {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"ok": false, "error": "only proto engine is supported by Trainer API start endpoint"})),
+        )
+            .into_response();
+    }
+    let trials = req.trials.unwrap_or(18).clamp(1, 128);
+    let warmup_sec = req.warmup_sec.unwrap_or(4).clamp(1, 60);
+    let sample_sec = req.sample_sec.unwrap_or(12).clamp(4, 180);
+    let overlay = req.overlay.unwrap_or(true);
+    let stream_port = req
+        .stream_port
+        .unwrap_or_else(|| state.sessions.base_stream_port + 2);
+
+    let log_dir = state.trainer.root.join("logs").join("trainer");
+    if let Err(err) = fs::create_dir_all(&log_dir) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"ok": false, "error": format!("failed to create trainer log dir: {err}")})),
+        )
+            .into_response();
+    }
+    let run_id = state.trainer.next_run_id();
+    let log_path = log_dir.join(format!("{run_id}.log"));
+    let profile_dir = trainer_profile_root(&state.trainer.root).join(&profile_name);
+    let run_artifacts_dir = profile_dir.join("runs").join(&run_id);
+    if let Err(err) = fs::create_dir_all(&run_artifacts_dir) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"ok": false, "error": format!("failed to create run artifacts dir: {err}")})),
+        )
+            .into_response();
+    }
+    let mut log_file = match OpenOptions::new().create(true).append(true).open(&log_path) {
+        Ok(v) => v,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"ok": false, "error": format!("failed to open trainer log: {err}")})),
+            )
+                .into_response();
+        }
+    };
+    let _ = writeln!(
+        log_file,
+        "[trainer-api] run_id={run_id} serial={serial} profile_name={profile_name} mode={mode} engine={engine}"
+    );
+    let log_file_err = match log_file.try_clone() {
+        Ok(v) => v,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"ok": false, "error": format!("failed to clone trainer log fd: {err}")})),
+            )
+                .into_response();
+        }
+    };
+
+    let wbeam_bin = state.trainer.root.join("wbeam");
+    if !wbeam_bin.exists() {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"ok": false, "error": format!("missing wbeam launcher: {}", wbeam_bin.display())})),
+        )
+            .into_response();
+    }
+    let mut cmd = Command::new(&wbeam_bin);
+    cmd.arg("train")
+        .arg("wizard")
+        .arg("--engine")
+        .arg(&engine)
+        .arg("--serial")
+        .arg(&serial)
+        .arg("--profile-name")
+        .arg(&profile_name)
+        .arg("--mode")
+        .arg(&mode)
+        .arg("--run-id")
+        .arg(&run_id)
+        .arg("--trials")
+        .arg(trials.to_string())
+        .arg("--warmup-sec")
+        .arg(warmup_sec.to_string())
+        .arg("--sample-sec")
+        .arg(sample_sec.to_string())
+        .arg("--stream-port")
+        .arg(stream_port.to_string())
+        .arg("--control-port")
+        .arg(state.trainer.control_port.to_string())
+        .stdout(Stdio::from(log_file))
+        .stderr(Stdio::from(log_file_err))
+        .current_dir(&state.trainer.root);
+    if overlay {
+        cmd.arg("--overlay");
+    } else {
+        cmd.arg("--no-overlay");
+    }
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"ok": false, "error": format!("failed to spawn trainer run: {err}")})),
+            )
+                .into_response();
+        }
+    };
+    let pid = child.id();
+    let run = TrainerRun {
+        run_id: run_id.clone(),
+        profile_name,
+        serial,
+        mode,
+        engine,
+        status: "running".to_string(),
+        started_at_unix_ms: now_unix_ms(),
+        finished_at_unix_ms: None,
+        trials,
+        warmup_sec,
+        sample_sec,
+        log_path: log_path.to_string_lossy().to_string(),
+        profile_dir: profile_dir.to_string_lossy().to_string(),
+        run_artifacts_dir: run_artifacts_dir.to_string_lossy().to_string(),
+        exit_code: None,
+        pid: Some(pid),
+        error: None,
+    };
+    let run_bootstrap = serde_json::json!({
+        "run_id": run_id.clone(),
+        "status": "running",
+        "started_at_unix_ms": run.started_at_unix_ms,
+        "profile_name": run.profile_name,
+        "serial": run.serial,
+        "mode": run.mode,
+        "engine": run.engine,
+        "trials": run.trials,
+        "warmup_sec": run.warmup_sec,
+        "sample_sec": run.sample_sec,
+        "log_path": run.log_path,
+        "profile_dir": run.profile_dir,
+        "run_artifacts_dir": run.run_artifacts_dir,
+        "stream_port": stream_port,
+    });
+    let _ = fs::write(
+        run_artifacts_dir.join("run.json"),
+        serde_json::to_vec_pretty(&run_bootstrap).unwrap_or_default(),
+    );
+    {
+        let mut runs = state.trainer.runs.lock().await;
+        runs.insert(run_id.clone(), run);
+    }
+    let trainer_state = state.trainer.clone();
+    let run_id_for_task = run_id.clone();
+    tokio::spawn(async move {
+        let wait_result = tokio::task::spawn_blocking(move || child.wait()).await;
+        let finished_at = now_unix_ms();
+        let (status, exit_code, error_msg) = match wait_result {
+            Ok(Ok(exit_status)) => {
+                let code = exit_status.code().unwrap_or(-1);
+                if code == 0 {
+                    ("completed".to_string(), Some(code), None)
+                } else {
+                    (
+                        "failed".to_string(),
+                        Some(code),
+                        Some(format!("trainer run exited with code {code}")),
+                    )
+                }
+            }
+            Ok(Err(err)) => (
+                "failed".to_string(),
+                None,
+                Some(format!("trainer run wait failed: {err}")),
+            ),
+            Err(err) => (
+                "failed".to_string(),
+                None,
+                Some(format!("trainer run join failed: {err}")),
+            ),
+        };
+        let mut runs = trainer_state.runs.lock().await;
+        if let Some(run) = runs.get_mut(&run_id_for_task) {
+            run.status = status;
+            run.finished_at_unix_ms = Some(finished_at);
+            run.exit_code = exit_code;
+            run.error = error_msg;
+            run.pid = None;
+            persist_trainer_run_artifacts(run);
+        }
+    });
+
+    (
+        StatusCode::OK,
+        Json(TrainerStartResponse {
+            ok: true,
+            run_id,
+            status: "running".to_string(),
+            log_path: log_path.to_string_lossy().to_string(),
+        }),
+    )
+        .into_response()
+}
+
+async fn post_trainer_stop(
+    State(state): State<AppState>,
+    body: Option<Json<TrainerStopRequest>>,
+) -> impl IntoResponse {
+    let req = body.map(|Json(v)| v).unwrap_or(TrainerStopRequest {
+        run_id: String::new(),
+    });
+    let run_id = req.run_id.trim();
+    if run_id.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"ok": false, "error": "run_id is required"})),
+        )
+            .into_response();
+    }
+    let mut runs = state.trainer.runs.lock().await;
+    let Some(run) = runs.get_mut(run_id) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"ok": false, "error": "run not found"})),
+        )
+            .into_response();
+    };
+    let Some(pid) = run.pid else {
+        return (
+            StatusCode::OK,
+            Json(serde_json::json!({"ok": true, "status": run.status, "note": "run already finished"})),
+        )
+            .into_response();
+    };
+
+    let kill_status = Command::new("kill")
+        .arg("-TERM")
+        .arg(pid.to_string())
+        .status();
+    match kill_status {
+        Ok(status) if status.success() => {
+            run.status = "stopping".to_string();
+            persist_trainer_run_artifacts(run);
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({"ok": true, "run_id": run_id, "status": "stopping"})),
+            )
+                .into_response()
+        }
+        Ok(status) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(
+                serde_json::json!({"ok": false, "error": format!("kill returned status {status}")}),
+            ),
+        )
+            .into_response(),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(
+                serde_json::json!({"ok": false, "error": format!("failed to execute kill: {err}")}),
+            ),
+        )
+            .into_response(),
+    }
+}
+
+async fn get_trainer_runs(State(state): State<AppState>) -> impl IntoResponse {
+    let runs_map = state.trainer.runs.lock().await;
+    let mut runs: Vec<TrainerRun> = runs_map.values().cloned().collect();
+    runs.sort_by(|a, b| b.started_at_unix_ms.cmp(&a.started_at_unix_ms));
+    (StatusCode::OK, Json(TrainerRunsResponse { ok: true, runs })).into_response()
+}
+
+async fn get_trainer_run(
+    State(state): State<AppState>,
+    AxPath(run_id): AxPath<String>,
+) -> impl IntoResponse {
+    let runs = state.trainer.runs.lock().await;
+    match runs.get(run_id.as_str()) {
+        Some(run) => (
+            StatusCode::OK,
+            Json(serde_json::json!({"ok": true, "run": run})),
+        )
+            .into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"ok": false, "error": "run not found"})),
+        )
+            .into_response(),
+    }
+}
+
+async fn get_trainer_run_tail(
+    State(state): State<AppState>,
+    AxPath(run_id): AxPath<String>,
+    Query(query): Query<TrainerRunTailQuery>,
+) -> impl IntoResponse {
+    let lines_limit = query.lines.unwrap_or(160).clamp(1, 1000);
+    let run = {
+        let runs = state.trainer.runs.lock().await;
+        runs.get(run_id.as_str()).cloned()
+    };
+    let Some(run) = run else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"ok": false, "error": "run not found"})),
+        )
+            .into_response();
+    };
+    let content = fs::read_to_string(&run.log_path).unwrap_or_default();
+    let mut lines: Vec<String> = content.lines().map(|v| v.to_string()).collect();
+    if lines.len() > lines_limit {
+        lines = lines.split_off(lines.len() - lines_limit);
+    }
+    (
+        StatusCode::OK,
+        Json(TrainerRunTailResponse {
+            ok: true,
+            run_id: run.run_id,
+            line_count: lines.len(),
+            lines,
+        }),
+    )
+        .into_response()
+}
+
+async fn get_trainer_devices(State(state): State<AppState>) -> impl IntoResponse {
+    let devices = list_adb_devices(state.sessions.base_stream_port);
+    (
+        StatusCode::OK,
+        Json(TrainerDevicesResponse { ok: true, devices }),
+    )
+        .into_response()
+}
+
+async fn get_trainer_diagnostics(State(state): State<AppState>) -> impl IntoResponse {
+    let health = {
+        let core = state.sessions.default_core();
+        serde_json::to_value(core.health().await).unwrap_or(Value::Null)
+    };
+    let adb_version = Command::new("adb")
+        .arg("version")
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .unwrap_or_default();
+    let adb_devices_raw = Command::new("adb")
+        .arg("devices")
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .unwrap_or_default();
+    let runs_count = state.trainer.runs.lock().await.len();
+    (
+        StatusCode::OK,
+        Json(TrainerDiagnosticsResponse {
+            ok: true,
+            daemon_health: health,
+            adb_version: adb_version.trim().to_string(),
+            adb_devices_raw: adb_devices_raw.trim().to_string(),
+            profile_root: trainer_profile_root(&state.trainer.root)
+                .to_string_lossy()
+                .to_string(),
+            runs_count,
+        }),
+    )
+        .into_response()
+}
+
+async fn get_trainer_profiles(State(state): State<AppState>) -> impl IntoResponse {
+    let root = trainer_profile_root(&state.trainer.root);
+    let mut profiles = list_trainer_profiles(&root);
+    profiles.sort_by(|a, b| b.updated_at_unix_ms.cmp(&a.updated_at_unix_ms));
+    (
+        StatusCode::OK,
+        Json(TrainerProfilesResponse { ok: true, profiles }),
+    )
+        .into_response()
+}
+
+async fn get_trainer_profile(
+    State(state): State<AppState>,
+    AxPath(profile_name): AxPath<String>,
+) -> impl IntoResponse {
+    let profile_name = sanitize_profile_name(&profile_name);
+    let dir = trainer_profile_root(&state.trainer.root).join(&profile_name);
+    if !dir.is_dir() {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"ok": false, "error": "profile not found"})),
+        )
+            .into_response();
+    }
+    let profile_path = dir.join(format!("{profile_name}.json"));
+    let params_path = dir.join("parameters.json");
+    let preflight_path = dir.join("preflight.json");
+    let resp = TrainerProfileDetailResponse {
+        ok: true,
+        profile_name,
+        profile: read_json_value(&profile_path),
+        parameters: read_json_value(&params_path),
+        preflight: read_json_value(&preflight_path),
+    };
+    (StatusCode::OK, Json(resp)).into_response()
+}
+
 async fn core_error_response(core: Arc<DaemonCore>, err: CoreError) -> axum::response::Response {
     let status = match err {
         CoreError::Validation(_) | CoreError::UnsupportedHost(_) => StatusCode::BAD_REQUEST,
@@ -696,8 +1371,7 @@ async fn auto_layout_wayland_portal_outputs(
 }
 
 fn wayland_portal_auto_layout_enabled() -> bool {
-    let raw = std::env::var("WBEAM_WAYLAND_PORTAL_AUTO_LAYOUT")
-        .unwrap_or_else(|_| "1".to_string());
+    let raw = std::env::var("WBEAM_WAYLAND_PORTAL_AUTO_LAYOUT").unwrap_or_else(|_| "1".to_string());
     !matches!(
         raw.trim().to_ascii_lowercase().as_str(),
         "0" | "false" | "no" | "off"
@@ -953,4 +1627,353 @@ fn fill_pseudorandom(buf: &mut [u8]) {
         let rem = buf.len() - i;
         buf[i..].copy_from_slice(&v[..rem]);
     }
+}
+
+fn persist_trainer_run_artifacts(run: &TrainerRun) {
+    let run_dir = PathBuf::from(&run.run_artifacts_dir);
+    if fs::create_dir_all(&run_dir).is_err() {
+        return;
+    }
+    let run_doc = serde_json::json!({
+        "run_id": run.run_id,
+        "status": run.status,
+        "started_at_unix_ms": run.started_at_unix_ms,
+        "finished_at_unix_ms": run.finished_at_unix_ms,
+        "profile_name": run.profile_name,
+        "serial": run.serial,
+        "mode": run.mode,
+        "engine": run.engine,
+        "trials": run.trials,
+        "warmup_sec": run.warmup_sec,
+        "sample_sec": run.sample_sec,
+        "log_path": run.log_path,
+        "profile_dir": run.profile_dir,
+        "run_artifacts_dir": run.run_artifacts_dir,
+        "exit_code": run.exit_code,
+        "error": run.error,
+    });
+    let _ = fs::write(
+        run_dir.join("run.json"),
+        serde_json::to_vec_pretty(&run_doc).unwrap_or_default(),
+    );
+
+    let log_src = PathBuf::from(&run.log_path);
+    if log_src.exists() {
+        let _ = fs::copy(&log_src, run_dir.join("logs.txt"));
+    }
+
+    let profile_name = sanitize_profile_name(&run.profile_name);
+    let profile_dir = PathBuf::from(&run.profile_dir);
+    let profile_src = profile_dir.join(format!("{profile_name}.json"));
+    let params_src = profile_dir.join("parameters.json");
+    let preflight_src = profile_dir.join("preflight.json");
+    if profile_src.exists() {
+        let _ = fs::copy(profile_src, run_dir.join(format!("{profile_name}.json")));
+    }
+    if params_src.exists() {
+        let _ = fs::copy(params_src, run_dir.join("parameters.json"));
+    }
+    if preflight_src.exists() {
+        let _ = fs::copy(preflight_src, run_dir.join("preflight.json"));
+    }
+}
+
+fn list_adb_devices(base_stream_port: u16) -> Vec<TrainerDeviceInfo> {
+    let out = Command::new("adb").arg("devices").output();
+    let Ok(output) = out else {
+        return Vec::new();
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut devices = Vec::new();
+    let mut idx = 0usize;
+    for line in stdout.lines().skip(1) {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        if parts.len() < 2 {
+            continue;
+        }
+        let serial = parts[0].to_string();
+        let state = parts[1].to_string();
+        let model = adb_shell_getprop(&serial, "ro.product.model");
+        let api_level =
+            adb_shell_getprop(&serial, "ro.build.version.sdk").and_then(|v| v.parse::<u32>().ok());
+        let android_release = adb_shell_getprop(&serial, "ro.build.version.release");
+        let stream_port = if state == "device" {
+            Some(base_stream_port.saturating_add(idx as u16 + 1))
+        } else {
+            None
+        };
+        if state == "device" {
+            idx += 1;
+        }
+        devices.push(TrainerDeviceInfo {
+            serial,
+            state,
+            model,
+            api_level,
+            android_release,
+            stream_port,
+        });
+    }
+    devices
+}
+
+fn adb_shell_getprop(serial: &str, prop: &str) -> Option<String> {
+    let out = Command::new("adb")
+        .args(["-s", serial, "shell", "getprop", prop])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let raw = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if raw.is_empty() {
+        None
+    } else {
+        Some(raw)
+    }
+}
+
+fn now_unix_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0)
+}
+
+fn trainer_profile_root(root: &Path) -> PathBuf {
+    root.join("config").join("training").join("profiles")
+}
+
+fn sanitize_profile_name(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    for ch in raw.trim().chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '.' {
+            out.push(ch);
+        } else if ch.is_whitespace() {
+            out.push('_');
+        }
+    }
+    let out = out
+        .trim_matches(|c: char| c == '_' || c == '-' || c == '.')
+        .to_string();
+    if out.is_empty() {
+        "profile".to_string()
+    } else {
+        out
+    }
+}
+
+fn read_json_value(path: &Path) -> Value {
+    let Ok(raw) = fs::read_to_string(path) else {
+        return Value::Null;
+    };
+    serde_json::from_str(&raw).unwrap_or(Value::Null)
+}
+
+fn list_trainer_profiles(root: &Path) -> Vec<TrainerProfileSummary> {
+    let mut out = Vec::new();
+    let entries = match fs::read_dir(root) {
+        Ok(v) => v,
+        Err(_) => return out,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|v| v.to_str()) else {
+            continue;
+        };
+        let profile_name = sanitize_profile_name(name);
+        let profile_path = path.join(format!("{profile_name}.json"));
+        let params_path = path.join("parameters.json");
+        let preflight_path = path.join("preflight.json");
+        let params = read_json_value(&params_path);
+        let profile = read_json_value(&profile_path);
+        let best_score = params
+            .get("best")
+            .and_then(|v| v.get("score"))
+            .and_then(|v| v.as_f64())
+            .or_else(|| {
+                profile
+                    .get("profile")
+                    .and_then(|v| v.get("origin"))
+                    .and_then(|v| v.get("score"))
+                    .and_then(|v| v.as_f64())
+            });
+        let engine = params
+            .get("engine")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .or_else(|| {
+                profile
+                    .get("engine")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+            });
+        let serial = params
+            .get("serial")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .or_else(|| {
+                profile
+                    .get("device")
+                    .and_then(|v| v.get("serial"))
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+            });
+        let updated_at_unix_ms = fs::metadata(&path)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_millis());
+        out.push(TrainerProfileSummary {
+            profile_name,
+            path: path.to_string_lossy().to_string(),
+            has_profile: profile_path.exists(),
+            has_parameters: params_path.exists(),
+            has_preflight: preflight_path.exists(),
+            best_score,
+            engine,
+            serial,
+            updated_at_unix_ms,
+        });
+    }
+    out
+}
+
+fn adb_push_benchmark(serial: &str, size_mb: u32) -> Value {
+    let size_mb = size_mb.clamp(1, 64);
+    let bytes = (size_mb as usize) * 1024 * 1024;
+    let tmp_path = std::env::temp_dir().join(format!(
+        "wbeam-trainer-preflight-{}-{}.bin",
+        serial,
+        now_unix_ms()
+    ));
+    let remote_path = "/data/local/tmp/wbeam-trainer-preflight.bin";
+    let write_ok = fs::write(&tmp_path, vec![0u8; bytes]).is_ok();
+    if !write_ok {
+        return serde_json::json!({
+            "ok": false,
+            "error": "failed to write temp benchmark file",
+        });
+    }
+    let started = std::time::Instant::now();
+    let out = Command::new("adb")
+        .args(["-s", serial, "push"])
+        .arg(&tmp_path)
+        .arg(remote_path)
+        .output();
+    let elapsed = started.elapsed().as_secs_f64().max(0.001);
+    let _ = Command::new("adb")
+        .args(["-s", serial, "shell", "rm", "-f", remote_path])
+        .status();
+    let _ = fs::remove_file(&tmp_path);
+    let output = match out {
+        Ok(v) => v,
+        Err(err) => {
+            return serde_json::json!({
+                "ok": false,
+                "size_mb": size_mb,
+                "error": format!("adb push failed to execute: {err}"),
+            });
+        }
+    };
+    let ok = output.status.success();
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let mut throughput = ((bytes as f64) / elapsed) / (1024.0 * 1024.0);
+    if let Some((parsed_bytes, parsed_secs)) = parse_adb_push_bytes_and_secs(&stdout) {
+        if parsed_secs > 0.0 {
+            throughput = ((parsed_bytes as f64) / parsed_secs) / (1024.0 * 1024.0);
+        }
+    }
+    serde_json::json!({
+        "ok": ok,
+        "size_mb": size_mb,
+        "elapsed_sec": elapsed,
+        "throughput_mb_s": throughput,
+        "stdout": stdout.trim(),
+        "stderr": stderr.trim(),
+    })
+}
+
+fn parse_adb_push_bytes_and_secs(stdout: &str) -> Option<(u64, f64)> {
+    let start = stdout.find('(')?;
+    let end = stdout[start..].find(')')?;
+    let inner = &stdout[start + 1..start + end];
+    let mut bytes: Option<u64> = None;
+    let mut secs: Option<f64> = None;
+    for token in inner.split_whitespace() {
+        if token == "bytes" {
+            continue;
+        }
+        if token.ends_with('s') {
+            let clean = token.trim_end_matches('s');
+            if let Ok(v) = clean.parse::<f64>() {
+                secs = Some(v);
+            }
+        } else if bytes.is_none() {
+            if let Ok(v) = token.parse::<u64>() {
+                bytes = Some(v);
+            }
+        }
+    }
+    Some((bytes?, secs?))
+}
+
+fn adb_shell_rtt_benchmark(serial: &str, loops: u32) -> Value {
+    let loops = loops.clamp(1, 50);
+    let mut samples = Vec::<f64>::new();
+    let mut failures = 0u32;
+    for _ in 0..loops {
+        let started = std::time::Instant::now();
+        let status = Command::new("adb")
+            .args(["-s", serial, "shell", "true"])
+            .status();
+        let ms = started.elapsed().as_secs_f64() * 1000.0;
+        match status {
+            Ok(s) if s.success() => samples.push(ms),
+            _ => failures += 1,
+        }
+    }
+    if samples.is_empty() {
+        return serde_json::json!({
+            "ok": false,
+            "loops": loops,
+            "failures": failures,
+            "error": "no successful adb shell samples",
+        });
+    }
+    samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let avg = samples.iter().sum::<f64>() / samples.len() as f64;
+    let p50 = percentile_sorted(&samples, 0.5);
+    let p95 = percentile_sorted(&samples, 0.95);
+    serde_json::json!({
+        "ok": true,
+        "loops": loops,
+        "failures": failures,
+        "rtt_avg_ms": avg,
+        "rtt_p50_ms": p50,
+        "rtt_p95_ms": p95,
+    })
+}
+
+fn percentile_sorted(sorted: &[f64], q: f64) -> f64 {
+    if sorted.is_empty() {
+        return 0.0;
+    }
+    let qq = q.clamp(0.0, 1.0);
+    let idx = qq * ((sorted.len() - 1) as f64);
+    let lo = idx.floor() as usize;
+    let hi = idx.ceil() as usize;
+    if lo == hi {
+        return sorted[lo];
+    }
+    let frac = idx - lo as f64;
+    sorted[lo] * (1.0 - frac) + sorted[hi] * frac
 }

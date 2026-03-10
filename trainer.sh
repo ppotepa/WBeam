@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONTROL_PORT="${WBEAM_CONTROL_PORT:-5001}"
 START_SERVICE=0
 VERBOSE=0
+MODE="ui"
 PASSTHRU=()
 
 log() {
@@ -13,16 +14,21 @@ log() {
 
 usage() {
   cat <<'EOF'
-Usage: ./trainer.sh [options] [-- wizard_args...]
+Usage: ./trainer.sh [options] [-- args...]
 
 Options:
   --start-service          Try to start daemon service if health check fails.
   --control-port <port>   Control API port (default: 5001 or WBEAM_CONTROL_PORT).
+  --ui                    Launch Trainer UI app (default).
+  --wizard                Run wizard bridge mode.
   --verbose               Print extra diagnostics.
   -h, --help              Show help.
 
-All remaining args are forwarded to:
-  ./wbeam train wizard
+Modes:
+  --ui      -> npm run dev in src/apps/trainer-tauri
+  --wizard  -> ./wbeam train wizard
+
+Remaining args are forwarded to selected mode command.
 EOF
 }
 
@@ -42,6 +48,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --verbose)
       VERBOSE=1
+      shift
+      ;;
+    --ui)
+      MODE="ui"
+      shift
+      ;;
+    --wizard)
+      MODE="wizard"
       shift
       ;;
     -h|--help)
@@ -120,6 +134,27 @@ LOG_DIR="${ROOT_DIR}/logs/trainer"
 mkdir -p "${LOG_DIR}"
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
 LOG_FILE="${LOG_DIR}/${STAMP}.trainer.log"
+
+if [[ "${MODE}" == "ui" ]]; then
+  log "launching trainer UI (src/apps/trainer-tauri)"
+  if [[ ! -f "${ROOT_DIR}/src/apps/trainer-tauri/package.json" ]]; then
+    log "trainer UI app is missing"
+    exit 1
+  fi
+  if ! command -v npm >/dev/null 2>&1; then
+    log "npm is required to run trainer UI"
+    exit 1
+  fi
+  log "log=${LOG_FILE}"
+  set +e
+  (
+    cd "${ROOT_DIR}/src/apps/trainer-tauri"
+    npm run dev -- "${PASSTHRU[@]}"
+  ) 2>&1 | tee -a "${LOG_FILE}"
+  rc=${PIPESTATUS[0]}
+  set -e
+  exit "${rc}"
+fi
 
 log "launching trainer (wizard bridge mode)"
 log "log=${LOG_FILE}"

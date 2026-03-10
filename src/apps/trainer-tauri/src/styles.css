@@ -113,8 +113,19 @@ button.ghost {
   margin-left: auto;
 }
 
+.actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
 .panel {
   padding: 1rem;
+}
+
+.error-panel {
+  border-color: rgba(255, 111, 97, 0.6);
+  color: #ffd5cf;
 }
 
 .grid2 {
@@ -129,6 +140,12 @@ label {
   margin-bottom: 0.55rem;
   color: var(--muted);
   font-size: 0.9rem;
+}
+
+label.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 input,
@@ -160,6 +177,39 @@ select {
   margin-top: 0.8rem;
   color: var(--muted);
   font-size: 0.86rem;
+}
+
+h3 {
+  margin: 0.9rem 0 0.45rem;
+}
+
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+th,
+td {
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  padding: 0.45rem 0.42rem;
+  vertical-align: top;
+}
+
+th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.mono {
+  font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8rem;
 }
 
 .hud-topline {
@@ -231,6 +281,20 @@ select {
 
 .gates .warn {
   color: var(--warn);
+}
+
+.log-tail {
+  margin: 0.4rem 0 0;
+  max-height: 260px;
+  overflow: auto;
+  background: rgba(0, 0, 0, 0.24);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.6rem;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
 }
 
 @media (max-width: 900px) {

@@ -1,32 +1,30 @@
-# WBeam Trainer Tauri (Scaffold)
+# WBeam Trainer Tauri
 
-Initial TrainerV2 GUI scaffold.
+Dedicated Trainer V2 GUI for WBeam training domain.
 
 ## Purpose
 
-This app is the dedicated frontend for training workflows:
-- configure training runs,
-- observe full live HUD telemetry,
-- browse and compare generated profiles.
+The app provides a workstation-style UI for:
+- running preflight and starting/stopping training runs,
+- watching live HUD/log tail for active run,
+- browsing profiles and run artifacts,
+- comparing profile runtime parameters,
+- checking device list and diagnostics.
 
-Current state is scaffold-only and uses placeholder telemetry.
+## Runtime dependency
+
+Requires host daemon API on `http://127.0.0.1:5001` (or proxied equivalent).
 
 ## Run
+
+```bash
+./trainer.sh --ui
+```
+
+or directly:
 
 ```bash
 cd src/apps/trainer-tauri
 npm install
 npm run dev
 ```
-
-## Current tabs
-
-- `Train`
-- `Live HUD`
-
-## Next planned wiring
-
-- connect to trainer API endpoints,
-- consume live event stream,
-- profile browser and compare views,
-- service bootstrap/status integration.
