@@ -118,35 +118,46 @@ static DEVICE_SNAPSHOT_CACHE: OnceLock<Mutex<HashMap<String, CachedDeviceSnapsho
 static SESSION_LOGS: OnceLock<SessionLogs> = OnceLock::new();
 static WBEAM_CONFIG_CACHE: OnceLock<HashMap<String, String>> = OnceLock::new();
 
+fn wbeam_user_config_path() -> Option<PathBuf> {
+    let base = std::env::var("XDG_CONFIG_HOME")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .map(|h| PathBuf::from(h).join(".config"))
+        })?;
+    Some(base.join("wbeam/wbeam.conf"))
+}
+
+fn ensure_user_wbeam_config(root: &PathBuf) -> Option<PathBuf> {
+    let user_cfg = wbeam_user_config_path()?;
+    if user_cfg.exists() {
+        return Some(user_cfg);
+    }
+    let template = root.join("config/wbeam.conf");
+    if let Some(parent) = user_cfg.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if template.exists() {
+        let _ = fs::copy(&template, &user_cfg);
+    } else {
+        let _ = fs::write(&user_cfg, "");
+    }
+    Some(user_cfg)
+}
+
 fn wbeam_config_cache() -> &'static HashMap<String, String> {
     WBEAM_CONFIG_CACHE.get_or_init(|| {
         let root = repo_root();
         let mut files: Vec<PathBuf> = Vec::new();
-
-        if let Ok(path) = std::env::var("WBEAM_CONFIG_FILE") {
-            let trimmed = path.trim();
-            if !trimmed.is_empty() {
-                files.push(PathBuf::from(trimmed));
-            }
+        if let Some(user_cfg) = ensure_user_wbeam_config(&root) {
+            files.push(user_cfg);
+        } else {
+            files.push(root.join("config/wbeam.conf"));
         }
-
-        let user_cfg = std::env::var("XDG_CONFIG_HOME")
-            .ok()
-            .filter(|v| !v.trim().is_empty())
-            .map(PathBuf::from)
-            .or_else(|| {
-                std::env::var("HOME")
-                    .ok()
-                    .filter(|v| !v.trim().is_empty())
-                    .map(|h| PathBuf::from(h).join(".config"))
-            })
-            .map(|base| base.join("wbeam/wbeam.conf"));
-        if let Some(path) = user_cfg {
-            files.push(path);
-        }
-
-        files.push(root.join(".wbeam.conf"));
-        files.push(root.join("config/wbeam.conf"));
 
         let mut map = HashMap::new();
         for file in files {
@@ -1639,19 +1650,17 @@ fn unit_file_path() -> PathBuf {
 }
 
 fn service_unit_content() -> String {
+    let root_path = repo_root();
+    let _ = ensure_user_wbeam_config(&root_path);
     let daemon_bin_override = wbeam_config_value("WBEAM_DAEMON_BIN");
-    let default_runner = repo_root()
+    let default_runner = root_path
         .join("src/host/scripts/run_wbeamd.sh")
         .to_string_lossy()
         .to_string();
     let control_port = wbeam_control_port();
     let stream_port = wbeam_stream_port();
     let service_lock_file = format!("/tmp/wbeamd-service-{control_port}.lock");
-    let root = repo_root().to_string_lossy().to_string();
-    let config_file = repo_root()
-        .join("config/wbeam.conf")
-        .to_string_lossy()
-        .to_string();
+    let root = root_path.to_string_lossy().to_string();
     let exec_start = if let Some(bin) = daemon_bin_override {
         // Backward compatible override for prebuilt daemon binaries.
         format!("{bin} --control-port {control_port} --stream-port {stream_port} --root {root}")
@@ -1660,7 +1669,7 @@ fn service_unit_content() -> String {
         format!("{default_runner} {control_port} {stream_port}")
     };
     format!(
-        "[Unit]\nDescription=WBeam Screen Streaming Daemon\nAfter=graphical-session.target\n\n[Service]\nType=simple\nExecStart={exec_start}\nRestart=on-failure\nRestartSec=3\nEnvironment=RUST_LOG=info\nEnvironment=WBEAM_ROOT={root}\nEnvironment=WBEAM_CONFIG_FILE={config_file}\nEnvironment=WBEAM_LOCK_FILE={service_lock_file}\n\n[Install]\nWantedBy=default.target\n"
+        "[Unit]\nDescription=WBeam Screen Streaming Daemon\nAfter=graphical-session.target\n\n[Service]\nType=simple\nExecStart={exec_start}\nRestart=on-failure\nRestartSec=3\nEnvironment=RUST_LOG=info\nEnvironment=WBEAM_ROOT={root}\nEnvironment=WBEAM_LOCK_FILE={service_lock_file}\n\n[Install]\nWantedBy=default.target\n"
     )
 }
 

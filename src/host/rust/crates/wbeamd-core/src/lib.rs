@@ -45,15 +45,8 @@ const NO_PRESENT_MIN_RECV_FPS: f64 = 10.0;
 const NO_PRESENT_MAX_PRESENT_FPS: f64 = 1.0;
 const REVERSE_REFRESH_BACKSTOP: Duration = Duration::from_secs(120);
 
-fn load_wbeam_config(root: &Path) -> HashMap<String, String> {
-    let mut files: Vec<PathBuf> = Vec::new();
-    if let Ok(path) = std::env::var("WBEAM_CONFIG_FILE") {
-        let trimmed = path.trim();
-        if !trimmed.is_empty() {
-            files.push(PathBuf::from(trimmed));
-        }
-    }
-    let user_cfg = std::env::var("XDG_CONFIG_HOME")
+fn user_wbeam_config_path() -> Option<PathBuf> {
+    let base = std::env::var("XDG_CONFIG_HOME")
         .ok()
         .filter(|v| !v.trim().is_empty())
         .map(PathBuf::from)
@@ -62,13 +55,34 @@ fn load_wbeam_config(root: &Path) -> HashMap<String, String> {
                 .ok()
                 .filter(|v| !v.trim().is_empty())
                 .map(|home| PathBuf::from(home).join(".config"))
-        })
-        .map(|base| base.join("wbeam/wbeam.conf"));
-    if let Some(path) = user_cfg {
-        files.push(path);
+        })?;
+    Some(base.join("wbeam/wbeam.conf"))
+}
+
+fn ensure_user_wbeam_config(root: &Path) -> Option<PathBuf> {
+    let user_cfg = user_wbeam_config_path()?;
+    if user_cfg.exists() {
+        return Some(user_cfg);
     }
-    files.push(root.join(".wbeam.conf"));
-    files.push(root.join("config/wbeam.conf"));
+    if let Some(parent) = user_cfg.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let template = root.join("config/wbeam.conf");
+    if template.exists() {
+        let _ = std::fs::copy(&template, &user_cfg);
+    } else {
+        let _ = std::fs::write(&user_cfg, "");
+    }
+    Some(user_cfg)
+}
+
+fn load_wbeam_config(root: &Path) -> HashMap<String, String> {
+    let mut files: Vec<PathBuf> = Vec::new();
+    if let Some(user_cfg) = ensure_user_wbeam_config(root) {
+        files.push(user_cfg);
+    } else {
+        files.push(root.join("config/wbeam.conf"));
+    }
 
     let mut map = HashMap::new();
     for file in files {

@@ -873,3 +873,19 @@ Status: active
 - Added `x11` section with `WBEAM_X11_ALLOW_MONITOR_OBJECT` and placeholders for future policy unification.
 - Confirmed shell loader accepts section headers and still reads values:
   - `source src/host/scripts/wbeam_config.sh && wbeam_load_config ...` -> `control=5001 x11_allow=0`
+
+## In Progress (2026-03-10) [commit: pending] - bootstrap user config + user config as runtime source-of-truth
+- Updated runtime loaders to treat `~/.config/wbeam/wbeam.conf` as canonical source-of-truth.
+- Added startup bootstrap:
+  - if user config is missing, create `~/.config/wbeam/` and copy from `config/wbeam.conf`.
+- Applied in:
+  - shell loader (`src/host/scripts/wbeam_config.sh`)
+  - desktop tauri backend config cache (`src/apps/desktop-tauri/src-tauri/src/main.rs`)
+  - host rust core config loader (`src/host/rust/crates/wbeamd-core/src/lib.rs`)
+- Simplified service unit generation:
+  - removed hard wiring of `WBEAM_CONFIG_FILE=<repo>/config/wbeam.conf`.
+- Validation:
+  - `bash -n src/host/scripts/wbeam_config.sh wbeam devtool desktop.sh start-remote runas-remote redeploy-local src/host/scripts/run_wbeamd.sh src/host/scripts/run_wbeamd_debug.sh` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-core` -> OK
+  - `cd src/apps/desktop-tauri/src-tauri && cargo check` -> OK
+  - bootstrap smoke: `XDG_CONFIG_HOME=$(mktemp -d) ... wbeam_load_config ...` creates `wbeam/wbeam.conf`
