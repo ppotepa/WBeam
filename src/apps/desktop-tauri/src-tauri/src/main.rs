@@ -1447,12 +1447,15 @@ fn device_connect(
         ),
     );
     connect_log(&serial, effective_stream_port, "device_connect begin");
+    let host_probe = host_probe_brief();
+    let is_wayland_portal = host_probe.capture_mode == "wayland_portal";
     let is_virtual_mode = normalized_mode == "virtual"
         || normalized_mode == "virtual_monitor"
         || normalized_mode == "virtual_mirror"
         || normalized_mode == "virtual-duplicate"
         || normalized_mode == "virtual_duplicate";
-    if is_virtual_mode {
+    let skip_virtual_doctor = is_wayland_portal && normalized_mode == "virtual_mirror";
+    if is_virtual_mode && !skip_virtual_doctor {
         let doctor = virtual_doctor(Some(serial.clone()), Some(effective_stream_port))?;
         if !doctor.ok {
             let msg = if !doctor.install_hint.trim().is_empty() {

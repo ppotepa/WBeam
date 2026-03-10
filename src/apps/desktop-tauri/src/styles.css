@@ -372,6 +372,12 @@ h1 {
   flex: 0 0 auto;
 }
 
+.wayland-experimental-control {
+  border-top: 1px solid #26384e;
+  padding-top: 0.45rem;
+  flex: 0 0 auto;
+}
+
 .status-bar {
   border-top: 1px solid #26384e;
   padding-top: 0.45rem;

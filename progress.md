@@ -1,5 +1,21 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending) - Wayland-only experimental mirroring toggle in main UI
+- Reworked connect UX split by host backend:
+  - on `wayland_portal`, `Connect` now skips the middle mode modal and starts connect directly (portal chooser still appears as normal),
+  - on non-Wayland hosts, existing connect mode modal remains (virtual monitor / duplicate).
+- Moved `Use experimental virtual mirroring` to the main application window (below devices list):
+  - toggle is active only on Wayland hosts,
+  - toggle is visible but disabled (greyed) on X11/non-Wayland hosts,
+  - state is persisted in localStorage (`wbeam.connect.experimental.dup.wayland`).
+- Backend wiring for Wayland experimental mode:
+  - Tauri `device_connect` now skips virtual-doctor blocking specifically for `wayland_portal + virtual_mirror`,
+  - host Wayland backend maps `virtual_mirror` to the duplicate activation path (no unsupported-error on connect).
+- Validation:
+  - `cd src/apps/desktop-tauri && npm run build`
+  - `cd src/apps/desktop-tauri/src-tauri && cargo check`
+  - `cd src/host/rust && cargo check -p wbeamd-core`
+
 ## Session Update (2026-03-10, pending) - connect modal now visible on Wayland (checkbox discoverability fix)
 - Fixed missing experimental-duplication checkbox visibility in desktop Tauri app:
   - removed Wayland fast-path that skipped connect modal and directly triggered duplicate connect,

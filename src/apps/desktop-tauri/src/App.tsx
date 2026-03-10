@@ -41,7 +41,7 @@ function DeviceTypeIcon(props: { type: string }) {
 
 type DisplayMode = "virtual_monitor" | "duplicate";
 const CONNECT_MODE_STORAGE_KEY = "wbeam.connect.mode.by.serial";
-const EXPERIMENTAL_DUPLICATION_STORAGE_KEY = "wbeam.connect.experimental.dup.by.serial";
+const WAYLAND_EXPERIMENTAL_DUPLICATION_STORAGE_KEY = "wbeam.connect.experimental.dup.wayland";
 
 function loadSavedDisplayMode(serial: string): DisplayMode | null {
   try {
@@ -70,23 +70,17 @@ function saveDisplayMode(serial: string, mode: DisplayMode): void {
   }
 }
 
-function loadSavedExperimentalDuplication(serial: string): boolean {
+function loadWaylandExperimentalDuplication(): boolean {
   try {
-    const raw = localStorage.getItem(EXPERIMENTAL_DUPLICATION_STORAGE_KEY);
-    if (!raw) return false;
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    return parsed?.[serial] === true;
+    return localStorage.getItem(WAYLAND_EXPERIMENTAL_DUPLICATION_STORAGE_KEY) === "1";
   } catch {
     return false;
   }
 }
 
-function saveExperimentalDuplication(serial: string, enabled: boolean): void {
+function saveWaylandExperimentalDuplication(enabled: boolean): void {
   try {
-    const raw = localStorage.getItem(EXPERIMENTAL_DUPLICATION_STORAGE_KEY);
-    const parsed = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
-    parsed[serial] = enabled;
-    localStorage.setItem(EXPERIMENTAL_DUPLICATION_STORAGE_KEY, JSON.stringify(parsed));
+    localStorage.setItem(WAYLAND_EXPERIMENTAL_DUPLICATION_STORAGE_KEY, enabled ? "1" : "0");
   } catch {
     // Ignore localStorage failures.
   }
@@ -102,7 +96,9 @@ export default function App() {
   const [connectDialogDoctor, setConnectDialogDoctor] = createSignal<VirtualDoctor | null>(null);
   const [connectDialogDoctorLoading, setConnectDialogDoctorLoading] = createSignal(false);
   const [connectDialogBlockReason, setConnectDialogBlockReason] = createSignal("");
-  const [connectDialogExperimentalDuplication, setConnectDialogExperimentalDuplication] = createSignal(false);
+  const [waylandExperimentalDuplication, setWaylandExperimentalDuplication] = createSignal(
+    loadWaylandExperimentalDuplication(),
+  );
   const [virtualStartupDoctor, setVirtualStartupDoctor] = createSignal<VirtualDoctor | null>(null);
   const [virtualSetupVisible, setVirtualSetupVisible] = createSignal(false);
   const [virtualSetupInstalling, setVirtualSetupInstalling] = createSignal(false);
@@ -170,10 +166,28 @@ export default function App() {
     return session.hostProbe().captureMode === "wayland_portal";
   }
 
+  function toggleWaylandExperimentalDuplication(enabled: boolean): void {
+    setWaylandExperimentalDuplication(enabled);
+    saveWaylandExperimentalDuplication(enabled);
+  }
+
+  async function connectWaylandPortal(device: DeviceBasic): Promise<void> {
+    const blockedReason = connectDisabledReason(device);
+    if (blockedReason.length > 0) {
+      session.setError(blockedReason);
+      return;
+    }
+    const mode = waylandExperimentalDuplication() ? "virtual_mirror" : "duplicate";
+    await session.connectDevice(device, mode);
+  }
+
   function openConnectDialog(device: DeviceBasic): void {
+    if (isWaylandPortalHost()) {
+      void connectWaylandPortal(device);
+      return;
+    }
     const saved = loadSavedDisplayMode(device.serial);
     setConnectDialogMode(saved ?? "virtual_monitor");
-    setConnectDialogExperimentalDuplication(loadSavedExperimentalDuplication(device.serial));
     setConnectDialogDoctor(null);
     setConnectDialogDoctorLoading(true);
     setConnectDialogBlockReason(connectDisabledReason(device));
@@ -195,7 +209,6 @@ export default function App() {
     setConnectDialogDoctor(null);
     setConnectDialogDoctorLoading(false);
     setConnectDialogBlockReason("");
-    setConnectDialogExperimentalDuplication(false);
   }
 
   async function confirmConnect(): Promise<void> {
@@ -218,12 +231,9 @@ export default function App() {
           );
           return;
         }
-        const experimentalDuplicationEnabled = connectDialogExperimentalDuplication()
-          && doctor.resolver === "linux_x11_real_output";
-        backendMode = experimentalDuplicationEnabled ? "virtual_mirror" : "virtual_monitor";
+        backendMode = "virtual_monitor";
       }
       saveDisplayMode(device.serial, chosenMode);
-      saveExperimentalDuplication(device.serial, connectDialogExperimentalDuplication());
       closeConnectDialog();
       await session.connectDevice(device, backendMode);
     } catch (err) {
@@ -518,6 +528,23 @@ export default function App() {
           </For>
         </ul>
 
+        <section class="wayland-experimental-control">
+          <label class={`checkbox-option ${isWaylandPortalHost() ? "" : "disabled"}`}>
+            <input
+              type="checkbox"
+              checked={waylandExperimentalDuplication()}
+              disabled={!isWaylandPortalHost()}
+              onChange={(event) => toggleWaylandExperimentalDuplication(event.currentTarget.checked)}
+            />
+            <span>
+              Use experimental virtual mirroring (Wayland only)
+              <small>
+                Applies to Wayland connects only. For X11 this option is unavailable.
+              </small>
+            </span>
+          </label>
+        </section>
+
         <section class="service-controls">
           <button
             class={`svc-btn ${upgradeAvailable() ? "svc-upgrade" : ""}`}
@@ -583,7 +610,6 @@ export default function App() {
           const virtualMonitorSelected = () => connectDialogMode() === "virtual_monitor";
           const doctor = () => connectDialogDoctor();
           const virtualMonitorAvailable = () => isVirtualMonitorAvailable(doctor() ?? null);
-          const canUseExperimentalDuplication = () => doctor()?.resolver === "linux_x11_real_output";
           const virtualMonitorHint = () => {
             if (!virtualMonitorAvailable()) return "Not implemented for current host session yet.";
             if (doctor()?.resolver === "linux_x11_monitor_object_experimental") {
@@ -623,22 +649,6 @@ export default function App() {
                     <small>Works with current host backend.</small>
                   </span>
                 </label>
-                <div class={`mode-option-check ${virtualMonitorSelected() ? "" : "disabled"}`}>
-                  <label class={`checkbox-option ${canUseExperimentalDuplication() ? "" : "disabled"}`}>
-                    <input
-                      type="checkbox"
-                      checked={connectDialogExperimentalDuplication()}
-                      disabled={!virtualMonitorSelected() || !canUseExperimentalDuplication()}
-                      onChange={(event) => setConnectDialogExperimentalDuplication(event.currentTarget.checked)}
-                    />
-                    <span>
-                      Use experimental duplication (virtual mirror)
-                      <small>
-                        Creates a virtual monitor and mirrors primary output before streaming (X11 real-output only).
-                      </small>
-                    </span>
-                  </label>
-                </div>
                 <Show when={connectDialogDoctorLoading()}>
                   <p class="setup-message">Checking host capabilities...</p>
                 </Show>
