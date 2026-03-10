@@ -748,6 +748,7 @@ async fn get_metrics(
         let stream_port = query.stream_port.unwrap_or(state.sessions.base_stream_port);
         if let Some(serial_val) = query.serial.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
             let hud_text = read_trainer_overlay_text(serial_val, stream_port);
+            let hud_json = read_trainer_overlay_json(serial_val, stream_port).unwrap_or(Value::Null);
             obj.insert(
                 "trainer_hud_active".to_string(),
                 Value::Bool(hud_text.as_ref().is_some_and(|txt| !txt.trim().is_empty())),
@@ -756,9 +757,11 @@ async fn get_metrics(
                 "trainer_hud_text".to_string(),
                 Value::String(hud_text.unwrap_or_default()),
             );
+            obj.insert("trainer_hud_json".to_string(), hud_json);
         } else {
             obj.insert("trainer_hud_active".to_string(), Value::Bool(false));
             obj.insert("trainer_hud_text".to_string(), Value::String(String::new()));
+            obj.insert("trainer_hud_json".to_string(), Value::Null);
         }
     }
     Json(payload)
@@ -2261,6 +2264,23 @@ fn read_trainer_overlay_text(serial: &str, stream_port: u16) -> Option<String> {
     } else {
         Some(trimmed)
     }
+}
+
+fn read_trainer_overlay_json(serial: &str, stream_port: u16) -> Option<Value> {
+    let suffix = session_suffix(serial);
+    let marker = PathBuf::from(format!(
+        "/tmp/wbeam-trainer-active-{}-{}.flag",
+        suffix, stream_port
+    ));
+    if !marker.exists() {
+        return None;
+    }
+    let overlay = PathBuf::from(format!(
+        "/tmp/wbeam-trainer-overlay-{}-{}.json",
+        suffix, stream_port
+    ));
+    let raw = fs::read_to_string(overlay).ok()?;
+    serde_json::from_str::<Value>(&raw).ok()
 }
 
 fn read_json_value(path: &Path) -> Value {

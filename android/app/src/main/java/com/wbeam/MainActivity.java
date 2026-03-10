@@ -52,6 +52,7 @@ import com.wbeam.telemetry.ClientMetricsReporter;
 import com.wbeam.widget.FpsLossGraphView;
 
 import org.json.JSONException;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedInputStream;
@@ -1757,6 +1758,11 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         lastPerfMetricsAtMs = nowMs;
+        JSONObject trainerHudJson = metrics.optJSONObject("trainer_hud_json");
+        if (trainerHudJson != null && trainerHudJson.length() > 0) {
+            renderTrainerHudOverlayJson(trainerHudJson);
+            return;
+        }
         String trainerHudText = metrics.optString("trainer_hud_text", "");
         if (trainerHudText != null && !trainerHudText.trim().isEmpty()) {
             renderTrainerHudOverlay(trainerHudText);
@@ -1978,6 +1984,34 @@ public class MainActivity extends AppCompatActivity {
         refreshDebugInfoOverlay();
     }
 
+    private void renderTrainerHudOverlayJson(JSONObject hudJson) {
+        if (perfHudText == null || hudJson == null) {
+            return;
+        }
+        int progressPercent = hudJson.optInt("progress_percent", -1);
+        String progressText = String.format(
+                Locale.US,
+                "TRAINING PROGRESS %d%%  (trial %d/%d)",
+                Math.max(0, progressPercent),
+                hudJson.optInt("trial_index", 0),
+                hudJson.optInt("trial_total", 0)
+        );
+        String html = buildTrainerHudHtmlFromJson(hudJson, progressText, progressPercent);
+        if (perfHudWebView != null) {
+            perfHudWebView.loadDataWithBaseURL(null, html, "text/html", "utf-8", null);
+            perfHudWebView.setVisibility(View.VISIBLE);
+            perfHudText.setVisibility(View.GONE);
+        } else {
+            perfHudText.setText(progressText);
+            perfHudText.setVisibility(View.VISIBLE);
+        }
+        if (perfHudPanel != null) {
+            perfHudPanel.setAlpha(0.92f);
+        }
+        lastHudCompactLine = progressText;
+        refreshDebugInfoOverlay();
+    }
+
     private String buildTrainerProgressLine(String hudText) {
         Matcher matcher = TRAINER_TRIAL_PROGRESS_RE.matcher(hudText);
         if (!matcher.find()) {
@@ -2061,6 +2095,58 @@ public class MainActivity extends AppCompatActivity {
                 + "</style></head><body><div class='root'>"
                 + "<div class='progress'><div class='p-label'>" + escapeHtml(progressText) + "</div><div class='p-track'><div class='p-fill'></div></div></div>"
                 + "<table>" + rows + "</table>"
+                + "</div></body></html>";
+    }
+
+    private String buildTrainerHudHtmlFromJson(JSONObject hud, String progressLine, int progressPercent) {
+        JSONArray rows = hud.optJSONArray("rows");
+        StringBuilder tableRows = new StringBuilder();
+        if (rows != null) {
+            for (int i = 0; i < rows.length(); i++) {
+                JSONObject row = rows.optJSONObject(i);
+                if (row == null) {
+                    continue;
+                }
+                String type = row.optString("type", "single");
+                if ("sep".equals(type)) {
+                    tableRows.append("<tr class='sep'><td colspan='2'></td></tr>");
+                    continue;
+                }
+                if ("pair".equals(type)) {
+                    String level = row.optString("level", "info");
+                    tableRows.append("<tr><td class='left'>")
+                            .append(escapeHtml(row.optString("left", "")))
+                            .append("</td><td class='right ")
+                            .append(escapeHtml(level))
+                            .append("'>")
+                            .append(escapeHtml(row.optString("right", "")))
+                            .append("</td></tr>");
+                    continue;
+                }
+                tableRows.append("<tr><td class='single' colspan='2'>")
+                        .append(escapeHtml(row.optString("text", "")))
+                        .append("</td></tr>");
+            }
+        }
+        int safePct = progressPercent < 0 ? 0 : progressPercent;
+        String pLabel = progressLine == null || progressLine.trim().isEmpty() ? "TRAINING PROGRESS ..." : progressLine.trim();
+        return "<!doctype html><html><head><meta charset='utf-8'/>"
+                + "<style>"
+                + "html,body{margin:0;padding:0;background:transparent;color:#d9fbff;font-family:'JetBrains Mono','IBM Plex Mono',monospace;font-size:11px;}"
+                + ".root{padding:8px;box-sizing:border-box;width:100vw;height:100vh;display:flex;flex-direction:column;gap:8px;}"
+                + ".progress{border:1px solid rgba(126,245,255,.45);background:rgba(2,20,24,.30);padding:6px 8px;}"
+                + ".p-label{font-size:11px;color:#b9f8ff;letter-spacing:.04em;}"
+                + ".p-track{margin-top:6px;height:7px;background:rgba(0,0,0,.35);border:1px solid rgba(126,245,255,.35);}"
+                + ".p-fill{height:100%;width:" + safePct + "%;background:linear-gradient(90deg,#60f2c2,#7dd3fc);}"
+                + "table{width:100%;border-collapse:collapse;table-layout:fixed;background:rgba(2,20,24,.22);}"
+                + "td{border:1px solid rgba(126,245,255,.28);padding:4px 6px;vertical-align:top;word-break:break-word;}"
+                + "td.left{width:58%;color:#dffcff;} td.right{width:42%;text-align:right;color:#b9f8ff;}"
+                + "td.right.ok{color:#6ee7b7;} td.right.warn{color:#fbbf24;} td.right.risk{color:#f87171;}"
+                + "td.single{color:#9ee8f2;text-align:left;}"
+                + "tr.sep td{height:2px;padding:0;border-left:0;border-right:0;border-bottom:0;border-top:1px solid rgba(126,245,255,.42);}"
+                + "</style></head><body><div class='root'>"
+                + "<div class='progress'><div class='p-label'>" + escapeHtml(pLabel) + "</div><div class='p-track'><div class='p-fill'></div></div></div>"
+                + "<table>" + tableRows + "</table>"
                 + "</div></body></html>";
     }
 

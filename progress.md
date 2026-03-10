@@ -2022,3 +2022,20 @@ Status: active
   - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
   - `cd src/apps/trainer-tauri && npm run build` -> OK
   - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+
+## In Progress (2026-03-10) - Structured trainer HUD JSON (host -> Android WebView)
+- Added structured HUD export in trainer wizard:
+  - `wizard.py` now writes `/tmp/wbeam-trainer-overlay-<serial>-<port>.json` alongside `.txt` snapshots.
+  - JSON includes run/trial/generation context, progress percent, layout/chart mode, optional config/metrics and normalized row model (`pair/single/sep` with severity levels).
+- Extended daemon metrics payload:
+  - `/v1/metrics` now includes `trainer_hud_json` (when trainer run marker is active), in addition to `trainer_hud_text`.
+- Android HUD now prioritizes structured JSON rendering:
+  - `MainActivity.updatePerfHud()` first checks `trainer_hud_json` and renders WebView table from typed rows,
+  - falls back to text snapshot parser when JSON is unavailable,
+  - preserves progress bar + percent display.
+- This removes brittle text splitting as primary render path and aligns HUD closer to deterministic maquette rendering.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK

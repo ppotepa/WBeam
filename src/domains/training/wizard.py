@@ -170,6 +170,10 @@ def trainer_overlay_path(serial: str, stream_port: int) -> Path:
     return Path(f"/tmp/wbeam-trainer-overlay-{session_suffix(serial)}-{stream_port}.txt")
 
 
+def trainer_overlay_json_path(serial: str, stream_port: int) -> Path:
+    return Path(f"/tmp/wbeam-trainer-overlay-{session_suffix(serial)}-{stream_port}.json")
+
+
 def trainer_active_marker_path(serial: str, stream_port: int) -> Path:
     return Path(f"/tmp/wbeam-trainer-active-{session_suffix(serial)}-{stream_port}.flag")
 
@@ -311,6 +315,7 @@ def write_overlay_snapshot(
     note: str = "",
     chart_mode: str = "bars",
     layout_mode: str = "wide",
+    json_path: Path | None = None,
 ) -> None:
     recent = history or []
     valid_scores = [item.score for item in recent if item.score > -900.0]
@@ -423,6 +428,75 @@ def write_overlay_snapshot(
         path.write_text(payload, encoding="utf-8")
     except Exception:
         return
+    if json_path is not None:
+        progress_pct = 0
+        if trial_total > 0:
+            progress_pct = int(
+                round(max(0.0, min(100.0, (float(trial_index) * 100.0) / float(trial_total))))
+            )
+        rows: list[dict[str, Any]] = []
+        for raw in lines:
+            text = strip_markup(raw).strip()
+            if not text:
+                continue
+            if text.startswith("+") and text.endswith("+"):
+                rows.append({"type": "sep"})
+                continue
+            if text.startswith("|") and text.endswith("|") and len(text) > 2:
+                content = text[1:-1].rstrip()
+            else:
+                content = text
+            # split on first wide gap for table-like two-column rendering
+            match = re.search(r"\s{2,}", content)
+            if match:
+                left = content[: match.start()].strip()
+                right = content[match.end() :].strip()
+                row = {"type": "pair", "left": left, "right": right}
+                tone = "info"
+                if "RISK" in right or "RISK" in left:
+                    tone = "risk"
+                elif "WARN" in right or "WARN" in left:
+                    tone = "warn"
+                elif "OK" in right or "OK" in left:
+                    tone = "ok"
+                row["level"] = tone
+                rows.append(row)
+            else:
+                rows.append({"type": "single", "text": content})
+        hud_json: dict[str, Any] = {
+            "run_id": run_id,
+            "profile_name": profile_name,
+            "trial_id": trial_id,
+            "trial_index": trial_index,
+            "trial_total": trial_total,
+            "generation_index": generation_index,
+            "generation_total": generation_total,
+            "progress_percent": progress_pct,
+            "layout_mode": layout_mode,
+            "chart_mode": chart_mode,
+            "note": note or "",
+            "rows": rows,
+        }
+        if cfg is not None:
+            hud_json["config"] = asdict(cfg)
+        if result is not None:
+            hud_json["metrics"] = {
+                "score": result.score,
+                "present_fps_mean": result.present_fps_mean,
+                "recv_fps_mean": result.recv_fps_mean,
+                "decode_fps_mean": result.decode_fps_mean,
+                "e2e_p95_mean_ms": result.e2e_p95_mean_ms,
+                "drop_rate_per_sec": result.drop_rate_per_sec,
+                "bitrate_mbps_mean": result.bitrate_mbps_mean,
+                "queue_depth_mean": result.queue_depth_mean,
+                "late_rate_per_sec": result.late_rate_per_sec,
+                "sample_count": result.sample_count,
+                "notes": result.notes,
+            }
+        try:
+            json_path.write_text(json.dumps(hud_json, ensure_ascii=True), encoding="utf-8")
+        except Exception:
+            pass
 
 
 def profile_dir(profile_name: str) -> Path:
@@ -1546,6 +1620,7 @@ def main() -> int:
 
     marker_path = trainer_active_marker_path(serial, stream_port)
     overlay_path = trainer_overlay_path(serial, stream_port) if args.overlay else None
+    overlay_json_path = trainer_overlay_json_path(serial, stream_port) if args.overlay else None
     marker_payload = {
         "run_id": run_id,
         "profile_name": profile_name,
@@ -1571,6 +1646,7 @@ def main() -> int:
             note="initializing",
             chart_mode=args.overlay_chart,
             layout_mode=args.overlay_layout,
+            json_path=overlay_json_path,
         )
 
     try:
@@ -1597,6 +1673,7 @@ def main() -> int:
                     note="apply -> warmup -> sample",
                     chart_mode=args.overlay_chart,
                     layout_mode=args.overlay_layout,
+                    json_path=overlay_json_path,
                 )
             print(
                 f"\n[{trial_id}] apply encoder={cfg.encoder} size={cfg.size} "
@@ -1648,6 +1725,7 @@ def main() -> int:
                         note="apply failed",
                         chart_mode=args.overlay_chart,
                         layout_mode=args.overlay_layout,
+                        json_path=overlay_json_path,
                     )
                 continue
 
@@ -1684,6 +1762,7 @@ def main() -> int:
                         note=f"sampling {elapsed_sec:.1f}s",
                         chart_mode=args.overlay_chart,
                         layout_mode=args.overlay_layout,
+                        json_path=overlay_json_path,
                     )
 
                 samples = collect_metrics_samples(
@@ -1712,6 +1791,7 @@ def main() -> int:
                         note="sample complete",
                         chart_mode=args.overlay_chart,
                         layout_mode=args.overlay_layout,
+                        json_path=overlay_json_path,
                     )
                 print(
                     f"[{trial_id}] score={result.score:.2f} present={result.present_fps_mean:.1f} "
@@ -1763,6 +1843,7 @@ def main() -> int:
                         note="sample failed",
                         chart_mode=args.overlay_chart,
                         layout_mode=args.overlay_layout,
+                        json_path=overlay_json_path,
                     )
 
         if not results:
@@ -1799,6 +1880,7 @@ def main() -> int:
                 note="best candidate",
                 chart_mode=args.overlay_chart,
                 layout_mode=args.overlay_layout,
+                json_path=overlay_json_path,
             )
         should_apply_best = args.apply_best
         if should_apply_best is None:
@@ -1933,6 +2015,8 @@ def main() -> int:
         unlink_if_exists(marker_path)
         if overlay_path is not None:
             unlink_if_exists(overlay_path)
+        if overlay_json_path is not None:
+            unlink_if_exists(overlay_json_path)
 
 
 if __name__ == "__main__":
