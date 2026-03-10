@@ -2162,3 +2162,22 @@ Status: active
 - Validation:
   - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
   - `cd src/apps/trainer-tauri && npm run build` -> OK
+
+## In Progress (2026-03-10) - Trainer HUD hard fallback + compact pro dark pass
+- Android trainer HUD no longer drops to empty frame when trainer payload is partial:
+  - `trainer_hud_active` flag now also triggers trainer HUD mode even if text/json snapshot is temporarily missing,
+  - added explicit `renderTrainerHudOverlayPlaceholder()` to render full template with `PENDING` placeholders.
+- Android HUD visibility/readability increased:
+  - overlay alpha raised to `0.96` across runtime/trainer/fallback paths,
+  - stronger panel/chip/progress/table opacity for clearer on-device legibility.
+- Trainer metrics completeness updates:
+  - `live_mbps` now also checks top-level `bitrate_mbps_mean` before fallback,
+  - detail panel is auto-populated with core rows (run/profile/encoder/size/target/mbps/latency/drops) when trial `rows` are absent.
+- Desktop trainer pro-dark compact styling pass:
+  - darker Rider-like palette with pastel accents,
+  - reduced roundness (`topbar/nav/panel/input` radii),
+  - tighter layout spacing/padding for denser workflow,
+  - dark color-scheme hint enabled for native controls (`color-scheme: dark`) plus improved hover/selected row contrast.
+- Validation:
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK

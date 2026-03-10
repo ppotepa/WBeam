@@ -1002,7 +1002,7 @@ public class MainActivity extends AppCompatActivity {
         if (perfHudPanel != null) {
             perfHudPanel.setVisibility(visible ? View.VISIBLE : View.GONE);
             if (visible) {
-                perfHudPanel.setAlpha(0.88f);
+                perfHudPanel.setAlpha(0.96f);
             }
         }
     }
@@ -1735,7 +1735,7 @@ public class MainActivity extends AppCompatActivity {
         perfHudText.setText("HUD OFFLINE\nwaiting for host metrics...");
         perfHudText.setTextColor(Color.parseColor("#FCA5A5"));
         if (perfHudPanel != null) {
-            perfHudPanel.setAlpha(0.92f);
+            perfHudPanel.setAlpha(0.96f);
         }
         refreshDebugInfoOverlay();
         emitHudDebugAdb("state=offline waiting_metrics=1");
@@ -1761,7 +1761,8 @@ public class MainActivity extends AppCompatActivity {
         boolean trainerHudFromJson = trainerHudJson != null && trainerHudJson.length() > 0;
         String trainerHudText = metrics.optString("trainer_hud_text", "");
         boolean trainerHudFromText = trainerHudText != null && !trainerHudText.trim().isEmpty();
-        boolean trainerHudActive = trainerHudFromJson || trainerHudFromText;
+        boolean trainerHudFlag = metrics.optBoolean("trainer_hud_active", false);
+        boolean trainerHudActive = trainerHudFlag || trainerHudFromJson || trainerHudFromText;
         if (trainerHudActive && !trainerHudSessionActive) {
             trainerHudSessionActive = true;
             if (BuildConfig.DEBUG && !debugOverlayVisible) {
@@ -1777,6 +1778,10 @@ public class MainActivity extends AppCompatActivity {
         }
         if (trainerHudFromText) {
             renderTrainerHudOverlay(trainerHudText);
+            return;
+        }
+        if (trainerHudActive) {
+            renderTrainerHudOverlayPlaceholder();
             return;
         }
         if (perfHudWebView != null) {
@@ -2078,7 +2083,7 @@ public class MainActivity extends AppCompatActivity {
             perfHudText.setVisibility(View.VISIBLE);
         }
         if (perfHudPanel != null) {
-            perfHudPanel.setAlpha(0.95f);
+            perfHudPanel.setAlpha(0.96f);
         }
     }
 
@@ -2106,7 +2111,7 @@ public class MainActivity extends AppCompatActivity {
             perfHudText.setVisibility(View.VISIBLE);
         }
         if (perfHudPanel != null) {
-            perfHudPanel.setAlpha(0.92f);
+            perfHudPanel.setAlpha(0.96f);
         }
         lastHudCompactLine = progressLine.isEmpty() ? "hud: trainer overlay active" : progressLine;
         refreshDebugInfoOverlay();
@@ -2134,9 +2139,56 @@ public class MainActivity extends AppCompatActivity {
             perfHudText.setVisibility(View.VISIBLE);
         }
         if (perfHudPanel != null) {
-            perfHudPanel.setAlpha(0.92f);
+            perfHudPanel.setAlpha(0.96f);
         }
         lastHudCompactLine = progressText;
+        refreshDebugInfoOverlay();
+    }
+
+    private void renderTrainerHudOverlayPlaceholder() {
+        if (perfHudText == null) {
+            return;
+        }
+        String chips = hudChip("RUN", "PENDING", "state-pending")
+                + hudChip("PROFILE", "PENDING", "state-pending")
+                + hudChip("GEN", "0/0", "state-pending")
+                + hudChip("TRIAL", "0/0", "state-pending")
+                + hudChip("ENCODER", "PENDING", "state-pending")
+                + hudChip("SIZE/FPS", "PENDING", "state-pending");
+        String cards = hudCard("SCORE", "PENDING", "state-pending")
+                + hudCard("PRESENT FPS", "PENDING", "state-pending")
+                + hudCard("PIPE/DEC FPS", "PENDING / PENDING", "state-pending")
+                + hudCard("LIVE MBPS", "PENDING", "state-pending")
+                + hudCard("LAT p95 ms", "PENDING", "state-pending")
+                + hudCard("DROPS/s | QUEUE", "PENDING | PENDING", "state-pending");
+        String details = hudDetailRow("STATUS", "Waiting for trainer HUD feed")
+                + hudDetailRow("ACTION", "Keep stream running; metrics will populate automatically")
+                + hudDetailRow("LIVE MBPS", "PENDING")
+                + hudDetailRow("TARGET MBPS", "PENDING")
+                + hudDetailRow("NOTE", "Template is active to avoid blank overlay");
+        String html = buildUnifiedHudHtml(
+                "trainer",
+                "TRAINING PROGRESS ...",
+                0,
+                chips,
+                cards,
+                "trainer feed pending | placeholders visible",
+                details,
+                "scale-2x"
+        );
+        if (perfHudWebView != null) {
+            perfHudWebView.loadDataWithBaseURL(null, html, "text/html", "utf-8", null);
+            perfHudWebView.setVisibility(View.VISIBLE);
+            perfHudText.setVisibility(View.GONE);
+        } else {
+            perfHudText.setText("TRAINER HUD PENDING\nplaceholder layout active");
+            perfHudText.setTextColor(Color.parseColor("#B3EAF4FF"));
+            perfHudText.setVisibility(View.VISIBLE);
+        }
+        if (perfHudPanel != null) {
+            perfHudPanel.setAlpha(0.96f);
+        }
+        lastHudCompactLine = "trainer hud pending placeholders";
         refreshDebugInfoOverlay();
     }
 

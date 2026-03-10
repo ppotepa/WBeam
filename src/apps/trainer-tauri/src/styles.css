@@ -27,6 +27,7 @@ body {
   min-height: 100vh;
   font-family: "Space Grotesk", "Segoe UI", sans-serif;
   color: var(--text-main);
+  color-scheme: dark;
   background:
     radial-gradient(1100px 600px at -8% 8%, rgba(73, 194, 255, 0.16), transparent),
     radial-gradient(900px 500px at 108% 96%, rgba(56, 211, 159, 0.14), transparent),
@@ -48,7 +49,7 @@ select {
 
 .topbar {
   border: 1px solid var(--line-soft);
-  border-radius: 14px;
+  border-radius: 10px;
   background: var(--panel);
   backdrop-filter: blur(8px);
   padding: 10px 12px;
@@ -118,7 +119,7 @@ select {
 
 .nav-rail {
   border: 1px solid var(--line-soft);
-  border-radius: 14px;
+  border-radius: 10px;
   background: var(--panel-soft);
   padding: 7px;
   display: grid;
@@ -130,7 +131,7 @@ select {
   border: 1px solid transparent;
   background: transparent;
   color: var(--text-muted);
-  border-radius: 9px;
+  border-radius: 7px;
   padding: 8px 9px;
   text-align: left;
   cursor: pointer;
@@ -166,7 +167,7 @@ select {
 
 .panel.card {
   border: 1px solid var(--line-soft);
-  border-radius: 12px;
+  border-radius: 9px;
   background: var(--panel);
   padding: 10px;
 }
@@ -203,13 +204,13 @@ select {
   z-index: 20;
   background: rgba(3, 9, 14, 0.62);
   backdrop-filter: blur(2px);
-  border-radius: 14px;
+  border-radius: 9px;
 }
 
 .busy-overlay-card {
   min-width: 280px;
   border: 1px solid var(--line-strong);
-  border-radius: 12px;
+  border-radius: 8px;
   background: rgba(9, 21, 34, 0.92);
   padding: 14px 16px;
   display: grid;
@@ -259,7 +260,7 @@ input,
 select {
   width: 100%;
   border: 1px solid var(--line-soft);
-  border-radius: 9px;
+  border-radius: 7px;
   background: rgba(0, 0, 0, 0.24);
   color: var(--text-main);
   padding: 7px 9px;
@@ -268,6 +269,10 @@ select {
 select option {
   background: #1b2231;
   color: #eef3ff;
+}
+
+select {
+  color-scheme: dark;
 }
 
 input:focus,
@@ -335,7 +340,7 @@ select:focus {
 
 .advanced-box {
   border: 1px solid var(--line-soft);
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 10px;
   background: rgba(0, 0, 0, 0.16);
 }
@@ -364,7 +369,7 @@ select:focus {
 .hud-font-preview {
   margin-top: 4px;
   border: 1px solid rgba(73, 194, 255, 0.28);
-  border-radius: 9px;
+  border-radius: 7px;
   padding: 8px 10px;
   background: rgba(0, 0, 0, 0.2);
   color: var(--text-main);
@@ -725,6 +730,14 @@ td {
   text-align: left;
   padding: 7px 6px;
   vertical-align: top;
+}
+
+tbody tr:hover {
+  background: rgba(122, 179, 255, 0.14);
+}
+
+tbody tr:hover td {
+  color: var(--text-main);
 }
 
 th {
