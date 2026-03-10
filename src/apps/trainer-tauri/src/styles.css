@@ -709,6 +709,16 @@ th {
   margin-bottom: 12px;
 }
 
+.dataset-analytics {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.dataset-analytics h3 {
+  margin: 0;
+}
+
 .density-roomy .panel.card {
   padding: 16px;
 }

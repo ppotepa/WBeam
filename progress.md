@@ -1808,3 +1808,20 @@ Status: active
   - `python3 -m py_compile src/domains/training/wizard.py src/host/scripts/stream_wayland_portal_h264.py` -> OK
   - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
   - `cd src/apps/trainer-tauri && npm run build` -> OK
+
+## In Progress (2026-03-10) - Dataset timeline analytics in Trainer UI
+- Extended `Datasets` detail view in `src/apps/trainer-tauri/src/App.tsx` with parsed per-trial analytics from `parameters.results[]`:
+  - added deterministic trial ordering (`t01`, `t02`, ...),
+  - added chart panels for:
+    - score per trial,
+    - present FPS per trial,
+    - measured Mbps per trial,
+    - drops/s per trial.
+- Added numerical chart summaries (`last/min/max`) and per-bar tooltips with trial IDs.
+- Added per-trial table under charts with key telemetry columns:
+  - trial id, score, present FPS, pipe FPS, Mbps, drops/s, notes/state.
+- Added supporting dataset analytics styling in `styles.css` to keep chart/table block compact and readable.
+- Validation:
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `python3 -m py_compile src/domains/training/wizard.py` -> OK

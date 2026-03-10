@@ -137,6 +137,16 @@ type LiveStage = {
   level: "info" | "warn" | "risk" | "ok";
 };
 
+type DatasetTrialPoint = {
+  trial_id: string;
+  score: number;
+  present_fps_mean: number;
+  recv_fps_mean: number;
+  bitrate_mbps_mean: number;
+  drop_rate_per_sec: number;
+  notes: string;
+};
+
 type SettingsModel = {
   compactDensity: boolean;
   animateUi: boolean;
@@ -193,6 +203,40 @@ function seriesSummary(values: number[]): { min: string; max: string; last: stri
   const max = Math.max(...values);
   const last = values[values.length - 1];
   return { min: min.toFixed(1), max: max.toFixed(1), last: last.toFixed(1) };
+}
+
+function trialOrdinal(trialId: string): number {
+  const match = trialId.match(/t(\d+)/i);
+  if (!match) return Number.MAX_SAFE_INTEGER;
+  return Number(match[1]);
+}
+
+function parseDatasetTrials(parameters: Record<string, unknown>): DatasetTrialPoint[] {
+  const raw = valueAt(parameters, ["results"]);
+  if (!Array.isArray(raw)) return [];
+  const rows: DatasetTrialPoint[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const trial_id = String(row.trial_id || "").trim();
+    if (!trial_id) continue;
+    const score = Number(row.score || 0);
+    const present_fps_mean = Number(row.present_fps_mean || 0);
+    const recv_fps_mean = Number(row.recv_fps_mean || 0);
+    const bitrate_mbps_mean = Number(row.bitrate_mbps_mean || 0);
+    const drop_rate_per_sec = Number(row.drop_rate_per_sec || 0);
+    const notes = String(row.notes || "-");
+    rows.push({
+      trial_id,
+      score: Number.isFinite(score) ? score : 0,
+      present_fps_mean: Number.isFinite(present_fps_mean) ? present_fps_mean : 0,
+      recv_fps_mean: Number.isFinite(recv_fps_mean) ? recv_fps_mean : 0,
+      bitrate_mbps_mean: Number.isFinite(bitrate_mbps_mean) ? bitrate_mbps_mean : 0,
+      drop_rate_per_sec: Number.isFinite(drop_rate_per_sec) ? drop_rate_per_sec : 0,
+      notes,
+    });
+  }
+  return rows.sort((a, b) => trialOrdinal(a.trial_id) - trialOrdinal(b.trial_id));
 }
 
 async function fetchJson<T>(path: string): Promise<T> {
@@ -748,6 +792,15 @@ export default function App() {
   const recvSummary = createMemo(() => seriesSummary(hudSeries().recv));
   const dropSummary = createMemo(() => seriesSummary(hudSeries().drops));
   const selectedDevice = createMemo(() => devices().find((item) => item.serial === serial()));
+  const datasetTrials = createMemo(() => parseDatasetTrials(datasetDetail()?.parameters || {}));
+  const datasetScoreBars = createMemo(() => toBars(datasetTrials().map((v) => v.score)));
+  const datasetPresentBars = createMemo(() => toBars(datasetTrials().map((v) => v.present_fps_mean)));
+  const datasetMbpsBars = createMemo(() => toBars(datasetTrials().map((v) => v.bitrate_mbps_mean)));
+  const datasetDropBars = createMemo(() => toBars(datasetTrials().map((v) => v.drop_rate_per_sec), true));
+  const datasetScoreSummary = createMemo(() => seriesSummary(datasetTrials().map((v) => v.score)));
+  const datasetPresentSummary = createMemo(() => seriesSummary(datasetTrials().map((v) => v.present_fps_mean)));
+  const datasetMbpsSummary = createMemo(() => seriesSummary(datasetTrials().map((v) => v.bitrate_mbps_mean)));
+  const datasetDropSummary = createMemo(() => seriesSummary(datasetTrials().map((v) => v.drop_rate_per_sec)));
 
   return (
     <main class={`trainer-shell ${settings().compactDensity ? "density-compact" : "density-roomy"} ${settings().animateUi ? "animate-on" : "animate-off"}`}>
@@ -1422,6 +1475,116 @@ export default function App() {
                     </span>
                   </div>
                 </div>
+
+                <section class="dataset-analytics">
+                  <h3>Dataset Timeline</h3>
+                  <Show when={datasetTrials().length > 0} fallback={<p class="hint">No per-trial results found in this dataset.</p>}>
+                    <div class="chart-grid">
+                      <section class="chart-card">
+                        <h3>Score per trial</h3>
+                        <p class="chart-stats">
+                          last {datasetScoreSummary().last} | min {datasetScoreSummary().min} | max {datasetScoreSummary().max}
+                        </p>
+                        <div class="bar-row">
+                          <For each={datasetScoreBars()}>
+                            {(bar, idx) => (
+                              <span
+                                class={`bar ${bar.cls}`}
+                                style={{ height: `${bar.pct}%` }}
+                                title={`${datasetTrials()[idx()]?.trial_id || `t${idx() + 1}`}: ${bar.value.toFixed(2)}`}
+                              />
+                            )}
+                          </For>
+                        </div>
+                      </section>
+
+                      <section class="chart-card">
+                        <h3>Present FPS per trial</h3>
+                        <p class="chart-stats">
+                          last {datasetPresentSummary().last} | min {datasetPresentSummary().min} | max {datasetPresentSummary().max}
+                        </p>
+                        <div class="bar-row">
+                          <For each={datasetPresentBars()}>
+                            {(bar, idx) => (
+                              <span
+                                class={`bar ${bar.cls}`}
+                                style={{ height: `${bar.pct}%` }}
+                                title={`${datasetTrials()[idx()]?.trial_id || `t${idx() + 1}`}: ${bar.value.toFixed(2)} fps`}
+                              />
+                            )}
+                          </For>
+                        </div>
+                      </section>
+
+                      <section class="chart-card">
+                        <h3>Live Mbps per trial</h3>
+                        <p class="chart-stats">
+                          last {datasetMbpsSummary().last} | min {datasetMbpsSummary().min} | max {datasetMbpsSummary().max}
+                        </p>
+                        <div class="bar-row">
+                          <For each={datasetMbpsBars()}>
+                            {(bar, idx) => (
+                              <span
+                                class={`bar ${bar.cls}`}
+                                style={{ height: `${bar.pct}%` }}
+                                title={`${datasetTrials()[idx()]?.trial_id || `t${idx() + 1}`}: ${bar.value.toFixed(2)} Mbps`}
+                              />
+                            )}
+                          </For>
+                        </div>
+                      </section>
+
+                      <section class="chart-card">
+                        <h3>Drops/s per trial</h3>
+                        <p class="chart-stats">
+                          last {datasetDropSummary().last} | min {datasetDropSummary().min} | max {datasetDropSummary().max}
+                        </p>
+                        <div class="bar-row">
+                          <For each={datasetDropBars()}>
+                            {(bar, idx) => (
+                              <span
+                                class={`bar ${bar.cls}`}
+                                style={{ height: `${bar.pct}%` }}
+                                title={`${datasetTrials()[idx()]?.trial_id || `t${idx() + 1}`}: ${bar.value.toFixed(4)} drops/s`}
+                              />
+                            )}
+                          </For>
+                        </div>
+                      </section>
+                    </div>
+
+                    <div class="table-wrap">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Trial</th>
+                            <th>Score</th>
+                            <th>Present FPS</th>
+                            <th>Pipe FPS</th>
+                            <th>Mbps</th>
+                            <th>Drops/s</th>
+                            <th>State</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <For each={datasetTrials()}>
+                            {(row) => (
+                              <tr>
+                                <td class="mono">{row.trial_id}</td>
+                                <td>{row.score.toFixed(2)}</td>
+                                <td>{row.present_fps_mean.toFixed(1)}</td>
+                                <td>{row.recv_fps_mean.toFixed(1)}</td>
+                                <td>{row.bitrate_mbps_mean.toFixed(1)}</td>
+                                <td>{row.drop_rate_per_sec.toFixed(4)}</td>
+                                <td>{row.notes}</td>
+                              </tr>
+                            )}
+                          </For>
+                        </tbody>
+                      </table>
+                    </div>
+                  </Show>
+                </section>
               </Show>
             </article>
           </Show>
