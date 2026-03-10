@@ -102,6 +102,7 @@ struct TrainerStartRequest {
     crossover_rate: Option<f64>,
     bitrate_min_kbps: Option<u32>,
     bitrate_max_kbps: Option<u32>,
+    encoder_mode: Option<String>,
     encoders: Option<Vec<String>>,
     encoder_tuning_mode: Option<String>,
     encoder_params: Option<Value>,
@@ -121,6 +122,7 @@ struct TrainerStartResponse {
     run_id: String,
     status: String,
     log_path: String,
+    warnings: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1025,6 +1027,7 @@ async fn post_trainer_start(
         crossover_rate: None,
         bitrate_min_kbps: None,
         bitrate_max_kbps: None,
+        encoder_mode: None,
         encoders: None,
         encoder_tuning_mode: None,
         encoder_params: None,
@@ -1074,7 +1077,20 @@ async fn post_trainer_start(
         .bitrate_max_kbps
         .unwrap_or(200_000)
         .clamp(bitrate_min_kbps, 400_000);
-    let encoder_mode = "single".to_string();
+    let mut warnings: Vec<String> = Vec::new();
+    let requested_encoder_mode = req
+        .encoder_mode
+        .as_deref()
+        .unwrap_or("auto")
+        .trim()
+        .to_ascii_lowercase();
+    if !matches!(requested_encoder_mode.as_str(), "auto" | "single" | "multi") {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"ok": false, "error": "invalid encoder_mode (use auto|single|multi)"})),
+        )
+            .into_response();
+    }
     let mut encoders = req
         .encoders
         .unwrap_or_else(|| vec!["h265".to_string(), "h264".to_string()])
@@ -1095,8 +1111,28 @@ async fn post_trainer_start(
         let mut seen = HashSet::new();
         encoders.retain(|enc| seen.insert(enc.clone()));
     }
-    if encoders.len() > 1 {
+    let mut encoder_mode = if requested_encoder_mode == "auto" {
+        if encoders.len() > 1 {
+            "multi".to_string()
+        } else {
+            "single".to_string()
+        }
+    } else {
+        requested_encoder_mode
+    };
+    if encoder_mode == "single" && encoders.len() > 1 {
+        warnings.push(format!(
+            "encoder_mode=single requested with {} encoders; using first encoder '{}'",
+            encoders.len(),
+            encoders[0]
+        ));
         encoders = vec![encoders[0].clone()];
+    }
+    if encoder_mode == "multi" && encoders.len() == 1 {
+        warnings.push(
+            "encoder_mode=multi requested with one encoder; switching to single mode".to_string(),
+        );
+        encoder_mode = "single".to_string();
     }
     let encoder_tuning_mode = req
         .encoder_tuning_mode
@@ -1112,6 +1148,16 @@ async fn post_trainer_start(
             .into_response();
     }
     let encoder_params = req.encoder_params.unwrap_or(Value::Null);
+    if encoder_tuning_mode == "manual" {
+        warnings.push(
+            "encoder_tuning_mode=manual is experimental; unsupported params may be ignored by runtime".to_string(),
+        );
+    }
+    if encoder_tuning_mode == "manual" && !encoder_params.is_null() {
+        warnings.push(
+            "encoder_params are accepted by trainer flow but may not map 1:1 to active streamer backend".to_string(),
+        );
+    }
     let hud_chart_mode = req
         .hud_chart_mode
         .as_deref()
@@ -1188,6 +1234,9 @@ async fn post_trainer_start(
         log_file,
         "[trainer-api] run_id={run_id} serial={serial} profile_name={profile_name} mode={mode} engine={engine}"
     );
+    for warning in &warnings {
+        let _ = writeln!(log_file, "[trainer-api][warn] {warning}");
+    }
     let log_file_err = match log_file.try_clone() {
         Ok(v) => v,
         Err(err) => {
@@ -1404,6 +1453,7 @@ async fn post_trainer_start(
             run_id,
             status: "running".to_string(),
             log_path: log_path.to_string_lossy().to_string(),
+            warnings,
         }),
     )
         .into_response()

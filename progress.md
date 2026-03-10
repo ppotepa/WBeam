@@ -2349,3 +2349,13 @@ Status: active
   - `python3 -m py_compile src/domains/training/wizard.py` -> OK
   - `cd src/host/rust && cargo check -p wbeamd-api -p wbeamd-core -p wbeamd-streamer` -> OK
   - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+- Trainer API (`/v1/trainer/start`) improvements:
+  - fixed silent multi-encoder truncation:
+    - added `encoder_mode` request field (`auto|single|multi`),
+    - `auto` now derives mode from encoder list size,
+    - `single` with many encoders now truncates with explicit warning,
+    - `multi` with one encoder now normalizes to single with warning.
+  - start response now returns `warnings: []` for operator visibility.
+  - added explicit warning messages when `encoder_tuning_mode=manual` / `encoder_params` are used (experimental mapping visibility).
+- Validation:
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
