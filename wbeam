@@ -100,6 +100,12 @@ adb_device_cmd() {
 }
 
 android_connected_serials() {
+  if [[ -n "${WBEAM_ANDROID_SERIALS:-}" ]]; then
+    printf '%s\n' "${WBEAM_ANDROID_SERIALS}" \
+      | tr ',;[:space:]' '\n' \
+      | awk 'NF { print $1 }'
+    return 0
+  fi
   require_cmd adb
   adb start-server >/dev/null 2>&1 || true
   adb devices | awk 'NR>1 && $2=="device"{print $1}'
@@ -278,12 +284,53 @@ build_number_read_file() {
   fi
 }
 
+build_number_from_version() {
+  local raw="${1:-}"
+  if [[ "$raw" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.([0-9]+)\.[A-Za-z0-9._-]+$ ]]; then
+    echo "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  if [[ "$raw" =~ ^[0-9]+\.[0-9]+\.[0-9]+\+b([0-9]+)$ ]]; then
+    echo "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  if [[ "$raw" =~ ^[0-9]+\.[0-9]+\.([0-9]+)$ ]]; then
+    echo "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  if [[ "$raw" =~ ^[0-9]+\.([0-9]+)\.[A-Za-z0-9._-]+$ ]]; then
+    echo "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  return 1
+}
+
+build_number_seed_max() {
+  local file_no version_no version_raw
+  file_no="$(build_number_read_file)"
+  if [[ ! "$file_no" =~ ^[0-9]+$ ]]; then
+    file_no=0
+  fi
+
+  version_no=0
+  version_raw="$(build_version_read_file)"
+  if [[ -n "$version_raw" ]]; then
+    version_no="$(build_number_from_version "$version_raw" || true)"
+    if [[ ! "$version_no" =~ ^[0-9]+$ ]]; then
+      version_no=0
+    fi
+  fi
+
+  if (( version_no > file_no )); then
+    echo "$version_no"
+  else
+    echo "$file_no"
+  fi
+}
+
 build_number_next() {
   local n
-  n="$(build_number_read_file)"
-  if [[ ! "$n" =~ ^[0-9]+$ ]]; then
-    n=0
-  fi
+  n="$(build_number_seed_max)"
   n=$((n + 1))
   printf '%s\n' "$n" > "$BUILD_NUMBER_FILE"
   echo "$n"

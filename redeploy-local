@@ -41,6 +41,37 @@ ANDROID_DEPLOY=1
 DESKTOP_BUILD=1
 DESKTOP_START=1
 
+adb_connected_serials_retry() {
+  local attempts=0
+  local prev=""
+  local cur=""
+  local stable=0
+  local -a serials=()
+
+  if ! command -v adb >/dev/null 2>&1; then
+    return 0
+  fi
+
+  adb start-server >/dev/null 2>&1 || true
+  while (( attempts < 6 )); do
+    mapfile -t serials < <(adb devices | awk 'NR>1 && $2=="device" {print $1}')
+    cur="${serials[*]:-}"
+    if [[ "$cur" == "$prev" ]]; then
+      stable=$((stable + 1))
+    else
+      stable=0
+      prev="$cur"
+    fi
+    if (( stable >= 1 )); then
+      break
+    fi
+    attempts=$((attempts + 1))
+    sleep 1
+  done
+
+  printf '%s\n' "${serials[@]}"
+}
+
 ensure_desktop_dev_deps() {
   if [[ -f "$DESKTOP_DIR/node_modules/vite/client.d.ts" ]]; then
     return 0
@@ -151,13 +182,19 @@ fi
 
 if [[ "$ANDROID_DEPLOY" -eq 1 ]]; then
   if command -v adb >/dev/null 2>&1; then
-    DEVICE_COUNT="$(adb devices | awk 'NR>1 && $2=="device" {n++} END{print n+0}')"
+    mapfile -t DEPLOY_SERIALS < <(adb_connected_serials_retry)
+    DEVICE_COUNT="${#DEPLOY_SERIALS[@]}"
   else
     DEVICE_COUNT=0
   fi
   if [[ "$DEVICE_COUNT" -gt 0 ]]; then
-    echo "[redeploy-local] android deploy-all (devices=$DEVICE_COUNT)"
-    WBEAM_BUILD_REV="$BUILD_REV" WBEAM_ANDROID_FORCE_INSTALL=1 ./wbeam android deploy-all
+    SERIALS_CSV="$(IFS=,; echo "${DEPLOY_SERIALS[*]}")"
+    echo "[redeploy-local] android deploy-all (devices=$DEVICE_COUNT serials=${DEPLOY_SERIALS[*]})"
+    WBEAM_BUILD_REV="$BUILD_REV" \
+      WBEAM_ANDROID_FORCE_INSTALL=1 \
+      WBEAM_ANDROID_SERIAL="" \
+      WBEAM_ANDROID_SERIALS="$SERIALS_CSV" \
+      ./wbeam android deploy-all
   else
     echo "[redeploy-local] android deploy skipped (no adb devices in 'device' state)"
   fi

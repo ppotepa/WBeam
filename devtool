@@ -65,7 +65,8 @@ build_version_for_build() {
     normalize_build_version "$explicit"
     return 0
   fi
-  local n
+
+  local n version_raw version_no
   n=0
   if [[ -f "$BUILD_NUMBER_FILE" ]]; then
     n="$(tr -d '\r[:space:]' < "$BUILD_NUMBER_FILE" 2>/dev/null || echo 0)"
@@ -73,6 +74,24 @@ build_version_for_build() {
   if [[ ! "$n" =~ ^[0-9]+$ ]]; then
     n=0
   fi
+
+  version_no=0
+  if [[ -f "$BUILD_VERSION_FILE" ]]; then
+    version_raw="$(tr -d '\r[:space:]' < "$BUILD_VERSION_FILE" 2>/dev/null || true)"
+    if [[ "$version_raw" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.([0-9]+)\.[A-Za-z0-9._-]+$ ]]; then
+      version_no="${BASH_REMATCH[1]}"
+    elif [[ "$version_raw" =~ ^[0-9]+\.[0-9]+\.([0-9]+)$ ]]; then
+      version_no="${BASH_REMATCH[1]}"
+    elif [[ "$version_raw" =~ ^[0-9]+\.[0-9]+\.[0-9]+\+b([0-9]+)$ ]]; then
+      version_no="${BASH_REMATCH[1]}"
+    elif [[ "$version_raw" =~ ^[0-9]+\.([0-9]+)\.[A-Za-z0-9._-]+$ ]]; then
+      version_no="${BASH_REMATCH[1]}"
+    fi
+  fi
+  if [[ "$version_no" =~ ^[0-9]+$ ]] && (( version_no > n )); then
+    n="$version_no"
+  fi
+
   n=$((n + 1))
   printf '%s\n' "$n" > "$BUILD_NUMBER_FILE"
   local v="${VERSION_BASE}.${n}"
