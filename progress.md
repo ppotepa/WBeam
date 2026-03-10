@@ -2321,3 +2321,12 @@ Status: active
   - provide a single technical source to evaluate pipeline correctness,
   - highlight likely artifact/stability root causes,
   - accelerate structured external review and benchmarking.
+
+## In Progress (2026-03-11) - External agent prompt for quality/stability improvements
+- Added `prompt.md` as ready-to-use instruction set for a separate agent to execute backend-quality improvements.
+- Prompt includes:
+  - mandatory code-reading scope anchored to `backend.md`,
+  - phased workflow (baseline audit -> implementation -> validation -> delivery),
+  - hard requirements for practical code changes (not theory-only),
+  - focus areas: artifact reduction, encoder fallback quality, effective-config observability, adaptation stability, training relevance,
+  - strict output structure and success criteria for verifiable progress.
