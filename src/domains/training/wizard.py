@@ -1299,6 +1299,8 @@ def main() -> int:
     parser.add_argument("--crossover-rate", type=float, default=0.50)
     parser.add_argument("--encoder-mode", choices=["single", "multi"], default="multi")
     parser.add_argument("--encoders", default="h265,h264", help="CSV encoders: h264,h265,mjpeg,rawpng")
+    parser.add_argument("--encoder-tuning-mode", choices=["auto", "manual"], default="auto")
+    parser.add_argument("--encoder-params-json", default="{}", help="JSON map with encoder-specific manual params.")
     parser.add_argument("--bitrate-min-kbps", type=int, default=10000)
     parser.add_argument("--bitrate-max-kbps", type=int, default=200000)
     parser.add_argument("--warmup-sec", type=int, default=4)
@@ -1354,6 +1356,12 @@ def main() -> int:
         selected_encoders = selected_encoders[:1]
     bitrate_min_kbps = max(1000, min(int(args.bitrate_min_kbps), int(args.bitrate_max_kbps)))
     bitrate_max_kbps = max(bitrate_min_kbps, max(int(args.bitrate_min_kbps), int(args.bitrate_max_kbps)))
+    try:
+        encoder_params_payload = json.loads(args.encoder_params_json or "{}")
+    except Exception:
+        encoder_params_payload = {}
+    if not isinstance(encoder_params_payload, dict):
+        encoder_params_payload = {"value": encoder_params_payload}
 
     print("== WBeam Main Trainer Wizard ==")
     print(f"root: {ROOT}")
@@ -1403,6 +1411,7 @@ def main() -> int:
     print(
         "tuning: "
         f"enc_mode={args.encoder_mode} encoders={','.join(selected_encoders)} "
+        f"encoder_tuning={args.encoder_tuning_mode} "
         f"gen={generations} pop={population} elite={elite_count} "
         f"mut={mutation_rate:.2f} cross={crossover_rate:.2f} "
         f"bitrate=[{bitrate_min_kbps},{bitrate_max_kbps}]kbps"
@@ -1843,6 +1852,8 @@ def main() -> int:
             "mode": mode,
             "encoder_mode": args.encoder_mode,
             "encoders": selected_encoders,
+            "encoder_tuning_mode": args.encoder_tuning_mode,
+            "encoder_params": encoder_params_payload,
             "generations": generations,
             "population": population,
             "elite_count": elite_count,

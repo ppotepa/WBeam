@@ -1979,3 +1979,26 @@ Status: active
   - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
   - `cd src/apps/trainer-tauri && npm run build` -> OK
   - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+
+## In Progress (2026-03-10) - Native HUD-only training path + single-encoder training flow
+- Enforced Android-native trainer HUD as primary path (avoid half-broken burn-in composition):
+  - `wbeamd-core` now disables host-side overlay burn-in by default during trainer runs.
+  - Burn-in can be re-enabled explicitly via `WBEAM_TRAINER_HUD_BURNIN=1`.
+- Introduced single-encoder training flow in Trainer API/UI:
+  - UI now selects one encoder (`h264|h265|mjpeg|rawpng`) instead of multi-checkbox mix,
+  - backend normalizes trainer run to `encoder_mode=single` and first encoder only,
+  - wizard receives explicit single-encoder args.
+- Added `auto/manual` encoder tuning mode with per-encoder manual parameter payload from UI:
+  - H26x: `preset`, `gop`, `bframes`
+  - MJPEG: `quality`
+  - RAW PNG: `compression_level`
+  - payload propagated to backend and persisted in trainer run artifacts (`encoder_tuning_mode`, `encoder_params`).
+- Wizard CLI extended for new tuning metadata:
+  - `--encoder-tuning-mode`
+  - `--encoder-params-json`
+  - values included in exported run `parameters.json`.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK

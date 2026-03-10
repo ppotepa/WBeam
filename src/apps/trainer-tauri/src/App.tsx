@@ -483,11 +483,13 @@ export default function App() {
   const [crossoverRate, setCrossoverRate] = createSignal(0.5);
   const [bitrateMinKbps, setBitrateMinKbps] = createSignal(10000);
   const [bitrateMaxKbps, setBitrateMaxKbps] = createSignal(200000);
-  const [encoderMode, setEncoderMode] = createSignal("multi");
-  const [encH264, setEncH264] = createSignal(true);
-  const [encH265, setEncH265] = createSignal(true);
-  const [encRawpng, setEncRawpng] = createSignal(false);
-  const [encMjpeg, setEncMjpeg] = createSignal(false);
+  const [selectedEncoder, setSelectedEncoder] = createSignal("h265");
+  const [encoderTuneMode, setEncoderTuneMode] = createSignal("auto");
+  const [manualH26xPreset, setManualH26xPreset] = createSignal("fast");
+  const [manualH26xGop, setManualH26xGop] = createSignal(60);
+  const [manualH26xBframes, setManualH26xBframes] = createSignal(0);
+  const [manualMjpegQuality, setManualMjpegQuality] = createSignal(85);
+  const [manualPngCompression, setManualPngCompression] = createSignal(4);
   const [overlay, setOverlay] = createSignal(true);
   const [hudChartMode, setHudChartMode] = createSignal("bars");
   const [hudFontPreset, setHudFontPreset] = createSignal("compact");
@@ -513,14 +515,7 @@ export default function App() {
   const runningRuns = createMemo(() =>
     runs().filter((item) => item.status === "running" || item.status === "stopping"),
   );
-  const selectedEncoders = createMemo(() =>
-    [
-      encH264() ? "h264" : "",
-      encH265() ? "h265" : "",
-      encRawpng() ? "rawpng" : "",
-      encMjpeg() ? "mjpeg" : "",
-    ].filter(Boolean),
-  );
+  const selectedEncoders = createMemo(() => [selectedEncoder()]);
   const activeRun = createMemo(() => {
     const selected = selectedRunId();
     if (selected) return runs().find((r) => r.run_id === selected) || runs()[0];
@@ -552,9 +547,6 @@ export default function App() {
     if (!serial()) problems.push("Select a device");
     if (!profileName().trim()) problems.push("Profile name is required");
     if (selectedEncoders().length === 0) problems.push("At least one encoder must be selected");
-    if (encoderMode() === "single" && selectedEncoders().length !== 1) {
-      problems.push("Single encoder mode requires exactly one encoder");
-    }
     if (bitrateMinKbps() > bitrateMaxKbps()) problems.push("Bitrate min must be <= bitrate max");
     if (generations() <= 0) problems.push("Generations must be greater than 0");
     if (population() <= 1) problems.push("Population must be greater than 1");
@@ -569,7 +561,7 @@ export default function App() {
     const selected = devices().find((item) => item.serial === serial());
     if (!selected) return warnings;
     if (selected.state !== "device") warnings.push(`Device state is '${selected.state}'`);
-    if ((selected.api_level || 0) <= 19 && encH265()) warnings.push("h265 may underperform on low API devices");
+    if ((selected.api_level || 0) <= 19 && selectedEncoder() === "h265") warnings.push("h265 may underperform on low API devices");
     if (bitrateMaxKbps() > 150000) warnings.push("Very high max bitrate can destabilize weaker USB links");
     if (trials() < 8) warnings.push("Low trial budget can reduce result quality");
     return warnings;
@@ -740,8 +732,17 @@ export default function App() {
       if (!canStart()) throw new Error(hardBlockers().join("; "));
       setTail(null);
       setSelectedRunId("");
-      const encoders =
-        encoderMode() === "single" ? [selectedEncoders()[0] || "h264"] : selectedEncoders();
+      const encoders = [selectedEncoder()];
+      const encoderParams: Record<string, unknown> =
+        selectedEncoder() === "mjpeg"
+          ? { quality: Number(manualMjpegQuality()) }
+          : selectedEncoder() === "rawpng"
+            ? { compression_level: Number(manualPngCompression()) }
+            : {
+                preset: manualH26xPreset(),
+                gop: Number(manualH26xGop()),
+                bframes: Number(manualH26xBframes()),
+              };
       const resp = await fetch("/v1/trainer/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -759,8 +760,10 @@ export default function App() {
           crossover_rate: Number(crossoverRate()),
           bitrate_min_kbps: Number(bitrateMinKbps()),
           bitrate_max_kbps: Number(bitrateMaxKbps()),
-          encoder_mode: encoderMode(),
+          encoder_mode: "single",
           encoders,
+          encoder_tuning_mode: encoderTuneMode(),
+          encoder_params: encoderParams,
           overlay: overlay(),
           hud_chart_mode: hudChartMode(),
           hud_font_preset: hudFontPreset(),
@@ -961,33 +964,68 @@ export default function App() {
                     </select>
                   </label>
 
-                  <label title="Single mode enforces one codec, multi mode explores all selected codecs.">
-                    Encoder mode
-                    <select value={encoderMode()} onInput={(e) => setEncoderMode(e.currentTarget.value)}>
-                      <option value="multi">multi</option>
-                      <option value="single">single</option>
+                  <label title="Select the single encoder to train for this run.">
+                    Encoder
+                    <select value={selectedEncoder()} onInput={(e) => setSelectedEncoder(e.currentTarget.value)}>
+                      <option value="h264">h264</option>
+                      <option value="h265">h265</option>
+                      <option value="mjpeg">mjpeg</option>
+                      <option value="rawpng">rawpng</option>
                     </select>
                   </label>
                 </div>
 
-                <div class="chip-row">
-                  <label class={`chip ${encH264() ? "on" : ""}`} title="H.264 is broadly compatible and usually stable.">
-                    <input type="checkbox" checked={encH264()} onInput={(e) => setEncH264(e.currentTarget.checked)} />
-                    h264
+                <div class="two-col">
+                  <label title="Auto uses trainer defaults/adaptation. Manual exposes encoder-specific knobs.">
+                    Encoder tuning
+                    <select value={encoderTuneMode()} onInput={(e) => setEncoderTuneMode(e.currentTarget.value)}>
+                      <option value="auto">auto</option>
+                      <option value="manual">manual</option>
+                    </select>
                   </label>
-                  <label class={`chip ${encH265() ? "on" : ""}`} title="H.265 can improve quality at same bitrate.">
-                    <input type="checkbox" checked={encH265()} onInput={(e) => setEncH265(e.currentTarget.checked)} />
-                    h265
-                  </label>
-                  <label class={`chip ${encRawpng() ? "on" : ""}`} title="Raw PNG path for diagnostics, heavy bandwidth usage.">
-                    <input type="checkbox" checked={encRawpng()} onInput={(e) => setEncRawpng(e.currentTarget.checked)} />
-                    rawpng
-                  </label>
-                  <label class={`chip ${encMjpeg() ? "on" : ""}`} title="MJPEG fallback path, useful for compatibility probes.">
-                    <input type="checkbox" checked={encMjpeg()} onInput={(e) => setEncMjpeg(e.currentTarget.checked)} />
-                    mjpeg
+                  <label title="Single-encoder flow is now mandatory for deterministic profile outputs.">
+                    Training profile mode
+                    <input value="single encoder profile" disabled />
                   </label>
                 </div>
+
+                <Show when={encoderTuneMode() === "manual"}>
+                  <div class="advanced-box">
+                    <Show when={selectedEncoder() === "h264" || selectedEncoder() === "h265"}>
+                      <div class="two-col">
+                        <label title="Encoder preset for H26x manual mode.">
+                          H26x preset
+                          <select value={manualH26xPreset()} onInput={(e) => setManualH26xPreset(e.currentTarget.value)}>
+                            <option value="ultrafast">ultrafast</option>
+                            <option value="fast">fast</option>
+                            <option value="balanced">balanced</option>
+                            <option value="quality">quality</option>
+                          </select>
+                        </label>
+                        <label title="Keyframe interval (frames).">
+                          GOP
+                          <input type="number" min="1" max="240" value={manualH26xGop()} onInput={(e) => setManualH26xGop(Number(e.currentTarget.value || 60))} />
+                        </label>
+                      </div>
+                      <label title="B-frames count (0 for low-latency).">
+                        B-frames
+                        <input type="number" min="0" max="4" value={manualH26xBframes()} onInput={(e) => setManualH26xBframes(Number(e.currentTarget.value || 0))} />
+                      </label>
+                    </Show>
+                    <Show when={selectedEncoder() === "mjpeg"}>
+                      <label title="MJPEG quality factor (higher = better quality, more bandwidth).">
+                        MJPEG quality
+                        <input type="number" min="1" max="100" value={manualMjpegQuality()} onInput={(e) => setManualMjpegQuality(Number(e.currentTarget.value || 85))} />
+                      </label>
+                    </Show>
+                    <Show when={selectedEncoder() === "rawpng"}>
+                      <label title="PNG compression level (0 fastest, 9 smallest).">
+                        PNG compression level
+                        <input type="number" min="0" max="9" value={manualPngCompression()} onInput={(e) => setManualPngCompression(Number(e.currentTarget.value || 4))} />
+                      </label>
+                    </Show>
+                  </div>
+                </Show>
 
                 <div class="slider-row">
                   <label title="Lower tested bitrate bound.">

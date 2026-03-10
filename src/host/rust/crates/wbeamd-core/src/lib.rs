@@ -1277,6 +1277,8 @@ impl DaemonCore {
             format!("/tmp/wbeam-trainer-overlay-{}-{}.txt", session_suffix, self.stream_port);
         let trainer_run_active = Path::new(&trainer_active_marker).exists();
         let trainer_overlay_active = Path::new(&trainer_overlay_file).exists();
+        let trainer_hud_burnin =
+            wbeam_setting_bool(&self.settings, "WBEAM_TRAINER_HUD_BURNIN", false);
 
         if capture_backend == "wayland_portal" && trainer_run_active {
             if use_rust_streamer {
@@ -1333,7 +1335,7 @@ impl DaemonCore {
                 .arg("/tmp/wbeam-frames")
                 .arg("--debug-fps")
                 .arg(cfg.debug_fps.to_string());
-            if trainer_overlay_active {
+            if trainer_overlay_active && trainer_hud_burnin {
                 cmd.env("WBEAM_OVERLAY_TEXT_FILE", &trainer_overlay_file);
             } else {
                 cmd.env_remove("WBEAM_OVERLAY_TEXT_FILE");
@@ -1404,7 +1406,7 @@ impl DaemonCore {
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
-            if trainer_overlay_active {
+            if trainer_overlay_active && trainer_hud_burnin {
                 cmd.env("WBEAM_OVERLAY_TEXT_FILE", &trainer_overlay_file);
             } else {
                 cmd.env_remove("WBEAM_OVERLAY_TEXT_FILE");

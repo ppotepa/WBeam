@@ -69,6 +69,8 @@ struct TrainerRun {
     bitrate_max_kbps: u32,
     encoder_mode: String,
     encoders: Vec<String>,
+    encoder_tuning_mode: String,
+    encoder_params: Value,
     hud_chart_mode: String,
     hud_font_preset: String,
     hud_layout: String,
@@ -100,8 +102,9 @@ struct TrainerStartRequest {
     crossover_rate: Option<f64>,
     bitrate_min_kbps: Option<u32>,
     bitrate_max_kbps: Option<u32>,
-    encoder_mode: Option<String>,
     encoders: Option<Vec<String>>,
+    encoder_tuning_mode: Option<String>,
+    encoder_params: Option<Value>,
     hud_chart_mode: Option<String>,
     hud_font_preset: Option<String>,
     hud_layout: Option<String>,
@@ -982,8 +985,9 @@ async fn post_trainer_start(
         crossover_rate: None,
         bitrate_min_kbps: None,
         bitrate_max_kbps: None,
-        encoder_mode: None,
         encoders: None,
+        encoder_tuning_mode: None,
+        encoder_params: None,
         hud_chart_mode: None,
         hud_font_preset: None,
         hud_layout: None,
@@ -1030,19 +1034,7 @@ async fn post_trainer_start(
         .bitrate_max_kbps
         .unwrap_or(200_000)
         .clamp(bitrate_min_kbps, 400_000);
-    let encoder_mode = req
-        .encoder_mode
-        .as_deref()
-        .unwrap_or("multi")
-        .trim()
-        .to_ascii_lowercase();
-    if !matches!(encoder_mode.as_str(), "single" | "multi") {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"ok": false, "error": "invalid encoder_mode (use single|multi)"})),
-        )
-            .into_response();
-    }
+    let encoder_mode = "single".to_string();
     let mut encoders = req
         .encoders
         .unwrap_or_else(|| vec!["h265".to_string(), "h264".to_string()])
@@ -1063,13 +1055,23 @@ async fn post_trainer_start(
         let mut seen = HashSet::new();
         encoders.retain(|enc| seen.insert(enc.clone()));
     }
-    if encoder_mode == "single" && encoders.len() != 1 {
+    if encoders.len() > 1 {
+        encoders = vec![encoders[0].clone()];
+    }
+    let encoder_tuning_mode = req
+        .encoder_tuning_mode
+        .as_deref()
+        .unwrap_or("auto")
+        .trim()
+        .to_ascii_lowercase();
+    if !matches!(encoder_tuning_mode.as_str(), "auto" | "manual") {
         return (
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"ok": false, "error": "single encoder_mode requires exactly one encoder"})),
+            Json(serde_json::json!({"ok": false, "error": "invalid encoder_tuning_mode (use auto|manual)"})),
         )
             .into_response();
     }
+    let encoder_params = req.encoder_params.unwrap_or(Value::Null);
     let hud_chart_mode = req
         .hud_chart_mode
         .as_deref()
@@ -1203,6 +1205,10 @@ async fn post_trainer_start(
         .arg(&encoder_mode)
         .arg("--encoders")
         .arg(encoders.join(","))
+        .arg("--encoder-tuning-mode")
+        .arg(&encoder_tuning_mode)
+        .arg("--encoder-params-json")
+        .arg(encoder_params.to_string())
         .arg("--overlay-chart")
         .arg(&hud_chart_mode)
         .arg("--overlay-layout")
@@ -1264,6 +1270,8 @@ async fn post_trainer_start(
         bitrate_max_kbps,
         encoder_mode: encoder_mode.clone(),
         encoders: encoders.clone(),
+        encoder_tuning_mode: encoder_tuning_mode.clone(),
+        encoder_params: encoder_params.clone(),
         hud_chart_mode: hud_chart_mode.clone(),
         hud_font_preset: hud_font_preset.clone(),
         hud_layout: hud_layout.clone(),
@@ -1294,6 +1302,8 @@ async fn post_trainer_start(
         "bitrate_max_kbps": run.bitrate_max_kbps,
         "encoder_mode": run.encoder_mode,
         "encoders": run.encoders,
+        "encoder_tuning_mode": run.encoder_tuning_mode.clone(),
+        "encoder_params": run.encoder_params.clone(),
         "hud_chart_mode": run.hud_chart_mode,
         "hud_font_preset": run.hud_font_preset.clone(),
         "hud_layout": run.hud_layout.clone(),
