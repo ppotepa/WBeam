@@ -987,3 +987,13 @@ Status: active
   - `bash -n redeploy-local redeploy_local redeply_local` -> OK
   - `./redeploy_local --help` -> OK
   - `./redeply_local --help` -> OK
+
+## In Progress (2026-03-10) [commit: 708e57df] - enforce single redeploy script path
+- Reverted wrapper aliases to remove naming ambiguity.
+- Removed:
+  - `./redeploy_local`
+  - `./redeply_local`
+- Canonical and only supported entrypoint is now:
+  - `./redeploy-local`
+- Validation:
+  - `bash -n redeploy-local` -> OK
