@@ -2002,3 +2002,23 @@ Status: active
   - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
   - `cd src/apps/trainer-tauri && npm run build` -> OK
   - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+
+## In Progress (2026-03-10) - Android WebView HUD (HTML table layer) for trainer
+- Replaced plain text-only trainer HUD rendering on Android with HTML/CSS overlay layer:
+  - added full-screen `WebView` (`perfHudWebView`) inside `perfHudPanel`,
+  - trainer HUD now renders as transparent table/grid-like overlay with bordered cells.
+- `MainActivity` trainer HUD pipeline:
+  - consumes host-provided `trainer_hud_text`,
+  - builds HTML view dynamically (`buildTrainerHudHtml`),
+  - parses ASCII-box rows into left/right table columns,
+  - prepends explicit progress block with bar (`TRAINING PROGRESS X%`) based on trial counters.
+- Runtime behavior:
+  - when trainer HUD is active, WebView overlay is shown and fallback `TextView` HUD is hidden,
+  - when trainer HUD is not active, app falls back to existing metrics text HUD logic.
+- Added safe WebView setup:
+  - JS disabled, file access disabled, transparent background, no overscroll bars.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK

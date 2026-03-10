@@ -32,6 +32,8 @@ import android.widget.SeekBar;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
 
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
@@ -153,6 +155,7 @@ public class MainActivity extends AppCompatActivity {
     private TextView bpsText;
     private TextView statsText;
     private TextView perfHudText;
+    private WebView perfHudWebView;
     private TextView debugInfoText;
     // ── Startup overlay ────────────────────────────────────────────────────────
     private TextView startupTitleText;
@@ -672,6 +675,7 @@ public class MainActivity extends AppCompatActivity {
         bpsText = findViewById(R.id.bpsText);
         statsText = findViewById(R.id.statsText);
         perfHudText = findViewById(R.id.perfHudText);
+        perfHudWebView = findViewById(R.id.perfHudWebView);
         debugInfoText = findViewById(R.id.debugInfoText);
         startupTitleText    = findViewById(R.id.startupTitle);
         startupSubtitleText = findViewById(R.id.startupSubtitle);
@@ -732,6 +736,25 @@ public class MainActivity extends AppCompatActivity {
         simpleFps120Button = findViewById(R.id.simpleFps120Button);
         simpleFps144Button = findViewById(R.id.simpleFps144Button);
         simpleApplyButton = findViewById(R.id.simpleApplyButton);
+        setupTrainerHudWebView();
+    }
+
+    private void setupTrainerHudWebView() {
+        if (perfHudWebView == null) {
+            return;
+        }
+        WebSettings settings = perfHudWebView.getSettings();
+        settings.setJavaScriptEnabled(false);
+        settings.setDomStorageEnabled(false);
+        settings.setAllowFileAccess(false);
+        settings.setBuiltInZoomControls(false);
+        settings.setDisplayZoomControls(false);
+        settings.setUseWideViewPort(true);
+        settings.setLoadWithOverviewMode(true);
+        perfHudWebView.setBackgroundColor(Color.TRANSPARENT);
+        perfHudWebView.setVerticalScrollBarEnabled(false);
+        perfHudWebView.setHorizontalScrollBarEnabled(false);
+        perfHudWebView.setOverScrollMode(View.OVER_SCROLL_NEVER);
     }
 
     private void bindStartupBuildVersion() {
@@ -1700,6 +1723,10 @@ public class MainActivity extends AppCompatActivity {
         if (perfHudText == null) {
             return;
         }
+        if (perfHudWebView != null) {
+            perfHudWebView.setVisibility(View.GONE);
+        }
+        perfHudText.setVisibility(View.VISIBLE);
         latestTargetFps = getSelectedFps();
         latestPresentFps = 0.0;
         latestStreamUptimeSec = 0L;
@@ -1735,6 +1762,10 @@ public class MainActivity extends AppCompatActivity {
             renderTrainerHudOverlay(trainerHudText);
             return;
         }
+        if (perfHudWebView != null) {
+            perfHudWebView.setVisibility(View.GONE);
+        }
+        perfHudText.setVisibility(View.VISIBLE);
 
         JSONObject kpi = metrics.optJSONObject("kpi");
         JSONObject latest = metrics.optJSONObject("latest_client_metrics");
@@ -1928,9 +1959,18 @@ public class MainActivity extends AppCompatActivity {
         }
 
         String progressLine = buildTrainerProgressLine(hudText);
-        String finalText = progressLine.isEmpty() ? hudText : progressLine + "\n" + hudText;
-        perfHudText.setText(finalText);
-        perfHudText.setTextColor(Color.parseColor("#B3EAF4FF"));
+        int progressPercent = parseTrainerProgressPercent(hudText);
+        if (perfHudWebView != null) {
+            String html = buildTrainerHudHtml(hudText, progressLine, progressPercent);
+            perfHudWebView.loadDataWithBaseURL(null, html, "text/html", "utf-8", null);
+            perfHudWebView.setVisibility(View.VISIBLE);
+            perfHudText.setVisibility(View.GONE);
+        } else {
+            String finalText = progressLine.isEmpty() ? hudText : progressLine + "\n" + hudText;
+            perfHudText.setText(finalText);
+            perfHudText.setTextColor(Color.parseColor("#B3EAF4FF"));
+            perfHudText.setVisibility(View.VISIBLE);
+        }
         if (perfHudPanel != null) {
             perfHudPanel.setAlpha(0.92f);
         }
@@ -1956,6 +1996,103 @@ public class MainActivity extends AppCompatActivity {
         }
         int pct = Math.max(0, Math.min(100, (int) Math.round((cur * 100.0) / total)));
         return String.format(Locale.US, "TRAINING PROGRESS %d%%  (trial %d/%d)", pct, cur, total);
+    }
+
+    private int parseTrainerProgressPercent(String hudText) {
+        Matcher matcher = TRAINER_TRIAL_PROGRESS_RE.matcher(hudText == null ? "" : hudText);
+        if (!matcher.find()) {
+            return -1;
+        }
+        try {
+            int cur = Integer.parseInt(matcher.group(1));
+            int total = Integer.parseInt(matcher.group(2));
+            if (cur <= 0 || total <= 0) {
+                return -1;
+            }
+            return Math.max(0, Math.min(100, (int) Math.round((cur * 100.0) / total)));
+        } catch (Exception ignored) {
+            return -1;
+        }
+    }
+
+    private String buildTrainerHudHtml(String hudText, String progressLine, int progressPercent) {
+        StringBuilder rows = new StringBuilder();
+        String[] lines = hudText.split("\n");
+        for (String raw : lines) {
+            String line = raw == null ? "" : raw.trim();
+            if (line.isEmpty()) {
+                continue;
+            }
+            if (line.startsWith("+") && line.endsWith("+")) {
+                rows.append("<tr class='sep'><td colspan='2'></td></tr>");
+                continue;
+            }
+            if (line.startsWith("|") && line.endsWith("|") && line.length() > 2) {
+                String content = line.substring(1, line.length() - 1).trim();
+                String[] parts = splitHudColumns(content);
+                rows.append("<tr><td class='left'>")
+                        .append(escapeHtml(parts[0]))
+                        .append("</td><td class='right'>")
+                        .append(escapeHtml(parts[1]))
+                        .append("</td></tr>");
+            } else {
+                rows.append("<tr><td class='single' colspan='2'>")
+                        .append(escapeHtml(line))
+                        .append("</td></tr>");
+            }
+        }
+        int safePct = progressPercent < 0 ? 0 : progressPercent;
+        String progressText = progressLine == null || progressLine.trim().isEmpty()
+                ? "TRAINING PROGRESS ..."
+                : progressLine.trim();
+        return "<!doctype html><html><head><meta charset='utf-8'/>"
+                + "<style>"
+                + "html,body{margin:0;padding:0;background:transparent;color:#d9fbff;font-family:'JetBrains Mono','IBM Plex Mono',monospace;font-size:11px;}"
+                + ".root{padding:8px;box-sizing:border-box;width:100vw;height:100vh;display:flex;flex-direction:column;gap:8px;}"
+                + ".progress{border:1px solid rgba(126,245,255,.45);background:rgba(2,20,24,.30);padding:6px 8px;}"
+                + ".p-label{font-size:11px;color:#b9f8ff;letter-spacing:.04em;}"
+                + ".p-track{margin-top:6px;height:7px;background:rgba(0,0,0,.35);border:1px solid rgba(126,245,255,.35);}"
+                + ".p-fill{height:100%;width:" + safePct + "%;background:linear-gradient(90deg,#60f2c2,#7dd3fc);}"
+                + "table{width:100%;border-collapse:collapse;table-layout:fixed;background:rgba(2,20,24,.22);}"
+                + "td{border:1px solid rgba(126,245,255,.28);padding:4px 6px;vertical-align:top;word-break:break-word;}"
+                + "td.left{width:58%;color:#dffcff;} td.right{width:42%;text-align:right;color:#b9f8ff;}"
+                + "td.single{color:#9ee8f2;text-align:left;}"
+                + "tr.sep td{height:2px;padding:0;border-left:0;border-right:0;border-bottom:0;border-top:1px solid rgba(126,245,255,.42);}"
+                + "</style></head><body><div class='root'>"
+                + "<div class='progress'><div class='p-label'>" + escapeHtml(progressText) + "</div><div class='p-track'><div class='p-fill'></div></div></div>"
+                + "<table>" + rows + "</table>"
+                + "</div></body></html>";
+    }
+
+    private String[] splitHudColumns(String content) {
+        if (content == null) {
+            return new String[]{"", ""};
+        }
+        int pivot = -1;
+        for (int i = 2; i < content.length() - 2; i++) {
+            if (content.charAt(i) == ' ' && content.charAt(i - 1) == ' ' && content.charAt(i + 1) == ' ') {
+                pivot = i;
+                break;
+            }
+        }
+        if (pivot < 0) {
+            return new String[]{content.trim(), ""};
+        }
+        String left = content.substring(0, pivot).trim();
+        String right = content.substring(pivot).trim();
+        return new String[]{left, right};
+    }
+
+    private String escapeHtml(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#39;");
     }
 
     private void refreshDebugInfoOverlay() {

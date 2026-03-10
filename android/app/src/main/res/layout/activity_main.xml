@@ -200,6 +200,13 @@
         android:orientation="vertical"
         android:padding="12dp">
 
+        <WebView
+            android:id="@+id/perfHudWebView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@android:color/transparent"
+            android:visibility="gone" />
+
         <TextView
             android:id="@+id/perfHudText"
             android:layout_width="match_parent"
