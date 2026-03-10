@@ -407,6 +407,18 @@ fn list_devices_basic() -> DevicesBasicResponse {
 
     match adb_devices() {
         Ok(serials) => {
+            let connected: HashSet<String> = serials.iter().cloned().collect();
+            let stale = port_map
+                .keys()
+                .filter(|serial| !connected.contains(*serial))
+                .cloned()
+                .collect::<Vec<_>>();
+            if !stale.is_empty() {
+                for serial in stale {
+                    port_map.remove(&serial);
+                }
+                port_map_changed = true;
+            }
             let mut devices = Vec::new();
             for (idx, serial) in serials.into_iter().enumerate() {
                 let snap = collect_device_snapshot(&serial);
@@ -617,6 +629,15 @@ fn daemon_stream_state_and_port(serial: &str, stream_port: Option<u16>) -> Optio
     }
     let body = String::from_utf8_lossy(&output.stdout);
     let json: Value = serde_json::from_str(&body).ok()?;
+    let target_serial = json
+        .get("target_serial")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .unwrap_or("");
+    // Ignore default/non-matching daemon sessions when querying per-device state.
+    if target_serial.is_empty() || target_serial != serial {
+        return None;
+    }
     let state = json
         .get("state")
         .and_then(|v| v.as_str())

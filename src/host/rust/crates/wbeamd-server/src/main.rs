@@ -169,6 +169,65 @@ impl SessionRegistry {
         core
     }
 
+    async fn resolve_core_readonly(
+        &self,
+        serial: Option<&str>,
+        requested_stream_port: Option<u16>,
+    ) -> Option<Arc<DaemonCore>> {
+        if let Some(raw) = serial {
+            let normalized = raw.trim();
+            if !normalized.is_empty() {
+                {
+                    let guard = self.serial_cores.lock().await;
+                    if let Some(existing) = guard.get(normalized) {
+                        return Some(existing.core.clone());
+                    }
+                }
+                if let Some(stream_port) = requested_stream_port.filter(|p| *p > 0) {
+                    if stream_port == self.base_stream_port {
+                        return Some(self.default_core.clone());
+                    }
+                    let guard = self.port_cores.lock().await;
+                    if let Some(existing) = guard.get(&stream_port) {
+                        return Some(existing.core.clone());
+                    }
+                }
+                return None;
+            }
+        }
+
+        if let Some(stream_port) = requested_stream_port.filter(|p| *p > 0) {
+            if stream_port == self.base_stream_port {
+                return Some(self.default_core.clone());
+            }
+            let guard = self.port_cores.lock().await;
+            if let Some(existing) = guard.get(&stream_port) {
+                return Some(existing.core.clone());
+            }
+            return None;
+        }
+
+        Some(self.default_core.clone())
+    }
+
+    fn default_core(&self) -> Arc<DaemonCore> {
+        self.default_core.clone()
+    }
+
+    async fn forget_core(&self, core: &Arc<DaemonCore>) {
+        if Arc::ptr_eq(core, &self.default_core) {
+            return;
+        }
+        {
+            let mut guard = self.serial_cores.lock().await;
+            guard.retain(|_, entry| !Arc::ptr_eq(&entry.core, core));
+        }
+        {
+            let mut guard = self.port_cores.lock().await;
+            guard.retain(|_, entry| !Arc::ptr_eq(&entry.core, core));
+        }
+    }
+
     async fn stop_all(&self) {
         let mut cores = vec![self.default_core.clone()];
         {
@@ -307,7 +366,11 @@ async fn get_status(
     Query(query): Query<SessionQuery>,
 ) -> impl IntoResponse {
     let serial = query.serial.as_deref();
-    let core = state.sessions.resolve_core(serial, query.stream_port).await;
+    let core = state
+        .sessions
+        .resolve_core_readonly(serial, query.stream_port)
+        .await
+        .unwrap_or_else(|| state.sessions.default_core());
     Json(core.status().await)
 }
 
@@ -316,7 +379,11 @@ async fn get_host_probe(
     Query(query): Query<SessionQuery>,
 ) -> impl IntoResponse {
     let serial = query.serial.as_deref();
-    let core = state.sessions.resolve_core(serial, query.stream_port).await;
+    let core = state
+        .sessions
+        .resolve_core_readonly(serial, query.stream_port)
+        .await
+        .unwrap_or_else(|| state.sessions.default_core());
     Json(core.host_probe().await)
 }
 
@@ -325,7 +392,11 @@ async fn get_health(
     Query(query): Query<SessionQuery>,
 ) -> impl IntoResponse {
     let serial = query.serial.as_deref();
-    let core = state.sessions.resolve_core(serial, query.stream_port).await;
+    let core = state
+        .sessions
+        .resolve_core_readonly(serial, query.stream_port)
+        .await
+        .unwrap_or_else(|| state.sessions.default_core());
     Json(core.health().await)
 }
 
@@ -334,7 +405,11 @@ async fn get_presets(
     Query(query): Query<SessionQuery>,
 ) -> impl IntoResponse {
     let serial = query.serial.as_deref();
-    let core = state.sessions.resolve_core(serial, query.stream_port).await;
+    let core = state
+        .sessions
+        .resolve_core_readonly(serial, query.stream_port)
+        .await
+        .unwrap_or_else(|| state.sessions.default_core());
     Json(core.presets().await)
 }
 
@@ -343,7 +418,11 @@ async fn get_metrics(
     Query(query): Query<SessionQuery>,
 ) -> impl IntoResponse {
     let serial = query.serial.as_deref();
-    let core = state.sessions.resolve_core(serial, query.stream_port).await;
+    let core = state
+        .sessions
+        .resolve_core_readonly(serial, query.stream_port)
+        .await
+        .unwrap_or_else(|| state.sessions.default_core());
     Json(core.metrics().await)
 }
 
@@ -372,7 +451,11 @@ async fn get_virtual_probe(
     Query(query): Query<SessionQuery>,
 ) -> impl IntoResponse {
     let serial = query.serial.as_deref();
-    let core = state.sessions.resolve_core(serial, query.stream_port).await;
+    let core = state
+        .sessions
+        .resolve_core_readonly(serial, query.stream_port)
+        .await
+        .unwrap_or_else(|| state.sessions.default_core());
     Json(core.virtual_probe().await)
 }
 
@@ -381,7 +464,11 @@ async fn get_virtual_doctor(
     Query(query): Query<SessionQuery>,
 ) -> impl IntoResponse {
     let serial = query.serial.as_deref();
-    let core = state.sessions.resolve_core(serial, query.stream_port).await;
+    let core = state
+        .sessions
+        .resolve_core_readonly(serial, query.stream_port)
+        .await
+        .unwrap_or_else(|| state.sessions.default_core());
     Json(core.virtual_doctor().await)
 }
 
@@ -415,9 +502,20 @@ async fn post_stop(
     Query(query): Query<SessionQuery>,
 ) -> impl IntoResponse {
     let serial = query.serial.as_deref();
-    let core = state.sessions.resolve_core(serial, query.stream_port).await;
+    let maybe_core = state
+        .sessions
+        .resolve_core_readonly(serial, query.stream_port)
+        .await;
+    if maybe_core.is_none() && serial.map(|s| !s.trim().is_empty()).unwrap_or(false) {
+        let resp = state.sessions.default_core().status().await;
+        return (StatusCode::OK, Json(resp)).into_response();
+    }
+    let core = maybe_core.unwrap_or_else(|| state.sessions.default_core());
     match core.stop().await {
-        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
+        Ok(resp) => {
+            state.sessions.forget_core(&core).await;
+            (StatusCode::OK, Json(resp)).into_response()
+        }
         Err(err) => core_error_response(core, err).await,
     }
 }

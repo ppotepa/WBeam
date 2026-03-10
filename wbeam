@@ -193,8 +193,8 @@ android_pipeline_min_sdk() {
 }
 
 detect_tether_ip() {
-  # Android USB tethering always uses 192.168.42.0/24 or 192.168.43.0/24
-  # (AOSP hardcoded).  Three ways to find the host's tether-side IP:
+  # Determine host address reachable from the currently targeted Android device.
+  # On old API levels `ip route` may be missing, so keep multiple probes.
   #
   # Priority 1 — ask the connected device for its default gateway.
   #   On USB tether this is the host address. We trust device route first,
@@ -205,18 +205,37 @@ detect_tether_ip() {
     gw="$(adb_device_cmd shell ip route 2>/dev/null \
           | awk '/^default/{for(i=1;i<=NF;i++){if($i=="via"){print $(i+1); exit}}}' \
           | tr -d '\r' || true)"
+    if [[ -z "$gw" ]]; then
+      # API17/legacy fallback (toolbox route).
+      gw="$(adb_device_cmd shell route -n 2>/dev/null \
+            | awk '$1=="0.0.0.0" || $1=="default"{print $2; exit}' \
+            | tr -d '\r' || true)"
+    fi
     if [[ -n "$gw" && "$gw" != "127."* ]]; then
       echo "$gw"; return 0
     fi
   fi
-  # Priority 2 — look for a host interface in the AOSP tether subnets.
+  # Priority 2 — look for a host interface in common USB-tether private ranges.
+  # Keep AOSP 192.168.42/43 first.
   local ip
   ip="$(ip -4 addr show 2>/dev/null \
         | awk '/inet 192\.168\.4[23]\./{gsub(/\/.*/, "", $2); print $2; exit}')"
   if [[ -n "$ip" ]]; then echo "$ip"; return 0; fi
-  # Priority 3 — USB gadget interface names: usb*, rndis*, enx*
+  # Priority 3 — USB-like interfaces with any private IPv4 (vendor subnets vary).
   ip="$(ip -4 addr show 2>/dev/null \
-        | awk '/^[0-9]+: (usb|rndis|enx)/{iface=1} iface && /inet /{gsub(/\/.*/, "", $2); print $2; iface=0; exit}')"
+        | awk '
+            /^[0-9]+: (usb|rndis|enx)/{iface=1; next}
+            iface && /inet /{
+              gsub(/\/.*/, "", $2);
+              if ($2 ~ /^10\./ || $2 ~ /^192\.168\./ || $2 ~ /^172\.(1[6-9]|2[0-9]|3[01])\./) {
+                print $2; exit
+              }
+              iface=0
+            }')"
+  if [[ -n "$ip" ]]; then echo "$ip"; return 0; fi
+  # Priority 4 — as a last resort, any USB-like interface IPv4.
+  ip="$(ip -4 addr show 2>/dev/null \
+        | awk '/^[0-9]+: (usb|rndis|enx)/{iface=1; next} iface && /inet /{gsub(/\/.*/, "", $2); print $2; exit}')"
   if [[ -n "$ip" ]]; then echo "$ip"; return 0; fi
   return 1
 }
