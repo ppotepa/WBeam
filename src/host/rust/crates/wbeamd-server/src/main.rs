@@ -983,8 +983,10 @@ async fn post_trainer_start(
     if encoders.is_empty() {
         encoders = vec!["h264".to_string()];
     }
-    encoders.sort();
-    encoders.dedup();
+    {
+        let mut seen = HashSet::new();
+        encoders.retain(|enc| seen.insert(enc.clone()));
+    }
     if encoder_mode == "single" && encoders.len() != 1 {
         return (
             StatusCode::BAD_REQUEST,

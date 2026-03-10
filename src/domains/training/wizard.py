@@ -1141,11 +1141,16 @@ def run_proto_autotune_engine(
         bitrate_values = [min(hi, max(lo, target_bitrate))]
 
     requested_encoders = [e for e in selected_encoders if e in {"h264", "h265"}]
-    if encoder_mode == "single" and requested_encoders:
-        requested_encoders = requested_encoders[:1]
+    effective_proto_encoder: str | None = None
     if requested_encoders:
-        force_h264 = requested_encoders[0] == "h264"
-        base_cfg["PROTO_H264"] = 1 if force_h264 else 0
+        if encoder_mode == "single":
+            effective_proto_encoder = requested_encoders[0]
+        elif "h265" in requested_encoders:
+            effective_proto_encoder = "h265"
+        elif "h264" in requested_encoders:
+            effective_proto_encoder = "h264"
+    if effective_proto_encoder:
+        base_cfg["PROTO_H264"] = 1 if effective_proto_encoder == "h264" else 0
     temp_base.write_text(json.dumps(base_cfg, indent=2) + "\n", encoding="utf-8")
 
     results_name = f"autotune-results-main-{stamp}.json"
@@ -1255,6 +1260,7 @@ def run_proto_autotune_engine(
         "crossover_rate": crossover_rate,
         "encoder_mode": encoder_mode,
         "selected_encoders": selected_encoders,
+        "effective_proto_encoder": effective_proto_encoder,
         "bitrate_min_kbps": bitrate_min_kbps,
         "bitrate_max_kbps": bitrate_max_kbps,
         "preflight": preflight,

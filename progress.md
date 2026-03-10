@@ -17,12 +17,17 @@
     - `bitrate_min_kbps`, `bitrate_max_kbps`,
     - `encoder_mode` (`single|multi`), `encoders[]`,
   - added validation/sanitization for mode and codec list,
+  - preserved encoder order from request (stable dedupe, no alphabetical reordering) so first codec remains priority codec,
   - wired all new parameters into wizard invocation and persisted run artifacts (`run.json` + in-memory run state).
 - Extended `src/domains/training/wizard.py` to accept and persist new runtime knobs:
   - new CLI args mirror server contract (GA + encoder mode/list + bitrate range),
   - live-api search space now filters/clamps encoders and bitrate ladder to requested range,
   - proto engine call now forwards GA controls (including crossover rate) and bitrate bounds,
-  - fixed proto temp config emission ordering so forced codec (`PROTO_H264`) is written before run.
+  - fixed proto temp config emission ordering so forced codec (`PROTO_H264`) is written before run,
+  - added explicit proto codec selection policy:
+    - `single` mode -> selected codec,
+    - `multi` mode -> prefers `h265`, fallback `h264`,
+    - persisted as `effective_proto_encoder` in run parameters.
 - Extended legacy autotune core (`src/domains/training/legacy_engine.py`):
   - added `--crossover-rate`,
   - generation crossover now uses configured probability (instead of hardcoded `0.50`),
