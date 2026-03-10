@@ -74,6 +74,31 @@ type Diagnostics = {
   runs_count: number;
 };
 
+type DatasetSummary = {
+  run_id: string;
+  profile_name: string;
+  status: string;
+  run_artifacts_dir: string;
+  has_run_json: boolean;
+  has_parameters: boolean;
+  has_profile: boolean;
+  has_preflight: boolean;
+  has_logs: boolean;
+  best_trial?: string | null;
+  best_score?: number | null;
+  last_recompute_at_unix_ms?: number | null;
+};
+
+type DatasetDetail = {
+  ok: boolean;
+  dataset: DatasetSummary;
+  run: Record<string, unknown>;
+  parameters: Record<string, unknown>;
+  profile: Record<string, unknown>;
+  preflight: Record<string, unknown>;
+  recompute: Record<string, unknown>;
+};
+
 type ProfileDetail = {
   ok: boolean;
   profile_name: string;
@@ -289,6 +314,10 @@ export default function App() {
   const [profiles, setProfiles] = createSignal<ProfileItem[]>([]);
   const [devices, setDevices] = createSignal<DeviceInfo[]>([]);
   const [diagnostics, setDiagnostics] = createSignal<Diagnostics | null>(null);
+  const [datasets, setDatasets] = createSignal<DatasetSummary[]>([]);
+  const [selectedDatasetRunId, setSelectedDatasetRunId] = createSignal("");
+  const [datasetDetail, setDatasetDetail] = createSignal<DatasetDetail | null>(null);
+  const [datasetActionText, setDatasetActionText] = createSignal("");
   const [tail, setTail] = createSignal<RunTail | null>(null);
   const [busyAction, setBusyAction] = createSignal("");
   const [lastError, setLastError] = createSignal("");
@@ -422,6 +451,45 @@ export default function App() {
     setDiagnostics(data);
   }
 
+  async function refreshDatasets() {
+    const data = await fetchJson<{ ok: boolean; datasets: DatasetSummary[] }>("/v1/trainer/datasets");
+    const items = data.datasets || [];
+    setDatasets(items);
+    if (!selectedDatasetRunId() && items.length > 0) {
+      setSelectedDatasetRunId(items[0].run_id);
+      await refreshDatasetDetail(items[0].run_id);
+    }
+  }
+
+  async function refreshDatasetDetail(runId: string) {
+    if (!runId) {
+      setDatasetDetail(null);
+      return;
+    }
+    const data = await fetchJson<DatasetDetail>(`/v1/trainer/datasets/${encodeURIComponent(runId)}`);
+    setDatasetDetail(data);
+  }
+
+  async function runDatasetFindOptimal(runId: string) {
+    await withUiGuard("Recomputing dataset winner", async () => {
+      if (!runId) {
+        throw new Error("Select dataset first.");
+      }
+      const resp = await fetch(`/v1/trainer/datasets/${encodeURIComponent(runId)}/find-optimal`, {
+        method: "POST",
+      });
+      const body = (await resp.json()) as Record<string, unknown>;
+      if (!resp.ok) {
+        throw new Error(String(body.error || "find-optimal failed"));
+      }
+      const bestTrial = String(body.best_trial || "unknown");
+      const bestScore = Number(body.best_score || 0);
+      setDatasetActionText(`recompute done: best=${bestTrial} score=${bestScore.toFixed(2)}`);
+      await refreshDatasets();
+      await refreshDatasetDetail(runId);
+    });
+  }
+
   async function refreshTail() {
     const run = activeRun();
     if (!run) {
@@ -533,6 +601,7 @@ export default function App() {
       await refreshProfiles();
       await refreshDevices();
       await refreshDiagnostics();
+      await refreshDatasets();
       await refreshTail();
     });
     pollId = window.setInterval(async () => {
@@ -541,6 +610,7 @@ export default function App() {
         await refreshRuns();
         await refreshDevices();
         if (tab() === "profiles" || tab() === "compare") await refreshProfiles();
+        if (tab() === "datasets") await refreshDatasets();
         if (tab() === "live" || tab() === "runs" || runningRuns().length > 0) await refreshTail();
         if (tab() === "diagnostics") await refreshDiagnostics();
       } catch (err) {
@@ -1048,9 +1118,10 @@ export default function App() {
           <Show when={tab() === "datasets"}>
             <article class="panel card">
               <h2>Datasets</h2>
-              <p class="hint">
-                Current backend stores datasets per run artifact directory. This view maps dataset entries from known runs.
-              </p>
+              <p class="hint">Datasets expose run artifacts and allow deterministic `Find Optimal Best` recompute.</p>
+              <Show when={datasetActionText()}>
+                <div class="busy-banner">{datasetActionText()}</div>
+              </Show>
               <div class="table-wrap">
                 <table>
                   <thead>
@@ -1058,25 +1129,70 @@ export default function App() {
                       <th>Run ID</th>
                       <th>Profile</th>
                       <th>Status</th>
+                      <th>Best</th>
+                      <th>Recompute</th>
                       <th>Artifacts</th>
-                      <th>Log</th>
+                      <th>Action</th>
                     </tr>
                   </thead>
                   <tbody>
-                    <For each={runs()}>
+                    <For each={datasets()}>
                       {(item) => (
-                        <tr>
-                          <td class="mono">{item.run_id}</td>
+                        <tr class={selectedDatasetRunId() === item.run_id ? "selected-row" : ""}>
+                          <td class="mono">
+                            <button
+                              class="link-btn"
+                              onClick={() => {
+                                setSelectedDatasetRunId(item.run_id);
+                                void refreshDatasetDetail(item.run_id);
+                              }}
+                            >
+                              {item.run_id}
+                            </button>
+                          </td>
                           <td>{item.profile_name}</td>
                           <td>{item.status}</td>
+                          <td>
+                            {item.best_trial || "-"}{" "}
+                            {typeof item.best_score === "number" ? `(${item.best_score.toFixed(2)})` : ""}
+                          </td>
+                          <td>{formatTs(item.last_recompute_at_unix_ms || undefined)}</td>
                           <td class="mono">{item.run_artifacts_dir}</td>
-                          <td class="mono">{item.log_path}</td>
+                          <td>
+                            <button
+                              class="primary"
+                              disabled={!!busyAction() || !item.has_parameters}
+                              onClick={() => void runDatasetFindOptimal(item.run_id)}
+                            >
+                              Find Optimal Best
+                            </button>
+                          </td>
                         </tr>
                       )}
                     </For>
                   </tbody>
                 </table>
               </div>
+              <Show when={datasetDetail()}>
+                <div class="meta-grid">
+                  <div class="meta-item">
+                    <strong>Dataset run</strong>
+                    <span class="mono">{datasetDetail()!.dataset.run_id}</span>
+                  </div>
+                  <div class="meta-item">
+                    <strong>Has parameters</strong>
+                    <span>{datasetDetail()!.dataset.has_parameters ? "yes" : "no"}</span>
+                  </div>
+                  <div class="meta-item">
+                    <strong>Has preflight</strong>
+                    <span>{datasetDetail()!.dataset.has_preflight ? "yes" : "no"}</span>
+                  </div>
+                  <div class="meta-item">
+                    <strong>Has logs</strong>
+                    <span>{datasetDetail()!.dataset.has_logs ? "yes" : "no"}</span>
+                  </div>
+                </div>
+              </Show>
             </article>
           </Show>
 

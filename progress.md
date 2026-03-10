@@ -1,5 +1,34 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending, branch `trainerv2`) - Datasets API wired end-to-end in trainer UI
+- Added real dataset API support in Rust host daemon (`wbeamd-server`):
+  - new responses/models:
+    - `TrainerDatasetSummary`,
+    - `TrainerDatasetsResponse`,
+    - `TrainerDatasetDetailResponse`,
+    - `TrainerDatasetRecomputeResponse`,
+  - new endpoints (both plain and `/v1` namespaced):
+    - `GET /trainer/datasets`,
+    - `GET /trainer/datasets/{run_id}`,
+    - `POST /trainer/datasets/{run_id}/find-optimal`,
+  - `find-optimal` now performs deterministic ranking from `parameters.json` (`results[]` sorted by score), writes `recompute.json`, and returns best trial/score + alternatives.
+- Wired datasets flow in trainer desktop app (`src/apps/trainer-tauri/src/App.tsx`):
+  - added dataset state, detail state, and recompute action state,
+  - added API calls:
+    - refresh datasets list,
+    - load dataset detail,
+    - trigger `Find Optimal Best`,
+  - upgraded `Datasets` tab from runs mirror to actual dataset-backed view with:
+    - selected dataset row,
+    - best trial and score,
+    - last recompute timestamp,
+    - action button (`Find Optimal Best`) with busy-state handling,
+    - basic dataset detail summary cards.
+- Verification:
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK,
+  - `cd src/apps/trainer-tauri && npm ci && npm run build` -> OK,
+  - `python3 -m py_compile src/domains/training/wizard.py` -> OK.
+
 ## Session Update (2026-03-10, pending, branch `trainerv2`) - Trainer UI implementation pass + richer Android training HUD
 - Implemented a substantial trainer desktop UI pass in `src/apps/trainer-tauri`:
   - rewrote `src/apps/trainer-tauri/src/App.tsx` into a workstation-style shell with:

@@ -199,6 +199,49 @@ struct TrainerDiagnosticsResponse {
     runs_count: usize,
 }
 
+#[derive(Debug, Serialize)]
+struct TrainerDatasetSummary {
+    run_id: String,
+    profile_name: String,
+    status: String,
+    run_artifacts_dir: String,
+    has_run_json: bool,
+    has_parameters: bool,
+    has_profile: bool,
+    has_preflight: bool,
+    has_logs: bool,
+    best_trial: Option<String>,
+    best_score: Option<f64>,
+    last_recompute_at_unix_ms: Option<u128>,
+}
+
+#[derive(Debug, Serialize)]
+struct TrainerDatasetsResponse {
+    ok: bool,
+    datasets: Vec<TrainerDatasetSummary>,
+}
+
+#[derive(Debug, Serialize)]
+struct TrainerDatasetDetailResponse {
+    ok: bool,
+    dataset: TrainerDatasetSummary,
+    run: Value,
+    parameters: Value,
+    profile: Value,
+    preflight: Value,
+    recompute: Value,
+}
+
+#[derive(Debug, Serialize)]
+struct TrainerDatasetRecomputeResponse {
+    ok: bool,
+    run_id: String,
+    best_trial: String,
+    best_score: f64,
+    alternatives: Vec<Value>,
+    output_path: String,
+}
+
 struct TrainerState {
     root: PathBuf,
     control_port: u16,
@@ -556,6 +599,12 @@ async fn main() {
         .route("/trainer/runs/{run_id}/tail", get(get_trainer_run_tail))
         .route("/trainer/profiles", get(get_trainer_profiles))
         .route("/trainer/profiles/{profile_name}", get(get_trainer_profile))
+        .route("/trainer/datasets", get(get_trainer_datasets))
+        .route("/trainer/datasets/{run_id}", get(get_trainer_dataset))
+        .route(
+            "/trainer/datasets/{run_id}/find-optimal",
+            post(post_trainer_dataset_find_optimal),
+        )
         .route("/trainer/devices", get(get_trainer_devices))
         .route("/trainer/diagnostics", get(get_trainer_diagnostics))
         .route("/v1/status", get(get_status))
@@ -581,6 +630,12 @@ async fn main() {
         .route(
             "/v1/trainer/profiles/{profile_name}",
             get(get_trainer_profile),
+        )
+        .route("/v1/trainer/datasets", get(get_trainer_datasets))
+        .route("/v1/trainer/datasets/{run_id}", get(get_trainer_dataset))
+        .route(
+            "/v1/trainer/datasets/{run_id}/find-optimal",
+            post(post_trainer_dataset_find_optimal),
         )
         .route("/v1/trainer/devices", get(get_trainer_devices))
         .route("/v1/trainer/diagnostics", get(get_trainer_diagnostics))
@@ -1416,6 +1471,184 @@ async fn get_trainer_profile(
         preflight: read_json_value(&preflight_path),
     };
     (StatusCode::OK, Json(resp)).into_response()
+}
+
+fn trainer_dataset_summary_from_run(run: &TrainerRun) -> TrainerDatasetSummary {
+    let run_dir = PathBuf::from(&run.run_artifacts_dir);
+    let run_json = run_dir.join("run.json");
+    let params_path = run_dir.join("parameters.json");
+    let profile_name = sanitize_profile_name(&run.profile_name);
+    let profile_path = run_dir.join(format!("{profile_name}.json"));
+    let preflight_path = run_dir.join("preflight.json");
+    let logs_path = run_dir.join("logs.txt");
+    let recompute_path = run_dir.join("recompute.json");
+    let parameters = read_json_value(&params_path);
+    let best_trial = parameters
+        .get("best")
+        .and_then(|v| v.get("trial_id"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let best_score = parameters
+        .get("best")
+        .and_then(|v| v.get("score"))
+        .and_then(|v| v.as_f64());
+    let last_recompute_at_unix_ms = fs::metadata(&recompute_path)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis());
+    TrainerDatasetSummary {
+        run_id: run.run_id.clone(),
+        profile_name: run.profile_name.clone(),
+        status: run.status.clone(),
+        run_artifacts_dir: run.run_artifacts_dir.clone(),
+        has_run_json: run_json.exists(),
+        has_parameters: params_path.exists(),
+        has_profile: profile_path.exists(),
+        has_preflight: preflight_path.exists(),
+        has_logs: logs_path.exists(),
+        best_trial,
+        best_score,
+        last_recompute_at_unix_ms,
+    }
+}
+
+async fn get_trainer_datasets(State(state): State<AppState>) -> impl IntoResponse {
+    let runs_map = state.trainer.runs.lock().await;
+    let mut datasets: Vec<TrainerDatasetSummary> = runs_map
+        .values()
+        .map(trainer_dataset_summary_from_run)
+        .collect();
+    datasets.sort_by(|a, b| b.run_id.cmp(&a.run_id));
+    (
+        StatusCode::OK,
+        Json(TrainerDatasetsResponse { ok: true, datasets }),
+    )
+        .into_response()
+}
+
+async fn get_trainer_dataset(
+    State(state): State<AppState>,
+    AxPath(run_id): AxPath<String>,
+) -> impl IntoResponse {
+    let run = {
+        let runs = state.trainer.runs.lock().await;
+        runs.get(run_id.as_str()).cloned()
+    };
+    let Some(run) = run else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"ok": false, "error": "dataset run not found"})),
+        )
+            .into_response();
+    };
+    let run_dir = PathBuf::from(&run.run_artifacts_dir);
+    let profile_name = sanitize_profile_name(&run.profile_name);
+    let detail = TrainerDatasetDetailResponse {
+        ok: true,
+        dataset: trainer_dataset_summary_from_run(&run),
+        run: read_json_value(&run_dir.join("run.json")),
+        parameters: read_json_value(&run_dir.join("parameters.json")),
+        profile: read_json_value(&run_dir.join(format!("{profile_name}.json"))),
+        preflight: read_json_value(&run_dir.join("preflight.json")),
+        recompute: read_json_value(&run_dir.join("recompute.json")),
+    };
+    (StatusCode::OK, Json(detail)).into_response()
+}
+
+async fn post_trainer_dataset_find_optimal(
+    State(state): State<AppState>,
+    AxPath(run_id): AxPath<String>,
+) -> impl IntoResponse {
+    let run = {
+        let runs = state.trainer.runs.lock().await;
+        runs.get(run_id.as_str()).cloned()
+    };
+    let Some(run) = run else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"ok": false, "error": "dataset run not found"})),
+        )
+            .into_response();
+    };
+    let run_dir = PathBuf::from(&run.run_artifacts_dir);
+    let parameters = read_json_value(&run_dir.join("parameters.json"));
+    let Some(results) = parameters.get("results").and_then(|v| v.as_array()) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"ok": false, "error": "dataset has no results[] in parameters.json"})),
+        )
+            .into_response();
+    };
+    if results.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"ok": false, "error": "dataset results[] is empty"})),
+        )
+            .into_response();
+    }
+
+    let mut ranked = results.clone();
+    ranked.sort_by(|a, b| {
+        let ascore = a.get("score").and_then(|v| v.as_f64()).unwrap_or(-1e9);
+        let bscore = b.get("score").and_then(|v| v.as_f64()).unwrap_or(-1e9);
+        bscore
+            .partial_cmp(&ascore)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let best = ranked[0].clone();
+    let best_trial = best
+        .get("trial_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+    let best_score = best.get("score").and_then(|v| v.as_f64()).unwrap_or(-999.0);
+    let alternatives: Vec<Value> = ranked.into_iter().skip(1).take(4).collect();
+    let now_ms = now_unix_ms();
+    let recompute_doc = serde_json::json!({
+        "ok": true,
+        "run_id": run.run_id,
+        "recomputed_at_unix_ms": now_ms,
+        "method": "deterministic_sort_by_score",
+        "best_trial": best_trial,
+        "best_score": best_score,
+        "best": best,
+        "alternatives": alternatives,
+    });
+    let output_path = run_dir.join("recompute.json");
+    if let Err(err) = fs::write(
+        &output_path,
+        serde_json::to_vec_pretty(&recompute_doc).unwrap_or_default(),
+    ) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"ok": false, "error": format!("failed to write recompute file: {err}")})),
+        )
+            .into_response();
+    }
+    (
+        StatusCode::OK,
+        Json(TrainerDatasetRecomputeResponse {
+            ok: true,
+            run_id: run.run_id,
+            best_trial: recompute_doc
+                .get("best_trial")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string(),
+            best_score: recompute_doc
+                .get("best_score")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(best_score),
+            alternatives: recompute_doc
+                .get("alternatives")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default(),
+            output_path: output_path.to_string_lossy().to_string(),
+        }),
+    )
+        .into_response()
 }
 
 async fn core_error_response(core: Arc<DaemonCore>, err: CoreError) -> axum::response::Response {
