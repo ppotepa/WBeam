@@ -2305,3 +2305,19 @@ Status: active
   - `python3 -m py_compile src/domains/training/wizard.py` -> OK
   - `cd src/host/rust && cargo check -p wbeamd-streamer -p wbeamd-server` -> OK
   - `cd src/apps/trainer-tauri && npm run build` -> OK
+
+## In Progress (2026-03-11) - Backend documentation for pipeline audit
+- Added comprehensive backend audit document: `backend.md`.
+- Scope covered:
+  - full runtime architecture (orchestration, daemon/core/api, streamer, Android decode),
+  - end-to-end connect/start/apply/metrics loop,
+  - encoder/backend selection and current runtime clamps,
+  - training/trainer API flow and artifact model,
+  - high-risk stability/quality gap hypotheses,
+  - practical improvement roadmap,
+  - code-map by subsystem for deep external review,
+  - copy/paste prompt-ready investigation brief for third-party pipeline assessment.
+- Purpose:
+  - provide a single technical source to evaluate pipeline correctness,
+  - highlight likely artifact/stability root causes,
+  - accelerate structured external review and benchmarking.
