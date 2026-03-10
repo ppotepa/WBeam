@@ -490,6 +490,43 @@ h1 {
   font-size: 0.67rem;
 }
 
+.mode-option-check {
+  border: 1px solid #2f445a;
+  border-radius: 8px;
+  background: #132338;
+  padding: 0.55rem;
+}
+
+.mode-option-check.disabled {
+  opacity: 0.62;
+}
+
+.checkbox-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  cursor: pointer;
+}
+
+.checkbox-option.disabled {
+  cursor: not-allowed;
+}
+
+.checkbox-option input {
+  margin-top: 0.12rem;
+}
+
+.checkbox-option span {
+  display: grid;
+  gap: 0.12rem;
+  font-size: 0.74rem;
+}
+
+.checkbox-option small {
+  color: #a3b7cd;
+  font-size: 0.67rem;
+}
+
 .connect-modal-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;

@@ -678,6 +678,7 @@ fn daemon_post_action(
             let mode_param = match normalized.as_str() {
                 "duplicate" => Some("duplicate"),
                 "virtual" | "virtual_monitor" => Some("virtual_monitor"),
+                "virtual_mirror" | "virtual-duplicate" | "virtual_duplicate" => Some("virtual_mirror"),
                 _ => None,
             };
             if let Some(mode_param) = mode_param {
@@ -1422,6 +1423,9 @@ fn device_connect(
     if normalized_mode != "duplicate"
         && normalized_mode != "virtual"
         && normalized_mode != "virtual_monitor"
+        && normalized_mode != "virtual_mirror"
+        && normalized_mode != "virtual-duplicate"
+        && normalized_mode != "virtual_duplicate"
     {
         let msg = format!("Unsupported display mode: {normalized_mode}");
         ui_service_log(
@@ -1443,7 +1447,12 @@ fn device_connect(
         ),
     );
     connect_log(&serial, effective_stream_port, "device_connect begin");
-    if normalized_mode == "virtual" || normalized_mode == "virtual_monitor" {
+    let is_virtual_mode = normalized_mode == "virtual"
+        || normalized_mode == "virtual_monitor"
+        || normalized_mode == "virtual_mirror"
+        || normalized_mode == "virtual-duplicate"
+        || normalized_mode == "virtual_duplicate";
+    if is_virtual_mode {
         let doctor = virtual_doctor(Some(serial.clone()), Some(effective_stream_port))?;
         if !doctor.ok {
             let msg = if !doctor.install_hint.trim().is_empty() {

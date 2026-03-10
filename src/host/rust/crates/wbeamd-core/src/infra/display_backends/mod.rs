@@ -9,6 +9,7 @@ mod windows;
 pub enum DisplayMode {
     Duplicate,
     VirtualMonitor,
+    VirtualMirror,
 }
 
 impl DisplayMode {
@@ -16,6 +17,7 @@ impl DisplayMode {
         match self {
             Self::Duplicate => "duplicate",
             Self::VirtualMonitor => "virtual_monitor",
+            Self::VirtualMirror => "virtual_mirror",
         }
     }
 
@@ -55,6 +57,7 @@ pub struct VirtualMonitorProbe {
 pub fn normalize_requested_mode(mode: Option<&str>) -> DisplayMode {
     match mode.unwrap_or("duplicate").trim().to_lowercase().as_str() {
         "virtual" | "virtual_monitor" => DisplayMode::VirtualMonitor,
+        "virtual_mirror" | "virtual-duplicate" | "virtual_duplicate" => DisplayMode::VirtualMirror,
         _ => DisplayMode::Duplicate,
     }
 }

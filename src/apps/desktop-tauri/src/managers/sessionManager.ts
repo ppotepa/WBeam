@@ -201,7 +201,7 @@ export function createSessionManager(api: HostApiManager) {
 
   async function connectDevice(
     device: DeviceBasic,
-    displayMode: "virtual_monitor" | "duplicate",
+    displayMode: "virtual_monitor" | "virtual_mirror" | "duplicate",
   ) {
     const key = `${device.serial}:connect`;
     setDeviceActionBusy((prev) => (prev.includes(key) ? prev : [...prev, key]));

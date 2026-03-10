@@ -16,6 +16,8 @@ pub fn activate(
 ) -> Result<Activation, ActivationError> {
     match mode {
         DisplayMode::Duplicate => duplicate::activate(host_probe),
-        DisplayMode::VirtualMonitor => virtual_monitor::activate(host_probe, serial_hint, size),
+        DisplayMode::VirtualMonitor | DisplayMode::VirtualMirror => {
+            virtual_monitor::activate(host_probe, mode, serial_hint, size)
+        }
     }
 }

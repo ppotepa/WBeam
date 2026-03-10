@@ -1,5 +1,25 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending) - GUI checkbox for experimental virtual duplication (virtual mirror)
+- Added desktop connect-modal checkbox:
+  - label: `Use experimental duplication (virtual mirror)`,
+  - visible in connect dialog and enabled only for X11 real-output resolver (`linux_x11_real_output`),
+  - persisted per device serial in localStorage.
+- Added new connect mode plumbing:
+  - frontend/session/backend now support `virtual_mirror` mode in addition to `virtual_monitor` and `duplicate`,
+  - Tauri backend accepts aliases `virtual-duplicate` / `virtual_duplicate` and maps them to host `display_mode=virtual_mirror`.
+- Host core display backend now supports new `DisplayMode::VirtualMirror`:
+  - routed as virtual mode (not duplicate fallback),
+  - X11 virtual backend receives mirror intent.
+- X11 real-output backend behavior:
+  - when mirror mode is requested and primary output exists, virtual output is activated with `xrandr --same-as <primary>`,
+  - mirrored geometry is now accepted in this mode (previously treated as error),
+  - if mirror is requested but not achieved, host logs a warning.
+- Validation:
+  - `cd src/apps/desktop-tauri && npm run build` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-core` -> OK
+  - `cd src/apps/desktop-tauri/src-tauri && cargo check` -> OK
+
 ## Session Update (2026-03-10, pending) - autotune: default capture size auto-detected from target device
 - Updated `proto/autotune.py` so `--capture-size` is now truly optional:
   - when `--capture-size` is omitted, autotune auto-detects full physical device resolution via ADB (`wm size`, fallback `dumpsys display`),

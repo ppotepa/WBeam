@@ -41,6 +41,7 @@ function DeviceTypeIcon(props: { type: string }) {
 
 type DisplayMode = "virtual_monitor" | "duplicate";
 const CONNECT_MODE_STORAGE_KEY = "wbeam.connect.mode.by.serial";
+const EXPERIMENTAL_DUPLICATION_STORAGE_KEY = "wbeam.connect.experimental.dup.by.serial";
 
 function loadSavedDisplayMode(serial: string): DisplayMode | null {
   try {
@@ -69,6 +70,28 @@ function saveDisplayMode(serial: string, mode: DisplayMode): void {
   }
 }
 
+function loadSavedExperimentalDuplication(serial: string): boolean {
+  try {
+    const raw = localStorage.getItem(EXPERIMENTAL_DUPLICATION_STORAGE_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return parsed?.[serial] === true;
+  } catch {
+    return false;
+  }
+}
+
+function saveExperimentalDuplication(serial: string, enabled: boolean): void {
+  try {
+    const raw = localStorage.getItem(EXPERIMENTAL_DUPLICATION_STORAGE_KEY);
+    const parsed = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+    parsed[serial] = enabled;
+    localStorage.setItem(EXPERIMENTAL_DUPLICATION_STORAGE_KEY, JSON.stringify(parsed));
+  } catch {
+    // Ignore localStorage failures.
+  }
+}
+
 export default function App() {
   const api = new HostApiManager();
   const session = createSessionManager(api);
@@ -79,6 +102,7 @@ export default function App() {
   const [connectDialogDoctor, setConnectDialogDoctor] = createSignal<VirtualDoctor | null>(null);
   const [connectDialogDoctorLoading, setConnectDialogDoctorLoading] = createSignal(false);
   const [connectDialogBlockReason, setConnectDialogBlockReason] = createSignal("");
+  const [connectDialogExperimentalDuplication, setConnectDialogExperimentalDuplication] = createSignal(false);
   const [virtualStartupDoctor, setVirtualStartupDoctor] = createSignal<VirtualDoctor | null>(null);
   const [virtualSetupVisible, setVirtualSetupVisible] = createSignal(false);
   const [virtualSetupInstalling, setVirtualSetupInstalling] = createSignal(false);
@@ -163,6 +187,7 @@ export default function App() {
     }
     const saved = loadSavedDisplayMode(device.serial);
     setConnectDialogMode(saved ?? "virtual_monitor");
+    setConnectDialogExperimentalDuplication(loadSavedExperimentalDuplication(device.serial));
     setConnectDialogDoctor(null);
     setConnectDialogDoctorLoading(true);
     setConnectDialogBlockReason(connectDisabledReason(device));
@@ -184,6 +209,7 @@ export default function App() {
     setConnectDialogDoctor(null);
     setConnectDialogDoctorLoading(false);
     setConnectDialogBlockReason("");
+    setConnectDialogExperimentalDuplication(false);
   }
 
   async function confirmConnect(): Promise<void> {
@@ -197,7 +223,7 @@ export default function App() {
     }
     try {
       let chosenMode = connectDialogMode();
-      let backendMode: "virtual_monitor" | "duplicate" = "duplicate";
+      let backendMode: "virtual_monitor" | "virtual_mirror" | "duplicate" = "duplicate";
       if (chosenMode === "virtual_monitor") {
         const doctor = connectDialogDoctor() ?? await api.getVirtualDoctor(device);
         if (!isVirtualMonitorAvailable(doctor)) {
@@ -206,9 +232,12 @@ export default function App() {
           );
           return;
         }
-        backendMode = "virtual_monitor";
+        const experimentalDuplicationEnabled = connectDialogExperimentalDuplication()
+          && doctor.resolver === "linux_x11_real_output";
+        backendMode = experimentalDuplicationEnabled ? "virtual_mirror" : "virtual_monitor";
       }
       saveDisplayMode(device.serial, chosenMode);
+      saveExperimentalDuplication(device.serial, connectDialogExperimentalDuplication());
       closeConnectDialog();
       await session.connectDevice(device, backendMode);
     } catch (err) {
@@ -568,6 +597,7 @@ export default function App() {
           const virtualMonitorSelected = () => connectDialogMode() === "virtual_monitor";
           const doctor = () => connectDialogDoctor();
           const virtualMonitorAvailable = () => isVirtualMonitorAvailable(doctor() ?? null);
+          const canUseExperimentalDuplication = () => doctor()?.resolver === "linux_x11_real_output";
           const virtualMonitorHint = () => {
             if (!virtualMonitorAvailable()) return "Not implemented for current host session yet.";
             if (doctor()?.resolver === "linux_x11_monitor_object_experimental") {
@@ -607,6 +637,22 @@ export default function App() {
                     <small>Works with current host backend.</small>
                   </span>
                 </label>
+                <div class={`mode-option-check ${virtualMonitorSelected() ? "" : "disabled"}`}>
+                  <label class={`checkbox-option ${canUseExperimentalDuplication() ? "" : "disabled"}`}>
+                    <input
+                      type="checkbox"
+                      checked={connectDialogExperimentalDuplication()}
+                      disabled={!virtualMonitorSelected() || !canUseExperimentalDuplication()}
+                      onChange={(event) => setConnectDialogExperimentalDuplication(event.currentTarget.checked)}
+                    />
+                    <span>
+                      Use experimental duplication (virtual mirror)
+                      <small>
+                        Creates a virtual monitor and mirrors primary output before streaming (X11 real-output only).
+                      </small>
+                    </span>
+                  </label>
+                </div>
                 <Show when={connectDialogDoctorLoading()}>
                   <p class="setup-message">Checking host capabilities...</p>
                 </Show>

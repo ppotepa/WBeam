@@ -1,5 +1,5 @@
 use super::super::super::super::{host_probe::HostProbe, x11_backend};
-use super::super::super::{Activation, ActivationError, RuntimeHandle, VirtualMonitorProbe};
+use super::super::super::{Activation, ActivationError, DisplayMode, RuntimeHandle, VirtualMonitorProbe};
 use tracing::info;
 
 pub fn probe(host_probe: &HostProbe) -> VirtualMonitorProbe {
@@ -50,9 +50,11 @@ pub fn probe(host_probe: &HostProbe) -> VirtualMonitorProbe {
 
 pub fn activate(
     host_probe: &HostProbe,
+    mode: DisplayMode,
     serial_hint: &str,
     size: &str,
 ) -> Result<Activation, ActivationError> {
+    let mirror_to_primary = matches!(mode, DisplayMode::VirtualMirror);
     let mut errors = Vec::new();
     for backend in x11_backend::backends_for_virtual_monitor() {
         let probe = backend.probe(host_probe);
@@ -61,11 +63,12 @@ pub fn activate(
             continue;
         }
 
-        match backend.create(serial_hint, size) {
+        match backend.create(serial_hint, size, mirror_to_primary) {
             Ok(x11_backend::BackendHandle::RealOutput(handle)) => {
                 info!(
                     serial = serial_hint,
                     backend = backend.key(),
+                    mirror_to_primary = mirror_to_primary,
                     output = %handle.output_name,
                     x = handle.x,
                     y = handle.y,
@@ -84,6 +87,7 @@ pub fn activate(
                 info!(
                     serial = serial_hint,
                     backend = backend.key(),
+                    mirror_to_primary = mirror_to_primary,
                     monitor = %handle.name,
                     x = handle.x,
                     y = handle.y,

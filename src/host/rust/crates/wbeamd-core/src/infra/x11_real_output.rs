@@ -349,7 +349,7 @@ fn is_evdi_loaded() -> bool {
         .unwrap_or(false)
 }
 
-pub fn create(_serial: &str, size: &str) -> Result<X11RealOutputHandle, String> {
+pub fn create(_serial: &str, size: &str, mirror_to_primary: bool) -> Result<X11RealOutputHandle, String> {
     let display = detect_x11_display().unwrap_or_default();
     if display.trim().is_empty() {
         return Err("DISPLAY is not set for daemon process".to_string());
@@ -448,9 +448,22 @@ pub fn create(_serial: &str, size: &str) -> Result<X11RealOutputHandle, String> 
         "--mode".to_string(),
         chosen_mode.clone(),
     ];
-    if let Some(p) = primary.as_deref() {
-        args.push("--right-of".to_string());
-        args.push(p.to_string());
+    if mirror_to_primary {
+        if let Some(p) = primary.as_deref() {
+            args.push("--same-as".to_string());
+            args.push(p.to_string());
+        } else {
+            warn!(
+                output = %output.name,
+                "x11 real-output create: mirror requested but no primary output detected; falling back to extended placement"
+            );
+        }
+    }
+    if !mirror_to_primary || primary.is_none() {
+        if let Some(p) = primary.as_deref() {
+            args.push("--right-of".to_string());
+            args.push(p.to_string());
+        }
     }
     let arg_refs = args.iter().map(|s| s.as_str()).collect::<Vec<_>>();
     xrandr(&arg_refs, &display, xauth.as_deref())
@@ -485,20 +498,33 @@ pub fn create(_serial: &str, size: &str) -> Result<X11RealOutputHandle, String> 
         .collect::<Vec<_>>();
 
     if !mirrored_with.is_empty() {
+        if mirror_to_primary {
+            info!(
+                output = %output.name,
+                mirrors = %mirrored_with.join(","),
+                "x11 real-output create: experimental mirror active"
+            );
+        } else {
+            warn!(
+                output = %output.name,
+                mirrors = %mirrored_with.join(","),
+                "x11 real-output create: enabled output mirrors active output(s)"
+            );
+            return Err(format!(
+                "output {} enabled but mirrors active output(s): {} at {}x{}+{}+{}",
+                output.name,
+                mirrored_with.join(","),
+                aw,
+                ah,
+                x,
+                y
+            ));
+        }
+    } else if mirror_to_primary {
         warn!(
             output = %output.name,
-            mirrors = %mirrored_with.join(","),
-            "x11 real-output create: enabled output mirrors active output(s)"
+            "x11 real-output create: mirror requested but output is not mirrored after activation"
         );
-        return Err(format!(
-            "output {} enabled but mirrors active output(s): {} at {}x{}+{}+{}",
-            output.name,
-            mirrored_with.join(","),
-            aw,
-            ah,
-            x,
-            y
-        ));
     }
 
     Ok(X11RealOutputHandle {

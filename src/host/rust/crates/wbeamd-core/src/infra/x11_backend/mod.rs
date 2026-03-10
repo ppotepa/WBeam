@@ -20,7 +20,7 @@ pub trait X11VirtualOutputBackend {
     fn key(&self) -> &'static str;
     fn primary(&self) -> bool;
     fn probe(&self, host_probe: &HostProbe) -> BackendProbe;
-    fn create(&self, serial: &str, size: &str) -> Result<BackendHandle, String>;
+    fn create(&self, serial: &str, size: &str, mirror_to_primary: bool) -> Result<BackendHandle, String>;
     fn destroy(&self, handle: &BackendHandle) -> Result<(), String>;
 }
 
@@ -48,8 +48,8 @@ impl X11VirtualOutputBackend for RealOutputBackend {
         }
     }
 
-    fn create(&self, serial: &str, size: &str) -> Result<BackendHandle, String> {
-        x11_real_output::create(serial, size).map(BackendHandle::RealOutput)
+    fn create(&self, serial: &str, size: &str, mirror_to_primary: bool) -> Result<BackendHandle, String> {
+        x11_real_output::create(serial, size, mirror_to_primary).map(BackendHandle::RealOutput)
     }
 
     fn destroy(&self, handle: &BackendHandle) -> Result<(), String> {
@@ -99,7 +99,7 @@ impl X11VirtualOutputBackend for MonitorObjectBackend {
         }
     }
 
-    fn create(&self, serial: &str, size: &str) -> Result<BackendHandle, String> {
+    fn create(&self, serial: &str, size: &str, _mirror_to_primary: bool) -> Result<BackendHandle, String> {
         x11_monitor_object::create(serial, size).map(BackendHandle::MonitorObject)
     }
 
