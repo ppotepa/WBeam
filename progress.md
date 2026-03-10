@@ -890,7 +890,7 @@ Status: active
   - `cd src/apps/desktop-tauri/src-tauri && cargo check` -> OK
   - bootstrap smoke: `XDG_CONFIG_HOME=$(mktemp -d) ... wbeam_load_config ...` creates `wbeam/wbeam.conf`
 
-## In Progress (2026-03-10) [commit: pending] - per-device runtime profile persistence in user config dir
+## In Progress (2026-03-10) [commit: 54b8daa8] - per-device runtime profile persistence in user config dir
 - Moved per-session runtime-state storage to user config space (`~/.config/wbeam`) instead of repo tree.
 - Serial-bound sessions now persist at:
   - `~/.config/wbeam/devices/<serial>.json`
