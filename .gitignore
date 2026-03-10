@@ -72,6 +72,7 @@ src/protocol/logs/**
 all.log
 
 # Local generated helper files
+.autofetch
 codebase_concat*.txt
 concat*.txt
 ALL_CODE*
@@ -80,9 +81,12 @@ ALL_CODE*
 .wbeam_build_version
 .wbeam_buildno
 .wbeam_device_ports
+.wbeam_redeploy_compat.state
 ignores
 buildlog
 *.bak
+logfile
+proto/autotune-results.json
 proto/autotune-results-*.json
 proto/debugframes/
 delivery.md
