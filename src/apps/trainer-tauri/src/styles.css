@@ -356,6 +356,48 @@ select:focus {
   width: auto;
 }
 
+.hud-font-preview {
+  margin-top: 4px;
+  border: 1px solid rgba(73, 194, 255, 0.28);
+  border-radius: 9px;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--text-main);
+  display: grid;
+  gap: 5px;
+}
+
+.hud-font-preview .preview-title {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.hud-font-preview .preview-row {
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-font-preview .state {
+  margin-left: 8px;
+  font-weight: 700;
+}
+
+.hud-font-preview .state.ok {
+  color: #7bf0bf;
+}
+
+.hud-font-preview .state.warn {
+  color: #ffd166;
+}
+
+.hud-font-preview .state.risk {
+  color: #ff8b7f;
+}
+
 .meta-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

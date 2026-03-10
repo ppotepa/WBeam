@@ -1930,3 +1930,14 @@ Status: active
   - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
   - `cd src/apps/trainer-tauri && npm run build` -> OK
   - `python3 -m py_compile src/domains/training/wizard.py src/host/scripts/stream_wayland_portal_h264.py` -> OK
+
+## In Progress (2026-03-10) - HUD font preset live preview in Trainer UI
+- Added real-time HUD typography preview block in `Train` advanced panel (`trainer-tauri`):
+  - updates immediately when `HUD font preset` changes,
+  - includes sample HUD rows and inline severity chips (`OK/WARN/RISK`).
+- Implemented preset-based preview style mapping in UI runtime:
+  - `compact`, `dense`, `arcade`, `system` with distinct font-family, size and letter-spacing.
+- Added dedicated CSS component styles for preview card (`.hud-font-preview`) with compact display tuned to current UI grid.
+- Validation:
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK

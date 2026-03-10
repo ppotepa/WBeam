@@ -530,6 +530,19 @@ export default function App() {
   const liveStages = createMemo(() => parseLiveStages(tail()?.lines || []));
   const liveHealth = createMemo(() => inferLiveHealth(tail()?.lines || []));
   const hasLiveSamples = createMemo(() => hudSeries().score.length > 0 || hudSeries().present.length > 0);
+  const hudFontPreviewStyle = createMemo(() => {
+    const preset = hudFontPreset();
+    if (preset === "dense") {
+      return { "font-family": "\"JetBrains Mono\", \"IBM Plex Mono\", monospace", "font-size": "0.76rem", "letter-spacing": "0.02em" };
+    }
+    if (preset === "arcade") {
+      return { "font-family": "\"IBM Plex Mono\", \"JetBrains Mono\", monospace", "font-size": "0.86rem", "letter-spacing": "0.04em" };
+    }
+    if (preset === "system") {
+      return { "font-family": "Monospace", "font-size": "0.82rem", "letter-spacing": "0.01em" };
+    }
+    return { "font-family": "\"JetBrains Mono\", \"IBM Plex Mono\", monospace", "font-size": "0.82rem", "letter-spacing": "0.02em" };
+  });
 
   const hardBlockers = createMemo(() => {
     const problems: string[] = [];
@@ -1125,6 +1138,12 @@ export default function App() {
                         <option value="system">system mono</option>
                       </select>
                     </label>
+                    <div class="hud-font-preview" title="Preview of typography style used by Android HUD overlay." style={hudFontPreviewStyle()}>
+                      <div class="preview-title">HUD font preview</div>
+                      <div class="preview-row">TRIAL t05 | GEN 2/4 | FPS 58.9 <span class="state ok">OK</span></div>
+                      <div class="preview-row">LIVE 34.8 Mbps | LAT 42.1ms <span class="state warn">WARN</span></div>
+                      <div class="preview-row">DROPS/s 0.004 | QUEUE 0.36 <span class="state risk">RISK</span></div>
+                    </div>
                   </div>
                 </Show>
               </article>
