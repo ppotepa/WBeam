@@ -1461,3 +1461,14 @@ Status: active
   - required min/max bitrate training contract and visualization implications,
   - full GUI information architecture (`Train`, `Live HUD`, `Profiles`, `Runs`, `Compare`, `Devices`, `Validation`, `Diagnostics`, `Datasets`),
   - required API/data/artifact contracts and DoD for first complete Trainer app.
+
+## In Progress (2026-03-10) - TrainerV2 spec extension in Jira/engineering-task format
+- Expanded `trainer.update.md` with formal implementation addendum matching engineering task template:
+  - technical context and impacted modules,
+  - Jira-style task definition (`title`, `goal`, `scope`, `acceptance criteria`),
+  - target architecture and integration model,
+  - file/module layout proposal,
+  - API contracts and data structures,
+  - pseudo-code for core flows and recompute path,
+  - error handling, validation, fallbacks,
+  - risks, performance constraints, and test focus areas.

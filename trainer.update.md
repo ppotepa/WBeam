@@ -318,3 +318,300 @@ Najważniejsza zmiana koncepcyjna:
 
 To jest baza pod dalszy etap: lepsze profile produkcyjne i obiektywne porównywanie jakości pod konkretne urządzenia i przepustowość.
 
+---
+
+## 15. Dodatek techniczny (format Jira / Engineering Spec)
+
+### 15.1 Kontekst techniczny
+
+Zmiana dotyczy czterech głównych obszarów istniejącego systemu:
+
+1. `src/apps/trainer-tauri` - aplikacja desktopowa (UI + orchestracja treningu),
+2. `src/host/rust/crates/wbeamd-server` - API trenera i strumień eventów,
+3. `src/domains/training/wizard.py` + `legacy_engine.py` - silnik i logika optymalizacji,
+4. `config/training/...` - kontrakt artefaktów runu/profilu/datasetu.
+
+Miejsca integracji z istniejącym systemem:
+
+1. `trainer.sh` (launcher) -> przejście na natywny Tauri runtime,
+2. endpointy `/v1/trainer/*` -> rozszerzenie o datasety i recompute,
+3. profile runtime w desktop app -> aplikowanie wybranego profilu po treningu.
+
+### 15.2 Task (Jira style)
+
+Tytuł:
+
+`TRN-001 - TrainerV2: dataset-first training, encoder-param genetic tuning, deterministic find-optimal`
+
+Cel biznesowy/techniczny:
+
+1. zwiększyć jakość i stabilność profili przez pełniejszą optymalizację,
+2. zapewnić pełny audyt i replay wyników treningu,
+3. umożliwić porównywanie encoderów i deterministyczny wybór najlepszego profilu.
+
+Zakres zmian:
+
+1. Tauri launcher + natywne okno trenera,
+2. pełny model danych run/dataset,
+3. pełny zestaw parametrów optimizera w GUI,
+4. parametry encodera jako geny,
+5. min/max bitrate jako obowiązkowy kontrakt i wymiar analityczny,
+6. endpoint `find-optimal` na zapisanym datasetcie,
+7. live HUD przez event stream.
+
+Kryteria akceptacji:
+
+1. `trainer.sh` uruchamia app Tauri bez ręcznego odpalania przeglądarki,
+2. GUI pokazuje realtime dane treningu z API event stream,
+3. GUI umożliwia ustawienie `generations`, `population`, `elite_count`, `mutation_rate`, `crossover_rate`,
+4. GUI wymusza `bitrate_min_kbps` i `bitrate_max_kbps`,
+5. każdy run tworzy kompletny dataset artefaktów,
+6. endpoint `find-optimal` działa deterministycznie,
+7. wynik końcowy zwraca `global winner` i `winner per encoder`,
+8. wykresy pokazują wpływ bitrate i encodera.
+
+### 15.3 Architektura rozwiązania
+
+Nowe elementy:
+
+1. `TrainerDatasetService` (backend) - odczyt/indeksacja datasetów runów,
+2. `TrainerOptimizeService` (backend) - deterministyczny recompute rankingu,
+3. `TrainerEventBus` (backend) - stream eventów runu (`SSE`),
+4. `EncoderSearchSpaceBuilder` (engine) - budowa przestrzeni per encoder,
+5. `BitrateRangePolicy` (engine) - clamp i walidacja min/max bitrate,
+6. `DatasetsViewModel` (frontend) - widok datasetów i akcja `Find Optimal Best`.
+
+Integracja z obecnym systemem:
+
+1. GUI wywołuje API `/v1/trainer/start` z rozszerzonym payload,
+2. engine publikuje eventy triali i metryki do `events.jsonl` + stream API,
+3. backend zapisuje i indeksuje run artifacts pod profilem,
+4. GUI czyta run/profiles/datasets i rysuje wykresy.
+
+### 15.4 Przepływ danych i logika
+
+1. Użytkownik uruchamia run w `Train`.
+2. API waliduje payload (w tym bitrate min/max i constraints GA).
+3. Silnik wykonuje preflight i buduje effective search space.
+4. Triale uruchamiane są generacyjnie; eventy idą na żywo do HUD.
+5. Po zakończeniu runu zapisywany jest dataset + ranking końcowy.
+6. Użytkownik otwiera `Datasets` i klika `Find Optimal Best`.
+7. Backend ładuje dataset i przelicza ranking bez nowego streamu.
+8. Wynik recompute zapisywany jest jako nowy rekord decyzji.
+
+### 15.5 Struktura modułów / plików (proponowana)
+
+1. `src/apps/trainer-tauri/src/features/train/*`
+2. `src/apps/trainer-tauri/src/features/hud/*`
+3. `src/apps/trainer-tauri/src/features/datasets/*`
+4. `src/apps/trainer-tauri/src/features/compare/*`
+5. `src/host/rust/crates/wbeamd-server/src/trainer/datasets.rs`
+6. `src/host/rust/crates/wbeamd-server/src/trainer/optimize.rs`
+7. `src/host/rust/crates/wbeamd-server/src/trainer/events.rs`
+8. `src/domains/training/encoder_space.py`
+9. `src/domains/training/bitrate_policy.py`
+10. `src/domains/training/scoring.py`
+
+### 15.6 Interfejsy i kontrakty
+
+Kontrakt start runu (request):
+
+```json
+{
+  "serial": "HVA6PKNT",
+  "profile_name": "baseline",
+  "mode": "quality",
+  "encoder_mode": "multi",
+  "encoders": ["h264", "h265", "mjpeg", "rawpng"],
+  "generations": 6,
+  "population": 24,
+  "elite_count": 6,
+  "mutation_rate": 0.34,
+  "crossover_rate": 0.6,
+  "bitrate_min_kbps": 20000,
+  "bitrate_max_kbps": 200000,
+  "fps_values": [60, 72, 90, 120],
+  "size_values": ["1280x800", "2000x1200"]
+}
+```
+
+Kontrakt `find-optimal`:
+
+```json
+{
+  "run_id": "run-20260310-0001",
+  "scoring_mode": "quality",
+  "scoring_version": "v2.1",
+  "tie_break": "latency_then_stability"
+}
+```
+
+Kontrakt odpowiedzi:
+
+```json
+{
+  "ok": true,
+  "run_id": "run-20260310-0001",
+  "global_winner": {"trial_id": "t42", "encoder": "h265", "score": 89.21},
+  "per_encoder_winner": [
+    {"encoder": "h264", "trial_id": "t31", "score": 86.11},
+    {"encoder": "h265", "trial_id": "t42", "score": 89.21}
+  ],
+  "scoring_version": "v2.1",
+  "deterministic_hash": "sha256:..."
+}
+```
+
+### 15.7 Struktury danych (minimalne)
+
+```text
+RunMeta
+- run_id
+- profile_name
+- serial
+- started_at
+- finished_at
+- config_hash
+
+TrialRecord
+- trial_id
+- generation
+- encoder
+- encoder_params
+- global_params
+- score
+- reject_reason
+
+TimeseriesPoint
+- ts_ms
+- sender_fps
+- recv_fps
+- decode_fps
+- latency_p95
+- drop_rate
+```
+
+### 15.8 API i komunikacja komponentów
+
+Wymagane endpointy dodatkowe:
+
+1. `GET /v1/trainer/events/{run_id}` - `text/event-stream`,
+2. `GET /v1/trainer/datasets`,
+3. `GET /v1/trainer/datasets/{run_id}`,
+4. `POST /v1/trainer/datasets/{run_id}/find-optimal`,
+5. `GET /v1/trainer/datasets/{run_id}/charts`.
+
+### 15.9 Przykładowe fragmenty implementacji
+
+Inicjalizacja backend service (pseudo-Rust):
+
+```rust
+pub struct TrainerDatasetService {
+    root: PathBuf,
+}
+
+impl TrainerDatasetService {
+    pub fn new(root: PathBuf) -> Self { Self { root } }
+    pub fn load_run(&self, run_id: &str) -> Result<RunDataset, LoadError> { ... }
+}
+```
+
+Główna logika `find-optimal` (pseudo-Rust):
+
+```rust
+fn find_optimal(dataset: &RunDataset, cfg: &ScoringConfig) -> OptimalResult {
+    let mut scored = dataset.trials
+        .iter()
+        .filter(|t| t.reject_reason.is_none())
+        .map(|t| (t, score_trial(t, cfg)))
+        .collect::<Vec<_>>();
+    scored.sort_by(score_desc_then_tiebreak(cfg.tie_break));
+    build_result(scored, cfg)
+}
+```
+
+Integracja z istniejącym start flow (pseudo-Python):
+
+```python
+def start_training(req):
+    validate_request(req)
+    space = build_encoder_space(req.encoders, req.bitrate_min_kbps, req.bitrate_max_kbps)
+    for generation in range(req.generations):
+        candidates = evolve_population(space, generation, req.population, req.elite_count)
+        run_generation(candidates)
+    persist_dataset_and_summary()
+```
+
+### 15.10 Pseudo-kod kluczowego flow
+
+```text
+TRAIN_RUN():
+  validate(input)
+  preflight = run_preflight(device)
+  space = derive_space(input, preflight)
+  for gen in 1..N:
+    pop = make_population(space, gen)
+    for candidate in pop:
+      apply(candidate)
+      sample_metrics()
+      score()
+      emit_event()
+      persist_trial()
+  finalize_run()
+  publish_summary()
+
+FIND_OPTIMAL(run_id):
+  data = load_dataset(run_id)
+  validate_integrity(data)
+  ranked = deterministic_rank(data, scoring_config)
+  persist_recompute_result(ranked)
+  return ranked
+```
+
+### 15.11 Edge cases i obsługa błędów
+
+1. Brak urządzenia ADB -> błąd walidacji + komunikat UI + brak startu runu.
+2. `min_bitrate > max_bitrate` -> hard validation error.
+3. Unsupported encoder na danym API/modelu -> auto-disable + warning + zapis powodu.
+4. Brak metryk podczas triala -> trial oznaczony `invalid_sample`.
+5. Przerwanie runu -> status `cancelled`, częściowy dataset nadal zapisany.
+6. Brak pliku artefaktu przy recompute -> `dataset_corrupt` + blokada operacji.
+7. Brak stream eventów -> fallback polling snapshot co 1-2s.
+
+### 15.12 Walidacja danych i fallbacki
+
+1. JSON schema validation przy odczycie artefaktów.
+2. Hash datasetu + wersja scoringu.
+3. Fallback dla wykresów: jeśli brak timeseries, pokazujemy tabelę agregatów.
+4. Fallback dla `find-optimal`: jeśli brak części metryk, wyklucz trial i loguj reason.
+
+### 15.13 Ryzyka, wydajność, testy
+
+Ryzyka:
+
+1. zbyt duża przestrzeń encoder params -> eksplozja czasu runu,
+2. niespójne capability probing między urządzeniami,
+3. regresja wydajności przy dużych datasetach.
+
+Wydajność:
+
+1. indeksowanie datasetów cachem,
+2. lazy-load timeseries/charts,
+3. limit event stream payload.
+
+Testy wymagane:
+
+1. walidacja payload startu,
+2. constraints GA + bitrate range,
+3. deterministyczność `find-optimal` (powtarzalność wyniku),
+4. integracja event stream + HUD,
+5. integralność artefaktów runu,
+6. per-encoder ranking correctness.
+
+### 15.14 Notatki implementacyjne dla zespołu
+
+1. Zachować kompatybilność ze starymi endpointami, ale nową logikę budować na datasetach.
+2. Każdy nowy artefakt ma mieć `schema_version`.
+3. Każdy trial musi zapisywać pełne `encoder_params` i `global_params`.
+4. UI ma blokować start runu, jeśli krytyczne pola są nieustawione.
+5. `trainer.sh` ma być jedynym oficjalnym entrypointem dla trenera.
