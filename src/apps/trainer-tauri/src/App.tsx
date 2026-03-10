@@ -205,6 +205,22 @@ function seriesSummary(values: number[]): { min: string; max: string; last: stri
   return { min: min.toFixed(1), max: max.toFixed(1), last: last.toFixed(1) };
 }
 
+function safeName(input: string): string {
+  return input.replace(/[^a-zA-Z0-9._-]+/g, "_");
+}
+
+function downloadJson(filename: string, payload: unknown): void {
+  const blob = new Blob([`${JSON.stringify(payload, null, 2)}\n`], { type: "application/json" });
+  const href = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = href;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(href);
+}
+
 function trialOrdinal(trialId: string): number {
   const match = trialId.match(/t(\d+)/i);
   if (!match) return Number.MAX_SAFE_INTEGER;
@@ -477,6 +493,8 @@ export default function App() {
   const [rightProfile, setRightProfile] = createSignal("");
   const [leftDetail, setLeftDetail] = createSignal<ProfileDetail | null>(null);
   const [rightDetail, setRightDetail] = createSignal<ProfileDetail | null>(null);
+  const [previewProfileName, setPreviewProfileName] = createSignal("");
+  const [previewProfileDetail, setPreviewProfileDetail] = createSignal<ProfileDetail | null>(null);
   const [settings, setSettings] = createSignal<SettingsModel>({
     compactDensity: true,
     animateUi: true,
@@ -569,6 +587,10 @@ export default function App() {
       setRightProfile(sorted[1].profile_name);
       void loadProfileDetail("right", sorted[1].profile_name);
     }
+    if (!previewProfileName() && sorted.length > 0) {
+      setPreviewProfileName(sorted[0].profile_name);
+      void loadPreviewProfile(sorted[0].profile_name);
+    }
   }
 
   async function refreshDevices() {
@@ -641,6 +663,13 @@ export default function App() {
     const data = await fetchJson<ProfileDetail>(`/v1/trainer/profiles/${encodeURIComponent(name)}`);
     if (which === "left") setLeftDetail(data);
     else setRightDetail(data);
+  }
+
+  async function loadPreviewProfile(name: string) {
+    if (!name) return;
+    const data = await fetchJson<ProfileDetail>(`/v1/trainer/profiles/${encodeURIComponent(name)}`);
+    setPreviewProfileName(name);
+    setPreviewProfileDetail(data);
   }
 
   async function withUiGuard(actionLabel: string, fn: () => Promise<void>) {
@@ -801,6 +830,13 @@ export default function App() {
   const datasetPresentSummary = createMemo(() => seriesSummary(datasetTrials().map((v) => v.present_fps_mean)));
   const datasetMbpsSummary = createMemo(() => seriesSummary(datasetTrials().map((v) => v.bitrate_mbps_mean)));
   const datasetDropSummary = createMemo(() => seriesSummary(datasetTrials().map((v) => v.drop_rate_per_sec)));
+  const previewTrials = createMemo(() => parseDatasetTrials(previewProfileDetail()?.parameters || {}));
+  const previewScoreBars = createMemo(() => toBars(previewTrials().map((v) => v.score)));
+  const previewFpsBars = createMemo(() => toBars(previewTrials().map((v) => v.present_fps_mean)));
+  const previewMbpsBars = createMemo(() => toBars(previewTrials().map((v) => v.bitrate_mbps_mean)));
+  const previewScoreSummary = createMemo(() => seriesSummary(previewTrials().map((v) => v.score)));
+  const previewFpsSummary = createMemo(() => seriesSummary(previewTrials().map((v) => v.present_fps_mean)));
+  const previewMbpsSummary = createMemo(() => seriesSummary(previewTrials().map((v) => v.bitrate_mbps_mean)));
 
   return (
     <main class={`trainer-shell ${settings().compactDensity ? "density-compact" : "density-roomy"} ${settings().animateUi ? "animate-on" : "animate-off"}`}>
@@ -1349,19 +1385,32 @@ export default function App() {
                       <th>Best score</th>
                       <th>Preflight</th>
                       <th>Updated</th>
+                      <th>Action</th>
                       <th>Path</th>
                     </tr>
                   </thead>
                   <tbody>
                     <For each={profiles()}>
                       {(p) => (
-                        <tr>
+                        <tr class={previewProfileName() === p.profile_name ? "selected-row" : ""}>
                           <td>{p.profile_name}</td>
                           <td>{p.engine || "-"}</td>
                           <td>{p.serial || "-"}</td>
                           <td>{typeof p.best_score === "number" ? p.best_score.toFixed(2) : "-"}</td>
                           <td>{p.has_preflight ? "yes" : "no"}</td>
                           <td>{formatTs(p.updated_at_unix_ms || undefined)}</td>
+                          <td>
+                            <button
+                              class="primary"
+                              onClick={() =>
+                                void withUiGuard("Loading profile preview", async () => {
+                                  await loadPreviewProfile(p.profile_name);
+                                })
+                              }
+                            >
+                              Preview
+                            </button>
+                          </td>
                           <td class="mono">{p.path}</td>
                         </tr>
                       )}
@@ -1369,6 +1418,67 @@ export default function App() {
                   </tbody>
                 </table>
               </div>
+
+              <Show when={previewProfileDetail()}>
+                <section class="dataset-analytics">
+                  <h3>Profile Preview: {previewProfileName()}</h3>
+                  <div class="meta-grid">
+                    <div class="meta-item"><strong>Encoder</strong><span>{pickRuntimeValue(previewProfileDetail()!.profile, "encoder")}</span></div>
+                    <div class="meta-item"><strong>Size</strong><span>{pickRuntimeValue(previewProfileDetail()!.profile, "size")}</span></div>
+                    <div class="meta-item"><strong>FPS</strong><span>{pickRuntimeValue(previewProfileDetail()!.profile, "fps")}</span></div>
+                    <div class="meta-item"><strong>Bitrate</strong><span>{pickRuntimeBitrateMbps(previewProfileDetail()!.profile)}</span></div>
+                  </div>
+                  <Show when={previewTrials().length > 0} fallback={<p class="hint">No trial history in this profile parameters.</p>}>
+                    <div class="chart-grid">
+                      <section class="chart-card">
+                        <h3>Score history</h3>
+                        <p class="chart-stats">last {previewScoreSummary().last} | min {previewScoreSummary().min} | max {previewScoreSummary().max}</p>
+                        <div class="bar-row">
+                          <For each={previewScoreBars()}>
+                            {(bar, idx) => (
+                              <span
+                                class={`bar ${bar.cls}`}
+                                style={{ height: `${bar.pct}%` }}
+                                title={`${previewTrials()[idx()]?.trial_id || `t${idx() + 1}`}: ${bar.value.toFixed(2)}`}
+                              />
+                            )}
+                          </For>
+                        </div>
+                      </section>
+                      <section class="chart-card">
+                        <h3>Present FPS history</h3>
+                        <p class="chart-stats">last {previewFpsSummary().last} | min {previewFpsSummary().min} | max {previewFpsSummary().max}</p>
+                        <div class="bar-row">
+                          <For each={previewFpsBars()}>
+                            {(bar, idx) => (
+                              <span
+                                class={`bar ${bar.cls}`}
+                                style={{ height: `${bar.pct}%` }}
+                                title={`${previewTrials()[idx()]?.trial_id || `t${idx() + 1}`}: ${bar.value.toFixed(2)} fps`}
+                              />
+                            )}
+                          </For>
+                        </div>
+                      </section>
+                      <section class="chart-card">
+                        <h3>Mbps history</h3>
+                        <p class="chart-stats">last {previewMbpsSummary().last} | min {previewMbpsSummary().min} | max {previewMbpsSummary().max}</p>
+                        <div class="bar-row">
+                          <For each={previewMbpsBars()}>
+                            {(bar, idx) => (
+                              <span
+                                class={`bar ${bar.cls}`}
+                                style={{ height: `${bar.pct}%` }}
+                                title={`${previewTrials()[idx()]?.trial_id || `t${idx() + 1}`}: ${bar.value.toFixed(2)} Mbps`}
+                              />
+                            )}
+                          </For>
+                        </div>
+                      </section>
+                    </div>
+                  </Show>
+                </section>
+              </Show>
             </article>
           </Show>
 
@@ -1478,6 +1588,30 @@ export default function App() {
 
                 <section class="dataset-analytics">
                   <h3>Dataset Timeline</h3>
+                  <div class="actions-row">
+                    <button
+                      class="primary"
+                      onClick={() =>
+                        downloadJson(
+                          `${safeName(datasetDetail()!.dataset.run_id)}.dataset.json`,
+                          datasetDetail(),
+                        )
+                      }
+                    >
+                      Export Dataset JSON
+                    </button>
+                    <button
+                      class="primary"
+                      onClick={() =>
+                        downloadJson(
+                          `${safeName(datasetDetail()!.dataset.profile_name)}.profile.json`,
+                          datasetDetail()!.profile,
+                        )
+                      }
+                    >
+                      Export Profile JSON
+                    </button>
+                  </div>
                   <Show when={datasetTrials().length > 0} fallback={<p class="hint">No per-trial results found in this dataset.</p>}>
                     <div class="chart-grid">
                       <section class="chart-card">

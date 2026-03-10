@@ -1825,3 +1825,16 @@ Status: active
   - `cd src/apps/trainer-tauri && npm run build` -> OK
   - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
   - `python3 -m py_compile src/domains/training/wizard.py` -> OK
+
+## In Progress (2026-03-10) - Profile preview mode + dataset/profile export actions
+- Extended `Profiles` tab with actionable preview workflow:
+  - added `Preview` action per profile row,
+  - added selected-row highlighting for current preview profile,
+  - added profile preview panel with runtime summary (`encoder`, `size`, `fps`, `bitrate`) and historical charts from profile `parameters.results[]`.
+- Added export controls in `Datasets` timeline section:
+  - `Export Dataset JSON` (full selected dataset detail payload),
+  - `Export Profile JSON` (profile blob from selected dataset).
+- Export uses browser download flow with sanitized filenames.
+- Validation:
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
