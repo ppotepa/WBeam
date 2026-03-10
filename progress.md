@@ -2136,3 +2136,12 @@ Status: active
   - numeric percent indicator (right side of progress header).
 - Validation:
   - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+
+## In Progress (2026-03-10) - Trainer HUD dynamic scale profile mapping
+- Added dynamic HUD scale selection for training mode based on trainer-provided `font_profile`:
+  - `compact`, `dense`, `system` -> `scale-15x`
+  - default (`arcade` and others) -> `scale-2x`
+- Kept runtime HUD on normal density (`scale-1x`) while trainer uses enlarged classes only.
+- Unified renderer now accepts explicit scale class (`buildUnifiedHudHtml(..., scaleClass)`), so future UI can expose direct HUD size control without layout rewrites.
+- Validation:
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK

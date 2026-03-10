@@ -2043,7 +2043,8 @@ public class MainActivity extends AppCompatActivity {
                     chips.toString(),
                     cards.toString(),
                     trend,
-                    details.toString()
+                    details.toString(),
+                    "scale-1x"
             );
             perfHudWebView.loadDataWithBaseURL(null, html, "text/html", "utf-8", null);
             perfHudWebView.setVisibility(View.VISIBLE);
@@ -2203,7 +2204,7 @@ public class MainActivity extends AppCompatActivity {
                 + hudChip("SOURCE", "TEXT SNAPSHOT", "state-pending")
                 + hudChip("PROGRESS", String.valueOf(clampPercent(progressPercent)) + "%", "");
         String cards = hudCard("MODE", "fallback", "state-pending");
-        return buildUnifiedHudHtml("trainer", progressText, progressPercent, chips, cards, "text snapshot mode", details.toString());
+        return buildUnifiedHudHtml("trainer", progressText, progressPercent, chips, cards, "text snapshot mode", details.toString(), "scale-2x");
     }
 
     private String buildTrainerHudHtmlFromJson(JSONObject hud, String progressLine, int progressPercent) {
@@ -2225,6 +2226,7 @@ public class MainActivity extends AppCompatActivity {
 
         String encoder = config != null ? config.optString("encoder", "-") : "-";
         String size = config != null ? config.optString("size", "-") : "-";
+        String fontProfile = config != null ? config.optString("font_profile", "arcade") : "arcade";
         int fps = config != null ? config.optInt("fps", 0) : 0;
         double targetMbps = config != null ? config.optDouble("target_mbps", 0.0) : 0.0;
         String layoutMode = config != null ? config.optString("layout_mode", hud.optString("layout_mode", "wide")) : hud.optString("layout_mode", "wide");
@@ -2287,7 +2289,7 @@ public class MainActivity extends AppCompatActivity {
                 + " | mbps trend: " + trendMbps
                 + " | note: " + statusNote;
 
-        return buildUnifiedHudHtml("trainer", pLabel, progressPercent, chips, cards, trend, detailsRows.toString());
+        return buildUnifiedHudHtml("trainer", pLabel, progressPercent, chips, cards, trend, detailsRows.toString(), trainerScaleClass(fontProfile));
     }
 
     private String buildUnifiedHudHtml(
@@ -2297,13 +2299,14 @@ public class MainActivity extends AppCompatActivity {
             String chipsHtml,
             String cardsHtml,
             String trendText,
-            String detailsRowsHtml
+            String detailsRowsHtml,
+            String scaleClass
     ) {
         boolean isTrainer = "trainer".equalsIgnoreCase(mode);
         int safePct = clampPercent(progressPercent);
         String modeUpper = safeText(mode).toUpperCase(Locale.US);
         String progress = safeText(progressLabel);
-        String bodyClass = isTrainer ? "trainer" : "runtime";
+        String bodyClass = (isTrainer ? "trainer" : "runtime") + " " + safeText(scaleClass);
         return "<!doctype html><html><head><meta charset='utf-8'/>"
                 + "<style>"
                 + "html,body{margin:0;padding:0;background:transparent;color:#d9fbff;font-family:'JetBrains Mono','IBM Plex Mono',monospace;font-size:11px;}"
@@ -2329,14 +2332,22 @@ public class MainActivity extends AppCompatActivity {
                 + ".detail-table td{border:1px solid rgba(126,245,255,.28);padding:4px 6px;vertical-align:top;word-break:break-word;}"
                 + ".detail-table td:first-child{width:52%;color:#dffcff;} .detail-table td:last-child{text-align:right;color:#b9f8ff;}"
                 + ".state-ok{color:#6ee7b7;} .state-warn{color:#fbbf24;} .state-risk{color:#f87171;} .state-pending{color:#94a3b8;}"
-                + ".trainer .chip .k{font-size:18px;letter-spacing:.03em;}"
-                + ".trainer .chip .v{font-size:24px;line-height:1.1;}"
-                + ".trainer .p-label{font-size:20px;}"
-                + ".trainer .p-pct{font-size:28px;}"
-                + ".trainer .kpi .item .k{font-size:17px;}"
-                + ".trainer .kpi .item .v{font-size:23px;line-height:1.1;}"
-                + ".trainer .detail-table td{font-size:18px;padding:6px 8px;}"
-                + ".trainer .trend{font-size:16px;line-height:1.35;}"
+                + ".trainer.scale-2x .chip .k{font-size:18px;letter-spacing:.03em;}"
+                + ".trainer.scale-2x .chip .v{font-size:24px;line-height:1.1;}"
+                + ".trainer.scale-2x .p-label{font-size:20px;}"
+                + ".trainer.scale-2x .p-pct{font-size:28px;}"
+                + ".trainer.scale-2x .kpi .item .k{font-size:17px;}"
+                + ".trainer.scale-2x .kpi .item .v{font-size:23px;line-height:1.1;}"
+                + ".trainer.scale-2x .detail-table td{font-size:18px;padding:6px 8px;}"
+                + ".trainer.scale-2x .trend{font-size:16px;line-height:1.35;}"
+                + ".trainer.scale-15x .chip .k{font-size:14px;letter-spacing:.04em;}"
+                + ".trainer.scale-15x .chip .v{font-size:18px;line-height:1.1;}"
+                + ".trainer.scale-15x .p-label{font-size:16px;}"
+                + ".trainer.scale-15x .p-pct{font-size:22px;}"
+                + ".trainer.scale-15x .kpi .item .k{font-size:13px;}"
+                + ".trainer.scale-15x .kpi .item .v{font-size:17px;line-height:1.1;}"
+                + ".trainer.scale-15x .detail-table td{font-size:14px;padding:5px 7px;}"
+                + ".trainer.scale-15x .trend{font-size:13px;line-height:1.3;}"
                 + "</style></head><body class='" + bodyClass + "'><div class='root'>"
                 + "<div class='top'>"
                 + hudChip("HUD MODE", modeUpper, "")
@@ -2348,6 +2359,14 @@ public class MainActivity extends AppCompatActivity {
                 + "<div class='panel'><table class='detail-table'>" + detailsRowsHtml + "</table></div>"
                 + "</div>"
                 + "</div></body></html>";
+    }
+
+    private String trainerScaleClass(String fontProfile) {
+        String profile = fontProfile == null ? "" : fontProfile.trim().toLowerCase(Locale.US);
+        if ("compact".equals(profile) || "dense".equals(profile) || "system".equals(profile)) {
+            return "scale-15x";
+        }
+        return "scale-2x";
     }
 
     private int clampPercent(int progressPercent) {
