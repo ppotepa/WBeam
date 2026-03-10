@@ -1008,3 +1008,14 @@ Status: active
 - This prevents false-positive per-device `OK` status in `deploy-all` when install actually failed.
 - Validation:
   - `bash -n wbeam redeploy-local` -> OK
+
+## In Progress (2026-03-10) [commit: f3598eb5] - unique stream-port assignment per connected ADB device in desktop UI
+- Fixed port-collision behavior in desktop Tauri backend device listing:
+  - `list_devices_basic()` now enforces unique `streamPort` across all currently connected serials in a single refresh cycle.
+  - Existing `.wbeam_device_ports` values are still used as preferred hints, but collisions are automatically resolved to the next free port.
+  - Daemon-reported ports are now also de-duplicated before persisting back to `.wbeam_device_ports`.
+- Added helpers:
+  - `default_stream_port_for_index(...)`
+  - `pick_unique_stream_port(...)`
+- Validation:
+  - `cargo check -p wbeam-desktop-tauri` -> OK
