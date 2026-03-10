@@ -22,10 +22,14 @@ import {
   Unlink2,
   Loader2,
 } from "lucide-solid";
-import type { DeviceBasic } from "./types";
+import type { ConnectEncoderMode, ConnectSessionConfig, DeviceBasic } from "./types";
 import type { VirtualDepsInstallStatus, VirtualDoctor } from "./types";
 import { HostApiManager } from "./managers/hostApiManager";
 import { createSessionManager } from "./managers/sessionManager";
+import trainedProfileLabels from "./config/trained-profile-labels.json";
+import trainedProfileRuntime from "./config/trained-profile-runtime.json";
+import connectResolutionPresets from "./config/connect-resolution-presets.json";
+import connectEncoderOptions from "./config/connect-encoder-options.json";
 
 function BatteryIcon(props: { level: number | null; charging: boolean }) {
   if (props.charging) return <BatteryCharging size={14} />;
@@ -42,6 +46,69 @@ function DeviceTypeIcon(props: { type: string }) {
 type DisplayMode = "virtual_monitor" | "duplicate";
 const CONNECT_MODE_STORAGE_KEY = "wbeam.connect.mode.by.serial";
 const WAYLAND_EXPERIMENTAL_DUPLICATION_STORAGE_KEY = "wbeam.connect.experimental.dup.wayland";
+
+type TrainedProfileLabelEntry = {
+  id: string;
+  label: string;
+  description: string;
+};
+
+type TrainedProfileRuntimeEntry = {
+  encoder?: "h264" | "h265" | "rawpng";
+  cursorMode?: "embedded" | "hidden" | "metadata";
+};
+
+type ResolutionPresetEntry = {
+  id: string;
+  label: string;
+  kind: "device_max" | "device_current" | "fixed";
+  size?: string;
+};
+
+const TRAINED_PROFILE_DATA = trainedProfileLabels as {
+  defaultProfileId?: string;
+  profiles?: TrainedProfileLabelEntry[];
+};
+
+const TRAINED_PROFILE_RUNTIME_DATA = trainedProfileRuntime as {
+  defaultsByProfileId?: Record<string, TrainedProfileRuntimeEntry>;
+};
+
+const RESOLUTION_PRESET_DATA = connectResolutionPresets as {
+  defaultPresetId?: string;
+  presets?: ResolutionPresetEntry[];
+};
+
+const ENCODER_OPTION_DATA = connectEncoderOptions as {
+  defaultEncoderMode?: ConnectEncoderMode;
+  options?: { id: ConnectEncoderMode; label: string }[];
+};
+
+const TRAINED_PROFILE_OPTIONS: TrainedProfileLabelEntry[] = TRAINED_PROFILE_DATA.profiles ?? [];
+const TRAINED_PROFILE_IDS = new Set(TRAINED_PROFILE_OPTIONS.map((item) => item.id));
+const TRAINED_PROFILE_DEFAULT_ID =
+  (TRAINED_PROFILE_DATA.defaultProfileId && TRAINED_PROFILE_IDS.has(TRAINED_PROFILE_DATA.defaultProfileId))
+    ? TRAINED_PROFILE_DATA.defaultProfileId
+    : (TRAINED_PROFILE_OPTIONS[0]?.id ?? "fast60_3");
+
+const TRAINED_PROFILE_RUNTIME = TRAINED_PROFILE_RUNTIME_DATA.defaultsByProfileId ?? {};
+const RESOLUTION_PRESET_OPTIONS: ResolutionPresetEntry[] = RESOLUTION_PRESET_DATA.presets ?? [];
+const RESOLUTION_PRESET_IDS = new Set(RESOLUTION_PRESET_OPTIONS.map((item) => item.id));
+const RESOLUTION_PRESET_DEFAULT_ID =
+  (RESOLUTION_PRESET_DATA.defaultPresetId && RESOLUTION_PRESET_IDS.has(RESOLUTION_PRESET_DATA.defaultPresetId))
+    ? RESOLUTION_PRESET_DATA.defaultPresetId
+    : (RESOLUTION_PRESET_OPTIONS[0]?.id ?? "device_max");
+
+const ENCODER_OPTIONS = ENCODER_OPTION_DATA.options ?? [
+  { id: "profile_default" as const, label: "From trained profile" },
+  { id: "h264" as const, label: "H.264" },
+  { id: "h265" as const, label: "H.265 / HEVC" },
+  { id: "rawpng" as const, label: "RAW PNG (experimental)" },
+];
+const ENCODER_OPTION_IDS = new Set(ENCODER_OPTIONS.map((item) => item.id));
+const ENCODER_DEFAULT_MODE = ENCODER_OPTION_IDS.has(ENCODER_OPTION_DATA.defaultEncoderMode ?? "profile_default")
+  ? (ENCODER_OPTION_DATA.defaultEncoderMode as ConnectEncoderMode)
+  : "profile_default";
 
 function loadSavedDisplayMode(serial: string): DisplayMode | null {
   try {
@@ -86,6 +153,53 @@ function saveWaylandExperimentalDuplication(enabled: boolean): void {
   }
 }
 
+function parseResolutionDims(value: string): [number, number] | null {
+  const match = value.trim().match(/^(\d{3,5})x(\d{3,5})$/);
+  if (!match) return null;
+  const w = Number(match[1]);
+  const h = Number(match[2]);
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w < 320 || h < 320) return null;
+  return [w, h];
+}
+
+function normalizeLandscapeSize(value: string): string | undefined {
+  const dims = parseResolutionDims(value);
+  if (!dims) return undefined;
+  const width = Math.max(dims[0], dims[1]);
+  const height = Math.min(dims[0], dims[1]);
+  const safeW = Math.max(640, Math.min(3840, width));
+  const safeH = Math.max(360, Math.min(2160, height));
+  const evenW = safeW % 2 === 0 ? safeW : safeW - 1;
+  const evenH = safeH % 2 === 0 ? safeH : safeH - 1;
+  return `${evenW}x${evenH}`;
+}
+
+function resolveSessionSizeForPreset(device: DeviceBasic, presetId: string): string | undefined {
+  const preset = RESOLUTION_PRESET_OPTIONS.find((item) => item.id === presetId);
+  if (!preset) return normalizeLandscapeSize(device.maxResolution) ?? normalizeLandscapeSize(device.resolution);
+  if (preset.kind === "device_max") {
+    return normalizeLandscapeSize(device.maxResolution) ?? normalizeLandscapeSize(device.resolution);
+  }
+  if (preset.kind === "device_current") {
+    return normalizeLandscapeSize(device.resolution) ?? normalizeLandscapeSize(device.maxResolution);
+  }
+  return normalizeLandscapeSize(preset.size ?? "");
+}
+
+function resolveProfileId(profileId: string): string {
+  if (TRAINED_PROFILE_IDS.has(profileId)) return profileId;
+  return TRAINED_PROFILE_DEFAULT_ID;
+}
+
+function resolveEncoderForProfile(profileId: string, mode: ConnectEncoderMode): "h264" | "h265" | "rawpng" {
+  if (mode !== "profile_default") return mode;
+  const byProfile = TRAINED_PROFILE_RUNTIME[profileId];
+  if (byProfile?.encoder === "h264" || byProfile?.encoder === "h265" || byProfile?.encoder === "rawpng") {
+    return byProfile.encoder;
+  }
+  return "h264";
+}
+
 export default function App() {
   const api = new HostApiManager();
   const session = createSessionManager(api);
@@ -93,6 +207,9 @@ export default function App() {
   const [hostName, setHostName] = createSignal("unknown-host");
   const [connectDialogDevice, setConnectDialogDevice] = createSignal<DeviceBasic | null>(null);
   const [connectDialogMode, setConnectDialogMode] = createSignal<DisplayMode>("virtual_monitor");
+  const [connectDialogProfileId, setConnectDialogProfileId] = createSignal<string>(TRAINED_PROFILE_DEFAULT_ID);
+  const [connectDialogResolutionPresetId, setConnectDialogResolutionPresetId] = createSignal<string>(RESOLUTION_PRESET_DEFAULT_ID);
+  const [connectDialogEncoderMode, setConnectDialogEncoderMode] = createSignal<ConnectEncoderMode>(ENCODER_DEFAULT_MODE);
   const [connectDialogDoctor, setConnectDialogDoctor] = createSignal<VirtualDoctor | null>(null);
   const [connectDialogDoctorLoading, setConnectDialogDoctorLoading] = createSignal(false);
   const [connectDialogBlockReason, setConnectDialogBlockReason] = createSignal("");
@@ -171,28 +288,22 @@ export default function App() {
     saveWaylandExperimentalDuplication(enabled);
   }
 
-  async function connectWaylandPortal(device: DeviceBasic): Promise<void> {
-    const blockedReason = connectDisabledReason(device);
-    if (blockedReason.length > 0) {
-      session.setError(blockedReason);
-      return;
-    }
-    const mode = waylandExperimentalDuplication() ? "virtual_mirror" : "virtual_monitor";
-    await session.connectDevice(device, mode);
-  }
-
   function openConnectDialog(device: DeviceBasic): void {
-    if (isWaylandPortalHost()) {
-      void connectWaylandPortal(device);
-      return;
-    }
-    const saved = loadSavedDisplayMode(device.serial);
-    setConnectDialogMode(saved ?? "virtual_monitor");
+    const isWaylandHost = isWaylandPortalHost();
+    const saved = isWaylandHost ? "virtual_monitor" : (loadSavedDisplayMode(device.serial) ?? "virtual_monitor");
+    setConnectDialogMode(saved);
+    setConnectDialogProfileId(TRAINED_PROFILE_DEFAULT_ID);
+    setConnectDialogResolutionPresetId(RESOLUTION_PRESET_DEFAULT_ID);
+    setConnectDialogEncoderMode(ENCODER_DEFAULT_MODE);
     setConnectDialogDoctor(null);
-    setConnectDialogDoctorLoading(true);
+    setConnectDialogDoctorLoading(!isWaylandHost);
     setConnectDialogBlockReason(connectDisabledReason(device));
     setConnectDialogDevice(device);
-    void api.getVirtualDoctor(device)
+    if (isWaylandHost) {
+      return;
+    }
+    void api
+      .getVirtualDoctor(device)
       .then((doctor) => {
         setConnectDialogDoctor(doctor);
       })
@@ -214,6 +325,7 @@ export default function App() {
   async function confirmConnect(): Promise<void> {
     const device = connectDialogDevice();
     if (!device) return;
+    const waylandHost = isWaylandPortalHost();
     const blockedReason = connectDisabledReason(device);
     if (blockedReason.length > 0) {
       setConnectDialogBlockReason(blockedReason);
@@ -221,21 +333,35 @@ export default function App() {
       return;
     }
     try {
-      let chosenMode = connectDialogMode();
       let backendMode: "virtual_monitor" | "virtual_mirror" | "duplicate" = "duplicate";
-      if (chosenMode === "virtual_monitor") {
-        const doctor = connectDialogDoctor() ?? await api.getVirtualDoctor(device);
-        if (!isVirtualMonitorAvailable(doctor)) {
-          session.setError(
-            "Virtual monitor mode is unavailable in current host session. Use Duplicate mode."
-          );
-          return;
+      if (waylandHost) {
+        backendMode = waylandExperimentalDuplication() ? "virtual_mirror" : "virtual_monitor";
+      } else {
+        const chosenMode = connectDialogMode();
+        if (chosenMode === "virtual_monitor") {
+          const doctor = connectDialogDoctor() ?? await api.getVirtualDoctor(device);
+          if (!isVirtualMonitorAvailable(doctor)) {
+            session.setError(
+              "Virtual monitor mode is unavailable in current host session. Use Duplicate mode."
+            );
+            return;
+          }
+          backendMode = "virtual_monitor";
         }
-        backendMode = "virtual_monitor";
+        saveDisplayMode(device.serial, chosenMode);
       }
-      saveDisplayMode(device.serial, chosenMode);
+
+      const resolvedProfileId = resolveProfileId(connectDialogProfileId());
+      const resolvedSize = resolveSessionSizeForPreset(device, connectDialogResolutionPresetId());
+      const resolvedEncoder = resolveEncoderForProfile(resolvedProfileId, connectDialogEncoderMode());
+      const connectConfig: ConnectSessionConfig = {
+        profile: resolvedProfileId,
+        encoder: resolvedEncoder,
+        size: resolvedSize,
+      };
+
       closeConnectDialog();
-      await session.connectDevice(device, backendMode);
+      await session.connectDevice(device, backendMode, connectConfig);
     } catch (err) {
       session.setError(`Connect mode validation failed: ${String(err)}`);
     }
@@ -607,6 +733,7 @@ export default function App() {
       <Show when={connectDialogDevice()}>
         {(deviceAccessor) => {
           const device = deviceAccessor();
+          const waylandHost = isWaylandPortalHost();
           const virtualMonitorSelected = () => connectDialogMode() === "virtual_monitor";
           const doctor = () => connectDialogDoctor();
           const virtualMonitorAvailable = () => isVirtualMonitorAvailable(doctor() ?? null);
@@ -617,45 +744,110 @@ export default function App() {
             }
             return "Creates real additional monitor space on host desktop.";
           };
+          const selectedProfile = () =>
+            TRAINED_PROFILE_OPTIONS.find((item) => item.id === connectDialogProfileId())
+            ?? TRAINED_PROFILE_OPTIONS[0];
+          const selectedSize = () => resolveSessionSizeForPreset(device, connectDialogResolutionPresetId()) ?? "auto";
+          const selectedEncoder = () => resolveEncoderForProfile(
+            resolveProfileId(connectDialogProfileId()),
+            connectDialogEncoderMode(),
+          );
           return (
             <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Select display mode">
               <section class="connect-modal">
-                <h3>Connect mode</h3>
+                <h3>Connect session</h3>
                 <p class="connect-modal-subtitle">{device.model} ({device.serial})</p>
-                <label class={`mode-option ${virtualMonitorSelected() ? "selected" : ""} ${!virtualMonitorAvailable() ? "disabled" : ""}`}>
-                  <input
-                    type="radio"
-                    name="display-mode"
-                    checked={virtualMonitorSelected()}
-                    disabled={!virtualMonitorAvailable()}
-                    onChange={() => setConnectDialogMode("virtual_monitor")}
-                  />
-                  <span>
-                    Virtual monitor (extend host desktop)
-                    <small>
-                      {virtualMonitorHint()}
-                    </small>
-                  </span>
-                </label>
-                <label class={`mode-option ${connectDialogMode() === "duplicate" ? "selected" : ""}`}>
-                  <input
-                    type="radio"
-                    name="display-mode"
-                    checked={connectDialogMode() === "duplicate"}
-                    onChange={() => setConnectDialogMode("duplicate")}
-                  />
-                  <span>
-                    Duplicate current screen
-                    <small>Works with current host backend.</small>
-                  </span>
-                </label>
+                <Show
+                  when={!waylandHost}
+                  fallback={(
+                    <p class="setup-hint">
+                      Wayland mode: {waylandExperimentalDuplication() ? "Virtual mirror (experimental)" : "Virtual monitor (standard)"}
+                    </p>
+                  )}
+                >
+                  <label class={`mode-option ${virtualMonitorSelected() ? "selected" : ""} ${!virtualMonitorAvailable() ? "disabled" : ""}`}>
+                    <input
+                      type="radio"
+                      name="display-mode"
+                      checked={virtualMonitorSelected()}
+                      disabled={!virtualMonitorAvailable()}
+                      onChange={() => setConnectDialogMode("virtual_monitor")}
+                    />
+                    <span>
+                      Virtual monitor (extend host desktop)
+                      <small>
+                        {virtualMonitorHint()}
+                      </small>
+                    </span>
+                  </label>
+                  <label class={`mode-option ${connectDialogMode() === "duplicate" ? "selected" : ""}`}>
+                    <input
+                      type="radio"
+                      name="display-mode"
+                      checked={connectDialogMode() === "duplicate"}
+                      onChange={() => setConnectDialogMode("duplicate")}
+                    />
+                    <span>
+                      Duplicate current screen
+                      <small>Works with current host backend.</small>
+                    </span>
+                  </label>
+                </Show>
+
+                <div class="connect-config-grid">
+                  <label class="connect-config-field">
+                    <span>Trained profile</span>
+                    <select
+                      value={connectDialogProfileId()}
+                      onChange={(event) => setConnectDialogProfileId(event.currentTarget.value)}
+                    >
+                      <For each={TRAINED_PROFILE_OPTIONS}>
+                        {(profile) => (
+                          <option value={profile.id}>{profile.label}</option>
+                        )}
+                      </For>
+                    </select>
+                    <small>{selectedProfile()?.description ?? "Session profile"}</small>
+                  </label>
+
+                  <label class="connect-config-field">
+                    <span>Resolution preset</span>
+                    <select
+                      value={connectDialogResolutionPresetId()}
+                      onChange={(event) => setConnectDialogResolutionPresetId(event.currentTarget.value)}
+                    >
+                      <For each={RESOLUTION_PRESET_OPTIONS}>
+                        {(preset) => (
+                          <option value={preset.id}>{preset.label}</option>
+                        )}
+                      </For>
+                    </select>
+                    <small>Final stream size: {selectedSize()}</small>
+                  </label>
+
+                  <label class="connect-config-field">
+                    <span>Encoder</span>
+                    <select
+                      value={connectDialogEncoderMode()}
+                      onChange={(event) => setConnectDialogEncoderMode(event.currentTarget.value as ConnectEncoderMode)}
+                    >
+                      <For each={ENCODER_OPTIONS}>
+                        {(option) => (
+                          <option value={option.id}>{option.label}</option>
+                        )}
+                      </For>
+                    </select>
+                    <small>Active encoder for this connect: {selectedEncoder()}</small>
+                  </label>
+                </div>
+
                 <Show when={connectDialogDoctorLoading()}>
                   <p class="setup-message">Checking host capabilities...</p>
                 </Show>
                 <Show when={connectDialogBlockReason()}>
                   {(msg) => <p class="setup-missing">Connect blocked: {msg()}</p>}
                 </Show>
-                <Show when={doctor()}>
+                <Show when={!waylandHost && doctor()}>
                   {(d) => <p class="setup-hint">{d().installHint}</p>}
                 </Show>
                 <div class="connect-modal-actions">

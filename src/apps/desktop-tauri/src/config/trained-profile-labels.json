@@ -1,0 +1,35 @@
+{
+  "defaultProfileId": "fast60_3",
+  "profiles": [
+    {
+      "id": "fast60_3",
+      "label": "Universal Trained v3",
+      "description": "Najlepszy aktualny profil uniwersalny po autotune (stabilne 60 FPS)."
+    },
+    {
+      "id": "fast60_2",
+      "label": "Universal Trained v2",
+      "description": "Poprzednia generacja profilu uniwersalnego; bardziej konserwatywna."
+    },
+    {
+      "id": "fast60",
+      "label": "Fast 60",
+      "description": "Szybki profil 60 FPS z pierwszej serii treningowej."
+    },
+    {
+      "id": "balanced60",
+      "label": "Balanced 60",
+      "description": "Zbalansowany profil treningowy z bezpieczniejszym marginesem."
+    },
+    {
+      "id": "quality60",
+      "label": "Quality 60",
+      "description": "Profil nastawiony na jakość obrazu przy 60 FPS."
+    },
+    {
+      "id": "safe_60",
+      "label": "Safe 60",
+      "description": "Bezpieczny profil kompatybilnościowy, przydatny do szybkiego fallbacku."
+    }
+  ]
+}

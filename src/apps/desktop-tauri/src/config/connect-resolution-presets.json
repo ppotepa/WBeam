@@ -1,0 +1,39 @@
+{
+  "defaultPresetId": "device_max",
+  "presets": [
+    {
+      "id": "device_max",
+      "label": "Device Max (landscape)",
+      "kind": "device_max"
+    },
+    {
+      "id": "device_current",
+      "label": "Device Current (landscape)",
+      "kind": "device_current"
+    },
+    {
+      "id": "1280x720",
+      "label": "HD 1280x720",
+      "kind": "fixed",
+      "size": "1280x720"
+    },
+    {
+      "id": "1280x800",
+      "label": "WXGA 1280x800",
+      "kind": "fixed",
+      "size": "1280x800"
+    },
+    {
+      "id": "1920x1080",
+      "label": "FHD 1920x1080",
+      "kind": "fixed",
+      "size": "1920x1080"
+    },
+    {
+      "id": "2560x1440",
+      "label": "QHD 2560x1440",
+      "kind": "fixed",
+      "size": "2560x1440"
+    }
+  ]
+}

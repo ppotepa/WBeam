@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
@@ -88,6 +88,23 @@ struct VirtualDepsInstallStatus {
     success: bool,
     message: String,
     logs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+struct StartConfigPatch {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    encoder: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    size: Option<String>,
+}
+
+impl StartConfigPatch {
+    fn is_empty(&self) -> bool {
+        self.profile.is_none() && self.encoder.is_none() && self.size.is_none()
+    }
 }
 
 #[derive(Debug)]
@@ -662,11 +679,50 @@ fn daemon_stream_state_and_port(serial: &str, stream_port: Option<u16>) -> Optio
     Some((state.to_string(), resolved_port))
 }
 
+fn normalize_profile_name(value: Option<String>) -> Option<String> {
+    let trimmed = value.as_deref().map(str::trim).filter(|v| !v.is_empty())?;
+    Some(trimmed.to_string())
+}
+
+fn normalize_encoder_name(value: Option<String>) -> Option<String> {
+    let trimmed = value
+        .as_deref()
+        .map(str::trim)
+        .map(str::to_lowercase)
+        .filter(|v| !v.is_empty())?;
+    let normalized = match trimmed.as_str() {
+        "h264" => "h264",
+        "h265" => "h265",
+        "rawpng" | "raw-png" => "rawpng",
+        _ => return None,
+    };
+    Some(normalized.to_string())
+}
+
+fn normalize_size_name(value: Option<String>) -> Option<String> {
+    let trimmed = value
+        .as_deref()
+        .map(str::trim)
+        .map(str::to_lowercase)
+        .filter(|v| !v.is_empty())?;
+    let (w_raw, h_raw) = trimmed.split_once('x')?;
+    let mut width = w_raw.parse::<u32>().ok()?.clamp(640, 3840);
+    let mut height = h_raw.parse::<u32>().ok()?.clamp(360, 2160);
+    if width % 2 == 1 {
+        width -= 1;
+    }
+    if height % 2 == 1 {
+        height -= 1;
+    }
+    Some(format!("{width}x{height}"))
+}
+
 fn daemon_post_action(
     action: &str,
     serial: &str,
     stream_port: u16,
     display_mode: Option<&str>,
+    start_patch: Option<&StartConfigPatch>,
 ) -> Result<String, String> {
     let control_port = wbeam_control_port();
     let mut url = format!(
@@ -687,17 +743,39 @@ fn daemon_post_action(
             }
         }
     }
+    let body_json = if action == "start" {
+        if let Some(patch) = start_patch {
+            if patch.is_empty() {
+                None
+            } else {
+                Some(serde_json::to_string(patch).map_err(|e| format!("serialize start patch failed: {e}"))?)
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let mut curl_args: Vec<String> = vec![
+        "-sS".to_string(),
+        "--max-time".to_string(),
+        "3".to_string(),
+        "-X".to_string(),
+        "POST".to_string(),
+    ];
+    if let Some(ref body) = body_json {
+        curl_args.push("-H".to_string());
+        curl_args.push("Content-Type: application/json".to_string());
+        curl_args.push("--data".to_string());
+        curl_args.push(body.clone());
+    }
+    curl_args.push("-w".to_string());
+    curl_args.push("\nHTTP_STATUS:%{http_code}".to_string());
+    curl_args.push(url.clone());
+
     let output = Command::new("curl")
-        .args([
-            "-sS",
-            "--max-time",
-            "3",
-            "-X",
-            "POST",
-            "-w",
-            "\nHTTP_STATUS:%{http_code}",
-            &url,
-        ])
+        .args(&curl_args)
         .output()
         .map_err(|e| format!("curl failed: {e}"))?;
     if !output.status.success() {
@@ -1402,6 +1480,9 @@ fn device_connect(
     serial: String,
     stream_port: u16,
     display_mode: Option<String>,
+    connect_profile: Option<String>,
+    connect_encoder: Option<String>,
+    connect_size: Option<String>,
 ) -> Result<String, String> {
     service_ready_for_device_actions()?;
     let mut effective_stream_port = resolve_stream_port_for_serial(&serial, stream_port);
@@ -1418,6 +1499,11 @@ fn device_connect(
     if effective_stream_port == 0 {
         effective_stream_port = 5000;
     }
+    let start_patch = StartConfigPatch {
+        profile: normalize_profile_name(connect_profile),
+        encoder: normalize_encoder_name(connect_encoder),
+        size: normalize_size_name(connect_size),
+    };
     let chosen_mode = display_mode.unwrap_or_else(|| "duplicate".to_string());
     let normalized_mode = chosen_mode.trim().to_lowercase();
     if normalized_mode != "duplicate"
@@ -1442,8 +1528,14 @@ fn device_connect(
         "device_connect",
         "begin",
         &format!(
-            "serial={} requested_port={} effective_port={} requested_mode={}",
-            serial, stream_port, effective_stream_port, normalized_mode
+            "serial={} requested_port={} effective_port={} requested_mode={} profile={} encoder={} size={}",
+            serial,
+            stream_port,
+            effective_stream_port,
+            normalized_mode,
+            start_patch.profile.as_deref().unwrap_or("-"),
+            start_patch.encoder.as_deref().unwrap_or("-"),
+            start_patch.size.as_deref().unwrap_or("-")
         ),
     );
     connect_log(&serial, effective_stream_port, "device_connect begin");
@@ -1526,7 +1618,13 @@ fn device_connect(
         effective_stream_port,
         "device_connect daemon_post_action start",
     );
-    let resp = match daemon_post_action("start", &serial, effective_stream_port, Some(&normalized_mode)) {
+    let resp = match daemon_post_action(
+        "start",
+        &serial,
+        effective_stream_port,
+        Some(&normalized_mode),
+        Some(&start_patch),
+    ) {
         Ok(v) => v,
         Err(err) => {
             ui_service_log(
@@ -1573,7 +1671,7 @@ fn device_disconnect(serial: String, stream_port: u16) -> Result<String, String>
             serial, stream_port, effective_stream_port
         ),
     );
-    let mut res = daemon_post_action("stop", &serial, effective_stream_port, None);
+    let mut res = daemon_post_action("stop", &serial, effective_stream_port, None, None);
     if res.is_err() {
         // Fallback: stream port may have drifted from stale UI mapping.
         let control_port = wbeam_control_port();

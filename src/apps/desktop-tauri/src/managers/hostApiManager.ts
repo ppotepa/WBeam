@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  ConnectSessionConfig,
   DeviceBasic,
   DevicesBasicResponse,
   HostProbeBrief,
@@ -71,10 +72,18 @@ export class HostApiManager {
   async connectDevice(
     device: DeviceBasic,
     displayMode: "virtual_monitor" | "virtual_mirror" | "duplicate",
+    connectConfig?: ConnectSessionConfig,
   ): Promise<void> {
     try {
       await withTimeout(
-        invoke<string>("device_connect", { serial: device.serial, streamPort: device.streamPort, displayMode }),
+        invoke<string>("device_connect", {
+          serial: device.serial,
+          streamPort: device.streamPort,
+          displayMode,
+          connectProfile: connectConfig?.profile,
+          connectEncoder: connectConfig?.encoder,
+          connectSize: connectConfig?.size,
+        }),
         10000,
         "device_connect",
       );

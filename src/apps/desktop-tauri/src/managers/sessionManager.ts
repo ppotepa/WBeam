@@ -1,6 +1,6 @@
 import { createMemo, createSignal } from "solid-js";
 import { HostApiManager } from "./hostApiManager";
-import type { DeviceBasic, HostProbeBrief, ServiceStatus } from "../types";
+import type { ConnectSessionConfig, DeviceBasic, HostProbeBrief, ServiceStatus } from "../types";
 
 const EMPTY_PROBE: HostProbeBrief = {
   reachable: false,
@@ -202,12 +202,13 @@ export function createSessionManager(api: HostApiManager) {
   async function connectDevice(
     device: DeviceBasic,
     displayMode: "virtual_monitor" | "virtual_mirror" | "duplicate",
+    connectConfig?: ConnectSessionConfig,
   ) {
     const key = `${device.serial}:connect`;
     setDeviceActionBusy((prev) => (prev.includes(key) ? prev : [...prev, key]));
     setError("");
     try {
-      await api.connectDevice(device, displayMode);
+      await api.connectDevice(device, displayMode, connectConfig);
       await refreshSnapshot();
     } catch (err) {
       setError(String(err));

@@ -1,5 +1,28 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending) - Connect session profile modal + split desktop profile catalogs
+- Added per-connect session configuration in desktop Tauri UI:
+  - `Connect` now opens a session modal (also on Wayland) with:
+    - trained profile selector,
+    - resolution preset selector,
+    - encoder selector (`From trained profile`, `H.264`, `H.265`, `RAW PNG`).
+  - Session config is chosen every time `Connect` is pressed (no per-device auto-persist for profile values).
+- Wayland behavior preserved:
+  - global `Use experimental virtual mirroring (Wayland only)` checkbox still controls Wayland backend mode,
+  - modal now shows active Wayland mode and applies selected profile/resolution/encoder for that connect.
+- Split profile naming/runtime metadata into separate desktop JSON catalogs:
+  - `src/apps/desktop-tauri/src/config/trained-profile-labels.json`
+  - `src/apps/desktop-tauri/src/config/trained-profile-runtime.json`
+  - `src/apps/desktop-tauri/src/config/connect-resolution-presets.json`
+  - `src/apps/desktop-tauri/src/config/connect-encoder-options.json`
+- Extended Tauri backend `device_connect` to accept per-session config payload:
+  - new optional args: `connectProfile`, `connectEncoder`, `connectSize`,
+  - sanitized and forwarded as JSON `ConfigPatch` body to host `POST /v1/start`,
+  - preserves existing display-mode handling (`duplicate`, `virtual_monitor`, `virtual_mirror`).
+- Validation:
+  - `cd src/apps/desktop-tauri && npm run build` -> OK
+  - `cd src/apps/desktop-tauri/src-tauri && cargo check` -> OK
+
 ## Session Update (2026-03-10, pending) - Android debug overlay simplified to read-only telemetry
 - Simplified Android debug UX in `MainActivity` to remove runtime profile/control editing from the app screen:
   - removed `SettingsRepository` usage (no SharedPreferences read/write for stream profile controls in this path),

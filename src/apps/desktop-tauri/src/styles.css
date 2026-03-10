@@ -496,6 +496,41 @@ h1 {
   font-size: 0.67rem;
 }
 
+.connect-config-grid {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.connect-config-field {
+  display: grid;
+  gap: 0.2rem;
+  border: 1px solid #2f445a;
+  border-radius: 8px;
+  background: #132338;
+  padding: 0.45rem 0.5rem;
+}
+
+.connect-config-field span {
+  font-size: 0.7rem;
+  color: #c9d8ea;
+  font-weight: 600;
+}
+
+.connect-config-field select {
+  width: 100%;
+  border-radius: 6px;
+  border: 1px solid #3a5673;
+  background: #0e1a2b;
+  color: #eaf3ff;
+  font-size: 0.74rem;
+  padding: 0.32rem 0.38rem;
+}
+
+.connect-config-field small {
+  color: #9ab2c9;
+  font-size: 0.65rem;
+}
+
 .mode-option-check {
   border: 1px solid #2f445a;
   border-radius: 8px;
