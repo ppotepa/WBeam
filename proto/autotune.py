@@ -231,6 +231,27 @@ def format_secs(total: float) -> str:
     return f"{s}s"
 
 
+def parse_csv_int_values(raw: str | None, min_value: int, max_value: int | None = None) -> list[int]:
+    if raw is None:
+        return []
+    values: list[int] = []
+    for token in raw.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            val = int(token)
+        except ValueError:
+            continue
+        if val < min_value:
+            continue
+        if max_value is not None and val > max_value:
+            continue
+        values.append(val)
+    # Preserve deterministic order for reproducible runs.
+    return sorted(set(values))
+
+
 def percentile(values: list[float], q: float) -> float:
     if not values:
         return 0.0
@@ -1272,9 +1293,24 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument(
         "--fps",
         type=int,
-        choices=sorted(int(v) for v in TUNABLE_VALUES["PROTO_CAPTURE_FPS"]),
         default=None,
         help="Lock capture FPS for the entire run (for example: --fps 60).",
+    )
+    p.add_argument(
+        "--fps-values",
+        default="",
+        help=(
+            "Override FPS candidates for mutation as comma-separated integers "
+            "(for example: --fps-values 45,60,72,90)."
+        ),
+    )
+    p.add_argument(
+        "--bitrate-values",
+        default="",
+        help=(
+            "Override bitrate candidates (kbps) for mutation as comma-separated integers "
+            "(for example: --bitrate-values 15000,25000,40000,60000)."
+        ),
     )
     p.add_argument(
         "--reuse-device",
@@ -1395,7 +1431,16 @@ def main(argv: list[str]) -> int:
                 )
             else:
                 log("capture-size auto-detect unavailable and config has empty PROTO_CAPTURE_SIZE")
+    fps_values_override = parse_csv_int_values(args.fps_values, min_value=24, max_value=240)
+    if fps_values_override:
+        TUNABLE_VALUES["PROTO_CAPTURE_FPS"] = fps_values_override
+    bitrate_values_override = parse_csv_int_values(args.bitrate_values, min_value=1000)
+    if bitrate_values_override:
+        TUNABLE_VALUES["PROTO_CAPTURE_BITRATE_KBPS"] = bitrate_values_override
     forced_fps = int(args.fps) if args.fps is not None else None
+    if forced_fps is not None and (forced_fps < 24 or forced_fps > 240):
+        log(f"invalid --fps value {forced_fps}; expected 24..240")
+        return 1
     if forced_fps is not None:
         base_cfg["PROTO_CAPTURE_FPS"] = forced_fps
     show_overlay = bool(args.overlay)
@@ -1419,6 +1464,8 @@ def main(argv: list[str]) -> int:
         f"export_profiles={export_profiles} "
         f"single_profile_name={profile_name_single or '-'} "
         f"forced_fps={forced_fps if forced_fps is not None else 'auto'} "
+        f"fps_values={','.join(str(v) for v in TUNABLE_VALUES['PROTO_CAPTURE_FPS'])} "
+        f"bitrate_values={','.join(str(v) for v in TUNABLE_VALUES['PROTO_CAPTURE_BITRATE_KBPS'])} "
         f"gate(sender>={gate_min_sender_p50:.1f},pipe>={gate_min_pipe_p50:.1f},timeout<={gate_max_timeout_mean:.1f},portal={require_portal_metrics})"
     )
 
@@ -1822,6 +1869,8 @@ def main(argv: list[str]) -> int:
         "capture_size_source": capture_size_source,
         "capture_size_auto_detected": capture_size_auto,
         "capture_size_auto_serial": capture_size_serial,
+        "tunable_capture_fps_values": list(TUNABLE_VALUES["PROTO_CAPTURE_FPS"]),
+        "tunable_bitrate_values": list(TUNABLE_VALUES["PROTO_CAPTURE_BITRATE_KBPS"]),
         "fast_mode_tunable_keys": sorted(k for k in tunable_keys if k in FAST_MODE_TUNABLE_KEYS),
         "generations": generations,
         "population": population,

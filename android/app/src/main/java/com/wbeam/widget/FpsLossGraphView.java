@@ -11,6 +11,8 @@ public class FpsLossGraphView extends View {
     private static final int COLOR_GREEN = Color.parseColor("#22C55E");
     private static final int COLOR_ORANGE = Color.parseColor("#F59E0B");
     private static final int COLOR_RED = Color.parseColor("#EF4444");
+    private static final float ORANGE_LOSS_THRESHOLD = 20.0f;
+    private static final float RED_LOSS_THRESHOLD = 55.0f;
     private static final int COLOR_GRID = Color.parseColor("#2E3A4F");
     private static final int COLOR_BG = Color.parseColor("#3A0F172A");
 
@@ -107,9 +109,9 @@ public class FpsLossGraphView extends View {
             float level = levelHistory[idx];
             float loss = lossHistory[idx];
 
-            if (loss > 50.0f) {
+            if (loss > RED_LOSS_THRESHOLD) {
                 barPaint.setColor(COLOR_RED);
-            } else if (loss > 10.0f) {
+            } else if (loss > ORANGE_LOSS_THRESHOLD) {
                 barPaint.setColor(COLOR_ORANGE);
             } else {
                 barPaint.setColor(COLOR_GREEN);

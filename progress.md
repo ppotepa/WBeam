@@ -1,5 +1,29 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending) - Android fullscreen+awake hardening and max-quality autotune training flow
+- Android app runtime hardening for continuous kiosk-style streaming:
+  - forced immersive fullscreen in both debug and release paths (`MainActivity.applyBuildVariantUi -> setFullscreen(true)`),
+  - added persistent immersive re-apply on lifecycle events (`onResume`, `onWindowFocusChanged`) to keep nav/system bars hidden,
+  - enabled always-on display while app is active (`FLAG_KEEP_SCREEN_ON` + root `setKeepScreenOn(true)`),
+  - removed `Back` behavior that previously dropped out of fullscreen.
+- Debug/HUD stability improvements to reduce false low-FPS and random “no transmit” dips in overlay:
+  - added short metrics grace window before forcing `HUD OFFLINE` (`METRICS_STALE_GRACE_MS`),
+  - added present FPS stale-grace smoothing with fallback to decoder/receiver FPS when direct present FPS temporarily drops,
+  - adjusted pressure coloring logic to mark red only on real FPS degradation plus timing/queue pressure (less aggressive false-red),
+  - relaxed debug loss thresholds to align with real-world stream behavior:
+    - overlay text: green `<=20%`, orange `>20%`, red `>55%`,
+    - graph coloring in `FpsLossGraphView` updated to the same thresholds.
+- Autotune improvements for high-throughput quality training:
+  - `proto/autotune.py` now supports runtime mutation overrides:
+    - `--fps-values` (comma-separated candidate FPS list),
+    - `--bitrate-values` (comma-separated candidate bitrate list in kbps; supports up to 200 Mbps and beyond).
+  - added run metadata output for active tunable candidate lists in autotune report.
+- Added a ready-to-run 2-stage “max quality + fps” training script:
+  - `proto/train-autotune-max-quality.sh`
+  - stage1 broad search + stage2 deep refinement,
+  - default bitrate ladder reaches `200000 kbps` (200 Mbps),
+  - exports final profile as `baseline` to `proto/config/profiles.json` and snapshot to `proto/config/autotune-best.json`.
+
 ## Session Update (2026-03-10, pending) - Connect session profile modal + split desktop profile catalogs
 - Added per-connect session configuration in desktop Tauri UI:
   - `Connect` now opens a session modal (also on Wayland) with:

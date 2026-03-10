@@ -24,6 +24,7 @@ import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
+import android.view.WindowManager;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
@@ -126,6 +127,8 @@ public class MainActivity extends AppCompatActivity {
     private static final long DEBUG_FPS_SAMPLE_MS = 1000L;
     private static final int DEBUG_FPS_GRAPH_POINTS = 180;
     private static final long DEBUG_OVERLAY_TOGGLE_HOLD_MS = 650L;
+    private static final long PRESENT_FPS_STALE_GRACE_MS = 2500L;
+    private static final long METRICS_STALE_GRACE_MS = 3000L;
 
     // ── Views ──────────────────────────────────────────────────────────────────
     private View rootLayout;
@@ -249,6 +252,9 @@ public class MainActivity extends AppCompatActivity {
     private double latestPresentFps = 0.0;
     private long latestStreamUptimeSec = 0L;
     private long latestFrameOutHost = 0L;
+    private double latestStablePresentFps = 0.0;
+    private long latestStablePresentFpsAtMs = 0L;
+    private long lastPerfMetricsAtMs = 0L;
     private final SpannableStringBuilder liveLogBuffer = new SpannableStringBuilder();
 
     // ── Daemon state (updated via StatusPoller.Callbacks) ──────────────────────
@@ -321,6 +327,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        setScreenAlwaysOn(true);
 
         bindViews();
         bindStartupBuildVersion();
@@ -556,6 +563,21 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        setScreenAlwaysOn(true);
+        enforceImmersiveModeIfNeeded();
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) {
+            enforceImmersiveModeIfNeeded();
+        }
+    }
+
+    @Override
     protected void onDestroy() {
         statusPoller.stop();
         stopPreflightPulse();
@@ -577,10 +599,6 @@ public class MainActivity extends AppCompatActivity {
         }
         if (settingsVisible) {
             hideSettingsPanel();
-            return;
-        }
-        if (isFullscreen) {
-            setFullscreen(false);
             return;
         }
         super.onBackPressed();
@@ -749,7 +767,7 @@ public class MainActivity extends AppCompatActivity {
             fullscreenButton.setVisibility(View.GONE);
         }
         if (BuildConfig.DEBUG) {
-            setFullscreen(false);
+            setFullscreen(true);
             if (debugFpsGraphView != null) {
                 debugFpsGraphView.setCapacity(DEBUG_FPS_GRAPH_POINTS);
             }
@@ -1314,9 +1332,6 @@ public class MainActivity extends AppCompatActivity {
     private void setFullscreen(boolean enable) {
         isFullscreen = enable;
 
-        WindowInsetsControllerCompat controller =
-                WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
-
         if (enable) {
             if (topBar != null) {
                 topBar.setVisibility(View.GONE);
@@ -1325,14 +1340,7 @@ public class MainActivity extends AppCompatActivity {
                 statusPanel.setVisibility(View.GONE);
             }
             hideSettingsPanel();
-
-            WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
-            if (controller != null) {
-                controller.setSystemBarsBehavior(
-                        WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                );
-                controller.hide(WindowInsetsCompat.Type.systemBars());
-            }
+            enforceImmersiveModeIfNeeded();
             return;
         }
 
@@ -1346,8 +1354,36 @@ public class MainActivity extends AppCompatActivity {
         }
 
         WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
+        WindowInsetsControllerCompat controller =
+                WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
         if (controller != null) {
             controller.show(WindowInsetsCompat.Type.systemBars());
+        }
+    }
+
+    private void enforceImmersiveModeIfNeeded() {
+        if (!isFullscreen) {
+            return;
+        }
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+        WindowInsetsControllerCompat controller =
+                WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
+        if (controller != null) {
+            controller.setSystemBarsBehavior(
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            );
+            controller.hide(WindowInsetsCompat.Type.systemBars());
+        }
+    }
+
+    private void setScreenAlwaysOn(boolean enable) {
+        if (enable) {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        } else {
+            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        }
+        if (rootLayout != null) {
+            rootLayout.setKeepScreenOn(enable);
         }
     }
 
@@ -1672,10 +1708,18 @@ public class MainActivity extends AppCompatActivity {
         if (perfHudText == null) {
             return;
         }
+        long nowMs = SystemClock.elapsedRealtime();
         if (metrics == null) {
+            if (daemonReachable
+                    && lastPerfMetricsAtMs > 0L
+                    && (nowMs - lastPerfMetricsAtMs) <= METRICS_STALE_GRACE_MS) {
+                emitHudDebugAdb("state=metrics_stale grace=1");
+                return;
+            }
             updatePerfHudUnavailable();
             return;
         }
+        lastPerfMetricsAtMs = nowMs;
 
         JSONObject kpi = metrics.optJSONObject("kpi");
         JSONObject latest = metrics.optJSONObject("latest_client_metrics");
@@ -1685,7 +1729,31 @@ public class MainActivity extends AppCompatActivity {
         long streamUptimeSec = metrics.optLong("stream_uptime_sec", 0);
 
         double targetFps = kpi != null ? kpi.optDouble("target_fps", getSelectedFps()) : getSelectedFps();
+        if (!Double.isFinite(targetFps) || targetFps <= 0.0) {
+            targetFps = getSelectedFps();
+        }
         double presentFps = kpi != null ? kpi.optDouble("present_fps", 0.0) : 0.0;
+        double recvFps = kpi != null ? kpi.optDouble("recv_fps", 0.0) : 0.0;
+        double decodeFps = kpi != null ? kpi.optDouble("decode_fps", 0.0) : 0.0;
+        if (!Double.isFinite(presentFps) || presentFps < 0.0) {
+            presentFps = 0.0;
+        }
+        if (presentFps < 1.0) {
+            if (Double.isFinite(decodeFps) && decodeFps >= 1.0) {
+                presentFps = decodeFps;
+            } else if (Double.isFinite(recvFps) && recvFps >= 1.0) {
+                presentFps = recvFps;
+            }
+        }
+        boolean hasFlowSignals = streamUptimeSec > 0 || frameOutHost > 0 || recvFps >= 1.0 || decodeFps >= 1.0;
+        if (presentFps >= 1.0) {
+            latestStablePresentFps = presentFps;
+            latestStablePresentFpsAtMs = nowMs;
+        } else if (hasFlowSignals
+                && latestStablePresentFps >= 1.0
+                && (nowMs - latestStablePresentFpsAtMs) <= PRESENT_FPS_STALE_GRACE_MS) {
+            presentFps = latestStablePresentFps;
+        }
         String daemonStateUi = effectiveDaemonState(daemonState, presentFps, streamUptimeSec, frameOutHost);
         latestTargetFps = targetFps;
         latestPresentFps = presentFps;
@@ -1753,10 +1821,15 @@ public class MainActivity extends AppCompatActivity {
             );
             refreshDebugInfoOverlay();
 
-        // Build explicit high-pressure reason so logcat shows exactly which condition fired.
+        // Build explicit pressure reason so logcat shows exactly which condition fired.
         StringBuilder hpSb = new StringBuilder();
+        double fpsFloor = targetFps * 0.90;
+        boolean fpsUnderPressure = presentFps > 0.0 && presentFps < fpsFloor;
+        boolean timingPressure = decodeP95 > 12.0 || renderP95 > 7.0;
+        boolean queuePressure = qT >= qTMax || qD >= qDMax || qR >= qRMax;
         if (!warmingUp) {
-            if (decodeP95 > 12.0) { hpSb.append("dec>12(").append(String.format(Locale.US,"%.1f",decodeP95)).append(")"); }
+            if (fpsUnderPressure) { hpSb.append("fps<").append(String.format(Locale.US, "%.1f", fpsFloor)); }
+            if (decodeP95 > 12.0) { if (hpSb.length()>0) hpSb.append(','); hpSb.append("dec>12(").append(String.format(Locale.US,"%.1f",decodeP95)).append(")"); }
             if (renderP95 > 7.0)  { if (hpSb.length()>0) hpSb.append(','); hpSb.append("ren>7(").append(String.format(Locale.US,"%.1f",renderP95)).append(")"); }
             if (qT >= qTMax)      { if (hpSb.length()>0) hpSb.append(','); hpSb.append("qT=").append(qT).append("/").append(qTMax); }
             if (qD >= qDMax)      { if (hpSb.length()>0) hpSb.append(','); hpSb.append("qD=").append(qD).append("/").append(qDMax); }
@@ -1764,8 +1837,14 @@ public class MainActivity extends AppCompatActivity {
         }
         String hpReason = hpSb.length() > 0 ? hpSb.toString() : (warmingUp ? "warmup" : "ok");
 
-        // Red only when degraded with frames already flowing; warmup = yellow.
-        boolean highPressure = !warmingUp && hpSb.length() > 0;
+        // Red only for sustained heavy pressure with real FPS degradation.
+        boolean highPressure = !warmingUp && fpsUnderPressure && (timingPressure || queuePressure);
+        boolean mediumPressure = !warmingUp && (
+                adaptiveAction.startsWith("degrade")
+                        || fpsUnderPressure
+                        || timingPressure
+                        || queuePressure
+        );
         if (highPressure) {
             perfHudText.setTextColor(Color.parseColor("#FCA5A5")); // red
             Log.w(TAG, "HUD RED warmingUp=" + warmingUp + " hp=" + hpReason
@@ -1776,7 +1855,7 @@ public class MainActivity extends AppCompatActivity {
                     + " qR=" + qR + "/" + qRMax
                     + " fps_present=" + String.format(Locale.US, "%.1f", presentFps)
                     + " stream_up=" + streamUptimeSec + "s");
-        } else if (adaptiveAction.startsWith("degrade") || warmingUp) {
+        } else if (warmingUp || mediumPressure) {
             perfHudText.setTextColor(Color.parseColor("#FDE68A")); // yellow
         } else {
             perfHudText.setTextColor(Color.parseColor("#BBF7D0")); // green
@@ -1831,11 +1910,11 @@ public class MainActivity extends AppCompatActivity {
         String daemonStateUi = effectiveDaemonState(
                 daemonState, latestPresentFps, latestStreamUptimeSec, latestFrameOutHost);
         String host = daemonHostName == null || daemonHostName.trim().isEmpty() ? "-" : daemonHostName;
-        double safeTarget = latestTargetFps > 0.0 ? latestTargetFps : 60.0;
+        double safeTarget = latestTargetFps > 0.0 ? latestTargetFps : (double) getSelectedFps();
         double lossPct = Math.max(0.0, ((safeTarget - latestPresentFps) / safeTarget) * 100.0);
         String text = String.format(
                 Locale.US,
-                "DBG %s | host:%s | daemon:%s\nFPS %.0f/%.1f (loss %.0f%%)  thresholds: green <=10%% orange >10%% red >50%%\n%s\n%s",
+                "DBG %s | host:%s | daemon:%s\nFPS %.0f/%.1f (loss %.0f%%)  thresholds: green <=20%% orange >20%% red >55%%\n%s\n%s",
                 state,
                 host,
                 daemonStateUi,
