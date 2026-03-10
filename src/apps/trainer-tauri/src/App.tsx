@@ -285,6 +285,17 @@ function valueAt(obj: unknown, path: string[]): unknown {
   return cur;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseHudMetric(value: string): number | null {
+  if (!value) return null;
+  const cleaned = value.replace(/[^0-9.+-]/g, "");
+  const num = Number(cleaned);
+  return Number.isFinite(num) ? num : null;
+}
+
 function pickRuntimeValue(profile: Record<string, unknown>, key: string): string {
   const value = valueAt(profile, ["profile", "runtime", key]);
   if (value === undefined || value === null) return "-";
@@ -612,22 +623,37 @@ export default function App() {
     const state = String(valueAt(liveStatus(), ["base", "state"]) || "").toUpperCase();
     return state === "STREAMING" || state === "STARTING" || state === "RECONNECTING";
   });
+  const liveHudFallbackKpi = createMemo(() => {
+    const snapshot = hud();
+    const present = parseHudMetric(snapshot.presentFps);
+    const recv = parseHudMetric(snapshot.recvFps);
+    const drop = parseHudMetric(snapshot.dropsPerSec);
+    const mbps = parseHudMetric(snapshot.bitrateMbps);
+    const latency = parseHudMetric(snapshot.e2eP95Ms);
+    return { present, recv, drop, mbps, latency };
+  });
   const liveKpi = createMemo(() => {
     const kpi = (valueAt(liveMetrics(), ["kpi"]) as Record<string, unknown>) || {};
-    const present = Number(kpi.present_fps || 0);
-    const recv = Number(kpi.recv_fps || 0);
-    const drop = Number(kpi.drop_rate || 0);
-    const mbps = Number(kpi.effective_bitrate_mbps || 0);
-    const latency = Number(kpi.e2e_latency_ms_p95 || 0);
+    const fallback = liveHudFallbackKpi();
+    const presentRaw = Number(kpi.present_fps || 0);
+    const recvRaw = Number(kpi.recv_fps || 0);
+    const dropRaw = Number(kpi.drop_rate || 0);
+    const mbpsRaw = Number(kpi.effective_bitrate_mbps || 0);
+    const latencyRaw = Number(kpi.e2e_latency_ms_p95 || 0);
+    const present = Number.isFinite(presentRaw) && presentRaw > 0 ? presentRaw : fallback.present || 0;
+    const recv = Number.isFinite(recvRaw) && recvRaw > 0 ? recvRaw : fallback.recv || 0;
+    const drop = Number.isFinite(dropRaw) && dropRaw >= 0 ? dropRaw : fallback.drop || 0;
+    const mbps = Number.isFinite(mbpsRaw) && mbpsRaw > 0 ? mbpsRaw : fallback.mbps || 0;
+    const latency = Number.isFinite(latencyRaw) && latencyRaw > 0 ? latencyRaw : fallback.latency || 0;
     return {
-      present: Number.isFinite(present) ? present : 0,
-      recv: Number.isFinite(recv) ? recv : 0,
-      drop: Number.isFinite(drop) ? drop : 0,
-      mbps: Number.isFinite(mbps) ? mbps : 0,
-      latency: Number.isFinite(latency) ? latency : 0,
+      present,
+      recv,
+      drop,
+      mbps,
+      latency,
     };
   });
-  const hasLiveSeries = createMemo(() => liveSeries().present.length > 0);
+  const hasLiveSeries = createMemo(() => liveSeries().present.length > 0 || hudSeries().present.length > 0);
 
   function sessionPath(path: string): string {
     const params = new URLSearchParams();
@@ -781,18 +807,55 @@ export default function App() {
 
   async function refreshLiveSession() {
     if (!serial().trim()) return;
-    const data = await fetchJson<Record<string, unknown>>(sessionPath("/v1/trainer/live/status"));
-    const status = (data.status as Record<string, unknown>) || null;
-    const metrics = (data.metrics as Record<string, unknown>) || null;
+    let status: Record<string, unknown> | null = null;
+    let metrics: Record<string, unknown> | null = null;
+    let primaryErr = "";
+    try {
+      const data = await fetchJson<Record<string, unknown>>(sessionPath("/v1/trainer/live/status"));
+      status = isRecord(data.status) ? data.status : null;
+      metrics = isRecord(data.metrics) ? data.metrics : null;
+    } catch (err) {
+      primaryErr = String(err);
+    }
+
+    if (!status) {
+      try {
+        const fallbackStatus = await fetchJson<Record<string, unknown>>(sessionPath("/v1/status"));
+        status = isRecord(fallbackStatus) ? fallbackStatus : null;
+      } catch {
+        // keep null, we'll report only when both status and metrics are missing
+      }
+    }
+    if (!metrics) {
+      try {
+        const fallbackMetrics = await fetchJson<Record<string, unknown>>(sessionPath("/v1/metrics"));
+        metrics = isRecord(fallbackMetrics) ? fallbackMetrics : null;
+      } catch {
+        // keep null
+      }
+    }
+
     setLiveStatus(status);
     setLiveMetrics(metrics);
+    if (!status && !metrics) {
+      if (primaryErr) {
+        setLastError(`Live metrics unavailable: ${primaryErr}`);
+      }
+      return;
+    }
 
     const kpi = (valueAt(metrics, ["kpi"]) as Record<string, unknown>) || {};
-    const present = Number(kpi.present_fps || 0);
-    const recv = Number(kpi.recv_fps || 0);
-    const drop = Number(kpi.drop_rate || 0);
-    const mbps = Number(kpi.effective_bitrate_mbps || 0);
-    const latency = Number(kpi.e2e_latency_ms_p95 || 0);
+    const fallback = liveHudFallbackKpi();
+    const presentRaw = Number(kpi.present_fps || 0);
+    const recvRaw = Number(kpi.recv_fps || 0);
+    const dropRaw = Number(kpi.drop_rate || 0);
+    const mbpsRaw = Number(kpi.effective_bitrate_mbps || 0);
+    const latencyRaw = Number(kpi.e2e_latency_ms_p95 || 0);
+    const present = Number.isFinite(presentRaw) && presentRaw > 0 ? presentRaw : fallback.present || 0;
+    const recv = Number.isFinite(recvRaw) && recvRaw > 0 ? recvRaw : fallback.recv || 0;
+    const drop = Number.isFinite(dropRaw) && dropRaw >= 0 ? dropRaw : fallback.drop || 0;
+    const mbps = Number.isFinite(mbpsRaw) && mbpsRaw > 0 ? mbpsRaw : fallback.mbps || 0;
+    const latency = Number.isFinite(latencyRaw) && latencyRaw > 0 ? latencyRaw : fallback.latency || 0;
     const score = Math.max(0, (Number.isFinite(present) ? present : 0) * 2 - (Number.isFinite(latency) ? latency : 0) * 0.08 - (Number.isFinite(drop) ? drop : 0) * 120);
     appendLiveSeriesPoint({
       present: Number.isFinite(present) ? present : 0,
@@ -1040,6 +1103,17 @@ export default function App() {
   const livePresentBars = createMemo(() => toBars(liveSeries().present));
   const liveRecvBars = createMemo(() => toBars(liveSeries().recv));
   const liveDropBars = createMemo(() => toBars(liveSeries().drop, true));
+  const livePlaceholderBars = createMemo(() =>
+    Array.from({ length: 16 }, (_, idx) => ({
+      value: 0,
+      pct: 10 + ((idx % 4) * 2),
+      cls: idx % 5 === 0 ? "warn" : "good",
+    })),
+  );
+  const liveScoreRenderBars = createMemo(() => (liveScoreBars().length ? liveScoreBars() : livePlaceholderBars()));
+  const livePresentRenderBars = createMemo(() => (livePresentBars().length ? livePresentBars() : livePlaceholderBars()));
+  const liveRecvRenderBars = createMemo(() => (liveRecvBars().length ? liveRecvBars() : livePlaceholderBars()));
+  const liveDropRenderBars = createMemo(() => (liveDropBars().length ? liveDropBars() : livePlaceholderBars()));
   const liveScoreSummary = createMemo(() => seriesSummary(liveSeries().score));
   const livePresentSummary = createMemo(() => seriesSummary(liveSeries().present));
   const liveRecvSummary = createMemo(() => seriesSummary(liveSeries().recv));
@@ -1667,7 +1741,7 @@ export default function App() {
                     <h3>Score trend</h3>
                     <p class="chart-stats">last {liveScoreSummary().last} | min {liveScoreSummary().min} | max {liveScoreSummary().max}</p>
                     <div class="bar-row">
-                      <For each={liveScoreBars()}>
+                      <For each={liveScoreRenderBars()}>
                         {(bar, idx) => (
                           <span
                             class={`bar ${bar.cls}`}
@@ -1682,7 +1756,7 @@ export default function App() {
                     <h3>Present FPS trend</h3>
                     <p class="chart-stats">last {livePresentSummary().last} | min {livePresentSummary().min} | max {livePresentSummary().max}</p>
                     <div class="bar-row">
-                      <For each={livePresentBars()}>
+                      <For each={livePresentRenderBars()}>
                         {(bar, idx) => (
                           <span
                             class={`bar ${bar.cls}`}
@@ -1697,7 +1771,7 @@ export default function App() {
                     <h3>Pipeline FPS trend</h3>
                     <p class="chart-stats">last {liveRecvSummary().last} | min {liveRecvSummary().min} | max {liveRecvSummary().max}</p>
                     <div class="bar-row">
-                      <For each={liveRecvBars()}>
+                      <For each={liveRecvRenderBars()}>
                         {(bar, idx) => (
                           <span
                             class={`bar ${bar.cls}`}
@@ -1712,7 +1786,7 @@ export default function App() {
                     <h3>Drop trend</h3>
                     <p class="chart-stats">last {liveDropSummary().last} | min {liveDropSummary().min} | max {liveDropSummary().max}</p>
                     <div class="bar-row">
-                      <For each={liveDropBars()}>
+                      <For each={liveDropRenderBars()}>
                         {(bar, idx) => (
                           <span
                             class={`bar ${bar.cls}`}

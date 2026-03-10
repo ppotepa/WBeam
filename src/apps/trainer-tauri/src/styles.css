@@ -271,6 +271,11 @@ select option {
   color: #eef3ff;
 }
 
+select option:checked {
+  background: #2a3a57;
+  color: #f6fbff;
+}
+
 select {
   color-scheme: dark;
 }
@@ -526,7 +531,7 @@ button.link-btn {
 
 .live-layout {
   display: grid;
-  grid-template-columns: 286px minmax(0, 1fr) 320px;
+  grid-template-columns: minmax(250px, 0.9fr) minmax(560px, 1.6fr) minmax(280px, 1fr);
   gap: 12px;
 }
 
@@ -824,7 +829,7 @@ th {
   }
 }
 
-@media (max-width: 1320px) {
+@media (max-width: 1560px) {
   .live-layout {
     grid-template-columns: 1fr;
   }

@@ -2228,3 +2228,22 @@ Status: active
   - center/right cards keep KPI charts, timeline, and log feed.
 - Validation:
   - `cd src/apps/trainer-tauri && npm run build` -> OK
+
+## In Progress (2026-03-10) - Live Metrics visibility hotfix (desktop + Android)
+- Fixed trainer desktop `Live Stats` data path so metrics do not disappear when only one endpoint is available:
+  - primary fetch remains `GET /v1/trainer/live/status?serial=...&stream_port=...`,
+  - added fallback reads to legacy session endpoints:
+    - `GET /v1/status?serial=...&stream_port=...`
+    - `GET /v1/metrics?serial=...&stream_port=...`.
+- Added KPI fallback from parsed HUD tail lines (present/recv/drop/mbps/latency) when live metrics payload is temporarily partial.
+- Prevented "empty charts" in `Live Stats`:
+  - added placeholder bar sets for score/fps/drop cards so panel never renders as empty frame,
+  - widened `Live Stats` center column and switched to earlier responsive collapse for medium widths.
+- Improved select dropdown readability for dark theme (`option:checked` contrast fix).
+- Android HUD rendering hardening:
+  - forced software layer for HUD `WebView` to avoid intermittent transparent/blank text rendering,
+  - increased HUD overlay opacity/contrast and switched chip/KPI grids to auto-fit columns,
+  - replaced `100vw/100vh` sizing with `100%` sizing for more stable full-screen overlay layout.
+- Validation:
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+  - `cd android && ./gradlew :app:compileDebugJavaWithJavac` -> FAIL in this shell due Java/Gradle class-version mismatch (`Unsupported class file major version 69`), requires running with project-supported JDK (Java 17 as used in deploy scripts).
