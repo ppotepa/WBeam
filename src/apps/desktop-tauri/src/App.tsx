@@ -89,7 +89,7 @@ const TRAINED_PROFILE_IDS = new Set(TRAINED_PROFILE_OPTIONS.map((item) => item.i
 const TRAINED_PROFILE_DEFAULT_ID =
   (TRAINED_PROFILE_DATA.defaultProfileId && TRAINED_PROFILE_IDS.has(TRAINED_PROFILE_DATA.defaultProfileId))
     ? TRAINED_PROFILE_DATA.defaultProfileId
-    : (TRAINED_PROFILE_OPTIONS[0]?.id ?? "fast60_3");
+    : (TRAINED_PROFILE_OPTIONS[0]?.id ?? "baseline");
 
 const TRAINED_PROFILE_RUNTIME = TRAINED_PROFILE_RUNTIME_DATA.defaultsByProfileId ?? {};
 const RESOLUTION_PRESET_OPTIONS: ResolutionPresetEntry[] = RESOLUTION_PRESET_DATA.presets ?? [];

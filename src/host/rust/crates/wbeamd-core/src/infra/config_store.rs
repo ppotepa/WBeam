@@ -11,7 +11,7 @@ use std::path::Path;
 use wbeamd_api::{validate_config, validate_config_with_presets, ActiveConfig, ConfigPatch};
 
 fn default_config_from_presets(presets: &BTreeMap<String, ActiveConfig>) -> ActiveConfig {
-    for key in ["fast60_3", "balanced60", "fast60", "safe_60"] {
+    for key in ["baseline"] {
         if let Some(cfg) = presets.get(key) {
             return cfg.clone();
         }

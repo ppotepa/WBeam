@@ -21,36 +21,33 @@ from typing import Any, Dict, Optional, Tuple
 STATES = {"IDLE", "STARTING", "STREAMING", "RECONNECTING", "ERROR", "STOPPING"}
 
 PRESETS: Dict[str, Dict[str, Any]] = {
-    "lowlatency": {
-        "profile": "lowlatency",
-        "encoder": "auto",
-        "cursor_mode": "hidden",
-        "size": "1920x1080",
+    "baseline": {
+        "profile": "baseline",
+        "encoder": "h264",
+        "cursor_mode": "embedded",
+        "size": "1280x800",
         "fps": 60,
-        "bitrate_kbps": 18000,
-        "debug_fps": 0,
-    },
-    "balanced": {
-        "profile": "balanced",
-        "encoder": "auto",
-        "cursor_mode": "hidden",
-        "size": "1920x1080",
-        "fps": 60,
-        "bitrate_kbps": 25000,
-        "debug_fps": 0,
-    },
-    "ultra": {
-        "profile": "ultra",
-        "encoder": "auto",
-        "cursor_mode": "hidden",
-        "size": "2560x1440",
-        "fps": 60,
-        "bitrate_kbps": 38000,
+        "bitrate_kbps": 10000,
         "debug_fps": 0,
     },
 }
 
-VALID_ENCODERS = {"auto", "nvenc", "openh264"}
+LEGACY_PROFILE_ALIASES = {
+    "lowlatency",
+    "balanced",
+    "ultra",
+    "safe_60",
+    "aggressive_60",
+    "quality_60",
+    "debug_60",
+    "fast60",
+    "balanced60",
+    "quality60",
+    "fast60_2",
+    "fast60_3",
+}
+
+VALID_ENCODERS = {"h264", "h265", "rawpng", "auto", "nvenc", "openh264"}
 VALID_CURSOR_MODES = {"hidden", "embedded", "metadata"}
 
 
@@ -72,7 +69,7 @@ class Metrics:
 @dataclass
 class RuntimeState:
     state: str = "IDLE"
-    active_config: Dict[str, Any] = field(default_factory=lambda: PRESETS["balanced"].copy())
+    active_config: Dict[str, Any] = field(default_factory=lambda: PRESETS["baseline"].copy())
     last_error: str = ""
     host_name: str = socket.gethostname()
     uptime_start: float = field(default_factory=time.time)
@@ -280,13 +277,27 @@ class WBeamDaemon:
         else:
             self.metrics.stream_uptime_sec = 0
 
+    @staticmethod
+    def canonical_profile(raw_profile: Any) -> str:
+        profile = str(raw_profile or "").strip()
+        if not profile:
+            return "baseline"
+        if profile == "baseline":
+            return "baseline"
+        if profile in LEGACY_PROFILE_ALIASES:
+            return "baseline"
+        return profile
+
     def validate_config(self, incoming: Dict[str, Any]) -> Dict[str, Any]:
-        base_profile = str(incoming.get("profile") or self.runtime.active_config.get("profile") or "balanced")
+        base_profile = self.canonical_profile(
+            incoming.get("profile") or self.runtime.active_config.get("profile") or "baseline"
+        )
         if base_profile not in PRESETS:
             raise ConfigError("invalid profile")
 
         cfg = dict(PRESETS[base_profile])
         cfg.update({k: v for k, v in incoming.items() if v is not None})
+        cfg["profile"] = base_profile
 
         if cfg.get("encoder") not in VALID_ENCODERS:
             raise ConfigError("invalid encoder")

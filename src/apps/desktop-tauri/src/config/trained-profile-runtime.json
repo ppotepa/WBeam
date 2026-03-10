@@ -1,26 +1,6 @@
 {
   "defaultsByProfileId": {
-    "fast60_3": {
-      "encoder": "h264",
-      "cursorMode": "embedded"
-    },
-    "fast60_2": {
-      "encoder": "h264",
-      "cursorMode": "embedded"
-    },
-    "fast60": {
-      "encoder": "h264",
-      "cursorMode": "embedded"
-    },
-    "balanced60": {
-      "encoder": "h264",
-      "cursorMode": "embedded"
-    },
-    "quality60": {
-      "encoder": "h264",
-      "cursorMode": "embedded"
-    },
-    "safe_60": {
+    "baseline": {
       "encoder": "h264",
       "cursorMode": "embedded"
     }

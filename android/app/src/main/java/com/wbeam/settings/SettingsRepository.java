@@ -32,9 +32,14 @@ public final class SettingsRepository {
     public SettingsSnapshot load() {
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
 
-        String profile = prefs.getString(PREF_PROFILE, "lowlatency");
+        String profile = prefs.getString(PREF_PROFILE, "baseline");
         String encoder = prefs.getString(PREF_ENCODER, "h265");
         String cursor  = prefs.getString(PREF_CURSOR, "embedded");
+
+        if (!"baseline".equals(profile)) {
+            profile = "baseline";
+            prefs.edit().putString(PREF_PROFILE, profile).apply();
+        }
 
         // Migration v3: collapse legacy encoder names to h265/rawpng.
         // h264 is a valid first-class encoder — pass through without migration.

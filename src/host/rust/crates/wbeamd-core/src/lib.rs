@@ -315,7 +315,7 @@ fn load_presets_from_proto_file(root: &Path) -> Option<BTreeMap<String, ActiveCo
 }
 
 fn default_config_from_presets(presets: &BTreeMap<String, ActiveConfig>) -> ActiveConfig {
-    for key in ["fast60_3", "balanced60", "fast60", "safe_60"] {
+    for key in ["baseline"] {
         if let Some(cfg) = presets.get(key) {
             return cfg.clone();
         }
@@ -498,8 +498,8 @@ impl DaemonCore {
 
         let runtime_config_path = runtime_config_path_for_session(&root, session_label.as_deref());
         // Merge built-in presets with proto-trained presets (proto can override).
-        // This prevents "invalid profile" errors when Android/GUI requests built-in profiles
-        // (balanced/ultra/lowlatency) and proto/profiles.json only contains the tuned set.
+        // Canonical runtime profile is now "baseline"; legacy profile names are
+        // canonicalized in API validation to preserve backward compatibility.
         let mut presets = wbeamd_api::presets();
         if let Some(proto_presets) = load_presets_from_proto_file(&root) {
             for (k, v) in proto_presets {
@@ -712,7 +712,7 @@ impl DaemonCore {
         let cfg = match validate_config_with_presets(patch, &current_cfg, &presets) {
             Ok(cfg) => cfg,
             Err(ValidationError::InvalidProfile) => {
-                // Runtime config can be stale (e.g. "balanced" from old presets).
+                // Runtime config can be stale (e.g. old pre-baseline profile names).
                 // Auto-heal to a valid preset so /start does not hard-fail.
                 let fallback = default_config_from_presets(&presets);
                 warn!(

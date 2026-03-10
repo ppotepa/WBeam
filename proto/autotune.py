@@ -196,7 +196,12 @@ class TrialResult:
     score: float
     fps_score: float
     timeout_penalty: float
+    drop_penalty: float
+    target_penalty: float
     jitter: float
+    drop_ratio_p50: float
+    fps_target: float
+    fps_gap_p50: float
     sender_p50: float
     raw_sender_p50: float
     stale_p50: float
@@ -402,6 +407,19 @@ def effective_sender_fps(raw_sender: list[float], stale_dupe: list[float]) -> li
     return [max(0.0, raw_sender[i] - stale_dupe[i]) for i in range(len(raw_sender))]
 
 
+def compute_drop_ratio_p50(sender: list[float], pipe: list[float]) -> float:
+    if not sender or not pipe:
+        return 0.0
+    n = min(len(sender), len(pipe))
+    if n <= 0:
+        return 0.0
+    ratios = [
+        max(0.0, pipe[i] - sender[i]) / max(1.0, pipe[i])
+        for i in range(n)
+    ]
+    return percentile(ratios, 0.50)
+
+
 def parse_wbh1_metrics(path: Path) -> tuple[list[float], list[float]]:
     units: list[float] = []
     avg_kb: list[float] = []
@@ -427,19 +445,45 @@ def resolve_portal_restore_token_file(base_cfg: dict[str, Any], base_path: Path)
     return Path("/tmp/proto-portal-restore-token")
 
 
-def score_trial(sender_p50: float, sender_p20: float, pipe_p50: float, timeout_mean: float) -> tuple[float, float, float, float]:
-    # Throughput component.
-    fps_score = (sender_p50 * 0.50) + (sender_p20 * 0.35) + (pipe_p50 * 0.15)
+def score_trial(
+    sender_p50: float,
+    sender_p20: float,
+    pipe_p50: float,
+    timeout_mean: float,
+    stale_p50: float,
+    drop_ratio_p50: float,
+    fps_target: float,
+) -> tuple[float, float, float, float, float, float, float]:
+    # Throughput component with a target-FPS cap so extremely high pipeline
+    # spikes do not hide instability.
+    fps_target = max(1.0, float(fps_target))
+    bounded_pipe = min(pipe_p50, fps_target)
+    fps_score = (sender_p50 * 0.50) + (sender_p20 * 0.30) + (bounded_pipe * 0.20)
     # Jitter proxy: bigger spread between p50 and p20 usually means less stable pacing.
     jitter = max(0.0, sender_p50 - sender_p20)
+    jitter_penalty = jitter * 0.35
     # Piecewise timeout penalty: low misses are tolerated, persistent misses are expensive.
     timeout_penalty = (
         (timeout_mean * 0.08)
         + (max(0.0, timeout_mean - 20.0) * 0.20)
         + (max(0.0, timeout_mean - 60.0) * 0.25)
     )
-    total_penalty = timeout_penalty + (jitter * 0.40)
-    return fps_score - total_penalty, fps_score, total_penalty, jitter
+    # Frame drop pressure combines sender-vs-pipeline gap and stale duplication.
+    drop_penalty = (drop_ratio_p50 * 55.0) + (stale_p50 * 0.80)
+    # Penalize missing target FPS, both median and tail.
+    fps_gap_p50 = max(0.0, fps_target - sender_p50)
+    fps_gap_p20 = max(0.0, (fps_target * 0.95) - sender_p20)
+    target_penalty = (fps_gap_p50 * 0.90) + (fps_gap_p20 * 0.60)
+    total_penalty = timeout_penalty + jitter_penalty + drop_penalty + target_penalty
+    return (
+        fps_score - total_penalty,
+        fps_score,
+        timeout_penalty,
+        jitter,
+        drop_penalty,
+        target_penalty,
+        fps_gap_p50,
+    )
 
 
 def cfg_int(cfg: dict[str, Any], key: str, default: int = 0) -> int:
@@ -490,6 +534,8 @@ def objective_fast(row: dict[str, Any]) -> float:
         - (r.timeout_mean * 0.35)
         - (r.stale_p50 * 1.20)
         - (r.jitter * 0.35)
+        - (r.drop_ratio_p50 * 65.0)
+        - (r.fps_gap_p50 * 0.80)
     )
 
 
@@ -500,6 +546,8 @@ def objective_balanced(row: dict[str, Any]) -> float:
         - (r.timeout_mean * 0.20)
         - (r.stale_p50 * 1.00)
         - (r.jitter * 0.25)
+        - (r.drop_ratio_p50 * 50.0)
+        - (r.fps_gap_p50 * 0.60)
     )
 
 
@@ -513,6 +561,8 @@ def objective_quality(row: dict[str, Any]) -> float:
         - (r.timeout_mean * 0.25)
         - (r.stale_p50 * 1.00)
         - (r.jitter * 0.20)
+        - (r.drop_ratio_p50 * 45.0)
+        - (r.fps_gap_p50 * 0.55)
     )
 
 
@@ -577,21 +627,13 @@ def write_profiles_file(
     path: Path,
     generated_profiles: dict[str, dict[str, Any]],
 ) -> None:
-    if path.exists():
-        try:
-            doc = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            doc = {}
-    else:
-        doc = {}
-    if not isinstance(doc, dict):
-        doc = {}
-    profiles = doc.get("profiles")
-    if not isinstance(profiles, dict):
-        profiles = {}
-        doc["profiles"] = profiles
-    if "version" not in doc:
-        doc["version"] = 1
+    # Keep profile catalog intentionally minimal: each export rewrites the file
+    # to the currently selected generated profiles.
+    doc = {
+        "version": 1,
+        "profiles": {},
+    }
+    profiles: dict[str, Any] = doc["profiles"]
     for name, payload in generated_profiles.items():
         profiles[name] = payload
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -860,6 +902,7 @@ def run_trial(
     cfg_path = out_dir / f"{name}.json"
     run_log = out_dir / f"{name}.run.log"
     overlay_path = out_dir / f"{name}.overlay.txt"
+    target_fps = float(max(1, cfg_int(trial_cfg, "PROTO_CAPTURE_FPS", 60)))
     if overlay_enabled:
         trial_cfg["PROTO_PORTAL_OVERLAY_ENABLE"] = 1
         trial_cfg["PROTO_PORTAL_OVERLAY_TEXT_FILE"] = str(overlay_path)
@@ -917,7 +960,12 @@ def run_trial(
             score=-1e9,
             fps_score=0.0,
             timeout_penalty=0.0,
+            drop_penalty=0.0,
+            target_penalty=0.0,
             jitter=0.0,
+            drop_ratio_p50=0.0,
+            fps_target=target_fps,
+            fps_gap_p50=0.0,
             sender_p50=0.0,
             raw_sender_p50=0.0,
             stale_p50=0.0,
@@ -950,11 +998,15 @@ def run_trial(
                 sender_p20_live = percentile(sender_live, 0.20)
                 pipe_p50_live = statistics.median(pipe_live)
                 timeout_mean_live = statistics.fmean(timeout_live) if timeout_live else 0.0
-                live_score, _, _, _ = score_trial(
+                drop_ratio_p50_live = compute_drop_ratio_p50(sender_live, pipe_live)
+                live_score, _, _, _, _, _, _ = score_trial(
                     sender_p50=sender_p50_live,
                     sender_p20=sender_p20_live,
                     pipe_p50=pipe_p50_live,
                     timeout_mean=timeout_mean_live,
+                    stale_p50=stale_p50_live,
+                    drop_ratio_p50=drop_ratio_p50_live,
+                    fps_target=target_fps,
                 )
                 live_scores.append(live_score)
                 text = build_overlay_text(
@@ -1001,7 +1053,12 @@ def run_trial(
                 score=-1e9,
                 fps_score=0.0,
                 timeout_penalty=0.0,
+                drop_penalty=0.0,
+                target_penalty=0.0,
                 jitter=0.0,
+                drop_ratio_p50=0.0,
+                fps_target=target_fps,
+                fps_gap_p50=0.0,
                 sender_p50=0.0,
                 raw_sender_p50=0.0,
                 stale_p50=0.0,
@@ -1021,11 +1078,15 @@ def run_trial(
     sender_p20 = percentile(sender, 0.20)
     pipe_p50 = statistics.median(pipe)
     timeout_mean = statistics.fmean(timeout_misses) if timeout_misses else 0.0
-    score, fps_score, timeout_penalty, jitter = score_trial(
+    drop_ratio_p50 = compute_drop_ratio_p50(sender, pipe)
+    score, fps_score, timeout_penalty, jitter, drop_penalty, target_penalty, fps_gap_p50 = score_trial(
         sender_p50=sender_p50,
         sender_p20=sender_p20,
         pipe_p50=pipe_p50,
         timeout_mean=timeout_mean,
+        stale_p50=stale_p50,
+        drop_ratio_p50=drop_ratio_p50,
+        fps_target=target_fps,
     )
     if overlay_enabled:
         write_overlay_text(
@@ -1056,7 +1117,12 @@ def run_trial(
             score=-1e8,
             fps_score=fps_score,
             timeout_penalty=timeout_penalty,
+            drop_penalty=drop_penalty,
+            target_penalty=target_penalty,
             jitter=jitter,
+            drop_ratio_p50=drop_ratio_p50,
+            fps_target=target_fps,
+            fps_gap_p50=fps_gap_p50,
             sender_p50=sender_p50,
             raw_sender_p50=raw_sender_p50,
             stale_p50=stale_p50,
@@ -1075,7 +1141,12 @@ def run_trial(
             score=-1e8,
             fps_score=fps_score,
             timeout_penalty=timeout_penalty,
+            drop_penalty=drop_penalty,
+            target_penalty=target_penalty,
             jitter=jitter,
+            drop_ratio_p50=drop_ratio_p50,
+            fps_target=target_fps,
+            fps_gap_p50=fps_gap_p50,
             sender_p50=sender_p50,
             raw_sender_p50=raw_sender_p50,
             stale_p50=stale_p50,
@@ -1099,7 +1170,12 @@ def run_trial(
             score=-1e8,
             fps_score=fps_score,
             timeout_penalty=timeout_penalty,
+            drop_penalty=drop_penalty,
+            target_penalty=target_penalty,
             jitter=jitter,
+            drop_ratio_p50=drop_ratio_p50,
+            fps_target=target_fps,
+            fps_gap_p50=fps_gap_p50,
             sender_p50=sender_p50,
             raw_sender_p50=raw_sender_p50,
             stale_p50=stale_p50,
@@ -1118,7 +1194,12 @@ def run_trial(
         score=score,
         fps_score=fps_score,
         timeout_penalty=timeout_penalty,
+        drop_penalty=drop_penalty,
+        target_penalty=target_penalty,
         jitter=jitter,
+        drop_ratio_p50=drop_ratio_p50,
+        fps_target=target_fps,
+        fps_gap_p50=fps_gap_p50,
         sender_p50=sender_p50,
         raw_sender_p50=raw_sender_p50,
         stale_p50=stale_p50,
@@ -1173,7 +1254,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--export-profiles",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Export 3 auto profiles (fast/balanced/quality) to profiles-out.",
+        help="Export auto profiles to profiles-out (default exports only baseline).",
     )
     p.add_argument("--profile-fast-name", default="fast_auto")
     p.add_argument("--profile-balanced-name", default="balanced_auto")
@@ -1182,7 +1263,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--profile-name",
         "--profilename",
         dest="profile_name",
-        default="",
+        default="baseline",
         help="Export only one profile with this name (uses best trial).",
     )
     p.add_argument("--profile-min-samples", type=int, default=12)
@@ -1478,7 +1559,9 @@ def main(argv: list[str]) -> int:
                 f"done trial={res.name} score={res.score:.2f} sender_p50={res.sender_p50:.1f} "
                 f"raw_sender_p50={res.raw_sender_p50:.1f} stale_p50={res.stale_p50:.1f} "
                 f"pipe_p50={res.pipe_p50:.1f} timeout_mean={res.timeout_mean:.1f} "
-                f"tpen={res.timeout_penalty:.1f} jitter={res.jitter:.1f} samples={res.samples} "
+                f"drop={res.drop_ratio_p50 * 100.0:.1f}% gap={res.fps_gap_p50:.1f} "
+                f"tpen={res.timeout_penalty:.1f} dpen={res.drop_penalty:.1f} "
+                f"xpen={res.target_penalty:.1f} jitter={res.jitter:.1f} samples={res.samples} "
                 f"elapsed={format_secs(trial_elapsed)}"
             )
             if res.notes:
@@ -1496,8 +1579,12 @@ def main(argv: list[str]) -> int:
                 "best_raw_sender_p50": gen_best.raw_sender_p50,
                 "best_stale_p50": gen_best.stale_p50,
                 "best_pipe_p50": gen_best.pipe_p50,
+                "best_drop_ratio_p50": gen_best.drop_ratio_p50,
+                "best_fps_gap_p50": gen_best.fps_gap_p50,
                 "best_timeout_mean": gen_best.timeout_mean,
                 "best_timeout_penalty": gen_best.timeout_penalty,
+                "best_drop_penalty": gen_best.drop_penalty,
+                "best_target_penalty": gen_best.target_penalty,
                 "valid_trials": len([r for r in ranked_gen if r.score > -1e7]),
                 "trials": [
                     {
@@ -1566,10 +1653,15 @@ def main(argv: list[str]) -> int:
                 "score": r.score,
                 "fps_score": r.fps_score,
                 "timeout_penalty": r.timeout_penalty,
+                "drop_penalty": r.drop_penalty,
+                "target_penalty": r.target_penalty,
                 "jitter": r.jitter,
                 "sender_p50": r.sender_p50,
                 "raw_sender_p50": r.raw_sender_p50,
                 "stale_p50": r.stale_p50,
+                "drop_ratio_p50": r.drop_ratio_p50,
+                "fps_target": r.fps_target,
+                "fps_gap_p50": r.fps_gap_p50,
                 "sender_p20": r.sender_p20,
                 "pipe_p50": r.pipe_p50,
                 "timeout_mean": r.timeout_mean,
@@ -1605,6 +1697,8 @@ def main(argv: list[str]) -> int:
                     "pipe_p50": round(best.pipe_p50, 4),
                     "timeout_mean": round(best.timeout_mean, 4),
                     "stale_p50": round(best.stale_p50, 4),
+                    "drop_ratio_p50": round(best.drop_ratio_p50, 6),
+                    "fps_gap_p50": round(best.fps_gap_p50, 4),
                     "samples": int(best.samples),
                 },
                 "values": values,
@@ -1619,6 +1713,8 @@ def main(argv: list[str]) -> int:
                 "pipe_p50": best.pipe_p50,
                 "timeout_mean": best.timeout_mean,
                 "stale_p50": best.stale_p50,
+                "drop_ratio_p50": best.drop_ratio_p50,
+                "fps_gap_p50": best.fps_gap_p50,
                 "samples": best.samples,
             }
         else:
@@ -1666,6 +1762,8 @@ def main(argv: list[str]) -> int:
                         "pipe_p50": round(r.pipe_p50, 4),
                         "timeout_mean": round(r.timeout_mean, 4),
                         "stale_p50": round(r.stale_p50, 4),
+                        "drop_ratio_p50": round(r.drop_ratio_p50, 6),
+                        "fps_gap_p50": round(r.fps_gap_p50, 4),
                         "samples": int(r.samples),
                     },
                     "values": values,
@@ -1681,6 +1779,8 @@ def main(argv: list[str]) -> int:
                     "pipe_p50": r.pipe_p50,
                     "timeout_mean": r.timeout_mean,
                     "stale_p50": r.stale_p50,
+                    "drop_ratio_p50": r.drop_ratio_p50,
+                    "fps_gap_p50": r.fps_gap_p50,
                     "samples": r.samples,
                 }
         if generated_profiles:
@@ -1749,10 +1849,15 @@ def main(argv: list[str]) -> int:
                 "score": r.score,
                 "fps_score": r.fps_score,
                 "timeout_penalty": r.timeout_penalty,
+                "drop_penalty": r.drop_penalty,
+                "target_penalty": r.target_penalty,
                 "jitter": r.jitter,
                 "sender_p50": r.sender_p50,
                 "raw_sender_p50": r.raw_sender_p50,
                 "stale_p50": r.stale_p50,
+                "drop_ratio_p50": r.drop_ratio_p50,
+                "fps_target": r.fps_target,
+                "fps_gap_p50": r.fps_gap_p50,
                 "sender_p20": r.sender_p20,
                 "pipe_p50": r.pipe_p50,
                 "timeout_mean": r.timeout_mean,
@@ -1771,6 +1876,9 @@ def main(argv: list[str]) -> int:
             "sender_p50": best.sender_p50,
             "raw_sender_p50": best.raw_sender_p50,
             "stale_p50": best.stale_p50,
+            "drop_ratio_p50": best.drop_ratio_p50,
+            "fps_target": best.fps_target,
+            "fps_gap_p50": best.fps_gap_p50,
             "sender_p20": best.sender_p20,
             "pipe_p50": best.pipe_p50,
             "timeout_mean": best.timeout_mean,
@@ -1808,7 +1916,9 @@ def main(argv: list[str]) -> int:
             f"sender_p50={r.sender_p50:>5.1f} raw_s50={r.raw_sender_p50:>5.1f} "
             f"dup_s50={r.stale_p50:>5.1f} sender_p20={r.sender_p20:>5.1f} "
             f"pipe_p50={r.pipe_p50:>5.1f} timeout={r.timeout_mean:>6.1f} "
-            f"tpen={r.timeout_penalty:>6.1f} jitter={r.jitter:>4.1f} samples={r.samples:>2}"
+            f"drop%={r.drop_ratio_p50 * 100.0:>5.1f} gap={r.fps_gap_p50:>4.1f} "
+            f"tpen={r.timeout_penalty:>6.1f} dpen={r.drop_penalty:>6.1f} "
+            f"xpen={r.target_penalty:>6.1f} jitter={r.jitter:>4.1f} samples={r.samples:>2}"
         )
     print("")
     print("Generation best:")
@@ -1816,7 +1926,8 @@ def main(argv: list[str]) -> int:
         print(
             f"g{g['generation']}: {g['best_name']} score={g['best_score']:.2f} "
             f"sender_p50={g['best_sender_p50']:.1f} raw_s50={g['best_raw_sender_p50']:.1f} "
-            f"dup_s50={g['best_stale_p50']:.1f} pipe_p50={g['best_pipe_p50']:.1f}"
+            f"dup_s50={g['best_stale_p50']:.1f} pipe_p50={g['best_pipe_p50']:.1f} "
+            f"drop%={g['best_drop_ratio_p50'] * 100.0:.1f} gap={g['best_fps_gap_p50']:.1f}"
         )
     print("")
     print(f"Best trial: {best.name} (trial config: {best.config_path})")
@@ -1831,7 +1942,8 @@ def main(argv: list[str]) -> int:
             print(
                 f"- {tier}: {meta['profile_name']} <= {meta['trial']} "
                 f"(s50={meta['sender_p50']:.1f}, p50={meta['pipe_p50']:.1f}, "
-                f"timeout={meta['timeout_mean']:.1f}, stale={meta['stale_p50']:.1f})"
+                f"timeout={meta['timeout_mean']:.1f}, stale={meta['stale_p50']:.1f}, "
+                f"drop%={meta['drop_ratio_p50'] * 100.0:.1f}, gap={meta['fps_gap_p50']:.1f})"
             )
         print(f"Profiles file: {profiles_out}")
 

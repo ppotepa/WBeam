@@ -1225,3 +1225,27 @@ Status: active
   - `cargo check -p wbeamd-server` -> OK
   - `cargo check -p wbeam-desktop-tauri` -> OK
   - `bash -n wbeam` -> OK
+
+## In Progress (2026-03-10) - baseline-only profile unification + autotune scoring v2
+- Profile catalog was simplified to a single trained profile named `baseline`.
+- Updated profile sources and defaults:
+  - `proto/config/profiles.json` now contains only `baseline`.
+  - `proto/config/proto.json`, `proto/config/proto.conf`, and `proto/config/autotune-best.json` now point to `PROTO_PROFILE=baseline`.
+  - Desktop Tauri connect profile list now exposes only `baseline` (`trained-profile-labels.json` + `trained-profile-runtime.json`).
+  - Android profile defaults and stored settings now normalize to `baseline`.
+- Added backward-compatibility mapping for legacy profile names to `baseline`:
+  - Rust API validation canonicalizes legacy names to `baseline`.
+  - Rust streamer CLI accepts legacy names but resolves them to baseline defaults.
+  - Python fallback daemon canonicalizes legacy names to `baseline`.
+- Autotune scoring upgrade (reward model v2):
+  - added explicit drop-ratio penalty (`pipeline_fps` vs effective `sender_fps`),
+  - added FPS target gap penalty (median/tail under target),
+  - kept timeout + jitter penalties and combined them in final score,
+  - extended logs/reports/profile metadata with `drop_ratio_p50`, `fps_gap_p50`, `drop_penalty`, `target_penalty`.
+- Autotune profile export behavior now rewrites `profiles.json` with current generated profiles (no accumulation of stale profile variants).
+- Default autotune single-profile export name is now `baseline`.
+- Validation:
+  - `python3 -m py_compile proto/autotune.py src/host/daemon/wbeamd.py` -> OK
+  - `cargo check -p wbeamd-api -p wbeamd-core -p wbeamd-streamer` -> OK
+  - `cd src/apps/desktop-tauri && npm run build` -> OK
+  - `cd android && GRADLE_USER_HOME=/home/ppotepa/git/WBeam/.gradle-user ./gradlew :app:compileDebugJavaWithJavac --no-daemon --stacktrace` -> OK

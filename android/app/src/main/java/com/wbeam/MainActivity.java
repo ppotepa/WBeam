@@ -78,18 +78,7 @@ public class MainActivity extends AppCompatActivity {
             "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4";
 
     private static final String[] PROFILE_OPTIONS = {
-            "fast60_3",
-            "fast60_2",
-            "fast60",
-            "safe_60",
-            "aggressive_60",
-            "quality_60",
-            "debug_60",
-            "balanced60",
-            "quality60",
-            "lowlatency",
-            "balanced",
-            "ultra"
+            "baseline"
     };
     /**
      * Preferred video encoder for this device.
@@ -123,7 +112,7 @@ public class MainActivity extends AppCompatActivity {
     }
     private static final String[] ENCODER_OPTIONS = {PREFERRED_VIDEO, "raw-png"};
     private static final String[] CURSOR_OPTIONS = {"embedded", "hidden", "metadata"};
-    private static final String DEFAULT_PROFILE = "lowlatency";
+    private static final String DEFAULT_PROFILE = "baseline";
     private static final String DEFAULT_CURSOR_MODE = "embedded";
     private static final int DEFAULT_RES_SCALE = 100;
     private static final int DEFAULT_FPS = 60;

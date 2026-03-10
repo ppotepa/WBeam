@@ -1,7 +1,7 @@
 {
   "RUN_BACKEND": "rust",
   "RUN_DEVICE": "adb",
-  "PROTO_PROFILE": "fast60_3",
+  "PROTO_PROFILE": "baseline",
   "PROTO_PROFILE_FILE": "config/profiles.json",
   "GRADLEW": "",
   "ANDROID_LOG_FILE": "/tmp/proto-android.log",

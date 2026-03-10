@@ -24,7 +24,8 @@ pub enum CaptureBackend {
     about = "Host screencast (Wayland portal/X11) -> WBTP framed sender"
 )]
 pub struct Args {
-    #[arg(long, default_value = "balanced", value_parser = [
+    #[arg(long, default_value = "baseline", value_parser = [
+        "baseline",
         "lowlatency", "balanced", "ultra",
         "safe_60", "aggressive_60", "quality_60", "debug_60",
         "fast60", "balanced60", "quality60", "fast60_2", "fast60_3"
@@ -108,6 +109,22 @@ struct ProfileDefaults {
 
 fn defaults_for_profile(name: &str) -> ProfileDefaults {
     match name {
+        "baseline" => ProfileDefaults {
+            size: "1280x800",
+            fps: 60,
+            bitrate_kbps: 10_000,
+            nv_preset: "p4",
+            stream_mode: StreamMode::Ultra,
+            queue_max_buffers: 1,
+            queue_max_time_ms: 8,
+            appsink_max_buffers: 1,
+            pull_timeout_ms: 20,
+            write_timeout_ms: 40,
+            disconnect_on_timeout: false,
+            videorate_drop_only: false,
+            pipewire_keepalive_ms: 12,
+            h264_gop: 30,
+        },
         "safe_60" => ProfileDefaults {
             size: "1024x640",
             fps: 60,
@@ -303,9 +320,20 @@ fn defaults_for_profile(name: &str) -> ProfileDefaults {
     }
 }
 
+fn canonical_profile_name(name: &str) -> &str {
+    match name {
+        "baseline" => "baseline",
+        "lowlatency" | "balanced" | "ultra" | "safe_60" | "aggressive_60" | "quality_60"
+        | "debug_60" | "fast60" | "balanced60" | "quality60" | "fast60_2" | "fast60_3" => {
+            "baseline"
+        }
+        _ => "baseline",
+    }
+}
+
 /// Apply profile defaults and parse size/fps/bitrate overrides.
 pub fn resolve_profile(args: &Args) -> Result<ResolvedConfig> {
-    let defaults = defaults_for_profile(&args.profile);
+    let defaults = defaults_for_profile(canonical_profile_name(&args.profile));
 
     let size = args.size.as_deref().unwrap_or(defaults.size);
     let fps = args.fps.unwrap_or(defaults.fps).clamp(24, 120);
