@@ -93,6 +93,10 @@ pub fn make_pipeline(
     profile.queue_buffers = cfg.queue_max_buffers.max(1);
     profile.appsink_buffers = cfg.appsink_max_buffers.max(1);
     profile.queue_time_ns = (cfg.queue_max_time_ms.max(1) as u64) * 1_000_000u64;
+    let capture_backend_name = match capture {
+        PreparedCapture::Wayland(_) => "wayland_portal",
+        PreparedCapture::X11 => "x11",
+    };
 
     // ── Source ───────────────────────────────────────────────────────────────
     let src = capture.build_source(cfg)?;
@@ -257,6 +261,41 @@ pub fn make_pipeline(
             cfg.encoder, encoder_name, raw_format, cfg.fps, cfg.bitrate_kbps
         );
     }
+    let parse_mode = if mode_png {
+        "png_raw"
+    } else if hevc {
+        if framed { "h265_au" } else { "h265_nal" }
+    } else if framed {
+        "h264_au"
+    } else {
+        "h264_nal"
+    };
+    println!(
+        "[wbeam-effective] requested_encoder={} resolved_backend={} raw_format={} size={}x{} fps={} bitrate_kbps={} cursor_mode={:?} gop={} intra_only={} stream_mode={:?} queue_max_buffers={} queue_max_time_ms={} appsink_max_buffers={} appsink_drop={} appsink_sync={} capture_backend={} parse_mode={} timeout_pull_ms={} timeout_write_ms={} timeout_disconnect={} videorate_drop_only={} pipewire_keepalive_ms={}",
+        cfg.encoder,
+        encoder_name,
+        raw_format,
+        cfg.width,
+        cfg.height,
+        cfg.fps,
+        cfg.bitrate_kbps,
+        cfg.cursor_mode,
+        effective_gop,
+        cfg.intra_only,
+        cfg.stream_mode,
+        cfg.queue_max_buffers.max(1),
+        cfg.queue_max_time_ms.max(1),
+        cfg.appsink_max_buffers.max(1),
+        profile.appsink_drop,
+        profile.appsink_sync,
+        capture_backend_name,
+        parse_mode,
+        cfg.pull_timeout_ms,
+        cfg.write_timeout_ms,
+        cfg.disconnect_on_timeout,
+        cfg.videorate_drop_only,
+        cfg.pipewire_keepalive_ms
+    );
     if let Some(parse) = &parse {
         parse.set_property("disable-passthrough", false);
         parse.set_property("config-interval", -1i32);

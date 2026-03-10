@@ -2330,3 +2330,22 @@ Status: active
   - hard requirements for practical code changes (not theory-only),
   - focus areas: artifact reduction, encoder fallback quality, effective-config observability, adaptation stability, training relevance,
   - strict output structure and success criteria for verifiable progress.
+
+## In Progress (2026-03-11) - Trainer start-state + effective runtime snapshot + Android e2e latency
+- Implemented trainer daemon state normalization fix:
+  - `src/domains/training/wizard.py` now normalizes daemon state to uppercase and treats `STREAMING|STARTING|RECONNECTING` as active.
+  - prevents redundant `/v1/start` attempts during training setup when daemon reports uppercase states.
+- Added structured effective runtime visibility plumbing (requested vs resolved runtime):
+  - `wbeamd-streamer` now emits `[wbeam-effective] ...` structured line with resolved backend/runtime fields.
+  - `wbeamd-core` parses this line, exposes snapshot in API base response, and persists snapshots to JSONL:
+    - `logs/effective-runtime/<serial>-<port>.jsonl`.
+  - `wbeamd-api` response model extended with optional `effective_runtime_config` payload.
+  - Snapshot includes requested codec, resolved backend, raw format, fps, bitrate, GOP/intra flags, stream mode, queue/appsink settings, capture backend, parse mode, timeout settings, and snapshot reason.
+- Implemented real Android e2e latency reporting (removes hardcoded zeros):
+  - `android/app/src/main/java/com/wbeam/stream/H264TcpPlayer.java`
+  - both framed and legacy decode loops now publish e2e latency using presenter PTS (`now_us - presented_pts_us`).
+  - decoder drain stats extended with `lastRenderedPtsUs` and propagated from `MediaCodec` output `presentationTimeUs`.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-api -p wbeamd-core -p wbeamd-streamer` -> OK
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK

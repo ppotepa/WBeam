@@ -247,6 +247,7 @@ public final class H264TcpPlayer {
         long   renderNsMax   = 0;
         long lastLog = SystemClock.elapsedRealtime();
         long lastPresentMs   = SystemClock.elapsedRealtime();
+        long lastPresentedPtsUs = -1L;
         long pendingWithNoPresent = 0;
         long lastDecodeProgressMs = SystemClock.elapsedRealtime();
         MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
@@ -386,6 +387,9 @@ public final class H264TcpPlayer {
 
             if (drainStats.renderedCount > 0) { lastPresentMs = SystemClock.elapsedRealtime(); pendingWithNoPresent = 0; }
             else if (inFrames > 0)            { pendingWithNoPresent++; }
+            if (drainStats.renderedCount > 0 && drainStats.lastRenderedPtsUs > 0) {
+                lastPresentedPtsUs = drainStats.lastRenderedPtsUs;
+            }
             if (pendingWithNoPresent > 300 && (SystemClock.elapsedRealtime() - lastPresentMs) > 5_000) {
                 throw new IOException("C5: black-screen watchdog: 0 frames presented in 5s with "
                         + pendingWithNoPresent + " decoded – reconnecting");
@@ -408,9 +412,10 @@ public final class H264TcpPlayer {
                 double decodeMsP50 = inFrames > 0 ? (decodeNsTotal / 1_000_000.0) / inFrames : 0.0;
                 double decodeMsP95 = percentileMs(decodeNsBuf, Math.min(decodeNsBufN, 128), 0.95, decodeNsScratch);
                 double renderMsP95 = renderNsMax / 1_000_000.0;
+                double e2eMs = estimateE2eLatencyMs(lastPresentedPtsUs);
                 statusListener.onClientMetrics(new ClientMetricsSample(
                         inFrames, inFrames, outFrames, bytes,
-                        decodeMsP50, decodeMsP95, renderMsP95, 0.0, 0.0,
+                        decodeMsP50, decodeMsP95, renderMsP95, e2eMs, e2eMs,
                         estimateTransportDepthFrames(sTail - sHead, avgNalSize),
                         Math.min(DECODE_QUEUE_MAX_FRAMES, pendingDecodeQueue),
                         Math.min(RENDER_QUEUE_MAX_FRAMES, renderQueueDepth),
@@ -466,6 +471,7 @@ public final class H264TcpPlayer {
         long   lastDecodeProgressMs = SystemClock.elapsedRealtime();
         long   expectedSeq = -1L;
         long   lastQueuedPtsUs = -1L;
+        long   lastPresentedPtsUs = -1L;
         boolean flushIssued        = false;
         // After codec.flush() the decoder has no reference frames — P-frames
         // queued before the next IDR will produce corrupted blocks.  This flag
@@ -648,6 +654,9 @@ public final class H264TcpPlayer {
                 lastPresentMs = nowAfterDrain;
                 totalInSincePresent = 0;
                 flushIssued = false;
+                if (drainStats.lastRenderedPtsUs > 0) {
+                    lastPresentedPtsUs = drainStats.lastRenderedPtsUs;
+                }
             }
             tooLateSec  += drainStats.droppedLateCount;
             renderNsMax  = Math.max(renderNsMax, drainStats.renderNsMax);
@@ -759,9 +768,10 @@ public final class H264TcpPlayer {
                 ));
                 int queueDecodeDepth = Math.min(DECODE_QUEUE_MAX_FRAMES, pendingDecodeQueue);
                 int queueRenderDepth = Math.min(RENDER_QUEUE_MAX_FRAMES, drainStats.renderedCount > 0 ? 1 : 0);
+                double e2eMs = estimateE2eLatencyMs(lastPresentedPtsUs);
                 statusListener.onClientMetrics(new ClientMetricsSample(
                         inFrames, inFrames, outFrames, bytes,
-                        decodeMsP50, decodeMsP95, renderMsP95, 0.0, 0.0,
+                        decodeMsP50, decodeMsP95, renderMsP95, e2eMs, e2eMs,
                     transportQueueDepth,
                     queueDecodeDepth,
                     queueRenderDepth,
@@ -1206,6 +1216,7 @@ public final class H264TcpPlayer {
     ) {
         stats.reset();
         int  latestRenderableIndex = -1;
+        long latestRenderablePtsUs = -1L;
         long timeoutUs             = firstTimeoutUs;
 
         while (true) {
@@ -1221,10 +1232,12 @@ public final class H264TcpPlayer {
                         stats.droppedLateCount++;
                     }
                     latestRenderableIndex = outputIndex;
+                    latestRenderablePtsUs = info.presentationTimeUs;
                 } else {
                     long renderStartNs = SystemClock.elapsedRealtimeNanos();
                     codec.releaseOutputBuffer(outputIndex, true);
                     stats.renderedCount++;
+                    stats.lastRenderedPtsUs = info.presentationTimeUs;
                     stats.renderNsMax = Math.max(
                             stats.renderNsMax,
                             SystemClock.elapsedRealtimeNanos() - renderStartNs
@@ -1241,8 +1254,21 @@ public final class H264TcpPlayer {
             long renderStartNs = SystemClock.elapsedRealtimeNanos();
             codec.releaseOutputBuffer(latestRenderableIndex, true);
             stats.renderedCount = 1;
+            stats.lastRenderedPtsUs = latestRenderablePtsUs;
             stats.renderNsMax   = SystemClock.elapsedRealtimeNanos() - renderStartNs;
         }
+    }
+
+    private static double estimateE2eLatencyMs(long presentedPtsUs) {
+        if (presentedPtsUs <= 0L) {
+            return 0.0;
+        }
+        long nowUs = System.currentTimeMillis() * 1000L;
+        long lagUs = nowUs - presentedPtsUs;
+        if (lagUs <= 0L) {
+            return 0.0;
+        }
+        return lagUs / 1000.0;
     }
 
     private static int estimateTransportDepthFrames(int streamLen, int avgNalSize) {
@@ -1389,12 +1415,14 @@ public final class H264TcpPlayer {
         int  renderedCount;
         int  droppedLateCount;
         long renderNsMax;
+        long lastRenderedPtsUs;
 
         void reset() {
             releasedCount  = 0;
             renderedCount  = 0;
             droppedLateCount = 0;
             renderNsMax    = 0;
+            lastRenderedPtsUs = -1L;
         }
     }
 }

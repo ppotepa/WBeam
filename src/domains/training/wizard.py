@@ -1619,7 +1619,8 @@ def main() -> int:
         eprint("[error] trainer_v2 requires daemon API to be reachable.")
         return 1
 
-    if state not in {"running", "starting"}:
+    state_norm = state.strip().upper()
+    if state_norm not in {"STREAMING", "STARTING", "RECONNECTING"}:
         should_start = True if args.non_interactive else prompt_yes_no(
             "Session is not running. Try to start stream now?",
             default_yes=True,

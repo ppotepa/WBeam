@@ -5,7 +5,7 @@ use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use nix::libc;
 use thiserror::Error;
@@ -16,8 +16,8 @@ use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 use wbeamd_api::{
     valid_values, validate_config_with_presets, ActiveConfig, BaseResponse, ClientMetricsRequest,
-    ClientMetricsResponse, ConfigPatch, ErrorResponse, HealthResponse, HostProbeResponse,
-    KpiSnapshot, MetricsResponse, MetricsSnapshot, PresetsResponse, StatusResponse,
+    ClientMetricsResponse, ConfigPatch, EffectiveRuntimeConfig, ErrorResponse, HealthResponse,
+    HostProbeResponse, KpiSnapshot, MetricsResponse, MetricsSnapshot, PresetsResponse, StatusResponse,
     ValidationError, VirtualDisplayDoctorResponse, VirtualDisplayProbeResponse,
 };
 
@@ -44,6 +44,102 @@ const NO_PRESENT_RESTART_COOLDOWN: Duration = Duration::from_secs(15);
 const NO_PRESENT_MIN_RECV_FPS: f64 = 10.0;
 const NO_PRESENT_MAX_PRESENT_FPS: f64 = 1.0;
 const REVERSE_REFRESH_BACKSTOP: Duration = Duration::from_secs(120);
+
+fn now_unix_ms() -> u128 {
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(dur) => dur.as_millis(),
+        Err(_) => 0,
+    }
+}
+
+fn parse_bool_token(raw: &str) -> bool {
+    matches!(
+        raw.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
+fn parse_effective_runtime_line(line: &str, reason: &str) -> Option<EffectiveRuntimeConfig> {
+    let prefix = "[wbeam-effective]";
+    let body = line.trim().strip_prefix(prefix)?.trim();
+    let mut map: HashMap<&str, &str> = HashMap::new();
+    for token in body.split_whitespace() {
+        let Some((k, v)) = token.split_once('=') else {
+            continue;
+        };
+        map.insert(k.trim(), v.trim());
+    }
+    let parse_u32 = |key: &str, default: u32| -> u32 {
+        map.get(key)
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(default)
+    };
+    let parse_i32 = |key: &str, default: i32| -> i32 {
+        map.get(key)
+            .and_then(|v| v.parse::<i32>().ok())
+            .unwrap_or(default)
+    };
+    let parse_string = |key: &str, default: &str| -> String {
+        map.get(key)
+            .map(|v| (*v).to_string())
+            .unwrap_or_else(|| default.to_string())
+    };
+    let parse_size = || -> String {
+        let w = parse_u32("size", 0);
+        let h = parse_u32("height", 0);
+        if w > 0 && h > 0 {
+            return format!("{w}x{h}");
+        }
+        if let Some(raw) = map.get("size") {
+            if raw.contains('x') {
+                return (*raw).to_string();
+            }
+        }
+        "0x0".to_string()
+    };
+
+    Some(EffectiveRuntimeConfig {
+        requested_encoder: parse_string("requested_encoder", "unknown"),
+        resolved_backend: parse_string("resolved_backend", "unknown"),
+        raw_format: parse_string("raw_format", "unknown"),
+        size: parse_size(),
+        fps: parse_u32("fps", 0),
+        bitrate_kbps: parse_u32("bitrate_kbps", 0),
+        cursor_mode: parse_string("cursor_mode", "unknown"),
+        gop: parse_u32("gop", 0),
+        intra_only: map
+            .get("intra_only")
+            .map(|v| parse_bool_token(v))
+            .unwrap_or(false),
+        stream_mode: parse_string("stream_mode", "unknown"),
+        queue_max_buffers: parse_u32("queue_max_buffers", 0),
+        queue_max_time_ms: parse_u32("queue_max_time_ms", 0),
+        appsink_max_buffers: parse_u32("appsink_max_buffers", 0),
+        appsink_drop: map
+            .get("appsink_drop")
+            .map(|v| parse_bool_token(v))
+            .unwrap_or(false),
+        appsink_sync: map
+            .get("appsink_sync")
+            .map(|v| parse_bool_token(v))
+            .unwrap_or(false),
+        capture_backend: parse_string("capture_backend", "unknown"),
+        parse_mode: parse_string("parse_mode", "unknown"),
+        timeout_pull_ms: parse_u32("timeout_pull_ms", 0),
+        timeout_write_ms: parse_u32("timeout_write_ms", 0),
+        timeout_disconnect: map
+            .get("timeout_disconnect")
+            .map(|v| parse_bool_token(v))
+            .unwrap_or(false),
+        videorate_drop_only: map
+            .get("videorate_drop_only")
+            .map(|v| parse_bool_token(v))
+            .unwrap_or(false),
+        pipewire_keepalive_ms: parse_i32("pipewire_keepalive_ms", 0),
+        snapshot_unix_ms: now_unix_ms(),
+        snapshot_reason: reason.to_string(),
+    })
+}
 
 fn user_wbeam_config_path() -> Option<PathBuf> {
     let base = std::env::var("XDG_CONFIG_HOME")
@@ -356,6 +452,7 @@ pub enum CoreError {
 struct Inner {
     state: String,
     active_config: ActiveConfig,
+    effective_runtime_config: Option<EffectiveRuntimeConfig>,
     baseline_config: ActiveConfig,
     last_error: String,
     host_name: String,
@@ -379,6 +476,7 @@ struct Inner {
     presets: BTreeMap<String, ActiveConfig>,
     requested_display_mode: String,
     display_runtime: Option<display_backends::RuntimeHandle>,
+    pending_runtime_snapshot_reason: String,
 }
 
 impl Inner {
@@ -390,6 +488,7 @@ impl Inner {
         Self {
             state: STATE_IDLE.to_string(),
             active_config: active_config.clone(),
+            effective_runtime_config: None,
             baseline_config: active_config,
             last_error: String::new(),
             host_name,
@@ -413,6 +512,7 @@ impl Inner {
             presets,
             requested_display_mode: "duplicate".to_string(),
             display_runtime: None,
+            pending_runtime_snapshot_reason: "init".to_string(),
         }
     }
 }
@@ -762,7 +862,7 @@ impl DaemonCore {
             inner.no_present_streak = 0;
             inner.last_no_present_recovery_at = None;
         }
-        self.start_with_config(cfg).await?;
+        self.start_with_config(cfg, "start_request").await?;
         Ok(self.status().await)
     }
 
@@ -800,7 +900,7 @@ impl DaemonCore {
                 let mut inner = self.inner.lock().await;
                 inner.metrics.restart_count = inner.metrics.restart_count.saturating_add(1);
             }
-            self.start_with_config(cfg).await?;
+            self.start_with_config(cfg, "apply_request").await?;
         }
 
         Ok(self.status().await)
@@ -1020,7 +1120,7 @@ impl DaemonCore {
         }
 
         if let Some(cfg) = restart_cfg {
-            self.start_with_config(cfg).await?;
+            self.start_with_config(cfg, "adaptive_restart").await?;
         }
 
         Ok(ClientMetricsResponse {
@@ -1089,7 +1189,7 @@ impl DaemonCore {
         inner.no_present_streak = 0;
     }
 
-    async fn start_with_config(&self, cfg: ActiveConfig) -> Result<(), CoreError> {
+    async fn start_with_config(&self, cfg: ActiveConfig, reason: &str) -> Result<(), CoreError> {
         let requested_display_mode = {
             let inner = self.inner.lock().await;
             inner.requested_display_mode.clone()
@@ -1172,6 +1272,7 @@ impl DaemonCore {
 
         let run_id;
         let existing_pid;
+        let provisional_effective;
         {
             let mut inner = self.inner.lock().await;
             existing_pid = inner.current_pid;
@@ -1187,7 +1288,36 @@ impl DaemonCore {
             inner.last_output_at = Some(Instant::now());
             inner.last_streaming_line_at = None;
             inner.no_present_streak = 0;
+            inner.pending_runtime_snapshot_reason = reason.to_string();
+            provisional_effective = EffectiveRuntimeConfig {
+                requested_encoder: cfg.encoder.clone(),
+                resolved_backend: "unknown".to_string(),
+                raw_format: "unknown".to_string(),
+                size: launch_size.clone(),
+                fps: cfg.fps,
+                bitrate_kbps: cfg.bitrate_kbps,
+                cursor_mode: cfg.cursor_mode.clone(),
+                gop: if cfg.intra_only { 1 } else { (cfg.fps / 8).max(6) },
+                intra_only: cfg.intra_only,
+                stream_mode: "unknown".to_string(),
+                queue_max_buffers: 0,
+                queue_max_time_ms: 0,
+                appsink_max_buffers: 0,
+                appsink_drop: false,
+                appsink_sync: false,
+                capture_backend: self.host_probe.capture_mode_name().to_string(),
+                parse_mode: "unknown".to_string(),
+                timeout_pull_ms: 0,
+                timeout_write_ms: 0,
+                timeout_disconnect: false,
+                videorate_drop_only: false,
+                pipewire_keepalive_ms: 0,
+                snapshot_unix_ms: now_unix_ms(),
+                snapshot_reason: format!("{reason}:provisional"),
+            };
+            inner.effective_runtime_config = Some(provisional_effective.clone());
         }
+        self.persist_effective_runtime_snapshot(run_id, &provisional_effective);
 
         {
             let cfg = { self.inner.lock().await.baseline_config.clone() };
@@ -1480,6 +1610,7 @@ impl DaemonCore {
     }
 
     async fn on_stream_output(&self, run_id: u64, line: &str) {
+        let mut effective_snapshot: Option<EffectiveRuntimeConfig> = None;
         let mut inner = self.inner.lock().await;
         if inner.run_id != run_id {
             return;
@@ -1502,6 +1633,14 @@ impl DaemonCore {
             inner.metrics.bitrate_actual_bps = bps;
         }
 
+        if let Some(mut parsed) =
+            parse_effective_runtime_line(line, &inner.pending_runtime_snapshot_reason)
+        {
+            parsed.snapshot_unix_ms = now_unix_ms();
+            inner.effective_runtime_config = Some(parsed.clone());
+            effective_snapshot = Some(parsed);
+        }
+
         let trimmed = line.trim();
         if !trimmed.is_empty() {
             let lower = trimmed.to_ascii_lowercase();
@@ -1513,6 +1652,10 @@ impl DaemonCore {
             {
                 inner.last_error = trimmed.to_string();
             }
+        }
+        drop(inner);
+        if let Some(snapshot) = effective_snapshot {
+            self.persist_effective_runtime_snapshot(run_id, &snapshot);
         }
     }
 
@@ -1589,7 +1732,7 @@ impl DaemonCore {
                 }
 
                 if let Some(cfg) = cfg_for_restart {
-                    if let Err(err) = core.start_with_config(cfg).await {
+                    if let Err(err) = core.start_with_config(cfg, "auto_reconnect").await {
                         let mut inner = core.inner.lock().await;
                         inner.state = STATE_ERROR.to_string();
                         inner.last_error = err.to_string();
@@ -1648,10 +1791,54 @@ impl DaemonCore {
         }
     }
 
+    fn effective_runtime_log_path(&self) -> PathBuf {
+        let serial = self
+            .target_serial
+            .as_deref()
+            .unwrap_or("default")
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                    ch
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>();
+        self.root
+            .join("logs")
+            .join("effective-runtime")
+            .join(format!("{serial}-{}.jsonl", self.stream_port))
+    }
+
+    fn persist_effective_runtime_snapshot(&self, run_id: u64, snapshot: &EffectiveRuntimeConfig) {
+        let path = self.effective_runtime_log_path();
+        if let Some(parent) = path.parent() {
+            if let Err(err) = std::fs::create_dir_all(parent) {
+                warn!(error = %err, path = %path.display(), "effective runtime: mkdir failed");
+                return;
+            }
+        }
+        let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&path) else {
+            warn!(path = %path.display(), "effective runtime: open jsonl failed");
+            return;
+        };
+        let line = serde_json::json!({
+            "run_id": run_id,
+            "stream_port": self.stream_port,
+            "serial": self.target_serial,
+            "snapshot": snapshot,
+        });
+        if let Err(err) = writeln!(file, "{line}") {
+            warn!(error = %err, path = %path.display(), "effective runtime: append jsonl failed");
+        }
+    }
+
     fn base_from_inner(&self, inner: &Inner) -> BaseResponse {
         BaseResponse {
             state: inner.state.clone(),
             active_config: inner.active_config.clone(),
+            effective_runtime_config: inner.effective_runtime_config.clone(),
             host_name: inner.host_name.clone(),
             uptime: inner.started_at.elapsed().as_secs(),
             run_id: inner.run_id,
