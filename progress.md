@@ -1019,3 +1019,18 @@ Status: active
   - `pick_unique_stream_port(...)`
 - Validation:
   - `cargo check -p wbeam-desktop-tauri` -> OK
+
+## In Progress (2026-03-10) [commit: a4b83431] - redeploy-local build revision bump only when rebuild inputs changed
+- Updated `redeploy-local` build-revision strategy:
+  - no longer always calls `./wbeam version new`,
+  - now reuses current version when host/APK rebuild is not required.
+- Added compatibility input fingerprint tracking:
+  - new state file: `.wbeam_redeploy_compat.state`,
+  - fingerprint built from git tree + dirty status of `android`, `src/host/rust`, and `wbeam`,
+  - host/APK artifact presence also gates bump decision.
+- Behavior:
+  - bump (`version new`) only when rebuild inputs changed, baseline is missing, fingerprint is unavailable, or required artifacts are missing.
+  - otherwise keep existing shared `BUILD_REV` for host+android redeploy.
+- Validation:
+  - `bash -n redeploy-local` -> OK
+  - `./redeploy-local --help` -> OK
