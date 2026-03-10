@@ -34,6 +34,7 @@ type RunItem = {
   profile_dir: string;
   run_artifacts_dir: string;
   hud_chart_mode?: string;
+  hud_font_preset?: string;
   exit_code?: number | null;
   error?: string | null;
 };
@@ -488,6 +489,7 @@ export default function App() {
   const [encMjpeg, setEncMjpeg] = createSignal(false);
   const [overlay, setOverlay] = createSignal(true);
   const [hudChartMode, setHudChartMode] = createSignal("bars");
+  const [hudFontPreset, setHudFontPreset] = createSignal("compact");
   const [selectedRunId, setSelectedRunId] = createSignal("");
   const [leftProfile, setLeftProfile] = createSignal("");
   const [rightProfile, setRightProfile] = createSignal("");
@@ -746,6 +748,7 @@ export default function App() {
           encoders,
           overlay: overlay(),
           hud_chart_mode: hudChartMode(),
+          hud_font_preset: hudFontPreset(),
         }),
       });
       const body = (await resp.json()) as Record<string, unknown>;
@@ -1113,6 +1116,15 @@ export default function App() {
                         <option value="line">line</option>
                       </select>
                     </label>
+                    <label title="HUD font preset used on Android overlay. Compact is recommended default.">
+                      HUD font preset
+                      <select value={hudFontPreset()} onInput={(e) => setHudFontPreset(e.currentTarget.value)}>
+                        <option value="compact">compact (JetBrains 13)</option>
+                        <option value="dense">dense (JetBrains 12)</option>
+                        <option value="arcade">arcade (IBM Plex 14)</option>
+                        <option value="system">system mono</option>
+                      </select>
+                    </label>
                   </div>
                 </Show>
               </article>
@@ -1171,6 +1183,7 @@ export default function App() {
                   <div class="meta-item"><strong>Generation</strong><span>{hud().generation}</span></div>
                   <div class="meta-item"><strong>Progress</strong><span>{hud().progress}</span></div>
                   <div class="meta-item"><strong>HUD charts</strong><span>{activeRun()?.hud_chart_mode || hudChartMode()}</span></div>
+                  <div class="meta-item"><strong>HUD font</strong><span>{activeRun()?.hud_font_preset || hudFontPreset()}</span></div>
                   <div class="meta-item">
                     <strong>Live health</strong>
                     <span class={`live-pill ${liveHealth().tone}`}>{liveHealth().state}</span>

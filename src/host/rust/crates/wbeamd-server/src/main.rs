@@ -70,6 +70,7 @@ struct TrainerRun {
     encoder_mode: String,
     encoders: Vec<String>,
     hud_chart_mode: String,
+    hud_font_preset: String,
     exit_code: Option<i32>,
     pid: Option<u32>,
     error: Option<String>,
@@ -101,6 +102,7 @@ struct TrainerStartRequest {
     encoder_mode: Option<String>,
     encoders: Option<Vec<String>>,
     hud_chart_mode: Option<String>,
+    hud_font_preset: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -962,6 +964,7 @@ async fn post_trainer_start(
         encoder_mode: None,
         encoders: None,
         hud_chart_mode: None,
+        hud_font_preset: None,
     });
 
     let serial = req.serial.trim().to_string();
@@ -1055,6 +1058,19 @@ async fn post_trainer_start(
         return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"ok": false, "error": "invalid hud_chart_mode (use bars|line)"})),
+        )
+            .into_response();
+    }
+    let hud_font_preset = req
+        .hud_font_preset
+        .as_deref()
+        .unwrap_or("compact")
+        .trim()
+        .to_ascii_lowercase();
+    if !matches!(hud_font_preset.as_str(), "compact" | "dense" | "arcade" | "system") {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"ok": false, "error": "invalid hud_font_preset (use compact|dense|arcade|system)"})),
         )
             .into_response();
     }
@@ -1159,6 +1175,15 @@ async fn post_trainer_start(
         .arg("--control-port")
         .arg(state.trainer.control_port.to_string())
         .env("PYTHONUNBUFFERED", "1")
+        .env(
+            "WBEAM_OVERLAY_FONT_DESC",
+            match hud_font_preset.as_str() {
+                "dense" => "JetBrains Mono SemiBold 12",
+                "arcade" => "IBM Plex Mono SemiBold 14",
+                "system" => "Monospace Semi-Bold 13",
+                _ => "JetBrains Mono SemiBold 13",
+            },
+        )
         .stdout(Stdio::from(log_file))
         .stderr(Stdio::from(log_file_err))
         .current_dir(&state.trainer.root);
@@ -1203,6 +1228,7 @@ async fn post_trainer_start(
         encoder_mode: encoder_mode.clone(),
         encoders: encoders.clone(),
         hud_chart_mode: hud_chart_mode.clone(),
+        hud_font_preset: hud_font_preset.clone(),
         exit_code: None,
         pid: Some(pid),
         error: None,

@@ -1914,3 +1914,19 @@ Status: active
   - `python3 -m py_compile src/host/scripts/stream_wayland_portal_h264.py` -> OK
   - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
   - `cd src/apps/trainer-tauri && npm run build` -> OK
+
+## In Progress (2026-03-10) - HUD font presets wired end-to-end (Trainer UI -> API -> runtime)
+- Added HUD font preset selection in Trainer UI (`Train` advanced section):
+  - `compact`, `dense`, `arcade`, `system`
+- `trainer-tauri` now sends `hud_font_preset` in `/v1/trainer/start` payload.
+- Extended daemon trainer API (`wbeamd-server`) to accept/validate `hud_font_preset`.
+- Runtime mapping added at trainer spawn time:
+  - `compact` -> `JetBrains Mono SemiBold 13`
+  - `dense` -> `JetBrains Mono SemiBold 12`
+  - `arcade` -> `IBM Plex Mono SemiBold 14`
+  - `system` -> `Monospace Semi-Bold 13`
+- Preset is persisted in run metadata (`TrainerRun.hud_font_preset`) and shown in `Live Run` context.
+- Validation:
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+  - `python3 -m py_compile src/domains/training/wizard.py src/host/scripts/stream_wayland_portal_h264.py` -> OK
