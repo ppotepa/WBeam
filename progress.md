@@ -1,5 +1,25 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending, branch `trainerv2`) - TrainerV2 foundation slice
+- Started dedicated `trainerv2` branch and implemented first operational TrainerV2 building block.
+- Added new launcher script:
+  - `trainer.sh`
+  - behavior:
+    - verifies daemon health (`/v1/health`),
+    - optional service bootstrap via `--start-service`,
+    - forwards run to `./wbeam train wizard` (bridge mode),
+    - writes logs to `logs/trainer/<timestamp>.trainer.log`.
+- Extended training wizard input contract with explicit profile identity:
+  - new `--profile-name` flag (interactive prompt default: `baseline`).
+- Added per-profile artifact persistence required by TrainerV2 spec:
+  - output directory: `config/training/profiles/<profile_name>/`
+  - generated files:
+    - `<profile_name>.json` (trained profile snapshot)
+    - `parameters.json` (training inputs/parameters and run context)
+- Implemented artifact generation for both engines:
+  - `proto` engine path now exports profile artifact + parameters alongside existing canonical files,
+  - `live_api` path now exports profile artifact + parameters from ranked trial results.
+
 ## Session Update (2026-03-10, pending) - Comprehensive Trainer product/spec document
 - Added a full project-level Trainer blueprint in:
   - `trainer.md`
