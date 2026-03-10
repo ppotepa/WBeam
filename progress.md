@@ -843,7 +843,7 @@ Status: active
 ## Backfill (2026-03-10) [commit: 83c36bca] - initial env-to-conf move in proto/domain
 - Replaced selected env toggles with policy/config-file driven controls.
 
-## In Progress (2026-03-10) [commit: pending] - main-lane config-first runtime wiring (no `proto_x11`)
+## In Progress (2026-03-10) [commit: 4ade624e] - main-lane config-first runtime wiring (no `proto_x11`)
 - Added shared config defaults file:
   - `config/wbeam.conf`
 - Added shared shell loader:
