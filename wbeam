@@ -980,27 +980,39 @@ android_install_with_signature_recover() {
   local package_name="$2"
   local out=""
   local rc=1
+  local install_ok=0
 
-  if out="$(adb_device_cmd install -r "$apk_path" 2>&1)"; then
+  out="$(adb_device_cmd install -r "$apk_path" 2>&1)" || rc=$?
+  if [[ "$rc" -eq 0 ]] && ! printf '%s' "$out" | grep -q "Failure \["; then
+    install_ok=1
+  fi
+  if [[ "$install_ok" -eq 1 ]]; then
     [[ -n "$out" ]] && printf '%s\n' "$out"
     return 0
   fi
-  rc=$?
   [[ -n "$out" ]] && printf '%s\n' "$out" >&2
 
-  if printf '%s' "$out" | grep -q "INSTALL_FAILED_UPDATE_INCOMPATIBLE"; then
+  if printf '%s' "$out" | grep -Eq "INSTALL_FAILED_UPDATE_INCOMPATIBLE|INSTALL_PARSE_FAILED_INCONSISTENT_CERTIFICATES"; then
     echo "[android] Detected signature mismatch for ${package_name}; uninstalling existing package and retrying..."
     adb_device_cmd uninstall "$package_name" >/dev/null 2>&1 || true
     adb_device_cmd shell pm uninstall --user 0 "$package_name" >/dev/null 2>&1 || true
 
-    if out="$(adb_device_cmd install -r "$apk_path" 2>&1)"; then
+    rc=1
+    install_ok=0
+    out="$(adb_device_cmd install -r "$apk_path" 2>&1)" || rc=$?
+    if [[ "$rc" -eq 0 ]] && ! printf '%s' "$out" | grep -q "Failure \["; then
+      install_ok=1
+    fi
+    if [[ "$install_ok" -eq 1 ]]; then
       [[ -n "$out" ]] && printf '%s\n' "$out"
       return 0
     fi
-    rc=$?
     [[ -n "$out" ]] && printf '%s\n' "$out" >&2
   fi
 
+  if [[ "$rc" -eq 0 ]]; then
+    rc=1
+  fi
   return "$rc"
 }
 
