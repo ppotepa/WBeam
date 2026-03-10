@@ -288,6 +288,22 @@ pub struct KpiSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
+pub struct TransportRuntimeSnapshot {
+    pub pipeline_fps: u32,
+    pub sender_fps: f64,
+    pub timeout_misses: u64,
+    pub send_timeouts: u64,
+    pub timeout_key: u64,
+    pub timeout_delta: u64,
+    pub key_retry_ok: u64,
+    pub key_retry_fail: u64,
+    pub queue_depth: u64,
+    pub queue_peak: u64,
+    pub queue_drops: u64,
+    pub seq: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
 pub struct MetricsSnapshot {
     pub start_count: u64,
     pub stop_count: u64,
@@ -310,6 +326,7 @@ pub struct MetricsSnapshot {
     pub adaptive_reason: String,
     pub backpressure_high_events: u64,
     pub backpressure_recover_events: u64,
+    pub transport_runtime: TransportRuntimeSnapshot,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -13,6 +13,7 @@ use nix::unistd::Pid;
 use tokio::process::Command;
 use tokio::time::sleep;
 use wbeamd_api::ActiveConfig;
+use wbeamd_api::TransportRuntimeSnapshot;
 
 /// Build the command to launch the streamer for `cfg`.
 ///
@@ -102,6 +103,36 @@ pub fn parse_kbps_line_to_bps(line: &str) -> Option<u64> {
     Some((kbps * 1000.0) as u64)
 }
 
+/// Parse streamer transport line:
+/// `[wbeam-framed] pipeline_fps=.. sender_fps=.. ... queue_depth=.. queue_peak=.. queue_drops=.. seq=..`
+pub fn parse_transport_runtime_line(line: &str) -> Option<TransportRuntimeSnapshot> {
+    if !line.contains("[wbeam-framed]") || !line.contains("pipeline_fps=") {
+        return None;
+    }
+    let mut out = TransportRuntimeSnapshot::default();
+    for token in line.split_whitespace() {
+        let Some((key, value)) = token.split_once('=') else {
+            continue;
+        };
+        match key {
+            "pipeline_fps" => out.pipeline_fps = value.parse().ok()?,
+            "sender_fps" => out.sender_fps = value.parse().ok()?,
+            "timeout_misses" => out.timeout_misses = value.parse().ok()?,
+            "send_timeouts" => out.send_timeouts = value.parse().ok()?,
+            "timeout_key" => out.timeout_key = value.parse().ok()?,
+            "timeout_delta" => out.timeout_delta = value.parse().ok()?,
+            "key_retry_ok" => out.key_retry_ok = value.parse().ok()?,
+            "key_retry_fail" => out.key_retry_fail = value.parse().ok()?,
+            "queue_depth" => out.queue_depth = value.parse().ok()?,
+            "queue_peak" => out.queue_peak = value.parse().ok()?,
+            "queue_drops" => out.queue_drops = value.parse().ok()?,
+            "seq" => out.seq = value.parse().ok()?,
+            _ => {}
+        }
+    }
+    Some(out)
+}
+
 /// Return a build revision string (injected via `WBEAM_BUILD_REV` env var at
 /// compile time, or a default placeholder).
 pub fn build_revision() -> String {
@@ -145,5 +176,19 @@ mod tests {
     #[test]
     fn parse_kbps_no_match() {
         assert_eq!(parse_kbps_line_to_bps("unrelated log line"), None);
+    }
+
+    #[test]
+    fn parse_transport_line_known() {
+        let line = "[wbeam-framed] pipeline_fps=59 sender_fps=58.8 timeout_misses=1 send_timeouts=2 timeout_key=0 timeout_delta=2 key_retry_ok=0 key_retry_fail=0 queue_depth=1 queue_peak=2 queue_drops=3 seq=42";
+        let parsed = parse_transport_runtime_line(line).expect("transport line should parse");
+        assert_eq!(parsed.pipeline_fps, 59);
+        assert_eq!(parsed.sender_fps, 58.8);
+        assert_eq!(parsed.timeout_misses, 1);
+        assert_eq!(parsed.send_timeouts, 2);
+        assert_eq!(parsed.queue_depth, 1);
+        assert_eq!(parsed.queue_peak, 2);
+        assert_eq!(parsed.queue_drops, 3);
+        assert_eq!(parsed.seq, 42);
     }
 }

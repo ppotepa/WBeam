@@ -2359,3 +2359,14 @@ Status: active
   - added explicit warning messages when `encoder_tuning_mode=manual` / `encoder_params` are used (experimental mapping visibility).
 - Validation:
   - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+- Added structured sender transport telemetry to daemon metrics (`/v1/metrics`):
+  - new `transport_runtime` snapshot fields:
+    - `pipeline_fps`, `sender_fps`, `timeout_misses`, `send_timeouts`,
+    - `timeout_key`, `timeout_delta`, `key_retry_ok`, `key_retry_fail`,
+    - `queue_depth`, `queue_peak`, `queue_drops`, `seq`.
+  - parser added in `wbeamd-core` for `[wbeam-framed] ...` transport log lines.
+  - core now updates `metrics.transport_runtime` from streamer output in real time.
+  - unit test added for transport line parser.
+- Validation:
+  - `cd src/host/rust && cargo check -p wbeamd-api -p wbeamd-core -p wbeamd-server` -> OK
+  - `cd src/host/rust && cargo test -p wbeamd-core parse_transport_line_known -- --nocapture` -> OK

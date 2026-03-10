@@ -1632,6 +1632,9 @@ impl DaemonCore {
         if let Some(bps) = proc::parse_kbps_line_to_bps(line) {
             inner.metrics.bitrate_actual_bps = bps;
         }
+        if let Some(transport) = proc::parse_transport_runtime_line(line) {
+            inner.metrics.transport_runtime = transport;
+        }
 
         if let Some(mut parsed) =
             parse_effective_runtime_line(line, &inner.pending_runtime_snapshot_reason)
