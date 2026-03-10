@@ -1571,23 +1571,8 @@ fn service_unit_content() -> String {
         // Default to repository runner to avoid stale release-binary drift.
         format!("{default_runner} {control_port} {stream_port}")
     };
-    let mut session_env = String::new();
-    for key in [
-        "DISPLAY",
-        "XAUTHORITY",
-        "WAYLAND_DISPLAY",
-        "XDG_RUNTIME_DIR",
-    ] {
-        if let Ok(val) = std::env::var(key) {
-            let trimmed = val.trim();
-            if !trimmed.is_empty() {
-                session_env.push_str(&format!("Environment={}={}\n", key, trimmed));
-            }
-        }
-    }
-
     format!(
-        "[Unit]\nDescription=WBeam Screen Streaming Daemon\nAfter=graphical-session.target\n\n[Service]\nType=simple\nExecStart={exec_start}\nRestart=on-failure\nRestartSec=3\nEnvironment=RUST_LOG=info\nEnvironment=WBEAM_DAEMON_IMPL=rust\nEnvironment=WBEAM_USE_RUST_STREAMER=1\nEnvironment=WBEAM_ROOT={root}\nEnvironment=WBEAM_LOCK_FILE={service_lock_file}\n{session_env}\n[Install]\nWantedBy=default.target\n"
+        "[Unit]\nDescription=WBeam Screen Streaming Daemon\nAfter=graphical-session.target\n\n[Service]\nType=simple\nExecStart={exec_start}\nRestart=on-failure\nRestartSec=3\nEnvironment=RUST_LOG=info\nEnvironment=WBEAM_DAEMON_IMPL=rust\nEnvironment=WBEAM_USE_RUST_STREAMER=1\nEnvironment=WBEAM_ROOT={root}\nEnvironment=WBEAM_LOCK_FILE={service_lock_file}\n\n[Install]\nWantedBy=default.target\n"
     )
 }
 

@@ -922,6 +922,35 @@ android_build() {
     > "$(android_build_stamp_path "$ANDROID_APK")" 2>/dev/null || true
 }
 
+android_install_with_signature_recover() {
+  local apk_path="$1"
+  local package_name="$2"
+  local out=""
+  local rc=1
+
+  if out="$(adb_device_cmd install -r "$apk_path" 2>&1)"; then
+    [[ -n "$out" ]] && printf '%s\n' "$out"
+    return 0
+  fi
+  rc=$?
+  [[ -n "$out" ]] && printf '%s\n' "$out" >&2
+
+  if printf '%s' "$out" | grep -q "INSTALL_FAILED_UPDATE_INCOMPATIBLE"; then
+    echo "[android] Detected signature mismatch for ${package_name}; uninstalling existing package and retrying..."
+    adb_device_cmd uninstall "$package_name" >/dev/null 2>&1 || true
+    adb_device_cmd shell pm uninstall --user 0 "$package_name" >/dev/null 2>&1 || true
+
+    if out="$(adb_device_cmd install -r "$apk_path" 2>&1)"; then
+      [[ -n "$out" ]] && printf '%s\n' "$out"
+      return 0
+    fi
+    rc=$?
+    [[ -n "$out" ]] && printf '%s\n' "$out" >&2
+  fi
+
+  return "$rc"
+}
+
 android_install() {
   if [[ ! -f "$ANDROID_APK" ]]; then
     echo "APK not found: $ANDROID_APK" >&2
@@ -935,7 +964,7 @@ android_install() {
     return 0
   fi
   echo "[android] Installing $ANDROID_APK (${ANDROID_SERIAL:-default})…"
-  adb_device_cmd install -r "$ANDROID_APK"
+  android_install_with_signature_recover "$ANDROID_APK" "$ANDROID_PACKAGE"
   # Record the build config that is now on the device so future skip checks work.
   local build_stamp install_stamp
   build_stamp="$(android_build_stamp_path "$ANDROID_APK")"
@@ -1208,7 +1237,7 @@ android_install_release() {
     return 0
   fi
   echo "[android] Installing $release_apk ($(android_target_desc))…"
-  adb_device_cmd install -r "$release_apk"
+  android_install_with_signature_recover "$release_apk" "$ANDROID_PACKAGE"
   local build_stamp install_stamp
   build_stamp="$(android_build_stamp_path "$release_apk")"
   install_stamp="$(android_install_stamp_path "$release_apk")"

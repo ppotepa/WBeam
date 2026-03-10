@@ -60,6 +60,17 @@ struct EvdiModuleStatus {
 }
 
 pub fn probe(is_remote: bool) -> X11RealOutputProbe {
+    if policy_flag_enabled("DISABLE_REAL_OUTPUT_BACKEND") {
+        return X11RealOutputProbe {
+            supported: false,
+            reason: format!(
+                "real-output backend disabled by policy file ({})",
+                policy_file_location_hint()
+            ),
+            missing_deps: vec!["real-output-disabled".to_string()],
+        };
+    }
+
     if is_remote {
         return X11RealOutputProbe {
             supported: false,
@@ -84,7 +95,7 @@ pub fn probe(is_remote: bool) -> X11RealOutputProbe {
         };
     }
 
-    let xauth = resolve_xauthority();
+    let xauth = resolve_xauthority_for_display(&display);
     let evdi = detect_evdi_module_status();
 
     let providers = match xrandr_output(&["--listproviders"], &display, xauth.as_deref()) {
@@ -175,12 +186,67 @@ pub fn probe(is_remote: bool) -> X11RealOutputProbe {
     }
 }
 
+fn policy_flag_enabled(key: &str) -> bool {
+    let path = policy_file_path();
+    let Some(path) = path else {
+        return false;
+    };
+    let Ok(raw) = fs::read_to_string(path) else {
+        return false;
+    };
+    for line in raw.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((k, v)) = line.split_once('=') else {
+            continue;
+        };
+        if k.trim() != key {
+            continue;
+        }
+        let low = v.trim().to_ascii_lowercase();
+        return low == "1" || low == "true" || low == "on" || low == "yes";
+    }
+    false
+}
+
+fn policy_file_path() -> Option<PathBuf> {
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+        let trimmed = xdg.trim();
+        if !trimmed.is_empty() {
+            return Some(PathBuf::from(trimmed).join("wbeam/x11-virtual-policy.conf"));
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        let trimmed = home.trim();
+        if !trimmed.is_empty() {
+            return Some(PathBuf::from(trimmed).join(".config/wbeam/x11-virtual-policy.conf"));
+        }
+    }
+    if let Ok(user) = std::env::var("USER") {
+        let trimmed = user.trim();
+        if !trimmed.is_empty() {
+            return Some(
+                PathBuf::from(format!("/home/{trimmed}")).join(".config/wbeam/x11-virtual-policy.conf"),
+            );
+        }
+    }
+    None
+}
+
+fn policy_file_location_hint() -> String {
+    policy_file_path()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "<unknown-policy-path>".to_string())
+}
+
 pub fn create(_serial: &str, size: &str) -> Result<X11RealOutputHandle, String> {
     let display = detect_x11_display().unwrap_or_default();
     if display.trim().is_empty() {
         return Err("DISPLAY is not set for daemon process".to_string());
     }
-    let xauth = resolve_xauthority();
+    let xauth = resolve_xauthority_for_display(&display);
 
     let providers_raw = xrandr_output(&["--listproviders"], &display, xauth.as_deref())
         .map_err(|e| format!("xrandr --listproviders failed: {e}"))?;
@@ -335,7 +401,7 @@ pub fn destroy(handle: &X11RealOutputHandle) -> Result<(), String> {
     if display.trim().is_empty() {
         return Ok(());
     }
-    let xauth = resolve_xauthority();
+    let xauth = resolve_xauthority_for_display(&display);
 
     let _ = xrandr(
         &["--output", &handle.output_name, "--off"],
@@ -998,48 +1064,82 @@ Provider 1: id: 0x48 cap: 0xf, Source Output, Sink Output, Source Offload, Sink 
     }
 }
 
-fn resolve_xauthority() -> Option<PathBuf> {
+fn resolve_xauthority_for_display(display: &str) -> Option<PathBuf> {
     let uid = std::env::var("UID")
         .ok()
         .filter(|v| !v.trim().is_empty())
         .or_else(|| std::env::var("EUID").ok())
         .unwrap_or_else(|| "1000".to_string());
-    let run_dir = PathBuf::from(format!("/run/user/{uid}"));
-    if run_dir.exists() {
-        let mut candidates: Vec<PathBuf> = Vec::new();
-        if let Ok(entries) = fs::read_dir(&run_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    if name.starts_with("xauth_") && path.is_file() {
-                        candidates.push(path);
-                    }
-                }
-            }
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    // Prefer current process env first (set by run_wbeamd.sh after probe),
+    // then evaluate discovered candidates.
+    if let Ok(path) = std::env::var("XAUTHORITY") {
+        let p = PathBuf::from(path);
+        if p.exists() {
+            candidates.push(p);
         }
-        candidates.sort_by_key(|p| {
+    }
+
+    if let Ok(entries) = fs::read_dir("/tmp") {
+        let mut tmp_candidates: Vec<PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| {
+                p.is_file()
+                    && p.file_name()
+                        .and_then(|n| n.to_str())
+                        .map(|n| n.starts_with("xauth_"))
+                        .unwrap_or(false)
+            })
+            .collect();
+        tmp_candidates.sort_by_key(|p| {
             std::fs::metadata(p)
                 .and_then(|m| m.modified())
                 .ok()
                 .unwrap_or(SystemTime::UNIX_EPOCH)
         });
-        if let Some(last) = candidates.pop() {
-            return Some(last);
-        }
+        tmp_candidates.reverse();
+        candidates.extend(tmp_candidates);
     }
 
-    if let Ok(path) = std::env::var("XAUTHORITY") {
-        let p = PathBuf::from(path);
-        if p.exists() {
-            return Some(p);
+    let run_dir = PathBuf::from(format!("/run/user/{uid}"));
+    if run_dir.exists() {
+        let mut run_candidates: Vec<PathBuf> = Vec::new();
+        if let Ok(entries) = fs::read_dir(&run_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if name.starts_with("xauth_") && path.is_file() {
+                        run_candidates.push(path);
+                    }
+                }
+            }
         }
+        run_candidates.sort_by_key(|p| {
+            std::fs::metadata(p)
+                .and_then(|m| m.modified())
+                .ok()
+                .unwrap_or(SystemTime::UNIX_EPOCH)
+        });
+        run_candidates.reverse();
+        candidates.extend(run_candidates);
     }
 
     if let Some(home) = std::env::var_os("HOME") {
         let p = Path::new(&home).join(".Xauthority");
         if p.exists() {
-            return Some(p);
+            candidates.push(p);
         }
     }
-    None
+
+    candidates.dedup();
+
+    for candidate in &candidates {
+        if xrandr_output(&["--listproviders"], display, Some(candidate.as_path())).is_ok() {
+            return Some(candidate.clone());
+        }
+    }
+
+    candidates.into_iter().next()
 }

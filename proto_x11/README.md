@@ -32,10 +32,11 @@ Run from repo root:
 ```
 
 Behavior:
-- enforces `WBEAM_X11_ENABLE_SETMONITOR_FALLBACK=0`
-- `start` requires `resolver=linux_x11_real_output`
+- defaults to strict real-output mode, but auto-enables monitor-object fallback on `X11 + NVIDIA + EVDI`
+- `start` requires `resolver=linux_x11_real_output`, or `linux_x11_monitor_object_experimental` when fallback is enabled
 - fails fast with explicit dependency hint when real output is not ready
 - `acceptance` asserts topology changed (`xrandr --query`) after start and reverts on stop
+  (fallback mode skips topology assertion and checks STREAMING only)
 
 Wrappers are also available:
 - `proto_x11/probe-host.sh`, `proto_x11/doctor.sh`, `proto_x11/status.sh`
@@ -46,6 +47,13 @@ Wrappers are also available:
 
 Compatibility note:
 - `proto_x11/run.sh` is kept as alias to `proto_x11/run`.
+
+Policy file:
+- `~/.config/wbeam/x11-virtual-policy.conf` (written by `proto_x11/run`)
+- keys:
+  - `ENABLE_SETMONITOR_FALLBACK=0|1`
+  - `ALLOW_MONITOR_OBJECT=0|1`
+  - `DISABLE_REAL_OUTPUT_BACKEND=0|1`
 
 ## android x11 APK
 

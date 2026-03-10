@@ -51,6 +51,36 @@ fn resolve_xauthority_for_capture() -> Option<PathBuf> {
         .filter(|v| !v.trim().is_empty())
         .or_else(|| std::env::var("EUID").ok())
         .unwrap_or_else(|| "1000".to_string());
+    if let Ok(path) = std::env::var("XAUTHORITY") {
+        let p = PathBuf::from(path);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+
+    if let Ok(entries) = std::fs::read_dir("/tmp") {
+        let mut tmp_candidates: Vec<PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| {
+                p.is_file()
+                    && p.file_name()
+                        .and_then(|n| n.to_str())
+                        .map(|n| n.starts_with("xauth_"))
+                        .unwrap_or(false)
+            })
+            .collect();
+        tmp_candidates.sort_by_key(|p| {
+            std::fs::metadata(p)
+                .and_then(|m| m.modified())
+                .ok()
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+        });
+        if let Some(last) = tmp_candidates.pop() {
+            return Some(last);
+        }
+    }
+
     let run_dir = PathBuf::from(format!("/run/user/{uid}"));
     if run_dir.exists() {
         let mut candidates: Vec<PathBuf> = Vec::new();
@@ -72,13 +102,6 @@ fn resolve_xauthority_for_capture() -> Option<PathBuf> {
         });
         if let Some(last) = candidates.pop() {
             return Some(last);
-        }
-    }
-
-    if let Ok(path) = std::env::var("XAUTHORITY") {
-        let p = PathBuf::from(path);
-        if p.exists() {
-            return Some(p);
         }
     }
 

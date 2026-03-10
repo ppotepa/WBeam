@@ -45,6 +45,64 @@ Usage:
 EOF
 }
 
+ensure_supported_node() {
+  if ! command -v node >/dev/null 2>&1; then
+    echo "[desktop] node is required (recommended v20 or v22 LTS)." >&2
+    return 1
+  fi
+  local major
+  major="$(node -p 'parseInt(process.versions.node.split(".")[0],10)' 2>/dev/null || echo 0)"
+  if [[ ! "$major" =~ ^[0-9]+$ ]]; then
+    echo "[desktop] unable to detect node version." >&2
+    return 1
+  fi
+  if (( major < 18 || major > 22 )); then
+    echo "[desktop] unsupported node version: $(node -v)" >&2
+    echo "[desktop] use Node 20.x or 22.x LTS for desktop-tauri." >&2
+    return 1
+  fi
+}
+
+desktop_dev_port_pid() {
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -tiTCP:1420 -sTCP:LISTEN 2>/dev/null | head -n1 || true
+    return 0
+  fi
+  if command -v ss >/dev/null 2>&1; then
+    ss -lptn 'sport = :1420' 2>/dev/null \
+      | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' \
+      | head -n1 || true
+    return 0
+  fi
+  echo ""
+}
+
+desktop_kill_stale_dev() {
+  local pid cmd
+  pid="$(desktop_dev_port_pid)"
+  if [[ -z "$pid" ]]; then
+    return 0
+  fi
+
+  cmd="$(ps -p "$pid" -o args= 2>/dev/null || true)"
+  if [[ "$cmd" =~ (desktop-tauri|wbeam-desktop-tauri|tauri\ dev|vite\ --port\ 1420) ]]; then
+    echo "[desktop] found stale desktop dev process on :1420 (pid=$pid), terminating..."
+    kill "$pid" 2>/dev/null || true
+    sleep 1
+    pid="$(desktop_dev_port_pid)"
+    if [[ -n "$pid" ]]; then
+      kill -9 "$pid" 2>/dev/null || true
+      sleep 1
+    fi
+    return 0
+  fi
+
+  echo "[desktop] port 1420 is in use by non-WBeam process (pid=$pid)." >&2
+  echo "[desktop] command: $cmd" >&2
+  echo "[desktop] free port 1420 and retry." >&2
+  return 1
+}
+
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   usage
   exit 0
@@ -52,6 +110,8 @@ fi
 
 run_dev() {
   local log_file
+  ensure_supported_node
+  desktop_kill_stale_dev
   log_file="$(new_log_file "desktop")"
   echo "[desktop] log=$log_file"
   (
@@ -59,12 +119,15 @@ run_dev() {
     if [[ ! -d node_modules ]]; then
       npm install
     fi
+    # Tauri/WebKit can be unstable on some Wayland stacks in dev mode.
+    export WEBKIT_DISABLE_DMABUF_RENDERER="${WEBKIT_DISABLE_DMABUF_RENDERER:-1}"
     exec npm run tauri dev
   ) 2>&1 | tee -a "$log_file"
 }
 
 run_release() {
   local log_file
+  ensure_supported_node
   log_file="$(new_log_file "desktop")"
   echo "[desktop] log=$log_file"
   (
@@ -73,6 +136,7 @@ run_release() {
       npm install
     fi
     npm run build
+    export WEBKIT_DISABLE_DMABUF_RENDERER="${WEBKIT_DISABLE_DMABUF_RENDERER:-1}"
     exec cargo run --release --manifest-path src-tauri/Cargo.toml
   ) 2>&1 | tee -a "$log_file"
 }

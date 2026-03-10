@@ -5,6 +5,7 @@ SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 USER_UID="$(id -u)"
 USER_RUNTIME_DIR="/run/user/$USER_UID"
+DESKTOP_DIR="$ROOT_DIR/src/apps/desktop-tauri"
 
 usage() {
   cat <<'USAGE'
@@ -33,6 +34,19 @@ HOST_BUILD=1
 ANDROID_DEPLOY=1
 DESKTOP_BUILD=1
 DESKTOP_START=1
+
+ensure_desktop_dev_deps() {
+  if [[ -f "$DESKTOP_DIR/node_modules/vite/client.d.ts" ]]; then
+    return 0
+  fi
+
+  echo "[redeploy-local] desktop deps missing (vite/client); installing dev dependencies"
+  if [[ -f "$DESKTOP_DIR/package-lock.json" ]]; then
+    NODE_ENV=development npm --prefix "$DESKTOP_DIR" ci --include=dev
+  else
+    NODE_ENV=development npm --prefix "$DESKTOP_DIR" install --include=dev
+  fi
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -123,7 +137,8 @@ fi
 
 if [[ "$DESKTOP_BUILD" -eq 1 ]]; then
   echo "[redeploy-local] desktop build"
-  npm --prefix "$ROOT_DIR/src/apps/desktop-tauri" run build
+  ensure_desktop_dev_deps
+  NODE_ENV=development npm --prefix "$DESKTOP_DIR" run build
 else
   echo "[redeploy-local] desktop build skipped (--no-desktop-build)"
 fi

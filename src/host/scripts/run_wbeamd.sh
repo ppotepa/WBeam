@@ -34,12 +34,13 @@ resolve_display() {
 
 list_xauth_candidates() {
   local uid="${UID:-$(id -u 2>/dev/null || echo 1000)}"
+  if [[ -f "${XAUTHORITY:-}" ]]; then
+    printf '%s\n' "$XAUTHORITY"
+  fi
+  ls -1t /tmp/xauth_* 2>/dev/null || true
   local run_dir="/run/user/${uid}"
   if [[ -d "$run_dir" ]]; then
     ls -1t "$run_dir"/xauth_* 2>/dev/null || true
-  fi
-  if [[ -f "${XAUTHORITY:-}" ]]; then
-    printf '%s\n' "$XAUTHORITY"
   fi
   if [[ -f "${HOME:-}/.Xauthority" ]]; then
     printf '%s\n' "${HOME}/.Xauthority"

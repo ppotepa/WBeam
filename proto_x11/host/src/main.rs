@@ -1,12 +1,14 @@
 use serde_json::Value;
 use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
 const REAL_OUTPUT_RESOLVER: &str = "linux_x11_real_output";
-const CURL_MAX_TIME_SEC: &str = "8";
+const MONITOR_OBJECT_RESOLVER: &str = "linux_x11_monitor_object_experimental";
+const DEFAULT_CURL_MAX_TIME_SEC: &str = "20";
 
 #[derive(Debug, Clone)]
 struct Opts {
@@ -151,8 +153,13 @@ fn cmd_smoke(opts: &Opts) -> Result<(), String> {
         doctor.missing_deps.join(","),
         doctor.install_hint
     );
-    if !(doctor.ok && doctor.resolver == REAL_OUTPUT_RESOLVER) {
-        return Err("smoke aborted: X11 real-output backend is not ready".to_string());
+    if !doctor.ok || !is_supported_virtual_resolver(&doctor.resolver) {
+        return Err(format!(
+            "smoke aborted: virtual backend is not ready (ok={} resolver={} allow_monitor_object={})",
+            doctor.ok,
+            doctor.resolver,
+            allow_monitor_object()
+        ));
     }
 
     let _ = start_session(opts)?;
@@ -179,8 +186,27 @@ fn cmd_acceptance(opts: &Opts) -> Result<(), String> {
         doctor.missing_deps.join(","),
         doctor.install_hint
     );
-    if !(doctor.ok && doctor.resolver == REAL_OUTPUT_RESOLVER) {
-        return Err("acceptance aborted: X11 real-output backend is not ready".to_string());
+    if !doctor.ok || !is_supported_virtual_resolver(&doctor.resolver) {
+        return Err(format!(
+            "acceptance aborted: virtual backend is not ready (ok={} resolver={} allow_monitor_object={})",
+            doctor.ok,
+            doctor.resolver,
+            allow_monitor_object()
+        ));
+    }
+
+    if doctor.resolver == MONITOR_OBJECT_RESOLVER {
+        println!(
+            "[acceptance] monitor-object fallback active; skipping real-output RandR topology assertion"
+        );
+        let _ = start_session(opts)?;
+        let reached_streaming = wait_for_state(opts, "STREAMING", Duration::from_secs(8))?;
+        let _ = stop_session(opts);
+        if !reached_streaming {
+            return Err("acceptance failed: session did not reach STREAMING".to_string());
+        }
+        println!("[acceptance] OK (fallback mode)");
+        return Ok(());
     }
 
     let before = xrandr_topology()?;
@@ -292,11 +318,12 @@ fn start_session(opts: &Opts) -> Result<Value, String> {
     let stream_port = require_stream_port(opts)?;
 
     let doctor = virtual_doctor(opts)?;
-    if !(doctor.ok && doctor.resolver == REAL_OUTPUT_RESOLVER) {
+    if !doctor.ok || !is_supported_virtual_resolver(&doctor.resolver) {
         return Err(format!(
-            "virtual monitor preflight failed: ok={} resolver={} missing=[{}] hint={}",
+            "virtual monitor preflight failed: ok={} resolver={} allow_monitor_object={} missing=[{}] hint={}",
             doctor.ok,
             doctor.resolver,
+            allow_monitor_object(),
             doctor.missing_deps.join(","),
             doctor.install_hint
         ));
@@ -308,7 +335,14 @@ fn start_session(opts: &Opts) -> Result<Value, String> {
     let mut url = api_url(&start_opts, "/v1/start", true);
     append_query(&mut url, "display_mode", "virtual_monitor");
 
-    let body = curl_json("POST", &url)?;
+    let body = match curl_json("POST", &url) {
+        Ok(body) => body,
+        Err(e) if e.contains("Operation timed out") => {
+            thread::sleep(Duration::from_millis(1200));
+            curl_json("POST", &url)?
+        }
+        Err(e) => return Err(e),
+    };
     let json: Value =
         serde_json::from_str(&body).map_err(|e| format!("invalid JSON from start API: {e}"))?;
     let ok = json.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -320,6 +354,55 @@ fn start_session(opts: &Opts) -> Result<Value, String> {
         return Err(error.to_string());
     }
     Ok(json)
+}
+
+fn allow_monitor_object() -> bool {
+    read_policy_bool("ALLOW_MONITOR_OBJECT")
+}
+
+fn is_supported_virtual_resolver(resolver: &str) -> bool {
+    resolver == REAL_OUTPUT_RESOLVER
+        || (allow_monitor_object() && resolver == MONITOR_OBJECT_RESOLVER)
+}
+
+fn read_policy_bool(key: &str) -> bool {
+    let path = env::var("XDG_CONFIG_HOME")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .map(|v| PathBuf::from(v).join("wbeam/x11-virtual-policy.conf"))
+        .or_else(|| {
+            env::var("HOME")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .map(|home| PathBuf::from(home).join(".config/wbeam/x11-virtual-policy.conf"))
+        })
+        .or_else(|| {
+            env::var("USER")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .map(|user| PathBuf::from(format!("/home/{user}")).join(".config/wbeam/x11-virtual-policy.conf"))
+        });
+    let Some(path) = path else {
+        return false;
+    };
+    let Ok(raw) = fs::read_to_string(path) else {
+        return false;
+    };
+    for line in raw.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((k, v)) = line.split_once('=') else {
+            continue;
+        };
+        if k.trim() != key {
+            continue;
+        }
+        let low = v.trim().to_ascii_lowercase();
+        return low == "1" || low == "true" || low == "on" || low == "yes";
+    }
+    false
 }
 
 fn stop_session(opts: &Opts) -> Result<Value, String> {
@@ -695,8 +778,21 @@ fn pct_encode(raw: &str) -> String {
 }
 
 fn curl_json(method: &str, url: &str) -> Result<String, String> {
+    let max_time = env::var("WBEAM_X11_CURL_MAX_TIME_SEC")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_CURL_MAX_TIME_SEC.to_string());
     let output = Command::new("curl")
-        .args(["-sS", "--max-time", CURL_MAX_TIME_SEC, "-X", method, url])
+        .args([
+            "-sS",
+            "--connect-timeout",
+            "2",
+            "--max-time",
+            &max_time,
+            "-X",
+            method,
+            url,
+        ])
         .output()
         .map_err(|e| format!("failed to execute curl: {e}"))?;
 

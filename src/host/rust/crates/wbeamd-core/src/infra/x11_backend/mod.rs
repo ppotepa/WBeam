@@ -1,5 +1,7 @@
 use super::host_probe::HostProbe;
 use super::{x11_monitor_object, x11_real_output};
+use std::fs;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub struct BackendProbe {
@@ -75,23 +77,23 @@ impl X11VirtualOutputBackend for MonitorObjectBackend {
                 missing_deps: Vec::new(),
             };
         }
-        let enabled = std::env::var("WBEAM_X11_ENABLE_SETMONITOR_FALLBACK")
-            .ok()
-            .map(|v| {
-                let low = v.trim().to_ascii_lowercase();
-                low == "1" || low == "true" || low == "on" || low == "yes"
-            })
-            .unwrap_or(false);
+        let enabled = read_policy_bool("ENABLE_SETMONITOR_FALLBACK");
         if enabled {
             BackendProbe {
                 supported: true,
-                reason: "xrandr --setmonitor fallback enabled".to_string(),
+                reason: format!(
+                    "xrandr --setmonitor fallback enabled by policy file ({})",
+                    policy_location_hint()
+                ),
                 missing_deps: Vec::new(),
             }
         } else {
             BackendProbe {
                 supported: false,
-                reason: "xrandr --setmonitor fallback disabled (set WBEAM_X11_ENABLE_SETMONITOR_FALLBACK=1 to force experimental mode)".to_string(),
+                reason: format!(
+                    "xrandr --setmonitor fallback disabled by policy file ({})",
+                    policy_location_hint()
+                ),
                 missing_deps: Vec::new(),
             }
         }
@@ -116,11 +118,68 @@ pub fn backends_for_virtual_monitor() -> Vec<Box<dyn X11VirtualOutputBackend>> {
     ]
 }
 
+fn policy_file_path() -> Option<PathBuf> {
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+        let trimmed = xdg.trim();
+        if !trimmed.is_empty() {
+            return Some(PathBuf::from(trimmed).join("wbeam/x11-virtual-policy.conf"));
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        let trimmed = home.trim();
+        if !trimmed.is_empty() {
+            return Some(PathBuf::from(trimmed).join(".config/wbeam/x11-virtual-policy.conf"));
+        }
+    }
+    if let Ok(user) = std::env::var("USER") {
+        let trimmed = user.trim();
+        if !trimmed.is_empty() {
+            return Some(
+                PathBuf::from(format!("/home/{trimmed}")).join(".config/wbeam/x11-virtual-policy.conf"),
+            );
+        }
+    }
+    None
+}
+
+fn read_policy_bool(key: &str) -> bool {
+    let Some(path) = policy_file_path() else {
+        return false;
+    };
+    let Ok(raw) = fs::read_to_string(path) else {
+        return false;
+    };
+    for line in raw.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((k, v)) = line.split_once('=') else {
+            continue;
+        };
+        if k.trim() != key {
+            continue;
+        }
+        let low = v.trim().to_ascii_lowercase();
+        return low == "1" || low == "true" || low == "on" || low == "yes";
+    }
+    false
+}
+
+fn policy_location_hint() -> String {
+    policy_file_path()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "<unknown-policy-path>".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::infra::host_probe::{CaptureMode, DesktopFlavor, HostOs, HostProbe, SessionKind};
+    use std::fs;
+    use std::path::PathBuf;
     use std::sync::{Mutex, OnceLock};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn env_lock() -> &'static Mutex<()> {
         static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -139,33 +198,46 @@ mod tests {
         }
     }
 
+    fn set_test_policy(content: Option<&str>) {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("duration")
+            .as_nanos();
+        let base = std::env::temp_dir().join(format!("wbeam-x11-policy-test-{}-{}", std::process::id(), stamp));
+        let policy_dir = base.join("wbeam");
+        fs::create_dir_all(&policy_dir).expect("create policy dir");
+        let policy_file = policy_dir.join("x11-virtual-policy.conf");
+        if let Some(raw) = content {
+            fs::write(&policy_file, raw).expect("write policy file");
+        }
+        std::env::set_var("XDG_CONFIG_HOME", PathBuf::from(&base));
+    }
+
     #[test]
     fn monitor_backend_probe_enabled_by_default_for_local_session() {
         let _guard = env_lock().lock().expect("env lock");
-        std::env::remove_var("WBEAM_X11_ENABLE_SETMONITOR_FALLBACK");
+        set_test_policy(None);
         let backend = MonitorObjectBackend;
         let probe = backend.probe(&local_x11_probe());
         assert!(!probe.supported);
     }
 
     #[test]
-    fn monitor_backend_probe_can_be_disabled_with_env() {
+    fn monitor_backend_probe_can_be_disabled_with_policy() {
         let _guard = env_lock().lock().expect("env lock");
-        std::env::set_var("WBEAM_X11_ENABLE_SETMONITOR_FALLBACK", "0");
+        set_test_policy(Some("ENABLE_SETMONITOR_FALLBACK=0\n"));
         let backend = MonitorObjectBackend;
         let probe = backend.probe(&local_x11_probe());
         assert!(!probe.supported);
-        std::env::remove_var("WBEAM_X11_ENABLE_SETMONITOR_FALLBACK");
     }
 
     #[test]
-    fn monitor_backend_probe_can_be_enabled_with_env() {
+    fn monitor_backend_probe_can_be_enabled_with_policy() {
         let _guard = env_lock().lock().expect("env lock");
-        std::env::set_var("WBEAM_X11_ENABLE_SETMONITOR_FALLBACK", "1");
+        set_test_policy(Some("ENABLE_SETMONITOR_FALLBACK=1\n"));
         let backend = MonitorObjectBackend;
         let probe = backend.probe(&local_x11_probe());
         assert!(probe.supported);
-        std::env::remove_var("WBEAM_X11_ENABLE_SETMONITOR_FALLBACK");
     }
 
     #[test]
