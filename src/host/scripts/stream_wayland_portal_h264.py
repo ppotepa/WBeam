@@ -649,7 +649,10 @@ def make_pipeline(
     )
     if overlays:
         overlay_text = os.getenv("WBEAM_OVERLAY_TEXT", "").strip() or "AUTOTUNE"
-        overlay_font = os.getenv("WBEAM_OVERLAY_FONT_DESC", "Sans 14").strip() or "Sans 14"
+        overlay_font = (
+            os.getenv("WBEAM_OVERLAY_FONT_DESC", "Monospace Semi-Bold 12").strip()
+            or "Monospace Semi-Bold 12"
+        )
         for ov in overlays:
             set_if_supported(ov, "font-desc", overlay_font)
             set_if_supported(ov, "shaded-background", True)

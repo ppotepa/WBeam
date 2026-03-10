@@ -1762,3 +1762,27 @@ Status: active
 - Validation:
   - `python3 -m py_compile src/host/scripts/stream_wayland_portal_h264.py src/domains/training/wizard.py` -> OK
   - `cd src/apps/trainer-tauri && npm run build` -> OK
+
+## In Progress (2026-03-10) - HUD V2 readability + Mbps-first trainer UX + dataset metadata
+- Reworked Android training HUD payload in `src/domains/training/wizard.py` to be more game-like and structured:
+  - section boxes with compact grid-style framing (`TL/TR/BL/BR`),
+  - clearer status hierarchy (`RUN/PROFILE/TRIAL/GEN/NOTE`),
+  - richer live metrics block + trend lines,
+  - bitrate displayed in **Mbps** (`x.y Mbps`) instead of raw kbps text.
+- Updated quality trial-space defaults in wizard:
+  - quality mode now prioritizes only native detected device resolution when available,
+  - removed fallback mix that could reintroduce lower-res legacy sizes in quality default flow.
+- Improved portal overlay rendering defaults in streamer helper (`stream_wayland_portal_h264.py`):
+  - default overlay font changed to compact monospace style (`Monospace Semi-Bold 12`) for better technical HUD readability.
+- Trainer Desktop UI (`src/apps/trainer-tauri`) enhancements:
+  - train form bitrate labels switched to Mbps input semantics (still converted to kbps for backend contract),
+  - live chart cards now show numeric summaries (`last/min/max`) and per-sample tooltips,
+  - datasets list now includes run `started` and `finished` timestamps,
+  - dataset detail panel now surfaces best trial config (`encoder`, `size`, `fps`, `bitrate` in Mbps),
+  - compare panel bitrate now rendered in Mbps.
+- Backend dataset API enrichment (`wbeamd-server`):
+  - added `started_at_unix_ms` and `finished_at_unix_ms` to dataset summaries.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py src/host/scripts/stream_wayland_portal_h264.py` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK

@@ -79,6 +79,8 @@ type DatasetSummary = {
   profile_name: string;
   status: string;
   run_artifacts_dir: string;
+  started_at_unix_ms?: number | null;
+  finished_at_unix_ms?: number | null;
   has_run_json: boolean;
   has_parameters: boolean;
   has_profile: boolean;
@@ -175,6 +177,22 @@ function toBars(values: number[], dangerAbove = false): { value: number; pct: nu
   });
 }
 
+function kbpsToMbps(kbps: number): number {
+  return Math.round((kbps / 1000) * 10) / 10;
+}
+
+function mbpsToKbps(mbps: number): number {
+  return Math.round(mbps * 1000);
+}
+
+function seriesSummary(values: number[]): { min: string; max: string; last: string } {
+  if (!values.length) return { min: "-", max: "-", last: "-" };
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const last = values[values.length - 1];
+  return { min: min.toFixed(1), max: max.toFixed(1), last: last.toFixed(1) };
+}
+
 async function fetchJson<T>(path: string): Promise<T> {
   const resp = await fetch(path);
   if (!resp.ok) {
@@ -197,6 +215,13 @@ function pickRuntimeValue(profile: Record<string, unknown>, key: string): string
   const value = valueAt(profile, ["profile", "runtime", key]);
   if (value === undefined || value === null) return "-";
   return String(value);
+}
+
+function pickRuntimeBitrateMbps(profile: Record<string, unknown>): string {
+  const value = valueAt(profile, ["profile", "runtime", "bitrate_kbps"]);
+  const kbps = Number(value);
+  if (!Number.isFinite(kbps) || kbps <= 0) return "-";
+  return `${kbpsToMbps(kbps).toFixed(1)} Mbps`;
 }
 
 function parseHud(lines: string[]): HudSnapshot {
@@ -711,6 +736,10 @@ export default function App() {
   const presentBars = createMemo(() => toBars(hudSeries().present));
   const recvBars = createMemo(() => toBars(hudSeries().recv));
   const dropBars = createMemo(() => toBars(hudSeries().drops, true));
+  const scoreSummary = createMemo(() => seriesSummary(hudSeries().score));
+  const presentSummary = createMemo(() => seriesSummary(hudSeries().present));
+  const recvSummary = createMemo(() => seriesSummary(hudSeries().recv));
+  const dropSummary = createMemo(() => seriesSummary(hudSeries().drops));
   const selectedDevice = createMemo(() => devices().find((item) => item.serial === serial()));
 
   return (
@@ -847,23 +876,25 @@ export default function App() {
 
                 <div class="slider-row">
                   <label title="Lower tested bitrate bound.">
-                    Bitrate min (kbps)
+                    Bitrate min (Mbps)
                     <input
                       type="number"
-                      min="1000"
-                      max="400000"
-                      value={bitrateMinKbps()}
-                      onInput={(e) => setBitrateMinKbps(Number(e.currentTarget.value || 10000))}
+                      min="1"
+                      max="400"
+                      step="0.1"
+                      value={kbpsToMbps(bitrateMinKbps())}
+                      onInput={(e) => setBitrateMinKbps(mbpsToKbps(Number(e.currentTarget.value || 10)))}
                     />
                   </label>
                   <label title="Upper tested bitrate bound.">
-                    Bitrate max (kbps)
+                    Bitrate max (Mbps)
                     <input
                       type="number"
-                      min="1000"
-                      max="400000"
-                      value={bitrateMaxKbps()}
-                      onInput={(e) => setBitrateMaxKbps(Number(e.currentTarget.value || 200000))}
+                      min="1"
+                      max="400"
+                      step="0.1"
+                      value={kbpsToMbps(bitrateMaxKbps())}
+                      onInput={(e) => setBitrateMaxKbps(mbpsToKbps(Number(e.currentTarget.value || 200)))}
                     />
                   </label>
                 </div>
@@ -1086,33 +1117,61 @@ export default function App() {
                 <div class="chart-grid">
                   <section class="chart-card">
                     <h3>Score trend</h3>
+                    <p class="chart-stats">last {scoreSummary().last} | min {scoreSummary().min} | max {scoreSummary().max}</p>
                     <div class="bar-row">
                       <For each={scoreBars()}>
-                        {(bar) => <span class={`bar ${bar.cls}`} style={{ height: `${bar.pct}%` }} title={bar.value.toFixed(2)} />}
+                        {(bar, idx) => (
+                          <span
+                            class={`bar ${bar.cls}`}
+                            style={{ height: `${bar.pct}%` }}
+                            title={`sample ${idx() + 1}: ${bar.value.toFixed(2)}`}
+                          />
+                        )}
                       </For>
                     </div>
                   </section>
                   <section class="chart-card">
                     <h3>Present FPS trend</h3>
+                    <p class="chart-stats">last {presentSummary().last} | min {presentSummary().min} | max {presentSummary().max}</p>
                     <div class="bar-row">
                       <For each={presentBars()}>
-                        {(bar) => <span class={`bar ${bar.cls}`} style={{ height: `${bar.pct}%` }} title={bar.value.toFixed(2)} />}
+                        {(bar, idx) => (
+                          <span
+                            class={`bar ${bar.cls}`}
+                            style={{ height: `${bar.pct}%` }}
+                            title={`sample ${idx() + 1}: ${bar.value.toFixed(2)} fps`}
+                          />
+                        )}
                       </For>
                     </div>
                   </section>
                   <section class="chart-card">
                     <h3>Pipeline FPS trend</h3>
+                    <p class="chart-stats">last {recvSummary().last} | min {recvSummary().min} | max {recvSummary().max}</p>
                     <div class="bar-row">
                       <For each={recvBars()}>
-                        {(bar) => <span class={`bar ${bar.cls}`} style={{ height: `${bar.pct}%` }} title={bar.value.toFixed(2)} />}
+                        {(bar, idx) => (
+                          <span
+                            class={`bar ${bar.cls}`}
+                            style={{ height: `${bar.pct}%` }}
+                            title={`sample ${idx() + 1}: ${bar.value.toFixed(2)} fps`}
+                          />
+                        )}
                       </For>
                     </div>
                   </section>
                   <section class="chart-card">
                     <h3>Drop trend</h3>
+                    <p class="chart-stats">last {dropSummary().last} | min {dropSummary().min} | max {dropSummary().max}</p>
                     <div class="bar-row">
                       <For each={dropBars()}>
-                        {(bar) => <span class={`bar ${bar.cls}`} style={{ height: `${bar.pct}%` }} title={bar.value.toFixed(2)} />}
+                        {(bar, idx) => (
+                          <span
+                            class={`bar ${bar.cls}`}
+                            style={{ height: `${bar.pct}%` }}
+                            title={`sample ${idx() + 1}: ${bar.value.toFixed(2)} drop`}
+                          />
+                        )}
                       </For>
                     </div>
                   </section>
@@ -1255,6 +1314,8 @@ export default function App() {
                       <th>Run ID</th>
                       <th>Profile</th>
                       <th>Status</th>
+                      <th>Started</th>
+                      <th>Finished</th>
                       <th>Best</th>
                       <th>Recompute</th>
                       <th>Artifacts</th>
@@ -1278,6 +1339,8 @@ export default function App() {
                           </td>
                           <td>{item.profile_name}</td>
                           <td>{item.status}</td>
+                          <td>{formatTs(item.started_at_unix_ms || undefined)}</td>
+                          <td>{formatTs(item.finished_at_unix_ms || undefined)}</td>
                           <td>
                             {item.best_trial || "-"}{" "}
                             {typeof item.best_score === "number" ? `(${item.best_score.toFixed(2)})` : ""}
@@ -1317,6 +1380,28 @@ export default function App() {
                     <strong>Has logs</strong>
                     <span>{datasetDetail()!.dataset.has_logs ? "yes" : "no"}</span>
                   </div>
+                  <div class="meta-item">
+                    <strong>Best encoder</strong>
+                    <span>{String(valueAt(datasetDetail()!.parameters, ["best", "config", "encoder"]) || "-")}</span>
+                  </div>
+                  <div class="meta-item">
+                    <strong>Best size</strong>
+                    <span>{String(valueAt(datasetDetail()!.parameters, ["best", "config", "size"]) || "-")}</span>
+                  </div>
+                  <div class="meta-item">
+                    <strong>Best fps</strong>
+                    <span>{String(valueAt(datasetDetail()!.parameters, ["best", "config", "fps"]) || "-")}</span>
+                  </div>
+                  <div class="meta-item">
+                    <strong>Best bitrate</strong>
+                    <span>
+                      {(() => {
+                        const kbps = Number(valueAt(datasetDetail()!.parameters, ["best", "config", "bitrate_kbps"]) || 0);
+                        if (!Number.isFinite(kbps) || kbps <= 0) return "-";
+                        return `${kbpsToMbps(kbps).toFixed(1)} Mbps`;
+                      })()}
+                    </span>
+                  </div>
                 </div>
               </Show>
             </article>
@@ -1341,7 +1426,7 @@ export default function App() {
                     <div class="meta-item"><strong>Encoder</strong><span>{pickRuntimeValue(leftDetail()!.profile, "encoder")}</span></div>
                     <div class="meta-item"><strong>Size</strong><span>{pickRuntimeValue(leftDetail()!.profile, "size")}</span></div>
                     <div class="meta-item"><strong>FPS</strong><span>{pickRuntimeValue(leftDetail()!.profile, "fps")}</span></div>
-                    <div class="meta-item"><strong>Bitrate</strong><span>{pickRuntimeValue(leftDetail()!.profile, "bitrate_kbps")}</span></div>
+                    <div class="meta-item"><strong>Bitrate</strong><span>{pickRuntimeBitrateMbps(leftDetail()!.profile)}</span></div>
                   </div>
                 </Show>
               </article>
@@ -1363,7 +1448,7 @@ export default function App() {
                     <div class="meta-item"><strong>Encoder</strong><span>{pickRuntimeValue(rightDetail()!.profile, "encoder")}</span></div>
                     <div class="meta-item"><strong>Size</strong><span>{pickRuntimeValue(rightDetail()!.profile, "size")}</span></div>
                     <div class="meta-item"><strong>FPS</strong><span>{pickRuntimeValue(rightDetail()!.profile, "fps")}</span></div>
-                    <div class="meta-item"><strong>Bitrate</strong><span>{pickRuntimeValue(rightDetail()!.profile, "bitrate_kbps")}</span></div>
+                    <div class="meta-item"><strong>Bitrate</strong><span>{pickRuntimeBitrateMbps(rightDetail()!.profile)}</span></div>
                   </div>
                 </Show>
               </article>

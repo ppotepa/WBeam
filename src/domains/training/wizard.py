@@ -189,6 +189,11 @@ def bar_line(value: float, max_value: float, width: int = 24) -> str:
     return f"[{'#' * fill}{'-' * (width - fill)}] {value:.1f}/{max_value:.1f}"
 
 
+def fmt_mbps_from_kbps(kbps: int | float) -> str:
+    mbps = max(0.0, float(kbps) / 1000.0)
+    return f"{mbps:.1f} Mbps"
+
+
 def spark_ascii(values: list[float], width: int = 24) -> str:
     if not values:
         return "." * max(6, width)
@@ -235,15 +240,18 @@ def write_overlay_snapshot(
         if ranked:
             best_trial = ranked[0].trial_id
 
+    target_fps = float(cfg.fps if cfg is not None else 60)
     lines: list[str] = []
     lines.extend(
         [
             "[TL]",
-            "WBEAM TRAINER V2",
-            f"run={run_id}",
-            f"profile={profile_name}",
-            f"trial={trial_id} ({trial_index}/{trial_total})",
-            f"generation={generation_index}/{generation_total}",
+            "╔═ WBEAM TRAINER HUD ════════════════",
+            f"║ RUN {run_id}",
+            f"║ PROFILE {profile_name}",
+            f"║ TRIAL {trial_id}  [{trial_index}/{trial_total}]",
+            f"║ GEN {generation_index}/{generation_total}",
+            f"║ NOTE {note or 'running'}",
+            "╚════════════════════════════════════",
             "",
             "[TR]",
         ]
@@ -251,40 +259,46 @@ def write_overlay_snapshot(
     if cfg is not None:
         lines.extend(
             [
-                f"encoder={cfg.encoder}",
-                f"size={cfg.size}",
-                f"fps={cfg.fps}",
-                f"bitrate={cfg.bitrate_kbps} kbps",
-                f"cursor={cfg.cursor_mode}",
+                "╔═ STREAM CONFIG ════════════════════",
+                f"║ codec     {cfg.encoder.upper()}",
+                f"║ size      {cfg.size}",
+                f"║ fps       {cfg.fps}",
+                f"║ bitrate   {fmt_mbps_from_kbps(cfg.bitrate_kbps)}",
+                f"║ cursor    {cfg.cursor_mode}",
+                "╚════════════════════════════════════",
             ]
         )
     else:
-        lines.append("config=<pending>")
-    if note:
-        lines.append(f"note={note}")
+        lines.extend(["╔═ STREAM CONFIG ════════════════════", "║ pending...", "╚════════════════════════════════════"])
     if best_trial:
-        lines.append(f"best_so_far={best_trial} ({best_recent:.2f})")
+        lines.append(f"BEST {best_trial}  score={best_recent:.2f}")
     lines.extend(["", "[BL]"])
     if result is not None:
         lines.extend(
             [
-                f"score={result.score:.2f}",
-                f"present  {bar_line(result.present_fps_mean, max(1.0, float(result.config.fps)))}",
-                f"recv     {bar_line(result.recv_fps_mean, max(1.0, float(result.config.fps)))}",
-                f"decode   {bar_line(result.decode_fps_mean, max(1.0, float(result.config.fps)))}",
-                f"score_tr {spark_ascii(valid_scores, width=28)}",
-                f"fps_tr   {spark_ascii(valid_present, width=28)}",
+                "╔═ LIVE METRICS ═════════════════════",
+                f"║ score     {result.score:.2f}",
+                f"║ present   {bar_line(result.present_fps_mean, target_fps)}",
+                f"║ pipe      {bar_line(result.recv_fps_mean, target_fps)}",
+                f"║ decode    {bar_line(result.decode_fps_mean, target_fps)}",
+                f"║ bitrate   {fmt_mbps_from_kbps(result.config.bitrate_kbps)}",
+                f"║ score_tr  {spark_ascii(valid_scores, width=28)}",
+                f"║ fps_tr    {spark_ascii(valid_present, width=28)}",
+                "╚════════════════════════════════════",
             ]
         )
     else:
         lines.extend(
             [
-                "score=<sampling>",
-                "present  [------------------------] 0.0/1.0",
-                "recv     [------------------------] 0.0/1.0",
-                "decode   [------------------------] 0.0/1.0",
-                f"score_tr {spark_ascii(valid_scores, width=28)}",
-                f"fps_tr   {spark_ascii(valid_present, width=28)}",
+                "╔═ LIVE METRICS ═════════════════════",
+                "║ score     <sampling>",
+                f"║ present   {bar_line(0.0, target_fps)}",
+                f"║ pipe      {bar_line(0.0, target_fps)}",
+                f"║ decode    {bar_line(0.0, target_fps)}",
+                "║ bitrate   <pending>",
+                f"║ score_tr  {spark_ascii(valid_scores, width=28)}",
+                f"║ fps_tr    {spark_ascii(valid_present, width=28)}",
+                "╚════════════════════════════════════",
             ]
         )
     lines.extend(["", "[BR]"])
@@ -296,24 +310,27 @@ def write_overlay_snapshot(
             quality_state = "warn"
         lines.extend(
             [
-                f"e2e_p95_ms={result.e2e_p95_mean_ms:.1f}",
-                f"decode_p95_ms={result.decode_p95_mean_ms:.1f}",
-                f"render_p95_ms={result.render_p95_mean_ms:.1f}",
-                f"drops_per_s={result.drop_rate_per_sec:.3f}",
-                f"late_per_s={result.late_rate_per_sec:.3f}",
-                f"queue_mean={result.queue_depth_mean:.3f}",
-                f"drop_tr  {spark_ascii(valid_drop, width=28)}",
-                f"samples={result.sample_count}",
-                f"quality_state={quality_state}",
-                f"state={result.notes}",
+                "╔═ QUALITY / LATENCY ════════════════",
+                f"║ e2e_p95     {result.e2e_p95_mean_ms:.1f} ms",
+                f"║ decode_p95  {result.decode_p95_mean_ms:.1f} ms",
+                f"║ render_p95  {result.render_p95_mean_ms:.1f} ms",
+                f"║ drops/s     {result.drop_rate_per_sec:.3f}",
+                f"║ late/s      {result.late_rate_per_sec:.3f}",
+                f"║ queue_mean  {result.queue_depth_mean:.3f}",
+                f"║ drop_tr     {spark_ascii(valid_drop, width=28)}",
+                f"║ samples     {result.sample_count}",
+                f"║ state       {quality_state}/{result.notes}",
+                "╚════════════════════════════════════",
             ]
         )
     else:
         lines.extend(
             [
-                f"drop_tr  {spark_ascii(valid_drop, width=28)}",
-                "quality_state=pending",
-                "waiting for metrics...",
+                "╔═ QUALITY / LATENCY ════════════════",
+                f"║ drop_tr     {spark_ascii(valid_drop, width=28)}",
+                "║ state       pending",
+                "║ waiting for metrics...",
+                "╚════════════════════════════════════",
             ]
         )
     payload = "\n".join(lines).strip() + "\n"
@@ -996,7 +1013,7 @@ def build_trial_space(
         # Default quality mode is intentionally biased towards max fidelity:
         # native landscape resolution + high bitrate ladder (up to 200 Mbps).
         encoders = ["h265", "h264", current_encoder]
-        sizes = [device_size or current_size, current_size]
+        sizes = [device_size] if device_size else [current_size]
         fps_values = [90, 72, 60, current_fps]
         bitrate_values = [200000, 160000, 120000, 90000, 60000, 40000, current_bitrate]
     elif mode == "latency":

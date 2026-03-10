@@ -559,6 +559,13 @@ button.link-btn {
   background: rgba(0, 0, 0, 0.1);
 }
 
+.chart-stats {
+  margin: 0 0 6px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  letter-spacing: 0.01em;
+}
+
 .bar-row {
   height: 118px;
   display: flex;
