@@ -320,8 +320,11 @@ def write_overlay_snapshot(
     recent = history or []
     valid_scores = [item.score for item in recent if item.score > -900.0]
     valid_present = [item.present_fps_mean for item in recent if item.present_fps_mean > 0.0]
+    valid_recv = [item.recv_fps_mean for item in recent if item.recv_fps_mean > 0.0]
+    valid_decode = [item.decode_fps_mean for item in recent if item.decode_fps_mean > 0.0]
     valid_drop = [item.drop_rate_per_sec * 100.0 for item in recent if item.sample_count > 0]
     valid_drop_sec = [item.drop_rate_per_sec for item in recent if item.sample_count > 0]
+    valid_late_sec = [item.late_rate_per_sec for item in recent if item.sample_count > 0]
     valid_bitrate = [item.bitrate_mbps_mean for item in recent if item.bitrate_mbps_mean > 0.0]
     valid_latency = [item.e2e_p95_mean_ms for item in recent if item.sample_count > 0 and item.e2e_p95_mean_ms >= 0.0]
     valid_queue = [item.queue_depth_mean for item in recent if item.sample_count > 0 and item.queue_depth_mean >= 0.0]
@@ -474,6 +477,7 @@ def write_overlay_snapshot(
                 rows.append(row)
             else:
                 rows.append({"type": "single", "text": content})
+        trend_window = 64 if layout_mode == "wide" else 48
         hud_json: dict[str, Any] = {
             "schema_version": "wbeam.hud.v1",
             "run_id": run_id,
@@ -533,16 +537,20 @@ def write_overlay_snapshot(
                     "note": note_state,
                 },
                 "trends": {
-                    "score": [round(v, 3) for v in valid_scores[-32:]],
-                    "present_fps": [round(v, 3) for v in valid_present[-32:]],
-                    "drop_pct": [round(v, 3) for v in valid_drop[-32:]],
-                    "drop_per_sec": [round(v, 4) for v in valid_drop_sec[-32:]],
-                    "mbps": [round(v, 3) for v in valid_bitrate[-32:]],
-                    "latency_ms_p95": [round(v, 3) for v in valid_latency[-32:]],
-                    "queue_depth": [round(v, 4) for v in valid_queue[-32:]],
+                    "score": [round(v, 3) for v in valid_scores[-trend_window:]],
+                    "present_fps": [round(v, 3) for v in valid_present[-trend_window:]],
+                    "recv_fps": [round(v, 3) for v in valid_recv[-trend_window:]],
+                    "decode_fps": [round(v, 3) for v in valid_decode[-trend_window:]],
+                    "drop_pct": [round(v, 3) for v in valid_drop[-trend_window:]],
+                    "drop_per_sec": [round(v, 4) for v in valid_drop_sec[-trend_window:]],
+                    "late_per_sec": [round(v, 4) for v in valid_late_sec[-trend_window:]],
+                    "mbps": [round(v, 3) for v in valid_bitrate[-trend_window:]],
+                    "latency_ms_p95": [round(v, 3) for v in valid_latency[-trend_window:]],
+                    "queue_depth": [round(v, 4) for v in valid_queue[-trend_window:]],
                 },
                 "status": {
                     "note": (result.notes if result is not None else ""),
+                    "sample_count": int(result.sample_count) if result is not None else 0,
                 },
             },
         }

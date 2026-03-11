@@ -2405,6 +2405,28 @@ Status: active
 - Validation:
   - `cd src/host/rust && cargo check -p wbeamd-streamer -p wbeamd-server` -> OK
   - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+- Trainer HUD v2 readability + coverage pass (Android training overlay):
+  - Reworked trainer chart section into a denser, 2-column trend grid so visual area is fully used.
+  - Spark bars now stretch across available width (`flex`) instead of fixed 3px bars; trend section no longer occupies only a small fraction of row width.
+  - Added richer trend set for training HUD:
+    - `recv_fps`, `decode_fps`, `late_per_sec` (in addition to score/present/mbps/drop/latency/queue).
+  - Increased trainer trend history window exported by wizard:
+    - `wide`: 64 samples
+    - `compact`: 48 samples
+  - Improved live value fallbacks in Android HUD:
+    - when KPI fields are absent/zero, HUD now derives latest values from trend series (not blank).
+  - Added clearer current trial cards:
+    - `CURRENT MODE` summary
+    - explicit `LIVE MBPS` card with Mbps unit
+    - `TRIAL SAMPLE COUNT`.
+  - Added `sample_count` to trainer HUD JSON status for runtime visibility.
+  - Tuned trainer overlay styling for readability:
+    - less transparent panels,
+    - balanced large-font profile (still bigger, less overflow-prone),
+    - responsive single-column fallback on narrower screens.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py` -> OK
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
 - Versioning update (deterministic deploy/redeploy suffix):
   - `./wbeam version new` no longer uses random hash from `/dev/urandom`.
   - build suffix is now deterministic and commit-bound: last 5 chars of `git rev-parse HEAD`.

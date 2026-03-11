@@ -2421,6 +2421,8 @@ public class MainActivity extends AppCompatActivity {
         }
         JSONArray trendScoreArr = trends != null ? trends.optJSONArray("score") : null;
         JSONArray trendFpsArr = trends != null ? trends.optJSONArray("present_fps") : null;
+        JSONArray trendRecvArr = trends != null ? trends.optJSONArray("recv_fps") : null;
+        JSONArray trendDecodeArr = trends != null ? trends.optJSONArray("decode_fps") : null;
         JSONArray trendMbpsArr = trends != null ? trends.optJSONArray("mbps") : null;
         JSONArray trendDropArr = trends != null ? trends.optJSONArray("drop_per_sec") : null;
         if ((trendDropArr == null || trendDropArr.length() == 0) && trends != null) {
@@ -2428,6 +2430,28 @@ public class MainActivity extends AppCompatActivity {
         }
         JSONArray trendLatencyArr = trends != null ? trends.optJSONArray("latency_ms_p95") : null;
         JSONArray trendQueueArr = trends != null ? trends.optJSONArray("queue_depth") : null;
+        JSONArray trendLateArr = trends != null ? trends.optJSONArray("late_per_sec") : null;
+        if (Double.isNaN(liveMbps) || liveMbps <= 0.0) {
+            liveMbps = latestFiniteFromSeries(trendMbpsArr);
+        }
+        if (Double.isNaN(present) || present <= 0.0) {
+            present = latestFiniteFromSeries(trendFpsArr);
+        }
+        if (Double.isNaN(recv) || recv <= 0.0) {
+            recv = latestFiniteFromSeries(trendRecvArr);
+        }
+        if (Double.isNaN(decode) || decode <= 0.0) {
+            decode = latestFiniteFromSeries(trendDecodeArr);
+        }
+        if (Double.isNaN(drops) || drops < 0.0) {
+            drops = latestFiniteFromSeries(trendDropArr);
+        }
+        if (Double.isNaN(latency) || latency < 0.0) {
+            latency = latestFiniteFromSeries(trendLatencyArr);
+        }
+        if (Double.isNaN(queue) || queue < 0.0) {
+            queue = latestFiniteFromSeries(trendQueueArr);
+        }
         String statusNote = status != null ? escapeHtml(status.optString("note", "")) : "";
         String modeSummary = String.format(
                 Locale.US,
@@ -2439,19 +2463,25 @@ public class MainActivity extends AppCompatActivity {
                 fmtDoubleOrPlaceholder(recv, "%.1f", "-"),
                 fmtDoubleOrPlaceholder(decode, "%.1f", "-")
         );
-        String trendChartsHtml = buildMetricTrendRowsHtml(
+        String trendChartsHtml = buildTrainerTrendGridHtml(
                 trendScoreArr,
                 trendFpsArr,
+                trendRecvArr,
+                trendDecodeArr,
                 trendMbpsArr,
                 trendDropArr,
                 trendLatencyArr,
                 trendQueueArr,
+                trendLateArr,
                 qualityState,
+                fpsState,
+                fpsState,
                 fpsState,
                 mbpsState,
                 dropState,
                 latState,
-                queueState
+                queueState,
+                dropState
         );
 
         String pLabel = progressLine == null || progressLine.trim().isEmpty() ? "TRAINING PROGRESS ..." : progressLine.trim();
@@ -2463,13 +2493,14 @@ public class MainActivity extends AppCompatActivity {
                 + hudChip("ENCODER", encoder, "")
                 + hudChip("SIZE/FPS", size + " @" + fps + " | " + String.format(Locale.US, "%.1f", targetMbps) + " Mbps", "");
 
-        String cards = hudCard("MODE", modeSummary, "")
+        String cards = hudCard("CURRENT MODE", modeSummary, "")
                 + hudCard("SCORE", fmtDoubleOrPlaceholder(score, "%.2f", "PENDING"), "")
                 + hudCard("PRESENT FPS", fmtDoubleOrPlaceholder(present, "%.1f", "PENDING"), hudToneClass(fpsState))
                 + hudCard("PIPE/DEC FPS", fmtDoubleOrPlaceholder(recv, "%.1f", "PENDING") + " / " + fmtDoubleOrPlaceholder(decode, "%.1f", "PENDING"), "")
-                + hudCard("LIVE MBPS", fmtLiveMbps(liveMbps, targetMbps), hudToneClass(mbpsState))
+                + hudCard("LIVE MBPS", fmtLiveMbps(liveMbps, targetMbps) + " Mbps", hudToneClass(mbpsState))
                 + hudCard("LAT p95 ms", fmtDoubleOrPlaceholder(latency, "%.1f", "PENDING"), hudToneClass(latState))
-                + hudCard("DROPS/s | QUEUE", fmtDoubleOrPlaceholder(drops, "%.3f", "PENDING") + " | " + fmtDoubleOrPlaceholder(queue, "%.3f", "PENDING"), hudToneClass(dropState));
+                + hudCard("DROPS/s | QUEUE", fmtDoubleOrPlaceholder(drops, "%.3f", "PENDING") + " | " + fmtDoubleOrPlaceholder(queue, "%.3f", "PENDING"), hudToneClass(dropState))
+                + hudCard("TRIAL SAMPLE COUNT", status != null ? String.valueOf(Math.max(0, status.optInt("sample_count", 0))) : "0", "");
 
         String trend = "layout=" + safeText(layoutMode)
                 + " | quality=" + safeText(qualityState.toUpperCase(Locale.US))
@@ -2510,56 +2541,58 @@ public class MainActivity extends AppCompatActivity {
         return "<!doctype html><html><head><meta charset='utf-8'/>"
                 + "<style>"
                 + "html,body{margin:0;padding:0;background:transparent;color:#ecfbff;font-family:'JetBrains Mono','IBM Plex Mono',monospace;font-size:13px;min-width:100%;min-height:100%;}"
-                + ".root{padding:8px;box-sizing:border-box;width:100%;height:100%;display:grid;grid-template-rows:auto auto minmax(0,1fr);gap:8px;}"
+                + ".root{padding:6px;box-sizing:border-box;width:100%;height:100%;display:grid;grid-template-rows:auto auto minmax(0,1fr);gap:6px;}"
                 + ".top{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:6px;}"
-                + ".chip{border:1px solid rgba(126,245,255,.52);background:rgba(6,24,31,.74);padding:5px 7px;min-height:34px;}"
+                + ".chip{border:1px solid rgba(126,245,255,.52);background:rgba(6,24,31,.82);padding:5px 7px;min-height:34px;}"
                 + ".chip .k{font-size:10px;color:#9dddea;display:block;letter-spacing:.05em;}"
                 + ".chip .v{font-size:12px;color:#ecfbff;word-break:break-word;}"
-                + ".progress{border:1px solid rgba(126,245,255,.52);background:rgba(6,24,31,.78);padding:5px 7px;}"
+                + ".progress{border:1px solid rgba(126,245,255,.52);background:rgba(6,24,31,.86);padding:5px 7px;}"
                 + ".p-head{display:flex;align-items:center;justify-content:space-between;gap:8px;}"
                 + ".p-label{font-size:11px;color:#b9f8ff;letter-spacing:.04em;}"
                 + ".p-pct{font-size:12px;color:#dcf9ff;font-weight:700;}"
                 + ".p-track{margin-top:6px;height:7px;background:rgba(0,0,0,.35);border:1px solid rgba(126,245,255,.35);}"
                 + ".p-fill{height:100%;width:" + safePct + "%;background:linear-gradient(90deg,#60f2c2,#7dd3fc);}"
-                + ".main{display:grid;grid-template-columns:1.25fr 1fr;gap:6px;min-height:0;}"
-                + ".panel{border:1px solid rgba(126,245,255,.5);background:rgba(6,24,31,.78);padding:6px;min-height:0;overflow:auto;}"
-                + ".kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:6px;}"
-                + ".kpi .item{border:1px solid rgba(126,245,255,.4);padding:6px;background:rgba(0,0,0,.34);}"
+                + ".main{display:grid;grid-template-columns:1fr 1fr;gap:6px;min-height:0;}"
+                + ".panel{border:1px solid rgba(126,245,255,.5);background:rgba(6,24,31,.88);padding:6px;min-height:0;overflow:auto;}"
+                + ".kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:6px;}"
+                + ".kpi .item{border:1px solid rgba(126,245,255,.42);padding:6px;background:rgba(0,0,0,.4);}"
                 + ".kpi .item .k{font-size:10px;color:#9dddea;display:block;}"
                 + ".kpi .item .v{font-size:12px;color:#dcf9ff;}"
                 + ".trend{font-size:10px;line-height:1.3;margin-top:6px;color:#9dddea;word-break:break-word;}"
-                + ".metric-trends{margin-top:7px;border:1px solid rgba(126,245,255,.35);padding:6px;background:rgba(2,10,14,.35);display:grid;gap:6px;}"
+                + ".metric-trends{margin-top:7px;border:1px solid rgba(126,245,255,.35);padding:6px;background:rgba(2,10,14,.45);display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;}"
                 + ".trend-row{display:grid;grid-template-columns:66px minmax(0,1fr) 94px;align-items:center;gap:6px;}"
                 + ".trend-label{font-size:10px;color:#9dddea;letter-spacing:.04em;}"
                 + ".trend-range{font-size:10px;color:#b9f8ff;text-align:right;white-space:nowrap;}"
+                + ".trend-card{border:1px solid rgba(126,245,255,.28);padding:5px;background:rgba(0,0,0,.24);display:grid;grid-template-rows:auto auto;gap:4px;min-width:0;}"
+                + ".trend-head{display:flex;align-items:center;justify-content:space-between;gap:6px;}"
                 + ".resource{margin-top:7px;border:1px solid rgba(126,245,255,.35);padding:6px;background:rgba(2,10,14,.35);display:grid;gap:5px;}"
                 + ".resource .title{font-size:10px;color:#9dddea;letter-spacing:.05em;}"
                 + ".res-row{display:grid;grid-template-columns:42px 62px minmax(0,1fr);align-items:center;gap:6px;}"
                 + ".res-row .rk{font-size:10px;color:#9dddea;}"
                 + ".res-row .rv{font-size:11px;color:#dcf9ff;}"
-                + ".spark{height:22px;display:flex;align-items:flex-end;gap:1px;border:1px solid rgba(126,245,255,.24);padding:2px;background:rgba(0,0,0,.26);overflow:hidden;}"
-                + ".spark-bar{width:3px;border-radius:2px 2px 0 0;background:linear-gradient(180deg,rgba(110,231,183,.96),rgba(110,231,183,.2));}"
+                + ".spark{height:22px;display:flex;align-items:flex-end;gap:1px;border:1px solid rgba(126,245,255,.24);padding:2px;background:rgba(0,0,0,.26);overflow:hidden;min-width:0;}"
+                + ".spark-bar{flex:1 1 0;min-width:2px;border-radius:2px 2px 0 0;background:linear-gradient(180deg,rgba(110,231,183,.96),rgba(110,231,183,.2));}"
                 + ".spark-bar.state-warn{background:linear-gradient(180deg,rgba(251,191,36,.96),rgba(251,191,36,.2));}"
                 + ".spark-bar.state-risk{background:linear-gradient(180deg,rgba(248,113,113,.96),rgba(248,113,113,.2));}"
                 + ".detail-table{width:100%;border-collapse:collapse;table-layout:fixed;}"
                 + ".detail-table td{border:1px solid rgba(126,245,255,.36);padding:4px 6px;vertical-align:top;word-break:break-word;}"
                 + ".detail-table td:first-child{width:52%;color:#dffcff;} .detail-table td:last-child{text-align:right;color:#b9f8ff;}"
                 + ".state-ok{color:#6ee7b7;} .state-warn{color:#fbbf24;} .state-risk{color:#f87171;} .state-pending{color:#94a3b8;}"
-                + ".trainer.scale-2x .chip .k{font-size:18px;letter-spacing:.03em;}"
-                + ".trainer.scale-2x .chip .v{font-size:24px;line-height:1.1;}"
-                + ".trainer.scale-2x .p-label{font-size:20px;}"
-                + ".trainer.scale-2x .p-pct{font-size:28px;}"
-                + ".trainer.scale-2x .kpi .item .k{font-size:17px;}"
-                + ".trainer.scale-2x .kpi .item .v{font-size:23px;line-height:1.1;}"
-                + ".trainer.scale-2x .detail-table td{font-size:18px;padding:6px 8px;}"
-                + ".trainer.scale-2x .trend{font-size:16px;line-height:1.35;}"
-                + ".trainer.scale-2x .trend-label{font-size:16px;}"
-                + ".trainer.scale-2x .trend-range{font-size:15px;}"
-                + ".trainer.scale-2x .trend-row{grid-template-columns:96px minmax(0,1fr) 124px;}"
-                + ".trainer.scale-2x .res-row .rk{font-size:16px;}"
-                + ".trainer.scale-2x .res-row .rv{font-size:18px;}"
+                + ".trainer.scale-2x .chip .k{font-size:14px;letter-spacing:.03em;}"
+                + ".trainer.scale-2x .chip .v{font-size:19px;line-height:1.1;}"
+                + ".trainer.scale-2x .p-label{font-size:16px;}"
+                + ".trainer.scale-2x .p-pct{font-size:22px;}"
+                + ".trainer.scale-2x .kpi .item .k{font-size:14px;}"
+                + ".trainer.scale-2x .kpi .item .v{font-size:18px;line-height:1.1;}"
+                + ".trainer.scale-2x .detail-table td{font-size:14px;padding:5px 7px;}"
+                + ".trainer.scale-2x .trend{font-size:14px;line-height:1.3;}"
+                + ".trainer.scale-2x .trend-label{font-size:14px;}"
+                + ".trainer.scale-2x .trend-range{font-size:13px;}"
+                + ".trainer.scale-2x .trend-row{grid-template-columns:82px minmax(0,1fr) 110px;}"
+                + ".trainer.scale-2x .res-row .rk{font-size:14px;}"
+                + ".trainer.scale-2x .res-row .rv{font-size:15px;}"
                 + ".trainer.scale-2x .spark{height:30px;}"
-                + ".trainer.scale-2x .spark-bar{width:4px;}"
+                + ".trainer.scale-2x .spark-bar{min-width:2px;}"
                 + ".trainer.scale-15x .chip .k{font-size:14px;letter-spacing:.04em;}"
                 + ".trainer.scale-15x .chip .v{font-size:18px;line-height:1.1;}"
                 + ".trainer.scale-15x .p-label{font-size:16px;}"
@@ -2571,6 +2604,7 @@ public class MainActivity extends AppCompatActivity {
                 + ".trainer.scale-15x .res-row .rk{font-size:13px;}"
                 + ".trainer.scale-15x .res-row .rv{font-size:14px;}"
                 + ".trainer.scale-15x .spark{height:26px;}"
+                + "@media (max-width:980px){.main{grid-template-columns:1fr;}.metric-trends{grid-template-columns:1fr;}}"
                 + "</style></head><body class='" + bodyClass + "'><div class='root'>"
                 + "<div class='top'>"
                 + hudChip("HUD MODE", modeUpper, "")
@@ -2711,12 +2745,57 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private String buildPendingMetricTrendRowsHtml() {
-        return buildTrendRowHtml("SCORE", null, "state-pending", "")
-                + buildTrendRowHtml("FPS", null, "state-pending", "")
-                + buildTrendRowHtml("MBPS", null, "state-pending", "")
-                + buildTrendRowHtml("DROPS", null, "state-pending", "")
-                + buildTrendRowHtml("LAT", null, "state-pending", "")
-                + buildTrendRowHtml("QUEUE", null, "state-pending", "");
+        return buildTrainerTrendGridHtml(
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "pending",
+                "pending",
+                "pending",
+                "pending",
+                "pending",
+                "pending",
+                "pending",
+                "pending",
+                "pending"
+        );
+    }
+
+    private String buildTrainerTrendGridHtml(
+            JSONArray score,
+            JSONArray fps,
+            JSONArray recv,
+            JSONArray decode,
+            JSONArray mbps,
+            JSONArray drops,
+            JSONArray latency,
+            JSONArray queue,
+            JSONArray late,
+            String scoreTone,
+            String fpsTone,
+            String recvTone,
+            String decodeTone,
+            String mbpsTone,
+            String dropTone,
+            String latTone,
+            String queueTone,
+            String lateTone
+    ) {
+        return buildTrendCardHtml("SCORE", score, hudToneClass(scoreTone), "")
+                + buildTrendCardHtml("PRESENT FPS", fps, hudToneClass(fpsTone), "")
+                + buildTrendCardHtml("RECV FPS", recv, hudToneClass(recvTone), "")
+                + buildTrendCardHtml("DECODE FPS", decode, hudToneClass(decodeTone), "")
+                + buildTrendCardHtml("LIVE MBPS", mbps, hudToneClass(mbpsTone), "Mbps")
+                + buildTrendCardHtml("DROP / SEC", drops, hudToneClass(dropTone), "")
+                + buildTrendCardHtml("LAT p95", latency, hudToneClass(latTone), "ms")
+                + buildTrendCardHtml("QUEUE DEPTH", queue, hudToneClass(queueTone), "")
+                + buildTrendCardHtml("LATE / SEC", late, hudToneClass(lateTone), "");
     }
 
     private String buildMetricTrendRowsHtml(
@@ -2739,6 +2818,20 @@ public class MainActivity extends AppCompatActivity {
                 + buildTrendRowHtml("DROPS", drops, hudToneClass(dropTone), "")
                 + buildTrendRowHtml("LAT", latency, hudToneClass(latTone), "ms")
                 + buildTrendRowHtml("QUEUE", queue, hudToneClass(queueTone), "");
+    }
+
+    private String buildTrendCardHtml(String label, JSONArray series, String toneClass, String unitSuffix) {
+        String bars = buildSparkBarsFromJson(series, toneClass);
+        String stats = buildSeriesStats(series, unitSuffix);
+        return "<div class='trend-card'><div class='trend-head'><span class='trend-label'>"
+                + escapeHtml(label)
+                + "</span><span class='trend-range "
+                + escapeHtml(toneClass == null ? "" : toneClass)
+                + "'>"
+                + escapeHtml(stats)
+                + "</span></div><div class='spark'>"
+                + bars
+                + "</div></div>";
     }
 
     private String buildTrendRowHtml(String label, JSONArray series, String toneClass, String unitSuffix) {
@@ -2833,6 +2926,22 @@ public class MainActivity extends AppCompatActivity {
             unit = " " + unit;
         }
         return String.format(Locale.US, "L %.2f%s · %.2f..%.2f", last, unit, lo, hi);
+    }
+
+    private double latestFiniteFromSeries(JSONArray series) {
+        if (series == null || series.length() == 0) {
+            return Double.NaN;
+        }
+        for (int i = series.length() - 1; i >= 0; i--) {
+            if (series.isNull(i)) {
+                continue;
+            }
+            double value = series.optDouble(i, Double.NaN);
+            if (Double.isFinite(value)) {
+                return value;
+            }
+        }
+        return Double.NaN;
     }
 
     private String fmtDoubleOrPlaceholder(double value, String pattern, String fallback) {
