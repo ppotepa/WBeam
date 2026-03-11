@@ -2480,6 +2480,19 @@ Status: active
   - Ensured trainer path consistently stays on one layout family in all trainer states (active/pending/fallback).
 - Validation:
   - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+- Branching/process governance update:
+  - Added dedicated agent workflow doc for dual-remote setup:
+    - `docs/agent-workflow.md`
+  - Documented branch strategy:
+    - `master` main integration,
+    - `release` release-only,
+    - version branch (`1.11`) and feature branches (`1.11/feature/*`),
+    - mirror requirements for GitHub (`origin`) and GitLab (`home`).
+  - Included operational command snippets for:
+    - version branch creation,
+    - feature start,
+    - mirror sync after master merges,
+    - release cut + tagging.
 - Versioning update (deterministic deploy/redeploy suffix):
   - `./wbeam version new` no longer uses random hash from `/dev/urandom`.
   - build suffix is now deterministic and commit-bound: last 5 chars of `git rev-parse HEAD`.
