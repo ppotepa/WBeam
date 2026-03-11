@@ -17,15 +17,15 @@ android/local.properties
 android/captures/
 android/.cxx/
 .gradle-user/
-proto/front/.gradle/
-proto/front/**/.gradle/
-proto/front/**/build/
-proto/front/local.properties
-proto/front/captures/
-proto/front/.cxx/
-proto/front/**/.cxx/
-proto/front/.externalNativeBuild/
-proto/front/**/.externalNativeBuild/
+archive/legacy/proto/front/.gradle/
+archive/legacy/proto/front/**/.gradle/
+archive/legacy/proto/front/**/build/
+archive/legacy/proto/front/local.properties
+archive/legacy/proto/front/captures/
+archive/legacy/proto/front/.cxx/
+archive/legacy/proto/front/**/.cxx/
+archive/legacy/proto/front/.externalNativeBuild/
+archive/legacy/proto/front/**/.externalNativeBuild/
 *.apk
 *.aab
 *.ap_
@@ -43,14 +43,10 @@ desktop/apps/desktop-tauri/node_modules/
 desktop/apps/desktop-tauri/dist/
 desktop/apps/trainer-tauri/node_modules/
 desktop/apps/trainer-tauri/dist/
-src/apps/desktop-tauri/node_modules/
-src/apps/desktop-tauri/dist/
-src/apps/trainer-tauri/node_modules/
-src/apps/trainer-tauri/dist/
 
 # .NET
-proto/host-cs/bin/
-proto/host-cs/obj/
+archive/legacy/proto/host-cs/bin/
+archive/legacy/proto/host-cs/obj/
 
 # Python
 __pycache__/
@@ -69,13 +65,8 @@ logs/.*
 .gradle-build.*.log
 host/logs/**
 host/rust/logs/**
-src/host/logs/**
-src/host/rust/logs/**
-src/src/
 shared/protocol/logs/**
-src/protocol/logs/**
 !host/rust/logs/.gitkeep
-!src/host/rust/logs/.gitkeep
 *.pid
 *.tmp
 *.cache
@@ -96,7 +87,7 @@ ignores
 buildlog
 *.bak
 logfile
-proto/autotune-results.json
-proto/autotune-results-*.json
-proto/debugframes/
+archive/legacy/proto/autotune-results.json
+archive/legacy/proto/autotune-results-*.json
+archive/legacy/proto/debugframes/
 delivery.md

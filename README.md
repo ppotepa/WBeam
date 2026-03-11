@@ -2,7 +2,7 @@
 
 WBeam turns an Android phone/tablet into a USB-connected second screen for Linux.
 
-![WBeam](src/assets/wbeam.png)
+![WBeam](docs/assets/wbeam.png)
 
 ## Current Status
 
@@ -12,7 +12,7 @@ WBeam turns an Android phone/tablet into a USB-connected second screen for Linux
 - best stability right now
 
 `X11`:
-- prototype path (`proto_x11/`)
+- prototype path (`archive/legacy/proto_x11/`)
 - not feature-parity with Wayland
 - for NVIDIA hosts, true second-monitor flow currently needs a hardware dummy plug
 
@@ -26,7 +26,7 @@ WBeam turns an Android phone/tablet into a USB-connected second screen for Linux
 
 ## What Is Experimental
 
-- full X11 virtual monitor flow (`proto_x11`)
+- full X11 virtual monitor flow (`archive/legacy/proto_x11`)
 - mixed GPU topologies (NVIDIA + EVDI on X11)
 - fallback monitor-object path on X11
 
@@ -35,7 +35,7 @@ WBeam turns an Android phone/tablet into a USB-connected second screen for Linux
 If you just want it to work now:
 1. use `Wayland`
 2. run main tooling (`./wbeam`, `./wbgui`)
-3. treat `proto_x11` as R&D, not default runtime
+3. treat archived X11 prototype as R&D, not default runtime
 
 ## Quick Start
 
@@ -49,7 +49,8 @@ If you just want it to work now:
 
 ## X11 Prototype Notes
 
-- entrypoint: `./proto_x11/run`
+- entrypoint: `./wbeam x11proto <command>`
+- archived script path: `./archive/legacy/proto_x11/run`
 - policy is file-based: `~/.config/wbeam/x11-virtual-policy.conf`
 - if preflight reports `xrandr-safe-topology`, the unsafe provider-link path is blocked by design
 - this block prevents known Xorg crashes on NVIDIA+EVDI setups
@@ -57,12 +58,11 @@ If you just want it to work now:
 ## Repo Layout
 
 - `android/` - Android domain (client app + decode runtime)
-- `host/` - host domain boundary (migration target)
-- `desktop/` - desktop domain boundary (migration target)
-- `shared/` - shared contracts/protocol boundary (migration target)
-- `src/` - legacy source tree under phased migration
-- `proto/` - historical sandbox lane
-- `proto_x11/` - X11 virtual-monitor prototype lane
+- `host/` - host domain boundary
+- `desktop/` - desktop domain boundary
+- `shared/` - shared contracts/protocol boundary
+- `archive/legacy/proto/` - historical sandbox lane
+- `archive/legacy/proto_x11/` - X11 virtual-monitor prototype lane
 
 Structure source of truth:
 - `docs/repo-structure.md`

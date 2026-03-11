@@ -19,8 +19,6 @@ Active implementation lives in:
 - `desktop/apps/desktop-tauri`
 - `desktop/apps/trainer-tauri`
 
-Compatibility alias remains under `src/apps` during transition.
-
 ## Contract
 
 - Do not move stream/session business logic into desktop UI.

@@ -22,7 +22,8 @@ targets=(
   "scripts/diagnostics"
 )
 
-legacy_pattern='src/host|src/apps|src/protocol|src/compat|src/domains/training'
+legacy_src_pattern='src/host|src/apps|src/protocol|src/compat|src/domains/training'
+legacy_wrapper_pattern='\\$ROOT_DIR/proto_x11|\\$ROOT_DIR/proto/|\\./proto_x11/|\\./proto/'
 
 for target in "${targets[@]}"; do
   if [[ ! -e "$target" ]]; then
@@ -30,11 +31,18 @@ for target in "${targets[@]}"; do
     failed=1
     continue
   fi
-  if rg -n "${legacy_pattern}" "$target" \
+  if rg -n "${legacy_src_pattern}" "$target" \
     -g '!scripts/ci/check-repo-layout.sh' \
     -g '!scripts/ci/check-boundaries.sh' \
     >/tmp/wbeam-boundary-hits.txt 2>/dev/null; then
-    echo "[boundaries][ERROR] legacy path reference found in $target"
+    echo "[boundaries][ERROR] legacy src-path reference found in $target"
+    sed -n '1,60p' /tmp/wbeam-boundary-hits.txt
+    failed=1
+  fi
+  if rg -n "${legacy_wrapper_pattern}" "$target" \
+    -g '!scripts/ci/check-boundaries.sh' \
+    >/tmp/wbeam-boundary-hits.txt 2>/dev/null; then
+    echo "[boundaries][ERROR] legacy wrapper reference found in $target"
     sed -n '1,60p' /tmp/wbeam-boundary-hits.txt
     failed=1
   fi

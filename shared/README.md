@@ -17,8 +17,6 @@ Active implementation lives in:
 - `shared/protocol`
 - `shared/compat`
 
-Compatibility aliases remain under `src/protocol` and `src/compat` during transition.
-
 ## Contract
 
 - Keep shared modules domain-neutral.
