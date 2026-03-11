@@ -12,15 +12,12 @@ Canonical shared domain boundary.
 
 ## Migration Status
 
-Active implementation still lives in:
-
-- `src/protocol`
-- `src/compat`
-
-Target location for migrated code:
+Active implementation lives in:
 
 - `shared/protocol`
 - `shared/compat`
+
+Compatibility aliases remain under `src/protocol` and `src/compat` during transition.
 
 ## Contract
 

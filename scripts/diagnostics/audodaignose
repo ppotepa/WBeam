@@ -2,14 +2,14 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DAEMON_BIN="$ROOT_DIR/src/host/rust/target/release/wbeamd-server"
+DAEMON_BIN="$ROOT_DIR/host/rust/target/release/wbeamd-server"
 CONTROL_PORT="${WBEAM_CONTROL_PORT:-5001}"
 STREAM_PORT="${WBEAM_STREAM_PORT:-5000}"
 DIAG_SECS="${WBEAM_DIAG_SECS:-60}"
 RESTART_BACKEND="${WBEAM_DIAG_RESTART_BACKEND:-1}"
 
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
-OUT_DIR="$ROOT_DIR/src/host/rust/logs/diagnose/$RUN_ID"
+OUT_DIR="$ROOT_DIR/host/rust/logs/diagnose/$RUN_ID"
 mkdir -p "$OUT_DIR"
 
 log() { echo "[audodaignose] $*"; }
@@ -74,7 +74,7 @@ start_backend_if_needed() {
 
   if [[ ! -x "$DAEMON_BIN" ]]; then
     log "release daemon missing, building..."
-    (cd "$ROOT_DIR/src/host/rust" && cargo build --release -p wbeamd-server -p wbeamd-streamer) \
+    (cd "$ROOT_DIR/host/rust" && cargo build --release -p wbeamd-server -p wbeamd-streamer) \
       >"$OUT_DIR/build_backend.log" 2>&1
   fi
 

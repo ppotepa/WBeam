@@ -3,16 +3,16 @@ set -euo pipefail
 
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
-WBEAM_CONFIG_HELPER="$ROOT_DIR/src/host/scripts/wbeam_config.sh"
+WBEAM_CONFIG_HELPER="$ROOT_DIR/host/scripts/wbeam_config.sh"
 if [[ -f "$WBEAM_CONFIG_HELPER" ]]; then
-  # shellcheck source=src/host/scripts/wbeam_config.sh
+  # shellcheck source=host/scripts/wbeam_config.sh
   source "$WBEAM_CONFIG_HELPER"
   wbeam_load_config "$ROOT_DIR"
 fi
 USER_UID="$(id -u)"
 USER_RUNTIME_DIR="/run/user/$USER_UID"
-DESKTOP_DIR="$ROOT_DIR/src/apps/desktop-tauri"
-HOST_BIN="$ROOT_DIR/src/host/rust/target/release/wbeamd-server"
+DESKTOP_DIR="$ROOT_DIR/desktop/apps/desktop-tauri"
+HOST_BIN="$ROOT_DIR/host/rust/target/release/wbeamd-server"
 ANDROID_DEBUG_APK="$ROOT_DIR/android/app/build/outputs/apk/debug/app-debug.apk"
 REDEPLOY_COMPAT_STATE_FILE="$ROOT_DIR/.wbeam_redeploy_compat.state"
 
@@ -126,9 +126,9 @@ compat_fingerprint_hash() {
 
   local tree_android tree_host tree_wbeam dirty
   tree_android="$(git -C "$ROOT_DIR" rev-parse "HEAD:android" 2>/dev/null || echo "missing-android-tree")"
-  tree_host="$(git -C "$ROOT_DIR" rev-parse "HEAD:src/host/rust" 2>/dev/null || echo "missing-host-tree")"
+  tree_host="$(git -C "$ROOT_DIR" rev-parse "HEAD:host/rust" 2>/dev/null || echo "missing-host-tree")"
   tree_wbeam="$(git -C "$ROOT_DIR" rev-parse "HEAD:wbeam" 2>/dev/null || echo "missing-wbeam-tree")"
-  dirty="$(git -C "$ROOT_DIR" status --porcelain=v1 --untracked-files=all -- android src/host/rust wbeam 2>/dev/null || true)"
+  dirty="$(git -C "$ROOT_DIR" status --porcelain=v1 --untracked-files=all -- android host/rust wbeam 2>/dev/null || true)"
 
   if command -v sha256sum >/dev/null 2>&1; then
     printf 'android=%s\nhost=%s\nwbeam=%s\n%s\n' "$tree_android" "$tree_host" "$tree_wbeam" "$dirty" \
@@ -280,7 +280,7 @@ fi
 
 if [[ "$HOST_RESTART" -eq 1 ]]; then
   echo "[redeploy-local] host start (debug background)"
-  WBEAM_BUILD_REV="$BUILD_REV" setsid -f nohup ./src/host/scripts/run_wbeamd_debug.sh 5001 5000 >/dev/null 2>&1
+  WBEAM_BUILD_REV="$BUILD_REV" setsid -f nohup ./host/scripts/run_wbeamd_debug.sh 5001 5000 >/dev/null 2>&1
   echo "[redeploy-local] wait for control API"
   for _ in $(seq 1 180); do
     if curl -fsS --max-time 1 http://127.0.0.1:5001/v1/status >/dev/null 2>&1; then

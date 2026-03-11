@@ -709,7 +709,7 @@ DVI-I-1-1 disconnected 1200x2000+1920+0 (normal left inverted right x axis y axi
 
 fn probe_host_json() -> Result<Value, String> {
     let repo = find_repo_root()?;
-    let script = repo.join("src/host/scripts/probe_host.py");
+    let script = repo.join("host/scripts/probe_host.py");
     let output = Command::new("python3")
         .arg(&script)
         .output()

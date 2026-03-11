@@ -11,7 +11,7 @@ WBeam repository should be easy to navigate by domain first:
 3. `desktop/` -> desktop UI apps and desktop-side integration
 4. `shared/` -> protocol/contracts/compat shared by domains
 
-The old `src/*` tree is still present during migration. It remains build-valid but is now treated as a migration source, not a long-term layout.
+The old `src/*` tree is now kept only as a compatibility alias layer (symlinks) to avoid breaking wrappers during transition.
 
 ## Canonical Top-Level Layout (Target)
 
@@ -30,19 +30,24 @@ WBeam/
   redeploy-local
 ```
 
-## Current Migration State (Phase 1)
+## Current Migration State (Phase 2)
 
-- Domain boundary folders are introduced:
+- Domain boundary folders are active:
   - `android/README.md`
   - `host/README.md`
   - `desktop/README.md`
   - `shared/README.md`
-- Legacy source paths still host active implementation:
-  - `src/host/...`
-  - `src/apps/...`
-  - `src/protocol/...`
-  - `src/domains/...`
-  - `src/compat/...`
+- Primary implementations are moved:
+  - `host/rust`, `host/scripts`, `host/daemon`
+  - `desktop/apps/desktop-tauri`, `desktop/apps/trainer-tauri`
+  - `shared/protocol`, `shared/compat`
+  - `host/training`
+- Compatibility aliases remain under `src/`:
+  - `src/host` -> `../host`
+  - `src/apps` -> `../desktop/apps`
+  - `src/protocol` -> `../shared/protocol`
+  - `src/compat` -> `../shared/compat`
+  - `src/domains/training` -> `../../host/training`
 
 ## Old -> New Mapping
 
@@ -58,10 +63,10 @@ WBeam/
 ## Migration Rules
 
 1. New code goes to target domain paths whenever practical.
-2. If a change must touch legacy `src/*`, add a note in PR/commit explaining why.
+2. If a change must touch compatibility aliases under `src/*`, add a note in PR/commit explaining why.
 3. Keep wrappers (`./wbeam`, `./trainer.sh`, `./desktop.sh`) stable during migration.
 4. Migrate in small, build-safe slices.
-5. Remove compatibility shims only after scripts/CI/docs are rewired.
+5. Remove compatibility alias layer only after scripts/CI/docs and external tooling are fully rewired.
 
 ## Structure Validation
 

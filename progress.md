@@ -1,5 +1,43 @@
 # WBeam Progress
 
+## Session Update (2026-03-11, pending, branch `cleanup-refactor`) - Domain move Phase 2 (host/desktop/shared/training) + compatibility aliases
+- Completed a large non-breaking repository move to domain-first paths:
+  - `src/host/*` -> `host/*`
+  - `src/apps/desktop-tauri` -> `desktop/apps/desktop-tauri`
+  - `src/apps/trainer-tauri` -> `desktop/apps/trainer-tauri`
+  - `src/protocol/*` -> `shared/protocol/*`
+  - `src/compat/*` -> `shared/compat/*`
+  - `src/domains/training/*` -> `host/training/*`
+- Added `src/*` compatibility alias layer (symlinks) to preserve old integration paths temporarily:
+  - `src/apps` -> `../desktop/apps`
+  - `src/host` -> `../host`
+  - `src/protocol` -> `../shared/protocol`
+  - `src/compat` -> `../shared/compat`
+  - `src/domains/training` -> `../../host/training`
+- Rewired operational scripts and wrappers to new canonical paths:
+  - `wbeam`, `trainer.sh`, `desktop.sh`, `devtool`, `start-remote`, `runas-remote`, `redeploy-local`,
+  - host scripts under `host/scripts/*`,
+  - CI scripts under `scripts/ci/*`,
+  - diagnostics/scripts references.
+- Rewired host runtime internals with hardcoded path constants:
+  - `host/rust/crates/wbeamd-core/src/lib.rs`
+  - `host/rust/crates/wbeamd-core/src/infra/{adb.rs,process.rs}`
+  - `host/rust/crates/wbeamd-server/src/main.rs`
+  - `host/rust/crates/wbeamd-streamer/Cargo.toml` (protocol dependency path to `shared/protocol/...`).
+- Updated documentation and migration SOT for Phase 2:
+  - `docs/repo-structure.md`
+  - `AGENTS.md` practical tree updated to compatibility alias model.
+- Updated ignore patterns for moved app and host paths:
+  - desktop app `node_modules`/`dist`
+  - host and shared logs.
+- Validation:
+  - `bash -n` on core wrappers/host/ci scripts -> OK,
+  - `python3 -m py_compile host/training/wizard.py host/scripts/stream_wayland_portal_h264.py host/daemon/wbeamd.py` -> OK,
+  - `cd host/rust && cargo check -p wbeamd-server -p wbeamd-core -p wbeamd-streamer` -> OK,
+  - `cd desktop/apps/desktop-tauri && npm run build` -> OK,
+  - `cd desktop/apps/trainer-tauri && npm ci && npm run build` -> OK,
+  - `./wbeam --help`, `./trainer.sh --help`, `./desktop.sh --help` -> OK.
+
 ## Session Update (2026-03-11, pending, branch `cleanup-refactor`) - Refactor cleanup Phase 1 scaffold + dead path cleanup
 - Removed dead, untracked leftover UI path:
   - `src/apps/desktop-egui` (build artifact directory only; no tracked sources remained).

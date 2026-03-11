@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DIST_DIR="${ROOT_DIR}/dist"
-RUST_MANIFEST="${ROOT_DIR}/src/host/rust/Cargo.toml"
+RUST_MANIFEST="${ROOT_DIR}/host/rust/Cargo.toml"
 
 mkdir -p "${DIST_DIR}"
 

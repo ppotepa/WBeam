@@ -16,8 +16,8 @@ trap 'rm -rf "${PKGROOT}"' EXIT
 
 mkdir -p "${PKGROOT}/DEBIAN" "${PKGROOT}/usr/local/bin" "${PKGROOT}/usr/share/doc/wbeam"
 install -m 0755 "${ROOT_DIR}/wbeam" "${PKGROOT}/usr/local/bin/wbeam"
-install -m 0755 "${ROOT_DIR}/src/host/rust/target/release/wbeamd-server" "${PKGROOT}/usr/local/bin/wbeamd-server"
-install -m 0755 "${ROOT_DIR}/src/host/rust/target/release/wbeamd-streamer" "${PKGROOT}/usr/local/bin/wbeamd-streamer"
+install -m 0755 "${ROOT_DIR}/host/rust/target/release/wbeamd-server" "${PKGROOT}/usr/local/bin/wbeamd-server"
+install -m 0755 "${ROOT_DIR}/host/rust/target/release/wbeamd-streamer" "${PKGROOT}/usr/local/bin/wbeamd-streamer"
 install -m 0644 "${ROOT_DIR}/README.md" "${PKGROOT}/usr/share/doc/wbeam/README.md"
 
 cat > "${PKGROOT}/DEBIAN/control" <<EOF

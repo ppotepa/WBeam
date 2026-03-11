@@ -2,10 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-HOST_SCRIPTS_DIR="$ROOT_DIR/src/host/scripts"
+HOST_SCRIPTS_DIR="$ROOT_DIR/host/scripts"
 WBEAM_CONFIG_HELPER="$HOST_SCRIPTS_DIR/wbeam_config.sh"
 if [[ -f "$WBEAM_CONFIG_HELPER" ]]; then
-  # shellcheck source=src/host/scripts/wbeam_config.sh
+  # shellcheck source=host/scripts/wbeam_config.sh
   source "$WBEAM_CONFIG_HELPER"
   wbeam_load_config "$ROOT_DIR"
 fi
@@ -14,7 +14,7 @@ CONTROL_PORT="${WBEAM_CONTROL_PORT:-5001}"
 STREAM_PORT="${WBEAM_STREAM_PORT:-5000}"
 DAEMON_NAME="${WBEAM_DAEMON_SERVICE_NAME:-wbeam-daemon}"
 
-DAEMON_BIN="$ROOT_DIR/src/host/rust/target/release/wbeamd-server"
+DAEMON_BIN="$ROOT_DIR/host/rust/target/release/wbeamd-server"
 
 ANDROID_DIR="$ROOT_DIR/android"
 ANDROID_PACKAGE="${WBEAM_ANDROID_PACKAGE:-com.wbeam}"
@@ -759,7 +759,7 @@ require_cmd() {
 
 host_build() {
   require_cmd cargo
-  local rust_dir="$ROOT_DIR/src/host/rust"
+  local rust_dir="$ROOT_DIR/host/rust"
   local build_version
   build_version="$(build_version_for_build)"
   echo "[host] Build version: $build_version"
@@ -774,7 +774,7 @@ ensure_daemon_binary() {
   fi
   echo "Daemon binary missing: $DAEMON_BIN" >&2
   echo "Build it first:" >&2
-  echo "  cd $ROOT_DIR/src/host/rust && cargo build --release -p wbeamd-server -p wbeamd-streamer" >&2
+  echo "  cd $ROOT_DIR/host/rust && cargo build --release -p wbeamd-server -p wbeamd-streamer" >&2
   exit 1
 }
 
@@ -1364,10 +1364,10 @@ logs_host() {
   local host_log
   host_log="$(ls -1t "$ROOT_DIR"/logs/*.host.*.log 2>/dev/null | head -n 1 || true)"
   if [[ -z "$host_log" ]]; then
-    host_log="$(ls -1t "$ROOT_DIR"/src/host/rust/logs/wbeamd-debug-*.log 2>/dev/null | head -n 1 || true)"
+    host_log="$(ls -1t "$ROOT_DIR"/host/rust/logs/wbeamd-debug-*.log 2>/dev/null | head -n 1 || true)"
   fi
   if [[ -z "$host_log" ]]; then
-    echo "No host debug log found in $ROOT_DIR/logs or $ROOT_DIR/src/host/rust/logs"
+    echo "No host debug log found in $ROOT_DIR/logs or $ROOT_DIR/host/rust/logs"
     exit 1
   fi
   tail -n 200 -f "$host_log"
@@ -2067,7 +2067,7 @@ x11proto_android_deploy() {
 
 train_wizard() {
   require_cmd python3
-  "$ROOT_DIR/src/domains/training/wizard.py" "$@"
+  "$ROOT_DIR/host/training/wizard.py" "$@"
 }
 
 group="${1:-}"

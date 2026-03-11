@@ -13,17 +13,13 @@ Canonical host domain boundary.
 
 ## Migration Status
 
-Active implementation still lives in:
-
-- `src/host/rust`
-- `src/host/scripts`
-- `src/host/daemon`
-
-Target location for migrated code:
+Active implementation lives in:
 
 - `host/rust`
 - `host/scripts`
 - `host/daemon`
+
+Compatibility aliases remain under `src/host` during transition.
 
 ## Contract
 

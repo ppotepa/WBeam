@@ -39,6 +39,10 @@ proto/front/**/.externalNativeBuild/
 **/.cxx/
 **/.externalNativeBuild/
 .build/
+desktop/apps/desktop-tauri/node_modules/
+desktop/apps/desktop-tauri/dist/
+desktop/apps/trainer-tauri/node_modules/
+desktop/apps/trainer-tauri/dist/
 src/apps/desktop-tauri/node_modules/
 src/apps/desktop-tauri/dist/
 src/apps/trainer-tauri/node_modules/
@@ -63,10 +67,14 @@ logs/*
 logs/.*
 !logs/.gitkeep
 .gradle-build.*.log
+host/logs/**
+host/rust/logs/**
 src/host/logs/**
 src/host/rust/logs/**
 src/src/
+shared/protocol/logs/**
 src/protocol/logs/**
+!host/rust/logs/.gitkeep
 !src/host/rust/logs/.gitkeep
 *.pid
 *.tmp

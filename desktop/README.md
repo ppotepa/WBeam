@@ -14,15 +14,12 @@ Desktop remains a client of host daemon API.
 
 ## Migration Status
 
-Active implementation still lives in:
-
-- `src/apps/desktop-tauri`
-- `src/apps/trainer-tauri`
-
-Target location for migrated code:
+Active implementation lives in:
 
 - `desktop/apps/desktop-tauri`
 - `desktop/apps/trainer-tauri`
+
+Compatibility alias remains under `src/apps` during transition.
 
 ## Contract
 

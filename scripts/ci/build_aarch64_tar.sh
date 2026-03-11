@@ -19,7 +19,7 @@ cargo build --release --target "${TARGET}" -p wbeamd-server --manifest-path "${R
 
 mkdir -p "${PKGROOT}/bin" "${PKGROOT}/doc"
 install -m 0755 "${ROOT_DIR}/wbeam" "${PKGROOT}/bin/wbeam"
-install -m 0755 "${ROOT_DIR}/src/host/rust/target/${TARGET}/release/wbeamd-server" "${PKGROOT}/bin/wbeamd-server"
+install -m 0755 "${ROOT_DIR}/host/rust/target/${TARGET}/release/wbeamd-server" "${PKGROOT}/bin/wbeamd-server"
 install -m 0644 "${ROOT_DIR}/README.md" "${PKGROOT}/doc/README.md"
 write_version_manifest
 

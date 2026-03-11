@@ -3,9 +3,9 @@ set -euo pipefail
 
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
-WBEAM_CONFIG_HELPER="$ROOT_DIR/src/host/scripts/wbeam_config.sh"
+WBEAM_CONFIG_HELPER="$ROOT_DIR/host/scripts/wbeam_config.sh"
 if [[ -f "$WBEAM_CONFIG_HELPER" ]]; then
-  # shellcheck source=src/host/scripts/wbeam_config.sh
+  # shellcheck source=host/scripts/wbeam_config.sh
   source "$WBEAM_CONFIG_HELPER"
   wbeam_load_config "$ROOT_DIR"
 fi
@@ -298,7 +298,7 @@ else
   run_step "host build (release)" bash -lc "echo '[start-remote] skipped (fast mode, use --rebuild-host or --redeploy)'"
 fi
 if [[ "$HOST_RESTART" -eq 1 ]]; then
-  run_step "host start (debug, background in selected GUI session)" runas_remote_exec "$DESKTOP_USER" bash -- -lc "cd '$ROOT_DIR' && WBEAM_BUILD_REV='$BUILD_REV' setsid -f nohup ./src/host/scripts/run_wbeamd_debug.sh 5001 5000 >/dev/null 2>&1"
+  run_step "host start (debug, background in selected GUI session)" runas_remote_exec "$DESKTOP_USER" bash -- -lc "cd '$ROOT_DIR' && WBEAM_BUILD_REV='$BUILD_REV' setsid -f nohup ./host/scripts/run_wbeamd_debug.sh 5001 5000 >/dev/null 2>&1"
 else
   run_step "host start (debug, background in remote GUI session user=${DESKTOP_USER})" bash -lc "echo '[start-remote] skipped (--no-host-restart)'"
 fi
@@ -328,7 +328,7 @@ run_step "adb snapshot (post-deploy)" adb_snapshot_log "$ADB_LOG"
 run_step "version doctor" ./wbeam version doctor
 
 if [[ "$REBUILD_DESKTOP" -eq 1 ]]; then
-  run_step "desktop app rebuild" bash -lc "npm --prefix '$ROOT_DIR/src/apps/desktop-tauri' run build"
+  run_step "desktop app rebuild" bash -lc "npm --prefix '$ROOT_DIR/desktop/apps/desktop-tauri' run build"
 else
   run_step "desktop app rebuild" bash -lc "echo '[start-remote] skipped (use --rebuild-desktop or --redeploy)'"
 fi

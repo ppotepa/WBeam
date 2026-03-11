@@ -45,37 +45,37 @@ Rules:
 ### 4.1 Host Daemon/API
 
 - Server router and trainer endpoints:
-  - `src/host/rust/crates/wbeamd-server/src/main.rs`
+  - `host/rust/crates/wbeamd-server/src/main.rs`
 - Shared API models and response contracts:
-  - `src/host/rust/crates/wbeamd-api/src/lib.rs`
+  - `host/rust/crates/wbeamd-api/src/lib.rs`
 - Core session/state/adaptation logic:
-  - `src/host/rust/crates/wbeamd-core/src/lib.rs`
-  - `src/host/rust/crates/wbeamd-core/src/domain/state.rs`
-  - `src/host/rust/crates/wbeamd-core/src/domain/policy.rs`
-  - `src/host/rust/crates/wbeamd-core/src/infra/process.rs`
+  - `host/rust/crates/wbeamd-core/src/lib.rs`
+  - `host/rust/crates/wbeamd-core/src/domain/state.rs`
+  - `host/rust/crates/wbeamd-core/src/domain/policy.rs`
+  - `host/rust/crates/wbeamd-core/src/infra/process.rs`
 
 ### 4.2 Streamer Pipeline
 
 - Pipeline assembly:
-  - `src/host/rust/crates/wbeamd-streamer/src/pipeline.rs`
+  - `host/rust/crates/wbeamd-streamer/src/pipeline.rs`
 - Capture/runtime source:
-  - `src/host/rust/crates/wbeamd-streamer/src/capture.rs`
+  - `host/rust/crates/wbeamd-streamer/src/capture.rs`
 - Framed transport:
-  - `src/host/rust/crates/wbeamd-streamer/src/transport.rs`
+  - `host/rust/crates/wbeamd-streamer/src/transport.rs`
 - Encoder modular split:
-  - `src/host/rust/crates/wbeamd-streamer/src/encoder/mod.rs`
-  - `src/host/rust/crates/wbeamd-streamer/src/encoder/selector.rs`
-  - `src/host/rust/crates/wbeamd-streamer/src/encoder/h264.rs`
-  - `src/host/rust/crates/wbeamd-streamer/src/encoder/h265.rs`
-  - `src/host/rust/crates/wbeamd-streamer/src/encoder/rawpng.rs`
+  - `host/rust/crates/wbeamd-streamer/src/encoder/mod.rs`
+  - `host/rust/crates/wbeamd-streamer/src/encoder/selector.rs`
+  - `host/rust/crates/wbeamd-streamer/src/encoder/h264.rs`
+  - `host/rust/crates/wbeamd-streamer/src/encoder/h265.rs`
+  - `host/rust/crates/wbeamd-streamer/src/encoder/rawpng.rs`
 
 ### 4.3 Desktop Apps
 
 - Main desktop controller:
-  - `src/apps/desktop-tauri`
+  - `desktop/apps/desktop-tauri`
 - Trainer desktop app:
-  - `src/apps/trainer-tauri`
-  - primary UI composition: `src/apps/trainer-tauri/src/App.tsx`
+  - `desktop/apps/trainer-tauri`
+  - primary UI composition: `desktop/apps/trainer-tauri/src/App.tsx`
 
 ### 4.4 Android Client
 
@@ -90,9 +90,9 @@ Key classes:
 ### 4.5 Training Domain
 
 - Trainer orchestrator script:
-  - `src/domains/training/wizard.py`
+  - `host/training/wizard.py`
 - Helper launcher script:
-  - `src/domains/training/train_max_quality.sh`
+  - `host/training/train_max_quality.sh`
 - Training profile artifacts (main-lane):
   - `config/training/profiles.json`
   - `config/training/autotune-best.json`
@@ -161,7 +161,7 @@ Precedence:
 3. repo defaults: `config/wbeam.conf` (bootstrap template).
 
 Loader helper:
-- `src/host/scripts/wbeam_config.sh`
+- `host/scripts/wbeam_config.sh`
 
 Important env keys (non-exhaustive):
 
@@ -314,18 +314,12 @@ WBeam/
   proto/
   proto_x11/
   scripts/
-  src/
-    apps/
-      desktop-tauri/
-      trainer-tauri/
-    domains/
-      training/
-    host/
-      daemon/
-      rust/
-      scripts/
-    protocol/
-      rust/
+  src/                  # compatibility aliases only
+    apps -> ../desktop/apps
+    host -> ../host
+    protocol -> ../shared/protocol
+    compat -> ../shared/compat
+    domains/training -> ../../host/training
 ```
 
 ## 15. Agent Guardrails

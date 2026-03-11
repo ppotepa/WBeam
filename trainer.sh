@@ -2,9 +2,9 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WBEAM_CONFIG_HELPER="${ROOT_DIR}/src/host/scripts/wbeam_config.sh"
+WBEAM_CONFIG_HELPER="${ROOT_DIR}/host/scripts/wbeam_config.sh"
 if [[ -f "${WBEAM_CONFIG_HELPER}" ]]; then
-  # shellcheck source=src/host/scripts/wbeam_config.sh
+  # shellcheck source=host/scripts/wbeam_config.sh
   source "${WBEAM_CONFIG_HELPER}"
   wbeam_load_config "${ROOT_DIR}"
 fi
@@ -113,8 +113,8 @@ Options:
   -h, --help              Show help.
 
 Modes:
-  --ui      -> npm run tauri:dev in src/apps/trainer-tauri
-  --web     -> npm run dev in src/apps/trainer-tauri
+  --ui      -> npm run tauri:dev in desktop/apps/trainer-tauri
+  --web     -> npm run dev in desktop/apps/trainer-tauri
   --wizard  -> ./wbeam train wizard
 
 Remaining args are forwarded to selected mode command.
@@ -233,8 +233,8 @@ STAMP="$(date -u +%Y%m%d-%H%M%S)"
 LOG_FILE="${LOG_DIR}/${STAMP}.trainer.log"
 
 if [[ "${MODE}" == "ui" || "${MODE}" == "web" ]]; then
-  log "launching trainer UI (src/apps/trainer-tauri, mode=${MODE})"
-  if [[ ! -f "${ROOT_DIR}/src/apps/trainer-tauri/package.json" ]]; then
+  log "launching trainer UI (desktop/apps/trainer-tauri, mode=${MODE})"
+  if [[ ! -f "${ROOT_DIR}/desktop/apps/trainer-tauri/package.json" ]]; then
     log "trainer UI app is missing"
     exit 1
   fi
@@ -242,14 +242,14 @@ if [[ "${MODE}" == "ui" || "${MODE}" == "web" ]]; then
     log "npm is required to run trainer UI"
     exit 1
   fi
-  if [[ ! -d "${ROOT_DIR}/src/apps/trainer-tauri/node_modules" ]]; then
+  if [[ ! -d "${ROOT_DIR}/desktop/apps/trainer-tauri/node_modules" ]]; then
     log "node_modules missing; running npm ci"
-    (cd "${ROOT_DIR}/src/apps/trainer-tauri" && npm ci >/dev/null 2>&1 || npm install >/dev/null 2>&1)
+    (cd "${ROOT_DIR}/desktop/apps/trainer-tauri" && npm ci >/dev/null 2>&1 || npm install >/dev/null 2>&1)
   fi
   log "log=${LOG_FILE}"
   set +e
   (
-    cd "${ROOT_DIR}/src/apps/trainer-tauri"
+    cd "${ROOT_DIR}/desktop/apps/trainer-tauri"
     if [[ "${MODE}" == "ui" ]]; then
       apply_tauri_stability_env
       npm run tauri:dev -- "${PASSTHRU[@]}"

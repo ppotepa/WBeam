@@ -10,7 +10,7 @@ def main() -> int:
     print(
         "[autotune] legacy proto trainer path has been removed.\n"
         "[autotune] use: ./wbeam train wizard\n"
-        "[autotune] for max-quality preset run: ./src/domains/training/train_max_quality.sh <serial>",
+        "[autotune] for max-quality preset run: ./host/training/train_max_quality.sh <serial>",
         file=sys.stderr,
     )
     return 2

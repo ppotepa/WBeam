@@ -17,8 +17,8 @@ mkdir -p "${TOPDIR}/"{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
 SRCROOT="${TOPDIR}/wbeam-${RPM_VERSION}"
 mkdir -p "${SRCROOT}"
 install -m 0755 "${ROOT_DIR}/wbeam" "${SRCROOT}/wbeam"
-install -m 0755 "${ROOT_DIR}/src/host/rust/target/release/wbeamd-server" "${SRCROOT}/wbeamd-server"
-install -m 0755 "${ROOT_DIR}/src/host/rust/target/release/wbeamd-streamer" "${SRCROOT}/wbeamd-streamer"
+install -m 0755 "${ROOT_DIR}/host/rust/target/release/wbeamd-server" "${SRCROOT}/wbeamd-server"
+install -m 0755 "${ROOT_DIR}/host/rust/target/release/wbeamd-streamer" "${SRCROOT}/wbeamd-streamer"
 install -m 0644 "${ROOT_DIR}/README.md" "${SRCROOT}/README.md"
 tar -C "${TOPDIR}" -czf "${TOPDIR}/SOURCES/wbeam-${RPM_VERSION}.tar.gz" "wbeam-${RPM_VERSION}"
 
