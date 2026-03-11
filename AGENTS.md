@@ -58,17 +58,24 @@ Rules:
 ### 4.2 Streamer Pipeline
 
 - Pipeline assembly:
-  - `host/rust/crates/wbeamd-streamer/src/pipeline.rs`
+  - `host/rust/crates/wbeamd-streamer/src/pipeline/builder.rs`
+  - `host/rust/crates/wbeamd-streamer/src/pipeline/profile.rs`
 - Capture/runtime source:
-  - `host/rust/crates/wbeamd-streamer/src/capture.rs`
+  - `host/rust/crates/wbeamd-streamer/src/capture/mod.rs`
+  - `host/rust/crates/wbeamd-streamer/src/capture/portal.rs`
+  - `host/rust/crates/wbeamd-streamer/src/capture/backend/wayland.rs`
+  - `host/rust/crates/wbeamd-streamer/src/capture/backend/x11.rs`
+- Packetization:
+  - `host/rust/crates/wbeamd-streamer/src/packetize/mod.rs`
 - Framed transport:
-  - `host/rust/crates/wbeamd-streamer/src/transport.rs`
+  - `host/rust/crates/wbeamd-streamer/src/transport/mod.rs`
+  - `host/rust/crates/wbeamd-streamer/src/transport/sender.rs`
 - Encoder modular split:
-  - `host/rust/crates/wbeamd-streamer/src/encoder/mod.rs`
-  - `host/rust/crates/wbeamd-streamer/src/encoder/selector.rs`
-  - `host/rust/crates/wbeamd-streamer/src/encoder/h264.rs`
-  - `host/rust/crates/wbeamd-streamer/src/encoder/h265.rs`
-  - `host/rust/crates/wbeamd-streamer/src/encoder/rawpng.rs`
+  - `host/rust/crates/wbeamd-streamer/src/encode/mod.rs`
+  - `host/rust/crates/wbeamd-streamer/src/encode/selector.rs`
+  - `host/rust/crates/wbeamd-streamer/src/encode/h264.rs`
+  - `host/rust/crates/wbeamd-streamer/src/encode/h265.rs`
+  - `host/rust/crates/wbeamd-streamer/src/encode/rawpng.rs`
 
 ### 4.3 Desktop Apps
 

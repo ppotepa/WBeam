@@ -14,64 +14,11 @@ use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
 
-use crate::backend::PreparedCapture;
-use crate::cli::{ResolvedConfig, StreamMode};
-use crate::encoder::{configure_encoder, is_hevc, is_png, pick_encoder};
+use crate::capture::PreparedCapture;
+use crate::cli::ResolvedConfig;
+use crate::encode::{configure_encoder, is_hevc, is_png, pick_encoder};
 
-struct BufferProfile {
-    queue_buffers: u32,
-    appsink_buffers: u32,
-    queue_leaky: &'static str,
-    appsink_drop: bool,
-    appsink_sync: bool,
-    use_videorate: bool,
-    queue_time_ns: u64,
-}
-
-fn buffer_profile(mode: StreamMode, fps: u32, mode_png: bool) -> BufferProfile {
-    let frame_ns = (1_000_000_000u64 / fps.max(1) as u64).max(1);
-    match mode {
-        StreamMode::Ultra => {
-            let queue_buffers = if mode_png { 4 } else { 3 };
-            let appsink_buffers = if mode_png { 2 } else { 1 };
-            BufferProfile {
-                queue_buffers,
-                appsink_buffers,
-                queue_leaky: "downstream",
-                appsink_drop: true,
-                appsink_sync: false,
-                use_videorate: !mode_png,
-                queue_time_ns: frame_ns.saturating_mul(queue_buffers as u64),
-            }
-        }
-        StreamMode::Stable => {
-            let queue_buffers = if mode_png { 12 } else { 10 };
-            let appsink_buffers = if mode_png { 10 } else { 8 };
-            BufferProfile {
-                queue_buffers,
-                appsink_buffers,
-                queue_leaky: "no",
-                appsink_drop: false,
-                appsink_sync: false,
-                use_videorate: false,
-                queue_time_ns: frame_ns.saturating_mul(queue_buffers as u64),
-            }
-        }
-        StreamMode::Quality => {
-            let queue_buffers = if mode_png { 20 } else { 24 };
-            let appsink_buffers = if mode_png { 16 } else { 20 };
-            BufferProfile {
-                queue_buffers,
-                appsink_buffers,
-                queue_leaky: "no",
-                appsink_drop: false,
-                appsink_sync: true,
-                use_videorate: false,
-                queue_time_ns: frame_ns.saturating_mul(queue_buffers as u64),
-            }
-        }
-    }
-}
+use super::profile::buffer_profile;
 
 /// Build the full capture → encode → appsink pipeline.
 ///

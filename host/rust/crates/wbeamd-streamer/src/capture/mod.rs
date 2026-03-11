@@ -1,11 +1,12 @@
+mod backend;
+mod portal;
+
 use anyhow::Result;
 use gstreamer as gst;
 
-use crate::capture::PortalStream;
 use crate::cli::{CaptureBackend, ResolvedConfig};
 
-pub mod wayland;
-pub mod x11;
+pub(crate) use portal::{request_portal_stream, PortalStream};
 
 #[derive(Debug)]
 pub enum PreparedCapture {
@@ -16,8 +17,8 @@ pub enum PreparedCapture {
 impl PreparedCapture {
     pub fn build_source(&self, cfg: &ResolvedConfig) -> Result<gst::Element> {
         match self {
-            PreparedCapture::Wayland(stream) => wayland::build_source(stream, cfg),
-            PreparedCapture::X11 => x11::build_source(),
+            PreparedCapture::Wayland(stream) => backend::wayland::build_source(stream, cfg),
+            PreparedCapture::X11 => backend::x11::build_source(),
         }
     }
 
@@ -48,7 +49,7 @@ pub async fn prepare_capture(cfg: &ResolvedConfig) -> Result<PreparedCapture> {
     match cfg.capture_backend {
         CaptureBackend::WaylandPortal => {
             println!("[wbeam] Requesting ScreenCast portal session (KDE prompt expected)...");
-            let stream = wayland::prepare(cfg).await?;
+            let stream = backend::wayland::prepare(cfg).await?;
             Ok(PreparedCapture::Wayland(stream))
         }
         CaptureBackend::X11 => Ok(PreparedCapture::X11),
