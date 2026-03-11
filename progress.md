@@ -2765,3 +2765,15 @@ Status: active
   - Prevents immediate false-negative `active=false` during short startup windows.
 - Verification:
   - `cd desktop/apps/desktop-tauri/src-tauri && cargo check` -> OK.
+
+## Completed (2026-03-11 17:10 CET) - Desktop Vite/esbuild stability hardening for icon imports
+- Addressed recurring `vite:esbuild` crash (`The service was stopped` / `write EPIPE`) seen during `./desktop.sh` startup.
+- Root-cause mitigation in frontend imports:
+  - Replaced bulk icon imports from `lucide-solid` root with per-icon subpath imports:
+    - `lucide-solid/icons/<icon-name>`
+  - This avoids forcing Vite/esbuild through large alias/icon export surfaces during pre-transform.
+- TypeScript resolver update for package export subpaths:
+  - `desktop/apps/desktop-tauri/tsconfig.json`:
+    - `moduleResolution: "node"` -> `moduleResolution: "bundler"`
+- Verification:
+  - `cd desktop/apps/desktop-tauri && npm run build` -> OK.

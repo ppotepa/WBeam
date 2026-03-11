@@ -1,27 +1,25 @@
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import {
-  AlertTriangle,
-  BatteryCharging,
-  BatteryFull,
-  BatteryLow,
-  BatteryMedium,
-  Cpu,
-  MonitorSmartphone,
-  Package,
-  Settings,
-  ShieldCheck,
-  Smartphone,
-  Tablet,
-  Play,
-  Square,
-  Download,
-  Trash2,
-  RefreshCw,
-  Link2,
-  Unlink2,
-  Loader2,
-} from "lucide-solid";
+import AlertTriangle from "lucide-solid/icons/alert-triangle";
+import BatteryCharging from "lucide-solid/icons/battery-charging";
+import BatteryFull from "lucide-solid/icons/battery-full";
+import BatteryLow from "lucide-solid/icons/battery-low";
+import BatteryMedium from "lucide-solid/icons/battery-medium";
+import Cpu from "lucide-solid/icons/cpu";
+import MonitorSmartphone from "lucide-solid/icons/monitor-smartphone";
+import Package from "lucide-solid/icons/package";
+import Settings from "lucide-solid/icons/settings";
+import ShieldCheck from "lucide-solid/icons/shield-check";
+import Smartphone from "lucide-solid/icons/smartphone";
+import Tablet from "lucide-solid/icons/tablet";
+import Play from "lucide-solid/icons/play";
+import Square from "lucide-solid/icons/square";
+import Download from "lucide-solid/icons/download";
+import Trash2 from "lucide-solid/icons/trash-2";
+import RefreshCw from "lucide-solid/icons/refresh-cw";
+import Link2 from "lucide-solid/icons/link-2";
+import Unlink2 from "lucide-solid/icons/unlink-2";
+import Loader2 from "lucide-solid/icons/loader-2";
 import type { ConnectEncoderMode, ConnectSessionConfig, DeviceBasic } from "./types";
 import type { VirtualDepsInstallStatus, VirtualDoctor } from "./types";
 import { HostApiManager } from "./managers/hostApiManager";
