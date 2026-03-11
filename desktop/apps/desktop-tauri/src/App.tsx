@@ -233,10 +233,13 @@ export default function App() {
     && session.hostVersion().length > 0
     && session.daemonVersion() !== session.hostVersion();
 
+  const daemonVersionKnown = () => session.daemonVersion().length > 0;
+
   function deviceVersionStatus(device: DeviceBasic): { cls: "ok" | "warn" | "bad"; label: string } {
     if (!device.apkInstalled) return { cls: "warn", label: "APK missing" };
     if (!session.service().installed) return { cls: "warn", label: "Install desktop service first" };
     if (!session.service().active) return { cls: "warn", label: "Start desktop service to verify" };
+    if (!daemonVersionKnown()) return { cls: "warn", label: "Daemon unreachable - cannot verify" };
     return device.apkMatchesDaemon
       ? { cls: "ok", label: "Version match" }
       : { cls: "bad", label: "Update required" };
@@ -253,6 +256,7 @@ export default function App() {
       }
     }
     if (!session.service().active) return "Desktop service must be running";
+    if (!daemonVersionKnown()) return "Daemon API unreachable";
     if (!device.apkInstalled) return "APK is not installed on this device";
     if (!device.apkMatchesDaemon) return "APK version must match daemon version";
     if (device.streamState === "STREAMING") return "Device is already streaming";

@@ -2818,3 +2818,18 @@ Status: active
 - Validation:
   - `bash -n trainer.sh` -> OK
   - repro run: `./trainer.sh --web --start-service` now falls back and reaches `service health: ok=True`.
+
+## Completed (2026-03-11 17:59 CET) - Desktop version-status clarity when daemon is unreachable
+- Fixed misleading "Update required" status in desktop UI when daemon API is down.
+- UI behavior changes:
+  - `deviceVersionStatus(...)` now shows warning:
+    - `Daemon unreachable - cannot verify`
+    - instead of false negative `Update required` when `daemon_apk_version` is unknown.
+  - `Connect` disable reason now explicitly reports:
+    - `Daemon API unreachable`
+    - before version-mismatch checks.
+- Device visibility improvement:
+  - session manager no longer clears/hides ADB device list when service is inactive.
+  - devices are always polled from backend; actions remain separately gated.
+- Validation:
+  - `cd desktop/apps/desktop-tauri && npm run build` -> OK.
