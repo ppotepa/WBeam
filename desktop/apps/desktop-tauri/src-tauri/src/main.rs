@@ -407,13 +407,11 @@ fn list_devices_basic() -> DevicesBasicResponse {
     let daemon_apk_version = host_build_revision_from_health().unwrap_or_default();
     let svc = service_status();
     if !svc.available || !svc.installed || !svc.active {
-        ui_service_log("list_devices_basic", "skip", "service inactive");
-        return DevicesBasicResponse {
-            host_apk_version,
-            daemon_apk_version,
-            devices: Vec::new(),
-            error: None,
-        };
+        ui_service_log(
+            "list_devices_basic",
+            "warn",
+            "service inactive; continuing with adb-only listing",
+        );
     }
 
     let base_stream_port = wbeam_stream_port();

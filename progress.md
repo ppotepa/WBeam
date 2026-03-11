@@ -2737,3 +2737,16 @@ Status: active
   - `bash -n desktop.sh` -> OK
   - `./trainer.sh --web --no-start-service` now exits with clear actionable message.
   - `./trainer.sh --web --start-service` now attempts non-blocking daemon start and passes health check when daemon is reachable.
+
+## Completed (2026-03-11 16:05 CET) - Desktop ADB discovery decoupled from daemon/service state
+- Fixed `desktop-tauri` device listing regression where ADB devices were hidden when daemon service was inactive.
+  - Root cause:
+    - `list_devices_basic()` returned early with empty `devices` if service was unavailable/not installed/not active.
+    - This made UI show no devices even when `adb devices` would return connected hardware.
+  - Change:
+    - Removed early-return gate on service status.
+    - Listing now always proceeds through `adb devices`; daemon inactivity only affects stream-state resolution (`unknown`) and logging.
+  - New UI service log behavior:
+    - emits warning: `service inactive; continuing with adb-only listing`.
+- Verification:
+  - `cd desktop/apps/desktop-tauri/src-tauri && cargo check` -> OK.
