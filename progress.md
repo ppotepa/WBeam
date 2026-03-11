@@ -1,5 +1,279 @@
 # WBeam Progress
 
+## Session Update (2026-03-10, pending, branch `trainerv2`) - Datasets API wired end-to-end in trainer UI
+- Added real dataset API support in Rust host daemon (`wbeamd-server`):
+  - new responses/models:
+    - `TrainerDatasetSummary`,
+    - `TrainerDatasetsResponse`,
+    - `TrainerDatasetDetailResponse`,
+    - `TrainerDatasetRecomputeResponse`,
+  - new endpoints (both plain and `/v1` namespaced):
+    - `GET /trainer/datasets`,
+    - `GET /trainer/datasets/{run_id}`,
+    - `POST /trainer/datasets/{run_id}/find-optimal`,
+  - `find-optimal` now performs deterministic ranking from `parameters.json` (`results[]` sorted by score), writes `recompute.json`, and returns best trial/score + alternatives.
+- Wired datasets flow in trainer desktop app (`src/apps/trainer-tauri/src/App.tsx`):
+  - added dataset state, detail state, and recompute action state,
+  - added API calls:
+    - refresh datasets list,
+    - load dataset detail,
+    - trigger `Find Optimal Best`,
+  - upgraded `Datasets` tab from runs mirror to actual dataset-backed view with:
+    - selected dataset row,
+    - best trial and score,
+    - last recompute timestamp,
+    - action button (`Find Optimal Best`) with busy-state handling,
+    - basic dataset detail summary cards.
+- Verification:
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK,
+  - `cd src/apps/trainer-tauri && npm ci && npm run build` -> OK,
+  - `python3 -m py_compile src/domains/training/wizard.py` -> OK.
+
+## Session Update (2026-03-10, pending, branch `trainerv2`) - Trainer UI implementation pass + richer Android training HUD
+- Implemented a substantial trainer desktop UI pass in `src/apps/trainer-tauri`:
+  - rewrote `src/apps/trainer-tauri/src/App.tsx` into a workstation-style shell with:
+    - top status bar,
+    - left navigation rail,
+    - dedicated content zones for `Train`, `Live Run`, `Runs`, `Profiles`, `Datasets`, `Compare`, `Devices`, `Validation`, `Diagnostics`, and `Settings`,
+  - added explicit busy/error feedback surfaces:
+    - global busy banner,
+    - error banner,
+    - action-specific busy labeling via guarded async wrappers,
+  - added stronger train-form UX:
+    - hard blockers and warnings panel,
+    - encoder selection semantics (`single` vs `multi`),
+    - bitrate min/max with dual sliders + numeric fields,
+    - advanced tuning accordion section (GA and overlay controls),
+  - improved live screen readability:
+    - KPI cards,
+    - trend bar panels derived from run-tail metrics,
+    - always-visible run context and stop action,
+    - dedicated event log column.
+- Replaced `src/apps/trainer-tauri/src/styles.css` to match the new UI model:
+  - compact futuristic theme with explicit semantic colors,
+  - card/grid layout with responsive fallbacks,
+  - motion and transition behavior (`animate-on`/`animate-off`),
+  - table, chart-bar, chip, and panel styling for dense operator workflows.
+- Expanded Android-visible training HUD payload in `src/domains/training/wizard.py`:
+  - added ASCII trend lines for:
+    - score,
+    - FPS,
+    - drop behavior,
+  - added best-so-far summary in overlay context,
+  - added `quality_state` classification (`good`/`warn`/`risk`),
+  - extended overlay updates to pass per-run history into snapshots for richer live context.
+- Verification:
+  - `python3 -m py_compile src/domains/training/wizard.py` -> OK,
+  - `cd src/apps/trainer-tauri && npm ci && npm run build` -> OK.
+
+## Session Update (2026-03-10, pending, branch `trainerv2`) - Trainer UI blueprint expanded with field-level interaction contract
+- Expanded `trainer.ui.md` from high-level UX blueprint into detailed interaction spec:
+  - added global control taxonomy describing where to use:
+    - radio cards,
+    - segmented controls,
+    - dropdowns,
+    - comboboxes,
+    - chips,
+    - steppers,
+    - sliders,
+    - switches,
+    - accordions,
+    - drawers,
+  - for each control family documented animation, transition, focus, loading, and disabled behavior.
+- Added validation severity model and dependency semantics:
+  - `hard block`,
+  - `soft warning`,
+  - `derived override`,
+  - plus global field dependency matrix for the trainer UI.
+- Added screen-by-screen interaction contract covering:
+  - bootstrap / service gate,
+  - `Train`,
+  - `Preflight Review`,
+  - `Live Run`,
+  - `Run Results`,
+  - `Runs`,
+  - `Profiles`,
+  - `Datasets`,
+  - `Compare`,
+  - `Devices`,
+  - `Validation`,
+  - `Diagnostics`,
+  - `Settings`.
+- Each screen section now specifies:
+  - required inputs,
+  - blocking conditions,
+  - control types,
+  - motion/transition rules,
+  - busy/error behavior,
+  - rationale for why a given interaction pattern is used.
+
+## Session Update (2026-03-10, pending, branch `trainerv2`) - Comprehensive Trainer UI/UX blueprint document
+- Added a dedicated UI/UX specification document:
+  - `trainer.ui.md`
+- Consolidated the new Trainer desktop product direction into one canonical design document covering:
+  - end-to-end user flow from bootstrap and service gate through training, live run, completion, and post-run analysis,
+  - complete information architecture (`Train`, `Live Run`, `Runs`, `Profiles`, `Datasets`, `Compare`, `Devices`, `Validation`, `Diagnostics`, `Settings`),
+  - workstation-style shell layout (top status bar, left rail, optional right detail pane),
+  - per-screen behavior and layout expectations,
+  - design system guidance for typography, color tokens, density, backgrounds, charts, tables, async states, tooltips, and motion,
+  - device-side HUD overlay consistency requirements,
+  - UX acceptance criteria and UI implementation priority order.
+
+## Session Update (2026-03-10, pending, branch `trainerv2`) - Trainer run stability (single portal consent + live HUD visibility)
+- Fixed trainer run behavior where each profile apply could trigger another Wayland portal chooser:
+  - `src/domains/training/wizard.py` now creates per-session trainer marker file:
+    - `/tmp/wbeam-trainer-active-<serial>-<stream_port>.flag`
+  - `src/host/rust/crates/wbeamd-core/src/lib.rs` now detects that marker for Wayland sessions and forces legacy Python streamer during active trainer runs, so portal restore-token flow is used across trial restarts.
+- Added restore-token support to Rust streamer path as well (defensive consistency):
+  - `src/host/rust/crates/wbeamd-streamer/src/cli.rs` new args:
+    - `--restore-token-file`
+    - `--portal-persist-mode`
+  - `src/host/rust/crates/wbeamd-streamer/src/capture.rs` now:
+    - loads restore token from file,
+    - retries without token when token restore fails,
+    - saves new restore token returned by portal start response.
+- Implemented training overlay HUD payload generation in wizard:
+  - `wizard.py` now writes structured overlay text snapshots (TL/TR/BL/BR sections with live metrics and ASCII bars) to:
+    - `/tmp/wbeam-trainer-overlay-<serial>-<stream_port>.txt`
+  - overlay + marker files are cleaned up in `finally` block when run exits.
+  - core passes `WBEAM_OVERLAY_TEXT_FILE` to streamer process when overlay file exists (Python path consumes it live).
+- Fixed trainer desktop HUD “no live updates” symptom:
+  - `src/host/rust/crates/wbeamd-server/src/main.rs` now spawns `wbeam train wizard` with `PYTHONUNBUFFERED=1`, so tail polling sees incremental logs instead of delayed buffered output.
+
+## Session Update (2026-03-10, pending, branch `trainerv2`) - Tauri launcher stability on Wayland (desktop + trainer)
+- Fixed Linux Tauri launcher stability path to avoid silent/no-window startup on problematic Wayland sessions:
+  - `desktop.sh`:
+    - added `desktop_apply_tauri_stability_env`,
+    - keeps `WEBKIT_DISABLE_DMABUF_RENDERER=1`,
+    - when `XDG_SESSION_TYPE=wayland`, now defaults to X11 backend for Tauri (`GDK_BACKEND=x11`, `WINIT_UNIX_BACKEND=x11`) unless explicitly disabled with `WBEAM_TAURI_NATIVE_WAYLAND=1`.
+    - auto-resolves `XAUTHORITY` (runtime `xauth_*` or `~/.Xauthority`) when X11 backend is active to avoid GTK init failure.
+  - `trainer.sh`:
+    - now loads shared WBeam config via `wbeam_config.sh`,
+    - added GUI context auto-reexec through `runas-remote` for `--ui` mode (same behavior class as desktop launcher),
+    - added Tauri stability env setup identical to desktop path (`WEBKIT_DISABLE_DMABUF_RENDERER`, X11 backend fallback on Wayland),
+    - auto-resolves `XAUTHORITY` when X11 fallback is active to prevent `Authorization required` GTK startup crash,
+    - added clear runtime log note when fallback is applied.
+- Goal of this change:
+  - prevent `Gdk-Message: Error 71 (Protocol error) dispatching to Wayland display`,
+  - prevent “process starts but no visible app window” in both desktop and trainer launch paths.
+
+## Session Update (2026-03-10, pending, branch `trainerv2`) - Legacy trainer path removed; trainer_v2 only
+- Removed legacy trainer execution path from main wizard flow:
+  - `src/domains/training/wizard.py` no longer supports `--engine` switching,
+  - removed proto/legacy branch and all legacy-engine invocation code,
+  - trainer now runs only one path: `trainer_v2` (daemon live API).
+- Added non-interactive run mode for API-driven execution:
+  - new wizard flags:
+    - `--non-interactive`,
+    - `--apply-best/--no-apply-best`,
+    - `--export-best/--no-export-best`,
+  - when non-interactive:
+    - no prompts,
+    - auto-select defaults,
+    - auto-start session if needed.
+- Added generation-style progress lines in live trainer output:
+  - emits `generation X/Y: population=N (start)` blocks,
+  - emits `done trial=...` summary lines for HUD compatibility.
+- Host Trainer API updated to run only new path:
+  - removed `engine` input from start request contract,
+  - backend now always records `engine=trainer_v2`,
+  - `post_trainer_start` launches wizard with non-interactive + auto apply/export flags.
+- Removed legacy trainer implementation file:
+  - deleted `src/domains/training/legacy_engine.py`.
+- Updated helper scripts/wrappers:
+  - rewrote `src/domains/training/train_max_quality.sh` to invoke `./wbeam train wizard` (new path only),
+  - `proto/autotune.py` now explicitly reports deprecation and exits with guidance.
+- Updated training domain docs:
+  - `src/domains/training/README.md` now documents only `wizard.py` trainer ownership.
+
+## Session Update (2026-03-10, pending, branch `trainerv2`) - Trainer Tauri shell + parameterized run API + proto HUD wiring
+- Implemented native Trainer desktop shell for Tauri app:
+  - added `src/apps/trainer-tauri/src-tauri/` (`Cargo.toml`, `build.rs`, `src/main.rs`, `tauri.conf.json`, capabilities, icon, schemas),
+  - extended `src/apps/trainer-tauri/package.json` with:
+    - `tauri:dev`
+    - `tauri:build`.
+- Upgraded `trainer.sh` launcher:
+  - `--ui` (default) now runs Tauri trainer app (`npm run tauri:dev`),
+  - `--web` keeps Vite-only mode,
+  - command help and mode descriptions updated.
+- Extended trainer start contract in host daemon (`wbeamd-server`) with explicit GA/encoder/bitrate controls:
+  - new request fields:
+    - `generations`, `population`, `elite_count`,
+    - `mutation_rate`, `crossover_rate`,
+    - `bitrate_min_kbps`, `bitrate_max_kbps`,
+    - `encoder_mode` (`single|multi`), `encoders[]`,
+  - added validation/sanitization for mode and codec list,
+  - preserved encoder order from request (stable dedupe, no alphabetical reordering) so first codec remains priority codec,
+  - wired all new parameters into wizard invocation and persisted run artifacts (`run.json` + in-memory run state).
+- Extended `src/domains/training/wizard.py` to accept and persist new runtime knobs:
+  - new CLI args mirror server contract (GA + encoder mode/list + bitrate range),
+  - live-api search space now filters/clamps encoders and bitrate ladder to requested range,
+  - proto engine call now forwards GA controls (including crossover rate) and bitrate bounds,
+  - fixed proto temp config emission ordering so forced codec (`PROTO_H264`) is written before run,
+  - added explicit proto codec selection policy:
+    - `single` mode -> selected codec,
+    - `multi` mode -> prefers `h265`, fallback `h264`,
+    - persisted as `effective_proto_encoder` in run parameters.
+- Extended legacy autotune core (`src/domains/training/legacy_engine.py`):
+  - added `--crossover-rate`,
+  - generation crossover now uses configured probability (instead of hardcoded `0.50`),
+  - report metadata now persists `crossover_rate`.
+- Trainer UI (`src/apps/trainer-tauri/src/App.tsx`) improvements:
+  - added training controls for:
+    - generations, population, elite, mutation, crossover,
+    - bitrate min/max,
+    - encoder mode + codec selection (`h264/h265/rawpng/mjpeg`),
+  - start payload now sends full parameter set to `/v1/trainer/start`,
+  - added local bitrate range guard (`min <= max`),
+  - upgraded HUD parser to handle both:
+    - live_api lines (`[tNN] score=...`)
+    - proto autotune lines (`done trial=... sender_p50=... pipe_p50=...` + generation progress).
+- Verification:
+  - `python3 -m py_compile src/domains/training/wizard.py src/domains/training/legacy_engine.py` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd src/apps/trainer-tauri && npm ci && npm run build` -> OK
+  - `cd src/apps/trainer-tauri/src-tauri && cargo check` -> OK
+  - `bash -n trainer.sh` and `./trainer.sh --help` -> OK
+
+## Session Update (2026-03-10, pending, branch `trainerv2`) - Preflight + mode scoring + Trainer GUI scaffold
+- Extended `src/domains/training/wizard.py` with mandatory preflight diagnostics:
+  - ADB push throughput benchmark (`adb push` MB/s),
+  - ADB shell RTT benchmark (`p50/p95`),
+  - stream baseline sampling summary (when daemon is reachable),
+  - derived `recommended_bitrate_kbps` seed from measured link quality.
+- Integrated preflight into run lifecycle:
+  - preflight executes before trial loop,
+  - preflight summary is now persisted in `parameters.json`,
+  - `preflight.json` is written automatically in profile artifact directory.
+- Implemented mode-aware scoring presets and gates in wizard (`quality`, `balanced`, `low_latency`):
+  - per-mode score weights,
+  - per-mode penalty sensitivity,
+  - hard gate style penalties and `gate_failed` notes.
+- Added initial Trainer GUI app scaffold:
+  - `src/apps/trainer-tauri/`
+  - includes Vite/Solid setup, initial tabs (`Train`, `Live HUD`), and HUD placeholder charts,
+  - includes app README and run instructions.
+
+## Session Update (2026-03-10, pending, branch `trainerv2`) - TrainerV2 foundation slice
+- Started dedicated `trainerv2` branch and implemented first operational TrainerV2 building block.
+- Added new launcher script:
+  - `trainer.sh`
+  - behavior:
+    - verifies daemon health (`/v1/health`),
+    - optional service bootstrap via `--start-service`,
+    - forwards run to `./wbeam train wizard` (bridge mode),
+    - writes logs to `logs/trainer/<timestamp>.trainer.log`.
+- Extended training wizard input contract with explicit profile identity:
+  - new `--profile-name` flag (interactive prompt default: `baseline`).
+- Added per-profile artifact persistence required by TrainerV2 spec:
+  - output directory: `config/training/profiles/<profile_name>/`
+  - generated files:
+    - `<profile_name>.json` (trained profile snapshot)
+    - `parameters.json` (training inputs/parameters and run context)
+- Implemented artifact generation for both engines:
+  - `proto` engine path now exports profile artifact + parameters alongside existing canonical files,
+  - `live_api` path now exports profile artifact + parameters from ranked trial results.
+
 ## Session Update (2026-03-10, pending) - Comprehensive Trainer product/spec document
 - Added a full project-level Trainer blueprint in:
   - `trainer.md`
@@ -1376,3 +1650,758 @@ Status: active
   - `cargo check -p wbeamd-api -p wbeamd-core -p wbeamd-streamer` -> OK
   - `cd src/apps/desktop-tauri && npm run build` -> OK
   - `cd android && GRADLE_USER_HOME=/home/ppotepa/git/WBeam/.gradle-user ./gradlew :app:compileDebugJavaWithJavac --no-daemon --stacktrace` -> OK
+
+## In Progress (2026-03-10) - TrainerV2 domain implementation (API + GUI + run artifacts)
+- Extended Rust host daemon (`wbeamd-server`) with trainer API surface:
+  - `POST /v1/trainer/preflight`
+  - `POST /v1/trainer/start`
+  - `POST /v1/trainer/stop`
+  - `GET /v1/trainer/runs`
+  - `GET /v1/trainer/runs/{run_id}`
+  - `GET /v1/trainer/runs/{run_id}/tail`
+  - `GET /v1/trainer/profiles`
+  - `GET /v1/trainer/profiles/{profile_name}`
+  - `GET /v1/trainer/devices`
+  - `GET /v1/trainer/diagnostics`
+- Added trainer run state registry in daemon:
+  - in-memory run catalog with PID/status/lifecycle fields,
+  - stop support via signal,
+  - deterministic run IDs.
+- Added deterministic per-run artifact persistence:
+  - run artifact directory under `config/training/profiles/<profile>/runs/<run_id>/`,
+  - persisted `run.json`, copied trainer log (`logs.txt`), and profile/parameters/preflight snapshots.
+- Updated wizard (`src/domains/training/wizard.py`) for run-id aware artifact layout:
+  - new `--run-id`,
+  - writes run-level artifacts for both `proto` and `live_api` paths.
+- Upgraded Trainer GUI (`src/apps/trainer-tauri`):
+  - tabs: `Train`, `Live HUD`, `Profiles`, `Runs`, `Compare`, `Devices`, `Validation`, `Diagnostics`,
+  - wired to live trainer API endpoints,
+  - run tail rendering for live HUD/event log,
+  - profile compare panel and diagnostics snapshot views.
+- Updated launcher and dev wiring:
+  - `trainer.sh` now defaults to GUI mode (`--ui`) with `--wizard` fallback,
+  - Vite proxy routes `/v1` to local daemon.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+
+## In Progress (2026-03-10) - TrainerV2 update specification document
+- Added comprehensive consolidation document:
+  - `trainer.update.md`
+- Document includes complete agreed direction for:
+  - Tauri-first launcher/app model,
+  - dataset-first run storage and deterministic `Find Optimal Best`,
+  - encoder-parameter genetic search (per encoder + global genes),
+  - required min/max bitrate training contract and visualization implications,
+  - full GUI information architecture (`Train`, `Live HUD`, `Profiles`, `Runs`, `Compare`, `Devices`, `Validation`, `Diagnostics`, `Datasets`),
+  - required API/data/artifact contracts and DoD for first complete Trainer app.
+
+## In Progress (2026-03-10) - TrainerV2 spec extension in Jira/engineering-task format
+- Expanded `trainer.update.md` with formal implementation addendum matching engineering task template:
+  - technical context and impacted modules,
+  - Jira-style task definition (`title`, `goal`, `scope`, `acceptance criteria`),
+  - target architecture and integration model,
+  - file/module layout proposal,
+  - API contracts and data structures,
+  - pseudo-code for core flows and recompute path,
+  - error handling, validation, fallbacks,
+  - risks, performance constraints, and test focus areas.
+
+## In Progress (2026-03-10) - TrainerV2 top-tier completeness iteration (UI/backend/scalability)
+- Extended `trainer.update.md` with dedicated iteration focused on end-to-end UI/backend complementarity and scalability:
+  - strict UI->API->engine->dataset parameter mapping matrix,
+  - fully parameterized training model (global + per-encoder),
+  - strict config contract and validation behavior,
+  - scalable execution/data/API planes (`queue`, `worker`, `lock manager`, `recompute engine`),
+  - SLO/SLA expectations for trainer runtime and live HUD,
+  - observability, testing matrix, and commercial-grade readiness criteria.
+
+## In Progress (2026-03-10) - TrainerV2 dynamic workload adaptation addendum
+- Extended `trainer.update.md` with explicit strategy for unknown/dynamic screen usage:
+  - workload segmentation model (`text_static`, `ui_interactive`, `video_motion`, `mixed`),
+  - segment-aware scoring and worst-case preference,
+  - runtime adaptive policy switching with hysteresis/cooldown,
+  - charts and telemetry dimensions dedicated to adaptation behavior.
+- Added explicit implementation note that code snippets are pseudocode architecture references and must be mapped to current backend contracts/flow rather than copied 1:1.
+
+## In Progress (2026-03-10) - Trainer UI/UX responsiveness + live readability + Wayland launch stability
+- Upgraded `src/apps/trainer-tauri` UX flow for faster feedback and clearer live-state visibility:
+  - added blocking `busy-overlay` with spinner card for long actions,
+  - added topbar live sync timestamp badge (`Last sync`) for operator confidence,
+  - added dynamic polling interval hot-apply (no restart needed).
+- Improved `Live Run` ergonomics:
+  - added inferred `Live health` pill (`idle`/`active`/`gated`/`degraded`) from run tail,
+  - added empty-state card when no samples are available yet,
+  - added `Stage Timeline` panel parsing warmup/sampling/generation/health-gate/failure/completion lines.
+- Enhanced trainer visual system in `styles.css`:
+  - busy overlay + spinner animation,
+  - timeline cards with severity-coded left rails,
+  - compact readability improvements for pills and live states,
+  - smoother transitions for KPI and timeline cards.
+- Stabilized Tauri launcher backend selection for Wayland sessions:
+  - `trainer.sh` and `desktop.sh` now force X11 backend only when `DISPLAY` exists,
+  - in Wayland-only sessions (`DISPLAY` missing), scripts keep native wayland backend,
+  - this avoids protocol errors caused by forcing unavailable X11 path.
+- Validation:
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+  - `bash -n trainer.sh` -> OK
+  - `bash -n desktop.sh` -> OK
+
+## In Progress (2026-03-10) - Trainer run stability: live reset + wayland portal profile/encoder normalization
+- Fixed `stream_wayland_portal_h264.py` argument robustness to prevent hard aborts during trainer-driven restarts:
+  - added `baseline` profile defaults,
+  - removed strict argparse `choices` for `--profile` and `--encoder` in favor of runtime normalization,
+  - added profile alias mapping (`safe_60`, `balanced60`, `quality60`, etc.) to valid defaults,
+  - unknown profile now warns and falls back to `baseline` instead of exiting with code 2,
+  - unsupported encoder names (`h265`, `rawpng`, `mjpeg`, etc.) now warn and fallback to `auto` for portal-h264 helper.
+- Improved Trainer UI run transition behavior (`src/apps/trainer-tauri/src/App.tsx`):
+  - live tail is cleared immediately when a new run starts,
+  - selected run is explicitly switched to the newly created `run_id` returned by API,
+  - this prevents stale Live View data from previous runs.
+- Validation:
+  - `python3 -m py_compile src/host/scripts/stream_wayland_portal_h264.py src/domains/training/wizard.py` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+
+## In Progress (2026-03-10) - HUD V2 readability + Mbps-first trainer UX + dataset metadata
+- Reworked Android training HUD payload in `src/domains/training/wizard.py` to be more game-like and structured:
+  - section boxes with compact grid-style framing (`TL/TR/BL/BR`),
+  - clearer status hierarchy (`RUN/PROFILE/TRIAL/GEN/NOTE`),
+  - richer live metrics block + trend lines,
+  - bitrate displayed in **Mbps** (`x.y Mbps`) instead of raw kbps text.
+- Updated quality trial-space defaults in wizard:
+  - quality mode now prioritizes only native detected device resolution when available,
+  - removed fallback mix that could reintroduce lower-res legacy sizes in quality default flow.
+- Improved portal overlay rendering defaults in streamer helper (`stream_wayland_portal_h264.py`):
+  - default overlay font changed to compact monospace style (`Monospace Semi-Bold 12`) for better technical HUD readability.
+- Trainer Desktop UI (`src/apps/trainer-tauri`) enhancements:
+  - train form bitrate labels switched to Mbps input semantics (still converted to kbps for backend contract),
+  - live chart cards now show numeric summaries (`last/min/max`) and per-sample tooltips,
+  - datasets list now includes run `started` and `finished` timestamps,
+  - dataset detail panel now surfaces best trial config (`encoder`, `size`, `fps`, `bitrate` in Mbps),
+  - compare panel bitrate now rendered in Mbps.
+- Backend dataset API enrichment (`wbeamd-server`):
+  - added `started_at_unix_ms` and `finished_at_unix_ms` to dataset summaries.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py src/host/scripts/stream_wayland_portal_h264.py` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+
+## In Progress (2026-03-10) - HUD V3 chart mode + live Mbps telemetry plumbing
+- Added configurable Android HUD trend rendering mode (`bars` / `line`) end-to-end:
+  - GUI control in Trainer advanced section,
+  - API contract field `hud_chart_mode` in `/v1/trainer/start`,
+  - server forwards mode to wizard via `--overlay-chart`,
+  - wizard renders trend lines using selected style.
+- Extended trainer trial scoring telemetry with measured live bitrate:
+  - `bitrate_mbps_mean` computed from daemon metrics (`metrics.bitrate_actual_bps` fallback to `latest_client_metrics.recv_bps`),
+  - included in best/result artifacts in `parameters.json`,
+  - printed in trial logs (`mbps=...`) for live parsing.
+- Enhanced Android HUD content density:
+  - added `live_mbps` panel metric,
+  - added `mbps_tr` trend section,
+  - compact framed box style retained for game-like readability.
+- Desktop Live Run HUD improved:
+  - parses and shows `Live Mbps` KPI card from run tail logs,
+  - keeps chart summary annotations (`last/min/max`) and per-sample tooltips.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py src/host/scripts/stream_wayland_portal_h264.py` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+
+## In Progress (2026-03-10) - Dataset timeline analytics in Trainer UI
+- Extended `Datasets` detail view in `src/apps/trainer-tauri/src/App.tsx` with parsed per-trial analytics from `parameters.results[]`:
+  - added deterministic trial ordering (`t01`, `t02`, ...),
+  - added chart panels for:
+    - score per trial,
+    - present FPS per trial,
+    - measured Mbps per trial,
+    - drops/s per trial.
+- Added numerical chart summaries (`last/min/max`) and per-bar tooltips with trial IDs.
+- Added per-trial table under charts with key telemetry columns:
+  - trial id, score, present FPS, pipe FPS, Mbps, drops/s, notes/state.
+- Added supporting dataset analytics styling in `styles.css` to keep chart/table block compact and readable.
+- Validation:
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `python3 -m py_compile src/domains/training/wizard.py` -> OK
+
+## In Progress (2026-03-10) - Profile preview mode + dataset/profile export actions
+- Extended `Profiles` tab with actionable preview workflow:
+  - added `Preview` action per profile row,
+  - added selected-row highlighting for current preview profile,
+  - added profile preview panel with runtime summary (`encoder`, `size`, `fps`, `bitrate`) and historical charts from profile `parameters.results[]`.
+- Added export controls in `Datasets` timeline section:
+  - `Export Dataset JSON` (full selected dataset detail payload),
+  - `Export Profile JSON` (profile blob from selected dataset).
+- Export uses browser download flow with sanitized filenames.
+- Validation:
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+
+## In Progress (2026-03-10) - Unified full-frame Android HUD + live per-sample updates
+- Reworked Wayland overlay rendering path to a single unified overlay element (`hud_main`) in `stream_wayland_portal_h264.py`:
+  - replaced legacy 4-corner (`hud_tl/tr/bl/br`) composition with one coherent full-frame text layout,
+  - enabled transparent background (`shaded-background=false`) and semi-transparent text color,
+  - retained backward compatibility in parser: supports new `[MAIN]` section and merges legacy `[TL/TR/BL/BR]` if needed.
+- Reworked trainer HUD payload (`wizard.py`) into one grid-aligned block:
+  - single rectangular layout with fixed-width line justification,
+  - consistent table-like sections for run/config/live/quality/trends,
+  - explicit threshold labels (`OK/WARN/RISK`) per metric area (fps/latency/drop health).
+- Added true live HUD refresh during sampling:
+  - `collect_metrics_samples` now supports per-sample callback,
+  - during each trial sampling pass HUD updates continuously with partial metrics,
+  - `live_mbps` and other values now evolve during the sample window instead of appearing static until trial end.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py src/host/scripts/stream_wayland_portal_h264.py` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+
+## In Progress (2026-03-10) - HUD threshold color rendering (markup + fallback)
+- Extended unified Wayland HUD overlay path to render colored threshold states from trainer markup:
+  - `wizard.py` now emits threshold tags as Pango markup (`OK/WARN/RISK`) with explicit green/amber/red tones,
+  - `stream_wayland_portal_h264.py` enables `textoverlay` markup mode (`use-markup=true`) for `hud_main`.
+- Added robust runtime fallback in overlay updater:
+  - first attempts `set_property("markup", ...)`,
+  - if markup property is unavailable, strips tags and falls back to plain `text` so HUD remains readable.
+- Result: single full-screen HUD keeps transparent style while now visually highlighting metric severity levels.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py src/host/scripts/stream_wayland_portal_h264.py` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+
+## In Progress (2026-03-10) - HUD extended thresholds + readability hardening
+- Extended Android unified HUD scoring semantics in `wizard.py`:
+  - added colorized threshold states for additional runtime signals:
+    - `LIVE Mbps` (target-relative, low-throughput detection),
+    - `QUEUE` depth,
+    - `LATE/s` (late frame cadence),
+    - note/health state mapping.
+  - added in-HUD legend row (`OK/WARN/RISK`) for immediate interpretation.
+- Improved overlay text layout resilience with markup-aware helpers:
+  - added `strip_markup` and `visible_len` for spacing/padding calculations,
+  - updated `kv_line`/`box_line` to avoid clipping/invalidating color markup when aligning HUD rows.
+- Quality state now incorporates queue pressure in addition to latency/drop thresholds.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+
+## In Progress (2026-03-10) - HUD visual maquette (SVG/XML)
+- Added full-screen HUD layout mock as SVG/XML file:
+  - `trainer.hud.maquette.xml`
+- Maquette includes:
+  - transparent full-screen frame + subtle dual grid,
+  - unified single overlay composition (no multi-corner split),
+  - top run/profile/trial strip,
+  - live metrics block with severity placeholders,
+  - trends block (sparkline + bar examples),
+  - lower status/event/legend zones,
+  - placeholder tokens for runtime values (`{run_id}`, `{Mbps}`, `{score}`, etc.).
+- Design intent encoded in file for implementation handoff:
+  - compact mono typography,
+  - alpha-based panels,
+  - threshold color semantics (`OK/WARN/RISK`).
+- Validation:
+  - XML parse check via `xml.etree.ElementTree` -> OK
+
+## In Progress (2026-03-10) - HUD default font refinement
+- Updated Wayland HUD streamer default font to a cleaner condensed monospace style better aligned with trainer HUD look:
+  - `WBEAM_OVERLAY_FONT_DESC` default: `JetBrains Mono SemiBold 13`
+- Existing override behavior preserved:
+  - custom font can still be supplied through `WBEAM_OVERLAY_FONT_DESC` environment variable.
+- Validation:
+  - `python3 -m py_compile src/host/scripts/stream_wayland_portal_h264.py` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+
+## In Progress (2026-03-10) - HUD font presets wired end-to-end (Trainer UI -> API -> runtime)
+- Added HUD font preset selection in Trainer UI (`Train` advanced section):
+  - `compact`, `dense`, `arcade`, `system`
+- `trainer-tauri` now sends `hud_font_preset` in `/v1/trainer/start` payload.
+- Extended daemon trainer API (`wbeamd-server`) to accept/validate `hud_font_preset`.
+- Runtime mapping added at trainer spawn time:
+  - `compact` -> `JetBrains Mono SemiBold 13`
+  - `dense` -> `JetBrains Mono SemiBold 12`
+  - `arcade` -> `IBM Plex Mono SemiBold 14`
+  - `system` -> `Monospace Semi-Bold 13`
+- Preset is persisted in run metadata (`TrainerRun.hud_font_preset`) and shown in `Live Run` context.
+- Validation:
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+  - `python3 -m py_compile src/domains/training/wizard.py src/host/scripts/stream_wayland_portal_h264.py` -> OK
+
+## In Progress (2026-03-10) - HUD font preset live preview in Trainer UI
+- Added real-time HUD typography preview block in `Train` advanced panel (`trainer-tauri`):
+  - updates immediately when `HUD font preset` changes,
+  - includes sample HUD rows and inline severity chips (`OK/WARN/RISK`).
+- Implemented preset-based preview style mapping in UI runtime:
+  - `compact`, `dense`, `arcade`, `system` with distinct font-family, size and letter-spacing.
+- Added dedicated CSS component styles for preview card (`.hud-font-preview`) with compact display tuned to current UI grid.
+- Validation:
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+
+## In Progress (2026-03-10) - HUD layout presets (compact/wide) end-to-end
+- Added new HUD layout control from Trainer UI to runtime:
+  - new `HUD layout` selector in `Train` advanced panel: `wide` / `compact`.
+- Trainer API (`/v1/trainer/start`) extended with `hud_layout` field:
+  - validated in backend (`wbeamd-server`): `compact|wide`.
+- Runtime integration:
+  - backend passes `--overlay-layout` to `wbeam train wizard` process,
+  - run metadata now stores `hud_layout` and exposes it in `Live Run` context.
+- Wizard HUD renderer (`wizard.py`) now adapts overlay width/spacing to layout mode:
+  - `wide`: broader content width and longer trend lines,
+  - `compact`: denser table-like width.
+  - layout marker shown in HUD config row (`LAYOUT WIDE/COMPACT`).
+- UI preview card now reflects chosen layout (`layout-wide` / `layout-compact`) to previsualize composition density.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py src/host/scripts/stream_wayland_portal_h264.py` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+
+## In Progress (2026-03-10) - Full-screen Android-native trainer HUD overlay (host-fed)
+- Implemented Android-native HUD render path for trainer sessions (instead of relying solely on burned-in GStreamer text):
+  - `MainActivity.updatePerfHud()` now consumes `trainer_hud_text` from `/v1/metrics`,
+  - renders full HUD payload directly in app overlay layer (`perfHudText`) with transparent fullscreen panel,
+  - prepends computed training progress line (`TRAINING PROGRESS X% (trial a/b)`) parsed from trial counters.
+- Added backend propagation in `wbeamd-server` metrics endpoint:
+  - `/v1/metrics` now augments payload with:
+    - `trainer_hud_active` (bool),
+    - `trainer_hud_text` (string),
+  - values are read from active trainer marker/overlay files under `/tmp/wbeam-trainer-*` for queried serial+stream_port.
+- UI layout update on Android:
+  - `perfHudPanel` made full-screen transparent layer,
+  - `perfHudText` now fills the screen with smaller monospace font for table-style HUD composition.
+- Debug overlay behavior update:
+  - toggling debug overlay now also shows/hides HUD overlay panel in DEBUG builds.
+- Validation:
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+
+## In Progress (2026-03-10) - Native HUD-only training path + single-encoder training flow
+- Enforced Android-native trainer HUD as primary path (avoid half-broken burn-in composition):
+  - `wbeamd-core` now disables host-side overlay burn-in by default during trainer runs.
+  - Burn-in can be re-enabled explicitly via `WBEAM_TRAINER_HUD_BURNIN=1`.
+- Introduced single-encoder training flow in Trainer API/UI:
+  - UI now selects one encoder (`h264|h265|mjpeg|rawpng`) instead of multi-checkbox mix,
+  - backend normalizes trainer run to `encoder_mode=single` and first encoder only,
+  - wizard receives explicit single-encoder args.
+- Added `auto/manual` encoder tuning mode with per-encoder manual parameter payload from UI:
+  - H26x: `preset`, `gop`, `bframes`
+  - MJPEG: `quality`
+  - RAW PNG: `compression_level`
+  - payload propagated to backend and persisted in trainer run artifacts (`encoder_tuning_mode`, `encoder_params`).
+- Wizard CLI extended for new tuning metadata:
+  - `--encoder-tuning-mode`
+  - `--encoder-params-json`
+  - values included in exported run `parameters.json`.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+
+## In Progress (2026-03-10) - Android WebView HUD (HTML table layer) for trainer
+- Replaced plain text-only trainer HUD rendering on Android with HTML/CSS overlay layer:
+  - added full-screen `WebView` (`perfHudWebView`) inside `perfHudPanel`,
+  - trainer HUD now renders as transparent table/grid-like overlay with bordered cells.
+- `MainActivity` trainer HUD pipeline:
+  - consumes host-provided `trainer_hud_text`,
+  - builds HTML view dynamically (`buildTrainerHudHtml`),
+  - parses ASCII-box rows into left/right table columns,
+  - prepends explicit progress block with bar (`TRAINING PROGRESS X%`) based on trial counters.
+- Runtime behavior:
+  - when trainer HUD is active, WebView overlay is shown and fallback `TextView` HUD is hidden,
+  - when trainer HUD is not active, app falls back to existing metrics text HUD logic.
+- Added safe WebView setup:
+  - JS disabled, file access disabled, transparent background, no overscroll bars.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+
+## In Progress (2026-03-10) - Structured trainer HUD JSON (host -> Android WebView)
+- Added structured HUD export in trainer wizard:
+  - `wizard.py` now writes `/tmp/wbeam-trainer-overlay-<serial>-<port>.json` alongside `.txt` snapshots.
+  - JSON includes run/trial/generation context, progress percent, layout/chart mode, optional config/metrics and normalized row model (`pair/single/sep` with severity levels).
+- Extended daemon metrics payload:
+  - `/v1/metrics` now includes `trainer_hud_json` (when trainer run marker is active), in addition to `trainer_hud_text`.
+- Android HUD now prioritizes structured JSON rendering:
+  - `MainActivity.updatePerfHud()` first checks `trainer_hud_json` and renders WebView table from typed rows,
+  - falls back to text snapshot parser when JSON is unavailable,
+  - preserves progress bar + percent display.
+- This removes brittle text splitting as primary render path and aligns HUD closer to deterministic maquette rendering.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+
+## In Progress (2026-03-10) - HUD schema v1 sections + maquette-style Android render
+- Finalized structured HUD payload in trainer wizard with explicit schema tag:
+  - `schema_version: wbeam.hud.v1`
+  - sectioned model under `sections`:
+    - `header` (run/profile/gen/trial)
+    - `config` (encoder/size/fps/target/chart/layout/best)
+    - `kpi` (score/fps/latency/mbps/drop/queue/samples)
+    - `states` (severity tags for fps/latency/drop/mbps/queue/late/quality/note)
+    - `trends` (score/fps/drop/mbps arrays)
+    - `status` (note)
+- Android WebView renderer now prefers sectioned schema and maps it to a maquette-like layout:
+  - top strip chips (run/profile/gen/trial/encoder/size+fps+target),
+  - progress band,
+  - KPI grid with severity colors,
+  - trends/status region,
+  - details table panel.
+- Previous row-based rendering remains as compatibility fallback.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+
+## In Progress (2026-03-10) - Fix trainer HUD visibility regression on Android
+- Fixed regression where trainer HUD content was rendered but not visible because `perfHudPanel` visibility followed debug-toggle state.
+- Updated both trainer HUD render paths (`renderTrainerHudOverlay` and `renderTrainerHudOverlayJson`) to force `perfHudPanel` visible when trainer HUD data is active.
+- Result: during training, HUD overlay now appears regardless of manual debug overlay toggle.
+- Validation:
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+
+## In Progress (2026-03-10) - Trainer HUD default-on via debug overlay toggle semantics
+- Updated Android HUD behavior to reuse existing debug-overlay control path:
+  - on first detection of active trainer HUD payload in a run, debug overlay auto-enables once,
+  - user can still toggle overlay on/off with VolUp+VolDown during the same run.
+- Removed unconditional panel-forcing from render methods to avoid fighting manual toggle.
+- Added `trainerHudSessionActive` run-state flag to detect rising edge of trainer HUD activity.
+- Validation:
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+
+## In Progress (2026-03-10) - Unified HUD renderer path (runtime + trainer)
+- Unified Android HUD display path so trainer and normal runtime are rendered through the same overlay mechanism (`perfHudWebView`), with layout varying by context:
+  - trainer context keeps the structured maquette-style layout path,
+  - runtime context now also renders via a dedicated WebView layout (`renderRuntimeHudOverlay`) instead of plain text-only labels.
+- Preserved existing VolUp+VolDown hold semantics as the single operator toggle for HUD visibility while allowing context-specific content.
+- Runtime HUD now shows a consistent grid/chip presentation with:
+  - state tone (`ok/warn/risk`),
+  - FPS target/current,
+  - adapt level/action,
+  - latency/frame/decode/render KPIs,
+  - queue depths and reason/error details.
+- Added text fallback only when WebView is unavailable, to keep backward resilience.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+
+## In Progress (2026-03-10) - Default HUD maquette + shared shell for all HUD contexts
+- Added persistent default HUD maquette artifact under:
+  - `docs/ui/hud/default-hud.maquette.xml`
+  - (copied from existing trainer maquette for versioned reference).
+- Refactored Android HUD HTML generation into one shared shell builder:
+  - `buildUnifiedHudHtml(...)`
+  - helper atoms: `hudChip(...)`, `hudCard(...)`, `hudDetailRow(...)`, `hudToneClass(...)`
+- Both context renderers now use the same maquette-like shell:
+  - trainer JSON renderer uses shared shell with trainer-specific content blocks,
+  - runtime debug renderer uses shared shell with runtime-specific metrics/trend/detail blocks.
+- Kept one HUD display mechanism and one toggle model (VolUp+VolDown hold), while allowing context-dependent data composition.
+- Validation:
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+
+## In Progress (2026-03-10) - Single-overlay cleanup + readability pass
+- Removed layered HUD behavior on Android debug toggle:
+  - `setDebugOverlayVisible(...)` now keeps only `perfHudPanel` visible,
+  - legacy `debugInfoPanel` (including old FPS graph area) is always hidden to prevent double overlays.
+- Improved unified HUD translucency and fit:
+  - reduced panel/chip background opacity for better stream visibility behind overlay,
+  - adjusted root/grid sizing and panel density to better fill the full screen consistently.
+- Stabilized HUD container composition in layout:
+  - `perfHudPanel` switched from `LinearLayout` to `FrameLayout` so WebView/Text fallback layers don't fight vertical measurement.
+- Desktop trainer UI readability fix:
+  - dropdown options now use explicit dark background + bright text (`select option`),
+  - selected table rows force readable text color (`.selected-row td`).
+- Validation:
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+
+## In Progress (2026-03-10) - Trainer HUD progress visibility + 2x font scale
+- Enhanced training-mode HUD readability in unified overlay:
+  - added always-visible percentage badge in progress strip (`NN%`),
+  - training mode now uses larger typography profile (approximately 2x vs runtime) for chips, KPI values, table rows, trend text.
+- Kept runtime HUD density unchanged while applying bigger visual scale only when `mode=trainer`.
+- Training progress now remains explicit in both:
+  - progress label text (`TRAINING PROGRESS ...`),
+  - numeric percent indicator (right side of progress header).
+- Validation:
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+
+## In Progress (2026-03-10) - Trainer HUD dynamic scale profile mapping
+- Added dynamic HUD scale selection for training mode based on trainer-provided `font_profile`:
+  - `compact`, `dense`, `system` -> `scale-15x`
+  - default (`arcade` and others) -> `scale-2x`
+- Kept runtime HUD on normal density (`scale-1x`) while trainer uses enlarged classes only.
+- Unified renderer now accepts explicit scale class (`buildUnifiedHudHtml(..., scaleClass)`), so future UI can expose direct HUD size control without layout rewrites.
+- Validation:
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+
+## In Progress (2026-03-10) - HUD completeness + darker desktop trainer theme
+- Android HUD completeness pass (trainer mode):
+  - added hard fallback details rows when structured `rows` payload is empty, so overlay never renders as "empty frame",
+  - added explicit placeholders (`PENDING`) for missing metrics instead of blank/implicit fields,
+  - strengthened Mbps visibility:
+    - `live_mbps` now falls back to `bitrate_mbps_mean` when missing,
+    - card value falls back to `target_mbps` (`NN.NN (target)`) before `PENDING`.
+- Android HUD visual contrast pass:
+  - reduced transparency (more opaque panels/chips/progress/table cells) for better readability on live stream.
+- Desktop trainer visual theme refresh:
+  - switched to darker, more IDE-like palette with pastel accents and stronger line contrast,
+  - tightened spacing/padding and panel density for a more compact layout,
+  - improved selected-row highlight contrast.
+- Validation:
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+
+## In Progress (2026-03-10) - Trainer HUD hard fallback + compact pro dark pass
+- Android trainer HUD no longer drops to empty frame when trainer payload is partial:
+  - `trainer_hud_active` flag now also triggers trainer HUD mode even if text/json snapshot is temporarily missing,
+  - added explicit `renderTrainerHudOverlayPlaceholder()` to render full template with `PENDING` placeholders.
+- Android HUD visibility/readability increased:
+  - overlay alpha raised to `0.96` across runtime/trainer/fallback paths,
+  - stronger panel/chip/progress/table opacity for clearer on-device legibility.
+- Trainer metrics completeness updates:
+  - `live_mbps` now also checks top-level `bitrate_mbps_mean` before fallback,
+  - detail panel is auto-populated with core rows (run/profile/encoder/size/target/mbps/latency/drops) when trial `rows` are absent.
+- Desktop trainer pro-dark compact styling pass:
+  - darker Rider-like palette with pastel accents,
+  - reduced roundness (`topbar/nav/panel/input` radii),
+  - tighter layout spacing/padding for denser workflow,
+  - dark color-scheme hint enabled for native controls (`color-scheme: dark`) plus improved hover/selected row contrast.
+- Validation:
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+
+## In Progress (2026-03-10) - Live Run v1 (start/apply/save-profile)
+- Added backend live endpoints in Rust daemon API:
+  - `GET /v1/trainer/live/status`
+  - `POST /v1/trainer/live/start`
+  - `POST /v1/trainer/live/apply`
+  - `POST /v1/trainer/live/save-profile`
+  - (same non-`/v1` aliases were also added)
+- Live backend behavior:
+  - `start`/`apply` use existing session-aware core resolution (`serial` + `stream_port`) and `ConfigPatch`,
+  - `save-profile` writes a compatible profile bundle into `config/training/profiles/<profile_name>/`:
+    - `<profile_name>.json`
+    - `parameters.json`
+  - profile includes live snapshot status/metrics metadata and derived `best.score`.
+- Trainer HUD signal robustness on server side:
+  - `trainer_hud_active` now uses marker presence + text + json availability (not text-only).
+- Added frontend Live Run controls in `trainer-tauri`:
+  - session controls: `Start Live`, `Apply Live`, `Save Profile`,
+  - live tuning fields: encoder, resolution mode/preset/custom size, FPS, target/min/max Mbps, cursor mode, intra-only, encoder-specific knobs,
+  - live context panel wired to real session status (`/v1/trainer/live/status`),
+  - live KPI/graphs sourced from live metrics polling (not only trainer tail parsing).
+- Frontend live telemetry:
+  - maintains local rolling series (`present/recv/drop/mbps/latency/score`) for charting in Live tab,
+  - adds explicit action feedback text after start/apply/save actions.
+- Validation:
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+
+## In Progress (2026-03-10) - Split Live tab into Live Run + Live Stats
+- Reworked trainer UI navigation to use two distinct tabs:
+  - `Live Run` -> configuration/apply/save workflow (Train-like control surface),
+  - `Live Stats` -> charts, KPI stream, timeline, and event log.
+- Updated tab model and routing:
+  - added `live_run` and `live_stats` tab IDs,
+  - removed single overloaded `live` tab usage.
+- UX behavior updates:
+  - `Start Live` now switches to `Live Stats` by default for immediate monitoring,
+  - `Auto-open Live ...` setting now targets `Live Stats` after training start,
+  - run list shortcuts now open `Live Stats`.
+- `Live Run` layout now mirrors `Train` intent:
+  - left card: full live parameter controls + actions (`Start Live`, `Apply Live`, `Save Profile`),
+  - right card: quick live snapshot + direct jump to `Live Stats`.
+- `Live Stats` now focuses on observability:
+  - left card reduced to session context + quick jump back to `Live Run controls`,
+  - center/right cards keep KPI charts, timeline, and log feed.
+- Validation:
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+
+## In Progress (2026-03-10) - Live Metrics visibility hotfix (desktop + Android)
+- Fixed trainer desktop `Live Stats` data path so metrics do not disappear when only one endpoint is available:
+  - primary fetch remains `GET /v1/trainer/live/status?serial=...&stream_port=...`,
+  - added fallback reads to legacy session endpoints:
+    - `GET /v1/status?serial=...&stream_port=...`
+    - `GET /v1/metrics?serial=...&stream_port=...`.
+- Added KPI fallback from parsed HUD tail lines (present/recv/drop/mbps/latency) when live metrics payload is temporarily partial.
+- Prevented "empty charts" in `Live Stats`:
+  - added placeholder bar sets for score/fps/drop cards so panel never renders as empty frame,
+  - widened `Live Stats` center column and switched to earlier responsive collapse for medium widths.
+- Improved select dropdown readability for dark theme (`option:checked` contrast fix).
+- Android HUD rendering hardening:
+  - forced software layer for HUD `WebView` to avoid intermittent transparent/blank text rendering,
+  - increased HUD overlay opacity/contrast and switched chip/KPI grids to auto-fit columns,
+  - replaced `100vw/100vh` sizing with `100%` sizing for more stable full-screen overlay layout.
+- Validation:
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+  - `cd android && ./gradlew :app:compileDebugJavaWithJavac` -> FAIL in this shell due Java/Gradle class-version mismatch (`Unsupported class file major version 69`), requires running with project-supported JDK (Java 17 as used in deploy scripts).
+
+## In Progress (2026-03-10) - Live Run hot-restart quality upgrade + Android resource HUD
+- Live Run patch planner added (`livePatchPlan`) with diff preview before apply:
+  - per-field from/to values,
+  - restart impact labels,
+  - changed-field count in apply confirmation.
+- Apply path now sends minimal patch only (changed fields) instead of full payload every time.
+- New guard: `Apply Live` exits early with `No live changes to apply.` when config is unchanged.
+- Start Live now clears previous live chart series to avoid stale carry-over between runs.
+- Live profile resolution hardened:
+  - live start/apply now resolve profile safely to active/baseline, reducing `invalid profile` failures.
+- Live bitrate controls improved with hard ranges and clamping:
+  - min/target/max Mbps are mutually normalized (`min <= target <= max`).
+- Live Run quality presets added:
+  - `latency`, `balanced`, `quality` quick buttons with tuned FPS/bitrate envelopes.
+- Live Run controls upgraded to operator-friendly ranges/tooltips:
+  - FPS as slider+numeric pair (`24..120`),
+  - Target/Min/Max bitrate as slider+numeric pairs (`1..300`).
+- Cursor mode options aligned with API contract (`embedded|hidden|metadata`).
+- Live context panel extended with:
+  - apply-mode badge (`restart required` / `hot apply`),
+  - live connection quality badge (`stable|warming|degraded`).
+- Android unified HUD expanded with device resource telemetry:
+  - CPU usage sampling (%),
+  - memory usage sampling (MB + normalized history),
+  - GPU proxy usage (% from render-time/frame-budget ratio).
+- Android HUD now renders mini sparkline graphs for CPU/MEM/GPU in both runtime and trainer overlays.
+- Android HUD WebView hardening/visibility:
+  - software layer forced for text/overlay reliability,
+  - resource panel integrated into unified HUD layout.
+- Validation:
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+
+## In Progress (2026-03-10) - H264 investigation + bitrate clamp consistency
+- Investigation outcome (root causes confirmed):
+  - Backend runtime clamps bitrate to `>= 4000 kbps` in two places:
+    - `wbeamd-api` config validation (`cfg.bitrate_kbps.clamp(4_000, ...)`)
+    - `wbeamd-streamer` CLI profile resolution (`bitrate_kbps.clamp(4_000, 300_000)`).
+  - Trainer UI allowed entering `1 Mbps`, which did not reflect effective runtime behavior.
+  - On this host `nvh264enc/nvh265enc` are unavailable; runtime falls back to software encoders (`x264enc/x265enc`), which materially affects low-bitrate quality envelopes.
+  - H264 path currently uses strict low-latency x264 settings (`ultrafast`, `cabac=0`, `ref=1`, `bframes=0`), which favors latency/stability over compression efficiency at low bitrate.
+- Implemented consistency fixes:
+  - Trainer desktop UI bitrate controls aligned to effective backend range:
+    - Live Run target/min/max changed to `4..300 Mbps`,
+    - Train bitrate numeric and slider minimum changed to `4 Mbps / 4000 kbps`,
+    - live normalization now clamps to `4..300`.
+  - Trainer backend start request clamp aligned to same floor:
+    - `src/host/rust/crates/wbeamd-server/src/main.rs`: `bitrate_min_kbps` now clamps to `4_000..400_000`.
+  - Trainer wizard clamp alignment:
+    - `src/domains/training/wizard.py` now normalizes trial and argument bitrate floor to `4000 kbps`.
+- Added diagnostic observability for encoder correctness:
+  - `wbeamd-streamer` now prints concrete encoder backend selection and effective runtime params (requested codec, backend, raw format, fps, bitrate, GOP, intra-only).
+  - x264 path now explicitly logs applied low-latency tuning preset/flags.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-streamer -p wbeamd-server` -> OK
+  - `cd src/apps/trainer-tauri && npm run build` -> OK
+
+## In Progress (2026-03-11) - Backend documentation for pipeline audit
+- Added comprehensive backend audit document: `backend.md`.
+- Scope covered:
+  - full runtime architecture (orchestration, daemon/core/api, streamer, Android decode),
+  - end-to-end connect/start/apply/metrics loop,
+  - encoder/backend selection and current runtime clamps,
+  - training/trainer API flow and artifact model,
+  - high-risk stability/quality gap hypotheses,
+  - practical improvement roadmap,
+  - code-map by subsystem for deep external review,
+  - copy/paste prompt-ready investigation brief for third-party pipeline assessment.
+- Purpose:
+  - provide a single technical source to evaluate pipeline correctness,
+  - highlight likely artifact/stability root causes,
+  - accelerate structured external review and benchmarking.
+
+## In Progress (2026-03-11) - External agent prompt for quality/stability improvements
+- Added `prompt.md` as ready-to-use instruction set for a separate agent to execute backend-quality improvements.
+- Prompt includes:
+  - mandatory code-reading scope anchored to `backend.md`,
+  - phased workflow (baseline audit -> implementation -> validation -> delivery),
+  - hard requirements for practical code changes (not theory-only),
+  - focus areas: artifact reduction, encoder fallback quality, effective-config observability, adaptation stability, training relevance,
+  - strict output structure and success criteria for verifiable progress.
+
+## In Progress (2026-03-11) - Trainer start-state + effective runtime snapshot + Android e2e latency
+- Implemented trainer daemon state normalization fix:
+  - `src/domains/training/wizard.py` now normalizes daemon state to uppercase and treats `STREAMING|STARTING|RECONNECTING` as active.
+  - prevents redundant `/v1/start` attempts during training setup when daemon reports uppercase states.
+- Added structured effective runtime visibility plumbing (requested vs resolved runtime):
+  - `wbeamd-streamer` now emits `[wbeam-effective] ...` structured line with resolved backend/runtime fields.
+  - `wbeamd-core` parses this line, exposes snapshot in API base response, and persists snapshots to JSONL:
+    - `logs/effective-runtime/<serial>-<port>.jsonl`.
+  - `wbeamd-api` response model extended with optional `effective_runtime_config` payload.
+  - Snapshot includes requested codec, resolved backend, raw format, fps, bitrate, GOP/intra flags, stream mode, queue/appsink settings, capture backend, parse mode, timeout settings, and snapshot reason.
+- Implemented real Android e2e latency reporting (removes hardcoded zeros):
+  - `android/app/src/main/java/com/wbeam/stream/H264TcpPlayer.java`
+  - both framed and legacy decode loops now publish e2e latency using presenter PTS (`now_us - presented_pts_us`).
+  - decoder drain stats extended with `lastRenderedPtsUs` and propagated from `MediaCodec` output `presentationTimeUs`.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-api -p wbeamd-core -p wbeamd-streamer` -> OK
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+- Trainer API (`/v1/trainer/start`) improvements:
+  - fixed silent multi-encoder truncation:
+    - added `encoder_mode` request field (`auto|single|multi`),
+    - `auto` now derives mode from encoder list size,
+    - `single` with many encoders now truncates with explicit warning,
+    - `multi` with one encoder now normalizes to single with warning.
+  - start response now returns `warnings: []` for operator visibility.
+  - added explicit warning messages when `encoder_tuning_mode=manual` / `encoder_params` are used (experimental mapping visibility).
+- Validation:
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+- Added structured sender transport telemetry to daemon metrics (`/v1/metrics`):
+  - new `transport_runtime` snapshot fields:
+    - `pipeline_fps`, `sender_fps`, `timeout_misses`, `send_timeouts`,
+    - `timeout_key`, `timeout_delta`, `key_retry_ok`, `key_retry_fail`,
+    - `queue_depth`, `queue_peak`, `queue_drops`, `seq`.
+  - parser added in `wbeamd-core` for `[wbeam-framed] ...` transport log lines.
+  - core now updates `metrics.transport_runtime` from streamer output in real time.
+  - unit test added for transport line parser.
+- Validation:
+  - `cd src/host/rust && cargo check -p wbeamd-api -p wbeamd-core -p wbeamd-server` -> OK
+  - `cd src/host/rust && cargo test -p wbeamd-core parse_transport_line_known -- --nocapture` -> OK
+- Trainer HUD completeness pass (Android + trainer wizard + daemon metrics bridge):
+  - Fixed `LIVE MBPS` fallback mapping in Android trainer HUD:
+    - now reads from `sections.kpi.live_mbps`, root fallback, and `metrics.bitrate_mbps_mean` fallback.
+  - Added missing trainer trend payloads from wizard JSON:
+    - `drop_per_sec`, `latency_ms_p95`, `queue_depth` (in addition to existing score/fps/mbps/drop_pct).
+  - Added full trainer mode card in HUD:
+    - `ENCODER | RESOLUTION | TARGET FPS | live present/recv/decode FPS` summary.
+  - Added rendered metric trend rows (actual spark charts) in HUD panel:
+    - score, fps, mbps, drops, latency, queue.
+    - includes last/min/max summary per trend row.
+  - Added pending trend placeholders so chart section is never blank while feed warms up.
+  - Increased trainer HUD readability:
+    - larger base font and enforced larger trainer scale profile mapping.
+  - Hardened server `/metrics` trainer overlay attachment:
+    - when `serial` is missing, daemon now auto-resolves active trainer overlay by `stream_port` from `/tmp/wbeam-trainer-active-*-<port>.flag`.
+    - prevents empty trainer HUD feed on Android builds where serial query is unavailable.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+- Encoder/decoder modularization pass (component-oriented split):
+  - Host streamer encoders split from monolithic `encoder.rs` into per-component modules:
+    - `src/host/rust/crates/wbeamd-streamer/src/encoder/mod.rs`
+    - `.../encoder/selector.rs`
+    - `.../encoder/h264.rs`
+    - `.../encoder/h265.rs`
+    - `.../encoder/rawpng.rs`
+  - Kept stable public API (`pick_encoder`, `configure_encoder`, `is_hevc`, `is_png`) so pipeline behavior remains unchanged while internals are modular.
+  - Android decode pipeline helper logic extracted from `H264TcpPlayer` into dedicated components:
+    - `android/app/src/main/java/com/wbeam/stream/DecoderSupport.java` (decoder capability probing)
+    - `android/app/src/main/java/com/wbeam/stream/StreamNalUtils.java` (NAL parsing/recovery/CSD extraction)
+  - `H264TcpPlayer` now consumes these decoder components instead of embedding all helper logic inline.
+- Validation:
+  - `cd src/host/rust && cargo check -p wbeamd-streamer -p wbeamd-server` -> OK
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK

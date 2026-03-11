@@ -191,25 +191,32 @@
         </LinearLayout>
     </LinearLayout>
 
-    <LinearLayout
+    <FrameLayout
         android:id="@+id/perfHudPanel"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="match_parent"
         android:layout_gravity="top"
-        android:layout_margin="10dp"
-        android:background="#AA0B1220"
-        android:orientation="vertical"
-        android:padding="8dp">
+        android:background="@android:color/transparent"
+        android:padding="6dp">
+
+        <WebView
+            android:id="@+id/perfHudWebView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@android:color/transparent"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/perfHudText"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:fontFamily="monospace"
+            android:gravity="top|start"
+            android:lineSpacingExtra="1dp"
             android:text="HUD OFFLINE"
-            android:textColor="#FCA5A5"
-            android:textSize="11sp" />
-    </LinearLayout>
+            android:textColor="#B3EAF4FF"
+            android:textSize="9sp" />
+    </FrameLayout>
 
     <!-- ── Startup / preflight full-screen modal ─────────────────────────── -->
     <FrameLayout

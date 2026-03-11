@@ -30,9 +30,22 @@ CURSOR_MODE_MAP = {
 }
 
 PROFILE_DEFAULTS = {
+    "baseline": {"size": "1280x800", "fps": 60, "bitrate_kbps": 10000, "nv_preset": "p4"},
     "lowlatency": {"size": "1280x720", "fps": 60, "bitrate_kbps": 16000, "nv_preset": "p2"},
     "balanced": {"size": "1920x1080", "fps": 60, "bitrate_kbps": 25000, "nv_preset": "p4"},
     "ultra": {"size": "2560x1440", "fps": 60, "bitrate_kbps": 38000, "nv_preset": "p6"},
+}
+
+PROFILE_ALIASES = {
+    "safe_60": "baseline",
+    "aggressive_60": "baseline",
+    "quality_60": "baseline",
+    "debug_60": "baseline",
+    "fast60": "baseline",
+    "balanced60": "baseline",
+    "quality60": "baseline",
+    "fast60_2": "baseline",
+    "fast60_3": "baseline",
 }
 
 # WBTP/1 wire format - must match wbtp-core/src/lib.rs exactly.
@@ -541,27 +554,14 @@ def make_pipeline(
         or bool(os.getenv("WBEAM_OVERLAY_TEXT_FILE", "").strip())
     )
     if overlay_enabled:
-        # 4-corner HUD layout:
-        # - TL: phase/time
-        # - TR: generation/trial/settings
-        # - BL: live fps/dup (separate corner for quick glance)
-        # - BR: score + summary metrics
-        overlay_specs = [
-            ("hud_tl", 0, 0, 8, 8),
-            ("hud_tr", 2, 0, 8, 8),
-            ("hud_bl", 0, 2, 8, 8),
-            ("hud_br", 2, 2, 8, 8),
-        ]
-        for name, halign, valign, xpad, ypad in overlay_specs:
-            ov = Gst.ElementFactory.make("textoverlay", name)
-            if ov is None:
-                overlays = []
-                break
-            set_if_supported(ov, "halignment", halign)
-            set_if_supported(ov, "valignment", valign)
-            set_if_supported(ov, "xpad", xpad)
-            set_if_supported(ov, "ypad", ypad)
-            overlays.append(ov)
+        # Single unified full-frame HUD overlay.
+        ov = Gst.ElementFactory.make("textoverlay", "hud_main")
+        if ov is not None:
+            set_if_supported(ov, "halignment", 0)  # left
+            set_if_supported(ov, "valignment", 0)  # top
+            set_if_supported(ov, "xpad", 6)
+            set_if_supported(ov, "ypad", 6)
+            overlays = [ov]
         if not overlays:
             print("[warn] textoverlay element unavailable; HUD overlay disabled", file=sys.stderr)
             overlay_enabled = False
@@ -591,7 +591,7 @@ def make_pipeline(
             "capsfilter",
         ]
         if overlay_enabled:
-            element_names.extend(["textoverlay(hud_tl)", "textoverlay(hud_tr)", "textoverlay(hud_bl)", "textoverlay(hud_br)"])
+            element_names.extend(["textoverlay(hud_main)"])
         element_names.extend(
             [
                 "tee",
@@ -636,15 +636,22 @@ def make_pipeline(
     )
     if overlays:
         overlay_text = os.getenv("WBEAM_OVERLAY_TEXT", "").strip() or "AUTOTUNE"
-        overlay_font = os.getenv("WBEAM_OVERLAY_FONT_DESC", "Sans 14").strip() or "Sans 14"
+        overlay_font = (
+            os.getenv("WBEAM_OVERLAY_FONT_DESC", "JetBrains Mono SemiBold 13").strip()
+            or "JetBrains Mono SemiBold 13"
+        )
         for ov in overlays:
             set_if_supported(ov, "font-desc", overlay_font)
-            set_if_supported(ov, "shaded-background", True)
+            set_if_supported(ov, "use-markup", True)
+            # Transparent background + light shadow for readability.
+            set_if_supported(ov, "shaded-background", False)
             set_if_supported(ov, "draw-shadow", True)
+            # Semi-transparent light text (ARGB).
+            set_if_supported(ov, "color", 0xB3EAF4FF)
             set_if_supported(ov, "text", "")
         # Backward-compatible fallback when no sectioned text is provided.
         if overlays:
-            set_if_supported(overlays[1], "text", overlay_text)  # TR
+            set_if_supported(overlays[0], "text", overlay_text)
 
     configure_encoder(enc, encoder_name, bitrate_kbps, fps, nv_preset)
     # Responsiveness-first default: allow videorate to duplicate when source is sparse.
@@ -803,12 +810,20 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Wayland KDE screencast via portal -> PipeWire -> H264 TCP"
     )
-    parser.add_argument("--profile", choices=["lowlatency", "balanced", "ultra"], default="balanced")
+    parser.add_argument(
+        "--profile",
+        default="baseline",
+        help="profile name (supports aliases; unknown values fallback to baseline)",
+    )
     parser.add_argument("--port", type=int, default=5000)
     parser.add_argument("--size", default=None)
     parser.add_argument("--fps", type=int, default=None)
     parser.add_argument("--bitrate-kbps", type=int, default=None)
-    parser.add_argument("--encoder", choices=["auto", "nvenc", "openh264"], default="auto")
+    parser.add_argument(
+        "--encoder",
+        default="auto",
+        help="encoder (auto|nvenc|openh264; h264/h265/rawpng/mjpeg are normalized to compatible fallback)",
+    )
     parser.add_argument("--cursor-mode", choices=["hidden", "embedded", "metadata"], default="embedded")
     parser.add_argument("--debug-dir", default="/tmp/wbeam-frames")
     parser.add_argument("--debug-fps", type=int, default=0)
@@ -821,7 +836,15 @@ def parse_args():
 
 
 def resolve_profile(args):
-    defaults = PROFILE_DEFAULTS[args.profile].copy()
+    requested = str(args.profile or "baseline").strip().lower()
+    profile = PROFILE_ALIASES.get(requested, requested)
+    if profile not in PROFILE_DEFAULTS:
+        print(
+            f"[warn] unknown profile '{requested}', falling back to baseline",
+            file=sys.stderr,
+        )
+        profile = "baseline"
+    defaults = PROFILE_DEFAULTS[profile].copy()
 
     size = args.size or defaults["size"]
     fps = args.fps if args.fps is not None else defaults["fps"]
@@ -832,7 +855,26 @@ def resolve_profile(args):
         raise SystemExit("--size must be WIDTHxHEIGHT")
     width, height = [int(x) for x in size.lower().split("x", 1)]
 
-    return width, height, fps, bitrate_kbps, nv_preset
+    return profile, width, height, fps, bitrate_kbps, nv_preset
+
+
+def normalize_encoder_name(raw_encoder: str) -> str:
+    requested = str(raw_encoder or "auto").strip().lower()
+    if requested in {"auto", "nvenc", "openh264"}:
+        return requested
+    if requested == "h264":
+        return "auto"
+    if requested in {"h265", "rawpng", "mjpeg", "jpeg"}:
+        print(
+            f"[warn] encoder '{requested}' not supported by wayland portal h264 helper; falling back to auto",
+            file=sys.stderr,
+        )
+        return "auto"
+    print(
+        f"[warn] unknown encoder '{requested}', falling back to auto",
+        file=sys.stderr,
+    )
+    return "auto"
 
 
 def main():
@@ -841,8 +883,9 @@ def main():
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     Gst.init(None)
 
-    width, height, fps, bitrate_kbps, nv_preset = resolve_profile(args)
-    encoder_name = pick_encoder(args.encoder)
+    profile, width, height, fps, bitrate_kbps, nv_preset = resolve_profile(args)
+    requested_encoder = normalize_encoder_name(args.encoder)
+    encoder_name = pick_encoder(requested_encoder)
     framed = args.framed or os.environ.get("WBEAM_FRAMED", "0") == "1"
     if framed:
         print("[wbeam] C3 framed protocol enabled (alignment=au)", flush=True)
@@ -851,7 +894,10 @@ def main():
     portal = session_bus.get_object(PORTAL_BUS, PORTAL_PATH)
     iface = dbus.Interface(portal, SCREENCAST_IFACE)
 
-    print(f"[wbeam] profile={args.profile} size={width}x{height} fps={fps} bitrate={bitrate_kbps}kbps encoder={encoder_name} cursor={args.cursor_mode}")
+    print(
+        f"[wbeam] profile={profile} size={width}x{height} fps={fps} "
+        f"bitrate={bitrate_kbps}kbps encoder={encoder_name} cursor={args.cursor_mode}"
+    )
     print("[wbeam] Requesting ScreenCast portal session (you will get KDE share prompt)...")
 
     session_handle = create_screencast_session(session_bus, iface)
@@ -901,26 +947,21 @@ def main():
 
     overlay_file = os.getenv("WBEAM_OVERLAY_TEXT_FILE", "").strip()
     if overlay_file:
-        overlay_elements = {
-            "TL": pipeline.get_by_name("hud_tl"),
-            "TR": pipeline.get_by_name("hud_tr"),
-            "BL": pipeline.get_by_name("hud_bl"),
-            "BR": pipeline.get_by_name("hud_br"),
-        }
+        overlay_elements = {"MAIN": pipeline.get_by_name("hud_main")}
         if any(v is not None for v in overlay_elements.values()):
             print(f"[wbeam] Overlay text source: {overlay_file}", flush=True)
-            overlay_state = {"TL": "", "TR": "", "BL": "", "BR": ""}
+            overlay_state = {"MAIN": ""}
 
             def _parse_overlay_sections(raw_text: str) -> dict[str, str]:
                 text = raw_text.replace("\r\n", "\n").replace("\r", "\n").strip()
-                out = {"TL": "", "TR": "", "BL": "", "BR": ""}
+                out = {"MAIN": ""}
                 if not text:
                     return out
 
-                section_rx = re.compile(r"^\[(TL|TR|BL|BR)\]\s*$", re.IGNORECASE)
+                section_rx = re.compile(r"^\[(MAIN|TL|TR|BL|BR)\]\s*$", re.IGNORECASE)
                 lines = text.split("\n")
                 current = None
-                buckets = {"TL": [], "TR": [], "BL": [], "BR": []}
+                buckets = {"MAIN": [], "TL": [], "TR": [], "BL": [], "BR": []}
                 section_count = 0
                 for line in lines:
                     m = section_rx.match(line.strip())
@@ -932,12 +973,21 @@ def main():
                         buckets[current].append(line.rstrip())
 
                 if section_count > 0:
-                    for key in out:
-                        out[key] = "\n".join(buckets[key]).strip()
+                    # Prefer new MAIN block, fallback to merged legacy quadrants.
+                    main = "\n".join(buckets["MAIN"]).strip()
+                    if main:
+                        out["MAIN"] = main
+                        return out
+                    merged = []
+                    for key in ("TL", "TR", "BL", "BR"):
+                        block = "\n".join(buckets[key]).strip()
+                        if block:
+                            merged.append(block)
+                    out["MAIN"] = "\n\n".join(merged).strip()
                     return out
 
-                # Backward compatibility: old 1-block overlay goes to TR.
-                out["TR"] = text
+                # Backward compatibility: old 1-block overlay goes to MAIN.
+                out["MAIN"] = text
                 return out
 
             def _refresh_overlay_text():
@@ -957,7 +1007,11 @@ def main():
                     if new_text == overlay_state[key]:
                         continue
                     try:
-                        elem.set_property("text", new_text)
+                        try:
+                            elem.set_property("markup", new_text)
+                        except Exception:
+                            plain_text = re.sub(r"<[^>]+>", "", new_text)
+                            elem.set_property("text", plain_text)
                         overlay_state[key] = new_text
                     except Exception as exc:
                         print(f"[warn] failed to set overlay text ({key}): {exc}", file=sys.stderr)

@@ -62,6 +62,34 @@ impl ActiveConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct EffectiveRuntimeConfig {
+    pub requested_encoder: String,
+    pub resolved_backend: String,
+    pub raw_format: String,
+    pub size: String,
+    pub fps: u32,
+    pub bitrate_kbps: u32,
+    pub cursor_mode: String,
+    pub gop: u32,
+    pub intra_only: bool,
+    pub stream_mode: String,
+    pub queue_max_buffers: u32,
+    pub queue_max_time_ms: u32,
+    pub appsink_max_buffers: u32,
+    pub appsink_drop: bool,
+    pub appsink_sync: bool,
+    pub capture_backend: String,
+    pub parse_mode: String,
+    pub timeout_pull_ms: u32,
+    pub timeout_write_ms: u32,
+    pub timeout_disconnect: bool,
+    pub videorate_drop_only: bool,
+    pub pipewire_keepalive_ms: i32,
+    pub snapshot_unix_ms: u128,
+    pub snapshot_reason: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientMetricsRequest {
     pub recv_fps: f64,
@@ -146,6 +174,8 @@ pub struct ConfigPatch {
 pub struct BaseResponse {
     pub state: String,
     pub active_config: ActiveConfig,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effective_runtime_config: Option<EffectiveRuntimeConfig>,
     pub host_name: String,
     pub uptime: u64,
     pub run_id: u64,
@@ -258,6 +288,22 @@ pub struct KpiSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
+pub struct TransportRuntimeSnapshot {
+    pub pipeline_fps: u32,
+    pub sender_fps: f64,
+    pub timeout_misses: u64,
+    pub send_timeouts: u64,
+    pub timeout_key: u64,
+    pub timeout_delta: u64,
+    pub key_retry_ok: u64,
+    pub key_retry_fail: u64,
+    pub queue_depth: u64,
+    pub queue_peak: u64,
+    pub queue_drops: u64,
+    pub seq: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
 pub struct MetricsSnapshot {
     pub start_count: u64,
     pub stop_count: u64,
@@ -280,6 +326,7 @@ pub struct MetricsSnapshot {
     pub adaptive_reason: String,
     pub backpressure_high_events: u64,
     pub backpressure_recover_events: u64,
+    pub transport_runtime: TransportRuntimeSnapshot,
 }
 
 #[derive(Debug, Clone, Serialize)]
