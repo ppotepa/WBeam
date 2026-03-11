@@ -2405,3 +2405,8 @@ Status: active
 - Validation:
   - `cd src/host/rust && cargo check -p wbeamd-streamer -p wbeamd-server` -> OK
   - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+- Versioning update (deterministic deploy/redeploy suffix):
+  - `./wbeam version new` no longer uses random hash from `/dev/urandom`.
+  - build suffix is now deterministic and commit-bound: last 5 chars of `git rev-parse HEAD`.
+  - resulting format remains compatible with current parser: `0.1.0.<build_no>.<hash5>`.
+  - fallback outside git repo: suffix `nogit`.
