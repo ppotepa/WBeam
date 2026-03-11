@@ -1,5 +1,21 @@
 # WBeam Progress
 
+## Session Update (2026-03-11, pending, branch `cleanup-refactor`) - Legacy archive isolation (`proto`, `proto_x11`)
+- Moved historical prototype lanes into archive tree:
+  - `proto/` -> `archive/legacy/proto/`
+  - `proto_x11/` -> `archive/legacy/proto_x11/`
+- Kept root-level compatibility aliases (symlinks) to avoid breaking old scripts/tools:
+  - `proto` -> `archive/legacy/proto`
+  - `proto_x11` -> `archive/legacy/proto_x11`
+- Added archive boundary doc:
+  - `archive/legacy/README.md`
+- Updated repo-structure source of truth:
+  - `docs/repo-structure.md` now includes `archive/` and legacy alias model.
+- Validation:
+  - `test -f proto/README.md` -> OK,
+  - `test -f proto_x11/README.md` -> OK,
+  - `./scripts/ci/check-repo-layout.sh` -> OK.
+
 ## Session Update (2026-03-11, pending, branch `cleanup-refactor`) - Docs normalization + CI quality gates for path boundaries
 - Added CI boundary checker:
   - `scripts/ci/check-boundaries.sh`

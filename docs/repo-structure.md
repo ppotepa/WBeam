@@ -21,6 +21,7 @@ WBeam/
   host/
   desktop/
   shared/
+  archive/
   docs/
   scripts/
   config/
@@ -48,6 +49,12 @@ WBeam/
   - `src/protocol` -> `../shared/protocol`
   - `src/compat` -> `../shared/compat`
   - `src/domains/training` -> `../../host/training`
+- Legacy prototypes are archived:
+  - `archive/legacy/proto`
+  - `archive/legacy/proto_x11`
+- Root aliases kept for compatibility:
+  - `proto` -> `archive/legacy/proto`
+  - `proto_x11` -> `archive/legacy/proto_x11`
 
 ## Old -> New Mapping
 
