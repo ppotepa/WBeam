@@ -33,4 +33,4 @@ Legacy `src/` and `src-tauri/` paths are deprecated and should not receive new c
 1. CI structure checker in warn mode: enabled.
 2. Desktop app split to `frontend/backend`: completed.
 3. Experimental lane isolation (`archive/experimental`): completed.
-4. CI enforce mode: pending.
+4. CI enforce mode: completed.

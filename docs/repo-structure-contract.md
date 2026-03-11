@@ -46,4 +46,4 @@ During migration, legacy paths may temporarily coexist:
 1. Introduce structural checks in CI (warn mode). (done)
 2. Migrate app paths with compatibility handling in scripts. (done)
 3. Isolate experimental lanes under archive or external repo. (done)
-4. Flip CI checks to enforce mode.
+4. Flip CI checks to enforce mode. (done)
