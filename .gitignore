@@ -41,6 +41,8 @@ proto/front/**/.externalNativeBuild/
 .build/
 src/apps/desktop-tauri/node_modules/
 src/apps/desktop-tauri/dist/
+src/apps/trainer-tauri/node_modules/
+src/apps/trainer-tauri/dist/
 
 # .NET
 proto/host-cs/bin/

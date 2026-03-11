@@ -2502,3 +2502,9 @@ Status: active
   - build suffix is now deterministic and commit-bound: last 5 chars of `git rev-parse HEAD`.
   - resulting format remains compatible with current parser: `0.1.0.<build_no>.<hash5>`.
   - fallback outside git repo: suffix `nogit`.
+- Git ignore hygiene update (trainer artifacts):
+  - Added missing ignore rules for Trainer Tauri generated assets:
+    - `src/apps/trainer-tauri/node_modules/`
+    - `src/apps/trainer-tauri/dist/`
+  - Effect:
+    - local npm install/build artifacts from trainer UI no longer pollute `git status`.
