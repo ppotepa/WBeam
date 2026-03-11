@@ -2453,6 +2453,15 @@ Status: active
     - `docs/ui/hud/default-hud.maquette.xml`
   - Kept single canonical trainer HUD source:
     - `docs/ui/hud/trainer-hud.sot.svg`
+- Repo cleanup (safe pass, option 1):
+  - Removed unreferenced top-level docs/artifacts:
+    - `backend.md`
+    - `prompt.md`
+    - `gitlab.runners.md`
+    - `instruct.txt`
+    - `package-lock.json` (root, empty lockfile)
+    - `docs/ui/makieta_loading_horizontal.svg`
+  - Intentionally preserved `proto/` and `proto_x11/` (still referenced by CLI/docs/core fallback paths).
 - Versioning update (deterministic deploy/redeploy suffix):
   - `./wbeam version new` no longer uses random hash from `/dev/urandom`.
   - build suffix is now deterministic and commit-bound: last 5 chars of `git rev-parse HEAD`.
