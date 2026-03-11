@@ -17,8 +17,8 @@ contributors.
 
 ## Experimental / Historical Paths
 
-- `proto/` - historical R&D lane
-- `proto_x11/` - X11 prototype lane
+- `archive/experimental/proto/` - historical R&D lane
+- `archive/experimental/proto_x11/` - X11 prototype lane
 
 These are not the default production path.
 
@@ -45,5 +45,5 @@ During migration, legacy paths may temporarily coexist:
 
 1. Introduce structural checks in CI (warn mode). (done)
 2. Migrate app paths with compatibility handling in scripts. (done)
-3. Isolate experimental lanes under archive or external repo.
+3. Isolate experimental lanes under archive or external repo. (done)
 4. Flip CI checks to enforce mode.

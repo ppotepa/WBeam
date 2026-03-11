@@ -191,7 +191,7 @@ run_deps_install() {
     echo "[deps] dependency install finished with missing items." >&2
     return 1
   fi
-  echo "[deps] OK: dependencies for main + proto are installed."
+  echo "[deps] OK: dependencies for main + experimental lanes are installed."
 }
 
 run_host_build() {

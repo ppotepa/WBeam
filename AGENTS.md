@@ -307,11 +307,13 @@ WBeam/
   start-remote
   runas-remote
   android/
+  archive/
+    experimental/
+      proto/
+      proto_x11/
   config/
   docs/
   logs/
-  proto/
-  proto_x11/
   scripts/
   src/
     apps/

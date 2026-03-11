@@ -14,8 +14,8 @@ Canonical repository layout and migration map for contributors.
 
 ## Experimental/Historical Lanes
 
-- `proto/` - historical R&D lane.
-- `proto_x11/` - X11 prototype lane.
+- `archive/experimental/proto/` - historical R&D lane.
+- `archive/experimental/proto_x11/` - X11 prototype lane.
 
 Treat these as non-default runtime paths.
 
@@ -32,5 +32,5 @@ Legacy `src/` and `src-tauri/` paths are deprecated and should not receive new c
 
 1. CI structure checker in warn mode: enabled.
 2. Desktop app split to `frontend/backend`: completed.
-3. Experimental lane isolation (`archive/experimental`): pending.
+3. Experimental lane isolation (`archive/experimental`): completed.
 4. CI enforce mode: pending.

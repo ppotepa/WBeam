@@ -17,15 +17,15 @@ android/local.properties
 android/captures/
 android/.cxx/
 .gradle-user/
-proto/front/.gradle/
-proto/front/**/.gradle/
-proto/front/**/build/
-proto/front/local.properties
-proto/front/captures/
-proto/front/.cxx/
-proto/front/**/.cxx/
-proto/front/.externalNativeBuild/
-proto/front/**/.externalNativeBuild/
+archive/experimental/proto/front/.gradle/
+archive/experimental/proto/front/**/.gradle/
+archive/experimental/proto/front/**/build/
+archive/experimental/proto/front/local.properties
+archive/experimental/proto/front/captures/
+archive/experimental/proto/front/.cxx/
+archive/experimental/proto/front/**/.cxx/
+archive/experimental/proto/front/.externalNativeBuild/
+archive/experimental/proto/front/**/.externalNativeBuild/
 *.apk
 *.aab
 *.ap_
@@ -49,8 +49,8 @@ src/apps/trainer-tauri/frontend/node_modules/
 src/apps/trainer-tauri/frontend/dist/
 
 # .NET
-proto/host-cs/bin/
-proto/host-cs/obj/
+archive/experimental/proto/host-cs/bin/
+archive/experimental/proto/host-cs/obj/
 
 # Python
 __pycache__/
@@ -92,7 +92,7 @@ ignores
 buildlog
 *.bak
 logfile
-proto/autotune-results.json
-proto/autotune-results-*.json
-proto/debugframes/
+archive/experimental/proto/autotune-results.json
+archive/experimental/proto/autotune-results-*.json
+archive/experimental/proto/debugframes/
 delivery.md
