@@ -47,6 +47,7 @@ import com.wbeam.api.StatusListener;
 import com.wbeam.api.StatusPoller;
 import com.wbeam.hud.HudRenderSupport;
 import com.wbeam.startup.StartupStepStyler;
+import com.wbeam.startup.TransportProbeCoordinator;
 import com.wbeam.stream.H264TcpPlayer;
 import com.wbeam.stream.VideoTestController;
 import com.wbeam.stream.StreamSessionController;
@@ -251,11 +252,6 @@ public class MainActivity extends AppCompatActivity {
     private boolean startupDismissed = false;
     private boolean handshakeResolved = false;
     private int controlRetryCount = 0;
-    private boolean transportProbeOk = false;
-    private boolean transportProbeInFlight = false;
-    private long transportProbeLastAtMs = 0L;
-    private long transportProbeRetryAfterMs = 0L;
-    private String transportProbeInfo = "not started";
     private boolean hwAvcDecodeAvailable = false;
     private String lastUiState = STATE_IDLE;
     private String lastUiInfo = "tap Settings -> Start Live";
@@ -309,6 +305,7 @@ public class MainActivity extends AppCompatActivity {
     private StreamSessionController sessionController;
     private ClientMetricsReporter metricsReporter;
     private VideoTestController videoTestController;
+    private final TransportProbeCoordinator transportProbe = new TransportProbeCoordinator();
 
     // ── Media ──────────────────────────────────────────────────────────────────
     private Surface surface;
@@ -477,10 +474,7 @@ public class MainActivity extends AppCompatActivity {
                 daemonState = "DISCONNECTED";
                 stopLiveView();
                 handshakeResolved = false;
-                transportProbeOk = false;
-                transportProbeInFlight = false;
-                transportProbeRetryAfterMs = 0L;
-                transportProbeInfo = "waiting for control link";
+                transportProbe.markWaitingForControlLink();
                 updateActionButtonsEnabled();
                 updateHostHint();
                 updatePerfHudUnavailable();
@@ -3308,9 +3302,9 @@ public class MainActivity extends AppCompatActivity {
             step2 = SS_OK;
             if (requiresTransportProbe()) {
                 maybeStartTransportProbe();
-                if (transportProbeOk) {
+                if (transportProbe.isProbeOk()) {
                     step2Detail = "service=" + daemonService + " · transport test OK";
-                } else if (transportProbeInFlight) {
+                } else if (transportProbe.isProbeInFlight()) {
                     step2Detail = "service=" + daemonService + " · transport test in progress…";
                 } else {
                     step2Detail = "service=" + daemonService + " · transport test pending";
@@ -3359,12 +3353,12 @@ public class MainActivity extends AppCompatActivity {
             step3Detail = (step2 == SS_ERROR && isBuildMismatch())
                     ? "blocked by build mismatch"
                     : "waiting for handshake";
-        } else if (requiresTransportProbe() && !transportProbeOk) {
+        } else if (requiresTransportProbe() && !transportProbe.isProbeOk()) {
             step3 = SS_ACTIVE;
-            if (transportProbeInFlight) {
-                step3Detail = "testing transport I/O… " + transportProbeInfo;
+            if (transportProbe.isProbeInFlight()) {
+                step3Detail = "testing transport I/O… " + transportProbe.getProbeInfo();
             } else {
-                step3Detail = "transport test retrying… " + transportProbeInfo;
+                step3Detail = "transport test retrying… " + transportProbe.getProbeInfo();
             }
         } else if (streamFlowing) {
             step3 = SS_OK;
@@ -3475,64 +3469,42 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private boolean isLoopbackHost(String host) {
-        if (host == null) {
-            return true;
-        }
-        String trimmed = host.trim();
-        return trimmed.isEmpty()
-                || "127.0.0.1".equals(trimmed)
-                || "localhost".equalsIgnoreCase(trimmed);
-    }
-
     private boolean requiresTransportProbe() {
-        if (!daemonReachable || !handshakeResolved) {
-            return false;
-        }
-        if ("local".equalsIgnoreCase(BuildConfig.WBEAM_API_IMPL)) {
-            return false;
-        }
-        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.JELLY_BEAN_MR1) {
-            return false;
-        }
-        return !isLoopbackHost(BuildConfig.WBEAM_API_HOST);
+        return transportProbe.requiresProbe(
+                daemonReachable,
+                handshakeResolved,
+                BuildConfig.WBEAM_API_IMPL,
+                BuildConfig.WBEAM_API_HOST
+        );
     }
 
     private void maybeStartTransportProbe() {
-        if (!requiresTransportProbe()) {
-            return;
-        }
-        long now = SystemClock.elapsedRealtime();
-        if (transportProbeOk || transportProbeInFlight || now < transportProbeRetryAfterMs) {
-            return;
-        }
+        transportProbe.maybeStartProbe(
+                requiresTransportProbe(),
+                ioExecutor,
+                uiHandler,
+                new TransportProbeCoordinator.Callbacks() {
+                    @Override
+                    public String shortError(Exception e) {
+                        return MainActivity.this.shortError(e);
+                    }
 
-        transportProbeInFlight = true;
-        transportProbeLastAtMs = now;
-        transportProbeInfo = "starting";
+                    @Override
+                    public void onProbeLogInfo(String msg) {
+                        appendLiveLogInfo(msg);
+                    }
 
-        ioExecutor.execute(() -> {
-            try {
-                long elapsed = HostApiClient.runTransportProbeMs(1);
-                uiHandler.post(() -> {
-                    transportProbeOk = true;
-                    transportProbeInFlight = false;
-                    transportProbeRetryAfterMs = 0L;
-                    transportProbeInfo = "1MB in " + elapsed + "ms";
-                    appendLiveLogInfo("transport probe OK: " + transportProbeInfo);
-                    updatePreflightOverlay();
-                });
-            } catch (Exception e) {
-                uiHandler.post(() -> {
-                    transportProbeOk = false;
-                    transportProbeInFlight = false;
-                    transportProbeRetryAfterMs = SystemClock.elapsedRealtime() + 4_000L;
-                    transportProbeInfo = shortError(e);
-                    appendLiveLogWarn("transport probe failed: " + transportProbeInfo);
-                    updatePreflightOverlay();
-                });
-            }
-        });
+                    @Override
+                    public void onProbeLogWarn(String msg) {
+                        appendLiveLogWarn(msg);
+                    }
+
+                    @Override
+                    public void onProbeStateChanged() {
+                        updatePreflightOverlay();
+                    }
+                }
+        );
     }
 
     // ══════════════════════════════════════════════════════════════════════════
