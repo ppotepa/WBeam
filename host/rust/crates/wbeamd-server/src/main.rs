@@ -57,6 +57,7 @@ struct TrainerRun {
     trials: u32,
     warmup_sec: u32,
     sample_sec: u32,
+    stream_port: u16,
     log_path: String,
     profile_dir: String,
     run_artifacts_dir: String,
@@ -772,6 +773,13 @@ async fn get_metrics(
     Query(query): Query<SessionQuery>,
 ) -> impl IntoResponse {
     let serial = query.serial.as_deref();
+    let stream_port = query.stream_port.unwrap_or(state.sessions.base_stream_port);
+    let connection_mode = resolve_connection_mode(
+        state.trainer.as_ref(),
+        serial.map(str::trim).filter(|s| !s.is_empty()),
+        stream_port,
+    )
+    .await;
     let core = state
         .sessions
         .resolve_core_readonly(serial, query.stream_port)
@@ -780,9 +788,12 @@ async fn get_metrics(
     let mut payload = serde_json::to_value(core.metrics().await)
         .unwrap_or_else(|_| serde_json::json!({}));
     if let Value::Object(ref mut obj) = payload {
-        let stream_port = query.stream_port.unwrap_or(state.sessions.base_stream_port);
         let serial_opt = query.serial.as_deref().map(str::trim).filter(|s| !s.is_empty());
         let (hud_active, hud_text, hud_json) = resolve_trainer_overlay_payload(serial_opt, stream_port);
+        obj.insert(
+            "connection_mode".to_string(),
+            Value::String(connection_mode.to_string()),
+        );
         obj.insert("trainer_hud_active".to_string(), Value::Bool(hud_active));
         obj.insert(
             "trainer_hud_text".to_string(),
@@ -1334,6 +1345,7 @@ async fn post_trainer_start(
         trials,
         warmup_sec,
         sample_sec,
+        stream_port,
         log_path: log_path.to_string_lossy().to_string(),
         profile_dir: profile_dir.to_string_lossy().to_string(),
         run_artifacts_dir: run_artifacts_dir.to_string_lossy().to_string(),
@@ -2551,6 +2563,27 @@ fn resolve_trainer_overlay_payload(
     }
 
     (false, None, None)
+}
+
+async fn resolve_connection_mode(
+    trainer: &TrainerState,
+    serial: Option<&str>,
+    stream_port: u16,
+) -> &'static str {
+    let runs = trainer.runs.lock().await;
+    let is_training = runs.values().any(|run| {
+        if run.status != "running" && run.status != "stopping" {
+            return false;
+        }
+        let serial_ok = serial.map(|s| run.serial == s).unwrap_or(true);
+        let port_ok = if stream_port > 0 {
+            run.stream_port == stream_port
+        } else {
+            true
+        };
+        serial_ok && port_ok
+    });
+    if is_training { "training" } else { "live" }
 }
 
 fn resolve_active_trainer_suffix(stream_port: u16) -> Option<String> {

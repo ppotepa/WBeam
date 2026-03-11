@@ -2700,3 +2700,20 @@ Status: active
 - Validation:
   - `python3 -m py_compile host/training/wizard.py` -> OK
   - `cd android && ./gradlew :app:compileDebugJavaWithJavac` -> OK
+
+## Completed (2026-03-11 16:40 CET) - Explicit connection mode split for HUD routing (`live` vs `training`)
+- Added explicit connection mode in host `/metrics` payload:
+  - top-level `connection_mode` now emitted as:
+    - `training` when an active trainer run matches current serial/stream port,
+    - `live` otherwise.
+  - This removes implicit HUD-mode guessing from stale overlay artifacts.
+- Extended trainer run state model with stream-port affinity:
+  - `TrainerRun` now carries `stream_port`, enabling precise per-session mode resolution.
+- Android poller merge upgraded:
+  - `StatusPoller` now forwards `connection_mode` into the UI metrics object together with `trainer_hud_*`.
+- Android HUD selector hardened:
+  - `MainActivity.updatePerfHud(...)` now renders trainer HUD only when `connection_mode == training`.
+  - Normal `Connect` path in desktop app now stays on runtime HUD even if stale trainer overlay files exist.
+- Validation:
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd android && ./gradlew :app:compileDebugJavaWithJavac` -> OK

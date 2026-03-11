@@ -1775,12 +1775,17 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         lastPerfMetricsAtMs = nowMs;
+        String connectionMode = metrics.optString("connection_mode", "live")
+                .trim()
+                .toLowerCase(Locale.US);
+        boolean isTrainingConnection = "training".equals(connectionMode);
         JSONObject trainerHudJson = metrics.optJSONObject("trainer_hud_json");
         boolean trainerHudFromJson = trainerHudJson != null && trainerHudJson.length() > 0;
         String trainerHudText = metrics.optString("trainer_hud_text", "");
         boolean trainerHudFromText = trainerHudText != null && !trainerHudText.trim().isEmpty();
         boolean trainerHudFlag = metrics.optBoolean("trainer_hud_active", false);
-        boolean trainerHudActive = trainerHudFlag || trainerHudFromJson || trainerHudFromText;
+        boolean trainerHudActive =
+                isTrainingConnection && (trainerHudFlag || trainerHudFromJson || trainerHudFromText);
         if (trainerHudActive && !trainerHudSessionActive) {
             trainerHudSessionActive = true;
             if (BuildConfig.DEBUG && !debugOverlayVisible) {
@@ -1790,15 +1795,15 @@ public class MainActivity extends AppCompatActivity {
             trainerHudSessionActive = false;
         }
 
-        if (trainerHudFromJson) {
+        if (isTrainingConnection && trainerHudFromJson) {
             renderTrainerHudOverlayJson(trainerHudJson);
             return;
         }
-        if (trainerHudFromText) {
+        if (isTrainingConnection && trainerHudFromText) {
             renderTrainerHudOverlay(trainerHudText);
             return;
         }
-        if (trainerHudActive) {
+        if (isTrainingConnection && trainerHudActive) {
             renderTrainerHudOverlayPlaceholder();
             return;
         }

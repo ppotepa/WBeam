@@ -272,6 +272,9 @@ public final class StatusPoller {
         if (payload.has("trainer_hud_json")) {
             putQuietly(merged, "trainer_hud_json", payload.opt("trainer_hud_json"));
         }
+        if (payload.has("connection_mode")) {
+            putQuietly(merged, "connection_mode", payload.optString("connection_mode", "live"));
+        }
         return merged;
     }
 
