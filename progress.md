@@ -2777,3 +2777,16 @@ Status: active
     - `moduleResolution: "node"` -> `moduleResolution: "bundler"`
 - Verification:
   - `cd desktop/apps/desktop-tauri && npm run build` -> OK.
+
+## Completed (2026-03-11 17:20 CET) - Desktop window startup reliability (stale single-instance cleanup)
+- Fixed intermittent "desktop app starts but no window appears" behavior in `./desktop.sh`.
+- Root cause:
+  - stale `wbeam-desktop-tauri` process could remain alive without visible window,
+  - Tauri single-instance plugin then caused next start attempts to exit quickly while trying to focus non-visible old instance.
+- Change in launcher:
+  - added `desktop_kill_stale_tauri_app()` in `desktop.sh`,
+  - runs before dev/release startup and terminates stale `wbeam-desktop-tauri` processes (TERM -> KILL fallback).
+- Existing dev-port cleanup remains in place (`desktop_kill_stale_dev` for Vite :1420).
+- Verification:
+  - `bash -n desktop.sh` -> OK
+  - startup test log confirms stale PID detection and clean relaunch path.

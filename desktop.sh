@@ -174,6 +174,39 @@ desktop_kill_stale_dev() {
   return 1
 }
 
+desktop_kill_stale_tauri_app() {
+  local pids pid cmd remaining
+  pids="$(
+    ps -eo pid=,args= 2>/dev/null \
+      | awk '/wbeam-desktop-tauri/ && $0 !~ /awk/ {print $1}'
+  )"
+  if [[ -z "${pids//[[:space:]]/}" ]]; then
+    return 0
+  fi
+
+  echo "[desktop] found stale desktop tauri process(es): $(echo "$pids" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+  while read -r pid; do
+    [[ -n "${pid:-}" ]] || continue
+    cmd="$(ps -p "$pid" -o args= 2>/dev/null || true)"
+    [[ "$cmd" == *"wbeam-desktop-tauri"* ]] || continue
+    kill "$pid" 2>/dev/null || true
+  done <<< "$pids"
+
+  sleep 1
+  remaining="$(
+    ps -eo pid=,args= 2>/dev/null \
+      | awk '/wbeam-desktop-tauri/ && $0 !~ /awk/ {print $1}'
+  )"
+  if [[ -n "${remaining//[[:space:]]/}" ]]; then
+    while read -r pid; do
+      [[ -n "${pid:-}" ]] || continue
+      cmd="$(ps -p "$pid" -o args= 2>/dev/null || true)"
+      [[ "$cmd" == *"wbeam-desktop-tauri"* ]] || continue
+      kill -9 "$pid" 2>/dev/null || true
+    done <<< "$remaining"
+  fi
+}
+
 desktop_apply_tauri_stability_env() {
   local xa
 
@@ -221,6 +254,7 @@ run_dev() {
   local log_file
   ensure_supported_node
   desktop_adb_preflight
+  desktop_kill_stale_tauri_app
   desktop_kill_stale_dev
   log_file="$(new_log_file "desktop")"
   echo "[desktop] log=$log_file"
@@ -238,6 +272,7 @@ run_release() {
   local log_file
   ensure_supported_node
   desktop_adb_preflight
+  desktop_kill_stale_tauri_app
   log_file="$(new_log_file "desktop")"
   echo "[desktop] log=$log_file"
   (
