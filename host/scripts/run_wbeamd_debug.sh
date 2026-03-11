@@ -2,7 +2,13 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+if [[ -f "$SCRIPT_DIR/../../wbeam" ]]; then
+  ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+elif [[ -f "$SCRIPT_DIR/../../../wbeam" ]]; then
+  ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+else
+  ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+fi
 WBEAM_CONFIG_HELPER="$ROOT_DIR/host/scripts/wbeam_config.sh"
 if [[ -f "$WBEAM_CONFIG_HELPER" ]]; then
   # shellcheck source=host/scripts/wbeam_config.sh

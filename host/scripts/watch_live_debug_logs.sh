@@ -2,7 +2,13 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+if [[ -f "$SCRIPT_DIR/../../wbeam" ]]; then
+  ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+elif [[ -f "$SCRIPT_DIR/../../../wbeam" ]]; then
+  ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+else
+  ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+fi
 LOG_DIR="${WBEAM_DEBUG_LOG_DIR:-$ROOT_DIR/logs}"
 mkdir -p "$LOG_DIR"
 

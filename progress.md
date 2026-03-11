@@ -2833,3 +2833,24 @@ Status: active
   - devices are always polled from backend; actions remain separately gated.
 - Validation:
   - `cd desktop/apps/desktop-tauri && npm run build` -> OK.
+
+## Completed (2026-03-11 18:06 CET) - Fixed daemon service crash loop caused by wrong host-script root path
+- Root cause identified from user-service journal:
+  - `run_wbeamd.sh` in systemd path entered `auto -> python (fallback)` and failed with:
+    - `/home/ppotepa/git/host/daemon/wbeamd.py: No such file or directory`
+  - script resolved repository root one level too high (`../../..`) when invoked from `host/scripts/*`.
+- Implemented robust root-resolution in host scripts:
+  - detects repo root via presence of `wbeam` in candidate paths:
+    - first `../..` (for `host/scripts`)
+    - then `../../..` (for `src/host/scripts`)
+  - applied to:
+    - `host/scripts/run_wbeamd.sh`
+    - `host/scripts/run_wbeamd_debug.sh`
+    - `host/scripts/watch_live_debug_logs.sh`
+    - `host/scripts/run_soak_local.sh`
+    - `host/scripts/soak_usb_30m.sh`
+- Validation:
+  - `bash -n` for all patched scripts -> OK.
+  - user systemd restart now healthy:
+    - `systemctl --user restart wbeam-daemon.service` -> active (running)
+    - `curl http://127.0.0.1:5001/v1/health` -> `ok:true`, `build_revision=0.1.0.151.320fe`.
