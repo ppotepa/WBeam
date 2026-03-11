@@ -10,8 +10,15 @@ if [[ -f "$WBEAM_CONFIG_HELPER" ]]; then
   wbeam_load_config "$ROOT_DIR"
 fi
 TARGET_DIR="$ROOT_DIR/.build/devtool"
-TAURI_DIR="$ROOT_DIR/src/apps/desktop-tauri"
-TAURI_MANIFEST="$TAURI_DIR/src-tauri/Cargo.toml"
+DESKTOP_APP_DIR="$ROOT_DIR/src/apps/desktop-tauri"
+DESKTOP_FRONTEND_DIR="$DESKTOP_APP_DIR"
+if [[ -f "$DESKTOP_APP_DIR/frontend/package.json" ]]; then
+  DESKTOP_FRONTEND_DIR="$DESKTOP_APP_DIR/frontend"
+fi
+TAURI_MANIFEST="$DESKTOP_APP_DIR/src-tauri/Cargo.toml"
+if [[ -f "$DESKTOP_APP_DIR/backend/Cargo.toml" ]]; then
+  TAURI_MANIFEST="$DESKTOP_APP_DIR/backend/Cargo.toml"
+fi
 HOST_WORKSPACE_DIR="$ROOT_DIR/src/host/rust"
 CONTROL_PORT="${WBEAM_CONTROL_PORT:-5001}"
 STREAM_PORT="${WBEAM_STREAM_PORT:-5000}"
@@ -198,8 +205,10 @@ run_host_build() {
 
 run_desktop_build() {
   log "build desktop-tauri frontend + backend"
+  log "desktop frontend dir: $DESKTOP_FRONTEND_DIR"
+  log "desktop backend manifest: $TAURI_MANIFEST"
   (
-    cd "$TAURI_DIR"
+    cd "$DESKTOP_FRONTEND_DIR"
     if [[ ! -d node_modules ]]; then
       npm install
     fi

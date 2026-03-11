@@ -10,6 +10,12 @@ if [[ -f "$WBEAM_CONFIG_HELPER" ]]; then
   wbeam_load_config "$ROOT_DIR"
 fi
 
+DESKTOP_APP_DIR="$ROOT_DIR/src/apps/desktop-tauri"
+DESKTOP_FRONTEND_DIR="$DESKTOP_APP_DIR"
+if [[ -f "$DESKTOP_APP_DIR/frontend/package.json" ]]; then
+  DESKTOP_FRONTEND_DIR="$DESKTOP_APP_DIR/frontend"
+fi
+
 usage() {
   cat <<'USAGE'
 Usage:
@@ -328,7 +334,7 @@ run_step "adb snapshot (post-deploy)" adb_snapshot_log "$ADB_LOG"
 run_step "version doctor" ./wbeam version doctor
 
 if [[ "$REBUILD_DESKTOP" -eq 1 ]]; then
-  run_step "desktop app rebuild" bash -lc "npm --prefix '$ROOT_DIR/src/apps/desktop-tauri' run build"
+  run_step "desktop app rebuild" bash -lc "npm --prefix '$DESKTOP_FRONTEND_DIR' run build"
 else
   run_step "desktop app rebuild" bash -lc "echo '[start-remote] skipped (use --rebuild-desktop or --redeploy)'"
 fi

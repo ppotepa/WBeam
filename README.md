@@ -63,6 +63,10 @@ If you just want it to work now:
 - `proto/` - historical sandbox lane
 - `proto_x11/` - X11 virtual-monitor prototype lane
 
+For contributor-facing path conventions and migration targets, see:
+
+- `docs/repo-structure-contract.md`
+
 ## Main Entrypoints
 
 - `./wbeam` - canonical CLI
