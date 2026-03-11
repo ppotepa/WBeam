@@ -2805,3 +2805,16 @@ Status: active
 - Validation:
   - `bash -n runas-remote` -> OK
   - `./desktop.sh` startup log no longer reports X11 authorization warning on remote-session path.
+
+## Completed (2026-03-11 17:41 CET) - Trainer daemon startup fallback hardening (systemd -> host-run)
+- Fixed trainer startup path for cases where `systemd --user start` succeeds but `/v1/health` remains unreachable.
+- `trainer.sh` now tracks daemon start mode:
+  - `systemd`
+  - `host-run`
+- New behavior:
+  - if systemd path does not produce healthy API within wait window, trainer automatically retries via background `wbeam host run`.
+  - second health wait is executed after fallback.
+- This removes "service health unreachable" dead-end on hosts where user unit exists but does not become healthy.
+- Validation:
+  - `bash -n trainer.sh` -> OK
+  - repro run: `./trainer.sh --web --start-service` now falls back and reaches `service health: ok=True`.

@@ -18,6 +18,7 @@ BOOT_LOG_DIR="${ROOT_DIR}/logs/trainer"
 DAEMON_PID_FILE="${ROOT_DIR}/.logs/trainer-daemon.pid"
 HEALTH_WAIT_ATTEMPTS="${WBEAM_TRAINER_HEALTH_WAIT_ATTEMPTS:-80}"
 HEALTH_WAIT_MS="${WBEAM_TRAINER_HEALTH_WAIT_MS:-500}"
+DAEMON_START_MODE=""
 
 log() {
   printf '[trainer] %s\n' "$*"
@@ -201,10 +202,12 @@ start_daemon_background_host_run() {
 
 start_daemon_best_effort() {
   if start_daemon_via_systemd; then
+    DAEMON_START_MODE="systemd"
     log "daemon start requested via systemd user service"
     return 0
   fi
   log "systemd user service start unavailable; falling back to background host run"
+  DAEMON_START_MODE="host-run"
   start_daemon_background_host_run
 }
 
@@ -304,6 +307,17 @@ if ! health_msg="$(check_health 2>/dev/null)"; then
     if start_daemon_best_effort; then
       if ! wait_for_health "${HEALTH_WAIT_ATTEMPTS}" "${HEALTH_WAIT_MS}"; then
         log "daemon start attempted but health is still unreachable"
+        if [[ "${DAEMON_START_MODE}" == "systemd" ]]; then
+          log "systemd start did not reach healthy API; retrying via background host run fallback"
+          if start_daemon_background_host_run; then
+            DAEMON_START_MODE="host-run"
+            if ! wait_for_health "${HEALTH_WAIT_ATTEMPTS}" "${HEALTH_WAIT_MS}"; then
+              log "fallback host run attempted but health is still unreachable"
+            fi
+          else
+            log "fallback host run start failed"
+          fi
+        fi
       fi
     else
       log "failed to start daemon service"
