@@ -23,6 +23,8 @@ install -m 0644 "${ROOT_DIR}/README.md" "${SRCROOT}/README.md"
 tar -C "${TOPDIR}" -czf "${TOPDIR}/SOURCES/wbeam-${RPM_VERSION}.tar.gz" "wbeam-${RPM_VERSION}"
 
 cat > "${TOPDIR}/SPECS/wbeam.spec" <<EOF
+%global debug_package %{nil}
+%global __debug_install_post %{nil}
 Name:           wbeam
 Version:        ${RPM_VERSION}
 Release:        ${RPM_RELEASE}%{?dist}

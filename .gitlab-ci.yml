@@ -120,7 +120,10 @@ build_apk_release:
     - unzip -q /tmp/cmdline-tools.zip -d /tmp
     - rm -rf "${ANDROID_SDK_ROOT}/cmdline-tools/latest"
     - mv /tmp/cmdline-tools "${ANDROID_SDK_ROOT}/cmdline-tools/latest"
-    - 'yes | "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" --sdk_root="${ANDROID_SDK_ROOT}" --licenses >/dev/null'
+    - |
+      set +o pipefail
+      yes | "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" --sdk_root="${ANDROID_SDK_ROOT}" --licenses >/dev/null
+      set -o pipefail
     - '"${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" --sdk_root="${ANDROID_SDK_ROOT}" "platform-tools" "platforms;android-35" "build-tools;35.0.0"'
     - ./scripts/ci/build_apk_release.sh
   artifacts:

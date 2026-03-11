@@ -14,6 +14,7 @@ rustup target add "${TARGET}"
 
 echo "[build_aarch64] Building wbeamd-server for ${TARGET}..."
 export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
+export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
 cargo build --release --target "${TARGET}" -p wbeamd-server --manifest-path "${RUST_MANIFEST}"
 
 mkdir -p "${PKGROOT}/bin" "${PKGROOT}/doc"
