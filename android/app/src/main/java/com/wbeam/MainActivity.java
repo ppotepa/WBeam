@@ -46,6 +46,7 @@ import com.wbeam.api.HostApiClient;
 import com.wbeam.api.StatusListener;
 import com.wbeam.api.StatusPoller;
 import com.wbeam.hud.HudRenderSupport;
+import com.wbeam.startup.StartupStepStyler;
 import com.wbeam.stream.H264TcpPlayer;
 import com.wbeam.stream.VideoTestController;
 import com.wbeam.stream.StreamSessionController;
@@ -3394,11 +3395,14 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        applyStepState(step1, "1", startupStep1Card, startupStep1Badge, startupStep1Label,
+        StartupStepStyler.applyStepState(step1, preflightAnimTick, SS_OK, SS_ERROR, SS_ACTIVE,
+                "1", startupStep1Card, startupStep1Badge, startupStep1Label,
                 startupStep1Status, startupStep1Detail, step1Detail);
-        applyStepState(step2, "2", startupStep2Card, startupStep2Badge, startupStep2Label,
+        StartupStepStyler.applyStepState(step2, preflightAnimTick, SS_OK, SS_ERROR, SS_ACTIVE,
+                "2", startupStep2Card, startupStep2Badge, startupStep2Label,
                 startupStep2Status, startupStep2Detail, step2Detail);
-        applyStepState(step3, "3", startupStep3Card, startupStep3Badge, startupStep3Label,
+        StartupStepStyler.applyStepState(step3, preflightAnimTick, SS_OK, SS_ERROR, SS_ACTIVE,
+                "3", startupStep3Card, startupStep3Badge, startupStep3Label,
                 startupStep3Status, startupStep3Detail, step3Detail);
 
         // subtitle
@@ -3529,91 +3533,6 @@ public class MainActivity extends AppCompatActivity {
                 });
             }
         });
-    }
-
-    private void applyStepState(int state, String number,
-            View card, TextView badge, TextView label, TextView status, TextView detail,
-            String detailText) {
-        if (badge == null || label == null || status == null || detail == null || card == null) {
-            return;
-        }
-        int badgeBg, badgeFg, labelColor, statusColor, cardBg;
-        String statusStr;
-        String icon = stepIconForNumber(number);
-        boolean blink = (preflightAnimTick % 2) == 0;
-        switch (state) {
-            case SS_OK:
-                cardBg     = Color.parseColor("#0F2E25");
-                badgeBg    = Color.parseColor("#14532D");
-                badgeFg    = Color.parseColor("#4ADE80");
-                labelColor = Color.parseColor("#86EFAC");
-                statusColor= Color.parseColor("#4ADE80");
-                statusStr  = "OK";
-                badge.setText(icon);
-                detail.setTextColor(Color.parseColor("#86EFAC"));
-                break;
-            case SS_ERROR:
-                cardBg     = Color.parseColor("#361113");
-                badgeBg    = Color.parseColor("#7F1D1D");
-                badgeFg    = Color.parseColor("#FCA5A5");
-                labelColor = Color.parseColor("#FCA5A5");
-                statusColor= Color.parseColor("#FCA5A5");
-                statusStr  = "ERR";
-                badge.setText(icon);
-                detail.setTextColor(Color.parseColor("#FCA5A5"));
-                break;
-            case SS_ACTIVE:
-                cardBg     = blink ? Color.parseColor("#3A2A0F") : Color.parseColor("#2B1F0F");
-                badgeBg    = blink ? Color.parseColor("#A16207") : Color.parseColor("#854D0E");
-                badgeFg    = Color.parseColor("#FEF08A");
-                labelColor = Color.parseColor("#FEF08A");
-                statusColor= Color.parseColor("#FDE68A");
-                statusStr  = "BUSY";
-                badge.setText(icon);
-                detail.setTextColor(Color.parseColor("#FDE68A"));
-                break;
-            default: // SS_PENDING
-                cardBg     = Color.parseColor("#111827");
-                badgeBg    = Color.parseColor("#1E293B");
-                badgeFg    = Color.parseColor("#64748B");
-                labelColor = Color.parseColor("#64748B");
-                statusColor= Color.parseColor("#64748B");
-                statusStr  = "WAIT";
-                badge.setText(icon);
-                detail.setTextColor(Color.parseColor("#94A3B8"));
-                break;
-        }
-        if (card.getBackground() instanceof GradientDrawable) {
-            GradientDrawable cardDrawable = (GradientDrawable) card.getBackground().mutate();
-            cardDrawable.setColor(cardBg);
-        } else {
-            card.setBackgroundColor(cardBg);
-        }
-        badge.setBackgroundColor(badgeBg);
-        badge.setTextColor(badgeFg);
-        label.setTextColor(labelColor);
-        status.setText(statusStr);
-        status.setTextColor(statusColor);
-        detail.setText(detailText != null ? detailText : "");
-    }
-
-    private String stepIconForNumber(String number) {
-        if ("1".equals(number)) {
-            return "\u21C4"; // link
-        }
-        if ("2".equals(number)) {
-            return "\u2699"; // handshake/config
-        }
-        return "\u25B6"; // stream/play
-    }
-
-    private String spinnerGlyph() {
-        switch (preflightAnimTick) {
-            case 1:  return "/";
-            case 2:  return "-";
-            case 3:  return "\\";
-            default: return "|";
-        }
     }
 
     // ══════════════════════════════════════════════════════════════════════════
