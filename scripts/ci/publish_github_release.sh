@@ -96,9 +96,9 @@ if [[ -n "${CI_COMMIT_TAG:-}" ]]; then
   RELEASE_TAG="${CI_COMMIT_TAG}"
   RELEASE_NAME="${CI_COMMIT_TAG}"
   PRERELEASE_JSON="false"
-elif [[ "${CI_COMMIT_BRANCH:-}" == "main" || "${CI_COMMIT_BRANCH:-}" == "${CI_DEFAULT_BRANCH:-}" ]]; then
-  RELEASE_TAG="main-latest"
-  RELEASE_NAME="main-latest (${WBEAM_VERSION})"
+elif [[ "${CI_COMMIT_BRANCH:-}" == "${CI_DEFAULT_BRANCH:-}" ]]; then
+  RELEASE_TAG="${CI_DEFAULT_BRANCH:-default}-latest"
+  RELEASE_NAME="${RELEASE_TAG} (${WBEAM_VERSION})"
   PRERELEASE_JSON="true"
 else
   echo "[publish] Branch is not releasable, skipping."

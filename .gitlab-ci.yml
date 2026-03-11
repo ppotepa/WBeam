@@ -15,7 +15,7 @@ default:
         export WBEAM_VERSION="${CI_COMMIT_TAG#v}"
         export WBEAM_VERSION="${WBEAM_VERSION#V}"
       else
-        export WBEAM_VERSION="0.0.0.main.${CI_PIPELINE_IID}.${CI_COMMIT_SHORT_SHA}"
+        export WBEAM_VERSION="0.0.0.${CI_DEFAULT_BRANCH}.${CI_PIPELINE_IID}.${CI_COMMIT_SHORT_SHA}"
       fi
     - chmod +x scripts/ci/*.sh
 
@@ -50,7 +50,6 @@ build_deb:
     expire_in: 14 days
   rules:
     - if: $CI_COMMIT_TAG
-    - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
 build_rpm:
@@ -69,7 +68,6 @@ build_rpm:
     expire_in: 14 days
   rules:
     - if: $CI_COMMIT_TAG
-    - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
 build_aarch64_tar:
@@ -105,7 +103,6 @@ build_aarch64_tar:
   allow_failure: true
   rules:
     - if: $CI_COMMIT_TAG
-    - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
 build_apk_release:
@@ -133,7 +130,6 @@ build_apk_release:
     expire_in: 14 days
   rules:
     - if: $CI_COMMIT_TAG
-    - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
 publish_github_release:
@@ -146,5 +142,4 @@ publish_github_release:
     - ./scripts/ci/publish_github_release.sh
   rules:
     - if: $CI_COMMIT_TAG
-    - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH

@@ -11,13 +11,13 @@ The setup uses:
 - Local GitLab CE in Docker (LAN-accessible)
 - GitLab Runner in Docker (Docker executor)
 - Project: `root/wbeam`
-- Default branch: `main`
+- Default branch: `master` (or whichever branch is configured as default in GitLab)
 - Pipeline config: `.gitlab-ci.yml`
 - Build/release scripts in `scripts/ci/`
 
 Main objective:
 
-- On push to `main`: build artifacts and publish them to GitHub release `main-latest` (pre-release)
+- On push to default branch: build artifacts and publish them to GitHub release `<default-branch>-latest` (pre-release)
 - On tag `vX.Y.Z`: build artifacts and publish them to GitHub release `vX.Y.Z`
 - All artifacts in one pipeline share one common `WBEAM_VERSION`
 
@@ -46,8 +46,8 @@ Remote repository in local GitLab:
 
 Branch behavior:
 
-- `main` is used as the CI release branch
-- `master` may still exist historically, but release logic is tied to `main`
+- CI release logic follows `CI_DEFAULT_BRANCH`
+- In your current setup, default branch is `master`
 
 ## 4. CI/CD Variables (Project-level)
 
@@ -105,7 +105,7 @@ Jobs:
 
 Rules:
 
-- Runs on `main`, default branch, and tags
+- Runs on default branch and tags
 
 ### 5.2 CI scripts in `scripts/ci/`
 
@@ -119,15 +119,15 @@ Rules:
 Versioning:
 
 - Each job uses one shared `WBEAM_VERSION`
-- `main` example format: `0.0.0.main.<pipeline_iid>.<short_sha>`
+- default branch example format: `0.0.0.<default-branch>.<pipeline_iid>.<short_sha>`
 - tag pipelines use the tag value directly (for example `v1.2.3` -> `1.2.3` for package versions where needed)
 
 ## 6. GitHub Release Strategy
 
 Implemented behavior:
 
-- For `main` branch pipelines:
-  - Release tag: `main-latest`
+- For default branch pipelines:
+  - Release tag: `<default-branch>-latest` (for example `master-latest`)
   - Type: pre-release
   - Existing assets with same names are replaced
 
@@ -160,9 +160,9 @@ Important:
 - If `config.toml` is missing, jobs stay `pending`
 - Registering the runner creates/updates this file
 
-## 8. Expected Flow on Push to `main`
+## 8. Expected Flow on Push to Default Branch
 
-1. Developer pushes commit to `main`
+1. Developer pushes commit to default branch (currently `master`)
 2. GitLab creates a pipeline
 3. Runner picks jobs in order:
    - `build_deb`
@@ -170,7 +170,7 @@ Important:
    - `build_aarch64_tar` (optional)
    - `build_apk_release`
 4. Build artifacts are collected in `dist/`
-5. `publish_github_release` updates/creates `main-latest` and uploads files
+5. `publish_github_release` updates/creates `<default-branch>-latest` and uploads files
 6. GitHub release page shows latest artifacts
 
 ## 9. Expected Flow on Tag `vX.Y.Z`
@@ -232,7 +232,7 @@ The build jobs install required dependencies at runtime. If packages move or are
 
 - This setup is optimized for LAN/local build infrastructure
 - GitHub is used as artifact distribution endpoint
-- `main-latest` is intentionally mutable (rolling latest)
+- `<default-branch>-latest` is intentionally mutable (rolling latest)
 - Tagged releases are immutable version references in practice
 
 ## 13. File Reference Summary
