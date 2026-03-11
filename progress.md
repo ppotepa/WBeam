@@ -2405,3 +2405,17 @@ Status: active
 - Validation:
   - `cd src/host/rust && cargo check -p wbeamd-streamer -p wbeamd-server` -> OK
   - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+
+## In Progress (2026-03-11) - AGENTS handbook modernization pass (master-based branch)
+- Rewrote `AGENTS.md` into a current operational handbook reflecting actual repository state.
+- Confirmed from previous updates that environment handling moved away from env-only assumptions:
+  - runtime is documented as config-first (`config/wbeam.conf` + user config) with env overrides,
+  - explicit guidance now favors config/API payloads for reproducible runs.
+- Added missing current surfaces:
+  - trainer application and trainer domain (`src/apps/trainer-tauri`, `./trainer.sh`, `./wbeam train wizard`),
+  - workflow source-of-truth pointer (`docs/agents.workflow.md`),
+  - updated practical tree including `trainer-tauri`, `config`, `updates`, `proto_x11`.
+- Refined operational content:
+  - refreshed key command sets (local/diagnostic/remote),
+  - clarified multi-device session model and per-serial API usage,
+  - tightened failure-mode diagnostics for connect/version/API17/Wayland cases.

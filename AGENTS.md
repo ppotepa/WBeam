@@ -1,231 +1,224 @@
 # WBeam Agent Handbook
 
-Last updated: 2026-03-07
+Last updated: 2026-03-11
 Primary entrypoint: `./wbeam`
 
 ## 1. Project Goal
 
-WBeam turns Android devices (including legacy API 17 tablets) into USB-connected second screens for Linux hosts, with a host daemon, Android client, and desktop control UI.
+WBeam turns Android devices (including legacy API 17 tablets) into USB-connected external displays for Linux hosts.
 
-This repo has two lanes:
+Core product surfaces:
+- Host daemon/runtime (`src/host/rust/`)
+- Android client (`android/`)
+- Desktop control UI (`src/apps/desktop-tauri/`)
+- Trainer UI + trainer domain (`src/apps/trainer-tauri/`, `src/domains/training/`)
 
-- Main lane (production path): `android/`, `src/host/rust/`, `src/apps/desktop-tauri/`, `wbeam`
-- Proto lane (historical R&D sandbox): `proto/` (kept for experiments and profile history)
+## 2. Canonical Operational Entry Points
 
-## 2. Source Of Truth And Entry Scripts
+- `./wbeam` -> canonical CLI orchestration
+- `./wbgui` -> terminal UI
+- `./devtool` -> developer convenience wrapper
+- `./trainer.sh` -> trainer desktop launcher
+- `./start-remote` -> remote session bootstrap (host + UI + optional deploy)
+- `./runas-remote` -> run a command in active graphical session
 
-- `./wbeam` is the canonical CLI orchestrator.
-- `./wbgui` is interactive terminal menu.
-- `./devtool` is developer wrapper (GUI-first + build/deploy convenience).
-- `./start-remote` is remote-session bootstrap for full host + desktop + Android flow.
-- `./runas-remote` executes one command in active graphical session of selected user.
+Rule:
+- Never hardcode usernames/IPs in scripts or docs.
+- Use explicit params or config/env inputs.
 
-Rule: do not hardcode usernames or host IPs. Pass user explicitly or via `WBEAM_DEV_REMOTE_USER`.
+## 3. Workflow Source Of Truth
 
-## 3. High-Level Architecture
+Canonical branch/release workflow lives in:
+- `docs/agents.workflow.md`
 
-### Host side
+If branching process changes, update that file first.
 
-- Rust control daemon HTTP server: `src/host/rust/crates/wbeamd-server`
-- Rust daemon core/state machine: `src/host/rust/crates/wbeamd-core`
-- Rust streamer (GStreamer capture + transport): `src/host/rust/crates/wbeamd-streamer`
+Current practical model in repo:
+- long-lived: `master`, `release`, version lanes (for example `0.1.1`)
+- short-lived: feature branches for issue work
+
+## 4. Repository Lanes
+
+- Main lane (production): `android/`, `src/host/rust/`, `src/apps/desktop-tauri/`, `src/apps/trainer-tauri/`, `src/domains/training/`
+- Proto lane (historical/R&D): `proto/`, `proto_x11/` (kept for experiments and history)
+
+## 5. High-Level Architecture
+
+### Host
+
+- API server: `src/host/rust/crates/wbeamd-server`
+- Core/state machine: `src/host/rust/crates/wbeamd-core`
+- Streamer pipeline/transport: `src/host/rust/crates/wbeamd-streamer`
 - Python fallback daemon: `src/host/daemon/wbeamd.py`
 - Host scripts: `src/host/scripts/`
 
-### Desktop side
+### Desktop
 
-- Current UI: Tauri + Solid + TypeScript: `src/apps/desktop-tauri`
-- Legacy desktop-egui UI has been removed from active repo paths.
+- Main desktop app: `src/apps/desktop-tauri`
+- Trainer app: `src/apps/trainer-tauri`
 
-### Android side
+### Android
 
-- Main app package: `com.wbeam` in `android/app/src/main/java/com/wbeam`
-- Stream decode path: `H264TcpPlayer`, `StreamService`, `StreamSessionController`
-- Startup/diagnostics UI flow in `MainActivity` and `StatusPoller`
+- Main package: `com.wbeam`
+- Stream decode path centered around:
+  - `H264TcpPlayer`
+  - `StreamService`
+  - `StreamSessionController`
 
-### Protocol side
+### Protocol
 
-- WBTP-related crates in `src/protocol/rust/crates/*`
+- WBTP crates under `src/protocol/rust/crates/*`
 
-## 4. Runtime Model
+## 6. Runtime Ownership Model
 
-### Why a daemon service exists
+- Desktop UIs are clients.
+- Streaming lifecycle authority is the daemon service.
+- Service is user-scoped systemd (`--user`), not system-wide root service.
 
-Desktop GUI is a thin client. Streaming control/state belongs to host daemon (`wbeamd-server`).
-The service keeps stream lifecycle stable independently of UI restarts.
+Service unit path:
+- `~/.config/systemd/user/wbeam-daemon.service`
 
-### Service ownership model
+## 7. Multi-Device Session Model
 
-- Service is a user-level systemd unit (`--user`), not system-wide root service.
-- Tauri backend can install/uninstall/start/stop service by writing:
-  - `~/.config/systemd/user/wbeam-daemon.service`
+Sessions are keyed by ADB serial and stream port.
 
-### Multi-device model (current)
-
-Host supports per-device session cores keyed by ADB serial.
-Each device can map to dedicated `stream_port` and daemon session via query args:
-
+Per-device API pattern:
 - `/v1/status?serial=<serial>&stream_port=<port>`
 - `/v1/start?serial=<serial>&stream_port=<port>`
 - `/v1/stop?serial=<serial>&stream_port=<port>`
 
-Port mapping file:
+Device port mapping:
+- `.wbeam_device_ports`
 
-- `.wbeam_device_ports` (generated/updated by deploy flow)
+## 8. Android Pipeline Compatibility
 
-## 5. Android Pipelines And API Compatibility
+Pipeline selection via `./wbeam`:
+- `legacy` -> minSdk 17 (API <= 18)
+- `modern` -> minSdk 19+
+- `auto` -> selected from detected device API
 
-Pipeline selector is in `./wbeam`:
+Practical behavior:
+- API 17 often needs tether/LAN fallback (reverse may be limited)
+- modern devices usually work with `adb reverse` and loopback host
 
-- `legacy` -> minSdk 17 (for API <= 18 devices)
-- `modern` -> minSdk 19
-- `auto` chooses based on detected device API
+## 9. Configuration And Environment
 
-Behavior:
+Runtime model is config-first with env override compatibility.
 
-- API 17 path usually cannot rely on full `adb reverse` behavior, often needs tether/LAN host IP fallback.
-- API 34 path commonly uses `127.0.0.1` through `adb reverse`.
+Defaults and precedence:
+1. Process env (explicit override)
+2. User config `~/.config/wbeam/wbeam.conf`
+3. Repo template `config/wbeam.conf` (used for bootstrap/defaults)
 
-## 6. Versioning And Compatibility Contract
+Helper:
+- `src/host/scripts/wbeam_config.sh`
 
-Single compatibility version is shared by:
+Important env groups:
 
-- Android APK versionName
-- Host daemon build revision (`/health -> build_revision`)
-
-Desktop GUI version is separate UI app version and is not compatibility gate.
-
-Version files:
-
-- `.wbeam_build_version`
-- `.wbeam_buildno`
-
-Current default generated format in `wbeam`:
-
-- `0.1.0.<build_number>.<hash>`
-
-Mismatch diagnostics:
-
-- `./wbeam version doctor`
-
-Doctor checks:
-
-- daemon `/health` revision
-- local build files
-- per-device installed APK version
-- match/mismatch result
-
-## 7. Connect Flow (Desktop Tauri -> Device)
-
-Frontend action:
-
-- `Connect` button calls Tauri command `device_connect(serial, stream_port)`.
-
-Backend action sequence:
-
-1. `adb start-server`
-2. device readiness probe (`adb -s <serial> get-state` polling)
-3. `adb reverse` for stream and control ports
-4. `adb shell am start -n com.wbeam/.MainActivity`
-5. daemon POST `/v1/start?serial=...&stream_port=...`
-
-Diagnostics added:
-
-- `logs/desktop-connect.log` contains step-by-step connect trace.
-
-## 8. Remote Workflows (RDP/Wayland/X11)
-
-`start-remote` exists because development happens from another machine while Android devices are physically attached to host.
-
-Default flow in `start-remote`:
-
-1. stop old host
-2. remove desktop user service for clean state
-3. optional host rebuild
-4. start host in remote graphical session user
-5. wait for control API
-6. launch desktop GUI in remote session
-7. snapshot ADB + start udev monitor logging
-8. optional full `android deploy-all` (with `--redeploy`)
-9. run version doctor
-
-Use:
-
-- `./start-remote <desktop_user>`
-- `./start-remote <desktop_user> --redeploy`
-
-Never assume fixed user/IP in scripts.
-
-## 9. Environment Variables (Important)
-
-### Core ports and service
-
-- `WBEAM_CONTROL_PORT` (default `5001`)
-- `WBEAM_STREAM_PORT` (default `5000`)
-- `WBEAM_DAEMON_SERVICE_NAME` (default `wbeam-daemon`)
-- `WBEAM_DAEMON_BIN` (Tauri service unit override)
+### Core service/ports
+- `WBEAM_CONTROL_PORT`
+- `WBEAM_STREAM_PORT`
+- `WBEAM_DAEMON_SERVICE_NAME`
+- `WBEAM_DAEMON_BIN`
 
 ### Versioning
-
 - `WBEAM_BUILD_REV`
-- `WBEAM_VERSION_BASE` (default `0.1.0` in `wbeam`, `0.1` in `devtool`)
+- `WBEAM_VERSION_BASE`
 
 ### Android deploy/build
-
 - `WBEAM_ANDROID_SERIAL`
-- `WBEAM_ANDROID_PIPELINE` (`auto|legacy|modern`)
+- `WBEAM_ANDROID_PIPELINE`
 - `WBEAM_ANDROID_HOST`
 - `WBEAM_ANDROID_API_HOST`
 - `WBEAM_ANDROID_STREAM_HOST`
 - `WBEAM_ANDROID_FORCE_INSTALL`
 - `WBEAM_ANDROID_SKIP_LAUNCH`
-- `WBEAM_MIN_SDK` (Gradle prop path)
+- `WBEAM_MIN_SDK`
 
-### Remote scripts
+### Remote
+- `WBEAM_DEV_REMOTE_USER`
 
-- `WBEAM_DEV_REMOTE_USER` (default target user for remote session scripts)
-
-### Watch/log behavior
-
+### Watch/log
 - `WBEAM_WATCH_INTERVAL`
 - `WBEAM_WATCH_LOG`
 - `WBEAM_WATCH_COLOR`
 - `WBEAM_ADB_LOGCAT_AUTO`
 
-### Host streamer internals (advanced)
-
+### Streamer internals (advanced)
 - `WBEAM_USE_RUST_STREAMER`
 - `WBEAM_RUST_STREAMER_BIN`
 - `WBEAM_START_TIMEOUT_SEC`
 - `WBEAM_ALLOW_LIVE_ADAPTIVE_RESTART`
 
-## 10. Logging Strategy
+Guidance:
+- Prefer config/API payloads for reproducible runs.
+- Use env vars for tactical one-off overrides.
 
-Main logs directory: `logs/`
+## 10. Versioning Contract
 
-Patterns currently used:
+Compatibility version is shared by:
+- Android APK `versionName`
+- Host daemon `build_revision` (`/health`)
 
-- `YYYYMMDD-HHMMSS.desktop.NNNN.log`
-- `YYYYMMDD-HHMMSS.adb.NNNN.log`
-- `YYYYMMDD-HHMMSS.udev.NNNN.log`
-- `YYYYMMDD-HHMMSS.host.NNNN.log`
-- `YYYYMMDD-HHMMSS.version.NNNN.log`
-- `desktop-connect.log` (connect path trace)
+Desktop UI app version is not the compatibility gate.
 
-Runtime generated files are ignored in git (`.gitignore` has broad `logs/*`, `*.log`, build artifacts, version temp files).
+Local version files:
+- `.wbeam_build_version`
+- `.wbeam_buildno`
 
-## 11. Current Key Commands
+Diagnostics:
+- `./wbeam version doctor`
 
-### Common local loop
+## 11. Trainer Domain (Current State)
 
+Canonical trainer path:
+- `./wbeam train wizard`
+- implementation: `src/domains/training/wizard.py`
+
+Trainer desktop launcher:
+- `./trainer.sh` (Trainer Tauri UI)
+
+Trainer and runtime HUDs are active UX areas; keep data mapping explicit and test against both desktop and Android displays.
+
+## 12. Connect Flow (Desktop -> Device)
+
+Typical connect sequence:
+1. `adb start-server`
+2. device state probe
+3. `adb reverse` control + stream ports
+4. launch Android activity
+5. daemon `/v1/start` for selected serial/port
+
+Trace file:
+- `logs/desktop-connect.log`
+
+## 13. Logging Strategy
+
+Main logs directory:
+- `logs/`
+
+Typical files:
+- `*.desktop.*.log`
+- `*.adb.*.log`
+- `*.udev.*.log`
+- `*.host.*.log`
+- `*.version.*.log`
+- `desktop-connect.log`
+
+Git hygiene:
+- generated runtime/build artifacts should stay ignored (`logs/*`, build outputs, caches)
+
+## 14. Current Key Commands
+
+### Daily local loop
 - `./wbeam host debug`
 - `./wbeam android deploy-all`
-- `./wbgui` or `./devtool` (desktop UI)
+- `./wbgui` or `./devtool`
+- `./trainer.sh`
+- `./wbeam train wizard`
 - `./wbeam version doctor`
-- `./wbeam watch tui`
 
 ### Fast diagnostics
-
 - `./wbeam daemon status`
 - `./wbeam watch devices`
 - `./wbeam watch streaming`
@@ -233,70 +226,45 @@ Runtime generated files are ignored in git (`.gitignore` has broad `logs/*`, `*.
 - `./wbeam watch logs`
 
 ### Remote full loop
-
 - `./start-remote <user> --redeploy`
 
-## 12. Android Startup Step Semantics (MainActivity)
+## 15. Known Failure Modes
 
-Android startup UI has 3 conceptual steps:
-
-1. Control link: host API reachable
-2. Handshake: daemon/service/build revision checks
-3. Stream path: transport/decode/frame flow
-
-Typical messages:
-
-- "waiting for control link"
-- "build mismatch"
-- "connecting to <host>:<port>"
-- "check USB tethering / host IP / LAN"
-
-Files:
-
-- `android/app/src/main/java/com/wbeam/MainActivity.java`
-- `android/app/src/main/java/com/wbeam/api/StatusPoller.java`
-- `android/app/src/main/java/com/wbeam/StreamService.java`
-
-## 13. Known Failure Modes
-
-### "more than one device/emulator"
-
-Cause: no explicit serial when multiple ADB devices are connected.
-Fix: set `WBEAM_ANDROID_SERIAL` or use `deploy-all` serial-aware flow.
+### Multiple ADB devices and ambiguous target
+- Symptom: `more than one device/emulator`
+- Fix: set explicit serial or use serial-aware deploy flow
 
 ### Build mismatch (host vs APK)
+- Symptom: startup mismatch/handshake block
+- Fix: rebuild + redeploy with one shared build revision, verify with `version doctor`
 
-Cause: host daemon revision and APK versionName differ.
-Fix: rebuild + redeploy with one shared `WBEAM_BUILD_REV`; verify with `version doctor`.
+### API17 stuck on control/tether checks
+- Cause: host path not reachable for legacy path
+- Fix: validate tether/LAN host path and check logs
 
-### API17 stuck on "check USB tethering"
+### Foreground app but no stream
+- Cause: partial connect succeeded, start/session mapping failed
+- Fix: inspect `desktop-connect.log`, per-serial `/v1/status`, and watch metrics
 
-Cause: control/stream host not reachable from old device path; reverse may be unavailable.
-Fix: ensure tethering path and reachable host IP fallback; inspect `desktop-connect.log` + adb logs.
+### Wayland desktop launch anomalies
+- Cause: GUI backend/session constraints
+- Fix: use current launcher wrappers and review logs; avoid bypassing wrappers in remote shells
 
-### API34 app foregrounds but no stream
-
-Cause: connect preflight partially succeeds (launch), but daemon start/session/port mapping fails.
-Fix: inspect `desktop-connect.log`, `/v1/status` per serial/port, `watch streaming`.
-
-### UI appears frozen on connect
-
-Cause: expensive device polling overlapping with connect action.
-Current mitigation: refresh-in-flight guard + slower polling + busy tile state.
-
-## 14. Key Paths (Practical Tree)
+## 16. Practical Tree
 
 ```text
 WBeam/
   wbeam
   wbgui
   devtool
+  trainer.sh
   start-remote
   runas-remote
   android/
   src/
     apps/
       desktop-tauri/
+      trainer-tauri/
     domains/
       training/
     host/
@@ -309,16 +277,19 @@ WBeam/
       api17/
       api21/
       api29/
-  proto/
+  config/
   docs/
+  proto/
+  proto_x11/
+  updates/
   logs/
 ```
 
-## 15. Design Rules For Future Work
+## 17. Design Guardrails For Agents
 
-- Keep `./wbeam` as the primary operational interface.
-- Keep daemon as authority; GUI should stay a client, not business-logic owner.
-- Do not bake personal usernames/IPs into repo scripts.
-- Keep Android-host compatibility strictly tied to shared build revision.
-- Preserve API17 compatibility path while extending modern pipeline.
-- Add features behind explicit probes/startup checks (host session type, capture backend, device transport readiness).
+- Keep `./wbeam` as primary operational interface.
+- Keep daemon as runtime authority; do not push session ownership into UI.
+- Keep compatibility version coherent across host + APK.
+- Prefer explicit probes/checks before enabling advanced paths.
+- Avoid introducing secret/env leakage into scripts, logs, or release assets.
+- Keep docs and workflow rules consistent with `docs/agents.workflow.md`.
