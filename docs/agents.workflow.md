@@ -58,3 +58,15 @@ Never place in public release assets/notes:
 - Avoid force-push on protected branches (`master`, `release`) except emergency alignment.
 - Keep branch protection enabled.
 - Keep docs under `docs/` and update workflow docs together with process changes.
+
+## 9) Repository Structure Source Of Truth
+
+- Canonical repository structure and migration state are defined in:
+  - `docs/repo-structure.md`
+- Domain boundaries are anchored by:
+  - `android/README.md`
+  - `host/README.md`
+  - `desktop/README.md`
+  - `shared/README.md`
+- Layout sanity check:
+  - `scripts/ci/check-repo-layout.sh`

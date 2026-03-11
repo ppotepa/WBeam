@@ -56,12 +56,16 @@ If you just want it to work now:
 
 ## Repo Layout
 
-- `android/` - Android client (`com.wbeam`)
-- `src/host/rust/` - Rust daemon, core, streamer
-- `src/apps/desktop-tauri/` - desktop UI
-- `src/host/scripts/` - host runtime scripts
+- `android/` - Android domain (client app + decode runtime)
+- `host/` - host domain boundary (migration target)
+- `desktop/` - desktop domain boundary (migration target)
+- `shared/` - shared contracts/protocol boundary (migration target)
+- `src/` - legacy source tree under phased migration
 - `proto/` - historical sandbox lane
 - `proto_x11/` - X11 virtual-monitor prototype lane
+
+Structure source of truth:
+- `docs/repo-structure.md`
 
 ## Main Entrypoints
 

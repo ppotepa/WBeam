@@ -1,6 +1,6 @@
 # WBeam Agent Handbook
 
-Last updated: 2026-03-11 14:22 CET
+Last updated: 2026-03-11
 Primary entrypoint: `./wbeam`
 
 ## 1. Project Purpose
@@ -19,6 +19,9 @@ Canonical workflow doc:
 - `docs/agents.workflow.md`
 
 If process rules conflict elsewhere, follow `docs/agents.workflow.md`.
+
+Canonical repository layout and migration map:
+- `docs/repo-structure.md`
 
 Branch naming note:
 - repo currently contains mixed naming conventions from transition periods (`0.1.1`, `feature/...`, `ver/...`),
@@ -302,6 +305,9 @@ WBeam/
   start-remote
   runas-remote
   android/
+  host/
+  desktop/
+  shared/
   config/
   docs/
   logs/
@@ -329,4 +335,4 @@ WBeam/
 - Keep host/APK compatibility revision coherent.
 - Prefer explicit probes/start checks for risky features (capture backend, session type, device readiness).
 - Never leak secrets/tokens/internal credentials to commits, logs, release notes, or assets.
-- Keep this file aligned with `progress.md` and `docs/agents.workflow.md`.
+- Keep this file aligned with `progress.md`, `docs/agents.workflow.md`, and `docs/repo-structure.md`.

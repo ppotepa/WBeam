@@ -1,5 +1,29 @@
 # WBeam Progress
 
+## Session Update (2026-03-11, pending, branch `cleanup-refactor`) - Refactor cleanup Phase 1 scaffold + dead path cleanup
+- Removed dead, untracked leftover UI path:
+  - `src/apps/desktop-egui` (build artifact directory only; no tracked sources remained).
+- Removed dead nested path:
+  - `src/src` (runtime log leftover path only).
+- Introduced repository-structure source-of-truth:
+  - `docs/repo-structure.md`
+  - defines domain-first target layout (`android/`, `host/`, `desktop/`, `shared/`),
+  - defines old-to-new migration mapping and phased migration rules.
+- Added canonical domain boundary docs:
+  - `android/README.md`
+  - `host/README.md`
+  - `desktop/README.md`
+  - `shared/README.md`
+- Added repo layout validation helper:
+  - `scripts/ci/check-repo-layout.sh`
+  - validates required structure/SOT files and reports legacy migration paths.
+- Normalized workflow docs to one canonical source:
+  - `docs/agents.workflow.md` kept canonical,
+  - `docs/agent-workflow.md` converted to compatibility stub pointing to canonical docs.
+- Updated top-level docs to reflect migration:
+  - `README.md` repo layout section now points to domain-first layout + `docs/repo-structure.md`,
+  - `AGENTS.md` now references `docs/repo-structure.md` and updated practical tree.
+
 ## Session Update (2026-03-10, pending, branch `trainerv2`) - Datasets API wired end-to-end in trainer UI
 - Added real dataset API support in Rust host daemon (`wbeamd-server`):
   - new responses/models:
