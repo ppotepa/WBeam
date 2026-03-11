@@ -1,5 +1,21 @@
 # WBeam Progress
 
+## Session Update (2026-03-11, pending, branch `cleanup-refactor`) - Docs normalization + CI quality gates for path boundaries
+- Added CI boundary checker:
+  - `scripts/ci/check-boundaries.sh`
+  - validates that operational wrappers/scripts no longer reference legacy source paths:
+    - `src/host`, `src/apps`, `src/protocol`, `src/compat`, `src/domains/training`.
+- Wired quality stage into GitLab CI:
+  - updated `.gitlab-ci.yml` with new `quality` stage and `quality_gates` job,
+  - job executes:
+    - `./scripts/ci/check-repo-layout.sh`
+    - `./scripts/ci/check-boundaries.sh`
+- Docs normalization status:
+  - no remaining legacy path references in `docs/` except intentional migration map in `docs/repo-structure.md`.
+- Validation:
+  - `./scripts/ci/check-repo-layout.sh` -> OK,
+  - `./scripts/ci/check-boundaries.sh` -> OK.
+
 ## Session Update (2026-03-11, pending, branch `cleanup-refactor`) - Domain move Phase 2 (host/desktop/shared/training) + compatibility aliases
 - Completed a large non-breaking repository move to domain-first paths:
   - `src/host/*` -> `host/*`
