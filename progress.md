@@ -2493,6 +2493,10 @@ Status: active
     - feature start,
     - mirror sync after master merges,
     - release cut + tagging.
+- Workflow naming correction (SemVer lane):
+  - Updated agent workflow to use `0.1.1` lane naming instead of `1.11`.
+  - Feature branch naming switched to `0.1.1/feature/*`.
+  - Release tag examples updated to SemVer style (`v0.1.1`, `v0.1.1-rc1`).
 - Versioning update (deterministic deploy/redeploy suffix):
   - `./wbeam version new` no longer uses random hash from `/dev/urandom`.
   - build suffix is now deterministic and commit-bound: last 5 chars of `git rev-parse HEAD`.
