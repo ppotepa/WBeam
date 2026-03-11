@@ -46,6 +46,7 @@ import com.wbeam.api.HostApiClient;
 import com.wbeam.api.StatusListener;
 import com.wbeam.api.StatusPoller;
 import com.wbeam.hud.HudRenderSupport;
+import com.wbeam.startup.StartupOverlayController;
 import com.wbeam.startup.StartupStepStyler;
 import com.wbeam.startup.TransportProbeCoordinator;
 import com.wbeam.stream.H264TcpPlayer;
@@ -306,19 +307,12 @@ public class MainActivity extends AppCompatActivity {
     private ClientMetricsReporter metricsReporter;
     private VideoTestController videoTestController;
     private final TransportProbeCoordinator transportProbe = new TransportProbeCoordinator();
+    private StartupOverlayController startupOverlayController;
 
     // ── Media ──────────────────────────────────────────────────────────────────
     private Surface surface;
     private H264TcpPlayer player;
     // ── Runnables ──────────────────────────────────────────────────────────────
-    private final Runnable preflightPulseTask = new Runnable() {
-        @Override
-        public void run() {
-            preflightAnimTick = (preflightAnimTick + 1) % 4;
-            updatePreflightOverlay();
-            uiHandler.postDelayed(this, 400);
-        }
-    };
     private final Runnable simpleMenuAutoHideTask = this::hideSimpleMenu;
     private final Runnable debugInfoFadeTask = () -> {
         if (debugInfoPanel != null) {
@@ -720,6 +714,11 @@ public class MainActivity extends AppCompatActivity {
         if (startupInfoText != null) {
             startupInfoText.setMovementMethod(new ScrollingMovementMethod());
         }
+        startupOverlayController = new StartupOverlayController(uiHandler, preflightOverlay);
+        startupOverlayController.setTickListener(animTick -> {
+            preflightAnimTick = animTick;
+            updatePreflightOverlay();
+        });
         liveLogText = findViewById(R.id.liveLogText);
 
         resValueText = findViewById(R.id.resValueText);
@@ -3199,33 +3198,21 @@ public class MainActivity extends AppCompatActivity {
     // ══════════════════════════════════════════════════════════════════════════
 
     private void startPreflightPulse() {
-        uiHandler.removeCallbacks(preflightPulseTask);
-        uiHandler.post(preflightPulseTask);
+        if (startupOverlayController != null) {
+            startupOverlayController.startPulse();
+        }
     }
 
     private void stopPreflightPulse() {
-        uiHandler.removeCallbacks(preflightPulseTask);
+        if (startupOverlayController != null) {
+            startupOverlayController.stopPulse();
+        }
     }
 
     private void setPreflightVisible(boolean visible) {
-        if (preflightOverlay == null) {
-            return;
+        if (startupOverlayController != null) {
+            startupOverlayController.setVisible(visible);
         }
-        if (visible) {
-            preflightOverlay.setVisibility(View.VISIBLE);
-            preflightOverlay.setAlpha(1f);
-            return;
-        }
-        preflightOverlay.animate()
-                .alpha(0f)
-                .setDuration(180)
-                .withEndAction(() -> {
-                    if (preflightOverlay != null) {
-                        preflightOverlay.setVisibility(View.GONE);
-                        preflightOverlay.setAlpha(1f);
-                    }
-                })
-                .start();
     }
 
     private void updatePreflightOverlay() {
