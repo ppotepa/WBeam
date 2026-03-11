@@ -148,6 +148,14 @@ type LivePatchChange = {
   restart: boolean;
 };
 
+type CurrentChildPreset = {
+  trialId: string;
+  encoder: string;
+  size: string;
+  fps: string;
+  bitrateKbps: string;
+};
+
 type DatasetTrialPoint = {
   trial_id: string;
   score: number;
@@ -470,6 +478,23 @@ function inferLiveHealth(lines: string[]): { state: string; tone: "ok" | "warn" 
   return { state: "idle", tone: "info" };
 }
 
+function parseCurrentChildPreset(lines: string[]): CurrentChildPreset | null {
+  const applyRe = /^\[(t\d+)\]\s+apply\s+encoder=([^\s]+)\s+size=([^\s]+)\s+fps=([0-9]+)\s+bitrate=([0-9]+)/;
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i];
+    const match = line.match(applyRe);
+    if (!match) continue;
+    return {
+      trialId: match[1],
+      encoder: match[2],
+      size: match[3],
+      fps: match[4],
+      bitrateKbps: match[5],
+    };
+  }
+  return null;
+}
+
 function profileUpdatedAt(item: ProfileItem): number {
   return Number(item.updated_at_unix_ms || 0);
 }
@@ -525,9 +550,6 @@ export default function App() {
   const [manualMjpegQuality, setManualMjpegQuality] = createSignal(85);
   const [manualPngCompression, setManualPngCompression] = createSignal(4);
   const [overlay, setOverlay] = createSignal(true);
-  const [hudChartMode, setHudChartMode] = createSignal("bars");
-  const [hudFontPreset, setHudFontPreset] = createSignal("compact");
-  const [hudLayout, setHudLayout] = createSignal("wide");
   const [liveResolutionMode, setLiveResolutionMode] = createSignal("auto_native");
   const [livePresetSize, setLivePresetSize] = createSignal("2000x1200");
   const [liveCustomWidth, setLiveCustomWidth] = createSignal(2000);
@@ -582,20 +604,8 @@ export default function App() {
   const hudSeries = createMemo(() => parseHudSeries(tail()?.lines || []));
   const liveStages = createMemo(() => parseLiveStages(tail()?.lines || []));
   const liveHealth = createMemo(() => inferLiveHealth(tail()?.lines || []));
+  const currentChildPreset = createMemo(() => parseCurrentChildPreset(tail()?.lines || []));
   const hasLiveSamples = createMemo(() => hudSeries().score.length > 0 || hudSeries().present.length > 0);
-  const hudFontPreviewStyle = createMemo(() => {
-    const preset = hudFontPreset();
-    if (preset === "dense") {
-      return { "font-family": "\"JetBrains Mono\", \"IBM Plex Mono\", monospace", "font-size": "0.76rem", "letter-spacing": "0.02em" };
-    }
-    if (preset === "arcade") {
-      return { "font-family": "\"IBM Plex Mono\", \"JetBrains Mono\", monospace", "font-size": "0.86rem", "letter-spacing": "0.04em" };
-    }
-    if (preset === "system") {
-      return { "font-family": "Monospace", "font-size": "0.82rem", "letter-spacing": "0.01em" };
-    }
-    return { "font-family": "\"JetBrains Mono\", \"IBM Plex Mono\", monospace", "font-size": "0.82rem", "letter-spacing": "0.02em" };
-  });
 
   const hardBlockers = createMemo(() => {
     const problems: string[] = [];
@@ -1166,9 +1176,9 @@ export default function App() {
           encoder_tuning_mode: encoderTuneMode(),
           encoder_params: encoderParams,
           overlay: overlay(),
-          hud_chart_mode: hudChartMode(),
-          hud_font_preset: hudFontPreset(),
-          hud_layout: hudLayout(),
+          hud_chart_mode: "bars",
+          hud_font_preset: "compact",
+          hud_layout: "wide",
         }),
       });
       const body = (await resp.json()) as Record<string, unknown>;
@@ -1584,34 +1594,8 @@ export default function App() {
                       <input type="checkbox" checked={overlay()} onInput={(e) => setOverlay(e.currentTarget.checked)} />
                       <span>Show on-device HUD overlay</span>
                     </label>
-                    <label title="Overlay trend style rendered on Android HUD during training.">
-                      HUD chart style
-                      <select value={hudChartMode()} onInput={(e) => setHudChartMode(e.currentTarget.value)}>
-                        <option value="bars">bars</option>
-                        <option value="line">line</option>
-                      </select>
-                    </label>
-                    <label title="HUD font preset used on Android overlay. Compact is recommended default.">
-                      HUD font preset
-                      <select value={hudFontPreset()} onInput={(e) => setHudFontPreset(e.currentTarget.value)}>
-                        <option value="compact">compact (JetBrains 13)</option>
-                        <option value="dense">dense (JetBrains 12)</option>
-                        <option value="arcade">arcade (IBM Plex 14)</option>
-                        <option value="system">system mono</option>
-                      </select>
-                    </label>
-                    <label title="Horizontal density of Android HUD composition. Wide spreads data more evenly on full screen.">
-                      HUD layout
-                      <select value={hudLayout()} onInput={(e) => setHudLayout(e.currentTarget.value)}>
-                        <option value="wide">wide</option>
-                        <option value="compact">compact</option>
-                      </select>
-                    </label>
-                    <div class={`hud-font-preview ${hudLayout() === "wide" ? "layout-wide" : "layout-compact"}`} title="Preview of typography style used by Android HUD overlay." style={hudFontPreviewStyle()}>
-                      <div class="preview-title">HUD font preview</div>
-                      <div class="preview-row">TRIAL t05 | GEN 2/4 | FPS 58.9 <span class="state ok">OK</span></div>
-                      <div class="preview-row">LIVE 34.8 Mbps | LAT 42.1ms <span class="state warn">WARN</span></div>
-                      <div class="preview-row">DROPS/s 0.004 | QUEUE 0.36 <span class="state risk">RISK</span></div>
+                    <div class="hint">
+                      HUD design is fixed and optimized for readability (no per-run font/layout toggles).
                     </div>
                   </div>
                 </Show>
@@ -1926,7 +1910,7 @@ export default function App() {
                 <div class="chart-grid">
                   <section class="chart-card">
                     <h3>Score trend</h3>
-                    <p class="chart-stats">last {liveScoreSummary().last} | min {liveScoreSummary().min} | max {liveScoreSummary().max}</p>
+                    <p class="chart-stats">CURRENT {liveScoreSummary().last} | min {liveScoreSummary().min} | max {liveScoreSummary().max}</p>
                     <div class="bar-row">
                       <For each={liveScoreRenderBars()}>
                         {(bar, idx) => (
@@ -1941,7 +1925,7 @@ export default function App() {
                   </section>
                   <section class="chart-card">
                     <h3>Present FPS trend</h3>
-                    <p class="chart-stats">last {livePresentSummary().last} | min {livePresentSummary().min} | max {livePresentSummary().max}</p>
+                    <p class="chart-stats">CURRENT {liveKpi().present.toFixed(1)} | min {livePresentSummary().min} | max {livePresentSummary().max}</p>
                     <div class="bar-row">
                       <For each={livePresentRenderBars()}>
                         {(bar, idx) => (
@@ -1956,7 +1940,7 @@ export default function App() {
                   </section>
                   <section class="chart-card">
                     <h3>Pipeline FPS trend</h3>
-                    <p class="chart-stats">last {liveRecvSummary().last} | min {liveRecvSummary().min} | max {liveRecvSummary().max}</p>
+                    <p class="chart-stats">CURRENT {liveKpi().recv.toFixed(1)} | min {liveRecvSummary().min} | max {liveRecvSummary().max}</p>
                     <div class="bar-row">
                       <For each={liveRecvRenderBars()}>
                         {(bar, idx) => (
@@ -1971,7 +1955,7 @@ export default function App() {
                   </section>
                   <section class="chart-card">
                     <h3>Drop trend</h3>
-                    <p class="chart-stats">last {liveDropSummary().last} | min {liveDropSummary().min} | max {liveDropSummary().max}</p>
+                    <p class="chart-stats">CURRENT {liveKpi().drop.toFixed(3)} | min {liveDropSummary().min} | max {liveDropSummary().max}</p>
                     <div class="bar-row">
                       <For each={liveDropRenderBars()}>
                         {(bar, idx) => (
@@ -2014,6 +1998,19 @@ export default function App() {
                 <pre class="log-tail">
                   <For each={tail()?.lines || []}>{(line) => <div>{line}</div>}</For>
                 </pre>
+                <section class="child-preset-box">
+                  <h3>Current Child Preset</h3>
+                  <div class="meta-grid">
+                    <div class="meta-item"><strong>Trial</strong><span>{currentChildPreset()?.trialId || hud().trialId || "-"}</span></div>
+                    <div class="meta-item"><strong>Encoder</strong><span>{currentChildPreset()?.encoder || String(valueAt(liveStatus(), ["base", "active_config", "encoder"]) || selectedEncoder())}</span></div>
+                    <div class="meta-item"><strong>Size</strong><span>{currentChildPreset()?.size || String(valueAt(liveStatus(), ["base", "active_config", "size"]) || resolvedLiveSize() || "native")}</span></div>
+                    <div class="meta-item"><strong>FPS</strong><span>{currentChildPreset()?.fps || String(valueAt(liveStatus(), ["base", "active_config", "fps"]) || liveFps())}</span></div>
+                    <div class="meta-item"><strong>Bitrate</strong><span>{currentChildPreset()?.bitrateKbps || String(valueAt(liveStatus(), ["base", "active_config", "bitrate_kbps"]) || mbpsToKbps(liveTargetMbps()))} kbps</span></div>
+                    <div class="meta-item"><strong>Cursor</strong><span>{String(valueAt(liveStatus(), ["base", "active_config", "cursor_mode"]) || liveCursorMode())}</span></div>
+                    <div class="meta-item"><strong>Intra-only</strong><span>{String(valueAt(liveStatus(), ["base", "active_config", "intra_only"]) ?? liveIntraOnly())}</span></div>
+                    <div class="meta-item"><strong>Progress</strong><span>{hud().progress || "-"}</span></div>
+                  </div>
+                </section>
               </article>
             </div>
           </Show>
