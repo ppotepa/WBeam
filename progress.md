@@ -2370,3 +2370,23 @@ Status: active
 - Validation:
   - `cd src/host/rust && cargo check -p wbeamd-api -p wbeamd-core -p wbeamd-server` -> OK
   - `cd src/host/rust && cargo test -p wbeamd-core parse_transport_line_known -- --nocapture` -> OK
+- Trainer HUD completeness pass (Android + trainer wizard + daemon metrics bridge):
+  - Fixed `LIVE MBPS` fallback mapping in Android trainer HUD:
+    - now reads from `sections.kpi.live_mbps`, root fallback, and `metrics.bitrate_mbps_mean` fallback.
+  - Added missing trainer trend payloads from wizard JSON:
+    - `drop_per_sec`, `latency_ms_p95`, `queue_depth` (in addition to existing score/fps/mbps/drop_pct).
+  - Added full trainer mode card in HUD:
+    - `ENCODER | RESOLUTION | TARGET FPS | live present/recv/decode FPS` summary.
+  - Added rendered metric trend rows (actual spark charts) in HUD panel:
+    - score, fps, mbps, drops, latency, queue.
+    - includes last/min/max summary per trend row.
+  - Added pending trend placeholders so chart section is never blank while feed warms up.
+  - Increased trainer HUD readability:
+    - larger base font and enforced larger trainer scale profile mapping.
+  - Hardened server `/metrics` trainer overlay attachment:
+    - when `serial` is missing, daemon now auto-resolves active trainer overlay by `stream_port` from `/tmp/wbeam-trainer-active-*-<port>.flag`.
+    - prevents empty trainer HUD feed on Android builds where serial query is unavailable.
+- Validation:
+  - `python3 -m py_compile src/domains/training/wizard.py` -> OK
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK

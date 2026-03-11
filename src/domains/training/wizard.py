@@ -321,7 +321,10 @@ def write_overlay_snapshot(
     valid_scores = [item.score for item in recent if item.score > -900.0]
     valid_present = [item.present_fps_mean for item in recent if item.present_fps_mean > 0.0]
     valid_drop = [item.drop_rate_per_sec * 100.0 for item in recent if item.sample_count > 0]
+    valid_drop_sec = [item.drop_rate_per_sec for item in recent if item.sample_count > 0]
     valid_bitrate = [item.bitrate_mbps_mean for item in recent if item.bitrate_mbps_mean > 0.0]
+    valid_latency = [item.e2e_p95_mean_ms for item in recent if item.sample_count > 0 and item.e2e_p95_mean_ms >= 0.0]
+    valid_queue = [item.queue_depth_mean for item in recent if item.sample_count > 0 and item.queue_depth_mean >= 0.0]
     best_recent = max(valid_scores) if valid_scores else 0.0
     best_trial = ""
     if recent:
@@ -533,7 +536,10 @@ def write_overlay_snapshot(
                     "score": [round(v, 3) for v in valid_scores[-32:]],
                     "present_fps": [round(v, 3) for v in valid_present[-32:]],
                     "drop_pct": [round(v, 3) for v in valid_drop[-32:]],
+                    "drop_per_sec": [round(v, 4) for v in valid_drop_sec[-32:]],
                     "mbps": [round(v, 3) for v in valid_bitrate[-32:]],
+                    "latency_ms_p95": [round(v, 3) for v in valid_latency[-32:]],
+                    "queue_depth": [round(v, 4) for v in valid_queue[-32:]],
                 },
                 "status": {
                     "note": (result.notes if result is not None else ""),

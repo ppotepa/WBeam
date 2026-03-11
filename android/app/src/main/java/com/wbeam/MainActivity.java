@@ -275,6 +275,13 @@ public class MainActivity extends AppCompatActivity {
     private final ArrayDeque<Double> usageCpuSeries = new ArrayDeque<>();
     private final ArrayDeque<Double> usageMemSeries = new ArrayDeque<>();
     private final ArrayDeque<Double> usageGpuSeries = new ArrayDeque<>();
+    private final ArrayDeque<Double> runtimePresentSeries = new ArrayDeque<>();
+    private final ArrayDeque<Double> runtimeMbpsSeries = new ArrayDeque<>();
+    private final ArrayDeque<Double> runtimeDropSeries = new ArrayDeque<>();
+    private final ArrayDeque<Double> runtimeLatencySeries = new ArrayDeque<>();
+    private final ArrayDeque<Double> runtimeQueueSeries = new ArrayDeque<>();
+    private long runtimeDropPrevCount = -1L;
+    private long runtimeDropPrevAtMs = 0L;
 
     // ── Daemon state (updated via StatusPoller.Callbacks) ──────────────────────
     private boolean daemonReachable = false;
@@ -1937,6 +1944,48 @@ public class MainActivity extends AppCompatActivity {
         } else if (warmingUp || mediumPressure) {
             runtimeStateTone = "warn";
         }
+        long latestDroppedFrames = latest != null ? latest.optLong("dropped_frames", -1L) : -1L;
+        long latestTooLateFrames = latest != null ? latest.optLong("too_late_frames", 0L) : 0L;
+        double dropPerSec = 0.0;
+        if (latestDroppedFrames >= 0L) {
+            long combined = latestDroppedFrames + Math.max(0L, latestTooLateFrames);
+            if (runtimeDropPrevCount >= 0L && runtimeDropPrevAtMs > 0L && nowMs > runtimeDropPrevAtMs) {
+                long deltaFrames = Math.max(0L, combined - runtimeDropPrevCount);
+                long deltaMs = Math.max(1L, nowMs - runtimeDropPrevAtMs);
+                dropPerSec = (deltaFrames * 1000.0) / deltaMs;
+            }
+            runtimeDropPrevCount = combined;
+            runtimeDropPrevAtMs = nowMs;
+        }
+        double bitrateMbps = 0.0;
+        if (latest != null) {
+            long recvBps = latest.optLong("recv_bps", 0L);
+            if (recvBps > 0L) {
+                bitrateMbps = recvBps / 1_000_000.0;
+            }
+        }
+        if (bitrateMbps <= 0.0) {
+            bitrateMbps = metrics.optLong("bitrate_actual_bps", 0L) / 1_000_000.0;
+        }
+        appendSeriesSample(runtimePresentSeries, Math.max(0.0, presentFps));
+        appendSeriesSample(runtimeMbpsSeries, Math.max(0.0, bitrateMbps));
+        appendSeriesSample(runtimeDropSeries, Math.max(0.0, dropPerSec));
+        appendSeriesSample(runtimeLatencySeries, Math.max(0.0, e2eP95));
+        appendSeriesSample(runtimeQueueSeries, Math.max(0.0, qT + qD + qR));
+        String runtimeChartsHtml = buildMetricTrendRowsHtml(
+                null,
+                seriesToJson(runtimePresentSeries),
+                seriesToJson(runtimeMbpsSeries),
+                seriesToJson(runtimeDropSeries),
+                seriesToJson(runtimeLatencySeries),
+                seriesToJson(runtimeQueueSeries),
+                runtimeStateTone,
+                runtimeStateTone,
+                runtimeStateTone,
+                runtimeStateTone,
+                runtimeStateTone,
+                runtimeStateTone
+        );
         renderRuntimeHudOverlay(
                 daemonStateUi,
                 targetFps,
@@ -1959,6 +2008,7 @@ public class MainActivity extends AppCompatActivity {
                 bpHigh,
                 bpRecover,
                 reason,
+                runtimeChartsHtml,
                 runtimeStateTone
         );
 
@@ -2022,6 +2072,7 @@ public class MainActivity extends AppCompatActivity {
             long bpHigh,
             long bpRecover,
             String reason,
+            String metricChartsHtml,
             String tone
     ) {
         sampleDeviceResourceUsage(targetFps, renderP95);
@@ -2060,6 +2111,7 @@ public class MainActivity extends AppCompatActivity {
                     -1,
                     chips.toString(),
                     cards.toString(),
+                    metricChartsHtml == null ? "" : metricChartsHtml,
                     trend,
                     details.toString(),
                     resourceRows,
@@ -2188,6 +2240,7 @@ public class MainActivity extends AppCompatActivity {
                 0,
                 chips,
                 cards,
+                buildPendingMetricTrendRowsHtml(),
                 "trainer feed pending | placeholders visible",
                 details,
                 resourceRows,
@@ -2275,7 +2328,18 @@ public class MainActivity extends AppCompatActivity {
         String cards = hudCard("MODE", "fallback", "state-pending");
         sampleDeviceResourceUsage(latestTargetFps > 1.0 ? latestTargetFps : 60.0, 0.0);
         String resourceRows = buildResourceRowsHtml();
-        return buildUnifiedHudHtml("trainer", progressText, progressPercent, chips, cards, "text snapshot mode", details.toString(), resourceRows, "scale-2x");
+        return buildUnifiedHudHtml(
+                "trainer",
+                progressText,
+                progressPercent,
+                chips,
+                cards,
+                buildPendingMetricTrendRowsHtml(),
+                "text snapshot mode",
+                details.toString(),
+                resourceRows,
+                "scale-2x"
+        );
     }
 
     private String buildTrainerHudHtmlFromJson(JSONObject hud, String progressLine, int progressPercent) {
@@ -2307,8 +2371,12 @@ public class MainActivity extends AppCompatActivity {
         double recv = kpi != null ? kpi.optDouble("recv_fps", Double.NaN) : Double.NaN;
         double decode = kpi != null ? kpi.optDouble("decode_fps", Double.NaN) : Double.NaN;
         double liveMbps = kpi != null ? kpi.optDouble("live_mbps", Double.NaN) : Double.NaN;
+        JSONObject metricsObj = hud.optJSONObject("metrics");
         if (Double.isNaN(liveMbps) || liveMbps <= 0.0) {
             liveMbps = hud.optDouble("bitrate_mbps_mean", Double.NaN);
+        }
+        if ((Double.isNaN(liveMbps) || liveMbps <= 0.0) && metricsObj != null) {
+            liveMbps = metricsObj.optDouble("bitrate_mbps_mean", Double.NaN);
         }
         double latency = kpi != null ? kpi.optDouble("latency_ms_p95", Double.NaN) : Double.NaN;
         double drops = kpi != null ? kpi.optDouble("drops_per_sec", Double.NaN) : Double.NaN;
@@ -2322,6 +2390,7 @@ public class MainActivity extends AppCompatActivity {
         String latState = states != null ? states.optString("latency", "PENDING").toLowerCase(Locale.US) : "pending";
         String mbpsState = states != null ? states.optString("mbps", "PENDING").toLowerCase(Locale.US) : "pending";
         String dropState = states != null ? states.optString("drop", "PENDING").toLowerCase(Locale.US) : "pending";
+        String queueState = states != null ? states.optString("queue", "PENDING").toLowerCase(Locale.US) : "pending";
         String qualityState = states != null ? states.optString("quality", "PENDING").toLowerCase(Locale.US) : "pending";
 
         JSONArray rows = hud.optJSONArray("rows");
@@ -2350,20 +2419,52 @@ public class MainActivity extends AppCompatActivity {
             detailsRows.append(hudDetailRow("LATENCY p95", fmtDoubleOrPlaceholder(latency, "%.1f ms", "PENDING")));
             detailsRows.append(hudDetailRow("DROPS/s", fmtDoubleOrPlaceholder(drops, "%.3f", "PENDING")));
         }
-        String trendScore = trends != null ? escapeHtml(trends.optJSONArray("score") != null ? trends.optJSONArray("score").toString() : "[]") : "[]";
-        String trendFps = trends != null ? escapeHtml(trends.optJSONArray("present_fps") != null ? trends.optJSONArray("present_fps").toString() : "[]") : "[]";
-        String trendMbps = trends != null ? escapeHtml(trends.optJSONArray("mbps") != null ? trends.optJSONArray("mbps").toString() : "[]") : "[]";
+        JSONArray trendScoreArr = trends != null ? trends.optJSONArray("score") : null;
+        JSONArray trendFpsArr = trends != null ? trends.optJSONArray("present_fps") : null;
+        JSONArray trendMbpsArr = trends != null ? trends.optJSONArray("mbps") : null;
+        JSONArray trendDropArr = trends != null ? trends.optJSONArray("drop_per_sec") : null;
+        if ((trendDropArr == null || trendDropArr.length() == 0) && trends != null) {
+            trendDropArr = trends.optJSONArray("drop_pct");
+        }
+        JSONArray trendLatencyArr = trends != null ? trends.optJSONArray("latency_ms_p95") : null;
+        JSONArray trendQueueArr = trends != null ? trends.optJSONArray("queue_depth") : null;
         String statusNote = status != null ? escapeHtml(status.optString("note", "")) : "";
+        String modeSummary = String.format(
+                Locale.US,
+                "%s | %s | target %d fps | live p/r/d %s/%s/%s",
+                safeText(encoder).toUpperCase(Locale.US),
+                safeText(size),
+                Math.max(0, fps),
+                fmtDoubleOrPlaceholder(present, "%.1f", "-"),
+                fmtDoubleOrPlaceholder(recv, "%.1f", "-"),
+                fmtDoubleOrPlaceholder(decode, "%.1f", "-")
+        );
+        String trendChartsHtml = buildMetricTrendRowsHtml(
+                trendScoreArr,
+                trendFpsArr,
+                trendMbpsArr,
+                trendDropArr,
+                trendLatencyArr,
+                trendQueueArr,
+                qualityState,
+                fpsState,
+                mbpsState,
+                dropState,
+                latState,
+                queueState
+        );
 
         String pLabel = progressLine == null || progressLine.trim().isEmpty() ? "TRAINING PROGRESS ..." : progressLine.trim();
         String chips = hudChip("RUN", runId, "")
                 + hudChip("PROFILE", profile, "")
+                + hudChip("SOURCE", "JSON FEED", "state-ok")
                 + hudChip("GEN", gIdx + "/" + gTotal, "")
                 + hudChip("TRIAL", trialId + " (" + tIdx + "/" + tTotal + ")", "")
                 + hudChip("ENCODER", encoder, "")
                 + hudChip("SIZE/FPS", size + " @" + fps + " | " + String.format(Locale.US, "%.1f", targetMbps) + " Mbps", "");
 
-        String cards = hudCard("SCORE", fmtDoubleOrPlaceholder(score, "%.2f", "PENDING"), "")
+        String cards = hudCard("MODE", modeSummary, "")
+                + hudCard("SCORE", fmtDoubleOrPlaceholder(score, "%.2f", "PENDING"), "")
                 + hudCard("PRESENT FPS", fmtDoubleOrPlaceholder(present, "%.1f", "PENDING"), hudToneClass(fpsState))
                 + hudCard("PIPE/DEC FPS", fmtDoubleOrPlaceholder(recv, "%.1f", "PENDING") + " / " + fmtDoubleOrPlaceholder(decode, "%.1f", "PENDING"), "")
                 + hudCard("LIVE MBPS", fmtLiveMbps(liveMbps, targetMbps), hudToneClass(mbpsState))
@@ -2372,13 +2473,21 @@ public class MainActivity extends AppCompatActivity {
 
         String trend = "layout=" + safeText(layoutMode)
                 + " | quality=" + safeText(qualityState.toUpperCase(Locale.US))
-                + " | score trend: " + trendScore
-                + " | fps trend: " + trendFps
-                + " | mbps trend: " + trendMbps
                 + " | note: " + statusNote;
         sampleDeviceResourceUsage(fps > 1 ? fps : (latestTargetFps > 1.0 ? latestTargetFps : 60.0), Double.isNaN(renderMs) ? 0.0 : renderMs);
         String resourceRows = buildResourceRowsHtml();
-        return buildUnifiedHudHtml("trainer", pLabel, progressPercent, chips, cards, trend, detailsRows.toString(), resourceRows, trainerScaleClass(fontProfile));
+        return buildUnifiedHudHtml(
+                "trainer",
+                pLabel,
+                progressPercent,
+                chips,
+                cards,
+                trendChartsHtml,
+                trend,
+                detailsRows.toString(),
+                resourceRows,
+                trainerScaleClass(fontProfile)
+        );
     }
 
     private String buildUnifiedHudHtml(
@@ -2387,6 +2496,7 @@ public class MainActivity extends AppCompatActivity {
             int progressPercent,
             String chipsHtml,
             String cardsHtml,
+            String chartsHtml,
             String trendText,
             String detailsRowsHtml,
             String resourceRowsHtml,
@@ -2399,7 +2509,7 @@ public class MainActivity extends AppCompatActivity {
         String bodyClass = (isTrainer ? "trainer" : "runtime") + " " + safeText(scaleClass);
         return "<!doctype html><html><head><meta charset='utf-8'/>"
                 + "<style>"
-                + "html,body{margin:0;padding:0;background:transparent;color:#ecfbff;font-family:'JetBrains Mono','IBM Plex Mono',monospace;font-size:12px;min-width:100%;min-height:100%;}"
+                + "html,body{margin:0;padding:0;background:transparent;color:#ecfbff;font-family:'JetBrains Mono','IBM Plex Mono',monospace;font-size:13px;min-width:100%;min-height:100%;}"
                 + ".root{padding:8px;box-sizing:border-box;width:100%;height:100%;display:grid;grid-template-rows:auto auto minmax(0,1fr);gap:8px;}"
                 + ".top{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:6px;}"
                 + ".chip{border:1px solid rgba(126,245,255,.52);background:rgba(6,24,31,.74);padding:5px 7px;min-height:34px;}"
@@ -2418,6 +2528,10 @@ public class MainActivity extends AppCompatActivity {
                 + ".kpi .item .k{font-size:10px;color:#9dddea;display:block;}"
                 + ".kpi .item .v{font-size:12px;color:#dcf9ff;}"
                 + ".trend{font-size:10px;line-height:1.3;margin-top:6px;color:#9dddea;word-break:break-word;}"
+                + ".metric-trends{margin-top:7px;border:1px solid rgba(126,245,255,.35);padding:6px;background:rgba(2,10,14,.35);display:grid;gap:6px;}"
+                + ".trend-row{display:grid;grid-template-columns:66px minmax(0,1fr) 94px;align-items:center;gap:6px;}"
+                + ".trend-label{font-size:10px;color:#9dddea;letter-spacing:.04em;}"
+                + ".trend-range{font-size:10px;color:#b9f8ff;text-align:right;white-space:nowrap;}"
                 + ".resource{margin-top:7px;border:1px solid rgba(126,245,255,.35);padding:6px;background:rgba(2,10,14,.35);display:grid;gap:5px;}"
                 + ".resource .title{font-size:10px;color:#9dddea;letter-spacing:.05em;}"
                 + ".res-row{display:grid;grid-template-columns:42px 62px minmax(0,1fr);align-items:center;gap:6px;}"
@@ -2439,6 +2553,9 @@ public class MainActivity extends AppCompatActivity {
                 + ".trainer.scale-2x .kpi .item .v{font-size:23px;line-height:1.1;}"
                 + ".trainer.scale-2x .detail-table td{font-size:18px;padding:6px 8px;}"
                 + ".trainer.scale-2x .trend{font-size:16px;line-height:1.35;}"
+                + ".trainer.scale-2x .trend-label{font-size:16px;}"
+                + ".trainer.scale-2x .trend-range{font-size:15px;}"
+                + ".trainer.scale-2x .trend-row{grid-template-columns:96px minmax(0,1fr) 124px;}"
                 + ".trainer.scale-2x .res-row .rk{font-size:16px;}"
                 + ".trainer.scale-2x .res-row .rv{font-size:18px;}"
                 + ".trainer.scale-2x .spark{height:30px;}"
@@ -2461,7 +2578,7 @@ public class MainActivity extends AppCompatActivity {
                 + "</div>"
                 + "<div class='progress'><div class='p-head'><span class='p-label'>" + escapeHtml(progress.isEmpty() ? "HUD ACTIVE" : progress) + "</span><span class='p-pct'>" + safePct + "%</span></div><div class='p-track'><div class='p-fill'></div></div></div>"
                 + "<div class='main'>"
-                + "<div class='panel'><div class='kpi'>" + cardsHtml + "</div><div class='trend'>" + escapeHtml(safeText(trendText)) + "</div><div class='resource'><div class='title'>DEVICE RESOURCES (* GPU proxy from render time)</div>" + resourceRowsHtml + "</div></div>"
+                + "<div class='panel'><div class='kpi'>" + cardsHtml + "</div><div class='metric-trends'>" + chartsHtml + "</div><div class='trend'>" + escapeHtml(safeText(trendText)) + "</div><div class='resource'><div class='title'>DEVICE RESOURCES (* GPU proxy from render time)</div>" + resourceRowsHtml + "</div></div>"
                 + "<div class='panel'><table class='detail-table'>" + detailsRowsHtml + "</table></div>"
                 + "</div>"
                 + "</div></body></html>";
@@ -2470,7 +2587,10 @@ public class MainActivity extends AppCompatActivity {
     private String trainerScaleClass(String fontProfile) {
         String profile = fontProfile == null ? "" : fontProfile.trim().toLowerCase(Locale.US);
         if ("compact".equals(profile) || "dense".equals(profile) || "system".equals(profile)) {
-            return "scale-15x";
+            return "scale-2x";
+        }
+        if ("arcade".equals(profile)) {
+            return "scale-2x";
         }
         return "scale-2x";
     }
@@ -2574,6 +2694,145 @@ public class MainActivity extends AppCompatActivity {
                 .append(buildSparkBarsHtml(usageGpuSeries, gpuTone))
                 .append("</div></div>");
         return html.toString();
+    }
+
+    private JSONArray seriesToJson(ArrayDeque<Double> series) {
+        JSONArray arr = new JSONArray();
+        if (series == null || series.isEmpty()) {
+            return arr;
+        }
+        for (Double v : series) {
+            if (v == null || !Double.isFinite(v)) {
+                continue;
+            }
+            arr.put(v);
+        }
+        return arr;
+    }
+
+    private String buildPendingMetricTrendRowsHtml() {
+        return buildTrendRowHtml("SCORE", null, "state-pending", "")
+                + buildTrendRowHtml("FPS", null, "state-pending", "")
+                + buildTrendRowHtml("MBPS", null, "state-pending", "")
+                + buildTrendRowHtml("DROPS", null, "state-pending", "")
+                + buildTrendRowHtml("LAT", null, "state-pending", "")
+                + buildTrendRowHtml("QUEUE", null, "state-pending", "");
+    }
+
+    private String buildMetricTrendRowsHtml(
+            JSONArray score,
+            JSONArray fps,
+            JSONArray mbps,
+            JSONArray drops,
+            JSONArray latency,
+            JSONArray queue,
+            String scoreTone,
+            String fpsTone,
+            String mbpsTone,
+            String dropTone,
+            String latTone,
+            String queueTone
+    ) {
+        return buildTrendRowHtml("SCORE", score, hudToneClass(scoreTone), "")
+                + buildTrendRowHtml("FPS", fps, hudToneClass(fpsTone), "")
+                + buildTrendRowHtml("MBPS", mbps, hudToneClass(mbpsTone), "")
+                + buildTrendRowHtml("DROPS", drops, hudToneClass(dropTone), "")
+                + buildTrendRowHtml("LAT", latency, hudToneClass(latTone), "ms")
+                + buildTrendRowHtml("QUEUE", queue, hudToneClass(queueTone), "");
+    }
+
+    private String buildTrendRowHtml(String label, JSONArray series, String toneClass, String unitSuffix) {
+        String bars = buildSparkBarsFromJson(series, toneClass);
+        String stats = buildSeriesStats(series, unitSuffix);
+        return "<div class='trend-row'><span class='trend-label'>"
+                + escapeHtml(label)
+                + "</span><div class='spark'>"
+                + bars
+                + "</div><span class='trend-range "
+                + escapeHtml(toneClass == null ? "" : toneClass)
+                + "'>"
+                + escapeHtml(stats)
+                + "</span></div>";
+    }
+
+    private String buildSparkBarsFromJson(JSONArray series, String toneClass) {
+        if (series == null || series.length() == 0) {
+            return "<span class='spark-bar " + escapeHtml(toneClass) + "' style='height:12%'></span>";
+        }
+        double lo = Double.POSITIVE_INFINITY;
+        double hi = Double.NEGATIVE_INFINITY;
+        for (int i = 0; i < series.length(); i++) {
+            if (series.isNull(i)) {
+                continue;
+            }
+            double v = series.optDouble(i, Double.NaN);
+            if (!Double.isFinite(v)) {
+                continue;
+            }
+            lo = Math.min(lo, v);
+            hi = Math.max(hi, v);
+        }
+        if (!Double.isFinite(lo) || !Double.isFinite(hi)) {
+            return "<span class='spark-bar " + escapeHtml(toneClass) + "' style='height:12%'></span>";
+        }
+        double span = hi - lo;
+        if (span < 1e-6) {
+            span = Math.max(1.0, Math.abs(hi));
+            lo = hi - span;
+        }
+
+        StringBuilder bars = new StringBuilder();
+        for (int i = 0; i < series.length(); i++) {
+            if (series.isNull(i)) {
+                continue;
+            }
+            double v = series.optDouble(i, Double.NaN);
+            if (!Double.isFinite(v)) {
+                continue;
+            }
+            double norm = (v - lo) / span;
+            norm = clampDouble(norm, 0.0, 1.0);
+            int height = (int) Math.round(10 + (norm * 90.0));
+            height = Math.max(8, Math.min(100, height));
+            bars.append("<span class='spark-bar ")
+                    .append(escapeHtml(toneClass))
+                    .append("' style='height:")
+                    .append(height)
+                    .append("%'></span>");
+        }
+        if (bars.length() == 0) {
+            return "<span class='spark-bar " + escapeHtml(toneClass) + "' style='height:12%'></span>";
+        }
+        return bars.toString();
+    }
+
+    private String buildSeriesStats(JSONArray series, String unitSuffix) {
+        if (series == null || series.length() == 0) {
+            return "PENDING";
+        }
+        double last = Double.NaN;
+        double lo = Double.POSITIVE_INFINITY;
+        double hi = Double.NEGATIVE_INFINITY;
+        for (int i = 0; i < series.length(); i++) {
+            if (series.isNull(i)) {
+                continue;
+            }
+            double v = series.optDouble(i, Double.NaN);
+            if (!Double.isFinite(v)) {
+                continue;
+            }
+            last = v;
+            lo = Math.min(lo, v);
+            hi = Math.max(hi, v);
+        }
+        if (!Double.isFinite(last) || !Double.isFinite(lo) || !Double.isFinite(hi)) {
+            return "PENDING";
+        }
+        String unit = unitSuffix == null ? "" : unitSuffix.trim();
+        if (!unit.isEmpty()) {
+            unit = " " + unit;
+        }
+        return String.format(Locale.US, "L %.2f%s · %.2f..%.2f", last, unit, lo, hi);
     }
 
     private String fmtDoubleOrPlaceholder(double value, String pattern, String fallback) {

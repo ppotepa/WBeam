@@ -781,27 +781,14 @@ async fn get_metrics(
         .unwrap_or_else(|_| serde_json::json!({}));
     if let Value::Object(ref mut obj) = payload {
         let stream_port = query.stream_port.unwrap_or(state.sessions.base_stream_port);
-        if let Some(serial_val) = query.serial.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-            let hud_text = read_trainer_overlay_text(serial_val, stream_port);
-            let hud_json = read_trainer_overlay_json(serial_val, stream_port).unwrap_or(Value::Null);
-            let hud_active =
-                trainer_overlay_marker_active(serial_val, stream_port)
-                    || hud_text.as_ref().is_some_and(|txt| !txt.trim().is_empty())
-                    || !hud_json.is_null();
-            obj.insert(
-                "trainer_hud_active".to_string(),
-                Value::Bool(hud_active),
-            );
-            obj.insert(
-                "trainer_hud_text".to_string(),
-                Value::String(hud_text.unwrap_or_default()),
-            );
-            obj.insert("trainer_hud_json".to_string(), hud_json);
-        } else {
-            obj.insert("trainer_hud_active".to_string(), Value::Bool(false));
-            obj.insert("trainer_hud_text".to_string(), Value::String(String::new()));
-            obj.insert("trainer_hud_json".to_string(), Value::Null);
-        }
+        let serial_opt = query.serial.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        let (hud_active, hud_text, hud_json) = resolve_trainer_overlay_payload(serial_opt, stream_port);
+        obj.insert("trainer_hud_active".to_string(), Value::Bool(hud_active));
+        obj.insert(
+            "trainer_hud_text".to_string(),
+            Value::String(hud_text.unwrap_or_default()),
+        );
+        obj.insert("trainer_hud_json".to_string(), hud_json.unwrap_or(Value::Null));
     }
     Json(payload)
 }
@@ -2528,6 +2515,75 @@ fn session_suffix(raw: &str) -> String {
     } else {
         out
     }
+}
+
+fn resolve_trainer_overlay_payload(
+    serial: Option<&str>,
+    stream_port: u16,
+) -> (bool, Option<String>, Option<Value>) {
+    if let Some(serial_val) = serial {
+        let hud_text = read_trainer_overlay_text(serial_val, stream_port);
+        let hud_json = read_trainer_overlay_json(serial_val, stream_port);
+        let hud_active = trainer_overlay_marker_active(serial_val, stream_port)
+            || hud_text.as_ref().is_some_and(|txt| !txt.trim().is_empty())
+            || hud_json.is_some();
+        return (hud_active, hud_text, hud_json);
+    }
+
+    if let Some(suffix) = resolve_active_trainer_suffix(stream_port) {
+        let text_path = PathBuf::from(format!(
+            "/tmp/wbeam-trainer-overlay-{}-{}.txt",
+            suffix, stream_port
+        ));
+        let json_path = PathBuf::from(format!(
+            "/tmp/wbeam-trainer-overlay-{}-{}.json",
+            suffix, stream_port
+        ));
+        let hud_text = fs::read_to_string(&text_path)
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+        let hud_json = fs::read_to_string(&json_path)
+            .ok()
+            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok());
+        let hud_active = hud_text.is_some() || hud_json.is_some();
+        return (hud_active, hud_text, hud_json);
+    }
+
+    (false, None, None)
+}
+
+fn resolve_active_trainer_suffix(stream_port: u16) -> Option<String> {
+    let entries = fs::read_dir("/tmp").ok()?;
+    let mut best: Option<(std::time::SystemTime, String)> = None;
+    let tail = format!("-{}.flag", stream_port);
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(file_name) = path.file_name().and_then(|v| v.to_str()) else {
+            continue;
+        };
+        if !file_name.starts_with("wbeam-trainer-active-") || !file_name.ends_with(&tail) {
+            continue;
+        }
+        let marker = file_name
+            .strip_prefix("wbeam-trainer-active-")
+            .and_then(|v| v.strip_suffix(&tail))
+            .unwrap_or("")
+            .trim();
+        if marker.is_empty() {
+            continue;
+        }
+        let modified = entry
+            .metadata()
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        match &best {
+            Some((prev, _)) if modified <= *prev => {}
+            _ => best = Some((modified, marker.to_string())),
+        }
+    }
+    best.map(|(_, suffix)| suffix)
 }
 
 fn read_trainer_overlay_text(serial: &str, stream_port: u16) -> Option<String> {
