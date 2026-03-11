@@ -2441,6 +2441,18 @@ Status: active
     - placeholder/no-data behavior,
     - single-overlay constraint (no concurrent alternate HUDs),
     - units and threshold color semantics.
+- Trainer docs/maquettes cleanup (light):
+  - Removed old root trainer markdown specs:
+    - `trainer.md`
+    - `trainer.sup.md`
+    - `trainer.final.md`
+    - `trainer.ui.md`
+    - `trainer.update.md`
+  - Removed deprecated trainer maquettes:
+    - `trainer.hud.maquette.xml`
+    - `docs/ui/hud/default-hud.maquette.xml`
+  - Kept single canonical trainer HUD source:
+    - `docs/ui/hud/trainer-hud.sot.svg`
 - Versioning update (deterministic deploy/redeploy suffix):
   - `./wbeam version new` no longer uses random hash from `/dev/urandom`.
   - build suffix is now deterministic and commit-bound: last 5 chars of `git rev-parse HEAD`.
