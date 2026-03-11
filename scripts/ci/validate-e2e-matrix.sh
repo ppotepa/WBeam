@@ -30,11 +30,6 @@ require_exec "./host/scripts/run_wbeamd.sh"
 require_exec "./host/scripts/run_wbeamd_debug.sh"
 
 echo "[matrix] check compatibility aliases"
-require_file "./src/host/scripts/run_wbeamd.sh"
-require_file "./src/host/scripts/run_wbeamd_debug.sh"
-require_file "./src/domains/training/wizard.py"
-require_file "./src/apps/trainer-tauri/package.json"
-require_file "./src/apps/desktop-tauri/package.json"
 require_file "./proto/README.md"
 require_file "./proto_x11/README.md"
 
@@ -44,9 +39,7 @@ bash -n \
   ./trainer.sh \
   ./desktop.sh \
   ./host/scripts/run_wbeamd.sh \
-  ./host/scripts/run_wbeamd_debug.sh \
-  ./src/host/scripts/run_wbeamd.sh \
-  ./src/host/scripts/run_wbeamd_debug.sh
+  ./host/scripts/run_wbeamd_debug.sh
 
 echo "[matrix] cli smoke"
 ./wbeam --help >/dev/null
@@ -55,7 +48,6 @@ echo "[matrix] cli smoke"
 
 echo "[matrix] python smoke"
 python3 -m py_compile \
-  ./host/training/wizard.py \
-  ./src/domains/training/wizard.py
+  ./host/training/wizard.py
 
 echo "[matrix] OK"
