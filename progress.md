@@ -1,5 +1,22 @@
 # WBeam Progress
 
+## Session Update (2026-03-11, pending, branch `v0.1.1/feature/runtime-hud-layout`) - Consolidated update summary (`update.md`)
+- Added new consolidated summary document:
+  - `update.md`
+- Summary captures latest lane state across:
+  - HUD split and trainer/runtime overlay routing,
+  - trainer live/run improvements and startup hardening,
+  - Android/host telemetry and runtime visibility upgrades,
+  - desktop/launcher stability fixes,
+  - repo refactor, CI gates, and docs cleanup.
+- Explicitly documented current unresolved HUD gaps:
+  - intermittent empty `LIVE METRICS` section,
+  - delayed/missing MBPS/trend values in some runs,
+  - chart area underutilization in trainer layout,
+  - need for strict single-overlay enforcement in all paths.
+- Purpose:
+  - provide a single handoff-ready changelog for sync/push checkpoints.
+
 ## Session Update (2026-03-11, pending, branch `master`) - Branch strategy cleanup (`v0.1.1`) + refactor promotion
 - Promoted full refactor stack to `master` via fast-forward from `cleanup-refactor`.
 - Pushed updated `master` to both remotes:
