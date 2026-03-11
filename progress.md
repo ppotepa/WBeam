@@ -2390,3 +2390,18 @@ Status: active
   - `python3 -m py_compile src/domains/training/wizard.py` -> OK
   - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
   - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+- Encoder/decoder modularization pass (component-oriented split):
+  - Host streamer encoders split from monolithic `encoder.rs` into per-component modules:
+    - `src/host/rust/crates/wbeamd-streamer/src/encoder/mod.rs`
+    - `.../encoder/selector.rs`
+    - `.../encoder/h264.rs`
+    - `.../encoder/h265.rs`
+    - `.../encoder/rawpng.rs`
+  - Kept stable public API (`pick_encoder`, `configure_encoder`, `is_hevc`, `is_png`) so pipeline behavior remains unchanged while internals are modular.
+  - Android decode pipeline helper logic extracted from `H264TcpPlayer` into dedicated components:
+    - `android/app/src/main/java/com/wbeam/stream/DecoderSupport.java` (decoder capability probing)
+    - `android/app/src/main/java/com/wbeam/stream/StreamNalUtils.java` (NAL parsing/recovery/CSD extraction)
+  - `H264TcpPlayer` now consumes these decoder components instead of embedding all helper logic inline.
+- Validation:
+  - `cd src/host/rust && cargo check -p wbeamd-streamer -p wbeamd-server` -> OK
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK

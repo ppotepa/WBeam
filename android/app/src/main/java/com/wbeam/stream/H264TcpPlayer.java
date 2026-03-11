@@ -6,8 +6,6 @@ import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.media.MediaCodec;
-import android.media.MediaCodecInfo;
-import android.media.MediaCodecList;
 import android.media.MediaFormat;
 import android.os.Build;
 import android.os.SystemClock;
@@ -24,7 +22,6 @@ import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.ByteBuffer;
-import java.util.Arrays;
 import java.util.Locale;
 
 /**
@@ -280,7 +277,7 @@ public final class H264TcpPlayer {
 
             avail = sTail - sHead;
             if (streamMode < 0 && avail >= 8) {
-                int probe = findStartCode(streamBuf, sHead, Math.min(sHead + 128, sTail));
+                int probe = StreamNalUtils.findStartCode(streamBuf, sHead, Math.min(sHead + 128, sTail));
                 streamMode = (probe >= 0) ? 0 : 1;
             }
 
@@ -310,7 +307,7 @@ public final class H264TcpPlayer {
                     renderQueueDepth = drainStats.renderedCount > 0 ? 1 : 0;
 
                     if (pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES) {
-                        if (isRecoveryNal(streamBuf, sHead + 4, nalSize)) {
+                        if (StreamNalUtils.isRecoveryNal(streamBuf, sHead + 4, nalSize)) {
                             long t0 = SystemClock.elapsedRealtimeNanos();
                             if (queueNal(codec, streamBuf, sHead + 4, nalSize, frames * frameUs, 1_000)) {
                                 long dn = SystemClock.elapsedRealtimeNanos() - t0;
@@ -333,13 +330,13 @@ public final class H264TcpPlayer {
                     sHead += 4 + nalSize;
                 }
             } else {
-                int nalStart = findStartCode(streamBuf, sHead, sTail);
+                int nalStart = StreamNalUtils.findStartCode(streamBuf, sHead, sTail);
                 if (nalStart < 0) {
                     sHead = Math.max(sHead, sTail - 3);
                 } else {
                     sHead = nalStart;
                     while (true) {
-                        int next = findStartCode(streamBuf, sHead + 3, sTail);
+                        int next = StreamNalUtils.findStartCode(streamBuf, sHead + 3, sTail);
                         if (next < 0) break;
                         int nalSize = next - sHead;
                         if (nalSize > 0) {
@@ -359,7 +356,7 @@ public final class H264TcpPlayer {
                             renderQueueDepth = drainStats.renderedCount > 0 ? 1 : 0;
 
                             if (pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES) {
-                                if (isRecoveryNal(streamBuf, sHead, nalSize)) {
+                                if (StreamNalUtils.isRecoveryNal(streamBuf, sHead, nalSize)) {
                                     long t0 = SystemClock.elapsedRealtimeNanos();
                                     if (queueNal(codec, streamBuf, sHead, nalSize, frames * frameUs, 1_000)) {
                                         long dn = SystemClock.elapsedRealtimeNanos() - t0;
@@ -517,7 +514,7 @@ public final class H264TcpPlayer {
         final boolean dropLateOutput = isUltraMode;
 
         // ── Capability guard – reject HEVC early on devices without a decoder ──
-        if (isHevc && !codecSupported(videoMime)) {
+        if (isHevc && !DecoderSupport.codecSupported(videoMime)) {
             throw new IOException(
                 "HEVC (video/hevc) decoder not available on this device "
                 + "(API " + Build.VERSION.SDK_INT + "). "
@@ -610,7 +607,7 @@ public final class H264TcpPlayer {
             }
 
             if (legacyAvcBootstrap && codec == null) {
-                AvcCsd avcCsd = extractAvcCsd(payloadBuf, payloadLen);
+                StreamNalUtils.AvcCsd avcCsd = StreamNalUtils.extractAvcCsd(payloadBuf, payloadLen);
                 if (avcCsd.sps != null) legacySps = avcCsd.sps;
                 if (avcCsd.pps != null) legacyPps = avcCsd.pps;
                 if (legacySps != null && legacyPps != null) {
@@ -663,7 +660,9 @@ public final class H264TcpPlayer {
 
             // Gate 1: don't feed P-frames to a freshly flushed codec.
             // Gate 2: normal decode-queue depth + recovery-NAL bypass.
-            boolean isRecovery = frameIsKey || containsRecoveryNal(payloadBuf, payloadLen, isHevc);
+            boolean isRecovery = frameIsKey || StreamNalUtils.containsRecoveryNal(
+                    payloadBuf, payloadLen, isHevc, FRAME_RESYNC_SCAN_LIMIT
+            );
                 if (waitForKeyframe && isRecovery) {
                 waitForKeyframe = false;
                 recoveryUnlockSec++;
@@ -1275,118 +1274,6 @@ public final class H264TcpPlayer {
         int denom = Math.max(512, avgNalSize);
         if (streamLen <= 0) return 0;
         return Math.min(8, streamLen / denom);
-    }
-
-    private static int findStartCode(byte[] data, int from, int toExclusive) {
-        int limit = toExclusive - 3;
-        for (int i = Math.max(0, from); i <= limit; i++) {
-            if (data[i] == 0 && data[i + 1] == 0) {
-                if (data[i + 2] == 1) return i;
-                if (i + 3 < toExclusive && data[i + 2] == 0 && data[i + 3] == 1) return i;
-            }
-        }
-        return -1;
-    }
-
-    private static boolean isRecoveryNal(byte[] data, int offset, int size) {
-        int type = firstNalType(data, offset, size);
-        return type == 5 || type == 7 || type == 8; // IDR/SPS/PPS
-    }
-
-    /**
-     * Returns true if this device has a hardware or software decoder for the
-     * given MIME type.  Uses the deprecated static MediaCodecList API that
-     * works on API 16+ (the new instance-based API requires API 21).
-     */
-    @SuppressWarnings("deprecation")
-    private static boolean codecSupported(String mimeType) {
-        int count = MediaCodecList.getCodecCount();
-        for (int i = 0; i < count; i++) {
-            MediaCodecInfo info = MediaCodecList.getCodecInfoAt(i);
-            if (info.isEncoder()) continue;
-            for (String type : info.getSupportedTypes()) {
-                if (type.equalsIgnoreCase(mimeType)) return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean containsRecoveryNal(byte[] data, int size, boolean isHevc) {
-        // Single-pass: find start code, read NAL type byte directly.
-        // H.264: type = data[nalByte] & 0x1F;  recovery = {5,7,8} (IDR/SPS/PPS)
-        // H.265: type = (data[nalByte] >> 1) & 0x3F;  recovery = {19,20,21,32,33,34}
-        int limit = Math.min(size, FRAME_RESYNC_SCAN_LIMIT);
-        int i = 0;
-        while (i < limit - 3) {
-            if (data[i] != 0 || data[i + 1] != 0) { i++; continue; }
-            final int nalByte;
-            if (data[i + 2] == 1) {
-                nalByte = i + 3;
-            } else if (i + 3 < limit && data[i + 2] == 0 && data[i + 3] == 1) {
-                nalByte = i + 4;
-            } else { i++; continue; }
-            if (nalByte >= limit) break;
-            final int type = isHevc
-                    ? ((data[nalByte] & 0x7E) >> 1)   // HEVC: bits[6:1] of first header byte
-                    : (data[nalByte] & 0x1F);          // H.264: bits[4:0]
-            if (isHevc
-                    ? (type == 19 || type == 20 || type == 21 || type == 32 || type == 33 || type == 34)
-                    : (type == 5  || type == 7  || type == 8))
-                return true;
-            i = nalByte + 1;
-        }
-        return false;
-    }
-
-    private static AvcCsd extractAvcCsd(byte[] data, int size) {
-        byte[] sps = null;
-        byte[] pps = null;
-        int start = findStartCode(data, 0, size);
-        if (start < 0) {
-            if (size > 0) {
-                int type = data[0] & 0x1F;
-                if (type == 7) sps = Arrays.copyOf(data, size);
-                if (type == 8) pps = Arrays.copyOf(data, size);
-            }
-            return new AvcCsd(sps, pps);
-        }
-
-        while (start >= 0 && start < size) {
-            int nalHdrOff = (start + 2 < size && data[start + 2] == 1) ? (start + 3) : (start + 4);
-            if (nalHdrOff >= size) break;
-            int next = findStartCode(data, nalHdrOff + 1, size);
-            if (next < 0) next = size;
-            int nalType = data[nalHdrOff] & 0x1F;
-            if (nalType == 7 && sps == null) sps = Arrays.copyOfRange(data, nalHdrOff, next);
-            if (nalType == 8 && pps == null) pps = Arrays.copyOfRange(data, nalHdrOff, next);
-            if (sps != null && pps != null) break;
-            start = next;
-        }
-        return new AvcCsd(sps, pps);
-    }
-
-    private static int firstNalType(byte[] data, int offset, int size) {
-        if (size <= 0 || offset < 0 || offset >= data.length) return -1;
-        int end = Math.min(data.length, offset + size);
-        int i = offset;
-        if (i + 3 < end && data[i] == 0 && data[i + 1] == 0) {
-            if (data[i + 2] == 1)
-                i += 3;
-            else if (i + 4 < end && data[i + 2] == 0 && data[i + 3] == 1)
-                i += 4;
-        }
-        if (i >= end) return -1;
-        return data[i] & 0x1F;
-    }
-
-    private static final class AvcCsd {
-        final byte[] sps;
-        final byte[] pps;
-
-        AvcCsd(byte[] sps, byte[] pps) {
-            this.sps = sps;
-            this.pps = pps;
-        }
     }
 
     private void closeSocket() {
