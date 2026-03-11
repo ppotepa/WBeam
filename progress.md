@@ -1,5 +1,30 @@
 # WBeam Progress
 
+## Session Update (2026-03-11, pending, branch `master`) - Branch strategy cleanup (`v0.1.1`) + refactor promotion
+- Promoted full refactor stack to `master` via fast-forward from `cleanup-refactor`.
+- Pushed updated `master` to both remotes:
+  - `origin/master`
+  - `home/master`
+- Standardized version-line branch naming to `v0.1.1`:
+  - created/pushed `v0.1.1` from current `master`,
+  - removed old `0.1.1` from local + both remotes.
+- Cleaned branch namespace and stale branches:
+  - renamed `feature/0.1.1-runtime-hud-sot` -> `feature/v0.1.1-runtime-hud-sot` (local + remotes),
+  - removed merged/stale branches:
+    - `cleanup-refactor`,
+    - `ver/0.1.1/feature/agents-handbook-refresh`,
+    - local stale `trainerv2`.
+- Removed conflicting test namespace branch that blocked `v0.1.1` root branch creation:
+  - deleted remote `v0.1.1/test-branch/test`.
+- Set local tracking explicitly to `origin` for active non-master branches:
+  - `v0.1.1` -> `origin/v0.1.1`,
+  - `feature/v0.1.1-runtime-hud-sot` -> `origin/feature/v0.1.1-runtime-hud-sot`.
+- Updated workflow docs for new naming convention:
+  - `docs/agents.workflow.md` now uses `v0.1.1` examples,
+  - `AGENTS.md` branch naming note now defines:
+    - version line: `v0.1.1`,
+    - feature line: `feature/v0.1.1-<slug>`.
+
 ## Session Update (2026-03-11, pending, branch `cleanup-refactor`) - E2E matrix validation for canonical + compatibility paths
 - Added E2E matrix validation script:
   - `scripts/ci/validate-e2e-matrix.sh`

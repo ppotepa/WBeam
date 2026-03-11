@@ -13,7 +13,7 @@ This file is the canonical workflow for agents and automation in WBeam.
 Long-lived branches:
 - `master`: integration and stable development line.
 - `release`: release/build branch used to cut and publish release artifacts.
-- `0.1.1` (example): version-scoped branch for a release line.
+- `v0.1.1` (example): version-scoped branch for a release line.
 
 Branch hygiene rules:
 - No long-lived ad-hoc branches like `trainerv2`.
@@ -22,7 +22,7 @@ Branch hygiene rules:
 
 ## 3) Development Flow
 
-1. Create feature branch from version branch (`0.1.1`) or from `master`.
+1. Create feature branch from version branch (`v0.1.1`) or from `master`.
 2. Open PR in GitHub.
 3. Merge into target branch via review.
 4. Promote to `master` when ready.

@@ -24,7 +24,8 @@ Canonical repository layout and migration map:
 - `docs/repo-structure.md`
 
 Branch naming note:
-- repo currently contains mixed naming conventions from transition periods (`0.1.1`, `feature/...`, `ver/...`),
+- repo currently uses `v0.1.1` as version-line branch naming,
+- feature branch naming should follow `feature/v0.1.1-<slug>`,
 - for the active sprint, follow current team instruction and keep branch usage explicit in PR/MR descriptions.
 
 ## 3. Canonical Entrypoints
