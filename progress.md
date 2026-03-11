@@ -1,5 +1,24 @@
 # WBeam Progress
 
+## Session Update (2026-03-11, pending, branch `cleanup-refactor`) - E2E matrix validation for canonical + compatibility paths
+- Added E2E matrix validation script:
+  - `scripts/ci/validate-e2e-matrix.sh`
+- Script validates both canonical and compatibility alias paths:
+  - canonical: `host/*`, `desktop/*`, top-level wrappers,
+  - compatibility aliases: `src/host/*`, `src/apps/*`, `src/domains/training/*`, `proto`, `proto_x11`.
+- Script runs:
+  - executable/file existence checks,
+  - `bash -n` syntax checks for canonical + alias wrappers,
+  - wrapper help smoke (`./wbeam --help`, `./trainer.sh --help`, `./desktop.sh --help`),
+  - Python compile smoke for trainer canonical + alias paths.
+- Integrated into CI quality stage:
+  - `.gitlab-ci.yml` `quality_gates` now runs:
+    - `check-repo-layout.sh`
+    - `check-boundaries.sh`
+    - `validate-e2e-matrix.sh`
+- Validation:
+  - `./scripts/ci/validate-e2e-matrix.sh` -> OK.
+
 ## Session Update (2026-03-11, pending, branch `cleanup-refactor`) - Legacy archive isolation (`proto`, `proto_x11`)
 - Moved historical prototype lanes into archive tree:
   - `proto/` -> `archive/legacy/proto/`
