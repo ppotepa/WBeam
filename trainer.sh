@@ -9,6 +9,12 @@ if [[ -f "${WBEAM_CONFIG_HELPER}" ]]; then
   wbeam_load_config "${ROOT_DIR}"
 fi
 CONTROL_PORT="${WBEAM_CONTROL_PORT:-5001}"
+TRAINER_APP_DIR="${ROOT_DIR}/src/apps/trainer-tauri"
+TRAINER_FRONTEND_DIR="${TRAINER_APP_DIR}"
+# Keep one-release fallback for pre-migration layout.
+if [[ -f "${TRAINER_APP_DIR}/frontend/package.json" ]]; then
+  TRAINER_FRONTEND_DIR="${TRAINER_APP_DIR}/frontend"
+fi
 START_SERVICE=0
 VERBOSE=0
 MODE="ui"
@@ -113,8 +119,8 @@ Options:
   -h, --help              Show help.
 
 Modes:
-  --ui      -> npm run tauri:dev in src/apps/trainer-tauri
-  --web     -> npm run dev in src/apps/trainer-tauri
+  --ui      -> npm run tauri:dev in src/apps/trainer-tauri/frontend
+  --web     -> npm run dev in src/apps/trainer-tauri/frontend
   --wizard  -> ./wbeam train wizard
 
 Remaining args are forwarded to selected mode command.
@@ -233,8 +239,8 @@ STAMP="$(date -u +%Y%m%d-%H%M%S)"
 LOG_FILE="${LOG_DIR}/${STAMP}.trainer.log"
 
 if [[ "${MODE}" == "ui" || "${MODE}" == "web" ]]; then
-  log "launching trainer UI (src/apps/trainer-tauri, mode=${MODE})"
-  if [[ ! -f "${ROOT_DIR}/src/apps/trainer-tauri/package.json" ]]; then
+  log "launching trainer UI (${TRAINER_FRONTEND_DIR}, mode=${MODE})"
+  if [[ ! -f "${TRAINER_FRONTEND_DIR}/package.json" ]]; then
     log "trainer UI app is missing"
     exit 1
   fi
@@ -242,14 +248,14 @@ if [[ "${MODE}" == "ui" || "${MODE}" == "web" ]]; then
     log "npm is required to run trainer UI"
     exit 1
   fi
-  if [[ ! -d "${ROOT_DIR}/src/apps/trainer-tauri/node_modules" ]]; then
+  if [[ ! -d "${TRAINER_FRONTEND_DIR}/node_modules" ]]; then
     log "node_modules missing; running npm ci"
-    (cd "${ROOT_DIR}/src/apps/trainer-tauri" && npm ci >/dev/null 2>&1 || npm install >/dev/null 2>&1)
+    (cd "${TRAINER_FRONTEND_DIR}" && npm ci >/dev/null 2>&1 || npm install >/dev/null 2>&1)
   fi
   log "log=${LOG_FILE}"
   set +e
   (
-    cd "${ROOT_DIR}/src/apps/trainer-tauri"
+    cd "${TRAINER_FRONTEND_DIR}"
     if [[ "${MODE}" == "ui" ]]; then
       apply_tauri_stability_env
       npm run tauri:dev -- "${PASSTHRU[@]}"

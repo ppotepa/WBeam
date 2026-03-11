@@ -17,12 +17,12 @@ From repo root:
 Or directly:
 
 ```bash
-cd src/apps/desktop-tauri
+cd src/apps/desktop-tauri/frontend
 npm install
-npm run tauri dev
+npm run tauri:dev
 ```
 
 ## Structure
 
-- `src/` Solid + TS UI
-- `src-tauri/` Tauri Rust backend and app config
+- `frontend/` Solid + TypeScript UI
+- `backend/` Tauri Rust backend and app config

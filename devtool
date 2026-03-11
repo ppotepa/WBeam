@@ -15,6 +15,7 @@ DESKTOP_FRONTEND_DIR="$DESKTOP_APP_DIR"
 if [[ -f "$DESKTOP_APP_DIR/frontend/package.json" ]]; then
   DESKTOP_FRONTEND_DIR="$DESKTOP_APP_DIR/frontend"
 fi
+# Keep one-release fallback for pre-migration layout.
 TAURI_MANIFEST="$DESKTOP_APP_DIR/src-tauri/Cargo.toml"
 if [[ -f "$DESKTOP_APP_DIR/backend/Cargo.toml" ]]; then
   TAURI_MANIFEST="$DESKTOP_APP_DIR/backend/Cargo.toml"

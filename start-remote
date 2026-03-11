@@ -12,6 +12,7 @@ fi
 
 DESKTOP_APP_DIR="$ROOT_DIR/src/apps/desktop-tauri"
 DESKTOP_FRONTEND_DIR="$DESKTOP_APP_DIR"
+# Keep one-release fallback for pre-migration layout.
 if [[ -f "$DESKTOP_APP_DIR/frontend/package.json" ]]; then
   DESKTOP_FRONTEND_DIR="$DESKTOP_APP_DIR/frontend"
 fi

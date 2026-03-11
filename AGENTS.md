@@ -1,6 +1,6 @@
 # WBeam Agent Handbook
 
-Last updated: 2026-03-11 14:22 CET
+Last updated: 2026-03-11 23:30 CET
 Primary entrypoint: `./wbeam`
 
 ## 1. Project Purpose
@@ -19,6 +19,9 @@ Canonical workflow doc:
 - `docs/agents.workflow.md`
 
 If process rules conflict elsewhere, follow `docs/agents.workflow.md`.
+
+Canonical repository layout and migration map:
+- `docs/repo-structure.md`
 
 Branch naming note:
 - repo currently contains mixed naming conventions from transition periods (`0.1.1`, `feature/...`, `ver/...`),
@@ -69,10 +72,12 @@ Rules:
 ### 4.3 Desktop Apps
 
 - Main desktop controller:
-  - `src/apps/desktop-tauri`
+  - `src/apps/desktop-tauri/frontend`
+  - `src/apps/desktop-tauri/backend`
 - Trainer desktop app:
-  - `src/apps/trainer-tauri`
-  - primary UI composition: `src/apps/trainer-tauri/src/App.tsx`
+  - `src/apps/trainer-tauri/frontend`
+  - `src/apps/trainer-tauri/backend`
+  - primary UI composition: `src/apps/trainer-tauri/frontend/src/App.tsx`
 
 ### 4.4 Android Client
 
@@ -311,7 +316,11 @@ WBeam/
   src/
     apps/
       desktop-tauri/
+        frontend/
+        backend/
       trainer-tauri/
+        frontend/
+        backend/
     domains/
       training/
     host/
@@ -329,4 +338,4 @@ WBeam/
 - Keep host/APK compatibility revision coherent.
 - Prefer explicit probes/start checks for risky features (capture backend, session type, device readiness).
 - Never leak secrets/tokens/internal credentials to commits, logs, release notes, or assets.
-- Keep this file aligned with `progress.md` and `docs/agents.workflow.md`.
+- Keep this file aligned with `progress.md`, `docs/agents.workflow.md`, and `docs/repo-structure.md`.

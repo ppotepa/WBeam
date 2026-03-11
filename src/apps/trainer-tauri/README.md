@@ -24,7 +24,12 @@ Requires host daemon API on `http://127.0.0.1:5001` (or proxied equivalent).
 or directly:
 
 ```bash
-cd src/apps/trainer-tauri
+cd src/apps/trainer-tauri/frontend
 npm install
 npm run dev
 ```
+
+## Structure
+
+- `frontend/` Solid + TypeScript UI
+- `backend/` Tauri Rust backend and app config

@@ -10,6 +10,15 @@ if [[ -f "$WBEAM_CONFIG_HELPER" ]]; then
   wbeam_load_config "$ROOT_DIR"
 fi
 TAURI_DIR="$ROOT_DIR/src/apps/desktop-tauri"
+DESKTOP_FRONTEND_DIR="$TAURI_DIR"
+if [[ -f "$TAURI_DIR/frontend/package.json" ]]; then
+  DESKTOP_FRONTEND_DIR="$TAURI_DIR/frontend"
+fi
+# Keep one-release fallback for pre-migration layout.
+TAURI_MANIFEST="$TAURI_DIR/src-tauri/Cargo.toml"
+if [[ -f "$TAURI_DIR/backend/Cargo.toml" ]]; then
+  TAURI_MANIFEST="$TAURI_DIR/backend/Cargo.toml"
+fi
 LOG_DIR="$ROOT_DIR/logs"
 
 ensure_log_dir() {
@@ -213,7 +222,7 @@ run_dev() {
   log_file="$(new_log_file "desktop")"
   echo "[desktop] log=$log_file"
   (
-    cd "$TAURI_DIR"
+    cd "$DESKTOP_FRONTEND_DIR"
     if [[ ! -d node_modules ]]; then
       npm install
     fi
@@ -228,13 +237,13 @@ run_release() {
   log_file="$(new_log_file "desktop")"
   echo "[desktop] log=$log_file"
   (
-    cd "$TAURI_DIR"
+    cd "$DESKTOP_FRONTEND_DIR"
     if [[ ! -d node_modules ]]; then
       npm install
     fi
     npm run build
     desktop_apply_tauri_stability_env
-    exec cargo run --release --manifest-path src-tauri/Cargo.toml
+    exec cargo run --release --manifest-path "$TAURI_MANIFEST"
   ) 2>&1 | tee -a "$log_file"
 }
 

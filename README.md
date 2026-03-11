@@ -58,13 +58,17 @@ If you just want it to work now:
 
 - `android/` - Android client (`com.wbeam`)
 - `src/host/rust/` - Rust daemon, core, streamer
-- `src/apps/desktop-tauri/` - desktop UI
+- `src/apps/desktop-tauri/frontend` - desktop UI frontend
+- `src/apps/desktop-tauri/backend` - desktop UI backend (Tauri)
+- `src/apps/trainer-tauri/frontend` - trainer UI frontend
+- `src/apps/trainer-tauri/backend` - trainer UI backend (Tauri)
 - `src/host/scripts/` - host runtime scripts
 - `proto/` - historical sandbox lane
 - `proto_x11/` - X11 virtual-monitor prototype lane
 
 For contributor-facing path conventions and migration targets, see:
 
+- `docs/repo-structure.md`
 - `docs/repo-structure-contract.md`
 
 ## Main Entrypoints

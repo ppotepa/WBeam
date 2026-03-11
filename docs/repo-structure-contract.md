@@ -9,8 +9,10 @@ contributors.
 - `android/` - Android app (`com.wbeam`)
 - `src/host/rust/` - host daemon/core/streamer crates
 - `src/host/scripts/` - host runtime scripts
-- `src/apps/desktop-tauri/` - desktop UI app
-- `src/apps/trainer-tauri/` - trainer desktop app
+- `src/apps/desktop-tauri/frontend/` - desktop UI frontend
+- `src/apps/desktop-tauri/backend/` - desktop UI backend (Tauri)
+- `src/apps/trainer-tauri/frontend/` - trainer UI frontend
+- `src/apps/trainer-tauri/backend/` - trainer UI backend (Tauri)
 - `wbeam`, `wbgui`, `devtool`, `start-remote` - operational entrypoints
 
 ## Experimental / Historical Paths
@@ -20,7 +22,7 @@ contributors.
 
 These are not the default production path.
 
-## Target App Layout (Desktop Apps)
+## App Layout Contract (Desktop Apps)
 
 For each app under `src/apps/<app>`:
 
@@ -41,8 +43,7 @@ During migration, legacy paths may temporarily coexist:
 
 ## Migration Sequence
 
-1. Introduce structural checks in CI (warn mode).
-2. Migrate app paths with compatibility handling in scripts.
+1. Introduce structural checks in CI (warn mode). (done)
+2. Migrate app paths with compatibility handling in scripts. (done)
 3. Isolate experimental lanes under archive or external repo.
 4. Flip CI checks to enforce mode.
-

@@ -34,11 +34,18 @@ check_app_layout() {
   [[ -d "$app_dir/src" ]] && has_legacy_frontend=1
   [[ -d "$app_dir/src-tauri" ]] && has_legacy_backend=1
 
+  if [[ "$has_frontend" -eq 0 ]]; then
+    warn "$app_name missing frontend/ directory."
+  fi
+  if [[ "$has_backend" -eq 0 ]]; then
+    warn "$app_name missing backend/ directory."
+  fi
+
   if [[ "$has_legacy_frontend" -eq 1 || "$has_legacy_backend" -eq 1 ]]; then
     warn "$app_name uses legacy layout (src/src-tauri). target is frontend/backend."
   fi
 
-  if [[ "$has_frontend" -eq 1 || "$has_backend" -eq 1 ]]; then
+  if [[ "$has_frontend" -eq 1 && "$has_backend" -eq 1 ]]; then
     info "$app_name has new layout markers (frontend/backend)."
   fi
 }

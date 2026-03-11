@@ -1,17 +1,17 @@
 {
-  "name": "wbeam-desktop-tauri",
+  "name": "wbeam-trainer-tauri",
   "private": true,
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --port 1420",
+    "dev": "vite --port 1430",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri --config ../backend/tauri.conf.json",
+    "tauri:dev": "tauri dev --config ../backend/tauri.conf.json",
+    "tauri:build": "tauri build --config ../backend/tauri.conf.json"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.8.0",
-    "lucide-solid": "^0.542.0",
     "solid-js": "^1.9.9"
   },
   "devDependencies": {
