@@ -2042,7 +2042,7 @@ deps_virtual_install() {
 }
 
 x11proto_run() {
-  "$ROOT_DIR/proto_x11/run.sh" "$@"
+  "$ROOT_DIR/archive/legacy/proto_x11/run.sh" "$@"
 }
 
 x11proto_android_build() {

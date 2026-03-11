@@ -11,9 +11,7 @@ WBeam repository should be easy to navigate by domain first:
 3. `desktop/` -> desktop UI apps and desktop-side integration
 4. `shared/` -> protocol/contracts/compat shared by domains
 
-The old `src/*` tree is now kept only as a compatibility alias layer (symlinks) to avoid breaking wrappers during transition.
-
-## Canonical Top-Level Layout (Target)
+## Canonical Top-Level Layout
 
 ```text
 WBeam/
@@ -31,30 +29,23 @@ WBeam/
   redeploy-local
 ```
 
-## Current Migration State (Phase 2)
+## Current Migration State (Phase 3)
 
 - Domain boundary folders are active:
   - `android/README.md`
   - `host/README.md`
   - `desktop/README.md`
   - `shared/README.md`
-- Primary implementations are moved:
-  - `host/rust`, `host/scripts`, `host/daemon`
+- Primary implementations are active under domain roots:
+  - `host/rust`, `host/scripts`, `host/daemon`, `host/training`
   - `desktop/apps/desktop-tauri`, `desktop/apps/trainer-tauri`
   - `shared/protocol`, `shared/compat`
-  - `host/training`
-- Compatibility aliases remain under `src/`:
-  - `src/host` -> `../host`
-  - `src/apps` -> `../desktop/apps`
-  - `src/protocol` -> `../shared/protocol`
-  - `src/compat` -> `../shared/compat`
-  - `src/domains/training` -> `../../host/training`
 - Legacy prototypes are archived:
   - `archive/legacy/proto`
   - `archive/legacy/proto_x11`
-- Root aliases kept for compatibility:
-  - `proto` -> `archive/legacy/proto`
-  - `proto_x11` -> `archive/legacy/proto_x11`
+- Compatibility wrappers are removed:
+  - no `src/*` alias layer
+  - no root-level `proto` / `proto_x11` aliases
 
 ## Old -> New Mapping
 
@@ -66,14 +57,15 @@ WBeam/
 - `src/protocol/rust` -> `shared/protocol/rust`
 - `src/compat/*` -> `shared/compat/*`
 - `src/domains/training` -> `host/training` (runtime-owned domain with desktop clients)
+- `proto/*` -> `archive/legacy/proto/*`
+- `proto_x11/*` -> `archive/legacy/proto_x11/*`
 
 ## Migration Rules
 
-1. New code goes to target domain paths whenever practical.
-2. If a change must touch compatibility aliases under `src/*`, add a note in PR/commit explaining why.
-3. Keep wrappers (`./wbeam`, `./trainer.sh`, `./desktop.sh`) stable during migration.
-4. Migrate in small, build-safe slices.
-5. Remove compatibility alias layer only after scripts/CI/docs and external tooling are fully rewired.
+1. New code goes to canonical domain paths.
+2. Do not add new compatibility wrappers or alias trees.
+3. Keep wrappers (`./wbeam`, `./trainer.sh`, `./desktop.sh`) stable.
+4. Keep CI guard scripts green for structure and boundary checks.
 
 ## Structure Validation
 
@@ -81,10 +73,6 @@ Use:
 
 ```bash
 scripts/ci/check-repo-layout.sh
-```
-
-Strict mode (fails while legacy paths still exist):
-
-```bash
-WBEAM_LAYOUT_STRICT=1 scripts/ci/check-repo-layout.sh
+scripts/ci/check-boundaries.sh
+scripts/ci/validate-e2e-matrix.sh
 ```

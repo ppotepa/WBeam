@@ -346,10 +346,10 @@ fn runtime_config_path_for_session(root: &Path, session_label: Option<&str>) -> 
 
 fn load_presets_from_training_files(root: &Path) -> Option<BTreeMap<String, ActiveConfig>> {
     // New canonical path: config/training/profiles.json
-    // Legacy fallback: proto/config/profiles.json
+    // Legacy archived fallback: archive/legacy/proto/config/profiles.json
     let candidates = [
         root.join("config/training/profiles.json"),
-        root.join("proto/config/profiles.json"),
+        root.join("archive/legacy/proto/config/profiles.json"),
     ];
 
     for path in candidates {
@@ -416,7 +416,7 @@ fn load_presets_from_training_files(root: &Path) -> Option<BTreeMap<String, Acti
         return Some(out);
     }
 
-    warn!("presets: no training profiles found in config/training or proto/config");
+    warn!("presets: no training profiles found in config/training or archive/legacy/proto/config");
     None
 }
 

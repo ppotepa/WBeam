@@ -309,18 +309,14 @@ WBeam/
   host/
   desktop/
   shared/
+  archive/
+    legacy/
+      proto/
+      proto_x11/
   config/
   docs/
   logs/
-  proto/
-  proto_x11/
   scripts/
-  src/                  # compatibility aliases only
-    apps -> ../desktop/apps
-    host -> ../host
-    protocol -> ../shared/protocol
-    compat -> ../shared/compat
-    domains/training -> ../../host/training
 ```
 
 ## 15. Agent Guardrails
