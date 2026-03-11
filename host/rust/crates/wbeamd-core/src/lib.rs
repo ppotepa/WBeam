@@ -589,6 +589,33 @@ impl DaemonCore {
         Ok(InstanceLock { file })
     }
 
+    fn session_suffix(&self) -> String {
+        self.target_serial
+            .as_deref()
+            .unwrap_or("default")
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                    ch
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>()
+    }
+
+    fn trainer_active_marker_path(&self) -> PathBuf {
+        PathBuf::from(format!(
+            "/tmp/wbeam-trainer-active-{}-{}.flag",
+            self.session_suffix(),
+            self.stream_port
+        ))
+    }
+
+    fn trainer_run_active(&self) -> bool {
+        self.trainer_active_marker_path().exists()
+    }
+
     pub fn new(root: PathBuf, stream_port: u16, control_port: u16) -> Self {
         Self::new_for_session(root, stream_port, control_port, None, None)
     }
@@ -930,6 +957,7 @@ impl DaemonCore {
 
         let mut restart_cfg: Option<ActiveConfig> = None;
         let action;
+        let trainer_run_active = self.trainer_run_active();
 
         {
             let mut inner = self.inner.lock().await;
@@ -997,7 +1025,7 @@ impl DaemonCore {
             let forced_no_present_restart = no_present_restart_ready
                 && inner.no_present_streak >= NO_PRESENT_RESTART_STREAK_REQUIRED;
 
-            if forced_no_present_restart {
+            if forced_no_present_restart && !trainer_run_active {
                 inner.no_present_streak = 0;
                 inner.last_no_present_recovery_at = Some(now);
                 inner.metrics.restart_count = inner.metrics.restart_count.saturating_add(1);
@@ -1020,6 +1048,16 @@ impl DaemonCore {
                     inner.run_id, inner.metrics.adaptive_reason
                 );
                 restart_cfg = Some(inner.active_config.clone());
+            } else if forced_no_present_restart && trainer_run_active {
+                inner.no_present_streak = 0;
+                inner.metrics.adaptive_level = inner.adaptation_level;
+                inner.metrics.adaptive_action = "recover-hold-training".to_string();
+                inner.metrics.adaptive_reason = format!(
+                    "training run active; suppress no-present restart present_fps={:.1} recv_fps={:.1}",
+                    client.present_fps, client.recv_fps
+                );
+                inner.last_error =
+                    "training run active: no-present recovery restart suppressed".to_string();
             } else if !can_adapt {
                 inner.high_pressure_streak = 0;
                 inner.low_pressure_streak = 0;
@@ -1090,11 +1128,22 @@ impl DaemonCore {
                     let target_cfg =
                         config_for_level(&inner.baseline_config, inner.adaptation_level);
                     if target_cfg != inner.active_config && inner.current_pid.is_some() {
-                        if self.allow_live_adaptive_restart {
+                        if self.allow_live_adaptive_restart && !trainer_run_active {
                             inner.active_config = target_cfg.clone();
                             inner.metrics.restart_count =
                                 inner.metrics.restart_count.saturating_add(1);
                             restart_cfg = Some(target_cfg);
+                        } else if trainer_run_active {
+                            inner.metrics.adaptive_action =
+                                format!("{}-hold-training", inner.metrics.adaptive_action);
+                            inner.metrics.adaptive_reason = format!(
+                                "{} | training run active; suppress restart size={} fps={} bitrate={}",
+                                reason, target_cfg.size, target_cfg.fps, target_cfg.bitrate_kbps
+                            );
+                            inner.last_error = format!(
+                                "adaptive hold during training L{}",
+                                inner.adaptation_level
+                            );
                         } else {
                             inner.metrics.adaptive_action =
                                 format!("{}-pending", inner.metrics.adaptive_action);

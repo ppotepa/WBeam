@@ -137,7 +137,10 @@ public class MainActivity extends AppCompatActivity {
     private static final long DEBUG_OVERLAY_TOGGLE_HOLD_MS = 650L;
     private static final long PRESENT_FPS_STALE_GRACE_MS = 2500L;
     private static final long METRICS_STALE_GRACE_MS = 3000L;
-    private static final int HUD_RESOURCE_SERIES_MAX = 42;
+    // Denser chart history so adjacent samples are visually closer at 4 Hz.
+    private static final int HUD_RESOURCE_SERIES_MAX = 120;
+    private static final double FPS_LOW_ANCHOR = 10.0;
+    private static final long TRAINER_HUD_PAYLOAD_GRACE_MS = 2000L;
 
     // ── Views ──────────────────────────────────────────────────────────────────
     private View rootLayout;
@@ -259,6 +262,9 @@ public class MainActivity extends AppCompatActivity {
     private long lastCriticalErrorLogAtMs = 0L;
     private String lastStatsLine = "fps in/out: - | drops: - | late: - | q(t/d/r): -/-/- | reconnects: -";
     private String lastHudCompactLine = "hud: waiting for metrics";
+    private String hudOverlayMode = "none";
+    private String lastHudWebHtml = "";
+    private long lastTrainerHudPayloadAtMs = 0L;
     private double latestTargetFps = 60.0;
     private double latestPresentFps = 0.0;
     private long latestStreamUptimeSec = 0L;
@@ -768,13 +774,15 @@ public class MainActivity extends AppCompatActivity {
         settings.setAllowFileAccess(false);
         settings.setBuiltInZoomControls(false);
         settings.setDisplayZoomControls(false);
-        settings.setUseWideViewPort(true);
-        settings.setLoadWithOverviewMode(true);
+        settings.setUseWideViewPort(false);
+        settings.setLoadWithOverviewMode(false);
         perfHudWebView.setBackgroundColor(Color.TRANSPARENT);
         perfHudWebView.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
         perfHudWebView.setVerticalScrollBarEnabled(false);
         perfHudWebView.setHorizontalScrollBarEnabled(false);
         perfHudWebView.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        perfHudWebView.setPadding(0, 0, 0, 0);
+        perfHudWebView.setInitialScale(100);
     }
 
     private void bindStartupBuildVersion() {
@@ -1733,6 +1741,35 @@ public class MainActivity extends AppCompatActivity {
         uiHandler.removeCallbacks(debugGraphSampleTask);
     }
 
+    private boolean showHudWebHtml(String modeTag, String html) {
+        if (perfHudWebView == null || html == null) {
+            return false;
+        }
+        if (!modeTag.equals(hudOverlayMode) || !html.equals(lastHudWebHtml)) {
+            perfHudWebView.loadDataWithBaseURL(null, html, "text/html", "utf-8", null);
+            lastHudWebHtml = html;
+        }
+        hudOverlayMode = modeTag;
+        perfHudWebView.setVisibility(View.VISIBLE);
+        if (perfHudText != null) {
+            perfHudText.setVisibility(View.GONE);
+        }
+        return true;
+    }
+
+    private void showHudTextOnly(String modeTag, String text, String colorHex) {
+        hudOverlayMode = modeTag;
+        lastHudWebHtml = "";
+        if (perfHudWebView != null) {
+            perfHudWebView.setVisibility(View.GONE);
+        }
+        if (perfHudText != null) {
+            perfHudText.setText(text == null ? "" : text);
+            perfHudText.setTextColor(Color.parseColor(colorHex));
+            perfHudText.setVisibility(View.VISIBLE);
+        }
+    }
+
     // ══════════════════════════════════════════════════════════════════════════
     // UI - perf HUD
     // ══════════════════════════════════════════════════════════════════════════
@@ -1741,17 +1778,12 @@ public class MainActivity extends AppCompatActivity {
         if (perfHudText == null) {
             return;
         }
-        if (perfHudWebView != null) {
-            perfHudWebView.setVisibility(View.GONE);
-        }
-        perfHudText.setVisibility(View.VISIBLE);
         latestTargetFps = getSelectedFps();
         latestPresentFps = 0.0;
         latestStreamUptimeSec = 0L;
         latestFrameOutHost = 0L;
         lastHudCompactLine = "hud: offline | waiting metrics";
-        perfHudText.setText("HUD OFFLINE\nwaiting for host metrics...");
-        perfHudText.setTextColor(Color.parseColor("#FCA5A5"));
+        showHudTextOnly("offline", "HUD OFFLINE\nwaiting for host metrics...", "#FCA5A5");
         if (perfHudPanel != null) {
             perfHudPanel.setAlpha(0.96f);
         }
@@ -1784,8 +1816,14 @@ public class MainActivity extends AppCompatActivity {
         String trainerHudText = metrics.optString("trainer_hud_text", "");
         boolean trainerHudFromText = trainerHudText != null && !trainerHudText.trim().isEmpty();
         boolean trainerHudFlag = metrics.optBoolean("trainer_hud_active", false);
+        if (isTrainingConnection && (trainerHudFromJson || trainerHudFromText)) {
+            lastTrainerHudPayloadAtMs = nowMs;
+        }
         boolean trainerHudActive =
                 isTrainingConnection && (trainerHudFlag || trainerHudFromJson || trainerHudFromText);
+        if (!isTrainingConnection && (trainerHudFlag || trainerHudFromJson || trainerHudFromText)) {
+            emitHudDebugAdb("trainer_payload_ignored connection_mode=" + connectionMode);
+        }
         if (trainerHudActive && !trainerHudSessionActive) {
             trainerHudSessionActive = true;
             if (BuildConfig.DEBUG && !debugOverlayVisible) {
@@ -1804,13 +1842,26 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         if (isTrainingConnection && trainerHudActive) {
+            if (lastTrainerHudPayloadAtMs > 0L
+                    && (nowMs - lastTrainerHudPayloadAtMs) <= TRAINER_HUD_PAYLOAD_GRACE_MS) {
+                emitHudDebugAdb("trainer_payload_gap grace=1 keep_last=1");
+                return;
+            }
             renderTrainerHudOverlayPlaceholder();
             return;
         }
-        if (perfHudWebView != null) {
-            perfHudWebView.setVisibility(View.GONE);
+        if (isTrainingConnection && trainerHudSessionActive) {
+            if (lastTrainerHudPayloadAtMs > 0L
+                    && (nowMs - lastTrainerHudPayloadAtMs) <= TRAINER_HUD_PAYLOAD_GRACE_MS) {
+                emitHudDebugAdb("trainer_payload_missing grace=1 keep_last=1");
+                return;
+            }
+            showHudTextOnly("trainer", "TRAINING HUD\nwaiting for trainer metrics...", "#B3EAF4FF");
+            lastHudCompactLine = "trainer hud waiting metrics";
+            refreshDebugInfoOverlay();
+            return;
         }
-        perfHudText.setVisibility(View.VISIBLE);
+        hudOverlayMode = "runtime";
 
         JSONObject kpi = metrics.optJSONObject("kpi");
         JSONObject latest = metrics.optJSONObject("latest_client_metrics");
@@ -1978,13 +2029,11 @@ public class MainActivity extends AppCompatActivity {
         appendSeriesSample(runtimeLatencySeries, Math.max(0.0, e2eP95));
         appendSeriesSample(runtimeQueueSeries, Math.max(0.0, qT + qD + qR));
         String runtimeChartsHtml = buildMetricTrendRowsHtml(
-                null,
                 seriesToJson(runtimePresentSeries),
                 seriesToJson(runtimeMbpsSeries),
                 seriesToJson(runtimeDropSeries),
                 seriesToJson(runtimeLatencySeries),
                 seriesToJson(runtimeQueueSeries),
-                runtimeStateTone,
                 runtimeStateTone,
                 runtimeStateTone,
                 runtimeStateTone,
@@ -2001,6 +2050,8 @@ public class MainActivity extends AppCompatActivity {
                 decodeP95,
                 renderP95,
                 frametimeP95,
+                bitrateMbps,
+                dropPerSec,
                 qT,
                 qD,
                 qR,
@@ -2065,6 +2116,8 @@ public class MainActivity extends AppCompatActivity {
             double decodeP95,
             double renderP95,
             double frametimeP95,
+            double liveMbps,
+            double dropsPerSec,
             int qT,
             int qD,
             int qR,
@@ -2083,26 +2136,48 @@ public class MainActivity extends AppCompatActivity {
         sampleDeviceResourceUsage(targetFps, renderP95);
         String resourceRows = buildResourceRowsHtml();
         if (perfHudWebView != null) {
+            int[] streamSize = computeScaledSize();
+            String streamMode = String.format(
+                    Locale.US,
+                    "%s | %dx%d | %.0ffps",
+                    getSelectedEncoder().toUpperCase(Locale.US),
+                    streamSize[0],
+                    streamSize[1],
+                    targetFps
+            );
+            String profileRev = safeText(daemonBuildRevision).equals("-")
+                    ? safeText(BuildConfig.WBEAM_BUILD_REV)
+                    : safeText(daemonBuildRevision);
             StringBuilder chips = new StringBuilder();
-            chips.append(hudChip("HUD", "RUNTIME", ""));
+            chips.append(hudChip("CURRENT PROFILE", getSelectedProfile(), ""));
+            chips.append(hudChip("PROFILE REV", profileRev, ""));
+            chips.append(hudChip("STREAM MODE", streamMode, ""));
+            chips.append(hudChip("DEVICE", daemonHostName, ""));
             chips.append(hudChip("STATE", daemonStateUi, hudToneClass(tone)));
-            chips.append(hudChip("FPS", String.format(Locale.US, "%.0f / %.1f", targetFps, presentFps), hudToneClass(tone)));
-            chips.append(hudChip("ADAPT", "L" + adaptiveLevel + " " + safeText(adaptiveAction), ""));
 
             StringBuilder cards = new StringBuilder();
+            cards.append(hudCard("PRESENT FPS", String.format(Locale.US, "%.1f", presentFps), hudToneClass(tone)));
+            cards.append(hudCard("RECV FPS", String.format(Locale.US, "%.1f", recvFps), ""));
+            cards.append(hudCard("DECODE FPS", String.format(Locale.US, "%.1f", decodeFps), ""));
+            cards.append(hudCard("LIVE MBPS", fmtDoubleOrPlaceholder(liveMbps, "%.2f", "PENDING"), hudToneClass(tone)));
             cards.append(hudCard("E2E p95", String.format(Locale.US, "%.1f ms", e2eP95), hudToneClass(tone)));
-            cards.append(hudCard("Frame p95", String.format(Locale.US, "%.2f ms", frametimeP95), ""));
             cards.append(hudCard("Decode p95", String.format(Locale.US, "%.2f ms", decodeP95), ""));
             cards.append(hudCard("Render p95", String.format(Locale.US, "%.2f ms", renderP95), ""));
-            cards.append(hudCard("Recv/Decode FPS", String.format(Locale.US, "%.1f / %.1f", recvFps, decodeFps), ""));
-            cards.append(hudCard("Drops", drops + " (bp " + bpHigh + "/" + bpRecover + ")", ""));
+            cards.append(hudCard("Frame p95", String.format(Locale.US, "%.2f ms", frametimeP95), ""));
+            cards.append(hudCard("Drops / s", fmtDoubleOrPlaceholder(dropsPerSec, "%.3f", "PENDING"), hudToneClass(tone)));
+            cards.append(hudCard("Drops total", String.valueOf(drops), ""));
 
             StringBuilder details = new StringBuilder();
+            details.append(hudDetailRow("Adaptive", "L" + adaptiveLevel + " " + safeText(adaptiveAction)));
             details.append(hudDetailRow("Transport queue", qT + "/" + qTMax));
             details.append(hudDetailRow("Decode queue", qD + "/" + qDMax));
             details.append(hudDetailRow("Render queue", qR + "/" + qRMax));
+            details.append(hudDetailRow("Backpressure", bpHigh + "/" + bpRecover));
+            details.append(hudDetailRow("Connection mode", "runtime"));
             details.append(hudDetailRow("Reason", safeText(reason)));
             details.append(hudDetailRow("Host error", safeText(daemonLastError)));
+            details.append(hudDetailRow("App build", safeText(BuildConfig.WBEAM_BUILD_REV)));
+            details.append(hudDetailRow("Daemon build", safeText(daemonBuildRevision)));
 
             String trend = "runtime health=" + tone.toUpperCase(Locale.US)
                     + " | recv=" + String.format(Locale.US, "%.1f", recvFps)
@@ -2111,8 +2186,6 @@ public class MainActivity extends AppCompatActivity {
                     + " | drops=" + drops;
 
             String html = buildRuntimeHudHtml(
-                    "LIVE METRICS",
-                    -1,
                     chips.toString(),
                     cards.toString(),
                     metricChartsHtml == null ? "" : metricChartsHtml,
@@ -2121,9 +2194,32 @@ public class MainActivity extends AppCompatActivity {
                     resourceRows,
                     "scale-1x"
             );
-            perfHudWebView.loadDataWithBaseURL(null, html, "text/html", "utf-8", null);
-            perfHudWebView.setVisibility(View.VISIBLE);
-            perfHudText.setVisibility(View.GONE);
+            if (!showHudWebHtml("runtime", html) && perfHudText != null) {
+                String hud = String.format(
+                        Locale.US,
+                        "HUD %s\nfps %.0f/%.1f frame %.2fms\ndec %.2fms ren %.2fms e2e %.2fms\nq %d/%d/%d max %d/%d/%d\nadapt L%d %s\ndrops %d bp %d/%d\n%s",
+                        daemonReachable ? "LIVE" : "DEGRADED",
+                        targetFps,
+                        presentFps,
+                        frametimeP95,
+                        decodeP95,
+                        renderP95,
+                        e2eP95,
+                        qT,
+                        qD,
+                        qR,
+                        qTMax,
+                        qDMax,
+                        qRMax,
+                        adaptiveLevel,
+                        adaptiveAction,
+                        drops,
+                        bpHigh,
+                        bpRecover,
+                        reason == null || reason.isEmpty() ? "-" : reason
+                );
+                showHudTextOnly("runtime", hud, "#B3EAF4FF");
+            }
         } else if (perfHudText != null) {
             String hud = String.format(
                     Locale.US,
@@ -2148,9 +2244,7 @@ public class MainActivity extends AppCompatActivity {
                     bpRecover,
                     reason == null || reason.isEmpty() ? "-" : reason
             );
-            perfHudText.setText(hud);
-            perfHudText.setTextColor(Color.parseColor("#B3EAF4FF"));
-            perfHudText.setVisibility(View.VISIBLE);
+            showHudTextOnly("runtime", hud, "#B3EAF4FF");
         }
         if (perfHudPanel != null) {
             perfHudPanel.setAlpha(0.96f);
@@ -2171,14 +2265,13 @@ public class MainActivity extends AppCompatActivity {
         int progressPercent = parseTrainerProgressPercent(hudText);
         if (perfHudWebView != null) {
             String html = buildTrainerHudHtml(hudText, progressLine, progressPercent);
-            perfHudWebView.loadDataWithBaseURL(null, html, "text/html", "utf-8", null);
-            perfHudWebView.setVisibility(View.VISIBLE);
-            perfHudText.setVisibility(View.GONE);
+            if (!showHudWebHtml("trainer", html)) {
+                String finalText = progressLine.isEmpty() ? hudText : progressLine + "\n" + hudText;
+                showHudTextOnly("trainer", finalText, "#B3EAF4FF");
+            }
         } else {
             String finalText = progressLine.isEmpty() ? hudText : progressLine + "\n" + hudText;
-            perfHudText.setText(finalText);
-            perfHudText.setTextColor(Color.parseColor("#B3EAF4FF"));
-            perfHudText.setVisibility(View.VISIBLE);
+            showHudTextOnly("trainer", finalText, "#B3EAF4FF");
         }
         if (perfHudPanel != null) {
             perfHudPanel.setAlpha(0.96f);
@@ -2201,12 +2294,11 @@ public class MainActivity extends AppCompatActivity {
         );
         String html = buildTrainerHudHtmlFromJson(hudJson, progressText, progressPercent);
         if (perfHudWebView != null) {
-            perfHudWebView.loadDataWithBaseURL(null, html, "text/html", "utf-8", null);
-            perfHudWebView.setVisibility(View.VISIBLE);
-            perfHudText.setVisibility(View.GONE);
+            if (!showHudWebHtml("trainer", html)) {
+                showHudTextOnly("trainer", progressText, "#B3EAF4FF");
+            }
         } else {
-            perfHudText.setText(progressText);
-            perfHudText.setVisibility(View.VISIBLE);
+            showHudTextOnly("trainer", progressText, "#B3EAF4FF");
         }
         if (perfHudPanel != null) {
             perfHudPanel.setAlpha(0.96f);
@@ -2266,13 +2358,11 @@ public class MainActivity extends AppCompatActivity {
                 "arcade"
         );
         if (perfHudWebView != null) {
-            perfHudWebView.loadDataWithBaseURL(null, html, "text/html", "utf-8", null);
-            perfHudWebView.setVisibility(View.VISIBLE);
-            perfHudText.setVisibility(View.GONE);
+            if (!showHudWebHtml("trainer", html)) {
+                showHudTextOnly("trainer", "TRAINER HUD PENDING\nplaceholder layout active", "#B3EAF4FF");
+            }
         } else {
-            perfHudText.setText("TRAINER HUD PENDING\nplaceholder layout active");
-            perfHudText.setTextColor(Color.parseColor("#B3EAF4FF"));
-            perfHudText.setVisibility(View.VISIBLE);
+            showHudTextOnly("trainer", "TRAINER HUD PENDING\nplaceholder layout active", "#B3EAF4FF");
         }
         if (perfHudPanel != null) {
             perfHudPanel.setAlpha(0.96f);
@@ -2527,8 +2617,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private String buildRuntimeHudHtml(
-            String progressLabel,
-            int progressPercent,
             String chipsHtml,
             String cardsHtml,
             String chartsHtml,
@@ -2537,42 +2625,44 @@ public class MainActivity extends AppCompatActivity {
             String resourceRowsHtml,
             String scaleClass
     ) {
-        int safePct = clampPercent(progressPercent);
-        String progress = safeText(progressLabel);
         String bodyClass = "hud-live " + safeText(scaleClass);
         return "<!doctype html><html><head><meta charset='utf-8'/>"
+                + "<meta name='viewport' content='width=device-width,height=device-height,initial-scale=1,maximum-scale=1,viewport-fit=cover'/>"
                 + "<style>"
-                + "html,body{margin:0;padding:0;background:transparent;color:#ecfbff;font-family:'JetBrains Mono','IBM Plex Mono',monospace;font-size:13px;min-width:100%;min-height:100%;}"
-                + ".root{padding:6px;box-sizing:border-box;width:100%;height:100%;display:grid;grid-template-rows:auto auto minmax(0,1fr);gap:6px;}"
-                + ".top{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:6px;}"
-                + ".chip{border:1px solid rgba(126,245,255,.52);background:rgba(6,24,31,.82);padding:5px 7px;min-height:34px;}"
-                + ".chip .k{font-size:10px;color:#9dddea;display:block;letter-spacing:.05em;}"
-                + ".chip .v{font-size:12px;color:#ecfbff;word-break:break-word;}"
-                + ".progress{border:1px solid rgba(126,245,255,.52);background:rgba(6,24,31,.86);padding:5px 7px;}"
-                + ".p-head{display:flex;align-items:center;justify-content:space-between;gap:8px;}"
-                + ".p-label{font-size:11px;color:#b9f8ff;letter-spacing:.04em;}"
-                + ".p-pct{font-size:12px;color:#dcf9ff;font-weight:700;}"
-                + ".p-track{margin-top:6px;height:7px;background:rgba(0,0,0,.35);border:1px solid rgba(126,245,255,.35);}"
-                + ".p-fill{height:100%;width:" + safePct + "%;background:linear-gradient(90deg,#60f2c2,#7dd3fc);}"
-                + ".main{display:grid;grid-template-columns:1fr 1fr;gap:6px;min-height:0;}"
-                + ".panel{border:1px solid rgba(126,245,255,.5);background:rgba(6,24,31,.88);padding:6px;min-height:0;overflow:auto;}"
-                + ".kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:6px;}"
-                + ".kpi .item{border:1px solid rgba(126,245,255,.42);padding:6px;background:rgba(0,0,0,.4);}"
-                + ".kpi .item .k{font-size:10px;color:#9dddea;display:block;}"
-                + ".kpi .item .v{font-size:12px;color:#dcf9ff;}"
-                + ".trend{font-size:10px;line-height:1.3;margin-top:6px;color:#9dddea;word-break:break-word;}"
-                + ".metric-trends{margin-top:7px;border:1px solid rgba(126,245,255,.35);padding:6px;background:rgba(2,10,14,.45);display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;}"
-                + ".trend-row{display:grid;grid-template-columns:66px minmax(0,1fr) 94px;align-items:center;gap:6px;}"
-                + ".trend-label{font-size:10px;color:#9dddea;letter-spacing:.04em;}"
-                + ".trend-range{font-size:10px;color:#b9f8ff;text-align:right;white-space:nowrap;}"
-                + ".trend-card{border:1px solid rgba(126,245,255,.28);padding:5px;background:rgba(0,0,0,.24);display:grid;grid-template-rows:auto auto;gap:4px;min-width:0;}"
+                + "html,body{margin:0;padding:0;background:transparent;color:#ecfbff;font-family:'JetBrains Mono','IBM Plex Mono',monospace;font-size:14px;width:100%;height:100%;}"
+                + ".root{position:fixed;inset:0;padding:6px;box-sizing:border-box;display:grid;grid-template-rows:auto minmax(0,1fr);gap:6px;}"
+                + ".top{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px;}"
+                + ".chip{border:1px solid rgba(126,245,255,.52);background:rgba(6,24,31,.82);padding:8px 10px;min-height:42px;}"
+                + ".chip .k{font-size:11px;color:#9dddea;display:block;letter-spacing:.05em;}"
+                + ".chip .v{font-size:14px;color:#ecfbff;word-break:break-word;font-weight:700;}"
+                + ".main{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:6px;min-height:0;}"
+                + ".panel{border:1px solid rgba(126,245,255,.5);background:rgba(6,24,31,.88);padding:8px;min-height:0;overflow:auto;}"
+                + ".panel-main{display:grid;grid-template-rows:auto minmax(0,1fr) auto auto;gap:8px;overflow:hidden;}"
+                + ".panel-side{overflow:auto;}"
+                + ".kpi{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;}"
+                + ".kpi .item{border:1px solid rgba(126,245,255,.42);padding:8px;background:rgba(0,0,0,.4);}"
+                + ".kpi .item .k{font-size:11px;color:#9dddea;display:block;}"
+                + ".kpi .item .v{font-size:18px;color:#dcf9ff;font-weight:700;line-height:1.15;}"
+                + ".trend{font-size:11px;line-height:1.35;margin-top:6px;color:#9dddea;word-break:break-word;}"
+                + ".metric-trends{margin-top:0;border:1px solid rgba(126,245,255,.35);padding:8px;background:rgba(2,10,14,.45);display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;min-height:0;overflow:auto;}"
+                + ".trend-row{display:grid;grid-template-columns:1fr;gap:6px;}"
+                + ".trend-label{font-size:11px;color:#9dddea;letter-spacing:.04em;}"
+                + ".trend-range{font-size:12px;color:#d6fbff;text-align:right;white-space:nowrap;font-weight:700;}"
+                + ".trend-card{border:1px solid rgba(126,245,255,.28);padding:6px;background:rgba(0,0,0,.24);display:grid;grid-template-rows:auto minmax(0,1fr);gap:6px;min-width:0;min-height:124px;}"
                 + ".trend-head{display:flex;align-items:center;justify-content:space-between;gap:6px;}"
+                + ".trend-meta{display:grid;grid-template-rows:auto auto;gap:4px;}"
+                + ".trend-meta-row{display:grid;grid-template-columns:1fr 1fr 1fr;align-items:center;gap:6px;}"
+                + ".trend-meta-item{font-size:13px;font-weight:700;color:#d6fbff;}"
+                + ".trend-meta-item.mid{text-align:center;}"
+                + ".trend-meta-item.high{text-align:right;}"
+                + ".trend-meta-cur{font-size:12px;color:#b9f8ff;font-weight:700;}"
                 + ".resource{margin-top:7px;border:1px solid rgba(126,245,255,.35);padding:6px;background:rgba(2,10,14,.35);display:grid;gap:5px;}"
                 + ".resource .title{font-size:10px;color:#9dddea;letter-spacing:.05em;}"
                 + ".res-row{display:grid;grid-template-columns:42px 62px minmax(0,1fr);align-items:center;gap:6px;}"
                 + ".res-row .rk{font-size:10px;color:#9dddea;}"
                 + ".res-row .rv{font-size:11px;color:#dcf9ff;}"
-                + ".spark{height:22px;display:flex;align-items:flex-end;gap:1px;border:1px solid rgba(126,245,255,.24);padding:2px;background:rgba(0,0,0,.26);overflow:hidden;min-width:0;}"
+                + ".spark{height:92px;display:flex;align-items:flex-end;gap:1px;border:1px solid rgba(126,245,255,.24);padding:2px;background:rgba(0,0,0,.26);overflow:hidden;min-width:0;}"
+                + ".spark-svg{width:100%;height:100%;display:block;}"
                 + ".spark-bar{flex:1 1 0;min-width:2px;border-radius:2px 2px 0 0;background:linear-gradient(180deg,rgba(110,231,183,.96),rgba(110,231,183,.2));}"
                 + ".spark-bar.state-warn{background:linear-gradient(180deg,rgba(251,191,36,.96),rgba(251,191,36,.2));}"
                 + ".spark-bar.state-risk{background:linear-gradient(180deg,rgba(248,113,113,.96),rgba(248,113,113,.2));}"
@@ -2580,16 +2670,15 @@ public class MainActivity extends AppCompatActivity {
                 + ".detail-table td{border:1px solid rgba(126,245,255,.36);padding:4px 6px;vertical-align:top;word-break:break-word;}"
                 + ".detail-table td:first-child{width:52%;color:#dffcff;} .detail-table td:last-child{text-align:right;color:#b9f8ff;}"
                 + ".state-ok{color:#6ee7b7;} .state-warn{color:#fbbf24;} .state-risk{color:#f87171;} .state-pending{color:#94a3b8;}"
-                + "@media (max-width:980px){.main{grid-template-columns:1fr;}.metric-trends{grid-template-columns:1fr;}}"
+                + "@media (max-width:980px){.main{grid-template-columns:1fr;}.metric-trends{grid-template-columns:1fr;}.spark{height:110px;}}"
                 + "</style></head><body class='" + bodyClass + "'><div class='root'>"
                 + "<div class='top'>"
                 + hudChip("HUD MODE", "RUNTIME", "")
                 + chipsHtml
                 + "</div>"
-                + "<div class='progress'><div class='p-head'><span class='p-label'>" + escapeHtml(progress.isEmpty() ? "HUD ACTIVE" : progress) + "</span><span class='p-pct'>" + safePct + "%</span></div><div class='p-track'><div class='p-fill'></div></div></div>"
                 + "<div class='main'>"
-                + "<div class='panel'><div class='kpi'>" + cardsHtml + "</div><div class='metric-trends'>" + chartsHtml + "</div><div class='trend'>" + escapeHtml(safeText(trendText)) + "</div><div class='resource'><div class='title'>DEVICE RESOURCES (* GPU proxy from render time)</div>" + resourceRowsHtml + "</div></div>"
-                + "<div class='panel'><table class='detail-table'>" + detailsRowsHtml + "</table></div>"
+                + "<div class='panel panel-main'><div class='kpi'>" + cardsHtml + "</div><div class='metric-trends'>" + chartsHtml + "</div><div class='trend'>" + escapeHtml(safeText(trendText)) + "</div><div class='resource'><div class='title'>DEVICE RESOURCES (* GPU proxy from render time)</div>" + resourceRowsHtml + "</div></div>"
+                + "<div class='panel panel-side'><table class='detail-table'>" + detailsRowsHtml + "</table></div>"
                 + "</div>"
                 + "</div></body></html>";
     }
@@ -2673,28 +2762,36 @@ public class MainActivity extends AppCompatActivity {
 
         String hudShellClass = "sot shell " + trainerScaleClass(fontProfile);
         return "<!doctype html><html><head><meta charset='utf-8'/>"
+                + "<meta name='viewport' content='width=device-width,height=device-height,initial-scale=1,maximum-scale=1,viewport-fit=cover'/>"
                 + "<style>"
                 + "html,body{margin:0;padding:0;background:transparent;color:#ecfbff;font-family:'JetBrains Mono','IBM Plex Mono',monospace;width:100%;height:100%;}"
-                + ".sot.shell{padding:6px;box-sizing:border-box;width:100%;height:100%;display:grid;grid-template-rows:auto minmax(0,1fr) auto;gap:6px;}"
+                + ".sot.shell{position:fixed;inset:0;padding:6px;box-sizing:border-box;display:grid;grid-template-rows:auto minmax(0,1fr) auto;gap:6px;}"
                 + ".sot .panel{background:rgba(4,25,34,.78);border:1px solid rgba(110,242,255,.34);border-radius:8px;padding:8px;min-width:0;}"
                 + ".sot .header{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;}"
                 + ".sot .chip{background:rgba(6,39,55,.85);border:1px solid rgba(124,236,255,.42);border-radius:6px;padding:6px 8px;min-width:0;}"
                 + ".sot .chip .k{display:block;font-size:11px;color:#9fe8f2;letter-spacing:.04em;}"
                 + ".sot .chip .v{display:block;font-size:16px;color:#f0fdff;font-weight:700;line-height:1.15;word-break:break-word;}"
-                + ".sot .main{display:grid;grid-template-columns:44% 56%;gap:6px;min-height:0;}"
+                + ".sot .main{display:grid;grid-template-columns:42% 58%;gap:6px;min-height:0;}"
                 + ".sot .left-col,.sot .right-col{display:grid;gap:6px;min-height:0;min-width:0;}"
-                + ".sot .left-col{grid-template-rows:repeat(3,minmax(88px,auto)) minmax(0,1fr);}"
+                + ".sot .left-col{grid-template-rows:repeat(3,minmax(98px,auto)) minmax(0,1fr);}"
                 + ".sot .kpi-block{background:rgba(3,19,27,.78);border:1px solid rgba(110,242,255,.24);border-radius:6px;padding:8px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;}"
                 + ".sot .kpi-item .k{display:block;font-size:11px;color:#9fe8f2;}"
                 + ".sot .kpi-item .v{display:block;font-size:20px;color:#f0fdff;font-weight:700;line-height:1.15;word-break:break-word;}"
                 + ".sot .status{background:rgba(3,19,27,.78);border:1px solid rgba(110,242,255,.24);border-radius:6px;padding:8px;display:grid;gap:5px;align-content:start;}"
                 + ".sot .status .row{font-size:12px;color:#c8f7ff;line-height:1.28;word-break:break-word;}"
-                + ".sot .trend-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;min-height:0;align-content:start;}"
-                + ".sot .trend-cell{background:rgba(3,19,27,.78);border:1px solid rgba(110,242,255,.24);border-radius:6px;padding:7px;display:grid;gap:5px;min-width:0;}"
+                + ".sot .trend-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;min-height:0;align-content:stretch;grid-auto-rows:minmax(128px,1fr);}"
+                + ".sot .trend-cell{background:rgba(3,19,27,.78);border:1px solid rgba(110,242,255,.24);border-radius:6px;padding:7px;display:grid;grid-template-rows:auto minmax(0,1fr);gap:6px;min-width:0;min-height:128px;}"
                 + ".sot .trend-head{display:flex;justify-content:space-between;align-items:center;gap:8px;min-width:0;}"
                 + ".sot .trend-title{font-size:11px;color:#9fe8f2;letter-spacing:.03em;}"
-                + ".sot .trend-stats{font-size:11px;color:#c8f7ff;white-space:nowrap;}"
-                + ".sot .spark{height:52px;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);align-items:end;gap:1px;border:1px solid rgba(114,231,255,.3);background:rgba(2,12,18,.95);padding:2px;overflow:hidden;min-width:0;}"
+                + ".sot .trend-stats{font-size:12px;color:#d8fbff;white-space:nowrap;font-weight:700;}"
+                + ".sot .spark{height:94px;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);align-items:end;gap:1px;border:1px solid rgba(114,231,255,.3);background:rgba(2,12,18,.95);padding:2px;overflow:hidden;min-width:0;}"
+                + ".sot .spark-svg{width:100%;height:100%;display:block;}"
+                + ".sot .trend-meta{display:grid;grid-template-rows:auto auto;gap:4px;}"
+                + ".sot .trend-meta-row{display:grid;grid-template-columns:1fr 1fr 1fr;align-items:center;gap:6px;}"
+                + ".sot .trend-meta-item{font-size:13px;font-weight:700;color:#d8fbff;}"
+                + ".sot .trend-meta-item.mid{text-align:center;}"
+                + ".sot .trend-meta-item.high{text-align:right;}"
+                + ".sot .trend-meta-cur{font-size:12px;color:#c8f7ff;font-weight:700;}"
                 + ".sot .spark .spark-bar{width:100%;min-width:0;border-radius:2px 2px 0 0;background:linear-gradient(180deg,rgba(141,217,255,.96),rgba(141,217,255,.24));}"
                 + ".sot .spark .spark-bar.state-warn{background:linear-gradient(180deg,rgba(251,191,36,.96),rgba(251,191,36,.24));}"
                 + ".sot .spark .spark-bar.state-risk{background:linear-gradient(180deg,rgba(248,113,113,.96),rgba(248,113,113,.24));}"
@@ -2705,7 +2802,7 @@ public class MainActivity extends AppCompatActivity {
                 + ".sot .res-row .rv{font-size:12px;color:#f0fdff;}"
                 + ".sot .footer{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;}"
                 + ".sot .foot{background:rgba(3,19,27,.78);border:1px solid rgba(110,242,255,.24);border-radius:6px;padding:6px 8px;font-size:12px;color:#c8f7ff;line-height:1.3;word-break:break-word;}"
-                + ".sot.scale-2x .chip .k{font-size:12px;}.sot.scale-2x .chip .v{font-size:20px;}.sot.scale-2x .kpi-item .k{font-size:12px;}.sot.scale-2x .kpi-item .v{font-size:24px;}.sot.scale-2x .status .row{font-size:14px;}.sot.scale-2x .trend-title{font-size:13px;}.sot.scale-2x .trend-stats{font-size:12px;}.sot.scale-2x .spark{height:62px;}"
+                + ".sot.scale-2x .chip .k{font-size:12px;}.sot.scale-2x .chip .v{font-size:20px;}.sot.scale-2x .kpi-item .k{font-size:12px;}.sot.scale-2x .kpi-item .v{font-size:24px;}.sot.scale-2x .status .row{font-size:14px;}.sot.scale-2x .trend-title{font-size:13px;}.sot.scale-2x .trend-stats{font-size:12px;}.sot.scale-2x .spark{height:110px;}"
                 + "@media (max-width:1200px){.sot .main{grid-template-columns:1fr;}.sot .trend-grid{grid-template-columns:1fr;}.sot .footer{grid-template-columns:1fr;}}"
                 + "</style></head><body class='hud-trainer'><div class='" + hudShellClass + "'>"
                 + "<div class='panel header'>"
@@ -2752,10 +2849,13 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private String buildSotTrendCellHtml(String label, JSONArray series, String toneClass, String unitSuffix) {
+        String stats = buildSeriesStats(series, unitSuffix);
+        String meta = buildSeriesMetaHtml(label, series, unitSuffix);
         return "<div class='trend-cell'>"
                 + "<div class='trend-head'><span class='trend-title'>" + escapeHtml(label) + "</span>"
-                + "<span class='trend-stats " + escapeHtml(toneClass == null ? "" : toneClass) + "'>" + escapeHtml(buildSeriesStats(series, unitSuffix)) + "</span></div>"
-                + "<div class='spark'>" + buildSparkBarsFromJson(series, toneClass) + "</div>"
+                + "<span class='trend-stats " + escapeHtml(toneClass == null ? "" : toneClass) + "'>" + escapeHtml(stats) + "</span></div>"
+                + "<div class='spark'>" + buildTrendSparkChartFromJson(series, toneClass) + "</div>"
+                + meta
                 + "</div>";
     }
 
@@ -2940,30 +3040,28 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private String buildMetricTrendRowsHtml(
-            JSONArray score,
             JSONArray fps,
             JSONArray mbps,
             JSONArray drops,
             JSONArray latency,
             JSONArray queue,
-            String scoreTone,
             String fpsTone,
             String mbpsTone,
             String dropTone,
             String latTone,
             String queueTone
     ) {
-        return buildTrendRowHtml("SCORE", score, hudToneClass(scoreTone), "")
-                + buildTrendRowHtml("FPS", fps, hudToneClass(fpsTone), "")
-                + buildTrendRowHtml("MBPS", mbps, hudToneClass(mbpsTone), "")
-                + buildTrendRowHtml("DROPS", drops, hudToneClass(dropTone), "")
-                + buildTrendRowHtml("LAT", latency, hudToneClass(latTone), "ms")
-                + buildTrendRowHtml("QUEUE", queue, hudToneClass(queueTone), "");
+        return buildTrendCardHtml("FPS", fps, hudToneClass(fpsTone), "")
+                + buildTrendCardHtml("MBPS", mbps, hudToneClass(mbpsTone), "Mbps")
+                + buildTrendCardHtml("DROPS / SEC", drops, hudToneClass(dropTone), "")
+                + buildTrendCardHtml("LAT p95", latency, hudToneClass(latTone), "ms")
+                + buildTrendCardHtml("QUEUE DEPTH", queue, hudToneClass(queueTone), "");
     }
 
     private String buildTrendCardHtml(String label, JSONArray series, String toneClass, String unitSuffix) {
-        String bars = buildSparkBarsFromJson(series, toneClass);
+        String bars = buildTrendSparkChartFromJson(series, toneClass);
         String stats = buildSeriesStats(series, unitSuffix);
+        String meta = buildSeriesMetaHtml(label, series, unitSuffix);
         return "<div class='trend-card'><div class='trend-head'><span class='trend-label'>"
                 + escapeHtml(label)
                 + "</span><span class='trend-range "
@@ -2972,11 +3070,13 @@ public class MainActivity extends AppCompatActivity {
                 + escapeHtml(stats)
                 + "</span></div><div class='spark'>"
                 + bars
-                + "</div></div>";
+                + "</div>"
+                + meta
+                + "</div>";
     }
 
     private String buildTrendRowHtml(String label, JSONArray series, String toneClass, String unitSuffix) {
-        String bars = buildSparkBarsFromJson(series, toneClass);
+        String bars = buildTrendSparkChartFromJson(series, toneClass);
         String stats = buildSeriesStats(series, unitSuffix);
         return "<div class='trend-row'><span class='trend-label'>"
                 + escapeHtml(label)
@@ -2989,10 +3089,11 @@ public class MainActivity extends AppCompatActivity {
                 + "</span></div>";
     }
 
-    private String buildSparkBarsFromJson(JSONArray series, String toneClass) {
+    private String buildTrendSparkChartFromJson(JSONArray series, String toneClass) {
         if (series == null || series.length() == 0) {
-            return buildSparkPlaceholderBars(toneClass, 28);
+            return buildTrendSparkPlaceholderSvg(toneClass);
         }
+        ArrayDeque<Double> values = new ArrayDeque<>();
         double lo = Double.POSITIVE_INFINITY;
         double hi = Double.NEGATIVE_INFINITY;
         for (int i = 0; i < series.length(); i++) {
@@ -3003,41 +3104,127 @@ public class MainActivity extends AppCompatActivity {
             if (!Double.isFinite(v)) {
                 continue;
             }
+            values.addLast(v);
             lo = Math.min(lo, v);
             hi = Math.max(hi, v);
         }
-        if (!Double.isFinite(lo) || !Double.isFinite(hi)) {
-            return buildSparkPlaceholderBars(toneClass, 28);
+        if (!Double.isFinite(lo) || !Double.isFinite(hi) || values.isEmpty()) {
+            return buildTrendSparkPlaceholderSvg(toneClass);
         }
         double span = hi - lo;
-        if (span < 1e-6) {
-            span = Math.max(1.0, Math.abs(hi));
-            lo = hi - span;
+        if (span < 1e-3) {
+            span = Math.max(1.0, Math.abs(hi) * 0.25);
         }
+        double pad = Math.max(0.1, span * 0.12);
+        double yMin = lo - pad;
+        double yMax = hi + pad;
+        double ySpan = Math.max(1e-3, yMax - yMin);
 
-        StringBuilder bars = new StringBuilder();
-        for (int i = 0; i < series.length(); i++) {
-            if (series.isNull(i)) {
-                continue;
-            }
-            double v = series.optDouble(i, Double.NaN);
-            if (!Double.isFinite(v)) {
-                continue;
-            }
-            double norm = (v - lo) / span;
+        int n = values.size();
+        String stroke = toneStrokeColor(toneClass);
+        String fill = toneFillColor(toneClass);
+        String dot = toneDotColor(toneClass);
+        if (n == 1) {
+            double single = values.peekFirst() == null ? yMin : values.peekFirst();
+            double norm = clampDouble((single - yMin) / ySpan, 0.0, 1.0);
+            double y = 100.0 - (norm * 100.0);
+            return "<svg class='spark-svg' viewBox='0 0 100 100' preserveAspectRatio='none'>"
+                    + "<rect x='0' y='0' width='100' height='100' fill='transparent'/>"
+                    + "<line x1='0' y1='" + fmt2(y) + "' x2='100' y2='" + fmt2(y) + "' stroke='" + stroke + "' stroke-width='2.4'/>"
+                    + "<circle cx='50' cy='" + fmt2(y) + "' r='2.2' fill='" + dot + "'/>"
+                    + "</svg>";
+        }
+        StringBuilder polyline = new StringBuilder();
+        StringBuilder area = new StringBuilder("M 0 100 ");
+        StringBuilder dots = new StringBuilder();
+        int idx = 0;
+        for (Double raw : values) {
+            double v = raw == null ? yMin : raw;
+            double norm = (v - yMin) / ySpan;
             norm = clampDouble(norm, 0.0, 1.0);
-            int height = (int) Math.round(10 + (norm * 90.0));
-            height = Math.max(8, Math.min(100, height));
-            bars.append("<span class='spark-bar ")
-                    .append(escapeHtml(toneClass))
-                    .append("' style='height:")
-                    .append(height)
-                    .append("%'></span>");
+            double x = (idx * 100.0) / Math.max(1, n - 1);
+            double y = 100.0 - (norm * 100.0);
+            if (idx == 0) {
+                area.append("L ").append(fmt2(x)).append(" ").append(fmt2(y)).append(" ");
+            } else {
+                area.append("L ").append(fmt2(x)).append(" ").append(fmt2(y)).append(" ");
+            }
+            polyline.append(fmt2(x)).append(",").append(fmt2(y)).append(" ");
+            dots.append("<circle cx='")
+                    .append(fmt2(x))
+                    .append("' cy='")
+                    .append(fmt2(y))
+                    .append("' r='1.0' fill='")
+                    .append(dot)
+                    .append("'/>");
+            idx++;
         }
-        if (bars.length() == 0) {
-            return buildSparkPlaceholderBars(toneClass, 28);
+        area.append("L 100 100 Z");
+        return "<svg class='spark-svg' viewBox='0 0 100 100' preserveAspectRatio='none'>"
+                + "<rect x='0' y='0' width='100' height='100' fill='transparent'/>"
+                + "<path d='" + area + "' fill='" + fill + "'/>"
+                + "<polyline points='" + polyline + "' fill='none' stroke='" + stroke + "' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/>"
+                + dots
+                + "</svg>";
+    }
+
+    private String buildTrendSparkPlaceholderSvg(String toneClass) {
+        String stroke = toneStrokeColor(toneClass);
+        String fill = toneFillColor(toneClass);
+        return "<svg class='spark-svg' viewBox='0 0 100 100' preserveAspectRatio='none'>"
+                + "<rect x='0' y='0' width='100' height='100' fill='transparent'/>"
+                + "<path d='M 0 100 L 0 70 L 15 68 L 30 72 L 45 66 L 60 69 L 75 63 L 90 65 L 100 62 L 100 100 Z' fill='" + fill + "'/>"
+                + "<polyline points='0,70 15,68 30,72 45,66 60,69 75,63 90,65 100,62' fill='none' stroke='" + stroke + "' stroke-width='2.1' stroke-linecap='round' stroke-linejoin='round' stroke-dasharray='4 4'/>"
+                + "</svg>";
+    }
+
+    private String toneStrokeColor(String toneClass) {
+        String tone = toneClass == null ? "" : toneClass.trim().toLowerCase(Locale.US);
+        if ("state-risk".equals(tone)) {
+            return "#f87171";
         }
-        return bars.toString();
+        if ("state-warn".equals(tone)) {
+            return "#fbbf24";
+        }
+        if ("state-ok".equals(tone)) {
+            return "#6ee7b7";
+        }
+        return "#8dd9ff";
+    }
+
+    private String toneFillColor(String toneClass) {
+        String tone = toneClass == null ? "" : toneClass.trim().toLowerCase(Locale.US);
+        if ("state-risk".equals(tone)) {
+            return "rgba(248,113,113,0.20)";
+        }
+        if ("state-warn".equals(tone)) {
+            return "rgba(251,191,36,0.22)";
+        }
+        if ("state-ok".equals(tone)) {
+            return "rgba(110,231,183,0.20)";
+        }
+        return "rgba(141,217,255,0.20)";
+    }
+
+    private String toneDotColor(String toneClass) {
+        String tone = toneClass == null ? "" : toneClass.trim().toLowerCase(Locale.US);
+        if ("state-risk".equals(tone)) {
+            return "#fecaca";
+        }
+        if ("state-warn".equals(tone)) {
+            return "#fde68a";
+        }
+        if ("state-ok".equals(tone)) {
+            return "#bbf7d0";
+        }
+        return "#dbeafe";
+    }
+
+    private String fmt2(double value) {
+        if (!Double.isFinite(value)) {
+            return "0.00";
+        }
+        return String.format(Locale.US, "%.2f", value);
     }
 
     private String buildSparkPlaceholderBars(String toneClass, int count) {
@@ -3082,6 +3269,95 @@ public class MainActivity extends AppCompatActivity {
             unit = " " + unit;
         }
         return String.format(Locale.US, "L %.2f%s · %.2f..%.2f", last, unit, lo, hi);
+    }
+
+    private String buildSeriesMetaHtml(String metricLabel, JSONArray series, String unitSuffix) {
+        double[] w = computeSeriesWindow(metricLabel, series);
+        String unit = unitSuffix == null ? "" : unitSuffix.trim();
+        if (!unit.isEmpty()) {
+            unit = " " + unit;
+        }
+        if (w == null) {
+            return "<div class='trend-meta'>"
+                    + "<div class='trend-meta-row'>"
+                    + "<span class='trend-meta-item low'>LOW: -</span>"
+                    + "<span class='trend-meta-item mid'>MID: -</span>"
+                    + "<span class='trend-meta-item high'>HIGH: -</span>"
+                    + "</div>"
+                    + "<div class='trend-meta-cur'>CUR: -</div>"
+                    + "</div>";
+        }
+        return "<div class='trend-meta'>"
+                + "<div class='trend-meta-row'>"
+                + "<span class='trend-meta-item low'>LOW: " + escapeHtml(fmt1(w[1]) + unit) + "</span>"
+                + "<span class='trend-meta-item mid'>MID: " + escapeHtml(fmt1(w[2]) + unit) + "</span>"
+                + "<span class='trend-meta-item high'>HIGH: " + escapeHtml(fmt1(w[3]) + unit) + "</span>"
+                + "</div>"
+                + "<div class='trend-meta-cur'>CUR: " + escapeHtml(fmt1(w[0]) + unit) + "</div>"
+                + "</div>";
+    }
+
+    private double[] computeSeriesWindow(String metricLabel, JSONArray series) {
+        if (series == null || series.length() == 0) {
+            return null;
+        }
+        double last = Double.NaN;
+        double lo = Double.POSITIVE_INFINITY;
+        double hi = Double.NEGATIVE_INFINITY;
+        for (int i = 0; i < series.length(); i++) {
+            if (series.isNull(i)) {
+                continue;
+            }
+            double v = series.optDouble(i, Double.NaN);
+            if (!Double.isFinite(v)) {
+                continue;
+            }
+            last = v;
+            lo = Math.min(lo, v);
+            hi = Math.max(hi, v);
+        }
+        if (!Double.isFinite(last) || !Double.isFinite(lo) || !Double.isFinite(hi)) {
+            return null;
+        }
+        String key = normalizeMetricKey(metricLabel);
+        double displayLow;
+        if ("fps".equals(key)) {
+            displayLow = FPS_LOW_ANCHOR;
+        } else if ("mbps".equals(key) || "latency".equals(key) || "drops".equals(key) || "queue".equals(key)) {
+            displayLow = 0.0;
+        } else {
+            displayLow = Math.max(0.0, Math.min(lo, hi));
+        }
+        double displayHigh = Math.max(hi, displayLow + 1.0);
+        double mid = (displayLow + displayHigh) * 0.5;
+        return new double[]{last, displayLow, mid, displayHigh};
+    }
+
+    private String normalizeMetricKey(String metricLabel) {
+        String label = metricLabel == null ? "" : metricLabel.trim().toUpperCase(Locale.US);
+        if (label.contains("FPS")) {
+            return "fps";
+        }
+        if (label.contains("MBPS") || label.contains("BITRATE")) {
+            return "mbps";
+        }
+        if (label.contains("LAT")) {
+            return "latency";
+        }
+        if (label.contains("DROP") || label.contains("LATE")) {
+            return "drops";
+        }
+        if (label.contains("QUEUE")) {
+            return "queue";
+        }
+        return "generic";
+    }
+
+    private String fmt1(double value) {
+        if (!Double.isFinite(value)) {
+            return "-";
+        }
+        return String.format(Locale.US, "%.1f", value);
     }
 
     private double latestFiniteFromSeries(JSONArray series) {

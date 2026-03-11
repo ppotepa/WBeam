@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="title desc">
+  <title id="title">WBeam Runtime HUD Source of Truth</title>
+  <desc id="desc">Canonical full-screen Android runtime HUD maquette for replication mode (non-trainer).</desc>
+
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#091613" stop-opacity="0.90"/>
+      <stop offset="100%" stop-color="#050d0b" stop-opacity="0.58"/>
+    </linearGradient>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#84ffd7" stroke-opacity="0.08" stroke-width="1"/>
+    </pattern>
+    <style><![CDATA[
+      .frame { fill: url(#bg); stroke: #84ffd7; stroke-opacity: 0.34; stroke-width: 2; }
+      .panel { fill: #0a1b17; fill-opacity: 0.78; stroke: #84ffd7; stroke-opacity: 0.32; stroke-width: 1.2; }
+      .subpanel { fill: #07130f; fill-opacity: 0.82; stroke: #8effdd; stroke-opacity: 0.24; stroke-width: 1; }
+      .chip { fill: #0a2520; fill-opacity: 0.92; stroke: #8effdd; stroke-opacity: 0.52; stroke-width: 1; }
+      .title { fill: #e6fff7; font-family: "JetBrains Mono", "IBM Plex Mono", monospace; font-size: 24px; font-weight: 700; }
+      .h2 { fill: #cbffec; font-family: "JetBrains Mono", "IBM Plex Mono", monospace; font-size: 18px; font-weight: 700; letter-spacing: 0.5px; }
+      .label { fill: #b2f7df; font-family: "JetBrains Mono", "IBM Plex Mono", monospace; font-size: 13px; font-weight: 600; }
+      .value { fill: #f2fff9; font-family: "JetBrains Mono", "IBM Plex Mono", monospace; font-size: 22px; font-weight: 700; }
+      .legend { fill: #d8fff2; font-family: "JetBrains Mono", "IBM Plex Mono", monospace; font-size: 12px; font-weight: 500; }
+      .small { fill: #afeed8; font-family: "JetBrains Mono", "IBM Plex Mono", monospace; font-size: 11px; font-weight: 500; }
+      .ok { fill: #6ee7b7; }
+      .warn { fill: #fbbf24; }
+      .risk { fill: #f87171; }
+      .spark-bg { fill: #04110c; fill-opacity: 0.95; stroke: #86ffd8; stroke-opacity: 0.28; stroke-width: 1; }
+      .spark-line { fill: none; stroke: #abffe2; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+      .placeholder { fill: none; stroke: #89ffd8; stroke-opacity: 0.42; stroke-dasharray: 6 6; stroke-width: 1; }
+    ]]></style>
+  </defs>
+
+  <rect x="0" y="0" width="1920" height="1080" fill="#020705"/>
+  <rect x="0" y="0" width="1920" height="1080" fill="url(#grid)"/>
+  <rect class="frame" x="16" y="16" width="1888" height="1048" rx="12"/>
+
+  <!-- Header -->
+  <rect class="panel" x="36" y="36" width="1848" height="118" rx="10"/>
+  <text class="title" x="56" y="74">WBEAM RUNTIME HUD v1 (SOT)</text>
+  <text class="small" x="56" y="100">Replication mode only. Single fullscreen overlay. No trainer fields. No percent/progress bars.</text>
+
+  <rect class="chip" x="670" y="52" width="260" height="84" rx="8"/>
+  <text class="label" x="688" y="78">CURRENT PROFILE</text>
+  <text class="value" x="688" y="112">{profile_name}</text>
+
+  <rect class="chip" x="950" y="52" width="200" height="84" rx="8"/>
+  <text class="label" x="968" y="78">PROFILE REV</text>
+  <text class="value" x="968" y="112">{profile_revision}</text>
+
+  <rect class="chip" x="1170" y="52" width="260" height="84" rx="8"/>
+  <text class="label" x="1188" y="78">STREAM MODE</text>
+  <text class="value" x="1188" y="112">{encoder} | {size} | {target_fps}fps</text>
+
+  <rect class="chip" x="1450" y="52" width="230" height="84" rx="8"/>
+  <text class="label" x="1468" y="78">DEVICE</text>
+  <text class="value" x="1468" y="112">{device_serial}</text>
+
+  <rect class="chip" x="1700" y="52" width="164" height="84" rx="8"/>
+  <text class="label" x="1718" y="78">STATUS</text>
+  <text class="value ok" x="1718" y="112">{connection_state}</text>
+
+  <!-- Main area -->
+  <rect class="panel" x="36" y="170" width="880" height="594" rx="10"/>
+  <rect class="panel" x="934" y="170" width="950" height="594" rx="10"/>
+
+  <text class="h2" x="56" y="204">RUNTIME METRICS</text>
+  <text class="h2" x="954" y="204">STREAM TRENDS (LIVE)</text>
+
+  <!-- Left KPI stack -->
+  <rect class="subpanel" x="56" y="220" width="840" height="106" rx="8"/>
+  <text class="label" x="74" y="246">PRESENT FPS</text>
+  <text class="value ok" x="74" y="280">{present_fps}</text>
+  <text class="label" x="308" y="246">RECV FPS</text>
+  <text class="value" x="308" y="280">{recv_fps}</text>
+  <text class="label" x="542" y="246">DECODE FPS</text>
+  <text class="value" x="542" y="280">{decode_fps}</text>
+  <text class="label" x="744" y="246">MBPS</text>
+  <text class="value ok" x="744" y="280">{live_mbps}</text>
+
+  <rect class="subpanel" x="56" y="338" width="840" height="106" rx="8"/>
+  <text class="label" x="74" y="364">LATENCY p95 (ms)</text>
+  <text class="value warn" x="74" y="398">{latency_ms_p95}</text>
+  <text class="label" x="308" y="364">DROPS / s</text>
+  <text class="value warn" x="308" y="398">{drops_per_sec}</text>
+  <text class="label" x="542" y="364">QUEUE DEPTH</text>
+  <text class="value" x="542" y="398">{queue_depth}</text>
+  <text class="label" x="744" y="364">LATE / s</text>
+  <text class="value warn" x="744" y="398">{late_per_sec}</text>
+
+  <rect class="subpanel" x="56" y="456" width="840" height="288" rx="8"/>
+  <text class="label" x="74" y="482">RUNTIME CONTEXT</text>
+  <text class="legend" x="74" y="508">build_rev: {build_revision}      daemon_rev: {daemon_revision}</text>
+  <text class="legend" x="74" y="532">transport: {transport_mode}      stream_port: {stream_port}      control_port: {control_port}</text>
+  <text class="legend" x="74" y="556">android_host: {android_host}      reverse: {adb_reverse_state}</text>
+  <text class="legend" x="74" y="580">session: {session_state}      reconnects: {reconnect_count}</text>
+  <text class="legend" x="74" y="604">last_error: {last_error_or_dash}</text>
+
+  <rect class="placeholder" x="74" y="624" width="804" height="104" rx="8"/>
+  <text class="small" x="90" y="650">Optional event strip (non-blocking):</text>
+  <text class="small" x="90" y="672">- reconnect started / restored</text>
+  <text class="small" x="90" y="694">- bitrate floor clamp triggered</text>
+  <text class="small" x="90" y="716">- decoder fallback switched</text>
+
+  <!-- Right trends: 2 x 3 -->
+  <rect class="subpanel" x="954" y="220" width="448" height="166" rx="8"/>
+  <text class="label" x="972" y="246">PRESENT FPS</text>
+  <rect class="spark-bg" x="972" y="258" width="412" height="90" rx="5"/>
+  <path class="spark-line" d="M 976 336 L 1028 332 L 1080 328 L 1132 320 L 1184 314 L 1236 308 L 1288 304 L 1340 300 L 1380 296"/>
+  <text class="legend" x="972" y="370">L {last} | min {min} | max {max}</text>
+
+  <rect class="subpanel" x="1416" y="220" width="448" height="166" rx="8"/>
+  <text class="label" x="1434" y="246">LIVE MBPS</text>
+  <rect class="spark-bg" x="1434" y="258" width="412" height="90" rx="5"/>
+  <path class="spark-line" d="M 1438 336 L 1490 330 L 1542 320 L 1594 314 L 1646 306 L 1698 298 L 1750 302 L 1802 296 L 1842 290"/>
+  <text class="legend" x="1434" y="370">L {last} Mbps | min {min} | max {max}</text>
+
+  <rect class="subpanel" x="954" y="402" width="448" height="166" rx="8"/>
+  <text class="label" x="972" y="428">LATENCY p95</text>
+  <rect class="spark-bg" x="972" y="440" width="412" height="90" rx="5"/>
+  <path class="spark-line" d="M 976 520 L 1028 516 L 1080 510 L 1132 500 L 1184 492 L 1236 486 L 1288 482 L 1340 476 L 1380 470"/>
+  <text class="legend" x="972" y="552">L {last} ms | min {min} | max {max}</text>
+
+  <rect class="subpanel" x="1416" y="402" width="448" height="166" rx="8"/>
+  <text class="label" x="1434" y="428">DROPS / s</text>
+  <rect class="spark-bg" x="1434" y="440" width="412" height="90" rx="5"/>
+  <path class="spark-line" d="M 1438 522 L 1490 518 L 1542 512 L 1594 506 L 1646 498 L 1698 492 L 1750 486 L 1802 482 L 1842 478"/>
+  <text class="legend" x="1434" y="552">L {last} | min {min} | max {max}</text>
+
+  <rect class="subpanel" x="954" y="584" width="448" height="160" rx="8"/>
+  <text class="label" x="972" y="610">QUEUE DEPTH</text>
+  <rect class="spark-bg" x="972" y="622" width="412" height="84" rx="5"/>
+  <path class="spark-line" d="M 976 694 L 1028 690 L 1080 684 L 1132 676 L 1184 670 L 1236 664 L 1288 658 L 1340 654 L 1380 650"/>
+
+  <rect class="subpanel" x="1416" y="584" width="448" height="160" rx="8"/>
+  <text class="label" x="1434" y="610">DECODE FPS</text>
+  <rect class="spark-bg" x="1434" y="622" width="412" height="84" rx="5"/>
+  <path class="spark-line" d="M 1438 696 L 1490 690 L 1542 684 L 1594 680 L 1646 674 L 1698 670 L 1750 664 L 1802 660 L 1842 656"/>
+
+  <!-- Legend -->
+  <rect class="panel" x="36" y="780" width="1848" height="264" rx="10"/>
+  <text class="h2" x="56" y="814">LEGEND: RUNTIME FIELD SOURCE MAPPING (CANONICAL)</text>
+  <text class="legend" x="56" y="840">A. Header identity: profile_name/profile_revision from active runtime profile resolver; device_serial from selected ADB serial.</text>
+  <text class="legend" x="56" y="862">B. Stream mode: encoder/size/target_fps from runtime stream config (not trainer candidate).</text>
+  <text class="legend" x="56" y="884">C. KPI values: present_fps, recv_fps, decode_fps, live_mbps, latency_ms_p95, drops_per_sec, late_per_sec, queue_depth from daemon metrics.</text>
+  <text class="legend" x="56" y="906">D. MBPS fallback chain: metrics.live_mbps -&gt; metrics.bitrate_mbps_mean -&gt; stream.target_mbps.</text>
+  <text class="legend" x="56" y="928">E. Connection state enum: connected / degraded / reconnecting / stalled. No percent/progress visualization.</text>
+  <text class="legend" x="56" y="950">F. Runtime-only contract: no generation/trial/progress/score fields and no trainer charts should render in this overlay.</text>
+  <text class="legend" x="56" y="972">G. Overlay rule: one active surface at a time. Runtime HUD must replace trainer HUD, never stack with it.</text>
+  <text class="legend" x="56" y="994">H. No-data rule: keep card visible with value placeholders; do not collapse layout.</text>
+  <text class="legend" x="56" y="1016">I. File type: SVG (XML), canonical SOT for runtime HUD.</text>
+
+  <rect class="subpanel" x="1320" y="824" width="544" height="202" rx="8"/>
+  <text class="h2" x="1340" y="856">Status palette</text>
+  <text class="legend ok" x="1340" y="888">CONNECTED   = stable transport and decode path</text>
+  <text class="legend warn" x="1340" y="916">DEGRADED    = quality drop or latency risk</text>
+  <text class="legend risk" x="1340" y="944">RECONNECTING/STALLED = no steady frame flow</text>
+  <text class="legend" x="1340" y="972">Font: JetBrains Mono / IBM Plex Mono</text>
+  <text class="legend" x="1340" y="994">Fullscreen target: 1920x1080 (scales proportionally)</text>
+</svg>

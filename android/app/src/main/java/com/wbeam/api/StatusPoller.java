@@ -19,8 +19,10 @@ public final class StatusPoller {
 
     private static final String TAG = "WBeamStatusPoller";
 
-    private static final long STATUS_POLL_MS           = 3_000L;
-    private static final int  HEALTH_POLL_EVERY        = 3;
+    // 5 Hz telemetry/status polling for responsive HUD updates.
+    private static final long STATUS_POLL_MS           = 200L;
+    // Keep /health lower-frequency to avoid unnecessary overhead.
+    private static final int  HEALTH_POLL_EVERY        = 16;
     private static final long AUTO_START_COOLDOWN_MS   = 4_000L;
 
     // ── Daemon state (queried by MainActivity via getters) ────────────────────

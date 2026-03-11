@@ -1464,7 +1464,8 @@ def main() -> int:
     parser.add_argument("--bitrate-max-kbps", type=int, default=200000)
     parser.add_argument("--warmup-sec", type=int, default=4)
     parser.add_argument("--sample-sec", type=int, default=12)
-    parser.add_argument("--poll-sec", type=float, default=1.0)
+    # 5 Hz trainer sampling by default for smoother live HUD updates.
+    parser.add_argument("--poll-sec", type=float, default=0.2)
     parser.add_argument(
         "--non-interactive",
         action=argparse.BooleanOptionalAction,
@@ -1856,7 +1857,7 @@ def main() -> int:
                     serial=serial,
                     stream_port=stream_port,
                     sample_sec=sample_sec,
-                    poll_sec=max(0.3, args.poll_sec),
+                    poll_sec=max(0.2, args.poll_sec),
                     on_sample=_on_sample_progress,
                 )
                 result = score_trial(cfg, samples, sample_sec, trial_id, mode)
