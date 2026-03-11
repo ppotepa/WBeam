@@ -2419,3 +2419,17 @@ Status: active
   - refreshed key command sets (local/diagnostic/remote),
   - clarified multi-device session model and per-serial API usage,
   - tightened failure-mode diagnostics for connect/version/API17/Wayland cases.
+
+## In Progress (2026-03-11 14:22 CET) - AGENTS handbook full-state hardening (progress + git-history audit)
+- Performed cross-check against:
+  - latest `progress.md` session stream,
+  - recent git history (host/trainer/android modularization and runtime-visibility work),
+  - current route/class reality in codebase.
+- Rebuilt `AGENTS.md` as a higher-fidelity operations+architecture map:
+  - explicit key files/classes for host core/api/streamer, Android client, desktop apps, and training domain,
+  - API quick map including trainer run management + live-mode endpoints (and compatibility aliases),
+  - config-first runtime model with env override guidance and grouped key env vars,
+  - runtime artifact map (effective-runtime snapshots + trainer `/tmp` HUD marker files),
+  - refreshed command cheat sheet and known-failure playbook.
+- Stamped handbook with precise update timestamp:
+  - `Last updated: 2026-03-11 14:22 CET`
