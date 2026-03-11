@@ -1,14 +1,10 @@
 //! WBTP framing and TCP sender.
 //!
-//! Implements the WBTP/1 wire format:
-//!   - HELLO (16 bytes) sent on new connection
-//!   - Per-frame header (22 bytes) + H.264 NAL payload
-//!
 //! The sender thread blocks on `TcpListener::accept`, drains the `AppSink`,
-//! frames each buffer, and writes it with a single vectored syscall.
+//! frames each buffer, and writes it over TCP.
 
-use std::io::{IoSlice, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::io::Write;
+use std::net::{SocketAddr, TcpListener};
 use std::sync::mpsc::{self, RecvTimeoutError, TrySendError};
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
@@ -20,21 +16,12 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use gstreamer as gst;
 use gstreamer_app as gst_app;
 use rand::Rng;
-use wbtp_core::{Flags, MAGIC, VERSION};
 
 use crate::cli::ResolvedConfig;
 use crate::cli::StreamMode;
+use crate::packetize::{build_header, build_hello, send_all_vectored};
 
-// ── Protocol constants ────────────────────────────────────────────────────────
-
-const HELLO_MAGIC: &[u8; 4] = b"WBS1";
-const HELLO_VERSION: u8 = 0x01;
-/// HELLO byte[5] codec flag — signals HEVC/H.265 stream to the Android client.
-pub const HELLO_CODEC_HEVC: u8 = 0x01;
-pub const HELLO_CODEC_PNG: u8 = 0x02;
-pub const HELLO_MODE_ULTRA: u8 = 0x10;
-pub const HELLO_MODE_STABLE: u8 = 0x20;
-pub const HELLO_MODE_QUALITY: u8 = 0x30;
+use super::HELLO_CODEC_PNG;
 
 #[derive(Clone)]
 struct CachedKeyframe {
@@ -54,95 +41,6 @@ fn sender_queue_capacity(mode: StreamMode) -> usize {
         StreamMode::Stable => 16,
         StreamMode::Quality => 48,
     }
-}
-
-pub fn hello_mode_bits(mode: StreamMode) -> u8 {
-    match mode {
-        StreamMode::Ultra => HELLO_MODE_ULTRA,
-        StreamMode::Stable => HELLO_MODE_STABLE,
-        StreamMode::Quality => HELLO_MODE_QUALITY,
-    }
-}
-// ── Header builders ───────────────────────────────────────────────────────────
-
-/// Build a 22-byte WBTP frame header directly into a stack array.
-///
-/// Wire layout (big-endian, from wbtp-core):
-///   [0..4]  magic  [4] version  [5] flags  [6..10] seq
-///   [10..18] capture_ts_us  [18..22] payload_len
-///
-/// No heap allocation: all fields are written with `to_be_bytes()` directly
-/// into the returned stack buffer — critical since this runus on every frame.
-#[inline]
-pub fn build_header(seq: u32, pts_us: u64, payload_len: usize, is_key: bool) -> [u8; 22] {
-    let mut h = [0u8; 22];
-    h[0..4].copy_from_slice(MAGIC);
-    h[4] = VERSION;
-    h[5] = if is_key { Flags::KEYFRAME } else { 0 };
-    h[6..10].copy_from_slice(&seq.to_be_bytes());
-    h[10..18].copy_from_slice(&pts_us.to_be_bytes());
-    h[18..22].copy_from_slice(&(payload_len as u32).to_be_bytes());
-    h
-}
-
-/// Build a 16-byte WBTP HELLO greeting for a new connection.
-///
-/// `codec_flags`: `0x00` = AVC, `HELLO_CODEC_HEVC` (0x01) = H.265, `HELLO_CODEC_PNG` (0x02) = PNG frames.
-/// Direct byte writes — no Cursor, no trait dispatch, no allocations.
-#[inline]
-pub fn build_hello(session_id: u64, codec_flags: u8) -> [u8; 16] {
-    let mut buf = [0u8; 16];
-    buf[0..4].copy_from_slice(HELLO_MAGIC);
-    buf[4] = HELLO_VERSION;
-    buf[5] = codec_flags;
-    buf[6..8].copy_from_slice(&16u16.to_be_bytes());
-    buf[8..16].copy_from_slice(&session_id.to_be_bytes());
-    buf
-}
-
-// ── Efficient I/O ─────────────────────────────────────────────────────────────
-
-/// Write `header` followed by `payload` to `stream` using vectored I/O,
-/// retrying partial writes until complete or an error occurs.
-pub fn send_all_vectored(
-    stream: &mut TcpStream,
-    header: &[u8],
-    payload: &[u8],
-) -> std::io::Result<()> {
-    let mut header_off = 0usize;
-    let mut payload_off = 0usize;
-
-    while header_off < header.len() || payload_off < payload.len() {
-        let mut bufs = [IoSlice::new(&[]), IoSlice::new(&[])];
-        let mut count = 0usize;
-
-        if header_off < header.len() {
-            bufs[count] = IoSlice::new(&header[header_off..]);
-            count += 1;
-        }
-        if payload_off < payload.len() {
-            bufs[count] = IoSlice::new(&payload[payload_off..]);
-            count += 1;
-        }
-
-        let written = stream.write_vectored(&bufs[..count])?;
-        if written == 0 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::BrokenPipe,
-                "write_vectored=0",
-            ));
-        }
-
-        let header_left = header.len() - header_off;
-        if written < header_left {
-            header_off += written;
-            continue;
-        }
-        header_off = header.len();
-        payload_off += written - header_left;
-    }
-
-    Ok(())
 }
 
 // ── Sender thread ─────────────────────────────────────────────────────────────
