@@ -2790,3 +2790,18 @@ Status: active
 - Verification:
   - `bash -n desktop.sh` -> OK
   - startup test log confirms stale PID detection and clean relaunch path.
+
+## Completed (2026-03-11 17:27 CET) - Remote-session window routing fix for desktop/trainer launchers
+- Fixed `./desktop.sh` and `./trainer.sh` re-exec session targeting when started from non-graphical shells:
+  - launchers now auto-detect whether an active remote graphical session exists for target user,
+  - if yes, they pass `RUNAS_REMOTE_SESSION_REMOTE=yes` (instead of forcing local-only session selection),
+  - if not, they fall back to `no`.
+- This addresses invisible-window starts caused by opening Tauri in a non-visible local seat (`DISPLAY=:0`) while user is on remote desktop (`:10`).
+
+## Completed (2026-03-11 17:28 CET) - X11 authorization fix in `runas-remote`
+- Improved X11 `XAUTHORITY` selection order:
+  - for X11 sessions, fallback now prefers `${HOME}/.Xauthority` before `/run/user/<uid>/xauth_*`.
+- This avoids selecting mismatched runtime xauth files in remote X11 sessions and resolves `Could not open X display` / authorization errors.
+- Validation:
+  - `bash -n runas-remote` -> OK
+  - `./desktop.sh` startup log no longer reports X11 authorization warning on remote-session path.
