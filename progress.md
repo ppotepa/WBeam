@@ -2427,6 +2427,20 @@ Status: active
 - Validation:
   - `python3 -m py_compile src/domains/training/wizard.py` -> OK
   - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
+- Trainer HUD maquette SOT update (single canonical design source):
+  - Added canonical SVG/XML maquette with full field-to-source legend:
+    - `docs/ui/hud/trainer-hud.sot.svg`
+  - Added folder-level HUD documentation and SOT rule:
+    - `docs/ui/hud/README.md`
+  - Marked previous maquettes as deprecated references:
+    - `docs/ui/hud/default-hud.maquette.xml`
+    - `trainer.hud.maquette.xml`
+  - New SOT legend includes:
+    - exact JSON key mapping (`sections.header`, `sections.config`, `sections.kpi`, `sections.trends`, `sections.states`, `status`),
+    - fallback chain for LIVE MBPS,
+    - placeholder/no-data behavior,
+    - single-overlay constraint (no concurrent alternate HUDs),
+    - units and threshold color semantics.
 - Versioning update (deterministic deploy/redeploy suffix):
   - `./wbeam version new` no longer uses random hash from `/dev/urandom`.
   - build suffix is now deterministic and commit-bound: last 5 chars of `git rev-parse HEAD`.

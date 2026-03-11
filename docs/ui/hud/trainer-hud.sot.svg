@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="title desc">
+  <title id="title">WBeam Trainer HUD Source of Truth</title>
+  <desc id="desc">Canonical full-screen Android trainer HUD maquette with field-to-data legend.</desc>
+
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#02151a" stop-opacity="0.88"/>
+      <stop offset="100%" stop-color="#020d13" stop-opacity="0.52"/>
+    </linearGradient>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#6ef2ff" stroke-opacity="0.08" stroke-width="1"/>
+    </pattern>
+    <style><![CDATA[
+      .frame { fill: url(#bg); stroke: #6ef2ff; stroke-opacity: 0.35; stroke-width: 2; }
+      .panel { fill: #041922; fill-opacity: 0.72; stroke: #6ef2ff; stroke-opacity: 0.34; stroke-width: 1.3; }
+      .subpanel { fill: #03131b; fill-opacity: 0.72; stroke: #6ef2ff; stroke-opacity: 0.24; stroke-width: 1; }
+      .title { fill: #d7fbff; font-family: "JetBrains Mono", "IBM Plex Mono", monospace; font-size: 24px; font-weight: 700; }
+      .h2 { fill: #b8f7ff; font-family: "JetBrains Mono", "IBM Plex Mono", monospace; font-size: 18px; font-weight: 700; letter-spacing: 0.5px; }
+      .label { fill: #9fe8f2; font-family: "JetBrains Mono", "IBM Plex Mono", monospace; font-size: 13px; font-weight: 600; }
+      .value { fill: #f0fdff; font-family: "JetBrains Mono", "IBM Plex Mono", monospace; font-size: 21px; font-weight: 700; }
+      .legend { fill: #c8f7ff; font-family: "JetBrains Mono", "IBM Plex Mono", monospace; font-size: 12px; font-weight: 500; }
+      .small { fill: #9fe8f2; font-family: "JetBrains Mono", "IBM Plex Mono", monospace; font-size: 11px; font-weight: 500; }
+      .ok { fill: #6ee7b7; }
+      .warn { fill: #fbbf24; }
+      .risk { fill: #f87171; }
+      .chip { fill: #062737; fill-opacity: 0.88; stroke: #7cecff; stroke-opacity: 0.46; stroke-width: 1; }
+      .spark-bg { fill: #020c12; fill-opacity: 0.95; stroke: #72e7ff; stroke-opacity: 0.3; stroke-width: 1; }
+      .spark-line { fill: none; stroke: #8dd9ff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+      .spark-bar { fill: #8dd9ff; fill-opacity: 0.8; }
+      .placeholder { fill: none; stroke: #89edff; stroke-opacity: 0.45; stroke-dasharray: 6 6; stroke-width: 1; }
+    ]]></style>
+  </defs>
+
+  <rect x="0" y="0" width="1920" height="1080" fill="#01070b"/>
+  <rect x="0" y="0" width="1920" height="1080" fill="url(#grid)"/>
+
+  <rect class="frame" x="16" y="16" width="1888" height="1048" rx="12"/>
+
+  <!-- Header -->
+  <rect class="panel" x="36" y="36" width="1848" height="110" rx="10"/>
+  <text class="title" x="56" y="72">WBEAM TRAINER HUD v2 (SOT)</text>
+  <text class="small" x="56" y="98">Single overlay. Full-screen. Dense two-column trends. No alternative HUD variants.</text>
+
+  <rect class="chip" x="620" y="52" width="210" height="74" rx="8"/>
+  <text class="label" x="638" y="76">RUN / PROFILE</text>
+  <text class="value" x="638" y="108">{run_id} / {profile_name}</text>
+
+  <rect class="chip" x="850" y="52" width="170" height="74" rx="8"/>
+  <text class="label" x="868" y="76">GEN</text>
+  <text class="value" x="868" y="108">{generation_index}/{generation_total}</text>
+
+  <rect class="chip" x="1040" y="52" width="210" height="74" rx="8"/>
+  <text class="label" x="1058" y="76">TRIAL</text>
+  <text class="value" x="1058" y="108">{trial_index}/{trial_total}</text>
+
+  <rect class="chip" x="1270" y="52" width="290" height="74" rx="8"/>
+  <text class="label" x="1288" y="76">CURRENT MODE</text>
+  <text class="value" x="1288" y="108">{encoder} | {size} | {fps}fps</text>
+
+  <rect class="chip" x="1580" y="52" width="284" height="74" rx="8"/>
+  <text class="label" x="1598" y="76">PROGRESS</text>
+  <text class="value" x="1598" y="108">{progress_percent}%</text>
+
+  <!-- Main split -->
+  <rect class="panel" x="36" y="162" width="830" height="574" rx="10"/>
+  <rect class="panel" x="884" y="162" width="1000" height="574" rx="10"/>
+
+  <text class="h2" x="56" y="196">LIVE KPI + TRIAL CONTEXT</text>
+  <text class="h2" x="904" y="196">LIVE METRIC TRENDS (2 COLUMNS)</text>
+
+  <!-- Left KPI cards -->
+  <rect class="subpanel" x="56" y="212" width="790" height="96" rx="8"/>
+  <text class="label" x="74" y="236">SCORE</text>
+  <text class="value" x="74" y="268">{score}</text>
+  <text class="label" x="284" y="236">PRESENT FPS</text>
+  <text class="value ok" x="284" y="268">{present_fps}</text>
+  <text class="label" x="534" y="236">LIVE MBPS</text>
+  <text class="value ok" x="534" y="268">{live_mbps} Mbps</text>
+
+  <rect class="subpanel" x="56" y="318" width="790" height="96" rx="8"/>
+  <text class="label" x="74" y="342">RECV FPS</text>
+  <text class="value" x="74" y="374">{recv_fps}</text>
+  <text class="label" x="284" y="342">DECODE FPS</text>
+  <text class="value" x="284" y="374">{decode_fps}</text>
+  <text class="label" x="534" y="342">LAT p95</text>
+  <text class="value warn" x="534" y="374">{latency_ms_p95} ms</text>
+
+  <rect class="subpanel" x="56" y="424" width="790" height="96" rx="8"/>
+  <text class="label" x="74" y="448">DROPS/s</text>
+  <text class="value warn" x="74" y="480">{drops_per_sec}</text>
+  <text class="label" x="284" y="448">LATE/s</text>
+  <text class="value warn" x="284" y="480">{late_per_sec}</text>
+  <text class="label" x="534" y="448">QUEUE</text>
+  <text class="value" x="534" y="480">{queue_depth}</text>
+
+  <rect class="subpanel" x="56" y="530" width="790" height="186" rx="8"/>
+  <text class="label" x="74" y="556">STATUS / NOTES / SAMPLE INFO</text>
+  <text class="legend" x="74" y="582">best_trial: {best_trial}    best_score: {best_score}</text>
+  <text class="legend" x="74" y="606">sample_count: {sample_count}    state.fps: {state_fps}</text>
+  <text class="legend" x="74" y="630">state.mbps: {state_mbps}    state.latency: {state_latency}</text>
+  <text class="legend" x="74" y="654">state.drop: {state_drop}    state.queue: {state_queue}</text>
+  <text class="legend" x="74" y="678">note: {status.note}</text>
+  <rect class="placeholder" x="510" y="560" width="318" height="136" rx="8"/>
+  <text class="small" x="524" y="588">Optional mini events:</text>
+  <text class="small" x="524" y="612">- apply candidate ...</text>
+  <text class="small" x="524" y="636">- sample stable ...</text>
+  <text class="small" x="524" y="660">- gate pass/fail ...</text>
+
+  <!-- Right: trends grid 2x4 -->
+  <!-- Row 1 -->
+  <rect class="subpanel" x="904" y="212" width="472" height="122" rx="8"/>
+  <text class="label" x="920" y="236">SCORE TREND</text>
+  <rect class="spark-bg" x="920" y="248" width="440" height="56" rx="5"/>
+  <path class="spark-line" d="M 924 294 L 980 286 L 1036 288 L 1092 270 L 1148 266 L 1204 262 L 1260 258 L 1316 252 L 1356 248"/>
+  <text class="legend" x="920" y="322">L {last} | min {min} | max {max}</text>
+
+  <rect class="subpanel" x="1392" y="212" width="472" height="122" rx="8"/>
+  <text class="label" x="1408" y="236">PRESENT FPS TREND</text>
+  <rect class="spark-bg" x="1408" y="248" width="440" height="56" rx="5"/>
+  <path class="spark-line" d="M 1412 286 L 1468 284 L 1524 276 L 1580 272 L 1636 268 L 1692 264 L 1748 262 L 1804 260 L 1844 258"/>
+  <text class="legend" x="1408" y="322">L {last} | min {min} | max {max}</text>
+
+  <!-- Row 2 -->
+  <rect class="subpanel" x="904" y="348" width="472" height="122" rx="8"/>
+  <text class="label" x="920" y="372">LIVE MBPS TREND</text>
+  <rect class="spark-bg" x="920" y="384" width="440" height="56" rx="5"/>
+  <rect class="spark-bar" x="926" y="402" width="18" height="36"/><rect class="spark-bar" x="950" y="396" width="18" height="42"/>
+  <rect class="spark-bar" x="974" y="390" width="18" height="48"/><rect class="spark-bar" x="998" y="388" width="18" height="50"/>
+  <rect class="spark-bar" x="1022" y="382" width="18" height="56"/><rect class="spark-bar" x="1046" y="386" width="18" height="52"/>
+  <rect class="spark-bar" x="1070" y="392" width="18" height="46"/><rect class="spark-bar" x="1094" y="398" width="18" height="40"/>
+  <rect class="spark-bar" x="1118" y="392" width="18" height="46"/><rect class="spark-bar" x="1142" y="388" width="18" height="50"/>
+  <rect class="spark-bar" x="1166" y="384" width="18" height="54"/><rect class="spark-bar" x="1190" y="382" width="18" height="56"/>
+  <rect class="spark-bar" x="1214" y="386" width="18" height="52"/><rect class="spark-bar" x="1238" y="392" width="18" height="46"/>
+  <rect class="spark-bar" x="1262" y="396" width="18" height="42"/><rect class="spark-bar" x="1286" y="402" width="18" height="36"/>
+  <text class="legend" x="920" y="458">L {last} Mbps | min {min} | max {max}</text>
+
+  <rect class="subpanel" x="1392" y="348" width="472" height="122" rx="8"/>
+  <text class="label" x="1408" y="372">LAT p95 TREND</text>
+  <rect class="spark-bg" x="1408" y="384" width="440" height="56" rx="5"/>
+  <path class="spark-line" d="M 1412 420 L 1468 416 L 1524 412 L 1580 406 L 1636 402 L 1692 396 L 1748 392 L 1804 388 L 1844 384"/>
+  <text class="legend" x="1408" y="458">L {last} ms | min {min} | max {max}</text>
+
+  <!-- Row 3 -->
+  <rect class="subpanel" x="904" y="484" width="472" height="122" rx="8"/>
+  <text class="label" x="920" y="508">DROPS/s TREND</text>
+  <rect class="spark-bg" x="920" y="520" width="440" height="56" rx="5"/>
+  <path class="spark-line" d="M 924 570 L 980 566 L 1036 562 L 1092 554 L 1148 558 L 1204 548 L 1260 546 L 1316 540 L 1356 534"/>
+  <text class="legend" x="920" y="594">L {last} | min {min} | max {max}</text>
+
+  <rect class="subpanel" x="1392" y="484" width="472" height="122" rx="8"/>
+  <text class="label" x="1408" y="508">QUEUE DEPTH TREND</text>
+  <rect class="spark-bg" x="1408" y="520" width="440" height="56" rx="5"/>
+  <path class="spark-line" d="M 1412 568 L 1468 562 L 1524 558 L 1580 554 L 1636 550 L 1692 546 L 1748 542 L 1804 538 L 1844 534"/>
+  <text class="legend" x="1408" y="594">L {last} | min {min} | max {max}</text>
+
+  <!-- Row 4 -->
+  <rect class="subpanel" x="904" y="620" width="472" height="96" rx="8"/>
+  <text class="label" x="920" y="644">RECV FPS TREND</text>
+  <rect class="spark-bg" x="920" y="654" width="440" height="44" rx="5"/>
+  <path class="spark-line" d="M 924 688 L 980 684 L 1036 680 L 1092 676 L 1148 672 L 1204 668 L 1260 664 L 1316 660 L 1356 656"/>
+
+  <rect class="subpanel" x="1392" y="620" width="472" height="96" rx="8"/>
+  <text class="label" x="1408" y="644">DECODE FPS TREND</text>
+  <rect class="spark-bg" x="1408" y="654" width="440" height="44" rx="5"/>
+  <path class="spark-line" d="M 1412 690 L 1468 686 L 1524 682 L 1580 680 L 1636 676 L 1692 672 L 1748 668 L 1804 664 L 1844 660"/>
+
+  <!-- Bottom legend -->
+  <rect class="panel" x="36" y="752" width="1848" height="292" rx="10"/>
+  <text class="h2" x="56" y="786">LEGEND: FIELD SOURCE MAPPING (CANONICAL)</text>
+  <text class="legend" x="56" y="812">A. Header: run_id=sections.header.run_id | profile=sections.header.profile_name | gen=sections.header.generation_index/total | trial=sections.header.trial_index/total</text>
+  <text class="legend" x="56" y="834">B. Current mode: encoder=sections.config.encoder | size=sections.config.size | fps=sections.config.fps | target_mbps=sections.config.target_mbps</text>
+  <text class="legend" x="56" y="856">C. KPI values: score/present/recv/decode/live_mbps/latency/drops/queue from sections.kpi.*</text>
+  <text class="legend" x="56" y="878">D. LIVE MBPS fallback chain: sections.kpi.live_mbps -&gt; metrics.bitrate_mbps_mean -&gt; sections.trends.mbps[-1] -&gt; sections.config.target_mbps</text>
+  <text class="legend" x="56" y="900">E. Trend charts source arrays: sections.trends.score, present_fps, recv_fps, decode_fps, mbps, drop_per_sec, latency_ms_p95, queue_depth, late_per_sec</text>
+  <text class="legend" x="56" y="922">F. State tones: state-ok/state-warn/state-risk map from sections.states.* thresholds (fps/mbps/latency/drop/queue/quality)</text>
+  <text class="legend" x="56" y="944">G. Progress: progress_percent global; if missing =&gt; derive from trial_index/trial_total</text>
+  <text class="legend" x="56" y="966">H. No data rule: show PENDING placeholders; do not hide cards/charts</text>
+  <text class="legend" x="56" y="988">I. Overlay rule: this is the only training HUD layout; no secondary HUDs should render concurrently</text>
+  <text class="legend" x="56" y="1010">J. Units: bitrate in Mbps; latency in ms; rates per second; queue depth raw units from host metrics</text>
+
+  <rect class="subpanel" x="1280" y="800" width="584" height="224" rx="8"/>
+  <text class="h2" x="1300" y="832">Threshold palette</text>
+  <text class="legend ok" x="1300" y="864">OK   = stable, within profile target</text>
+  <text class="legend warn" x="1300" y="894">WARN = drift/degradation, monitor closely</text>
+  <text class="legend risk" x="1300" y="924">RISK = critical, likely reject/restart path</text>
+  <text class="legend" x="1300" y="958">Font: JetBrains Mono / IBM Plex Mono</text>
+  <text class="legend" x="1300" y="980">Alpha: panel 0.72, frame 0.88..0.52</text>
+  <text class="legend" x="1300" y="1002">File type: SVG (XML), canonical SOT</text>
+</svg>

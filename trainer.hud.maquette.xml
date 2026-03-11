@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- DEPRECATED REFERENCE.
+     Canonical SOT: docs/ui/hud/trainer-hud.sot.svg -->
 <svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="hudTitle hudDesc">
   <title id="hudTitle">WBeam Trainer HUD Maquette</title>
   <desc id="hudDesc">Mock layout for full-screen Android training HUD with placeholders and threshold states.</desc>
