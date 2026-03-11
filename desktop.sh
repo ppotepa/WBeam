@@ -123,6 +123,17 @@ ensure_supported_node() {
   fi
 }
 
+desktop_adb_preflight() {
+  if ! command -v adb >/dev/null 2>&1; then
+    echo "[desktop] warning: adb not found in PATH; Android device discovery will be unavailable." >&2
+    return 0
+  fi
+  if ! adb start-server >/dev/null 2>&1; then
+    echo "[desktop] warning: failed to start adb server; Android device discovery may be unavailable." >&2
+    return 0
+  fi
+}
+
 desktop_dev_port_pid() {
   if command -v lsof >/dev/null 2>&1; then
     lsof -tiTCP:1420 -sTCP:LISTEN 2>/dev/null | head -n1 || true
@@ -209,6 +220,7 @@ desktop_ensure_graphical_context "$@"
 run_dev() {
   local log_file
   ensure_supported_node
+  desktop_adb_preflight
   desktop_kill_stale_dev
   log_file="$(new_log_file "desktop")"
   echo "[desktop] log=$log_file"
@@ -225,6 +237,7 @@ run_dev() {
 run_release() {
   local log_file
   ensure_supported_node
+  desktop_adb_preflight
   log_file="$(new_log_file "desktop")"
   echo "[desktop] log=$log_file"
   (

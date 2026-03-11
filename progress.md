@@ -2717,3 +2717,23 @@ Status: active
 - Validation:
   - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
   - `cd android && ./gradlew :app:compileDebugJavaWithJavac` -> OK
+
+## Completed (2026-03-11 15:35 CET) - Startup reliability fixes for `trainer.sh` and ADB preflight in `desktop.sh`
+- Trainer launcher hardening (`trainer.sh`):
+  - Added configurable health wait window for daemon startup:
+    - `WBEAM_TRAINER_HEALTH_WAIT_ATTEMPTS` (default `80`)
+    - `WBEAM_TRAINER_HEALTH_WAIT_MS` (default `500`)
+  - Improved boot path messaging:
+    - explicit log when systemd user service is unavailable and fallback to background host run is used,
+    - explicit log when auto-start is disabled.
+  - Updated failure hint to foreground daemon command:
+    - from ambiguous `./wbeam daemon up` suggestion to `./wbeam host run` / `./trainer.sh --start-service`.
+- Desktop launcher ADB readiness (`desktop.sh`):
+  - Added `desktop_adb_preflight()` before UI launch (dev and release paths).
+  - `adb start-server` is attempted automatically so device discovery does not depend on previous shell state.
+  - Non-fatal warning is shown when `adb` is missing or server start fails.
+- Validation:
+  - `bash -n trainer.sh` -> OK
+  - `bash -n desktop.sh` -> OK
+  - `./trainer.sh --web --no-start-service` now exits with clear actionable message.
+  - `./trainer.sh --web --start-service` now attempts non-blocking daemon start and passes health check when daemon is reachable.

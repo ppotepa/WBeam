@@ -9,11 +9,15 @@ if [[ -f "${WBEAM_CONFIG_HELPER}" ]]; then
   wbeam_load_config "${ROOT_DIR}"
 fi
 CONTROL_PORT="${WBEAM_CONTROL_PORT:-5001}"
-START_SERVICE=0
+START_SERVICE="${WBEAM_TRAINER_AUTO_START_SERVICE:-1}"
 VERBOSE=0
 MODE="ui"
 PASSTHRU=()
 ORIGINAL_ARGS=("$@")
+BOOT_LOG_DIR="${ROOT_DIR}/logs/trainer"
+DAEMON_PID_FILE="${ROOT_DIR}/.logs/trainer-daemon.pid"
+HEALTH_WAIT_ATTEMPTS="${WBEAM_TRAINER_HEALTH_WAIT_ATTEMPTS:-80}"
+HEALTH_WAIT_MS="${WBEAM_TRAINER_HEALTH_WAIT_MS:-500}"
 
 log() {
   printf '[trainer] %s\n' "$*"
@@ -105,6 +109,7 @@ Usage: ./trainer.sh [options] [-- args...]
 
 Options:
   --start-service          Try to start daemon service if health check fails.
+  --no-start-service       Do not attempt daemon auto-start on health failure.
   --control-port <port>   Control API port (default: 5001 or WBEAM_CONTROL_PORT).
   --ui                    Launch Trainer Tauri desktop app (default).
   --web                   Launch web-only Vite dev server.
@@ -121,10 +126,65 @@ Remaining args are forwarded to selected mode command.
 EOF
 }
 
+wait_for_health() {
+  local attempts="${1:-12}"
+  local pause_ms="${2:-500}"
+  local i=0
+  while (( i < attempts )); do
+    if check_health >/dev/null 2>&1; then
+      return 0
+    fi
+    i=$((i + 1))
+    sleep "$(awk "BEGIN { printf \"%.3f\", ${pause_ms}/1000 }")"
+  done
+  return 1
+}
+
+start_daemon_via_systemd() {
+  local unit="${WBEAM_DAEMON_SERVICE_NAME:-wbeam-daemon}"
+  local runtime_dir="/run/user/$(id -u)"
+  if ! command -v systemctl >/dev/null 2>&1; then
+    return 1
+  fi
+  if [[ ! -d "${runtime_dir}" ]]; then
+    return 1
+  fi
+  if [[ "$unit" != *.service ]]; then
+    unit="${unit}.service"
+  fi
+  XDG_RUNTIME_DIR="${runtime_dir}" DBUS_SESSION_BUS_ADDRESS="unix:path=${runtime_dir}/bus" \
+    systemctl --user start "${unit}" >/dev/null 2>&1 || return 1
+  return 0
+}
+
+start_daemon_background_host_run() {
+  mkdir -p "${BOOT_LOG_DIR}" "${ROOT_DIR}/.logs"
+  local daemon_log="${BOOT_LOG_DIR}/$(date -u +%Y%m%d-%H%M%S).trainer-daemon.log"
+  log "starting daemon via background host run (log=${daemon_log})"
+  nohup "${ROOT_DIR}/wbeam" host run >"${daemon_log}" 2>&1 &
+  local pid=$!
+  printf '%s\n' "${pid}" > "${DAEMON_PID_FILE}"
+  disown "${pid}" >/dev/null 2>&1 || true
+  return 0
+}
+
+start_daemon_best_effort() {
+  if start_daemon_via_systemd; then
+    log "daemon start requested via systemd user service"
+    return 0
+  fi
+  log "systemd user service start unavailable; falling back to background host run"
+  start_daemon_background_host_run
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --start-service)
       START_SERVICE=1
+      shift
+      ;;
+    --no-start-service)
+      START_SERVICE=0
       shift
       ;;
     --control-port)
@@ -210,18 +270,21 @@ fi
 if ! health_msg="$(check_health 2>/dev/null)"; then
   log "service health: unreachable"
   if [[ "$START_SERVICE" == "1" ]]; then
-    log "starting daemon via ./wbeam daemon up"
-    if ! "${ROOT_DIR}/wbeam" daemon up; then
+    if start_daemon_best_effort; then
+      if ! wait_for_health "${HEALTH_WAIT_ATTEMPTS}" "${HEALTH_WAIT_MS}"; then
+        log "daemon start attempted but health is still unreachable"
+      fi
+    else
       log "failed to start daemon service"
-      exit 1
     fi
-    sleep 1
+  else
+    log "auto-start disabled (use --start-service or WBEAM_TRAINER_AUTO_START_SERVICE=1)"
   fi
 fi
 
 if ! health_msg="$(check_health 2>/dev/null)"; then
   log "service is not healthy on ${health_url}"
-  log "hint: run './wbeam daemon up' or retry with --start-service"
+  log "hint: run './wbeam host run' (foreground) or retry './trainer.sh --start-service'"
   exit 1
 fi
 
