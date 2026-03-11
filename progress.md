@@ -2508,3 +2508,10 @@ Status: active
     - `src/apps/trainer-tauri/dist/`
   - Effect:
     - local npm install/build artifacts from trainer UI no longer pollute `git status`.
+- Branch lane migration (`0.1.1`) with clean history:
+  - Moved active trainerv2 work into version lane branch `0.1.1` for issue-driven development.
+  - Rebuilt `0.1.1` history without tracked generated artifacts from trainer UI (`node_modules`, `dist`).
+  - Preserved functional commits and CI/docs/HUD updates; dropped artifact payload from branch history.
+  - Synced cleaned `0.1.1` to both remotes (`origin`, `home`) using `--force-with-lease`.
+  - Final verification:
+    - `git ls-tree -r origin/0.1.1` no longer contains `src/apps/trainer-tauri/node_modules/*` or `src/apps/trainer-tauri/dist/*`.
