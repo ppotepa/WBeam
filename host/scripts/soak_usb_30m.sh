@@ -22,7 +22,13 @@ MAX_STARTING_SEC="${MAX_STARTING_SEC:-60}"
 ACTIVE_SCENE_MIN_BPS="${ACTIVE_SCENE_MIN_BPS:-1500000}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+if [[ -f "$SCRIPT_DIR/../../wbeam" ]]; then
+  ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+elif [[ -f "$SCRIPT_DIR/../../../wbeam" ]]; then
+  ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+else
+  ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+fi
 LOG_DIR="${WBEAM_SOAK_LOG_DIR:-$ROOT_DIR/host/rust/logs/soak}"
 mkdir -p "$LOG_DIR"
 TS="$(date +%Y%m%d-%H%M%S)"

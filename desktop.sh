@@ -61,8 +61,35 @@ desktop_has_graphical_env() {
   return 1
 }
 
+desktop_detect_runas_remote_filter() {
+  local target_user="$1"
+  local sid name type state active remote
+
+  if ! command -v loginctl >/dev/null 2>&1; then
+    echo "no"
+    return 0
+  fi
+
+  while read -r sid _; do
+    [[ -n "${sid:-}" ]] || continue
+    name="$(loginctl show-session "$sid" -p Name --value 2>/dev/null || true)"
+    type="$(loginctl show-session "$sid" -p Type --value 2>/dev/null || true)"
+    state="$(loginctl show-session "$sid" -p State --value 2>/dev/null || true)"
+    active="$(loginctl show-session "$sid" -p Active --value 2>/dev/null || true)"
+    remote="$(loginctl show-session "$sid" -p Remote --value 2>/dev/null || true)"
+
+    if [[ "$name" == "$target_user" && ( "$type" == "x11" || "$type" == "wayland" ) && "$state" == "active" && "$active" == "yes" && "$remote" == "yes" ]]; then
+      echo "yes"
+      return 0
+    fi
+  done < <(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1" "$2}')
+
+  echo "no"
+}
+
 desktop_ensure_graphical_context() {
   local -a launch_args
+  local remote_filter
   launch_args=("$@")
 
   # Already inside a graphical environment.
@@ -84,16 +111,20 @@ desktop_ensure_graphical_context() {
   fi
 
   local target_user="${WBEAM_DEV_REMOTE_USER:-$(id -un)}"
+  remote_filter="${RUNAS_REMOTE_SESSION_REMOTE:-}"
+  if [[ -z "${remote_filter}" ]]; then
+    remote_filter="$(desktop_detect_runas_remote_filter "$target_user")"
+  fi
   local runas="$ROOT_DIR/runas-remote"
   if [[ ! -x "$runas" ]]; then
     echo "[desktop] missing executable: $runas" >&2
     return 1
   fi
 
-  echo "[desktop] no graphical session in current shell; re-launching via runas-remote user=$target_user"
+  echo "[desktop] no graphical session in current shell; re-launching via runas-remote user=$target_user remote_filter=$remote_filter"
   exec env \
     RUNAS_REMOTE_QUIET=1 \
-    RUNAS_REMOTE_SESSION_REMOTE="${RUNAS_REMOTE_SESSION_REMOTE:-no}" \
+    RUNAS_REMOTE_SESSION_REMOTE="$remote_filter" \
     WBEAM_DESKTOP_REEXEC=1 \
     "$runas" "$target_user" "$ROOT_DIR/desktop.sh" -- "${launch_args[@]}"
 }
@@ -120,6 +151,17 @@ ensure_supported_node() {
       echo "[desktop] strict mode enabled (WBEAM_DESKTOP_STRICT_NODE=1), refusing to start." >&2
       return 1
     fi
+  fi
+}
+
+desktop_adb_preflight() {
+  if ! command -v adb >/dev/null 2>&1; then
+    echo "[desktop] warning: adb not found in PATH; Android device discovery will be unavailable." >&2
+    return 0
+  fi
+  if ! adb start-server >/dev/null 2>&1; then
+    echo "[desktop] warning: failed to start adb server; Android device discovery may be unavailable." >&2
+    return 0
   fi
 }
 
@@ -161,6 +203,39 @@ desktop_kill_stale_dev() {
   echo "[desktop] command: $cmd" >&2
   echo "[desktop] free port 1420 and retry." >&2
   return 1
+}
+
+desktop_kill_stale_tauri_app() {
+  local pids pid cmd remaining
+  pids="$(
+    ps -eo pid=,args= 2>/dev/null \
+      | awk '/wbeam-desktop-tauri/ && $0 !~ /awk/ {print $1}'
+  )"
+  if [[ -z "${pids//[[:space:]]/}" ]]; then
+    return 0
+  fi
+
+  echo "[desktop] found stale desktop tauri process(es): $(echo "$pids" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+  while read -r pid; do
+    [[ -n "${pid:-}" ]] || continue
+    cmd="$(ps -p "$pid" -o args= 2>/dev/null || true)"
+    [[ "$cmd" == *"wbeam-desktop-tauri"* ]] || continue
+    kill "$pid" 2>/dev/null || true
+  done <<< "$pids"
+
+  sleep 1
+  remaining="$(
+    ps -eo pid=,args= 2>/dev/null \
+      | awk '/wbeam-desktop-tauri/ && $0 !~ /awk/ {print $1}'
+  )"
+  if [[ -n "${remaining//[[:space:]]/}" ]]; then
+    while read -r pid; do
+      [[ -n "${pid:-}" ]] || continue
+      cmd="$(ps -p "$pid" -o args= 2>/dev/null || true)"
+      [[ "$cmd" == *"wbeam-desktop-tauri"* ]] || continue
+      kill -9 "$pid" 2>/dev/null || true
+    done <<< "$remaining"
+  fi
 }
 
 desktop_apply_tauri_stability_env() {
@@ -209,6 +284,8 @@ desktop_ensure_graphical_context "$@"
 run_dev() {
   local log_file
   ensure_supported_node
+  desktop_adb_preflight
+  desktop_kill_stale_tauri_app
   desktop_kill_stale_dev
   log_file="$(new_log_file "desktop")"
   echo "[desktop] log=$log_file"
@@ -225,6 +302,8 @@ run_dev() {
 run_release() {
   local log_file
   ensure_supported_node
+  desktop_adb_preflight
+  desktop_kill_stale_tauri_app
   log_file="$(new_log_file "desktop")"
   echo "[desktop] log=$log_file"
   (

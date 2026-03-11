@@ -1,5 +1,22 @@
 # WBeam Progress
 
+## Session Update (2026-03-11, pending, branch `v0.1.1/feature/runtime-hud-layout`) - Consolidated update summary (`update.md`)
+- Added new consolidated summary document:
+  - `update.md`
+- Summary captures latest lane state across:
+  - HUD split and trainer/runtime overlay routing,
+  - trainer live/run improvements and startup hardening,
+  - Android/host telemetry and runtime visibility upgrades,
+  - desktop/launcher stability fixes,
+  - repo refactor, CI gates, and docs cleanup.
+- Explicitly documented current unresolved HUD gaps:
+  - intermittent empty `LIVE METRICS` section,
+  - delayed/missing MBPS/trend values in some runs,
+  - chart area underutilization in trainer layout,
+  - need for strict single-overlay enforcement in all paths.
+- Purpose:
+  - provide a single handoff-ready changelog for sync/push checkpoints.
+
 ## Session Update (2026-03-11, pending, branch `master`) - Branch strategy cleanup (`v0.1.1`) + refactor promotion
 - Promoted full refactor stack to `master` via fast-forward from `cleanup-refactor`.
 - Pushed updated `master` to both remotes:
@@ -2681,3 +2698,176 @@ Status: active
   - refreshed command cheat sheet and known-failure playbook.
 - Stamped handbook with precise update timestamp:
   - `Last updated: 2026-03-11 14:22 CET`
+
+## Completed (2026-03-11 16:15 CET) - Trainer/Runtime HUD routing fix and layout split hardening
+- Fixed Android poller payload merge for trainer HUD transport:
+  - `StatusPoller` now merges `/metrics` top-level trainer envelope fields into the nested metrics object passed to UI callbacks:
+    - `trainer_hud_active`
+    - `trainer_hud_text`
+    - `trainer_hud_json`
+  - This removes the blind spot where trainer HUD data existed in API response but was dropped before `MainActivity.updatePerfHud(...)`.
+- Clarified runtime vs trainer HUD HTML layout separation:
+  - Runtime overlay builder renamed to dedicated `buildRuntimeHudHtml(...)`.
+  - Runtime body class now explicitly uses `hud-live`.
+  - Trainer SOT overlay body now explicitly uses `hud-trainer`.
+  - Result: cleaner separation of two independent HUD layout families.
+- Hardened trainer HUD JSON config coherence in training writer:
+  - Preserved training HUD metadata in top-level `config` export (`chart_mode`, `layout_mode`, `font_profile`, `best_trial`, `best_score`, `target_mbps`) instead of losing context to a raw config overwrite.
+  - File touched via symlinked canonical domain path: `host/training/wizard.py` (`src/domains/training -> ../../host/training`).
+- Validation:
+  - `python3 -m py_compile host/training/wizard.py` -> OK
+  - `cd android && ./gradlew :app:compileDebugJavaWithJavac` -> OK
+
+## Completed (2026-03-11 16:40 CET) - Explicit connection mode split for HUD routing (`live` vs `training`)
+- Added explicit connection mode in host `/metrics` payload:
+  - top-level `connection_mode` now emitted as:
+    - `training` when an active trainer run matches current serial/stream port,
+    - `live` otherwise.
+  - This removes implicit HUD-mode guessing from stale overlay artifacts.
+- Extended trainer run state model with stream-port affinity:
+  - `TrainerRun` now carries `stream_port`, enabling precise per-session mode resolution.
+- Android poller merge upgraded:
+  - `StatusPoller` now forwards `connection_mode` into the UI metrics object together with `trainer_hud_*`.
+- Android HUD selector hardened:
+  - `MainActivity.updatePerfHud(...)` now renders trainer HUD only when `connection_mode == training`.
+  - Normal `Connect` path in desktop app now stays on runtime HUD even if stale trainer overlay files exist.
+- Validation:
+  - `cd src/host/rust && cargo check -p wbeamd-server` -> OK
+  - `cd android && ./gradlew :app:compileDebugJavaWithJavac` -> OK
+
+## Completed (2026-03-11 15:35 CET) - Startup reliability fixes for `trainer.sh` and ADB preflight in `desktop.sh`
+- Trainer launcher hardening (`trainer.sh`):
+  - Added configurable health wait window for daemon startup:
+    - `WBEAM_TRAINER_HEALTH_WAIT_ATTEMPTS` (default `80`)
+    - `WBEAM_TRAINER_HEALTH_WAIT_MS` (default `500`)
+  - Improved boot path messaging:
+    - explicit log when systemd user service is unavailable and fallback to background host run is used,
+    - explicit log when auto-start is disabled.
+  - Updated failure hint to foreground daemon command:
+    - from ambiguous `./wbeam daemon up` suggestion to `./wbeam host run` / `./trainer.sh --start-service`.
+- Desktop launcher ADB readiness (`desktop.sh`):
+  - Added `desktop_adb_preflight()` before UI launch (dev and release paths).
+  - `adb start-server` is attempted automatically so device discovery does not depend on previous shell state.
+  - Non-fatal warning is shown when `adb` is missing or server start fails.
+- Validation:
+  - `bash -n trainer.sh` -> OK
+  - `bash -n desktop.sh` -> OK
+  - `./trainer.sh --web --no-start-service` now exits with clear actionable message.
+  - `./trainer.sh --web --start-service` now attempts non-blocking daemon start and passes health check when daemon is reachable.
+
+## Completed (2026-03-11 16:05 CET) - Desktop ADB discovery decoupled from daemon/service state
+- Fixed `desktop-tauri` device listing regression where ADB devices were hidden when daemon service was inactive.
+  - Root cause:
+    - `list_devices_basic()` returned early with empty `devices` if service was unavailable/not installed/not active.
+    - This made UI show no devices even when `adb devices` would return connected hardware.
+  - Change:
+    - Removed early-return gate on service status.
+    - Listing now always proceeds through `adb devices`; daemon inactivity only affects stream-state resolution (`unknown`) and logging.
+  - New UI service log behavior:
+    - emits warning: `service inactive; continuing with adb-only listing`.
+- Verification:
+  - `cd desktop/apps/desktop-tauri/src-tauri && cargo check` -> OK.
+
+## Completed (2026-03-11 16:20 CET) - Desktop service start UX fix (`activating` state handling)
+- Fixed service-state interpretation in desktop backend:
+  - `service_status()` now treats systemd transitional states as active from UI perspective:
+    - `active`
+    - `activating`
+    - `reloading`
+  - Status summary now includes raw systemd fields for diagnostics:
+    - `state=<is-active>`
+    - `sub_state=<SubState>`
+- Reduced "click start twice" symptom in desktop UI:
+  - `service_start()` now waits briefly after `systemctl --user start` for service state to settle before returning status.
+  - Prevents immediate false-negative `active=false` during short startup windows.
+- Verification:
+  - `cd desktop/apps/desktop-tauri/src-tauri && cargo check` -> OK.
+
+## Completed (2026-03-11 17:10 CET) - Desktop Vite/esbuild stability hardening for icon imports
+- Addressed recurring `vite:esbuild` crash (`The service was stopped` / `write EPIPE`) seen during `./desktop.sh` startup.
+- Root-cause mitigation in frontend imports:
+  - Replaced bulk icon imports from `lucide-solid` root with per-icon subpath imports:
+    - `lucide-solid/icons/<icon-name>`
+  - This avoids forcing Vite/esbuild through large alias/icon export surfaces during pre-transform.
+- TypeScript resolver update for package export subpaths:
+  - `desktop/apps/desktop-tauri/tsconfig.json`:
+    - `moduleResolution: "node"` -> `moduleResolution: "bundler"`
+- Verification:
+  - `cd desktop/apps/desktop-tauri && npm run build` -> OK.
+
+## Completed (2026-03-11 17:20 CET) - Desktop window startup reliability (stale single-instance cleanup)
+- Fixed intermittent "desktop app starts but no window appears" behavior in `./desktop.sh`.
+- Root cause:
+  - stale `wbeam-desktop-tauri` process could remain alive without visible window,
+  - Tauri single-instance plugin then caused next start attempts to exit quickly while trying to focus non-visible old instance.
+- Change in launcher:
+  - added `desktop_kill_stale_tauri_app()` in `desktop.sh`,
+  - runs before dev/release startup and terminates stale `wbeam-desktop-tauri` processes (TERM -> KILL fallback).
+- Existing dev-port cleanup remains in place (`desktop_kill_stale_dev` for Vite :1420).
+- Verification:
+  - `bash -n desktop.sh` -> OK
+  - startup test log confirms stale PID detection and clean relaunch path.
+
+## Completed (2026-03-11 17:27 CET) - Remote-session window routing fix for desktop/trainer launchers
+- Fixed `./desktop.sh` and `./trainer.sh` re-exec session targeting when started from non-graphical shells:
+  - launchers now auto-detect whether an active remote graphical session exists for target user,
+  - if yes, they pass `RUNAS_REMOTE_SESSION_REMOTE=yes` (instead of forcing local-only session selection),
+  - if not, they fall back to `no`.
+- This addresses invisible-window starts caused by opening Tauri in a non-visible local seat (`DISPLAY=:0`) while user is on remote desktop (`:10`).
+
+## Completed (2026-03-11 17:28 CET) - X11 authorization fix in `runas-remote`
+- Improved X11 `XAUTHORITY` selection order:
+  - for X11 sessions, fallback now prefers `${HOME}/.Xauthority` before `/run/user/<uid>/xauth_*`.
+- This avoids selecting mismatched runtime xauth files in remote X11 sessions and resolves `Could not open X display` / authorization errors.
+- Validation:
+  - `bash -n runas-remote` -> OK
+  - `./desktop.sh` startup log no longer reports X11 authorization warning on remote-session path.
+
+## Completed (2026-03-11 17:41 CET) - Trainer daemon startup fallback hardening (systemd -> host-run)
+- Fixed trainer startup path for cases where `systemd --user start` succeeds but `/v1/health` remains unreachable.
+- `trainer.sh` now tracks daemon start mode:
+  - `systemd`
+  - `host-run`
+- New behavior:
+  - if systemd path does not produce healthy API within wait window, trainer automatically retries via background `wbeam host run`.
+  - second health wait is executed after fallback.
+- This removes "service health unreachable" dead-end on hosts where user unit exists but does not become healthy.
+- Validation:
+  - `bash -n trainer.sh` -> OK
+  - repro run: `./trainer.sh --web --start-service` now falls back and reaches `service health: ok=True`.
+
+## Completed (2026-03-11 17:59 CET) - Desktop version-status clarity when daemon is unreachable
+- Fixed misleading "Update required" status in desktop UI when daemon API is down.
+- UI behavior changes:
+  - `deviceVersionStatus(...)` now shows warning:
+    - `Daemon unreachable - cannot verify`
+    - instead of false negative `Update required` when `daemon_apk_version` is unknown.
+  - `Connect` disable reason now explicitly reports:
+    - `Daemon API unreachable`
+    - before version-mismatch checks.
+- Device visibility improvement:
+  - session manager no longer clears/hides ADB device list when service is inactive.
+  - devices are always polled from backend; actions remain separately gated.
+- Validation:
+  - `cd desktop/apps/desktop-tauri && npm run build` -> OK.
+
+## Completed (2026-03-11 18:06 CET) - Fixed daemon service crash loop caused by wrong host-script root path
+- Root cause identified from user-service journal:
+  - `run_wbeamd.sh` in systemd path entered `auto -> python (fallback)` and failed with:
+    - `/home/ppotepa/git/host/daemon/wbeamd.py: No such file or directory`
+  - script resolved repository root one level too high (`../../..`) when invoked from `host/scripts/*`.
+- Implemented robust root-resolution in host scripts:
+  - detects repo root via presence of `wbeam` in candidate paths:
+    - first `../..` (for `host/scripts`)
+    - then `../../..` (for `src/host/scripts`)
+  - applied to:
+    - `host/scripts/run_wbeamd.sh`
+    - `host/scripts/run_wbeamd_debug.sh`
+    - `host/scripts/watch_live_debug_logs.sh`
+    - `host/scripts/run_soak_local.sh`
+    - `host/scripts/soak_usb_30m.sh`
+- Validation:
+  - `bash -n` for all patched scripts -> OK.
+  - user systemd restart now healthy:
+    - `systemctl --user restart wbeam-daemon.service` -> active (running)
+    - `curl http://127.0.0.1:5001/v1/health` -> `ok:true`, `build_revision=0.1.0.151.320fe`.

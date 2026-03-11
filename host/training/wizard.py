@@ -511,6 +511,7 @@ def write_overlay_snapshot(
                     "cursor_mode": cfg.cursor_mode if cfg is not None else "",
                     "chart_mode": chart_mode,
                     "layout_mode": layout_mode,
+                    "font_profile": "arcade",
                     "best_trial": best_trial,
                     "best_score": round(best_recent, 2),
                 },
@@ -555,7 +556,14 @@ def write_overlay_snapshot(
             },
         }
         if cfg is not None:
-            hud_json["config"] = asdict(cfg)
+            cfg_dict = asdict(cfg)
+            cfg_dict["target_mbps"] = round((float(cfg.bitrate_kbps) / 1000.0), 2)
+            cfg_dict["chart_mode"] = chart_mode
+            cfg_dict["layout_mode"] = layout_mode
+            cfg_dict["font_profile"] = "arcade"
+            cfg_dict["best_trial"] = best_trial
+            cfg_dict["best_score"] = round(best_recent, 2)
+            hud_json["config"] = cfg_dict
         if result is not None:
             hud_json["metrics"] = {
                 "score": result.score,
@@ -1456,7 +1464,8 @@ def main() -> int:
     parser.add_argument("--bitrate-max-kbps", type=int, default=200000)
     parser.add_argument("--warmup-sec", type=int, default=4)
     parser.add_argument("--sample-sec", type=int, default=12)
-    parser.add_argument("--poll-sec", type=float, default=1.0)
+    # 5 Hz trainer sampling by default for smoother live HUD updates.
+    parser.add_argument("--poll-sec", type=float, default=0.2)
     parser.add_argument(
         "--non-interactive",
         action=argparse.BooleanOptionalAction,
@@ -1848,7 +1857,7 @@ def main() -> int:
                     serial=serial,
                     stream_port=stream_port,
                     sample_sec=sample_sec,
-                    poll_sec=max(0.3, args.poll_sec),
+                    poll_sec=max(0.2, args.poll_sec),
                     on_sample=_on_sample_progress,
                 )
                 result = score_trial(cfg, samples, sample_sec, trial_id, mode)
