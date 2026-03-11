@@ -2750,3 +2750,18 @@ Status: active
     - emits warning: `service inactive; continuing with adb-only listing`.
 - Verification:
   - `cd desktop/apps/desktop-tauri/src-tauri && cargo check` -> OK.
+
+## Completed (2026-03-11 16:20 CET) - Desktop service start UX fix (`activating` state handling)
+- Fixed service-state interpretation in desktop backend:
+  - `service_status()` now treats systemd transitional states as active from UI perspective:
+    - `active`
+    - `activating`
+    - `reloading`
+  - Status summary now includes raw systemd fields for diagnostics:
+    - `state=<is-active>`
+    - `sub_state=<SubState>`
+- Reduced "click start twice" symptom in desktop UI:
+  - `service_start()` now waits briefly after `systemctl --user start` for service state to settle before returning status.
+  - Prevents immediate false-negative `active=false` during short startup windows.
+- Verification:
+  - `cd desktop/apps/desktop-tauri/src-tauri && cargo check` -> OK.

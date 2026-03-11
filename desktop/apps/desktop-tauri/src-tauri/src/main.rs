@@ -1048,13 +1048,20 @@ fn service_status() -> ServiceStatus {
     }
 
     let load_state = systemctl_show_prop("LoadState").unwrap_or_default();
+    let active_state = systemctl_state("is-active").unwrap_or_default();
+    let sub_state = systemctl_show_prop("SubState").unwrap_or_default();
     let installed = load_state == "loaded" || unit_file_path().exists();
-    let active = systemctl_state("is-active").as_deref() == Some("active");
+    // Treat transitional systemd states as active from UI perspective to avoid
+    // "double click start" behavior when service is still activating.
+    let active = matches!(
+        active_state.as_str(),
+        "active" | "activating" | "reloading"
+    );
     let enabled = systemctl_state("is-enabled").as_deref() == Some("enabled");
 
     let mut summary = format!(
-        "installed={} active={} enabled={}",
-        installed, active, enabled
+        "installed={} active={} enabled={} state={} sub_state={}",
+        installed, active, enabled, active_state, sub_state
     );
     if !active {
         if let Some(lock_hint) = daemon_lock_hint() {
@@ -1073,8 +1080,8 @@ fn service_status() -> ServiceStatus {
         "service_status",
         "ok",
         &format!(
-            "installed={} active={} enabled={}",
-            status.installed, status.active, status.enabled
+            "installed={} active={} enabled={} state={} sub_state={}",
+            status.installed, status.active, status.enabled, active_state, sub_state
         ),
     );
     status
@@ -1757,6 +1764,14 @@ fn service_start() -> Result<ServiceStatus, String> {
     if let Err(err) = systemctl_user(&["start", SERVICE_NAME]) {
         ui_service_log("service_start", "error", &err);
         return Err(err);
+    }
+    // Wait briefly for systemd to settle so UI doesn't require a second click.
+    for _ in 0..24 {
+        let state = systemctl_state("is-active").unwrap_or_default();
+        if matches!(state.as_str(), "active" | "activating" | "reloading") {
+            break;
+        }
+        thread::sleep(Duration::from_millis(250));
     }
     let status = service_status();
     ui_service_log(
