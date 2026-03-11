@@ -2215,36 +2215,51 @@ public class MainActivity extends AppCompatActivity {
         if (perfHudText == null) {
             return;
         }
-        String chips = hudChip("RUN", "PENDING", "state-pending")
-                + hudChip("PROFILE", "PENDING", "state-pending")
-                + hudChip("GEN", "0/0", "state-pending")
-                + hudChip("TRIAL", "0/0", "state-pending")
-                + hudChip("ENCODER", "PENDING", "state-pending")
-                + hudChip("SIZE/FPS", "PENDING", "state-pending");
-        String cards = hudCard("SCORE", "PENDING", "state-pending")
-                + hudCard("PRESENT FPS", "PENDING", "state-pending")
-                + hudCard("PIPE/DEC FPS", "PENDING / PENDING", "state-pending")
-                + hudCard("LIVE MBPS", "PENDING", "state-pending")
-                + hudCard("LAT p95 ms", "PENDING", "state-pending")
-                + hudCard("DROPS/s | QUEUE", "PENDING | PENDING", "state-pending");
-        String details = hudDetailRow("STATUS", "Waiting for trainer HUD feed")
-                + hudDetailRow("ACTION", "Keep stream running; metrics will populate automatically")
-                + hudDetailRow("LIVE MBPS", "PENDING")
-                + hudDetailRow("TARGET MBPS", "PENDING")
-                + hudDetailRow("NOTE", "Template is active to avoid blank overlay");
         sampleDeviceResourceUsage(latestTargetFps > 1.0 ? latestTargetFps : 60.0, 0.0);
         String resourceRows = buildResourceRowsHtml();
-        String html = buildUnifiedHudHtml(
-                "trainer",
-                "TRAINING PROGRESS ...",
+        String html = buildTrainerHudSotHtml(
+                "PENDING",
+                "PENDING",
+                "PENDING",
+                "PENDING",
                 0,
-                chips,
-                cards,
-                buildPendingMetricTrendRowsHtml(),
+                0,
+                0,
+                0,
+                0,
+                "T0",
+                0,
+                "TRAINING PROGRESS ...",
+                Double.NaN,
+                Double.NaN,
+                Double.NaN,
+                Double.NaN,
+                Double.NaN,
+                Double.NaN,
+                Double.NaN,
+                Double.NaN,
+                Double.NaN,
+                0,
+                "PENDING",
+                Double.NaN,
+                "pending",
+                "pending",
+                "pending",
+                "pending",
+                "pending",
+                "pending",
                 "trainer feed pending | placeholders visible",
-                details,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
                 resourceRows,
-                "scale-2x"
+                "wide",
+                "arcade"
         );
         if (perfHudWebView != null) {
             perfHudWebView.loadDataWithBaseURL(null, html, "text/html", "utf-8", null);
@@ -2319,26 +2334,51 @@ public class MainActivity extends AppCompatActivity {
                 details.append(hudDetailRow(line, "-"));
             }
         }
-        String progressText = progressLine == null || progressLine.trim().isEmpty()
-                ? "TRAINING PROGRESS ..."
-                : progressLine.trim();
-        String chips = hudChip("HUD", "TRAINER", "")
-                + hudChip("SOURCE", "TEXT SNAPSHOT", "state-pending")
-                + hudChip("PROGRESS", String.valueOf(clampPercent(progressPercent)) + "%", "");
-        String cards = hudCard("MODE", "fallback", "state-pending");
         sampleDeviceResourceUsage(latestTargetFps > 1.0 ? latestTargetFps : 60.0, 0.0);
         String resourceRows = buildResourceRowsHtml();
-        return buildUnifiedHudHtml(
-                "trainer",
-                progressText,
+        return buildTrainerHudSotHtml(
+                "TEXT-SNAPSHOT",
+                "PENDING",
+                "PENDING",
+                "PENDING",
+                0,
+                0,
+                0,
+                0,
+                0,
+                "T0",
                 progressPercent,
-                chips,
-                cards,
-                buildPendingMetricTrendRowsHtml(),
-                "text snapshot mode",
-                details.toString(),
+                progressLine,
+                Double.NaN,
+                Double.NaN,
+                Double.NaN,
+                Double.NaN,
+                Double.NaN,
+                Double.NaN,
+                Double.NaN,
+                Double.NaN,
+                Double.NaN,
+                0,
+                "PENDING",
+                Double.NaN,
+                "pending",
+                "pending",
+                "pending",
+                "pending",
+                "pending",
+                "pending",
+                "text snapshot mode | " + details.toString().replaceAll("<[^>]+>", " ").trim(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
                 resourceRows,
-                "scale-2x"
+                "wide",
+                "arcade"
         );
     }
 
@@ -2393,32 +2433,6 @@ public class MainActivity extends AppCompatActivity {
         String queueState = states != null ? states.optString("queue", "PENDING").toLowerCase(Locale.US) : "pending";
         String qualityState = states != null ? states.optString("quality", "PENDING").toLowerCase(Locale.US) : "pending";
 
-        JSONArray rows = hud.optJSONArray("rows");
-        StringBuilder detailsRows = new StringBuilder();
-        if (rows != null) {
-            for (int i = 0; i < rows.length(); i++) {
-                JSONObject row = rows.optJSONObject(i);
-                if (row == null) continue;
-                String type = row.optString("type", "single");
-                if ("pair".equals(type)) {
-                    detailsRows.append("<tr><td>")
-                            .append(escapeHtml(row.optString("left", "")))
-                            .append("</td><td>")
-                            .append(escapeHtml(row.optString("right", "")))
-                            .append("</td></tr>");
-                }
-            }
-        }
-        if (detailsRows.length() == 0) {
-            detailsRows.append(hudDetailRow("RUN ID", runId));
-            detailsRows.append(hudDetailRow("PROFILE", profile));
-            detailsRows.append(hudDetailRow("ENCODER", encoder));
-            detailsRows.append(hudDetailRow("SIZE", size));
-            detailsRows.append(hudDetailRow("TARGET", String.format(Locale.US, "%d FPS @ %.1f Mbps", fps, targetMbps)));
-            detailsRows.append(hudDetailRow("LIVE MBPS", fmtDoubleOrPlaceholder(liveMbps, "%.2f", "PENDING")));
-            detailsRows.append(hudDetailRow("LATENCY p95", fmtDoubleOrPlaceholder(latency, "%.1f ms", "PENDING")));
-            detailsRows.append(hudDetailRow("DROPS/s", fmtDoubleOrPlaceholder(drops, "%.3f", "PENDING")));
-        }
         JSONArray trendScoreArr = trends != null ? trends.optJSONArray("score") : null;
         JSONArray trendFpsArr = trends != null ? trends.optJSONArray("present_fps") : null;
         JSONArray trendRecvArr = trends != null ? trends.optJSONArray("recv_fps") : null;
@@ -2431,6 +2445,7 @@ public class MainActivity extends AppCompatActivity {
         JSONArray trendLatencyArr = trends != null ? trends.optJSONArray("latency_ms_p95") : null;
         JSONArray trendQueueArr = trends != null ? trends.optJSONArray("queue_depth") : null;
         JSONArray trendLateArr = trends != null ? trends.optJSONArray("late_per_sec") : null;
+        double late = kpi != null ? kpi.optDouble("late_per_sec", Double.NaN) : Double.NaN;
         if (Double.isNaN(liveMbps) || liveMbps <= 0.0) {
             liveMbps = latestFiniteFromSeries(trendMbpsArr);
         }
@@ -2452,72 +2467,58 @@ public class MainActivity extends AppCompatActivity {
         if (Double.isNaN(queue) || queue < 0.0) {
             queue = latestFiniteFromSeries(trendQueueArr);
         }
-        String statusNote = status != null ? escapeHtml(status.optString("note", "")) : "";
-        String modeSummary = String.format(
-                Locale.US,
-                "%s | %s | target %d fps | live p/r/d %s/%s/%s",
-                safeText(encoder).toUpperCase(Locale.US),
-                safeText(size),
-                Math.max(0, fps),
-                fmtDoubleOrPlaceholder(present, "%.1f", "-"),
-                fmtDoubleOrPlaceholder(recv, "%.1f", "-"),
-                fmtDoubleOrPlaceholder(decode, "%.1f", "-")
-        );
-        String trendChartsHtml = buildTrainerTrendGridHtml(
-                trendScoreArr,
-                trendFpsArr,
-                trendRecvArr,
-                trendDecodeArr,
-                trendMbpsArr,
-                trendDropArr,
-                trendLatencyArr,
-                trendQueueArr,
-                trendLateArr,
-                qualityState,
-                fpsState,
-                fpsState,
-                fpsState,
-                mbpsState,
-                dropState,
-                latState,
-                queueState,
-                dropState
-        );
-
-        String pLabel = progressLine == null || progressLine.trim().isEmpty() ? "TRAINING PROGRESS ..." : progressLine.trim();
-        String chips = hudChip("RUN", runId, "")
-                + hudChip("PROFILE", profile, "")
-                + hudChip("SOURCE", "JSON FEED", "state-ok")
-                + hudChip("GEN", gIdx + "/" + gTotal, "")
-                + hudChip("TRIAL", trialId + " (" + tIdx + "/" + tTotal + ")", "")
-                + hudChip("ENCODER", encoder, "")
-                + hudChip("SIZE/FPS", size + " @" + fps + " | " + String.format(Locale.US, "%.1f", targetMbps) + " Mbps", "");
-
-        String cards = hudCard("CURRENT MODE", modeSummary, "")
-                + hudCard("SCORE", fmtDoubleOrPlaceholder(score, "%.2f", "PENDING"), "")
-                + hudCard("PRESENT FPS", fmtDoubleOrPlaceholder(present, "%.1f", "PENDING"), hudToneClass(fpsState))
-                + hudCard("PIPE/DEC FPS", fmtDoubleOrPlaceholder(recv, "%.1f", "PENDING") + " / " + fmtDoubleOrPlaceholder(decode, "%.1f", "PENDING"), "")
-                + hudCard("LIVE MBPS", fmtLiveMbps(liveMbps, targetMbps) + " Mbps", hudToneClass(mbpsState))
-                + hudCard("LAT p95 ms", fmtDoubleOrPlaceholder(latency, "%.1f", "PENDING"), hudToneClass(latState))
-                + hudCard("DROPS/s | QUEUE", fmtDoubleOrPlaceholder(drops, "%.3f", "PENDING") + " | " + fmtDoubleOrPlaceholder(queue, "%.3f", "PENDING"), hudToneClass(dropState))
-                + hudCard("TRIAL SAMPLE COUNT", status != null ? String.valueOf(Math.max(0, status.optInt("sample_count", 0))) : "0", "");
-
-        String trend = "layout=" + safeText(layoutMode)
-                + " | quality=" + safeText(qualityState.toUpperCase(Locale.US))
-                + " | note: " + statusNote;
+        if (Double.isNaN(late) || late < 0.0) {
+            late = latestFiniteFromSeries(trendLateArr);
+        }
+        String statusNote = status != null ? status.optString("note", "") : "";
+        int sampleCount = status != null ? Math.max(0, status.optInt("sample_count", 0)) : 0;
+        String bestTrial = config != null ? config.optString("best_trial", "-") : "-";
+        double bestScore = config != null ? config.optDouble("best_score", Double.NaN) : Double.NaN;
         sampleDeviceResourceUsage(fps > 1 ? fps : (latestTargetFps > 1.0 ? latestTargetFps : 60.0), Double.isNaN(renderMs) ? 0.0 : renderMs);
         String resourceRows = buildResourceRowsHtml();
-        return buildUnifiedHudHtml(
-                "trainer",
-                pLabel,
+        return buildTrainerHudSotHtml(
+                runId,
+                profile,
+                encoder,
+                size,
+                Math.max(0, fps),
+                gIdx,
+                gTotal,
+                tIdx,
+                tTotal,
+                trialId,
                 progressPercent,
-                chips,
-                cards,
-                trendChartsHtml,
-                trend,
-                detailsRows.toString(),
+                progressLine,
+                score,
+                present,
+                recv,
+                decode,
+                liveMbps,
+                latency,
+                drops,
+                queue,
+                late,
+                sampleCount,
+                bestTrial,
+                bestScore,
+                fpsState,
+                mbpsState,
+                latState,
+                dropState,
+                queueState,
+                qualityState,
+                statusNote,
+                trendScoreArr,
+                trendFpsArr,
+                trendMbpsArr,
+                trendLatencyArr,
+                trendDropArr,
+                trendQueueArr,
+                trendRecvArr,
+                trendDecodeArr,
                 resourceRows,
-                trainerScaleClass(fontProfile)
+                layoutMode,
+                fontProfile
         );
     }
 
@@ -2618,6 +2619,171 @@ public class MainActivity extends AppCompatActivity {
                 + "</div></body></html>";
     }
 
+    private String buildTrainerHudSotHtml(
+            String runId,
+            String profile,
+            String encoder,
+            String size,
+            int fps,
+            int gIdx,
+            int gTotal,
+            int tIdx,
+            int tTotal,
+            String trialId,
+            int progressPercent,
+            String progressLine,
+            double score,
+            double present,
+            double recv,
+            double decode,
+            double liveMbps,
+            double latency,
+            double drops,
+            double queue,
+            double late,
+            int sampleCount,
+            String bestTrial,
+            double bestScore,
+            String fpsState,
+            String mbpsState,
+            String latState,
+            String dropState,
+            String queueState,
+            String qualityState,
+            String statusNote,
+            JSONArray trendScore,
+            JSONArray trendPresent,
+            JSONArray trendMbps,
+            JSONArray trendLatency,
+            JSONArray trendDrops,
+            JSONArray trendQueue,
+            JSONArray trendRecv,
+            JSONArray trendDecode,
+            String resourceRowsHtml,
+            String layoutMode,
+            String fontProfile
+    ) {
+        int pct = progressPercent;
+        if (pct < 0 && tTotal > 0) {
+            pct = (int) Math.round((Math.max(0, tIdx) * 100.0) / Math.max(1, tTotal));
+        }
+        pct = clampPercent(pct);
+        String progressText = progressLine == null || progressLine.trim().isEmpty()
+                ? String.format(Locale.US, "TRAINING PROGRESS %d%%", pct)
+                : progressLine.trim();
+        String modeLine = safeText(encoder).toUpperCase(Locale.US)
+                + " | " + safeText(size)
+                + " | " + Math.max(0, fps) + "fps";
+        String liveTriplet = String.format(
+                Locale.US,
+                "P/R/D %s / %s / %s",
+                fmtDoubleOrPlaceholder(present, "%.1f", "PENDING"),
+                fmtDoubleOrPlaceholder(recv, "%.1f", "PENDING"),
+                fmtDoubleOrPlaceholder(decode, "%.1f", "PENDING")
+        );
+        String statusLine1 = "best_trial: " + safeText(bestTrial) + "    best_score: " + fmtDoubleOrPlaceholder(bestScore, "%.2f", "PENDING");
+        String statusLine2 = "sample_count: " + sampleCount + "    state.fps: " + safeText(fpsState);
+        String statusLine3 = "state.mbps: " + safeText(mbpsState) + "    state.latency: " + safeText(latState);
+        String statusLine4 = "state.drop: " + safeText(dropState) + "    state.queue: " + safeText(queueState);
+        String statusLine5 = "quality: " + safeText(qualityState) + "    note: " + safeText(statusNote);
+
+        String trendGrid = buildSotTrendCellHtml("SCORE TREND", trendScore, hudToneClass(qualityState), "")
+                + buildSotTrendCellHtml("PRESENT FPS TREND", trendPresent, hudToneClass(fpsState), "")
+                + buildSotTrendCellHtml("LIVE MBPS TREND", trendMbps, hudToneClass(mbpsState), "Mbps")
+                + buildSotTrendCellHtml("LAT p95 TREND", trendLatency, hudToneClass(latState), "ms")
+                + buildSotTrendCellHtml("DROPS/s TREND", trendDrops, hudToneClass(dropState), "")
+                + buildSotTrendCellHtml("QUEUE DEPTH TREND", trendQueue, hudToneClass(queueState), "")
+                + buildSotTrendCellHtml("RECV FPS TREND", trendRecv, hudToneClass(fpsState), "")
+                + buildSotTrendCellHtml("DECODE FPS TREND", trendDecode, hudToneClass(fpsState), "");
+
+        String hudShellClass = "sot shell " + trainerScaleClass(fontProfile);
+        return "<!doctype html><html><head><meta charset='utf-8'/>"
+                + "<style>"
+                + "html,body{margin:0;padding:0;background:transparent;color:#ecfbff;font-family:'JetBrains Mono','IBM Plex Mono',monospace;width:100%;height:100%;}"
+                + ".sot.shell{padding:6px;box-sizing:border-box;width:100%;height:100%;display:grid;grid-template-rows:auto minmax(0,1fr) auto;gap:6px;}"
+                + ".sot .panel{background:rgba(4,25,34,.78);border:1px solid rgba(110,242,255,.34);border-radius:8px;padding:8px;min-width:0;}"
+                + ".sot .header{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;}"
+                + ".sot .chip{background:rgba(6,39,55,.85);border:1px solid rgba(124,236,255,.42);border-radius:6px;padding:6px 8px;min-width:0;}"
+                + ".sot .chip .k{display:block;font-size:11px;color:#9fe8f2;letter-spacing:.04em;}"
+                + ".sot .chip .v{display:block;font-size:16px;color:#f0fdff;font-weight:700;line-height:1.15;word-break:break-word;}"
+                + ".sot .main{display:grid;grid-template-columns:44% 56%;gap:6px;min-height:0;}"
+                + ".sot .left-col,.sot .right-col{display:grid;gap:6px;min-height:0;min-width:0;}"
+                + ".sot .left-col{grid-template-rows:repeat(3,minmax(88px,auto)) minmax(0,1fr);}"
+                + ".sot .kpi-block{background:rgba(3,19,27,.78);border:1px solid rgba(110,242,255,.24);border-radius:6px;padding:8px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;}"
+                + ".sot .kpi-item .k{display:block;font-size:11px;color:#9fe8f2;}"
+                + ".sot .kpi-item .v{display:block;font-size:20px;color:#f0fdff;font-weight:700;line-height:1.15;word-break:break-word;}"
+                + ".sot .status{background:rgba(3,19,27,.78);border:1px solid rgba(110,242,255,.24);border-radius:6px;padding:8px;display:grid;gap:5px;align-content:start;}"
+                + ".sot .status .row{font-size:12px;color:#c8f7ff;line-height:1.28;word-break:break-word;}"
+                + ".sot .trend-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;min-height:0;align-content:start;}"
+                + ".sot .trend-cell{background:rgba(3,19,27,.78);border:1px solid rgba(110,242,255,.24);border-radius:6px;padding:7px;display:grid;gap:5px;min-width:0;}"
+                + ".sot .trend-head{display:flex;justify-content:space-between;align-items:center;gap:8px;min-width:0;}"
+                + ".sot .trend-title{font-size:11px;color:#9fe8f2;letter-spacing:.03em;}"
+                + ".sot .trend-stats{font-size:11px;color:#c8f7ff;white-space:nowrap;}"
+                + ".sot .spark{height:52px;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);align-items:end;gap:1px;border:1px solid rgba(114,231,255,.3);background:rgba(2,12,18,.95);padding:2px;overflow:hidden;min-width:0;}"
+                + ".sot .spark .spark-bar{width:100%;min-width:0;border-radius:2px 2px 0 0;background:linear-gradient(180deg,rgba(141,217,255,.96),rgba(141,217,255,.24));}"
+                + ".sot .spark .spark-bar.state-warn{background:linear-gradient(180deg,rgba(251,191,36,.96),rgba(251,191,36,.24));}"
+                + ".sot .spark .spark-bar.state-risk{background:linear-gradient(180deg,rgba(248,113,113,.96),rgba(248,113,113,.24));}"
+                + ".sot .ok{color:#6ee7b7;} .sot .warn{color:#fbbf24;} .sot .risk{color:#f87171;}"
+                + ".sot .state-ok{color:#6ee7b7;} .sot .state-warn{color:#fbbf24;} .sot .state-risk{color:#f87171;} .sot .state-pending{color:#94a3b8;}"
+                + ".sot .res-row{display:grid;grid-template-columns:46px 70px minmax(0,1fr);align-items:center;gap:6px;margin-top:4px;}"
+                + ".sot .res-row .rk{font-size:11px;color:#9fe8f2;}"
+                + ".sot .res-row .rv{font-size:12px;color:#f0fdff;}"
+                + ".sot .footer{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;}"
+                + ".sot .foot{background:rgba(3,19,27,.78);border:1px solid rgba(110,242,255,.24);border-radius:6px;padding:6px 8px;font-size:12px;color:#c8f7ff;line-height:1.3;word-break:break-word;}"
+                + ".sot.scale-2x .chip .k{font-size:12px;}.sot.scale-2x .chip .v{font-size:20px;}.sot.scale-2x .kpi-item .k{font-size:12px;}.sot.scale-2x .kpi-item .v{font-size:24px;}.sot.scale-2x .status .row{font-size:14px;}.sot.scale-2x .trend-title{font-size:13px;}.sot.scale-2x .trend-stats{font-size:12px;}.sot.scale-2x .spark{height:62px;}"
+                + "@media (max-width:1200px){.sot .main{grid-template-columns:1fr;}.sot .trend-grid{grid-template-columns:1fr;}.sot .footer{grid-template-columns:1fr;}}"
+                + "</style></head><body><div class='" + hudShellClass + "'>"
+                + "<div class='panel header'>"
+                + "<div class='chip'><span class='k'>RUN / PROFILE</span><span class='v'>" + escapeHtml(safeText(runId) + " / " + safeText(profile)) + "</span></div>"
+                + "<div class='chip'><span class='k'>GEN</span><span class='v'>" + escapeHtml(gIdx + "/" + gTotal) + "</span></div>"
+                + "<div class='chip'><span class='k'>TRIAL</span><span class='v'>" + escapeHtml(tIdx + "/" + tTotal + " (" + safeText(trialId) + ")") + "</span></div>"
+                + "<div class='chip'><span class='k'>CURRENT MODE</span><span class='v'>" + escapeHtml(modeLine) + "</span></div>"
+                + "<div class='chip'><span class='k'>PROGRESS</span><span class='v'>" + escapeHtml(progressText + " | " + pct + "%") + "</span></div>"
+                + "</div>"
+                + "<div class='main'>"
+                + "<div class='panel left-col'>"
+                + "<div class='kpi-block'>"
+                + "<div class='kpi-item'><span class='k'>SCORE</span><span class='v " + escapeHtml(hudToneClass(qualityState)) + "'>" + escapeHtml(fmtDoubleOrPlaceholder(score, "%.2f", "PENDING")) + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>PRESENT FPS</span><span class='v " + escapeHtml(hudToneClass(fpsState)) + "'>" + escapeHtml(fmtDoubleOrPlaceholder(present, "%.1f", "PENDING")) + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>LIVE MBPS</span><span class='v " + escapeHtml(hudToneClass(mbpsState)) + "'>" + escapeHtml(fmtLiveMbps(liveMbps, Double.NaN) + " Mbps") + "</span></div>"
+                + "</div>"
+                + "<div class='kpi-block'>"
+                + "<div class='kpi-item'><span class='k'>RECV FPS</span><span class='v'>" + escapeHtml(fmtDoubleOrPlaceholder(recv, "%.1f", "PENDING")) + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>DECODE FPS</span><span class='v'>" + escapeHtml(fmtDoubleOrPlaceholder(decode, "%.1f", "PENDING")) + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>LAT p95</span><span class='v " + escapeHtml(hudToneClass(latState)) + "'>" + escapeHtml(fmtDoubleOrPlaceholder(latency, "%.1f ms", "PENDING")) + "</span></div>"
+                + "</div>"
+                + "<div class='kpi-block'>"
+                + "<div class='kpi-item'><span class='k'>DROPS/s</span><span class='v " + escapeHtml(hudToneClass(dropState)) + "'>" + escapeHtml(fmtDoubleOrPlaceholder(drops, "%.3f", "PENDING")) + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>LATE/s</span><span class='v " + escapeHtml(hudToneClass(dropState)) + "'>" + escapeHtml(fmtDoubleOrPlaceholder(late, "%.3f", "PENDING")) + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>QUEUE</span><span class='v " + escapeHtml(hudToneClass(queueState)) + "'>" + escapeHtml(fmtDoubleOrPlaceholder(queue, "%.3f", "PENDING")) + "</span></div>"
+                + "</div>"
+                + "<div class='status'>"
+                + "<div class='row'>" + escapeHtml(statusLine1) + "</div>"
+                + "<div class='row'>" + escapeHtml(statusLine2) + "</div>"
+                + "<div class='row'>" + escapeHtml(statusLine3) + "</div>"
+                + "<div class='row'>" + escapeHtml(statusLine4) + "</div>"
+                + "<div class='row'>" + escapeHtml(statusLine5) + "</div>"
+                + "<div class='row'>" + escapeHtml(liveTriplet) + "</div>"
+                + "</div>"
+                + "</div>"
+                + "<div class='panel right-col'><div class='trend-grid'>" + trendGrid + "</div></div>"
+                + "</div>"
+                + "<div class='footer'>"
+                + "<div class='foot'><strong>LAYOUT/FONT</strong><br/>layout=" + escapeHtml(safeText(layoutMode)) + " | font=" + escapeHtml(safeText(fontProfile)) + "</div>"
+                + "<div class='foot'><strong>DEVICE RESOURCES (* GPU proxy)</strong><br/>" + resourceRowsHtml + "</div>"
+                + "<div class='foot'><strong>THRESHOLDS</strong><br/><span class='ok'>OK</span> stable | <span class='warn'>WARN</span> drift | <span class='risk'>RISK</span> critical</div>"
+                + "</div>"
+                + "</div></body></html>";
+    }
+
+    private String buildSotTrendCellHtml(String label, JSONArray series, String toneClass, String unitSuffix) {
+        return "<div class='trend-cell'>"
+                + "<div class='trend-head'><span class='trend-title'>" + escapeHtml(label) + "</span>"
+                + "<span class='trend-stats " + escapeHtml(toneClass == null ? "" : toneClass) + "'>" + escapeHtml(buildSeriesStats(series, unitSuffix)) + "</span></div>"
+                + "<div class='spark'>" + buildSparkBarsFromJson(series, toneClass) + "</div>"
+                + "</div>";
+    }
+
     private String trainerScaleClass(String fontProfile) {
         String profile = fontProfile == null ? "" : fontProfile.trim().toLowerCase(Locale.US);
         if ("compact".equals(profile) || "dense".equals(profile) || "system".equals(profile)) {
@@ -2681,7 +2847,7 @@ public class MainActivity extends AppCompatActivity {
 
     private String buildSparkBarsHtml(ArrayDeque<Double> series, String toneClass) {
         if (series == null || series.isEmpty()) {
-            return "<span class='spark-bar " + escapeHtml(toneClass) + "' style='height:12%'></span>";
+            return buildSparkPlaceholderBars(toneClass, 18);
         }
         StringBuilder bars = new StringBuilder();
         for (Double sample : series) {
@@ -2850,7 +3016,7 @@ public class MainActivity extends AppCompatActivity {
 
     private String buildSparkBarsFromJson(JSONArray series, String toneClass) {
         if (series == null || series.length() == 0) {
-            return "<span class='spark-bar " + escapeHtml(toneClass) + "' style='height:12%'></span>";
+            return buildSparkPlaceholderBars(toneClass, 28);
         }
         double lo = Double.POSITIVE_INFINITY;
         double hi = Double.NEGATIVE_INFINITY;
@@ -2866,7 +3032,7 @@ public class MainActivity extends AppCompatActivity {
             hi = Math.max(hi, v);
         }
         if (!Double.isFinite(lo) || !Double.isFinite(hi)) {
-            return "<span class='spark-bar " + escapeHtml(toneClass) + "' style='height:12%'></span>";
+            return buildSparkPlaceholderBars(toneClass, 28);
         }
         double span = hi - lo;
         if (span < 1e-6) {
@@ -2894,7 +3060,22 @@ public class MainActivity extends AppCompatActivity {
                     .append("%'></span>");
         }
         if (bars.length() == 0) {
-            return "<span class='spark-bar " + escapeHtml(toneClass) + "' style='height:12%'></span>";
+            return buildSparkPlaceholderBars(toneClass, 28);
+        }
+        return bars.toString();
+    }
+
+    private String buildSparkPlaceholderBars(String toneClass, int count) {
+        int n = Math.max(8, Math.min(64, count));
+        String cls = escapeHtml(toneClass == null ? "" : toneClass);
+        StringBuilder bars = new StringBuilder();
+        for (int i = 0; i < n; i++) {
+            int h = 12 + ((i % 4) * 3);
+            bars.append("<span class='spark-bar ")
+                    .append(cls)
+                    .append("' style='height:")
+                    .append(h)
+                    .append("%'></span>");
         }
         return bars.toString();
     }

@@ -2462,6 +2462,24 @@ Status: active
     - `package-lock.json` (root, empty lockfile)
     - `docs/ui/makieta_loading_horizontal.svg`
   - Intentionally preserved `proto/` and `proto_x11/` (still referenced by CLI/docs/core fallback paths).
+- Trainer HUD implementation aligned to SOT maquette:
+  - Android training HUD now uses dedicated SOT renderer path (`buildTrainerHudSotHtml`) for:
+    - JSON feed mode,
+    - text snapshot fallback mode,
+    - pending-placeholder mode.
+  - Replaced generic training layout with SOT structure:
+    - header chips (`run/profile`, `gen`, `trial`, `current mode`, `progress`),
+    - left KPI/context stack,
+    - right 2-column trend grid,
+    - bottom legend/resources strip.
+  - Added explicit SOT trend cells:
+    - score, present fps, live mbps, latency p95, drops/sec, queue depth, recv fps, decode fps.
+  - Improved spark fill behavior:
+    - placeholder charts now render multi-bar placeholders (not single tiny bar),
+    - trend spark containers use full-width grid columns so charts occupy full available area.
+  - Ensured trainer path consistently stays on one layout family in all trainer states (active/pending/fallback).
+- Validation:
+  - `cd android && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugJavaWithJavac` -> OK
 - Versioning update (deterministic deploy/redeploy suffix):
   - `./wbeam version new` no longer uses random hash from `/dev/urandom`.
   - build suffix is now deterministic and commit-bound: last 5 chars of `git rev-parse HEAD`.
