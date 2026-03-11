@@ -2105,8 +2105,7 @@ public class MainActivity extends AppCompatActivity {
                     + " present=" + String.format(Locale.US, "%.1f", presentFps)
                     + " | drops=" + drops;
 
-            String html = buildUnifiedHudHtml(
-                    "runtime",
+            String html = buildRuntimeHudHtml(
                     "LIVE METRICS",
                     -1,
                     chips.toString(),
@@ -2522,8 +2521,7 @@ public class MainActivity extends AppCompatActivity {
         );
     }
 
-    private String buildUnifiedHudHtml(
-            String mode,
+    private String buildRuntimeHudHtml(
             String progressLabel,
             int progressPercent,
             String chipsHtml,
@@ -2534,11 +2532,9 @@ public class MainActivity extends AppCompatActivity {
             String resourceRowsHtml,
             String scaleClass
     ) {
-        boolean isTrainer = "trainer".equalsIgnoreCase(mode);
         int safePct = clampPercent(progressPercent);
-        String modeUpper = safeText(mode).toUpperCase(Locale.US);
         String progress = safeText(progressLabel);
-        String bodyClass = (isTrainer ? "trainer" : "runtime") + " " + safeText(scaleClass);
+        String bodyClass = "hud-live " + safeText(scaleClass);
         return "<!doctype html><html><head><meta charset='utf-8'/>"
                 + "<style>"
                 + "html,body{margin:0;padding:0;background:transparent;color:#ecfbff;font-family:'JetBrains Mono','IBM Plex Mono',monospace;font-size:13px;min-width:100%;min-height:100%;}"
@@ -2579,36 +2575,10 @@ public class MainActivity extends AppCompatActivity {
                 + ".detail-table td{border:1px solid rgba(126,245,255,.36);padding:4px 6px;vertical-align:top;word-break:break-word;}"
                 + ".detail-table td:first-child{width:52%;color:#dffcff;} .detail-table td:last-child{text-align:right;color:#b9f8ff;}"
                 + ".state-ok{color:#6ee7b7;} .state-warn{color:#fbbf24;} .state-risk{color:#f87171;} .state-pending{color:#94a3b8;}"
-                + ".trainer.scale-2x .chip .k{font-size:14px;letter-spacing:.03em;}"
-                + ".trainer.scale-2x .chip .v{font-size:19px;line-height:1.1;}"
-                + ".trainer.scale-2x .p-label{font-size:16px;}"
-                + ".trainer.scale-2x .p-pct{font-size:22px;}"
-                + ".trainer.scale-2x .kpi .item .k{font-size:14px;}"
-                + ".trainer.scale-2x .kpi .item .v{font-size:18px;line-height:1.1;}"
-                + ".trainer.scale-2x .detail-table td{font-size:14px;padding:5px 7px;}"
-                + ".trainer.scale-2x .trend{font-size:14px;line-height:1.3;}"
-                + ".trainer.scale-2x .trend-label{font-size:14px;}"
-                + ".trainer.scale-2x .trend-range{font-size:13px;}"
-                + ".trainer.scale-2x .trend-row{grid-template-columns:82px minmax(0,1fr) 110px;}"
-                + ".trainer.scale-2x .res-row .rk{font-size:14px;}"
-                + ".trainer.scale-2x .res-row .rv{font-size:15px;}"
-                + ".trainer.scale-2x .spark{height:30px;}"
-                + ".trainer.scale-2x .spark-bar{min-width:2px;}"
-                + ".trainer.scale-15x .chip .k{font-size:14px;letter-spacing:.04em;}"
-                + ".trainer.scale-15x .chip .v{font-size:18px;line-height:1.1;}"
-                + ".trainer.scale-15x .p-label{font-size:16px;}"
-                + ".trainer.scale-15x .p-pct{font-size:22px;}"
-                + ".trainer.scale-15x .kpi .item .k{font-size:13px;}"
-                + ".trainer.scale-15x .kpi .item .v{font-size:17px;line-height:1.1;}"
-                + ".trainer.scale-15x .detail-table td{font-size:14px;padding:5px 7px;}"
-                + ".trainer.scale-15x .trend{font-size:13px;line-height:1.3;}"
-                + ".trainer.scale-15x .res-row .rk{font-size:13px;}"
-                + ".trainer.scale-15x .res-row .rv{font-size:14px;}"
-                + ".trainer.scale-15x .spark{height:26px;}"
                 + "@media (max-width:980px){.main{grid-template-columns:1fr;}.metric-trends{grid-template-columns:1fr;}}"
                 + "</style></head><body class='" + bodyClass + "'><div class='root'>"
                 + "<div class='top'>"
-                + hudChip("HUD MODE", modeUpper, "")
+                + hudChip("HUD MODE", "RUNTIME", "")
                 + chipsHtml
                 + "</div>"
                 + "<div class='progress'><div class='p-head'><span class='p-label'>" + escapeHtml(progress.isEmpty() ? "HUD ACTIVE" : progress) + "</span><span class='p-pct'>" + safePct + "%</span></div><div class='p-track'><div class='p-fill'></div></div></div>"
@@ -2732,7 +2702,7 @@ public class MainActivity extends AppCompatActivity {
                 + ".sot .foot{background:rgba(3,19,27,.78);border:1px solid rgba(110,242,255,.24);border-radius:6px;padding:6px 8px;font-size:12px;color:#c8f7ff;line-height:1.3;word-break:break-word;}"
                 + ".sot.scale-2x .chip .k{font-size:12px;}.sot.scale-2x .chip .v{font-size:20px;}.sot.scale-2x .kpi-item .k{font-size:12px;}.sot.scale-2x .kpi-item .v{font-size:24px;}.sot.scale-2x .status .row{font-size:14px;}.sot.scale-2x .trend-title{font-size:13px;}.sot.scale-2x .trend-stats{font-size:12px;}.sot.scale-2x .spark{height:62px;}"
                 + "@media (max-width:1200px){.sot .main{grid-template-columns:1fr;}.sot .trend-grid{grid-template-columns:1fr;}.sot .footer{grid-template-columns:1fr;}}"
-                + "</style></head><body><div class='" + hudShellClass + "'>"
+                + "</style></head><body class='hud-trainer'><div class='" + hudShellClass + "'>"
                 + "<div class='panel header'>"
                 + "<div class='chip'><span class='k'>RUN / PROFILE</span><span class='v'>" + escapeHtml(safeText(runId) + " / " + safeText(profile)) + "</span></div>"
                 + "<div class='chip'><span class='k'>GEN</span><span class='v'>" + escapeHtml(gIdx + "/" + gTotal) + "</span></div>"

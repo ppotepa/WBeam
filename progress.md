@@ -2681,3 +2681,22 @@ Status: active
   - refreshed command cheat sheet and known-failure playbook.
 - Stamped handbook with precise update timestamp:
   - `Last updated: 2026-03-11 14:22 CET`
+
+## Completed (2026-03-11 16:15 CET) - Trainer/Runtime HUD routing fix and layout split hardening
+- Fixed Android poller payload merge for trainer HUD transport:
+  - `StatusPoller` now merges `/metrics` top-level trainer envelope fields into the nested metrics object passed to UI callbacks:
+    - `trainer_hud_active`
+    - `trainer_hud_text`
+    - `trainer_hud_json`
+  - This removes the blind spot where trainer HUD data existed in API response but was dropped before `MainActivity.updatePerfHud(...)`.
+- Clarified runtime vs trainer HUD HTML layout separation:
+  - Runtime overlay builder renamed to dedicated `buildRuntimeHudHtml(...)`.
+  - Runtime body class now explicitly uses `hud-live`.
+  - Trainer SOT overlay body now explicitly uses `hud-trainer`.
+  - Result: cleaner separation of two independent HUD layout families.
+- Hardened trainer HUD JSON config coherence in training writer:
+  - Preserved training HUD metadata in top-level `config` export (`chart_mode`, `layout_mode`, `font_profile`, `best_trial`, `best_score`, `target_mbps`) instead of losing context to a raw config overwrite.
+  - File touched via symlinked canonical domain path: `host/training/wizard.py` (`src/domains/training -> ../../host/training`).
+- Validation:
+  - `python3 -m py_compile host/training/wizard.py` -> OK
+  - `cd android && ./gradlew :app:compileDebugJavaWithJavac` -> OK

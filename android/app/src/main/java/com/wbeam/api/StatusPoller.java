@@ -160,7 +160,7 @@ public final class StatusPoller {
                         : null;
                 JSONObject metricsPayload = HostApiClient.apiRequestWithRetry(
                         "GET", "/metrics", null, HostApiClient.API_RETRY_ATTEMPTS);
-                JSONObject metrics = metricsPayload.optJSONObject("metrics");
+                JSONObject metrics = mergeMetricsPayload(metricsPayload);
                 uiHandler.post(() -> processStatusResult(status, health, metrics));
             } catch (Exception e) {
                 uiHandler.post(() -> processOfflineResult(e));
@@ -243,5 +243,46 @@ public final class StatusPoller {
         daemonState     = "DISCONNECTED";
         Log.e(TAG, "daemon poll failed api=" + HostApiClient.API_BASE, e);
         callbacks.onDaemonOffline(wasReachable, e);
+    }
+
+    /**
+     * /metrics payload has mixed shape:
+     *  - canonical runtime metrics under "metrics"
+     *  - trainer HUD envelope fields at top-level (trainer_hud_*)
+     *
+     * UI expects one object, so we flatten top-level trainer fields into
+     * the nested metrics object.
+     */
+    private static JSONObject mergeMetricsPayload(JSONObject payload) {
+        if (payload == null) {
+            return null;
+        }
+
+        JSONObject merged = payload.optJSONObject("metrics");
+        if (merged == null) {
+            merged = new JSONObject();
+        }
+
+        if (payload.has("trainer_hud_active")) {
+            putQuietly(merged, "trainer_hud_active", payload.optBoolean("trainer_hud_active", false));
+        }
+        if (payload.has("trainer_hud_text")) {
+            putQuietly(merged, "trainer_hud_text", payload.optString("trainer_hud_text", ""));
+        }
+        if (payload.has("trainer_hud_json")) {
+            putQuietly(merged, "trainer_hud_json", payload.opt("trainer_hud_json"));
+        }
+        return merged;
+    }
+
+    private static void putQuietly(JSONObject obj, String key, Object value) {
+        if (obj == null || key == null || key.isEmpty()) {
+            return;
+        }
+        try {
+            obj.put(key, value);
+        } catch (Exception ignored) {
+            // ignore malformed payload fragments; keep polling alive
+        }
     }
 }

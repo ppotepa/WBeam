@@ -511,6 +511,7 @@ def write_overlay_snapshot(
                     "cursor_mode": cfg.cursor_mode if cfg is not None else "",
                     "chart_mode": chart_mode,
                     "layout_mode": layout_mode,
+                    "font_profile": "arcade",
                     "best_trial": best_trial,
                     "best_score": round(best_recent, 2),
                 },
@@ -555,7 +556,14 @@ def write_overlay_snapshot(
             },
         }
         if cfg is not None:
-            hud_json["config"] = asdict(cfg)
+            cfg_dict = asdict(cfg)
+            cfg_dict["target_mbps"] = round((float(cfg.bitrate_kbps) / 1000.0), 2)
+            cfg_dict["chart_mode"] = chart_mode
+            cfg_dict["layout_mode"] = layout_mode
+            cfg_dict["font_profile"] = "arcade"
+            cfg_dict["best_trial"] = best_trial
+            cfg_dict["best_score"] = round(best_recent, 2)
+            hud_json["config"] = cfg_dict
         if result is not None:
             hud_json["metrics"] = {
                 "score": result.score,
