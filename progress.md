@@ -2515,3 +2515,31 @@ Status: active
   - Synced cleaned `0.1.1` to both remotes (`origin`, `home`) using `--force-with-lease`.
   - Final verification:
     - `git ls-tree -r origin/0.1.1` no longer contains `src/apps/trainer-tauri/node_modules/*` or `src/apps/trainer-tauri/dist/*`.
+
+## In Progress (2026-03-11) - AGENTS handbook modernization pass (master-based branch)
+- Rewrote `AGENTS.md` into a current operational handbook reflecting actual repository state.
+- Confirmed from previous updates that environment handling moved away from env-only assumptions:
+  - runtime is documented as config-first (`config/wbeam.conf` + user config) with env overrides,
+  - explicit guidance now favors config/API payloads for reproducible runs.
+- Added missing current surfaces:
+  - trainer application and trainer domain (`src/apps/trainer-tauri`, `./trainer.sh`, `./wbeam train wizard`),
+  - workflow source-of-truth pointer (`docs/agents.workflow.md`),
+  - updated practical tree including `trainer-tauri`, `config`, `updates`, `proto_x11`.
+- Refined operational content:
+  - refreshed key command sets (local/diagnostic/remote),
+  - clarified multi-device session model and per-serial API usage,
+  - tightened failure-mode diagnostics for connect/version/API17/Wayland cases.
+
+## In Progress (2026-03-11 14:22 CET) - AGENTS handbook full-state hardening (progress + git-history audit)
+- Performed cross-check against:
+  - latest `progress.md` session stream,
+  - recent git history (host/trainer/android modularization and runtime-visibility work),
+  - current route/class reality in codebase.
+- Rebuilt `AGENTS.md` as a higher-fidelity operations+architecture map:
+  - explicit key files/classes for host core/api/streamer, Android client, desktop apps, and training domain,
+  - API quick map including trainer run management + live-mode endpoints (and compatibility aliases),
+  - config-first runtime model with env override guidance and grouped key env vars,
+  - runtime artifact map (effective-runtime snapshots + trainer `/tmp` HUD marker files),
+  - refreshed command cheat sheet and known-failure playbook.
+- Stamped handbook with precise update timestamp:
+  - `Last updated: 2026-03-11 14:22 CET`
