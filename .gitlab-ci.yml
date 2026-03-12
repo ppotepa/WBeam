@@ -169,6 +169,10 @@ build_windows_server:
             [System.Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
           }
         }
+      if (Test-Path "C:\Users\ppotepa\.cargo\bin\cargo.exe") {
+        $env:Path = "C:\Users\ppotepa\.cargo\bin;$env:Path"
+      }
+      cargo --version
   script:
     - |
       Set-Location "$env:CI_PROJECT_DIR\host\rust"
