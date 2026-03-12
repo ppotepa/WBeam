@@ -65,6 +65,7 @@ import com.wbeam.ui.LiveLogUiAppender;
 import com.wbeam.ui.BuildRevisionGuard;
 import com.wbeam.ui.HostApiFailureNotifier;
 import com.wbeam.ui.HostOfflineFlowCoordinator;
+import com.wbeam.ui.HostOfflineHooksFactory;
 import com.wbeam.ui.MainActivityRuntimeStateView;
 import com.wbeam.ui.MainActivityInteractionPolicy;
 import com.wbeam.ui.MainActivityUiBinder;
@@ -521,37 +522,18 @@ public class MainActivity extends AppCompatActivity {
                 e,
                 STATE_ERROR,
                 HostApiClient.API_BASE,
-                new HostOfflineFlowCoordinator.Hooks() {
-                    @Override
-                    public void applyDisconnectedDaemonState() {
-                        MainActivity.this.applyDisconnectedDaemonState();
-                    }
-
-                    @Override
-                    public void updateOfflineUiState(boolean wasReachableState) {
-                        MainActivity.this.updateOfflineUiState(wasReachableState);
-                    }
-
-                    @Override
-                    public void refreshStatusText() {
-                        MainActivity.this.refreshStatusText();
-                    }
-
-                    @Override
-                    public void updateStatus(String state, String info, long bps) {
-                        MainActivity.this.updateStatus(state, info, bps);
-                    }
-
-                    @Override
-                    public void appendLiveLogError(String line) {
-                        MainActivity.this.appendLiveLogError(line);
-                    }
-
-                    @Override
-                    public void showLongToast(String message) {
-                        Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show();
-                    }
-                }
+                HostOfflineHooksFactory.create(
+                        this::applyDisconnectedDaemonState,
+                        this::updateOfflineUiState,
+                        this::refreshStatusText,
+                        this::updateStatus,
+                        this::appendLiveLogError,
+                        message -> Toast.makeText(
+                                MainActivity.this,
+                                message,
+                                Toast.LENGTH_LONG
+                        ).show()
+                )
         );
     }
 
