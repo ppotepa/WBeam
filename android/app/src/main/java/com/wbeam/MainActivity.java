@@ -13,10 +13,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
-import android.text.SpannableStringBuilder;
-import android.text.Spanned;
 import android.text.method.ScrollingMovementMethod;
-import android.text.style.ForegroundColorSpan;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -53,6 +50,7 @@ import com.wbeam.stream.VideoTestController;
 import com.wbeam.stream.StreamSessionController;
 import com.wbeam.telemetry.ClientMetricsReporter;
 import com.wbeam.ui.ErrorTextUtil;
+import com.wbeam.ui.LiveLogBuffer;
 import com.wbeam.ui.SettingsPayloadBuilder;
 import com.wbeam.ui.SettingsPanelController;
 import com.wbeam.ui.StatusTextFormatter;
@@ -271,7 +269,7 @@ public class MainActivity extends AppCompatActivity {
     private double latestStablePresentFps = 0.0;
     private long latestStablePresentFpsAtMs = 0L;
     private long lastPerfMetricsAtMs = 0L;
-    private final SpannableStringBuilder liveLogBuffer = new SpannableStringBuilder();
+    private final LiveLogBuffer liveLogBuffer = new LiveLogBuffer(LIVE_LOG_MAX_LINES);
     private long usageSampleLastRealtimeMs = 0L;
     private long usageSampleLastCpuMs = 0L;
     private double usageCpuPct = 0.0;
@@ -1515,37 +1513,7 @@ public class MainActivity extends AppCompatActivity {
             if (liveLogText == null) {
                 return;
             }
-
-            int color = Color.parseColor("#9CA3AF");
-            if ("I".equals(level)) {
-                color = Color.parseColor("#166534");
-            } else if ("W".equals(level)) {
-                color = Color.parseColor("#F59E0B");
-            } else if ("E".equals(level)) {
-                color = Color.parseColor("#7F1D1D");
-            }
-
-            String text = "[" + level + "] " + line + "\n";
-            int start = liveLogBuffer.length();
-            liveLogBuffer.append(text);
-            liveLogBuffer.setSpan(
-                    new ForegroundColorSpan(color),
-                    start,
-                    liveLogBuffer.length(),
-                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-            );
-
-            int linesToTrim = countLines(liveLogBuffer) - LIVE_LOG_MAX_LINES;
-            while (linesToTrim > 0) {
-                int newline = liveLogBuffer.toString().indexOf('\n');
-                if (newline < 0) {
-                    break;
-                }
-                liveLogBuffer.delete(0, newline + 1);
-                linesToTrim--;
-            }
-
-            liveLogText.setText(liveLogBuffer);
+            liveLogText.setText(liveLogBuffer.append(level, line));
             liveLogText.setVisibility(liveLogVisible ? View.VISIBLE : View.GONE);
         };
 
@@ -1554,19 +1522,6 @@ public class MainActivity extends AppCompatActivity {
         } else {
             runOnUiThread(task);
         }
-    }
-
-    private int countLines(CharSequence text) {
-        if (text == null || text.length() == 0) {
-            return 0;
-        }
-        int lines = 1;
-        for (int i = 0; i < text.length(); i++) {
-            if (text.charAt(i) == '\n') {
-                lines++;
-            }
-        }
-        return lines;
     }
 
     private void refreshStatusText() {
