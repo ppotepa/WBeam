@@ -1649,6 +1649,18 @@ public class MainActivity extends AppCompatActivity {
         return isTrainingConnection;
     }
 
+    private static final class RuntimePressureState {
+        final boolean warmingUp;
+        final String reason;
+        final String tone;
+
+        RuntimePressureState(boolean warmingUp, String reason, String tone) {
+            this.warmingUp = warmingUp;
+            this.reason = reason;
+            this.tone = tone;
+        }
+    }
+
     private void updateRuntimePerfHud(JSONObject metrics, long nowMs) {
         RuntimeTelemetryMapper.Snapshot runtime = RuntimeTelemetryMapper.map(
                 metrics,
@@ -1662,18 +1674,9 @@ public class MainActivity extends AppCompatActivity {
         long streamUptimeSec = runtime.streamUptimeSec;
 
         double targetFps = runtime.targetFps;
-        double presentFps = runtime.presentFps;
+        double presentFps = stabilizePresentFps(runtime, nowMs);
         double recvFps = runtime.recvFps;
         double decodeFps = runtime.decodeFps;
-        boolean hasFlowSignals = streamUptimeSec > 0 || frameOutHost > 0 || recvFps >= 1.0 || decodeFps >= 1.0;
-        if (presentFps >= 1.0) {
-            latestStablePresentFps = presentFps;
-            latestStablePresentFpsAtMs = nowMs;
-        } else if (hasFlowSignals
-                && latestStablePresentFps >= 1.0
-                && (nowMs - latestStablePresentFpsAtMs) <= PRESENT_FPS_STALE_GRACE_MS) {
-            presentFps = latestStablePresentFps;
-        }
         String daemonStateUi = effectiveDaemonState(daemonState, presentFps, streamUptimeSec, frameOutHost);
         latestTargetFps = targetFps;
         latestPresentFps = presentFps;
@@ -1699,30 +1702,6 @@ public class MainActivity extends AppCompatActivity {
         long bpRecover = runtime.bpRecover;
         String reason = runtime.reason;
 
-        boolean warmingUp = presentFps < 1.0 && streamUptimeSec < 5;
-        String hud = String.format(
-                Locale.US,
-                "HUD %s\nfps %.0f/%.1f frame %.2fms\ndec %.2fms ren %.2fms e2e %.2fms\nq %d/%d/%d max %d/%d/%d\nadapt L%d %s\ndrops %d bp %d/%d\n%s",
-                daemonReachable ? (warmingUp ? "WARM" : "LIVE") : "DEGRADED",
-                targetFps,
-                presentFps,
-                frametimeP95,
-                decodeP95,
-                renderP95,
-                e2eP95,
-                qT,
-                qD,
-                qR,
-                qTMax,
-                qDMax,
-                qRMax,
-                adaptiveLevel,
-                adaptiveAction,
-                drops,
-                bpHigh,
-                bpRecover,
-                reason.isEmpty() ? "-" : reason
-        );
         lastHudCompactLine = String.format(
                 Locale.US,
                 "hud fps %.0f/%.1f | e2e %.1fms | dec %.1fms | ren %.1fms | q %d/%d/%d",
@@ -1737,57 +1716,23 @@ public class MainActivity extends AppCompatActivity {
         );
         refreshDebugInfoOverlay();
 
-        // Build explicit pressure reason so logcat shows exactly which condition fired.
-        StringBuilder hpSb = new StringBuilder();
-        double fpsFloor = targetFps * 0.90;
-        boolean fpsUnderPressure = presentFps > 0.0 && presentFps < fpsFloor;
-        boolean timingPressure = decodeP95 > 12.0 || renderP95 > 7.0;
-        boolean queuePressure = qT >= qTMax || qD >= qDMax || qR >= qRMax;
-        if (!warmingUp) {
-            if (fpsUnderPressure) { hpSb.append("fps<").append(String.format(Locale.US, "%.1f", fpsFloor)); }
-            if (decodeP95 > 12.0) { if (hpSb.length()>0) hpSb.append(','); hpSb.append("dec>12(").append(String.format(Locale.US,"%.1f",decodeP95)).append(")"); }
-            if (renderP95 > 7.0)  { if (hpSb.length()>0) hpSb.append(','); hpSb.append("ren>7(").append(String.format(Locale.US,"%.1f",renderP95)).append(")"); }
-            if (qT >= qTMax)      { if (hpSb.length()>0) hpSb.append(','); hpSb.append("qT=").append(qT).append("/").append(qTMax); }
-            if (qD >= qDMax)      { if (hpSb.length()>0) hpSb.append(','); hpSb.append("qD=").append(qD).append("/").append(qDMax); }
-            if (qR >= qRMax)      { if (hpSb.length()>0) hpSb.append(','); hpSb.append("qR=").append(qR).append("/").append(qRMax); }
-        }
-        String hpReason = hpSb.length() > 0 ? hpSb.toString() : (warmingUp ? "warmup" : "ok");
-
-        // Red only for sustained heavy pressure with real FPS degradation.
-        boolean highPressure = !warmingUp && fpsUnderPressure && (timingPressure || queuePressure);
-        boolean mediumPressure = !warmingUp && (
-                adaptiveAction.startsWith("degrade")
-                        || fpsUnderPressure
-                        || timingPressure
-                        || queuePressure
+        RuntimePressureState pressureState = evaluateRuntimePressure(
+                targetFps,
+                presentFps,
+                decodeP95,
+                renderP95,
+                qT,
+                qD,
+                qR,
+                qTMax,
+                qDMax,
+                qRMax,
+                adaptiveAction,
+                streamUptimeSec
         );
-        String runtimeStateTone = "ok";
-        if (highPressure) {
-            runtimeStateTone = "risk";
-            Log.w(TAG, "HUD RED warmingUp=" + warmingUp + " hp=" + hpReason
-                    + " dec_p95=" + String.format(Locale.US, "%.2f", decodeP95)
-                    + " ren_p95=" + String.format(Locale.US, "%.2f", renderP95)
-                    + " qT=" + qT + "/" + qTMax
-                    + " qD=" + qD + "/" + qDMax
-                    + " qR=" + qR + "/" + qRMax
-                    + " fps_present=" + String.format(Locale.US, "%.1f", presentFps)
-                    + " stream_up=" + streamUptimeSec + "s");
-        } else if (warmingUp || mediumPressure) {
-            runtimeStateTone = "warn";
-        }
         long latestDroppedFrames = runtime.latestDroppedFrames;
         long latestTooLateFrames = runtime.latestTooLateFrames;
-        double dropPerSec = 0.0;
-        if (latestDroppedFrames >= 0L) {
-            long combined = latestDroppedFrames + Math.max(0L, latestTooLateFrames);
-            if (runtimeDropPrevCount >= 0L && runtimeDropPrevAtMs > 0L && nowMs > runtimeDropPrevAtMs) {
-                long deltaFrames = Math.max(0L, combined - runtimeDropPrevCount);
-                long deltaMs = Math.max(1L, nowMs - runtimeDropPrevAtMs);
-                dropPerSec = (deltaFrames * 1000.0) / deltaMs;
-            }
-            runtimeDropPrevCount = combined;
-            runtimeDropPrevAtMs = nowMs;
-        }
+        double dropPerSec = computeDropRatePerSec(latestDroppedFrames, latestTooLateFrames, nowMs);
         double bitrateMbps = runtime.bitrateMbps;
         runtimePresentSeries.addSample(Math.max(0.0, presentFps));
         runtimeMbpsSeries.addSample(Math.max(0.0, bitrateMbps));
@@ -1800,11 +1745,11 @@ public class MainActivity extends AppCompatActivity {
                 runtimeDropSeries.toJsonFinite(),
                 runtimeLatencySeries.toJsonFinite(),
                 runtimeQueueSeries.toJsonFinite(),
-                runtimeStateTone,
-                runtimeStateTone,
-                runtimeStateTone,
-                runtimeStateTone,
-                runtimeStateTone,
+                pressureState.tone,
+                pressureState.tone,
+                pressureState.tone,
+                pressureState.tone,
+                pressureState.tone,
                 FPS_LOW_ANCHOR
         );
         renderRuntimeHudOverlay(
@@ -1832,16 +1777,11 @@ public class MainActivity extends AppCompatActivity {
                 bpRecover,
                 reason,
                 runtimeChartsHtml,
-                runtimeStateTone
+                pressureState.tone
         );
 
-        String compact = String.format(
-                Locale.US,
-                "state=%s run_id=%d up=%ds stream_up=%ds host_in_out=%d/%d fps_target=%.0f fps_present=%.1f frame_p95=%.2f dec_p95=%.2f ren_p95=%.2f e2e_p95=%.2f q=%d/%d/%d qmax=%d/%d/%d adapt=L%d:%s drops=%d bp=%d/%d warmup=%b hp=%s reason=%s host_err=%s",
+        emitHudDebugAdb(buildRuntimeHudDebugSnapshot(
                 daemonStateUi,
-                daemonRunId,
-                daemonUptimeSec,
-                streamUptimeSec,
                 frameInHost,
                 frameOutHost,
                 targetFps,
@@ -1861,8 +1801,174 @@ public class MainActivity extends AppCompatActivity {
                 drops,
                 bpHigh,
                 bpRecover,
-                warmingUp,
-                hpReason,
+                pressureState,
+                reason
+        ));
+    }
+
+    private double stabilizePresentFps(RuntimeTelemetryMapper.Snapshot runtime, long nowMs) {
+        double presentFps = runtime.presentFps;
+        boolean hasFlowSignals =
+                runtime.streamUptimeSec > 0
+                        || runtime.frameOutHost > 0
+                        || runtime.recvFps >= 1.0
+                        || runtime.decodeFps >= 1.0;
+        if (presentFps >= 1.0) {
+            latestStablePresentFps = presentFps;
+            latestStablePresentFpsAtMs = nowMs;
+            return presentFps;
+        }
+        if (hasFlowSignals
+                && latestStablePresentFps >= 1.0
+                && (nowMs - latestStablePresentFpsAtMs) <= PRESENT_FPS_STALE_GRACE_MS) {
+            return latestStablePresentFps;
+        }
+        return presentFps;
+    }
+
+    private RuntimePressureState evaluateRuntimePressure(
+            double targetFps,
+            double presentFps,
+            double decodeP95,
+            double renderP95,
+            int qT,
+            int qD,
+            int qR,
+            int qTMax,
+            int qDMax,
+            int qRMax,
+            String adaptiveAction,
+            long streamUptimeSec
+    ) {
+        boolean warmingUp = presentFps < 1.0 && streamUptimeSec < 5;
+        StringBuilder pressureReasonBuilder = new StringBuilder();
+        double fpsFloor = targetFps * 0.90;
+        boolean fpsUnderPressure = presentFps > 0.0 && presentFps < fpsFloor;
+        boolean timingPressure = decodeP95 > 12.0 || renderP95 > 7.0;
+        boolean queuePressure = qT >= qTMax || qD >= qDMax || qR >= qRMax;
+        if (!warmingUp) {
+            if (fpsUnderPressure) {
+                pressureReasonBuilder.append("fps<").append(String.format(Locale.US, "%.1f", fpsFloor));
+            }
+            if (decodeP95 > 12.0) {
+                appendPressureSegment(pressureReasonBuilder, "dec>12(" + String.format(Locale.US, "%.1f", decodeP95) + ")");
+            }
+            if (renderP95 > 7.0) {
+                appendPressureSegment(pressureReasonBuilder, "ren>7(" + String.format(Locale.US, "%.1f", renderP95) + ")");
+            }
+            if (qT >= qTMax) {
+                appendPressureSegment(pressureReasonBuilder, "qT=" + qT + "/" + qTMax);
+            }
+            if (qD >= qDMax) {
+                appendPressureSegment(pressureReasonBuilder, "qD=" + qD + "/" + qDMax);
+            }
+            if (qR >= qRMax) {
+                appendPressureSegment(pressureReasonBuilder, "qR=" + qR + "/" + qRMax);
+            }
+        }
+        String pressureReason = pressureReasonBuilder.length() > 0
+                ? pressureReasonBuilder.toString()
+                : (warmingUp ? "warmup" : "ok");
+
+        boolean highPressure = !warmingUp && fpsUnderPressure && (timingPressure || queuePressure);
+        boolean mediumPressure = !warmingUp && (
+                adaptiveAction.startsWith("degrade")
+                        || fpsUnderPressure
+                        || timingPressure
+                        || queuePressure
+        );
+        String runtimeTone = "ok";
+        if (highPressure) {
+            runtimeTone = "risk";
+            Log.w(TAG, "HUD RED warmingUp=" + warmingUp + " hp=" + pressureReason
+                    + " dec_p95=" + String.format(Locale.US, "%.2f", decodeP95)
+                    + " ren_p95=" + String.format(Locale.US, "%.2f", renderP95)
+                    + " qT=" + qT + "/" + qTMax
+                    + " qD=" + qD + "/" + qDMax
+                    + " qR=" + qR + "/" + qRMax
+                    + " fps_present=" + String.format(Locale.US, "%.1f", presentFps)
+                    + " stream_up=" + streamUptimeSec + "s");
+        } else if (warmingUp || mediumPressure) {
+            runtimeTone = "warn";
+        }
+        return new RuntimePressureState(warmingUp, pressureReason, runtimeTone);
+    }
+
+    private void appendPressureSegment(StringBuilder sb, String segment) {
+        if (sb.length() > 0) {
+            sb.append(',');
+        }
+        sb.append(segment);
+    }
+
+    private double computeDropRatePerSec(long latestDroppedFrames, long latestTooLateFrames, long nowMs) {
+        if (latestDroppedFrames < 0L) {
+            return 0.0;
+        }
+        long combined = latestDroppedFrames + Math.max(0L, latestTooLateFrames);
+        double dropPerSec = 0.0;
+        if (runtimeDropPrevCount >= 0L && runtimeDropPrevAtMs > 0L && nowMs > runtimeDropPrevAtMs) {
+            long deltaFrames = Math.max(0L, combined - runtimeDropPrevCount);
+            long deltaMs = Math.max(1L, nowMs - runtimeDropPrevAtMs);
+            dropPerSec = (deltaFrames * 1000.0) / deltaMs;
+        }
+        runtimeDropPrevCount = combined;
+        runtimeDropPrevAtMs = nowMs;
+        return dropPerSec;
+    }
+
+    private String buildRuntimeHudDebugSnapshot(
+            String daemonStateUi,
+            long frameInHost,
+            long frameOutHost,
+            double targetFps,
+            double presentFps,
+            double frametimeP95,
+            double decodeP95,
+            double renderP95,
+            double e2eP95,
+            int qT,
+            int qD,
+            int qR,
+            int qTMax,
+            int qDMax,
+            int qRMax,
+            int adaptiveLevel,
+            String adaptiveAction,
+            long drops,
+            long bpHigh,
+            long bpRecover,
+            RuntimePressureState pressureState,
+            String reason
+    ) {
+        return String.format(
+                Locale.US,
+                "state=%s run_id=%d up=%ds stream_up=%ds host_in_out=%d/%d fps_target=%.0f fps_present=%.1f frame_p95=%.2f dec_p95=%.2f ren_p95=%.2f e2e_p95=%.2f q=%d/%d/%d qmax=%d/%d/%d adapt=L%d:%s drops=%d bp=%d/%d warmup=%b hp=%s reason=%s host_err=%s",
+                daemonStateUi,
+                daemonRunId,
+                daemonUptimeSec,
+                latestStreamUptimeSec,
+                frameInHost,
+                frameOutHost,
+                targetFps,
+                presentFps,
+                frametimeP95,
+                decodeP95,
+                renderP95,
+                e2eP95,
+                qT,
+                qD,
+                qR,
+                qTMax,
+                qDMax,
+                qRMax,
+                adaptiveLevel,
+                adaptiveAction,
+                drops,
+                bpHigh,
+                bpRecover,
+                pressureState.warmingUp,
+                pressureState.reason,
                 reason.isEmpty() ? "-" : reason,
                 daemonLastError.isEmpty()
                         ? "-"
@@ -1870,7 +1976,6 @@ public class MainActivity extends AppCompatActivity {
                         ? daemonLastError.substring(0, 44) + "..."
                         : daemonLastError)
         );
-        emitHudDebugAdb(compact);
     }
 
     private void renderRuntimeHudOverlay(
