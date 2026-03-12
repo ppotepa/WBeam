@@ -51,7 +51,7 @@ Branch: `v0.1.1/feature/runtime-hud-layout`
 ## 5. Repo Structure, Cleanup, and CI
 
 - Migrated to domain-first layout (`host/`, `desktop/`, `android/`, `shared/`) and removed compatibility alias layer (`src/`, `proto`, `proto_x11`).
-- Archived legacy prototype lanes under `archive/legacy`.
+- Removed legacy prototype lanes from repository (`archive/legacy` deleted).
 - Added/expanded CI quality gates:
   - repository layout checks,
   - path-boundary checks,
