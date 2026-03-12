@@ -41,7 +41,7 @@ import com.wbeam.api.StatusPoller;
 import com.wbeam.hud.RuntimeHudFallbackFormatter;
 import com.wbeam.hud.HudRenderSupport;
 import com.wbeam.hud.MetricSeriesBuffer;
-import com.wbeam.hud.RuntimeHudShellRenderer;
+import com.wbeam.hud.RuntimeHudWebPayloadBuilder;
 import com.wbeam.hud.TrainerHudShellRenderer;
 import com.wbeam.hud.TrainerProgressParser;
 import com.wbeam.input.CursorOverlayController;
@@ -1872,63 +1872,43 @@ public class MainActivity extends AppCompatActivity {
         String resourceRows = buildResourceRowsHtml();
         if (perfHudWebView != null) {
             int[] streamSize = computeScaledSize();
-            String streamMode = String.format(
-                    Locale.US,
-                    "%s | %dx%d | %.0ffps",
-                    getSelectedEncoder().toUpperCase(Locale.US),
-                    streamSize[0],
-                    streamSize[1],
-                    targetFps
-            );
-            String profileRev = HudRenderSupport.safeText(daemonBuildRevision).equals("-")
-                    ? HudRenderSupport.safeText(BuildConfig.WBEAM_BUILD_REV)
-                    : HudRenderSupport.safeText(daemonBuildRevision);
-            StringBuilder chips = new StringBuilder();
-            chips.append(hudChip("CURRENT PROFILE", getSelectedProfile(), ""));
-            chips.append(hudChip("PROFILE REV", profileRev, ""));
-            chips.append(hudChip("STREAM MODE", streamMode, ""));
-            chips.append(hudChip("DEVICE", daemonHostName, ""));
-            chips.append(hudChip("STATE", daemonStateUi, HudRenderSupport.hudToneClass(tone)));
+            RuntimeHudWebPayloadBuilder.Input payload = new RuntimeHudWebPayloadBuilder.Input();
+            payload.selectedProfile = getSelectedProfile();
+            payload.selectedEncoder = getSelectedEncoder();
+            payload.streamWidth = streamSize[0];
+            payload.streamHeight = streamSize[1];
+            payload.daemonHostName = daemonHostName;
+            payload.daemonStateUi = daemonStateUi;
+            payload.daemonBuildRevision = daemonBuildRevision;
+            payload.appBuildRevision = BuildConfig.WBEAM_BUILD_REV;
+            payload.daemonLastError = daemonLastError;
+            payload.tone = tone;
+            payload.targetFps = targetFps;
+            payload.presentFps = presentFps;
+            payload.recvFps = recvFps;
+            payload.decodeFps = decodeFps;
+            payload.liveMbps = liveMbps;
+            payload.e2eP95 = e2eP95;
+            payload.decodeP95 = decodeP95;
+            payload.renderP95 = renderP95;
+            payload.frametimeP95 = frametimeP95;
+            payload.dropsPerSec = dropsPerSec;
+            payload.qT = qT;
+            payload.qD = qD;
+            payload.qR = qR;
+            payload.qTMax = qTMax;
+            payload.qDMax = qDMax;
+            payload.qRMax = qRMax;
+            payload.adaptiveLevel = adaptiveLevel;
+            payload.adaptiveAction = adaptiveAction;
+            payload.drops = drops;
+            payload.bpHigh = bpHigh;
+            payload.bpRecover = bpRecover;
+            payload.reason = reason;
+            payload.metricChartsHtml = metricChartsHtml;
+            payload.resourceRowsHtml = resourceRows;
 
-            StringBuilder cards = new StringBuilder();
-            cards.append(hudCard("PRESENT FPS", String.format(Locale.US, "%.1f", presentFps), HudRenderSupport.hudToneClass(tone)));
-            cards.append(hudCard("RECV FPS", String.format(Locale.US, "%.1f", recvFps), ""));
-            cards.append(hudCard("DECODE FPS", String.format(Locale.US, "%.1f", decodeFps), ""));
-            cards.append(hudCard("LIVE MBPS", HudRenderSupport.fmtDoubleOrPlaceholder(liveMbps, "%.2f", "PENDING"), HudRenderSupport.hudToneClass(tone)));
-            cards.append(hudCard("E2E p95", String.format(Locale.US, "%.1f ms", e2eP95), HudRenderSupport.hudToneClass(tone)));
-            cards.append(hudCard("Decode p95", String.format(Locale.US, "%.2f ms", decodeP95), ""));
-            cards.append(hudCard("Render p95", String.format(Locale.US, "%.2f ms", renderP95), ""));
-            cards.append(hudCard("Frame p95", String.format(Locale.US, "%.2f ms", frametimeP95), ""));
-            cards.append(hudCard("Drops / s", HudRenderSupport.fmtDoubleOrPlaceholder(dropsPerSec, "%.3f", "PENDING"), HudRenderSupport.hudToneClass(tone)));
-            cards.append(hudCard("Drops total", String.valueOf(drops), ""));
-
-            StringBuilder details = new StringBuilder();
-            details.append(hudDetailRow("Adaptive", "L" + adaptiveLevel + " " + HudRenderSupport.safeText(adaptiveAction)));
-            details.append(hudDetailRow("Transport queue", qT + "/" + qTMax));
-            details.append(hudDetailRow("Decode queue", qD + "/" + qDMax));
-            details.append(hudDetailRow("Render queue", qR + "/" + qRMax));
-            details.append(hudDetailRow("Backpressure", bpHigh + "/" + bpRecover));
-            details.append(hudDetailRow("Connection mode", "runtime"));
-            details.append(hudDetailRow("Reason", HudRenderSupport.safeText(reason)));
-            details.append(hudDetailRow("Host error", HudRenderSupport.safeText(daemonLastError)));
-            details.append(hudDetailRow("App build", HudRenderSupport.safeText(BuildConfig.WBEAM_BUILD_REV)));
-            details.append(hudDetailRow("Daemon build", HudRenderSupport.safeText(daemonBuildRevision)));
-
-            String trend = "runtime health=" + tone.toUpperCase(Locale.US)
-                    + " | recv=" + String.format(Locale.US, "%.1f", recvFps)
-                    + " decode=" + String.format(Locale.US, "%.1f", decodeFps)
-                    + " present=" + String.format(Locale.US, "%.1f", presentFps)
-                    + " | drops=" + drops;
-
-            String html = RuntimeHudShellRenderer.buildHtml(
-                    chips.toString(),
-                    cards.toString(),
-                    metricChartsHtml == null ? "" : metricChartsHtml,
-                    trend,
-                    details.toString(),
-                    resourceRows,
-                    "scale-1x"
-            );
+            String html = RuntimeHudWebPayloadBuilder.build(payload);
             if (!showHudWebHtml("runtime", html) && perfHudText != null) {
                 String hud = RuntimeHudFallbackFormatter.buildText(
                         daemonReachable,
@@ -2523,14 +2503,6 @@ public class MainActivity extends AppCompatActivity {
 
     private double latestFiniteFromSeries(JSONArray series) {
         return HudRenderSupport.latestFiniteFromSeries(series);
-    }
-
-    private String hudChip(String key, String value, String toneClass) {
-        return HudRenderSupport.hudChip(key, value, toneClass);
-    }
-
-    private String hudCard(String key, String value, String toneClass) {
-        return HudRenderSupport.hudCard(key, value, toneClass);
     }
 
     private String hudDetailRow(String left, String right) {
