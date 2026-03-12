@@ -3,6 +3,13 @@ use axum::{
     Router,
 };
 
+use super::trainer_handlers::{
+    get_trainer_dataset, get_trainer_datasets, get_trainer_devices, get_trainer_diagnostics,
+    get_trainer_live_status, get_trainer_profile, get_trainer_profiles, get_trainer_run,
+    get_trainer_run_tail, get_trainer_runs, post_trainer_dataset_find_optimal,
+    post_trainer_live_apply, post_trainer_live_save_profile, post_trainer_live_start,
+    post_trainer_preflight, post_trainer_start, post_trainer_stop,
+};
 use crate::*;
 
 pub(crate) fn build_router(app_state: AppState) -> Router {
