@@ -44,6 +44,7 @@ import com.wbeam.hud.TrainerHudRouting;
 import com.wbeam.input.CursorOverlayController;
 import com.wbeam.input.ImmersiveModeController;
 import com.wbeam.startup.StartupOverlayCoordinator;
+import com.wbeam.startup.StartupOverlayHooksFactory;
 import com.wbeam.startup.StartupOverlayInputFactory;
 import com.wbeam.startup.StartupOverlayModelBuilder;
 import com.wbeam.startup.StartupOverlayController;
@@ -1996,93 +1997,69 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private StartupOverlayCoordinator.Hooks createStartupOverlayHooks() {
-        return new StartupOverlayCoordinator.Hooks() {
-            @Override
-            public boolean hasOverlayContainer() {
-                return preflightOverlay != null;
-            }
+        return StartupOverlayHooksFactory.create(
+                preflightOverlay,
+                startupOverlayViews,
+                videoTestController,
+                STARTUP_VIDEO_TEST_HINT_COLOR,
+                new StartupOverlayHooksFactory.ProbeHooks() {
+                    @Override
+                    public boolean requiresTransportProbe() {
+                        return MainActivity.this.requiresTransportProbe();
+                    }
 
-            @Override
-            public boolean isVideoTestOverlayActive() {
-                return videoTestController != null && videoTestController.isOverlayActive();
-            }
+                    @Override
+                    public void maybeStartTransportProbe() {
+                        if (daemonReachable && handshakeResolved && !isBuildMismatch()) {
+                            MainActivity.this.maybeStartTransportProbe();
+                        }
+                    }
+                },
+                this::buildStartupOverlayInput,
+                model -> StartupOverlayViewRenderer.applyModel(
+                        model,
+                        preflightAnimTick,
+                        startupOverlayViews
+                ),
+                this::setPreflightVisible,
+                (delayMs, action) -> uiHandler.postDelayed(action, delayMs)
+        );
+    }
 
-            @Override
-            public void applyVideoTestOverlay() {
-                StartupOverlayViewRenderer.applyVideoTestOverride(
-                        startupOverlayViews,
-                        videoTestController.getOverlayTitle(),
-                        videoTestController.getOverlayBody(),
-                        videoTestController.getOverlayHint(),
-                        STARTUP_VIDEO_TEST_HINT_COLOR
-                );
-                setPreflightVisible(true);
-            }
-
-            @Override
-            public boolean requiresTransportProbe() {
-                return MainActivity.this.requiresTransportProbe();
-            }
-
-            @Override
-            public void maybeStartTransportProbe() {
-                if (daemonReachable && handshakeResolved && !isBuildMismatch()) {
-                    MainActivity.this.maybeStartTransportProbe();
-                }
-            }
-
-            @Override
-            public StartupOverlayModelBuilder.Input buildInput(boolean shouldProbe) {
-                return StartupOverlayInputFactory.fromRuntimeState(
-                        daemonReachable,
-                        daemonHostName,
-                        daemonService,
-                        daemonBuildRevision,
+    private StartupOverlayModelBuilder.Input buildStartupOverlayInput(boolean shouldProbe) {
+        return StartupOverlayInputFactory.fromRuntimeState(
+                daemonReachable,
+                daemonHostName,
+                daemonService,
+                daemonBuildRevision,
+                daemonState,
+                daemonLastError,
+                handshakeResolved,
+                isBuildMismatch(),
+                shouldProbe,
+                transportProbe.isProbeOk(),
+                transportProbe.isProbeInFlight(),
+                transportProbe.getProbeInfo(),
+                BuildConfig.WBEAM_API_IMPL,
+                HostApiClient.API_BASE,
+                BuildConfig.WBEAM_API_HOST,
+                BuildConfig.WBEAM_STREAM_HOST,
+                BuildConfig.WBEAM_STREAM_PORT,
+                BuildConfig.WBEAM_BUILD_REV,
+                lastUiInfo,
+                MainActivityRuntimeStateView.effectiveDaemonState(
                         daemonState,
-                        daemonLastError,
-                        handshakeResolved,
-                        isBuildMismatch(),
-                        shouldProbe,
-                        transportProbe.isProbeOk(),
-                        transportProbe.isProbeInFlight(),
-                        transportProbe.getProbeInfo(),
-                        BuildConfig.WBEAM_API_IMPL,
-                        HostApiClient.API_BASE,
-                        BuildConfig.WBEAM_API_HOST,
-                        BuildConfig.WBEAM_STREAM_HOST,
-                        BuildConfig.WBEAM_STREAM_PORT,
-                        BuildConfig.WBEAM_BUILD_REV,
-                        lastUiInfo,
-                        MainActivityRuntimeStateView.effectiveDaemonState(
-                                daemonState,
-                                latestPresentFps,
-                                latestStreamUptimeSec,
-                                latestFrameOutHost
-                        ),
                         latestPresentFps,
-                        startupBeganAtMs,
-                        controlRetryCount,
-                        SystemClock.elapsedRealtime(),
-                        lastStatsLine,
-                        ErrorTextUtil.compactDaemonErrorForUi(daemonLastError)
-                );
-            }
-
-            @Override
-            public void applyModel(StartupOverlayModelBuilder.Model model) {
-                StartupOverlayViewRenderer.applyModel(model, preflightAnimTick, startupOverlayViews);
-            }
-
-            @Override
-            public void setOverlayVisible(boolean visible) {
-                setPreflightVisible(visible);
-            }
-
-            @Override
-            public void scheduleHide(long delayMs, Runnable action) {
-                uiHandler.postDelayed(action, delayMs);
-            }
-        };
+                        latestStreamUptimeSec,
+                        latestFrameOutHost
+                ),
+                latestPresentFps,
+                startupBeganAtMs,
+                controlRetryCount,
+                SystemClock.elapsedRealtime(),
+                lastStatsLine,
+                ErrorTextUtil.compactDaemonErrorForUi(daemonLastError)
+        );
     }
 
     private boolean requiresTransportProbe() {
