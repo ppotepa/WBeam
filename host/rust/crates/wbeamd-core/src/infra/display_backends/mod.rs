@@ -1,8 +1,41 @@
 use super::host_probe::{HostOs, HostProbe};
+#[cfg(unix)]
 use super::x11_monitor_object;
+#[cfg(unix)]
 use super::x11_real_output;
 
+#[cfg(unix)]
 mod linux;
+#[cfg(not(unix))]
+mod linux {
+    use super::{Activation, ActivationError, DisplayMode, HostProbe, VirtualMonitorProbe};
+
+    pub fn probe_virtual_monitor(host_probe: &HostProbe) -> VirtualMonitorProbe {
+        VirtualMonitorProbe {
+            supported: false,
+            resolver: "linux_backend_unavailable".to_string(),
+            missing_deps: vec!["unix-runtime".to_string()],
+            hint: format!(
+                "Linux virtual monitor backend is unavailable on this platform (os={})",
+                host_probe.os_name()
+            ),
+        }
+    }
+
+    pub fn activate(
+        _host_probe: &HostProbe,
+        mode: DisplayMode,
+        _serial_hint: &str,
+        _size: &str,
+    ) -> Result<Activation, ActivationError> {
+        if mode.is_virtual() {
+            return Err(ActivationError::Unsupported(
+                "Linux virtual monitor backend is unavailable on this platform".to_string(),
+            ));
+        }
+        Ok(Activation::default())
+    }
+}
 mod windows;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,7 +61,9 @@ impl DisplayMode {
 
 #[derive(Debug, Clone)]
 pub enum RuntimeHandle {
+    #[cfg(unix)]
     X11RealOutput(x11_real_output::X11RealOutputHandle),
+    #[cfg(unix)]
     X11MonitorObject(x11_monitor_object::X11MonitorObjectHandle),
 }
 
@@ -103,6 +138,7 @@ pub fn activate_start(
 }
 
 pub async fn stop_runtime(handle: RuntimeHandle) {
+    #[cfg(unix)]
     match handle {
         RuntimeHandle::X11RealOutput(h) => {
             let _ = x11_real_output::destroy(&h);
@@ -110,5 +146,9 @@ pub async fn stop_runtime(handle: RuntimeHandle) {
         RuntimeHandle::X11MonitorObject(h) => {
             let _ = x11_monitor_object::destroy(&h);
         }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = handle;
     }
 }
