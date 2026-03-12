@@ -760,16 +760,23 @@ public class MainActivity extends AppCompatActivity {
             fullscreenButton.setVisibility(View.GONE);
         }
         if (BuildConfig.DEBUG) {
-            setFullscreen(true);
-            if (debugFpsGraphView != null) {
-                debugFpsGraphView.setCapacity(DEBUG_FPS_GRAPH_POINTS);
-            }
-            setDebugOverlayVisible(debugOverlayVisible);
-            startDebugGraphSampling();
-            refreshDebugInfoOverlay();
+            applyDebugVariantUi();
             return;
         }
+        applyReleaseVariantUi();
+    }
 
+    private void applyDebugVariantUi() {
+        setFullscreen(true);
+        if (debugFpsGraphView != null) {
+            debugFpsGraphView.setCapacity(DEBUG_FPS_GRAPH_POINTS);
+        }
+        setDebugOverlayVisible(debugOverlayVisible);
+        startDebugGraphSampling();
+        refreshDebugInfoOverlay();
+    }
+
+    private void applyReleaseVariantUi() {
         setFullscreen(true);
         if (debugInfoPanel != null) {
             debugInfoPanel.setVisibility(View.GONE);
