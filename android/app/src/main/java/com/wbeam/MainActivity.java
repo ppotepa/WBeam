@@ -630,15 +630,22 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     public void onBackPressed() {
-        if (simpleMenuVisible) {
-            hideSimpleMenu();
-            return;
-        }
-        if (settingsPanelController != null && settingsPanelController.isVisible()) {
-            hideSettingsPanel();
+        if (handleBackNavigation()) {
             return;
         }
         super.onBackPressed();
+    }
+
+    private boolean handleBackNavigation() {
+        if (simpleMenuVisible) {
+            hideSimpleMenu();
+            return true;
+        }
+        if (settingsPanelController != null && settingsPanelController.isVisible()) {
+            hideSettingsPanel();
+            return true;
+        }
+        return false;
     }
 
     @Override
@@ -1176,15 +1183,19 @@ public class MainActivity extends AppCompatActivity {
 
     private void requestStartGuarded(boolean userAction, boolean ensureViewer) {
         if (isBuildMismatch()) {
-            String msg = "Build mismatch: app=" + BuildConfig.WBEAM_BUILD_REV
-                    + " host=" + daemonBuildRevision
-                    + " (redeploy APK or rebuild host)";
-            updateStatus(STATE_ERROR, msg, 0);
-            appendLiveLogError(msg);
-            Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+            handleBuildMismatchStartBlocked();
             return;
         }
         sessionController.requestStart(userAction, ensureViewer);
+    }
+
+    private void handleBuildMismatchStartBlocked() {
+        String msg = "Build mismatch: app=" + BuildConfig.WBEAM_BUILD_REV
+                + " host=" + daemonBuildRevision
+                + " (redeploy APK or rebuild host)";
+        updateStatus(STATE_ERROR, msg, 0);
+        appendLiveLogError(msg);
+        Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
     }
 
     // ══════════════════════════════════════════════════════════════════════════
