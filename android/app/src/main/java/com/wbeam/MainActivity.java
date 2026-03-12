@@ -2021,18 +2021,9 @@ public class MainActivity extends AppCompatActivity {
                 rawHudText,
                 latestTargetFps,
                 FPS_LOW_ANCHOR,
-                (targetFps, renderP95Ms) -> {
-                    resourceUsageTracker.sample(targetFps, renderP95Ms);
-                    return resourceUsageTracker.buildRowsHtml();
-                }
+                trainerResourceRowsProvider()
         );
-        if (rendered.html.isEmpty() && rendered.textFallback.isEmpty()) {
-            return;
-        }
-        applyTrainerHudRendered(rendered);
-        if (perfHudPanel != null) {
-            perfHudPanel.setAlpha(0.96f);
-        }
+        applyTrainerHudRenderedAndPanel(rendered, true);
     }
 
     private void renderTrainerHudOverlayJson(JSONObject hudJson) {
@@ -2043,15 +2034,9 @@ public class MainActivity extends AppCompatActivity {
                 hudJson,
                 latestTargetFps,
                 FPS_LOW_ANCHOR,
-                (targetFps, renderP95Ms) -> {
-                    resourceUsageTracker.sample(targetFps, renderP95Ms);
-                    return resourceUsageTracker.buildRowsHtml();
-                }
+                trainerResourceRowsProvider()
         );
-        applyTrainerHudRendered(rendered);
-        if (perfHudPanel != null) {
-            perfHudPanel.setAlpha(0.96f);
-        }
+        applyTrainerHudRenderedAndPanel(rendered, false);
     }
 
     private void renderTrainerHudOverlayPlaceholder() {
@@ -2061,11 +2046,25 @@ public class MainActivity extends AppCompatActivity {
         TrainerHudOverlayRenderer.Rendered rendered = TrainerHudOverlayRenderer.placeholder(
                 latestTargetFps,
                 FPS_LOW_ANCHOR,
-                (targetFps, renderP95Ms) -> {
-                    resourceUsageTracker.sample(targetFps, renderP95Ms);
-                    return resourceUsageTracker.buildRowsHtml();
-                }
+                trainerResourceRowsProvider()
         );
+        applyTrainerHudRenderedAndPanel(rendered, false);
+    }
+
+    private TrainerHudOverlayRenderer.ResourceRowsProvider trainerResourceRowsProvider() {
+        return (targetFps, renderP95Ms) -> {
+            resourceUsageTracker.sample(targetFps, renderP95Ms);
+            return resourceUsageTracker.buildRowsHtml();
+        };
+    }
+
+    private void applyTrainerHudRenderedAndPanel(
+            TrainerHudOverlayRenderer.Rendered rendered,
+            boolean skipIfEmpty
+    ) {
+        if (skipIfEmpty && rendered.html.isEmpty() && rendered.textFallback.isEmpty()) {
+            return;
+        }
         applyTrainerHudRendered(rendered);
         if (perfHudPanel != null) {
             perfHudPanel.setAlpha(0.96f);
