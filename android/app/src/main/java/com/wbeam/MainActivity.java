@@ -456,19 +456,31 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onAutoStartRequired() {
-                requestStartGuarded(false, true);
+                handleAutoStartRequired();
             }
 
             @Override
             public void onAutoStartFailed() {
-                appendLiveLogWarn("auto-start paused after failed capture; tap Start Live to retry");
+                handleAutoStartFailed();
             }
 
             @Override
             public void ensureDecoderRunning() {
-                MainActivity.this.ensureDecoderRunning();
+                handleEnsureDecoderRunning();
             }
         });
+    }
+
+    private void handleAutoStartRequired() {
+        requestStartGuarded(false, true);
+    }
+
+    private void handleAutoStartFailed() {
+        appendLiveLogWarn("auto-start paused after failed capture; tap Start Live to retry");
+    }
+
+    private void handleEnsureDecoderRunning() {
+        ensureDecoderRunning();
     }
 
     private void handleDaemonStatusUpdate(
