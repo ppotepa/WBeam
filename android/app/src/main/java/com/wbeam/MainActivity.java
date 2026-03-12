@@ -74,6 +74,7 @@ import com.wbeam.ui.MainActivityRuntimeStateView;
 import com.wbeam.ui.MainActivityInteractionPolicy;
 import com.wbeam.ui.MainActivityLifecycleCleaner;
 import com.wbeam.ui.MainActivitySimpleMenuCoordinator;
+import com.wbeam.ui.MainActivitySurfaceCallbacksFactory;
 import com.wbeam.ui.MainActivityUiBinder;
 import com.wbeam.ui.MainActivitySettingsPresenter;
 import com.wbeam.ui.MainActivityStatusPresenter;
@@ -170,24 +171,6 @@ public class MainActivity extends AppCompatActivity {
     private WebView perfHudWebView;
     private TextView debugInfoText;
     // ── Startup overlay ────────────────────────────────────────────────────────
-    private TextView startupTitleText;
-    private TextView startupSubtitleText;
-    private View startupStep1Card;
-    private View startupStep2Card;
-    private View startupStep3Card;
-    private TextView startupStep1Badge;
-    private TextView startupStep1Label;
-    private TextView startupStep1Detail;
-    private TextView startupStep1Status;
-    private TextView startupStep2Badge;
-    private TextView startupStep2Label;
-    private TextView startupStep2Detail;
-    private TextView startupStep2Status;
-    private TextView startupStep3Badge;
-    private TextView startupStep3Label;
-    private TextView startupStep3Detail;
-    private TextView startupStep3Status;
-    private TextView startupInfoText;
     private final StartupOverlayViewRenderer.Views startupOverlayViews = new StartupOverlayViewRenderer.Views();
     private TextView startupBuildVersionText;
     private TextView liveLogText;
@@ -732,52 +715,33 @@ public class MainActivity extends AppCompatActivity {
         perfHudText = findViewById(R.id.perfHudText);
         perfHudWebView = findViewById(R.id.perfHudWebView);
         debugInfoText = findViewById(R.id.debugInfoText);
-        startupTitleText    = findViewById(R.id.startupTitle);
-        startupSubtitleText = findViewById(R.id.startupSubtitle);
-        startupStep1Card    = findViewById(R.id.startupStep1Row);
-        startupStep2Card    = findViewById(R.id.startupStep2Row);
-        startupStep3Card    = findViewById(R.id.startupStep3Row);
-        startupStep1Badge   = findViewById(R.id.startupStep1Badge);
-        startupStep1Label   = findViewById(R.id.startupStep1Label);
-        startupStep1Detail  = findViewById(R.id.startupStep1Detail);
-        startupStep1Status  = findViewById(R.id.startupStep1Status);
-        startupStep2Badge   = findViewById(R.id.startupStep2Badge);
-        startupStep2Label   = findViewById(R.id.startupStep2Label);
-        startupStep2Detail  = findViewById(R.id.startupStep2Detail);
-        startupStep2Status  = findViewById(R.id.startupStep2Status);
-        startupStep3Badge   = findViewById(R.id.startupStep3Badge);
-        startupStep3Label   = findViewById(R.id.startupStep3Label);
-        startupStep3Detail  = findViewById(R.id.startupStep3Detail);
-        startupStep3Status  = findViewById(R.id.startupStep3Status);
-        startupInfoText     = findViewById(R.id.startupInfoText);
+        startupOverlayViews.titleText = findViewById(R.id.startupTitle);
+        startupOverlayViews.subtitleText = findViewById(R.id.startupSubtitle);
+        startupOverlayViews.step1Card = findViewById(R.id.startupStep1Row);
+        startupOverlayViews.step2Card = findViewById(R.id.startupStep2Row);
+        startupOverlayViews.step3Card = findViewById(R.id.startupStep3Row);
+        startupOverlayViews.step1Badge = findViewById(R.id.startupStep1Badge);
+        startupOverlayViews.step1Label = findViewById(R.id.startupStep1Label);
+        startupOverlayViews.step1Detail = findViewById(R.id.startupStep1Detail);
+        startupOverlayViews.step1Status = findViewById(R.id.startupStep1Status);
+        startupOverlayViews.step2Badge = findViewById(R.id.startupStep2Badge);
+        startupOverlayViews.step2Label = findViewById(R.id.startupStep2Label);
+        startupOverlayViews.step2Detail = findViewById(R.id.startupStep2Detail);
+        startupOverlayViews.step2Status = findViewById(R.id.startupStep2Status);
+        startupOverlayViews.step3Badge = findViewById(R.id.startupStep3Badge);
+        startupOverlayViews.step3Label = findViewById(R.id.startupStep3Label);
+        startupOverlayViews.step3Detail = findViewById(R.id.startupStep3Detail);
+        startupOverlayViews.step3Status = findViewById(R.id.startupStep3Status);
+        startupOverlayViews.infoText = findViewById(R.id.startupInfoText);
         startupBuildVersionText = findViewById(R.id.startupBuildVersion);
-        startupOverlayViews.titleText = startupTitleText;
-        startupOverlayViews.step1Card = startupStep1Card;
-        startupOverlayViews.step2Card = startupStep2Card;
-        startupOverlayViews.step3Card = startupStep3Card;
-        startupOverlayViews.step1Badge = startupStep1Badge;
-        startupOverlayViews.step1Label = startupStep1Label;
-        startupOverlayViews.step1Detail = startupStep1Detail;
-        startupOverlayViews.step1Status = startupStep1Status;
-        startupOverlayViews.step2Badge = startupStep2Badge;
-        startupOverlayViews.step2Label = startupStep2Label;
-        startupOverlayViews.step2Detail = startupStep2Detail;
-        startupOverlayViews.step2Status = startupStep2Status;
-        startupOverlayViews.step3Badge = startupStep3Badge;
-        startupOverlayViews.step3Label = startupStep3Label;
-        startupOverlayViews.step3Detail = startupStep3Detail;
-        startupOverlayViews.step3Status = startupStep3Status;
-        startupOverlayViews.subtitleText = startupSubtitleText;
-        startupOverlayViews.infoText = startupInfoText;
-        if (startupInfoText != null) {
-            startupInfoText.setMovementMethod(new ScrollingMovementMethod());
+        if (startupOverlayViews.infoText != null) {
+            startupOverlayViews.infoText.setMovementMethod(new ScrollingMovementMethod());
         }
         startupOverlayController = new StartupOverlayController(uiHandler, preflightOverlay);
         startupOverlayController.setTickListener(animTick -> {
             preflightAnimTick = animTick;
             updatePreflightOverlay();
         });
-        cursorOverlayController = new CursorOverlayController(cursorOverlay, cursorOverlayButton);
         liveLogText = findViewById(R.id.liveLogText);
 
         resValueText = findViewById(R.id.resValueText);
@@ -815,6 +779,7 @@ public class MainActivity extends AppCompatActivity {
         simpleFps120Button = findViewById(R.id.simpleFps120Button);
         simpleFps144Button = findViewById(R.id.simpleFps144Button);
         simpleApplyButton = findViewById(R.id.simpleApplyButton);
+        cursorOverlayController = new CursorOverlayController(cursorOverlay, cursorOverlayButton);
         MainActivityUiBinder.setupTrainerHudWebView(perfHudWebView);
     }
 
@@ -888,43 +853,33 @@ public class MainActivity extends AppCompatActivity {
 
     private void setupSurfaceCallbacks() {
         SurfaceView preview = findViewById(R.id.previewSurface);
-        MainActivityUiBinder.setupSurfaceCallbacks(preview, new MainActivityUiBinder.SurfaceCallbacks() {
-            @Override
-            public void onSurfaceCreated(Surface nextSurface, boolean ready) {
-                surface = nextSurface;
-                surfaceReady = ready;
-                updatePreflightOverlay();
-                updateStatus(STATE_IDLE, "surface ready", 0);
-            }
-
-            @Override
-            public void onSurfaceChanged(Surface nextSurface, boolean ready) {
-                surface = nextSurface;
-                surfaceReady = ready;
-                updatePreflightOverlay();
-            }
-
-            @Override
-            public void onSurfaceDestroyed() {
-                stopLiveView();
-                surface = null;
-                surfaceReady = false;
-                preflightComplete = false;
-                updatePreflightOverlay();
-                hideCursorOverlay();
-                updateStatus(STATE_IDLE, "surface destroyed", 0);
-            }
-
-            @Override
-            public boolean isCursorOverlayEnabled() {
-                return cursorOverlayController != null && cursorOverlayController.isOverlayEnabled();
-            }
-
-            @Override
-            public void onCursorOverlayMotion(float x, float y, int actionMasked) {
-                updateCursorOverlay(x, y, actionMasked);
-            }
-        });
+        MainActivityUiBinder.setupSurfaceCallbacks(
+                preview,
+                MainActivitySurfaceCallbacksFactory.create(
+                        (nextSurface, ready) -> {
+                            surface = nextSurface;
+                            surfaceReady = ready;
+                            updatePreflightOverlay();
+                            updateStatus(STATE_IDLE, "surface ready", 0);
+                        },
+                        (nextSurface, ready) -> {
+                            surface = nextSurface;
+                            surfaceReady = ready;
+                            updatePreflightOverlay();
+                        },
+                        () -> {
+                            stopLiveView();
+                            surface = null;
+                            surfaceReady = false;
+                            preflightComplete = false;
+                            updatePreflightOverlay();
+                            hideCursorOverlay();
+                            updateStatus(STATE_IDLE, "surface destroyed", 0);
+                        },
+                        () -> cursorOverlayController != null && cursorOverlayController.isOverlayEnabled(),
+                        this::updateCursorOverlay
+                )
+        );
     }
 
     private void setupButtons() {
