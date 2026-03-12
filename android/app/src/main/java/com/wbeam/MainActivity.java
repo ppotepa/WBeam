@@ -64,6 +64,7 @@ import com.wbeam.ui.LiveLogBuffer;
 import com.wbeam.ui.LiveLogUiAppender;
 import com.wbeam.ui.BuildRevisionGuard;
 import com.wbeam.ui.HostApiFailureNotifier;
+import com.wbeam.ui.HostOfflineFlowCoordinator;
 import com.wbeam.ui.MainActivityRuntimeStateView;
 import com.wbeam.ui.MainActivityInteractionPolicy;
 import com.wbeam.ui.MainActivityUiBinder;
@@ -515,9 +516,43 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void handleDaemonOffline(boolean wasReachable, Exception e) {
-        applyDisconnectedDaemonState();
-        updateOfflineUiState(wasReachable);
-        handleOfflineErrorNotification(wasReachable, e);
+        HostOfflineFlowCoordinator.handle(
+                wasReachable,
+                e,
+                STATE_ERROR,
+                HostApiClient.API_BASE,
+                new HostOfflineFlowCoordinator.Hooks() {
+                    @Override
+                    public void applyDisconnectedDaemonState() {
+                        MainActivity.this.applyDisconnectedDaemonState();
+                    }
+
+                    @Override
+                    public void updateOfflineUiState(boolean wasReachableState) {
+                        MainActivity.this.updateOfflineUiState(wasReachableState);
+                    }
+
+                    @Override
+                    public void refreshStatusText() {
+                        MainActivity.this.refreshStatusText();
+                    }
+
+                    @Override
+                    public void updateStatus(String state, String info, long bps) {
+                        MainActivity.this.updateStatus(state, info, bps);
+                    }
+
+                    @Override
+                    public void appendLiveLogError(String line) {
+                        MainActivity.this.appendLiveLogError(line);
+                    }
+
+                    @Override
+                    public void showLongToast(String message) {
+                        Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show();
+                    }
+                }
+        );
     }
 
     private void applyDisconnectedDaemonState() {
@@ -534,20 +569,6 @@ public class MainActivity extends AppCompatActivity {
         updatePerfHudUnavailable();
         resetStartupAfterDisconnect(wasReachable);
         updatePreflightOverlay();
-    }
-
-    private void handleOfflineErrorNotification(boolean wasReachable, Exception e) {
-        if (!wasReachable) {
-            refreshStatusText();
-            return;
-        }
-        String shortError = ErrorTextUtil.shortError(e);
-        updateStatus(STATE_ERROR, "Host API offline: " + shortError, 0);
-        appendLiveLogError("daemon poll failed: " + shortError + " | api=" + HostApiClient.API_BASE);
-        Toast.makeText(MainActivity.this,
-                "Host API unreachable (" + shortError
-                        + "). Check USB tethering/LAN and host IP: " + HostApiClient.API_BASE,
-                Toast.LENGTH_LONG).show();
     }
 
     private StreamSessionController createSessionController() {
