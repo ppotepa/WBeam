@@ -54,9 +54,10 @@ import com.wbeam.stream.H264TcpPlayer;
 import com.wbeam.stream.VideoTestController;
 import com.wbeam.stream.StreamSessionController;
 import com.wbeam.telemetry.ClientMetricsReporter;
+import com.wbeam.ui.SettingsPayloadBuilder;
+import com.wbeam.ui.StreamConfigResolver;
 import com.wbeam.widget.FpsLossGraphView;
 
-import org.json.JSONException;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -1165,27 +1166,20 @@ public class MainActivity extends AppCompatActivity {
 
     private JSONObject buildConfigPayload() {
         StreamConfig cfg = effectiveStreamConfig();
-        JSONObject payload = new JSONObject();
-        try {
-            String uiEncoder = getSelectedEncoder();
-            // "raw-png" (UI label) → "rawpng" (API name); "h264"/"h265" pass through as-is.
-            String encoder = "raw-png".equals(uiEncoder) ? "rawpng" : uiEncoder;
-            if (isLegacyAndroidDevice() && !"rawpng".equals(encoder)) {
-                // API17-era decoders are unstable with modern presets/codecs.
-                encoder = "h264";
-            }
-            boolean intraOnly = "h265".equals(encoder) && intraOnlyEnabled;
-            payload.put("profile", getSelectedProfile());
-            payload.put("encoder", encoder);
-            payload.put("cursor_mode", getSelectedCursorMode());
-            payload.put("size", cfg.width + "x" + cfg.height);
-            payload.put("fps", cfg.fps);
-            payload.put("bitrate_kbps", cfg.bitrateMbps * 1000);
-            payload.put("debug_fps", 0);
-            payload.put("intra_only", intraOnly);
-        } catch (JSONException ignored) {
-        }
-        return payload;
+        StreamConfigResolver.Resolved resolved = new StreamConfigResolver.Resolved(
+                cfg.width,
+                cfg.height,
+                cfg.fps,
+                cfg.bitrateMbps
+        );
+        return SettingsPayloadBuilder.buildPayload(
+                getSelectedProfile(),
+                getSelectedEncoder(),
+                getSelectedCursorMode(),
+                resolved,
+                intraOnlyEnabled,
+                isLegacyAndroidDevice()
+        );
     }
 
     private void handleApiFailure(String prefix, boolean userAction, Exception e) {
@@ -3430,14 +3424,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private int[] computeScaledSize() {
-        String profile = getSelectedProfile();
-        int baseW = "ultra".equals(profile) ? 2560 : 1920;
-        int baseH = "ultra".equals(profile) ? 1440 : 1080;
-
-        int scale = getResolutionScalePercent();
-        int w = Math.max(640, (baseW * scale / 100) & ~1);
-        int h = Math.max(360, (baseH * scale / 100) & ~1);
-        return new int[]{w, h};
+        return StreamConfigResolver.computeScaledSize(
+                getSelectedProfile(),
+                getResolutionScalePercent()
+        );
     }
 
     private boolean isLegacyAndroidDevice() {
@@ -3445,20 +3435,19 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private StreamConfig effectiveStreamConfig() {
-        int[] sz = computeScaledSize();
-        int width = sz[0];
-        int height = sz[1];
-        int fps = getSelectedFps();
-        int bitrateMbps = getSelectedBitrateMbps();
-        if (isLegacyAndroidDevice()) {
-            // API17 transport is highly sensitive to sender timeouts under
-            // high throughput; pin a conservative profile by default.
-            width = 640;
-            height = 360;
-            fps = Math.min(fps, 24);
-            bitrateMbps = Math.min(bitrateMbps, 2);
-        }
-        return new StreamConfig(width, height, fps, bitrateMbps);
+        StreamConfigResolver.Resolved resolved = StreamConfigResolver.resolve(
+                getSelectedProfile(),
+                getResolutionScalePercent(),
+                getSelectedFps(),
+                getSelectedBitrateMbps(),
+                isLegacyAndroidDevice()
+        );
+        return new StreamConfig(
+                resolved.width,
+                resolved.height,
+                resolved.fps,
+                resolved.bitrateMbps
+        );
     }
 
     private static final class StreamConfig {
