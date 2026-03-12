@@ -67,6 +67,7 @@ import com.wbeam.ui.SettingsPayloadBuilder;
 import com.wbeam.ui.SettingsPanelController;
 import com.wbeam.ui.SettingsUiSupport;
 import com.wbeam.ui.SimpleMenuUi;
+import com.wbeam.ui.StatusColorResolver;
 import com.wbeam.ui.StatusTextFormatter;
 import com.wbeam.ui.StreamConfigResolver;
 import com.wbeam.widget.FpsLossGraphView;
@@ -424,7 +425,7 @@ public class MainActivity extends AppCompatActivity {
                     String errCompact = lastError.length() > 80 ? lastError.substring(0, 80) + "..." : lastError;
                     updateStatsLine("host in/out: " + frameIn + "/" + frameOut
                             + " | drops: " + drops + " | reconnects: " + reconnects
-                            + " | bitrate: " + formatBps(bps)
+                            + " | bitrate: " + StatusTextFormatter.formatBps(bps)
                             + (errCompact.isEmpty() ? "" : " | last_error: " + errCompact));
                 }
                 updatePerfHud(metrics);
@@ -1427,7 +1428,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void refreshStatusText() {
-        int color = ledColorForState(lastUiState);
+        int color = StatusColorResolver.ledColorForState(lastUiState, STATE_STREAMING, STATE_CONNECTING);
         String daemonStateUi = effectiveDaemonState(
                 daemonState, latestPresentFps, latestStreamUptimeSec, latestFrameOutHost);
 
@@ -2284,20 +2285,6 @@ public class MainActivity extends AppCompatActivity {
         if (hudDebugLogLimiter.shouldLog(snapshot)) {
             Log.i(TAG, "HUDDBG " + snapshot);
         }
-    }
-
-    private int ledColorForState(String state) {
-        if (STATE_STREAMING.equals(state)) {
-            return Color.parseColor("#22C55E");
-        }
-        if (STATE_CONNECTING.equals(state)) {
-            return Color.parseColor("#F59E0B");
-        }
-        return Color.parseColor("#EF4444");
-    }
-
-    private String formatBps(long bps) {
-        return StatusTextFormatter.formatBps(bps);
     }
 
     private int[] computeScaledSize() {
