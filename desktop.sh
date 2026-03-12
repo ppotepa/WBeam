@@ -181,39 +181,12 @@ desktop_kill_stale_tauri_app() {
 }
 
 desktop_apply_tauri_stability_env() {
-  local xa
-
-  # Tauri/WebKit can be unstable on some Wayland stacks in dev mode.
-  export WEBKIT_DISABLE_DMABUF_RENDERER="${WEBKIT_DISABLE_DMABUF_RENDERER:-1}"
-
-  if [[ "${XDG_SESSION_TYPE:-}" == "wayland" && "${WBEAM_TAURI_NATIVE_WAYLAND:-0}" != "1" ]]; then
-    if [[ -n "${DISPLAY:-}" ]]; then
-      export GDK_BACKEND="${GDK_BACKEND:-x11}"
-      export WINIT_UNIX_BACKEND="${WINIT_UNIX_BACKEND:-x11}"
-      echo "[desktop] wayland detected with DISPLAY available; forcing x11 backend for Tauri stability."
-    else
-      export GDK_BACKEND="${GDK_BACKEND:-wayland}"
-      export WINIT_UNIX_BACKEND="${WINIT_UNIX_BACKEND:-wayland}"
-      echo "[desktop] wayland-only session detected (DISPLAY missing); using native wayland backend."
-    fi
+  if declare -F wbeam_apply_tauri_stability_env >/dev/null 2>&1; then
+    wbeam_apply_tauri_stability_env "desktop"
+    return 0
   fi
-
-  if [[ "${GDK_BACKEND:-}" == "x11" && -z "${XAUTHORITY:-}" ]]; then
-    xa=""
-    if [[ -n "${XDG_RUNTIME_DIR:-}" ]]; then
-      for candidate in "${XDG_RUNTIME_DIR}"/xauth_*; do
-        [[ -f "${candidate}" ]] || continue
-        xa="${candidate}"
-        break
-      done
-    fi
-    if [[ -z "${xa}" && -n "${HOME:-}" && -f "${HOME}/.Xauthority" ]]; then
-      xa="${HOME}/.Xauthority"
-    fi
-    if [[ -n "${xa}" ]]; then
-      export XAUTHORITY="${xa}"
-    fi
-  fi
+  echo "[desktop] missing GUI helper: ${WBEAM_GUI_HELPER}" >&2
+  return 1
 }
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
