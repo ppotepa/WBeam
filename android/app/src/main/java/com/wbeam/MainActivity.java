@@ -55,6 +55,7 @@ import com.wbeam.stream.VideoTestController;
 import com.wbeam.stream.StreamSessionController;
 import com.wbeam.telemetry.ClientMetricsReporter;
 import com.wbeam.ui.SettingsPayloadBuilder;
+import com.wbeam.ui.StatusTextFormatter;
 import com.wbeam.ui.StreamConfigResolver;
 import com.wbeam.widget.FpsLossGraphView;
 
@@ -1121,19 +1122,23 @@ public class MainActivity extends AppCompatActivity {
 
     private void updateHostHint() {
         StreamConfig cfg = effectiveStreamConfig();
-        String apiBase = HostApiClient.API_BASE;
         String daemonStateUi = effectiveDaemonState(
                 daemonState, latestPresentFps, latestStreamUptimeSec, latestFrameOutHost);
-        String line1 = "Control API " + (daemonReachable ? "connected" : "waiting")
-            + ": " + apiBase;
-        String line2 = "Host: " + daemonHostName + " | Daemon: " + daemonStateUi + " (" + daemonService + ")";
-        String line3 = "Outgoing config: " + getSelectedProfile()
-                + ", " + cfg.width + "x" + cfg.height
-                + ", " + cfg.fps + "fps, "
-                + cfg.bitrateMbps + "Mbps, "
-                + getSelectedEncoder() + (intraOnlyEnabled ? "+intra" : "")
-                + ", cursor " + getSelectedCursorMode();
-        hostHintText.setText(line1 + "\n" + line2 + "\n" + line3);
+        hostHintText.setText(StatusTextFormatter.buildHostHintText(
+                daemonReachable,
+                HostApiClient.API_BASE,
+                daemonHostName,
+                daemonStateUi,
+                daemonService,
+                getSelectedProfile(),
+                cfg.width,
+                cfg.height,
+                cfg.fps,
+                cfg.bitrateMbps,
+                getSelectedEncoder(),
+                intraOnlyEnabled,
+                getSelectedCursorMode()
+        ));
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -1691,20 +1696,17 @@ public class MainActivity extends AppCompatActivity {
 
     private void refreshStatusText() {
         int color = ledColorForState(lastUiState);
-        String host = daemonHostName == null || daemonHostName.trim().isEmpty() ? "-" : daemonHostName;
         String daemonStateUi = effectiveDaemonState(
                 daemonState, latestPresentFps, latestStreamUptimeSec, latestFrameOutHost);
-        String transport = "USB:" + (daemonReachable ? "Connected" : "Disconnected")
-                + " | Host:" + host
-            + " | Stream:" + daemonStateUi;
 
         statusText.setText(lastUiState.toUpperCase(Locale.US));
-        if (lastUiInfo == null || lastUiInfo.trim().isEmpty()) {
-            detailText.setText(transport);
-        } else {
-            detailText.setText(lastUiInfo + " | " + transport);
-        }
-        bpsText.setText("throughput: " + formatBps(lastUiBps));
+        detailText.setText(StatusTextFormatter.buildTransportDetail(
+                lastUiInfo,
+                daemonReachable,
+                daemonHostName,
+                daemonStateUi
+        ));
+        bpsText.setText("throughput: " + StatusTextFormatter.formatBps(lastUiBps));
 
         if (statusLed.getBackground() instanceof GradientDrawable) {
             GradientDrawable drawable = (GradientDrawable) statusLed.getBackground().mutate();
@@ -3411,16 +3413,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private String formatBps(long bps) {
-        if (bps <= 0) {
-            return "-";
-        }
-        if (bps >= 1024L * 1024L) {
-            return String.format(Locale.US, "%.2f MB/s", bps / (1024.0 * 1024.0));
-        }
-        if (bps >= 1024L) {
-            return String.format(Locale.US, "%.1f KB/s", bps / 1024.0);
-        }
-        return bps + " B/s";
+        return StatusTextFormatter.formatBps(bps);
     }
 
     private int[] computeScaledSize() {
