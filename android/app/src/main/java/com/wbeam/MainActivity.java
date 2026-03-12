@@ -45,9 +45,11 @@ import com.wbeam.hud.TrainerHudOverlayPipeline;
 import com.wbeam.input.CursorOverlayController;
 import com.wbeam.input.ImmersiveModeController;
 import com.wbeam.startup.StartupOverlayCoordinator;
+import com.wbeam.startup.StartupOverlayControllerGuard;
 import com.wbeam.startup.StartupOverlayHooksFactory;
 import com.wbeam.startup.StartupOverlayInputFactory;
 import com.wbeam.startup.StartupOverlayModelBuilder;
+import com.wbeam.startup.StartupOverlayProbeHooksFactory;
 import com.wbeam.startup.StartupOverlayController;
 import com.wbeam.startup.StartupOverlayViewRenderer;
 import com.wbeam.startup.TransportProbeCallbacksFactory;
@@ -1730,21 +1732,15 @@ public class MainActivity extends AppCompatActivity {
     // ══════════════════════════════════════════════════════════════════════════
 
     private void startPreflightPulse() {
-        if (startupOverlayController != null) {
-            startupOverlayController.startPulse();
-        }
+        StartupOverlayControllerGuard.startPulse(startupOverlayController);
     }
 
     private void stopPreflightPulse() {
-        if (startupOverlayController != null) {
-            startupOverlayController.stopPulse();
-        }
+        StartupOverlayControllerGuard.stopPulse(startupOverlayController);
     }
 
     private void setPreflightVisible(boolean visible) {
-        if (startupOverlayController != null) {
-            startupOverlayController.setVisible(visible);
-        }
+        StartupOverlayControllerGuard.setVisible(startupOverlayController, visible);
     }
 
     private void updatePreflightOverlay() {
@@ -1770,19 +1766,14 @@ public class MainActivity extends AppCompatActivity {
                 startupOverlayViews,
                 videoTestController,
                 STARTUP_VIDEO_TEST_HINT_COLOR,
-                new StartupOverlayHooksFactory.ProbeHooks() {
-                    @Override
-                    public boolean requiresTransportProbe() {
-                        return MainActivity.this.requiresTransportProbe();
-                    }
-
-                    @Override
-                    public void maybeStartTransportProbe() {
-                        if (daemonReachable && handshakeResolved && !isBuildMismatch()) {
-                            MainActivity.this.maybeStartTransportProbe();
+                StartupOverlayProbeHooksFactory.create(
+                        this::requiresTransportProbe,
+                        () -> {
+                            if (daemonReachable && handshakeResolved && !isBuildMismatch()) {
+                                maybeStartTransportProbe();
+                            }
                         }
-                    }
-                },
+                ),
                 this::buildStartupOverlayInput,
                 model -> StartupOverlayViewRenderer.applyModel(
                         model,
