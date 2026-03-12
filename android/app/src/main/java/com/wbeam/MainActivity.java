@@ -1550,10 +1550,45 @@ public class MainActivity extends AppCompatActivity {
                 TrainerHudModeHooksFactory.create(
                         () -> setDebugOverlayVisible(true),
                         this::emitHudDebugAdb,
-                        this::renderTrainerHudOverlayJson,
-                        this::renderTrainerHudOverlay,
+                        hudJson -> TrainerHudOverlayPipeline.renderFromJson(
+                                hudJson,
+                                latestTargetFps,
+                                FPS_LOW_ANCHOR,
+                                resourceUsageTracker,
+                                perfHudWebView,
+                                perfHudText,
+                                perfHudPanel,
+                                hudOverlayState,
+                                HUD_TEXT_COLOR_LIVE,
+                                compactLine -> lastHudCompactLine = compactLine,
+                                this::refreshDebugInfoOverlay
+                        ),
+                        rawHudText -> TrainerHudOverlayPipeline.renderFromText(
+                                rawHudText,
+                                latestTargetFps,
+                                FPS_LOW_ANCHOR,
+                                resourceUsageTracker,
+                                perfHudWebView,
+                                perfHudText,
+                                perfHudPanel,
+                                hudOverlayState,
+                                HUD_TEXT_COLOR_LIVE,
+                                compactLine -> lastHudCompactLine = compactLine,
+                                this::refreshDebugInfoOverlay
+                        ),
                         () -> { },
-                        this::renderTrainerHudOverlayPlaceholder,
+                        () -> TrainerHudOverlayPipeline.renderPlaceholder(
+                                latestTargetFps,
+                                FPS_LOW_ANCHOR,
+                                resourceUsageTracker,
+                                perfHudWebView,
+                                perfHudText,
+                                perfHudPanel,
+                                hudOverlayState,
+                                HUD_TEXT_COLOR_LIVE,
+                                compactLine -> lastHudCompactLine = compactLine,
+                                this::refreshDebugInfoOverlay
+                        ),
                         () -> {
                             showHudTextOnly(
                                     "trainer",
@@ -1670,53 +1705,6 @@ public class MainActivity extends AppCompatActivity {
         );
 
         emitHudDebugAdb(output.debugSnapshot);
-    }
-
-    private void renderTrainerHudOverlay(String rawHudText) {
-        TrainerHudOverlayPipeline.renderFromText(
-                rawHudText,
-                latestTargetFps,
-                FPS_LOW_ANCHOR,
-                resourceUsageTracker,
-                perfHudWebView,
-                perfHudText,
-                perfHudPanel,
-                hudOverlayState,
-                HUD_TEXT_COLOR_LIVE,
-                compactLine -> lastHudCompactLine = compactLine,
-                this::refreshDebugInfoOverlay
-        );
-    }
-
-    private void renderTrainerHudOverlayJson(JSONObject hudJson) {
-        TrainerHudOverlayPipeline.renderFromJson(
-                hudJson,
-                latestTargetFps,
-                FPS_LOW_ANCHOR,
-                resourceUsageTracker,
-                perfHudWebView,
-                perfHudText,
-                perfHudPanel,
-                hudOverlayState,
-                HUD_TEXT_COLOR_LIVE,
-                compactLine -> lastHudCompactLine = compactLine,
-                this::refreshDebugInfoOverlay
-        );
-    }
-
-    private void renderTrainerHudOverlayPlaceholder() {
-        TrainerHudOverlayPipeline.renderPlaceholder(
-                latestTargetFps,
-                FPS_LOW_ANCHOR,
-                resourceUsageTracker,
-                perfHudWebView,
-                perfHudText,
-                perfHudPanel,
-                hudOverlayState,
-                HUD_TEXT_COLOR_LIVE,
-                compactLine -> lastHudCompactLine = compactLine,
-                this::refreshDebugInfoOverlay
-        );
     }
 
     private void refreshDebugInfoOverlay() {
