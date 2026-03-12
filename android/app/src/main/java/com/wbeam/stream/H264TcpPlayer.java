@@ -9,10 +9,8 @@ import com.wbeam.BuildConfig;
 import com.wbeam.ClientMetricsSample;
 import com.wbeam.api.StatusListener;
 
-import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.util.Locale;
 
@@ -150,293 +148,140 @@ public final class H264TcpPlayer {
     // ── Main loop ─────────────────────────────────────────────────────────────
 
     private void runLoop() {
-        // P1.1: elevate to realtime audio priority to reduce decode jitter
-        android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO);
+        StreamReconnectLoop.RuntimeState runtimeState = new StreamReconnectLoop.RuntimeState() {
+            @Override
+            public boolean isRunning() {
+                return running;
+            }
 
-        while (running) {
-            final MediaCodec[] codecHolder = {null};
-            try {
-                statusListener.onStatus(STATE_CONNECTING, "connecting to " + HOST + ":" + PORT, 0);
-                statusListener.onStats(
-                        "fps in/out: - | drops: " + droppedTotal
-                                + " | late: " + tooLateTotal
-                                + " | reconnects: " + reconnects
-                );
+            @Override
+            public long getDroppedTotal() {
+                return droppedTotal;
+            }
 
-                socket = new Socket();
-                socket.connect(new InetSocketAddress(HOST, PORT), 2000);
-                socket.setTcpNoDelay(true);
-                socket.setReceiveBufferSize(SOCKET_RECV_BUFFER_SIZE);
-                socket.setSoTimeout(5_000); // P1.1: cap blocking read to 5s
+            @Override
+            public long getTooLateTotal() {
+                return tooLateTotal;
+            }
+
+            @Override
+            public long getReconnects() {
+                return reconnects;
+            }
+
+            @Override
+            public long incrementReconnects() {
+                reconnects++;
+                return reconnects;
+            }
+
+            @Override
+            public long getReconnectDelayMs() {
+                return reconnectDelayMs;
+            }
+
+            @Override
+            public void setReconnectDelayMs(long reconnectDelayMsValue) {
+                reconnectDelayMs = reconnectDelayMsValue;
+            }
+
+            @Override
+            public long incrementSessionConnectId() {
                 sessionConnectId++;
+                return sessionConnectId;
+            }
+
+            @Override
+            public void resetSampleSeq() {
                 sampleSeq = 0;
-
-                // Codec is created inside framedDecodeLoop after reading the
-                // WBTP HELLO which carries the codec-type flag (H.264 or HEVC).
-                statusListener.onStatus(STATE_STREAMING, "connected [framed]", 0);
-                // C3: framed-only transport for deterministic frame boundaries and metrics.
-                framedDecodeLoop(new BufferedInputStream(socket.getInputStream(), 256 * 1024), codecHolder);
-
-            } catch (Throwable e) {
-                if (running) {
-                    reconnects++;
-                    reconnectDelayMs = Math.min(5000, reconnectDelayMs + 400);
-                    String reason = e.getClass().getSimpleName() + ": " + e.getMessage();
-                    boolean isException = (e instanceof Exception);
-                    if (isException && isExpectedStreamClose((Exception) e)) {
-                        Log.w(TAG, "stream worker reconnect #" + reconnects
-                                + " delay_ms=" + reconnectDelayMs + " reason=" + reason);
-                        statusListener.onStatus(STATE_CONNECTING, "stream reconnecting: " + reason, 0);
-                    } else {
-                        Log.e(TAG, "stream worker failed", e);
-                        statusListener.onStatus(STATE_ERROR, "stream error: " + e.getClass().getSimpleName(), 0);
-                    }
-                    statusListener.onStats(
-                            "fps in/out: - | drops: " + droppedTotal
-                                    + " | late: " + tooLateTotal
-                                    + " | reconnects: " + reconnects
-                    );
-                }
-            } finally {
-                closeSocket();
-                MediaCodec c = codecHolder[0];
-                if (c != null) {
-                    try { c.stop(); } catch (Exception ignored) {}
-                    try { c.release(); } catch (Exception ignored) {}
-                }
             }
 
-            if (running) {
-                long jitterBound = Math.max(1L, reconnectDelayMs / 4L + 1L);
-                long jitterMs = (long) (Math.random() * jitterBound);
-                SystemClock.sleep(reconnectDelayMs + jitterMs);
+            @Override
+            public void setSocket(Socket nextSocket) {
+                socket = nextSocket;
             }
-        }
+
+            @Override
+            public void closeSocket() {
+                H264TcpPlayer.this.closeSocket();
+            }
+        };
+
+        new StreamReconnectLoop(
+                TAG,
+                HOST,
+                PORT,
+                SOCKET_RECV_BUFFER_SIZE,
+                runtimeState,
+                statusListener,
+                this::framedDecodeLoop,
+                STATE_CONNECTING,
+                STATE_STREAMING,
+                STATE_ERROR
+        ).run();
     }
 
     // ── Legacy AnnexB / AVCC decode loop ──────────────────────────────────────
 
     @SuppressWarnings("unused")
     private void decodeLoop(InputStream input, MediaCodec codec) throws IOException {
-        byte[] readBuf  = new byte[64 * 1024];
-        byte[] streamBuf = new byte[512 * 1024];
-        int sHead = 0;
-        int sTail = 0;
-        int streamMode = -1;
-        int avgNalSize = 1200;
-        int pendingDecodeQueue = 0;
-        int renderQueueDepth   = 0;
-
-        long frames        = 0;
-        long bytes         = 0;
-        long inFrames      = 0;
-        long outFrames     = 0;
-        long droppedSec    = 0;
-        long tooLateSec    = 0;
-        long   decodeNsTotal = 0;
-        long[] decodeNsBuf   = new long[128];
-        long[] decodeNsScratch = new long[128];
-        int    decodeNsBufN  = 0;
-        long   renderNsMax   = 0;
-        long lastLog = SystemClock.elapsedRealtime();
-        long lastPresentMs   = SystemClock.elapsedRealtime();
-        long lastPresentedPtsUs = -1L;
-        long pendingWithNoPresent = 0;
-        long lastDecodeProgressMs = SystemClock.elapsedRealtime();
-        MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
-        MediaCodecBridge.DrainStats drainStats = new MediaCodecBridge.DrainStats();
-
-        while (running) {
-            int count = input.read(readBuf);
-            if (count < 0) throw new IOException("stream closed");
-            if (count == 0) continue;
-
-            int avail = sTail - sHead;
-            if (sTail + count > streamBuf.length) {
-                if (avail + count > streamBuf.length) {
-                    int keep = streamBuf.length - count;
-                    if (keep <= 0) { sHead = 0; sTail = 0; avail = 0; }
-                    else {
-                        int newHead = sHead + (avail - keep);
-                        System.arraycopy(streamBuf, newHead, streamBuf, 0, keep);
-                        sHead = 0; sTail = keep; avail = keep;
-                    }
-                    droppedSec++;
-                } else {
-                    if (avail > 0) System.arraycopy(streamBuf, sHead, streamBuf, 0, avail);
-                    sHead = 0; sTail = avail;
-                }
-            }
-            System.arraycopy(readBuf, 0, streamBuf, sTail, count);
-            sTail += count;
-            bytes += count;
-
-            avail = sTail - sHead;
-            if (streamMode < 0 && avail >= 8) {
-                int probe = StreamNalUtils.findStartCode(streamBuf, sHead, Math.min(sHead + 128, sTail));
-                streamMode = (probe >= 0) ? 0 : 1;
+        LegacyAnnexBDecodeLoop.RuntimeState runtimeState = new LegacyAnnexBDecodeLoop.RuntimeState() {
+            @Override
+            public boolean isRunning() {
+                return running;
             }
 
-            if (streamMode == 1) {
-                while ((sTail - sHead) >= 4) {
-                    int nalSize =
-                            ((streamBuf[sHead]     & 0xFF) << 24) |
-                            ((streamBuf[sHead + 1] & 0xFF) << 16) |
-                            ((streamBuf[sHead + 2] & 0xFF) << 8)  |
-                            ((streamBuf[sHead + 3] & 0xFF));
-                    if (nalSize <= 0 || nalSize > streamBuf.length) { sHead += 1; droppedSec++; continue; }
-                    if ((sTail - sHead) < 4 + nalSize) break;
-
-                    frames++;
-                        MediaCodecBridge.drainLatestFrame(codec, bufferInfo, drainStats,
-                            true,
-                            pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES ? 16_000 : 5_000);
-                    pendingDecodeQueue = Math.max(0, pendingDecodeQueue - drainStats.releasedCount);
-                    if (drainStats.releasedCount > 0) lastDecodeProgressMs = SystemClock.elapsedRealtime();
-                    else if (pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES
-                            && (SystemClock.elapsedRealtime() - lastDecodeProgressMs) > 300) {
-                        pendingDecodeQueue = DECODE_QUEUE_MAX_FRAMES - 1;
-                    }
-                    outFrames  += drainStats.renderedCount;
-                    tooLateSec += drainStats.droppedLateCount;
-                    renderNsMax = Math.max(renderNsMax, drainStats.renderNsMax);
-                    renderQueueDepth = drainStats.renderedCount > 0 ? 1 : 0;
-
-                    if (pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES) {
-                        if (StreamNalUtils.isRecoveryNal(streamBuf, sHead + 4, nalSize)) {
-                            long t0 = SystemClock.elapsedRealtimeNanos();
-                            if (MediaCodecBridge.queueNal(codec, streamBuf, sHead + 4, nalSize, frames * frameUs, 1_000)) {
-                                long dn = SystemClock.elapsedRealtimeNanos() - t0;
-                                decodeNsTotal += dn; decodeNsBuf[(decodeNsBufN++) & 127] = dn;
-                                avgNalSize = ((avgNalSize * 7) + nalSize) / 8;
-                                inFrames++; pendingDecodeQueue = Math.min(DECODE_QUEUE_MAX_FRAMES, pendingDecodeQueue + 1);
-                                lastDecodeProgressMs = SystemClock.elapsedRealtime();
-                            } else { droppedSec++; }
-                        } else { droppedSec++; }
-                    } else {
-                        long t0 = SystemClock.elapsedRealtimeNanos();
-                        if (MediaCodecBridge.queueNal(codec, streamBuf, sHead + 4, nalSize, frames * frameUs, 1_000)) {
-                            long dn = SystemClock.elapsedRealtimeNanos() - t0;
-                            decodeNsTotal += dn; decodeNsBuf[(decodeNsBufN++) & 127] = dn;
-                            avgNalSize = ((avgNalSize * 7) + nalSize) / 8;
-                            inFrames++; pendingDecodeQueue++;
-                            lastDecodeProgressMs = SystemClock.elapsedRealtime();
-                        } else { droppedSec++; }
-                    }
-                    sHead += 4 + nalSize;
-                }
-            } else {
-                int nalStart = StreamNalUtils.findStartCode(streamBuf, sHead, sTail);
-                if (nalStart < 0) {
-                    sHead = Math.max(sHead, sTail - 3);
-                } else {
-                    sHead = nalStart;
-                    while (true) {
-                        int next = StreamNalUtils.findStartCode(streamBuf, sHead + 3, sTail);
-                        if (next < 0) break;
-                        int nalSize = next - sHead;
-                        if (nalSize > 0) {
-                            frames++;
-                                MediaCodecBridge.drainLatestFrame(codec, bufferInfo, drainStats,
-                                    true,
-                                    pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES ? 16_000 : 5_000);
-                            pendingDecodeQueue = Math.max(0, pendingDecodeQueue - drainStats.releasedCount);
-                            if (drainStats.releasedCount > 0) lastDecodeProgressMs = SystemClock.elapsedRealtime();
-                            else if (pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES
-                                    && (SystemClock.elapsedRealtime() - lastDecodeProgressMs) > 300) {
-                                pendingDecodeQueue = DECODE_QUEUE_MAX_FRAMES - 1;
-                            }
-                            outFrames  += drainStats.renderedCount;
-                            tooLateSec += drainStats.droppedLateCount;
-                            renderNsMax = Math.max(renderNsMax, drainStats.renderNsMax);
-                            renderQueueDepth = drainStats.renderedCount > 0 ? 1 : 0;
-
-                            if (pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES) {
-                                if (StreamNalUtils.isRecoveryNal(streamBuf, sHead, nalSize)) {
-                                    long t0 = SystemClock.elapsedRealtimeNanos();
-                                    if (MediaCodecBridge.queueNal(codec, streamBuf, sHead, nalSize, frames * frameUs, 1_000)) {
-                                        long dn = SystemClock.elapsedRealtimeNanos() - t0;
-                                        decodeNsTotal += dn; decodeNsBuf[(decodeNsBufN++) & 127] = dn;
-                                        avgNalSize = ((avgNalSize * 7) + nalSize) / 8;
-                                        inFrames++; pendingDecodeQueue = Math.min(DECODE_QUEUE_MAX_FRAMES, pendingDecodeQueue + 1);
-                                        lastDecodeProgressMs = SystemClock.elapsedRealtime();
-                                    } else { droppedSec++; }
-                                } else { droppedSec++; }
-                            } else {
-                                long t0 = SystemClock.elapsedRealtimeNanos();
-                                if (MediaCodecBridge.queueNal(codec, streamBuf, sHead, nalSize, frames * frameUs, 1_000)) {
-                                    long dn = SystemClock.elapsedRealtimeNanos() - t0;
-                                    decodeNsTotal += dn; decodeNsBuf[(decodeNsBufN++) & 127] = dn;
-                                    avgNalSize = ((avgNalSize * 7) + nalSize) / 8;
-                                    inFrames++; pendingDecodeQueue++;
-                                    lastDecodeProgressMs = SystemClock.elapsedRealtime();
-                                } else { droppedSec++; }
-                            }
-                        }
-                        sHead = next;
-                    }
-                }
+            @Override
+            public long getDroppedTotal() {
+                return droppedTotal;
             }
 
-            if (drainStats.renderedCount > 0) { lastPresentMs = SystemClock.elapsedRealtime(); pendingWithNoPresent = 0; }
-            else if (inFrames > 0)            { pendingWithNoPresent++; }
-            if (drainStats.renderedCount > 0 && drainStats.lastRenderedPtsUs > 0) {
-                lastPresentedPtsUs = drainStats.lastRenderedPtsUs;
-            }
-            if (pendingWithNoPresent > 300 && (SystemClock.elapsedRealtime() - lastPresentMs) > 5_000) {
-                throw new IOException("C5: black-screen watchdog: 0 frames presented in 5s with "
-                        + pendingWithNoPresent + " decoded – reconnecting");
+            @Override
+            public void addDroppedTotal(long delta) {
+                droppedTotal += delta;
             }
 
-            long now = SystemClock.elapsedRealtime();
-            if (now - lastLog >= 1000) {
-                droppedTotal += droppedSec; tooLateTotal += tooLateSec; reconnectDelayMs = 800;
-                statusListener.onStatus(STATE_STREAMING, "rendering live desktop", bytes);
-                statusListener.onStats(
-                        "fps in/out: " + inFrames + "/" + outFrames
-                                + " | drops: " + droppedTotal
-                                + " | late: " + tooLateTotal
-                                + " | q(t/d/r): "
-                                + StreamBufferMath.estimateTransportDepthFrames(sTail - sHead, avgNalSize) + "/"
-                                + Math.min(DECODE_QUEUE_MAX_FRAMES, pendingDecodeQueue) + "/"
-                                + renderQueueDepth
-                                + " | reconnects: " + reconnects
-                );
-                double decodeMsP50 = inFrames > 0 ? (decodeNsTotal / 1_000_000.0) / inFrames : 0.0;
-                double decodeMsP95 = StreamBufferMath.percentileMs(decodeNsBuf, Math.min(decodeNsBufN, 128), 0.95, decodeNsScratch);
-                double renderMsP95 = renderNsMax / 1_000_000.0;
-                double e2eMs = StreamBufferMath.estimateE2eLatencyMs(lastPresentedPtsUs);
-                statusListener.onClientMetrics(new ClientMetricsSample(
-                        inFrames, inFrames, outFrames, bytes,
-                        decodeMsP50, decodeMsP95, renderMsP95, e2eMs, e2eMs,
-                        StreamBufferMath.estimateTransportDepthFrames(sTail - sHead, avgNalSize),
-                        Math.min(DECODE_QUEUE_MAX_FRAMES, pendingDecodeQueue),
-                        Math.min(RENDER_QUEUE_MAX_FRAMES, renderQueueDepth),
-                        0, droppedTotal, tooLateTotal,
-                        (sessionConnectId << 32) | (sampleSeq++ & 0xFFFFFFFFL)
-                ));
-                if (Log.isLoggable(TAG, Log.DEBUG)) {
-                    Log.d(TAG, String.format(Locale.US,
-                        "[decode/legacy] in=%d out=%d drop=%d late=%d qD=%d/%d qR=%d/%d"
-                            + " dec_p95=%.1fms ren_p95=%.1fms noPresent=%d reconn=%d",
-                        inFrames, outFrames, droppedSec, tooLateSec,
-                        Math.min(DECODE_QUEUE_MAX_FRAMES, pendingDecodeQueue), DECODE_QUEUE_MAX_FRAMES,
-                        renderQueueDepth, RENDER_QUEUE_MAX_FRAMES,
-                        decodeMsP95, renderMsP95, pendingWithNoPresent, reconnects));
-                }
-                bytes = 0; inFrames = 0; outFrames = 0; droppedSec = 0; tooLateSec = 0;
-                decodeNsTotal = 0; decodeNsBufN = 0; renderNsMax = 0; lastLog = now;
+            @Override
+            public long getTooLateTotal() {
+                return tooLateTotal;
             }
-        }
+
+            @Override
+            public void addTooLateTotal(long delta) {
+                tooLateTotal += delta;
+            }
+
+            @Override
+            public long getReconnects() {
+                return reconnects;
+            }
+
+            @Override
+            public long getSessionConnectId() {
+                return sessionConnectId;
+            }
+
+            @Override
+            public long nextSampleSeq() {
+                return sampleSeq++;
+            }
+
+            @Override
+            public void resetReconnectDelayMs() {
+                reconnectDelayMs = 800;
+            }
+        };
+        new LegacyAnnexBDecodeLoop(
+                TAG,
+                statusListener,
+                runtimeState,
+                frameUs,
+                DECODE_QUEUE_MAX_FRAMES,
+                RENDER_QUEUE_MAX_FRAMES,
+                STATE_STREAMING
+        ).run(input, codec);
     }
 
-    // ── WBTP/1 framed decode loop ─────────────────────────────────────────────
-
-    /**
-     * WBTP/1 framed decode loop — host sends 22-byte WBTP/1 header + payload per access unit.
-     * Header: magic(4) ver(1) flags(1) seq(4) capture_ts_us(8) payload_len(4)
-     * Eliminates AnnexB start-code scanning entirely and gives exact PTS per frame.
-     */
     private void framedDecodeLoop(InputStream input, MediaCodec[] codecRef) throws IOException {
         byte[] helloBuf = new byte[HELLO_HEADER_SIZE];
         byte[] hdrBuf = new byte[FRAME_HEADER_SIZE];
@@ -612,7 +457,7 @@ public final class H264TcpPlayer {
         }
     }
 
-    private static boolean isExpectedStreamClose(Exception e) {
+    static boolean isExpectedStreamClose(Exception e) {
         if (!(e instanceof IOException)) return false;
         String msg = e.getMessage();
         if (msg == null) return false;
