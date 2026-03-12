@@ -1206,27 +1206,51 @@ public class MainActivity extends AppCompatActivity {
 
     private void startLiveView() {
         videoTestController.release();
-        if (surface == null || !surface.isValid()) {
-            updateStatus(STATE_ERROR, "surface not ready yet", 0);
+        if (!isSurfaceReadyForLiveView()) {
             return;
         }
-        if (player != null && player.isRunning()) {
-            updateStatus(STATE_STREAMING, "already running", 0);
+        if (isLivePlayerAlreadyRunning()) {
             return;
         }
 
         StreamConfigResolver.Resolved cfg = effectiveStreamConfig();
         long frameUs = Math.max(1L, 1_000_000L / Math.max(1, cfg.fps));
         SurfaceView preview = findViewById(R.id.previewSurface);
+        logStartLiveViewConfig(cfg, preview);
+        // Keep the Surface buffer sized from layout so video can scale to fill the screen.
+        // setFixedSize(stream_w, stream_h) causes a "small centered video" effect whenever the
+        // stream resolution differs from the view size (default config scales stream size).
+        preview.getHolder().setSizeFromLayout();
+        logSurfaceFrame(preview);
+        createAndStartPlayer(cfg, frameUs);
+        hideSettingsPanel();
+    }
+
+    private boolean isSurfaceReadyForLiveView() {
+        if (surface != null && surface.isValid()) {
+            return true;
+        }
+        updateStatus(STATE_ERROR, "surface not ready yet", 0);
+        return false;
+    }
+
+    private boolean isLivePlayerAlreadyRunning() {
+        if (player == null || !player.isRunning()) {
+            return false;
+        }
+        updateStatus(STATE_STREAMING, "already running", 0);
+        return true;
+    }
+
+    private void logStartLiveViewConfig(StreamConfigResolver.Resolved cfg, SurfaceView preview) {
         Log.i(TAG, String.format(Locale.US,
                 "startLiveView: cfg=%dx%d@%dfps view=%dx%d surfaceValid=%s",
                 cfg.width, cfg.height, cfg.fps,
                 preview.getWidth(), preview.getHeight(),
                 surface != null && surface.isValid()));
-        // Keep the Surface buffer sized from layout so video can scale to fill the screen.
-        // setFixedSize(stream_w, stream_h) causes a "small centered video" effect whenever the
-        // stream resolution differs from the view size (default config scales stream size).
-        preview.getHolder().setSizeFromLayout();
+    }
+
+    private void logSurfaceFrame(SurfaceView preview) {
         try {
             Rect frame = preview.getHolder().getSurfaceFrame();
             if (frame != null) {
@@ -1236,31 +1260,36 @@ public class MainActivity extends AppCompatActivity {
             }
         } catch (Exception ignored) {
         }
+    }
 
+    private void createAndStartPlayer(StreamConfigResolver.Resolved cfg, long frameUs) {
         player = new H264TcpPlayer(
                 surface,
-                new StatusListener() {
-                    @Override
-                    public void onStatus(String state, String info, long bps) {
-                        runOnUiThread(() -> updateStatus(state, info, bps));
-                    }
-
-                    @Override
-                    public void onStats(String line) {
-                        runOnUiThread(() -> updateStatsLine(line));
-                    }
-
-                    @Override
-                    public void onClientMetrics(ClientMetricsSample metrics) {
-                        metricsReporter.push(metrics);
-                    }
-                },
+                buildPlayerStatusListener(),
                 cfg.width,
                 cfg.height,
                 frameUs
         );
         player.start();
-        hideSettingsPanel();
+    }
+
+    private StatusListener buildPlayerStatusListener() {
+        return new StatusListener() {
+            @Override
+            public void onStatus(String state, String info, long bps) {
+                runOnUiThread(() -> updateStatus(state, info, bps));
+            }
+
+            @Override
+            public void onStats(String line) {
+                runOnUiThread(() -> updateStatsLine(line));
+            }
+
+            @Override
+            public void onClientMetrics(ClientMetricsSample metrics) {
+                metricsReporter.push(metrics);
+            }
+        };
     }
 
     private void stopLiveView() {
