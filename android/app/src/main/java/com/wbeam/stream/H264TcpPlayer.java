@@ -791,209 +791,64 @@ public final class H264TcpPlayer {
         }
     }
 
-    /**
-     * PNG framed decode path: each WBTP payload is one PNG frame.
-     * Decodes bitmap on CPU and blits to Surface canvas.
-     */
     private void framedDecodeLoopPng(InputStream input, byte[] hdrBuf, byte[] payloadBuf, boolean isUltraMode) throws IOException {
-        long bytes = 0L;
-        long inFrames = 0L;
-        long outFrames = 0L;
-        long droppedSec = 0L;
-        long decodeNsTotal = 0L;
-        long[] decodeNsBuf = new long[128];
-        long[] decodeNsScratch = new long[128];
-        int decodeNsBufN = 0;
-        int maxPayloadSeen = 0;
-        long payloadGrowEvents = 0L;
-        long resyncSuccessSec = 0L;
-        long resyncFailSec = 0L;
-        long lastLog = SystemClock.elapsedRealtime();
-        long lastPresentMs = SystemClock.elapsedRealtime();
-        long expectedSeq = -1L;
-        long lastQueuedPtsUs = -1L;
-        final int seqGapBudget = StreamBufferMath.computeSeqGapBudget(frameUs, isUltraMode);
-        final boolean dropBacklogFrames = isUltraMode;
-        PngSurfaceRenderer pngRenderer = new PngSurfaceRenderer(surface);
-        final int backlogFrameBudget = frameBufferBudgetFrames;
-
-        while (running) {
-            WbtpProtocol.FrameHeader frameHeader = WbtpProtocol.readFrameHeader(
-                    input,
-                    hdrBuf,
-                    FRAME_HEADER_SIZE,
-                    FRAME_MAGIC,
-                    FRAME_RESYNC_SCAN_LIMIT,
-                    FRAME_FLAG_KEYFRAME
-            );
-            if (frameHeader.resynced) {
-                resyncSuccessSec++;
+        FramedPngLoop.RuntimeState runtimeState = new FramedPngLoop.RuntimeState() {
+            @Override
+            public boolean isRunning() {
+                return running;
             }
 
-            long seqU32 = frameHeader.seqU32;
-            long ptsUs = frameHeader.ptsUs;
-
-            if (expectedSeq < 0) {
-                expectedSeq = seqU32;
-            }
-            if (seqU32 < expectedSeq) {
-                droppedSec++;
-                continue;
-            }
-            if (seqU32 > expectedSeq + seqGapBudget) {
-                expectedSeq = seqU32;
-            }
-            if (lastQueuedPtsUs > 0 && ptsUs + 1_000 < lastQueuedPtsUs) {
-                droppedSec++;
-                expectedSeq = seqU32 + 1;
-                continue;
+            @Override
+            public long getDroppedTotal() {
+                return droppedTotal;
             }
 
-            int payloadLen = frameHeader.payloadLen;
-            WbtpPayloadBuffer.validatePayloadLength(payloadLen, FRAME_PAYLOAD_HARD_CAP);
-            byte[] grownPayloadBuf = WbtpPayloadBuffer.ensureCapacity(
-                    payloadBuf,
-                    payloadLen,
-                    FRAME_PAYLOAD_HARD_CAP,
-                    TAG,
-                    "WBTP PNG payload buffer grow "
-            );
-            if (grownPayloadBuf != payloadBuf) {
-                payloadBuf = grownPayloadBuf;
-                payloadGrowEvents++;
-            }
-            maxPayloadSeen = Math.max(maxPayloadSeen, payloadLen);
-
-            WbtpFrameIo.readFully(input, payloadBuf, payloadLen);
-            bytes += FRAME_HEADER_SIZE + payloadLen;
-
-            int payloadEstimate = Math.max(8 * 1024, maxPayloadSeen + FRAME_HEADER_SIZE);
-            int backlogBytes = Math.max(0, input.available());
-            int backlogFramesEstimate = payloadEstimate > 0 ? (backlogBytes / payloadEstimate) : 0;
-            int skippedBacklog = 0;
-
-            while (dropBacklogFrames && backlogFramesEstimate > backlogFrameBudget) {
-                WbtpProtocol.FrameHeader skippedFrameHeader = WbtpProtocol.readFrameHeader(
-                        input,
-                        hdrBuf,
-                        FRAME_HEADER_SIZE,
-                        FRAME_MAGIC,
-                        FRAME_RESYNC_SCAN_LIMIT,
-                        FRAME_FLAG_KEYFRAME
-                );
-                if (skippedFrameHeader.resynced) {
-                    resyncSuccessSec++;
-                }
-
-                seqU32 = skippedFrameHeader.seqU32;
-                ptsUs = skippedFrameHeader.ptsUs;
-
-                int nextLen = skippedFrameHeader.payloadLen;
-                WbtpPayloadBuffer.validatePayloadLength(nextLen, FRAME_PAYLOAD_HARD_CAP);
-                byte[] grownBacklogPayloadBuf = WbtpPayloadBuffer.ensureCapacity(
-                        payloadBuf,
-                        nextLen,
-                        FRAME_PAYLOAD_HARD_CAP,
-                        TAG,
-                        "WBTP PNG payload buffer grow "
-                );
-                if (grownBacklogPayloadBuf != payloadBuf) {
-                    payloadBuf = grownBacklogPayloadBuf;
-                    payloadGrowEvents++;
-                }
-
-                payloadLen = nextLen;
-                maxPayloadSeen = Math.max(maxPayloadSeen, payloadLen);
-                WbtpFrameIo.readFully(input, payloadBuf, payloadLen);
-                bytes += FRAME_HEADER_SIZE + payloadLen;
-                skippedBacklog++;
-
-                payloadEstimate = Math.max(8 * 1024, maxPayloadSeen + FRAME_HEADER_SIZE);
-                backlogBytes = Math.max(0, input.available());
-                backlogFramesEstimate = payloadEstimate > 0 ? (backlogBytes / payloadEstimate) : 0;
+            @Override
+            public void addDroppedTotal(long delta) {
+                droppedTotal += delta;
             }
 
-            if (skippedBacklog > 0) {
-                droppedSec += skippedBacklog;
+            @Override
+            public long getTooLateTotal() {
+                return tooLateTotal;
             }
 
-            long t0 = SystemClock.elapsedRealtimeNanos();
-            PngSurfaceRenderer.RenderResult renderResult = pngRenderer.render(payloadBuf, payloadLen);
-            if (renderResult.rendered) {
-                outFrames++;
-                lastPresentMs = SystemClock.elapsedRealtime();
-                lastQueuedPtsUs = ptsUs;
-                expectedSeq = seqU32 + 1;
-            } else {
-                droppedSec++;
-                expectedSeq = seqU32 + 1;
+            @Override
+            public long getReconnects() {
+                return reconnects;
             }
 
-            long dn = SystemClock.elapsedRealtimeNanos() - t0;
-            decodeNsTotal += dn;
-            decodeNsBuf[(decodeNsBufN++) & 127] = dn;
-            inFrames++;
-
-            long nowMs = SystemClock.elapsedRealtime();
-            if (nowMs - lastPresentMs >= NO_PRESENT_HARD_RESET_MS) {
-                Log.w(TAG, "PNG absolute guard: reconnect after 5s with no present");
-                statusListener.onStatus(STATE_CONNECTING, "png stalled >5s: reconnecting", 0);
-                throw new IOException("PNG absolute guard: no frame presented for " + (nowMs - lastPresentMs) + "ms");
+            @Override
+            public long getSessionConnectId() {
+                return sessionConnectId;
             }
-            if (nowMs - lastLog >= 1000) {
-                droppedTotal += droppedSec;
+
+            @Override
+            public long nextSampleSeq() {
+                return sampleSeq++;
+            }
+
+            @Override
+            public void resetReconnectDelayMs() {
                 reconnectDelayMs = 800;
-
-                statusListener.onStatus(STATE_STREAMING, "rendering live desktop [framed/png]", bytes);
-                statusListener.onStats(
-                        "fps in/out: " + inFrames + "/" + outFrames
-                                + " | drops: " + droppedTotal
-                                + " | late: " + tooLateTotal
-                        + " | q(d/r): " + Math.min(backlogFramesEstimate, backlogFrameBudget) + "/0"
-                                + " | max_payload: " + (maxPayloadSeen / 1024) + "KB"
-                                + " | reconnects: " + reconnects
-                );
-
-                double decodeMsP50 = inFrames > 0 ? (decodeNsTotal / 1_000_000.0) / inFrames : 0.0;
-                double decodeMsP95 = StreamBufferMath.percentileMs(decodeNsBuf, Math.min(decodeNsBufN, 128), 0.95, decodeNsScratch);
-                long nowEpochUs = System.currentTimeMillis() * 1000L;
-                long transportLagUs = (lastQueuedPtsUs > 0 && nowEpochUs > lastQueuedPtsUs)
-                    ? (nowEpochUs - lastQueuedPtsUs)
-                    : 0L;
-                int transportQueueDepth = (int) Math.max(0L, Math.min(
-                    16L,
-                    transportLagUs / Math.max(1L, frameUs)
-                ));
-                statusListener.onClientMetrics(new ClientMetricsSample(
-                        inFrames, inFrames, outFrames, bytes,
-                        decodeMsP50, decodeMsP95, 0.0, 0.0, 0.0,
-                    transportQueueDepth,
-                        0,
-                        0,
-                        0, droppedTotal, tooLateTotal,
-                        (sessionConnectId << 32) | (sampleSeq++ & 0xFFFFFFFFL)
-                ));
-
-                if (Log.isLoggable(TAG, Log.DEBUG)) {
-                    Log.d(TAG, String.format(Locale.US,
-                            "[decode/framed/png] in=%d out=%d drop=%d dec_p95=%.1fms maxPayload=%d grow=%d resync_ok=%d resync_fail=%d reconn=%d",
-                            inFrames, outFrames, droppedSec, decodeMsP95,
-                            maxPayloadSeen, payloadGrowEvents, resyncSuccessSec, resyncFailSec, reconnects));
-                }
-
-                bytes = 0;
-                inFrames = 0;
-                outFrames = 0;
-                droppedSec = 0;
-                maxPayloadSeen = 0;
-                payloadGrowEvents = 0;
-                resyncSuccessSec = 0;
-                resyncFailSec = 0;
-                decodeNsTotal = 0;
-                decodeNsBufN = 0;
-                lastLog = nowMs;
             }
-        }
+        };
+        new FramedPngLoop(
+                TAG,
+                surface,
+                statusListener,
+                runtimeState,
+                frameUs,
+                FRAME_HEADER_SIZE,
+                FRAME_MAGIC,
+                FRAME_RESYNC_SCAN_LIMIT,
+                FRAME_FLAG_KEYFRAME,
+                FRAME_PAYLOAD_HARD_CAP,
+                NO_PRESENT_HARD_RESET_MS,
+                STATE_CONNECTING,
+                STATE_STREAMING,
+                frameBufferBudgetFrames
+        ).run(input, hdrBuf, payloadBuf, isUltraMode);
     }
 
     private void closeSocket() {
