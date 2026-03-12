@@ -246,4 +246,14 @@ public final class MainActivityUiBinder {
             simpleApplyButton.setOnClickListener(v -> onApply.run());
         }
     }
+
+    public static void applyActionButtonsEnabled(boolean enabled, Button... buttons) {
+        for (Button button : buttons) {
+            if (button == null) {
+                continue;
+            }
+            button.setEnabled(enabled);
+            button.setAlpha(enabled ? 1.0f : 0.45f);
+        }
+    }
 }

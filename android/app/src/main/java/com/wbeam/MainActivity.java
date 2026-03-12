@@ -883,14 +883,6 @@ public class MainActivity extends AppCompatActivity {
         updateActionButtonsEnabled();
     }
 
-    private void setActionButtonEnabled(Button button, boolean enabled) {
-        if (button == null) {
-            return;
-        }
-        button.setEnabled(enabled);
-        button.setAlpha(enabled ? 1.0f : 0.45f);
-    }
-
     private void setDebugOverlayVisible(boolean visible) {
         debugOverlayVisible = visible;
         if (!BuildConfig.DEBUG) {
@@ -911,12 +903,15 @@ public class MainActivity extends AppCompatActivity {
 
     private void updateActionButtonsEnabled() {
         boolean enabled = daemonReachable;
-        setActionButtonEnabled(quickStartButton, enabled);
-        setActionButtonEnabled(quickStopButton, enabled);
-        setActionButtonEnabled(quickTestButton, enabled);
-        setActionButtonEnabled(startButton, enabled);
-        setActionButtonEnabled(stopButton, enabled);
-        setActionButtonEnabled(testButton, enabled);
+        MainActivityUiBinder.applyActionButtonsEnabled(
+                enabled,
+                quickStartButton,
+                quickStopButton,
+                quickTestButton,
+                startButton,
+                stopButton,
+                testButton
+        );
     }
 
     private void setDebugControlsVisible(boolean visible) {
