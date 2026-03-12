@@ -282,4 +282,12 @@ public final class MainActivityUiBinder {
         }
         return nextVisible;
     }
+
+    public static void applyVisibility(int visibility, View... views) {
+        for (View view : views) {
+            if (view != null) {
+                view.setVisibility(visibility);
+            }
+        }
+    }
 }

@@ -881,27 +881,16 @@ public class MainActivity extends AppCompatActivity {
         hideSettingsPanel();
         hideSimpleMenu();
         setDebugControlsVisible(false);
-        if (topBar != null) {
-            topBar.setVisibility(View.GONE);
-        }
-        if (quickActionRow != null) {
-            quickActionRow.setVisibility(View.GONE);
-        }
-        if (statusPanel != null) {
-            statusPanel.setVisibility(View.GONE);
-        }
-        if (perfHudPanel != null) {
-            perfHudPanel.setVisibility(View.GONE);
-        }
-        if (settingsButton != null) {
-            settingsButton.setVisibility(View.GONE);
-        }
-        if (logButton != null) {
-            logButton.setVisibility(View.GONE);
-        }
-        if (fullscreenButton != null) {
-            fullscreenButton.setVisibility(View.GONE);
-        }
+        MainActivityUiBinder.applyVisibility(
+                View.GONE,
+                topBar,
+                quickActionRow,
+                statusPanel,
+                perfHudPanel,
+                settingsButton,
+                logButton,
+                fullscreenButton
+        );
         if (BuildConfig.DEBUG) {
             applyDebugVariantUi();
             return;
@@ -921,9 +910,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void applyReleaseVariantUi() {
         setFullscreen(true);
-        if (debugInfoPanel != null) {
-            debugInfoPanel.setVisibility(View.GONE);
-        }
+        MainActivityUiBinder.applyVisibility(View.GONE, debugInfoPanel);
         stopDebugGraphSampling();
     }
 
