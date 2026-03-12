@@ -43,7 +43,7 @@ import com.wbeam.hud.TrainerHudOverlayPipeline;
 import com.wbeam.hud.TrainerHudRouting;
 import com.wbeam.input.CursorOverlayController;
 import com.wbeam.input.ImmersiveModeController;
-import com.wbeam.startup.PreflightStateMachine;
+import com.wbeam.startup.StartupOverlayCoordinator;
 import com.wbeam.startup.StartupOverlayInputFactory;
 import com.wbeam.startup.StartupOverlayModelBuilder;
 import com.wbeam.startup.StartupOverlayController;
@@ -60,6 +60,7 @@ import com.wbeam.ui.ErrorTextUtil;
 import com.wbeam.ui.IntraOnlyButtonController;
 import com.wbeam.ui.LiveLogBuffer;
 import com.wbeam.ui.MainActivityRuntimeStateView;
+import com.wbeam.ui.MainActivityInteractionPolicy;
 import com.wbeam.ui.MainActivityUiBinder;
 import com.wbeam.ui.MainActivitySettingsPresenter;
 import com.wbeam.ui.MainActivityStatusPresenter;
@@ -217,9 +218,8 @@ public class MainActivity extends AppCompatActivity {
     private boolean debugControlsVisible = false;
     private boolean debugOverlayVisible = false;
     private boolean trainerHudSessionActive = false;
-    private boolean volumeUpHeld = false;
-    private boolean volumeDownHeld = false;
-    private boolean debugOverlayToggleArmed = false;
+    private final MainActivityInteractionPolicy.ToggleState debugToggleState =
+            new MainActivityInteractionPolicy.ToggleState();
     private boolean liveLogVisible = false;
     private final HudDebugLogLimiter hudDebugLogLimiter = new HudDebugLogLimiter(HUD_ADB_LOG_INTERVAL_MS);
     private boolean surfaceReady = false;
@@ -303,8 +303,10 @@ public class MainActivity extends AppCompatActivity {
         if (!BuildConfig.DEBUG) {
             return;
         }
-        if (volumeUpHeld && volumeDownHeld && !debugOverlayToggleArmed) {
-            debugOverlayToggleArmed = true;
+        if (debugToggleState.volumeUpHeld
+                && debugToggleState.volumeDownHeld
+                && !debugToggleState.debugOverlayToggleArmed) {
+            debugToggleState.debugOverlayToggleArmed = true;
             boolean nextVisible = !debugOverlayVisible;
             setDebugOverlayVisible(nextVisible);
             Toast.makeText(
@@ -708,15 +710,12 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private boolean handleBackNavigation() {
-        if (simpleMenuVisible) {
-            hideSimpleMenu();
-            return true;
-        }
-        if (settingsPanelController != null && settingsPanelController.isVisible()) {
-            hideSettingsPanel();
-            return true;
-        }
-        return false;
+        return MainActivityInteractionPolicy.handleBackNavigation(
+                simpleMenuVisible,
+                settingsPanelController != null && settingsPanelController.isVisible(),
+                this::hideSimpleMenu,
+                this::hideSettingsPanel
+        );
     }
 
     @Override
@@ -736,41 +735,40 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private boolean handleDebugOverlayToggleKeyDown(int keyCode, KeyEvent event) {
-        if (!BuildConfig.DEBUG
-                || (keyCode != KeyEvent.KEYCODE_VOLUME_UP
-                && keyCode != KeyEvent.KEYCODE_VOLUME_DOWN)) {
+        MainActivityInteractionPolicy.ToggleAction action =
+                MainActivityInteractionPolicy.handleDebugToggleKeyDown(
+                        debugToggleState,
+                        BuildConfig.DEBUG,
+                        keyCode,
+                        event.getRepeatCount()
+                );
+        if (!action.handled) {
             return false;
         }
-        if (event.getRepeatCount() == 0) {
-            if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
-                volumeUpHeld = true;
-            } else if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-                volumeDownHeld = true;
-            }
-            if (volumeUpHeld && volumeDownHeld && !debugOverlayToggleArmed) {
-                uiHandler.removeCallbacks(debugOverlayToggleTask);
-                uiHandler.postDelayed(debugOverlayToggleTask, DEBUG_OVERLAY_TOGGLE_HOLD_MS);
-            }
+        if (action.cancelScheduledToggle) {
+            uiHandler.removeCallbacks(debugOverlayToggleTask);
+        }
+        if (action.scheduleToggle) {
+            uiHandler.postDelayed(debugOverlayToggleTask, DEBUG_OVERLAY_TOGGLE_HOLD_MS);
         }
         return true;
     }
 
     private boolean handleDebugOverlayToggleKeyUp(int keyCode) {
-        if (!BuildConfig.DEBUG
-                || (keyCode != KeyEvent.KEYCODE_VOLUME_UP
-                && keyCode != KeyEvent.KEYCODE_VOLUME_DOWN)) {
+        MainActivityInteractionPolicy.ToggleAction action =
+                MainActivityInteractionPolicy.handleDebugToggleKeyUp(
+                        debugToggleState,
+                        BuildConfig.DEBUG,
+                        keyCode
+                );
+        if (!action.handled) {
             return false;
         }
-        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
-            volumeUpHeld = false;
-        } else if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-            volumeDownHeld = false;
-        }
-        if (!volumeUpHeld || !volumeDownHeld) {
+        if (action.cancelScheduledToggle) {
             uiHandler.removeCallbacks(debugOverlayToggleTask);
         }
-        if (!volumeUpHeld && !volumeDownHeld) {
-            debugOverlayToggleArmed = false;
+        if (action.resetArmed) {
+            debugToggleState.debugOverlayToggleArmed = false;
         }
         return true;
     }
@@ -1111,16 +1109,13 @@ public class MainActivity extends AppCompatActivity {
         }
         enforceCursorOverlayPolicy(false);
         intraOnlyEnabled = false;
-        updateIntraOnlyButton();
-        updateSettingValueLabels();
         simpleMode = PREFERRED_VIDEO;
         simpleFps = DEFAULT_FPS;
-        refreshSimpleMenuButtons();
+        refreshSettingsUi(true);
     }
 
     private void applySettings(boolean userAction) {
-        updateSettingValueLabels();
-        updateHostHint();
+        refreshSettingsUi(false);
     }
 
     private void updateSettingValueLabels() {
@@ -1498,9 +1493,7 @@ public class MainActivity extends AppCompatActivity {
                 simpleMode,
                 simpleFps
         );
-        updateIntraOnlyButton();
-        updateSettingValueLabels();
-        updateHostHint();
+        refreshSettingsUi(false);
     }
 
     private void refreshSimpleMenuButtons() {
@@ -1520,6 +1513,15 @@ public class MainActivity extends AppCompatActivity {
                 simpleFps144Button,
                 simpleFps
         );
+    }
+
+    private void refreshSettingsUi(boolean includeSimpleMenuButtons) {
+        updateIntraOnlyButton();
+        updateSettingValueLabels();
+        updateHostHint();
+        if (includeSimpleMenuButtons) {
+            refreshSimpleMenuButtons();
+        }
     }
 
     private void toggleCursorOverlayMode() {
@@ -1833,8 +1835,18 @@ public class MainActivity extends AppCompatActivity {
                 state.pressureState.tone,
                 FPS_LOW_ANCHOR
         );
-        renderRuntimeHudOverlay(
+        int[] streamSize = computeScaledSize();
+        RuntimeHudOverlayPipeline.render(
+                daemonReachable,
+                getSelectedProfile(),
+                getSelectedEncoder(),
+                streamSize[0],
+                streamSize[1],
+                daemonHostName,
                 daemonStateUi,
+                daemonBuildRevision,
+                BuildConfig.WBEAM_BUILD_REV,
+                daemonLastError,
                 state.targetFps,
                 state.presentFps,
                 state.recvFps,
@@ -1858,7 +1870,13 @@ public class MainActivity extends AppCompatActivity {
                 state.bpRecover,
                 state.reason,
                 runtimeChartsHtml,
-                state.pressureState.tone
+                state.pressureState.tone,
+                resourceUsageTracker,
+                perfHudWebView,
+                perfHudText,
+                perfHudPanel,
+                hudOverlayState,
+                HUD_TEXT_COLOR_LIVE
         );
 
         emitHudDebugAdb(RuntimeHudComputation.buildRuntimeDebugSnapshot(
@@ -1889,78 +1907,6 @@ public class MainActivity extends AppCompatActivity {
                 state.reason,
                 daemonLastError
         ));
-    }
-
-    private void renderRuntimeHudOverlay(
-            String daemonStateUi,
-            double targetFps,
-            double presentFps,
-            double recvFps,
-            double decodeFps,
-            double e2eP95,
-            double decodeP95,
-            double renderP95,
-            double frametimeP95,
-            double liveMbps,
-            double dropsPerSec,
-            int qT,
-            int qD,
-            int qR,
-            int qTMax,
-            int qDMax,
-            int qRMax,
-            int adaptiveLevel,
-            String adaptiveAction,
-            long drops,
-            long bpHigh,
-            long bpRecover,
-            String reason,
-            String metricChartsHtml,
-            String tone
-    ) {
-        int[] streamSize = computeScaledSize();
-        RuntimeHudOverlayPipeline.render(
-                daemonReachable,
-                getSelectedProfile(),
-                getSelectedEncoder(),
-                streamSize[0],
-                streamSize[1],
-                daemonHostName,
-                daemonStateUi,
-                daemonBuildRevision,
-                BuildConfig.WBEAM_BUILD_REV,
-                daemonLastError,
-                targetFps,
-                presentFps,
-                recvFps,
-                decodeFps,
-                e2eP95,
-                decodeP95,
-                renderP95,
-                frametimeP95,
-                liveMbps,
-                dropsPerSec,
-                qT,
-                qD,
-                qR,
-                qTMax,
-                qDMax,
-                qRMax,
-                adaptiveLevel,
-                adaptiveAction,
-                drops,
-                bpHigh,
-                bpRecover,
-                reason,
-                metricChartsHtml,
-                tone,
-                resourceUsageTracker,
-                perfHudWebView,
-                perfHudText,
-                perfHudPanel,
-                hudOverlayState,
-                HUD_TEXT_COLOR_LIVE
-        );
     }
 
     private void renderTrainerHudOverlay(String rawHudText) {
@@ -2051,98 +1997,110 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updatePreflightOverlay() {
-        if (preflightOverlay == null) {
-            return;
-        }
+        StartupOverlayCoordinator.State state = new StartupOverlayCoordinator.State();
+        state.startupBeganAtMs = startupBeganAtMs;
+        state.controlRetryCount = controlRetryCount;
+        state.startupDismissed = startupDismissed;
+        state.preflightComplete = preflightComplete;
 
-        if (applyVideoTestOverlayIfActive()) {
-            return;
-        }
-
-        boolean shouldProbe = requiresTransportProbe();
-        maybeStartTransportProbeIfReady(shouldProbe);
-
-        StartupOverlayModelBuilder.Input input = StartupOverlayInputFactory.fromRuntimeState(
-                daemonReachable,
-                daemonHostName,
-                daemonService,
-                daemonBuildRevision,
-                daemonState,
-                daemonLastError,
-                handshakeResolved,
-                isBuildMismatch(),
-                shouldProbe,
-                transportProbe.isProbeOk(),
-                transportProbe.isProbeInFlight(),
-                transportProbe.getProbeInfo(),
-                BuildConfig.WBEAM_API_IMPL,
-                HostApiClient.API_BASE,
-                BuildConfig.WBEAM_API_HOST,
-                BuildConfig.WBEAM_STREAM_HOST,
-                BuildConfig.WBEAM_STREAM_PORT,
-                BuildConfig.WBEAM_BUILD_REV,
-                lastUiInfo,
-                MainActivityRuntimeStateView.effectiveDaemonState(
-                        daemonState,
-                        latestPresentFps,
-                        latestStreamUptimeSec,
-                        latestFrameOutHost
-                ),
-                latestPresentFps,
-                startupBeganAtMs,
-                controlRetryCount,
-                SystemClock.elapsedRealtime(),
-                lastStatsLine,
-                ErrorTextUtil.compactDaemonErrorForUi(daemonLastError)
+        StartupOverlayCoordinator.State next = StartupOverlayCoordinator.update(
+                createStartupOverlayHooks(),
+                state
         );
-        StartupOverlayModelBuilder.Model model = StartupOverlayModelBuilder.build(input);
-        startupBeganAtMs = model.updatedStartupBeganAtMs;
-        controlRetryCount = model.updatedControlRetryCount;
-
-        applyStartupOverlayModel(model);
-        applyPreflightTransition(model.allOk);
+        startupBeganAtMs = next.startupBeganAtMs;
+        controlRetryCount = next.controlRetryCount;
+        startupDismissed = next.startupDismissed;
+        preflightComplete = next.preflightComplete;
     }
 
-    private boolean applyVideoTestOverlayIfActive() {
-        if (videoTestController == null || !videoTestController.isOverlayActive()) {
-            return false;
-        }
-        StartupOverlayViewRenderer.applyVideoTestOverride(
-                startupOverlayViews,
-                videoTestController.getOverlayTitle(),
-                videoTestController.getOverlayBody(),
-                videoTestController.getOverlayHint(),
-                STARTUP_VIDEO_TEST_HINT_COLOR
-        );
-        setPreflightVisible(true);
-        return true;
-    }
+    private StartupOverlayCoordinator.Hooks createStartupOverlayHooks() {
+        return new StartupOverlayCoordinator.Hooks() {
+            @Override
+            public boolean hasOverlayContainer() {
+                return preflightOverlay != null;
+            }
 
-    private void maybeStartTransportProbeIfReady(boolean shouldProbe) {
-        if (daemonReachable && handshakeResolved && !isBuildMismatch() && shouldProbe) {
-            maybeStartTransportProbe();
-        }
-    }
+            @Override
+            public boolean isVideoTestOverlayActive() {
+                return videoTestController != null && videoTestController.isOverlayActive();
+            }
 
-    private void applyStartupOverlayModel(StartupOverlayModelBuilder.Model model) {
-        StartupOverlayViewRenderer.applyModel(model, preflightAnimTick, startupOverlayViews);
-    }
+            @Override
+            public void applyVideoTestOverlay() {
+                StartupOverlayViewRenderer.applyVideoTestOverride(
+                        startupOverlayViews,
+                        videoTestController.getOverlayTitle(),
+                        videoTestController.getOverlayBody(),
+                        videoTestController.getOverlayHint(),
+                        STARTUP_VIDEO_TEST_HINT_COLOR
+                );
+                setPreflightVisible(true);
+            }
 
-    private void applyPreflightTransition(boolean allOk) {
-        PreflightStateMachine.Transition transition =
-                PreflightStateMachine.next(allOk, startupDismissed, 800L);
-        startupDismissed = transition.startupDismissed;
-        preflightComplete = transition.preflightComplete;
-        if (transition.showOverlayNow) {
-            setPreflightVisible(true);
-        }
-        if (transition.scheduleHide) {
-            uiHandler.postDelayed(() -> {
-                if (startupDismissed) {
-                    setPreflightVisible(false);
+            @Override
+            public boolean requiresTransportProbe() {
+                return MainActivity.this.requiresTransportProbe();
+            }
+
+            @Override
+            public void maybeStartTransportProbe() {
+                if (daemonReachable && handshakeResolved && !isBuildMismatch()) {
+                    MainActivity.this.maybeStartTransportProbe();
                 }
-            }, transition.hideDelayMs);
-        }
+            }
+
+            @Override
+            public StartupOverlayModelBuilder.Input buildInput(boolean shouldProbe) {
+                return StartupOverlayInputFactory.fromRuntimeState(
+                        daemonReachable,
+                        daemonHostName,
+                        daemonService,
+                        daemonBuildRevision,
+                        daemonState,
+                        daemonLastError,
+                        handshakeResolved,
+                        isBuildMismatch(),
+                        shouldProbe,
+                        transportProbe.isProbeOk(),
+                        transportProbe.isProbeInFlight(),
+                        transportProbe.getProbeInfo(),
+                        BuildConfig.WBEAM_API_IMPL,
+                        HostApiClient.API_BASE,
+                        BuildConfig.WBEAM_API_HOST,
+                        BuildConfig.WBEAM_STREAM_HOST,
+                        BuildConfig.WBEAM_STREAM_PORT,
+                        BuildConfig.WBEAM_BUILD_REV,
+                        lastUiInfo,
+                        MainActivityRuntimeStateView.effectiveDaemonState(
+                                daemonState,
+                                latestPresentFps,
+                                latestStreamUptimeSec,
+                                latestFrameOutHost
+                        ),
+                        latestPresentFps,
+                        startupBeganAtMs,
+                        controlRetryCount,
+                        SystemClock.elapsedRealtime(),
+                        lastStatsLine,
+                        ErrorTextUtil.compactDaemonErrorForUi(daemonLastError)
+                );
+            }
+
+            @Override
+            public void applyModel(StartupOverlayModelBuilder.Model model) {
+                StartupOverlayViewRenderer.applyModel(model, preflightAnimTick, startupOverlayViews);
+            }
+
+            @Override
+            public void setOverlayVisible(boolean visible) {
+                setPreflightVisible(visible);
+            }
+
+            @Override
+            public void scheduleHide(long delayMs, Runnable action) {
+                uiHandler.postDelayed(action, delayMs);
+            }
+        };
     }
 
     private boolean requiresTransportProbe() {
