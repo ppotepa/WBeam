@@ -79,6 +79,7 @@ import com.wbeam.ui.MainActivityButtonsSetup;
 import com.wbeam.ui.MainActivityLifecycleCleaner;
 import com.wbeam.ui.MainActivitySimpleMenuCoordinator;
 import com.wbeam.ui.MainActivitySettingsInitializer;
+import com.wbeam.ui.MainActivitySettingsInitializerHooksFactory;
 import com.wbeam.ui.MainActivitySpinnersSetup;
 import com.wbeam.ui.MainActivitySurfaceCallbacksFactory;
 import com.wbeam.ui.MainActivityUiBinder;
@@ -947,17 +948,10 @@ public class MainActivity extends AppCompatActivity {
                 DEFAULT_BITRATE_MBPS,
                 cursorOverlayController,
                 simpleMenuState,
-                new MainActivitySettingsInitializer.Hooks() {
-                    @Override
-                    public void enforceCursorOverlayPolicy(boolean persist) {
-                        MainActivity.this.enforceCursorOverlayPolicy(persist);
-                    }
-
-                    @Override
-                    public void refreshSettingsUi(boolean includeSimpleMenuButtons) {
-                        MainActivity.this.refreshSettingsUi(includeSimpleMenuButtons);
-                    }
-                }
+                MainActivitySettingsInitializerHooksFactory.create(
+                        this::enforceCursorOverlayPolicy,
+                        this::refreshSettingsUi
+                )
         );
         intraOnlyEnabled = false;
     }
