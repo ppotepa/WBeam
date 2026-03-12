@@ -5,8 +5,6 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.drawable.GradientDrawable;
-import android.media.MediaCodecInfo;
-import android.media.MediaCodecList;
 import android.media.MediaPlayer;
 import android.os.Build;
 import android.os.Bundle;
@@ -39,6 +37,7 @@ import com.wbeam.api.HostApiClient;
 import com.wbeam.api.StatusListener;
 import com.wbeam.api.StatusPoller;
 import com.wbeam.hud.RuntimeHudFallbackFormatter;
+import com.wbeam.hud.HudDebugLogLimiter;
 import com.wbeam.hud.MetricSeriesBuffer;
 import com.wbeam.hud.ResourceUsageTracker;
 import com.wbeam.hud.RuntimeTrendGridRenderer;
@@ -57,6 +56,7 @@ import com.wbeam.stream.H264TcpPlayer;
 import com.wbeam.stream.SessionUiBridge;
 import com.wbeam.stream.VideoTestController;
 import com.wbeam.stream.StreamSessionController;
+import com.wbeam.stream.DecoderCapabilityInspector;
 import com.wbeam.telemetry.ClientMetricsReporter;
 import com.wbeam.telemetry.RuntimeTelemetryMapper;
 import com.wbeam.ui.ErrorTextUtil;
@@ -103,34 +103,8 @@ public class MainActivity extends AppCompatActivity {
     };
     /**
      * Preferred video encoder for this device.
-     * HEVC hardware decode was standardised in API 21 (Android 5.0).  On older
-     * devices we also check MediaCodecList at runtime — if no video/hevc decoder
-     * is present we fall back to H.264 which every Android device supports.
      */
-    static final String PREFERRED_VIDEO = preferredVideoEncoder();
-    private static String preferredVideoEncoder() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-            return "h264";
-        }
-        try {
-            MediaCodecInfo[] infos;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                infos = new MediaCodecList(MediaCodecList.ALL_CODECS).getCodecInfos();
-            } else {
-                int count = MediaCodecList.getCodecCount();
-                infos = new MediaCodecInfo[count];
-                for (int i = 0; i < count; i++) infos[i] = MediaCodecList.getCodecInfoAt(i);
-            }
-            for (MediaCodecInfo info : infos) {
-                if (info.isEncoder()) continue;
-                for (String type : info.getSupportedTypes()) {
-                    if ("video/hevc".equalsIgnoreCase(type)) return "h265";
-                }
-            }
-        } catch (Exception ignored) {
-        }
-        return "h264";
-    }
+    static final String PREFERRED_VIDEO = DecoderCapabilityInspector.preferredVideoEncoder();
     private static final String[] ENCODER_OPTIONS = {PREFERRED_VIDEO, "raw-png"};
     private static final String[] CURSOR_OPTIONS = {"embedded", "hidden", "metadata"};
     private static final String DEFAULT_PROFILE = "baseline";
@@ -243,8 +217,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean volumeDownHeld = false;
     private boolean debugOverlayToggleArmed = false;
     private boolean liveLogVisible = false;
-    private long lastHudAdbLogAt = 0L;
-    private String lastHudAdbSnapshot = "";
+    private final HudDebugLogLimiter hudDebugLogLimiter = new HudDebugLogLimiter(HUD_ADB_LOG_INTERVAL_MS);
     private boolean surfaceReady = false;
     private boolean preflightComplete = false;
     private int preflightAnimTick = 0;
@@ -356,7 +329,7 @@ public class MainActivity extends AppCompatActivity {
         setupSurfaceCallbacks();
         setupButtons();
         loadSavedSettings();
-        hwAvcDecodeAvailable = hasHardwareAvcDecoder();
+        hwAvcDecodeAvailable = DecoderCapabilityInspector.hasHardwareAvcDecoder(TAG);
         Log.i(TAG, "startup transport api_impl=" + BuildConfig.WBEAM_API_IMPL
             + " api=" + HostApiClient.API_BASE
             + " stream=tcp://" + BuildConfig.WBEAM_STREAM_HOST + ":" + BuildConfig.WBEAM_STREAM_PORT);
@@ -2306,60 +2279,10 @@ public class MainActivity extends AppCompatActivity {
     // Utilities
     // ══════════════════════════════════════════════════════════════════════════
 
-    private boolean hasHardwareAvcDecoder() {
-        try {
-            MediaCodecInfo[] infos;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                infos = new MediaCodecList(MediaCodecList.ALL_CODECS).getCodecInfos();
-            } else {
-                int count = MediaCodecList.getCodecCount();
-                infos = new MediaCodecInfo[count];
-                for (int i = 0; i < count; i++) {
-                    infos[i] = MediaCodecList.getCodecInfoAt(i);
-                }
-            }
-
-            for (MediaCodecInfo info : infos) {
-                if (info == null || info.isEncoder()) {
-                    continue;
-                }
-                for (String type : info.getSupportedTypes()) {
-                    if ("video/avc".equalsIgnoreCase(type)) {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            if (info.isHardwareAccelerated()) {
-                                return true;
-                            }
-                        } else {
-                            String name = info.getName().toLowerCase(Locale.US);
-                            if (!name.startsWith("omx.google.")
-                                    && !name.startsWith("c2.android.")
-                                    && !name.contains("sw")) {
-                                return true;
-                            }
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            Log.w(TAG, "failed to inspect codecs", e);
-        }
-        return false;
-    }
-
     private void emitHudDebugAdb(String snapshot) {
-        if (snapshot == null || snapshot.trim().isEmpty()) {
-            return;
+        if (hudDebugLogLimiter.shouldLog(snapshot)) {
+            Log.i(TAG, "HUDDBG " + snapshot);
         }
-        long now = SystemClock.elapsedRealtime();
-        if (now - lastHudAdbLogAt < HUD_ADB_LOG_INTERVAL_MS) {
-            return;
-        }
-        if (snapshot.equals(lastHudAdbSnapshot)) {
-            return;
-        }
-        lastHudAdbLogAt = now;
-        lastHudAdbSnapshot = snapshot;
-        Log.i(TAG, "HUDDBG " + snapshot);
     }
 
     private int ledColorForState(String state) {
