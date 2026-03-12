@@ -585,19 +585,7 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (BuildConfig.DEBUG
-                && (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)) {
-            if (event.getRepeatCount() == 0) {
-                if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
-                    volumeUpHeld = true;
-                } else if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-                    volumeDownHeld = true;
-                }
-                if (volumeUpHeld && volumeDownHeld && !debugOverlayToggleArmed) {
-                    uiHandler.removeCallbacks(debugOverlayToggleTask);
-                    uiHandler.postDelayed(debugOverlayToggleTask, DEBUG_OVERLAY_TOGGLE_HOLD_MS);
-                }
-            }
+        if (handleDebugOverlayToggleKeyDown(keyCode, event)) {
             return true;
         }
         return super.onKeyDown(keyCode, event);
@@ -605,22 +593,50 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     public boolean onKeyUp(int keyCode, KeyEvent event) {
-        if (BuildConfig.DEBUG
-                && (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)) {
-            if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
-                volumeUpHeld = false;
-            } else if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-                volumeDownHeld = false;
-            }
-            if (!volumeUpHeld || !volumeDownHeld) {
-                uiHandler.removeCallbacks(debugOverlayToggleTask);
-            }
-            if (!volumeUpHeld && !volumeDownHeld) {
-                debugOverlayToggleArmed = false;
-            }
+        if (handleDebugOverlayToggleKeyUp(keyCode)) {
             return true;
         }
         return super.onKeyUp(keyCode, event);
+    }
+
+    private boolean handleDebugOverlayToggleKeyDown(int keyCode, KeyEvent event) {
+        if (!BuildConfig.DEBUG
+                || (keyCode != KeyEvent.KEYCODE_VOLUME_UP
+                && keyCode != KeyEvent.KEYCODE_VOLUME_DOWN)) {
+            return false;
+        }
+        if (event.getRepeatCount() == 0) {
+            if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+                volumeUpHeld = true;
+            } else if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+                volumeDownHeld = true;
+            }
+            if (volumeUpHeld && volumeDownHeld && !debugOverlayToggleArmed) {
+                uiHandler.removeCallbacks(debugOverlayToggleTask);
+                uiHandler.postDelayed(debugOverlayToggleTask, DEBUG_OVERLAY_TOGGLE_HOLD_MS);
+            }
+        }
+        return true;
+    }
+
+    private boolean handleDebugOverlayToggleKeyUp(int keyCode) {
+        if (!BuildConfig.DEBUG
+                || (keyCode != KeyEvent.KEYCODE_VOLUME_UP
+                && keyCode != KeyEvent.KEYCODE_VOLUME_DOWN)) {
+            return false;
+        }
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+            volumeUpHeld = false;
+        } else if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+            volumeDownHeld = false;
+        }
+        if (!volumeUpHeld || !volumeDownHeld) {
+            uiHandler.removeCallbacks(debugOverlayToggleTask);
+        }
+        if (!volumeUpHeld && !volumeDownHeld) {
+            debugOverlayToggleArmed = false;
+        }
+        return true;
     }
 
     // ══════════════════════════════════════════════════════════════════════════
