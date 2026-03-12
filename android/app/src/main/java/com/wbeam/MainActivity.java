@@ -344,9 +344,26 @@ public class MainActivity extends AppCompatActivity {
         }
 
         metricsReporter = new ClientMetricsReporter(ioExecutor, msg -> appendLiveLogWarn(msg));
+        videoTestController = createVideoTestController();
+        statusPoller = createStatusPoller();
+        sessionController = createSessionController();
 
-        videoTestController = new VideoTestController(uiHandler, ioExecutor,
-                new VideoTestController.Callbacks() {
+        applySettings(false);
+        setDebugControlsVisible(false);
+        applyBuildVariantUi();
+        updateStatsLine("fps in/out: - | drops: - | late: - | q(t/d/r): -/-/- | reconnects: -");
+        updatePerfHudUnavailable();
+        startupBeganAtMs = SystemClock.elapsedRealtime();
+        handshakeResolved = false;
+        startupDismissed = false;
+        startPreflightPulse();
+        updatePreflightOverlay();
+        updateStatus(STATE_IDLE, "waiting for desktop connect", 0);
+        statusPoller.start();
+    }
+
+    private VideoTestController createVideoTestController() {
+        return new VideoTestController(uiHandler, ioExecutor, new VideoTestController.Callbacks() {
             @Override public Surface getSurface() { return surface; }
             @Override public void stopVideoPlayer() {
                 if (player != null) { player.stop(); player = null; }
@@ -363,8 +380,9 @@ public class MainActivity extends AppCompatActivity {
             @Override public void onOverlayChanged() { updatePreflightOverlay(); }
             @Override public void setLiveLogVisible(boolean v) {
                 liveLogVisible = v;
-                if (liveLogText != null)
+                if (liveLogText != null) {
                     liveLogText.setVisibility(v ? View.VISIBLE : View.GONE);
+                }
             }
             @Override public void showToast(String msg, boolean longT) {
                 Toast.makeText(MainActivity.this, msg,
@@ -379,8 +397,10 @@ public class MainActivity extends AppCompatActivity {
                         getSelectedFps(), getSelectedBitrateMbps());
             }
         });
+    }
 
-        statusPoller = new StatusPoller(uiHandler, ioExecutor, new StatusPoller.Callbacks() {
+    private StatusPoller createStatusPoller() {
+        return new StatusPoller(uiHandler, ioExecutor, new StatusPoller.Callbacks() {
             @Override
             public void onDaemonStatusUpdate(boolean reachable, boolean wasReachable,
                     String hostName, String state, long runId, String lastError,
@@ -477,25 +497,14 @@ public class MainActivity extends AppCompatActivity {
                 MainActivity.this.ensureDecoderRunning();
             }
         });
+    }
 
-        sessionController = new StreamSessionController(
+    private StreamSessionController createSessionController() {
+        return new StreamSessionController(
                 uiHandler,
                 ioExecutor,
                 buildSessionUiBridge()
         );
-
-        applySettings(false);
-        setDebugControlsVisible(false);
-        applyBuildVariantUi();
-        updateStatsLine("fps in/out: - | drops: - | late: - | q(t/d/r): -/-/- | reconnects: -");
-        updatePerfHudUnavailable();
-        startupBeganAtMs = SystemClock.elapsedRealtime();
-        handshakeResolved = false;
-        startupDismissed = false;
-        startPreflightPulse();
-        updatePreflightOverlay();
-        updateStatus(STATE_IDLE, "waiting for desktop connect", 0);
-        statusPoller.start();
     }
 
     @Override
