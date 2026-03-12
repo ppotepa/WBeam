@@ -3,6 +3,38 @@
 Date: 2026-03-12
 Branch: v0.1.1/base
 
+## 1. Issue Strategy (Execution Model)
+
+Decision:
+- We do not use one giant issue for all work.
+- We use one epic issue per area, then small execution issues under each epic.
+
+Why:
+- Better review scope and lower merge risk.
+- Easier rollback and cleaner history.
+- Clear ownership and progress tracking.
+
+Execution format:
+- Epic issue: goal, scope, DoD, dependencies.
+- Child issues: 1 concrete change set each (small PR/MR).
+- Order is strict: finish one epic before moving to the next.
+
+Current status:
+- Epic #30 exists: Repo/Runtime Hygiene.
+- Next step: create child issues for #30 and execute them one-by-one.
+
+## 2. Epic #30 Breakdown (Step-by-step issues)
+
+Parent Epic:
+- #30 Repo/Runtime Hygiene
+
+Child issues in execution order:
+1. #31 Hygiene inventory and cleanup rules
+2. #32 Harden `.gitignore` for runtime/build artifacts
+3. #33 Remove stale helper/leftover assets
+4. #34 Stabilize CI hygiene checks after cleanup
+5. #35 Final cleanup report and close Epic #30
+
 ## Execution Order
 
 1. Repo/Runtime Hygiene
@@ -92,3 +124,4 @@ Definition of Done:
 ## Notes
 - Epics are executed one-by-one in listed order.
 - Epic #1 starts immediately.
+- Tracking rule: each child issue links to its epic and is closed by its own PR/MR.
