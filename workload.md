@@ -1,7 +1,7 @@
 # Workload Plan (Epics)
 
 Date: 2026-03-12
-Branch: v0.1.1/e30/i31-hygiene
+Branch: v0.1.1/base
 
 ## 1. Issue Strategy (Execution Model)
 
@@ -22,7 +22,9 @@ Execution format:
 Current status:
 - Epic #30 completed: Repo/Runtime Hygiene.
 - Child issues #31-#35 completed and closed.
-- Next step: open Epic #2 and execute its child issues one-by-one.
+- Epic #37 opened: Single Source of Truth for Profiles/Config.
+- Child issues #38-#42 opened.
+- Next step: execute #38 on a dedicated branch.
 
 ## 2. Epic #30 Breakdown (Step-by-step issues)
 
@@ -46,6 +48,29 @@ Child issues in execution order:
 5. #35 Final cleanup report and close Epic #30
    - https://github.com/ppotepa/WBeam/issues/35
    - Status: completed (`docs/hygiene-report-2026-03-12.md`)
+
+## 3. Epic #37 Breakdown (Step-by-step issues)
+
+Parent Epic:
+- #37 Single Source of Truth for Profiles/Config
+  - https://github.com/ppotepa/WBeam/issues/37
+
+Child issues in execution order:
+1. #38 Profile/config source inventory and mapping
+   - https://github.com/ppotepa/WBeam/issues/38
+   - Status: completed (`docs/profile-config-inventory-2026-03-12.md`)
+2. #39 Define canonical profile/config contract
+   - https://github.com/ppotepa/WBeam/issues/39
+   - Status: next
+3. #40 Implement canonical loading and remove fallback drift
+   - https://github.com/ppotepa/WBeam/issues/40
+   - Status: todo
+4. #41 Align API profile surface with canonical model
+   - https://github.com/ppotepa/WBeam/issues/41
+   - Status: todo
+5. #42 Final report and close Epic #37
+   - https://github.com/ppotepa/WBeam/issues/42
+   - Status: todo
 
 ## Execution Order
 
