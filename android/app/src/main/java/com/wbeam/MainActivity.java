@@ -39,6 +39,7 @@ import com.wbeam.api.HostApiClient;
 import com.wbeam.api.StatusListener;
 import com.wbeam.api.StatusPoller;
 import com.wbeam.hud.HudRenderSupport;
+import com.wbeam.hud.TrainerProgressParser;
 import com.wbeam.input.CursorOverlayController;
 import com.wbeam.input.ImmersiveModeController;
 import com.wbeam.startup.PreflightStateMachine;
@@ -69,8 +70,6 @@ import java.util.ArrayDeque;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import okhttp3.Request;
 import okhttp3.Response;
@@ -89,8 +88,6 @@ public class MainActivity extends AppCompatActivity {
     private static final int DECODE_QUEUE_MAX_FRAMES = 2;
     private static final int RENDER_QUEUE_MAX_FRAMES = 1;
     private static final int BANDWIDTH_TEST_MB = 64;
-    private static final Pattern TRAINER_TRIAL_PROGRESS_RE =
-            Pattern.compile("TRIAL\\s+[^\\[]*\\[(\\d+)/(\\d+)]");
     private static final String TEST_VIDEO_URL =
             "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4";
 
@@ -2056,8 +2053,8 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        String progressLine = buildTrainerProgressLine(hudText);
-        int progressPercent = parseTrainerProgressPercent(hudText);
+        String progressLine = TrainerProgressParser.buildProgressLine(hudText);
+        int progressPercent = TrainerProgressParser.parseProgressPercent(hudText);
         if (perfHudWebView != null) {
             String html = buildTrainerHudHtml(hudText, progressLine, progressPercent);
             if (!showHudWebHtml("trainer", html)) {
@@ -2164,43 +2161,6 @@ public class MainActivity extends AppCompatActivity {
         }
         lastHudCompactLine = "trainer hud pending placeholders";
         refreshDebugInfoOverlay();
-    }
-
-    private String buildTrainerProgressLine(String hudText) {
-        Matcher matcher = TRAINER_TRIAL_PROGRESS_RE.matcher(hudText);
-        if (!matcher.find()) {
-            return "";
-        }
-        int cur;
-        int total;
-        try {
-            cur = Integer.parseInt(matcher.group(1));
-            total = Integer.parseInt(matcher.group(2));
-        } catch (Exception ignored) {
-            return "";
-        }
-        if (total <= 0 || cur <= 0) {
-            return "";
-        }
-        int pct = Math.max(0, Math.min(100, (int) Math.round((cur * 100.0) / total)));
-        return String.format(Locale.US, "TRAINING PROGRESS %d%%  (trial %d/%d)", pct, cur, total);
-    }
-
-    private int parseTrainerProgressPercent(String hudText) {
-        Matcher matcher = TRAINER_TRIAL_PROGRESS_RE.matcher(hudText == null ? "" : hudText);
-        if (!matcher.find()) {
-            return -1;
-        }
-        try {
-            int cur = Integer.parseInt(matcher.group(1));
-            int total = Integer.parseInt(matcher.group(2));
-            if (cur <= 0 || total <= 0) {
-                return -1;
-            }
-            return Math.max(0, Math.min(100, (int) Math.round((cur * 100.0) / total)));
-        } catch (Exception ignored) {
-            return -1;
-        }
     }
 
     private String buildTrainerHudHtml(String hudText, String progressLine, int progressPercent) {
