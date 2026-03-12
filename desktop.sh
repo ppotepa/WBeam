@@ -4,10 +4,15 @@ set -euo pipefail
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 WBEAM_CONFIG_HELPER="$ROOT_DIR/host/scripts/wbeam_config.sh"
+WBEAM_GUI_HELPER="$ROOT_DIR/host/scripts/gui_session.sh"
 if [[ -f "$WBEAM_CONFIG_HELPER" ]]; then
   # shellcheck source=host/scripts/wbeam_config.sh
   source "$WBEAM_CONFIG_HELPER"
   wbeam_load_config "$ROOT_DIR"
+fi
+if [[ -f "$WBEAM_GUI_HELPER" ]]; then
+  # shellcheck source=host/scripts/gui_session.sh
+  source "$WBEAM_GUI_HELPER"
 fi
 TAURI_DIR="$ROOT_DIR/desktop/apps/desktop-tauri"
 LOG_DIR="$ROOT_DIR/logs"
@@ -51,82 +56,19 @@ Usage:
 EOF
 }
 
-desktop_has_graphical_env() {
-  if [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
-    return 0
-  fi
-  if [[ -n "${DISPLAY:-}" ]]; then
-    return 0
-  fi
-  return 1
-}
-
-desktop_detect_runas_remote_filter() {
-  local target_user="$1"
-  local sid name type state active remote
-
-  if ! command -v loginctl >/dev/null 2>&1; then
-    echo "no"
-    return 0
-  fi
-
-  while read -r sid _; do
-    [[ -n "${sid:-}" ]] || continue
-    name="$(loginctl show-session "$sid" -p Name --value 2>/dev/null || true)"
-    type="$(loginctl show-session "$sid" -p Type --value 2>/dev/null || true)"
-    state="$(loginctl show-session "$sid" -p State --value 2>/dev/null || true)"
-    active="$(loginctl show-session "$sid" -p Active --value 2>/dev/null || true)"
-    remote="$(loginctl show-session "$sid" -p Remote --value 2>/dev/null || true)"
-
-    if [[ "$name" == "$target_user" && ( "$type" == "x11" || "$type" == "wayland" ) && "$state" == "active" && "$active" == "yes" && "$remote" == "yes" ]]; then
-      echo "yes"
-      return 0
-    fi
-  done < <(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1" "$2}')
-
-  echo "no"
-}
-
 desktop_ensure_graphical_context() {
-  local -a launch_args
-  local remote_filter
-  launch_args=("$@")
-
-  # Already inside a graphical environment.
-  if desktop_has_graphical_env && [[ "${XDG_SESSION_TYPE:-}" != "tty" ]]; then
-    return 0
+  if declare -F wbeam_ensure_graphical_context >/dev/null 2>&1; then
+    wbeam_ensure_graphical_context \
+      "$ROOT_DIR" \
+      "desktop.sh" \
+      "desktop" \
+      "WBEAM_DESKTOP_AUTO_REEXEC" \
+      "WBEAM_DESKTOP_REEXEC" \
+      "$@"
+    return $?
   fi
-
-  # Prevent reexec loops.
-  if [[ "${WBEAM_DESKTOP_REEXEC:-0}" == "1" ]]; then
-    echo "[desktop] failed to enter graphical session context (DISPLAY/WAYLAND still missing)." >&2
-    echo "[desktop] run './runas-remote <user> ./desktop.sh' and verify active GUI session." >&2
-    return 1
-  fi
-
-  if [[ "${WBEAM_DESKTOP_AUTO_REEXEC:-1}" != "1" ]]; then
-    echo "[desktop] no graphical session in current shell (DISPLAY/WAYLAND missing)." >&2
-    echo "[desktop] run './runas-remote <user> ./desktop.sh' or set WBEAM_DESKTOP_AUTO_REEXEC=1." >&2
-    return 1
-  fi
-
-  local target_user="${WBEAM_DEV_REMOTE_USER:-$(id -un)}"
-  remote_filter="${RUNAS_REMOTE_SESSION_REMOTE:-}"
-  if [[ -z "${remote_filter}" ]]; then
-    remote_filter="$(desktop_detect_runas_remote_filter "$target_user")"
-  fi
-  local runas="$ROOT_DIR/runas-remote"
-  if [[ ! -x "$runas" ]]; then
-    echo "[desktop] missing executable: $runas" >&2
-    return 1
-  fi
-
-  echo "[desktop] no graphical session in current shell; re-launching via runas-remote user=$target_user remote_filter=$remote_filter"
-  exec env \
-    RUNAS_REMOTE_QUIET=1 \
-    RUNAS_REMOTE_SESSION_REMOTE="$remote_filter" \
-    WBEAM_DESKTOP_REEXEC=1 \
-    "$runas" "$target_user" "$ROOT_DIR/desktop.sh" -- "${launch_args[@]}"
+  echo "[desktop] missing GUI helper: ${WBEAM_GUI_HELPER}" >&2
+  return 1
 }
 
 ensure_supported_node() {
