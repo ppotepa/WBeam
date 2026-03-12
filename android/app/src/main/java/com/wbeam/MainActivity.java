@@ -42,7 +42,7 @@ import com.wbeam.input.ImmersiveModeController;
 import com.wbeam.startup.PreflightStateMachine;
 import com.wbeam.startup.StartupOverlayModelBuilder;
 import com.wbeam.startup.StartupOverlayController;
-import com.wbeam.startup.StartupStepStyler;
+import com.wbeam.startup.StartupOverlayViewRenderer;
 import com.wbeam.startup.TransportProbeCoordinator;
 import com.wbeam.stream.H264TcpPlayer;
 import com.wbeam.stream.SessionUiBridge;
@@ -162,6 +162,7 @@ public class MainActivity extends AppCompatActivity {
     private TextView startupStep3Detail;
     private TextView startupStep3Status;
     private TextView startupInfoText;
+    private final StartupOverlayViewRenderer.Views startupOverlayViews = new StartupOverlayViewRenderer.Views();
     private TextView startupBuildVersionText;
     private TextView liveLogText;
     private TextView resValueText;
@@ -813,6 +814,23 @@ public class MainActivity extends AppCompatActivity {
         startupStep3Status  = findViewById(R.id.startupStep3Status);
         startupInfoText     = findViewById(R.id.startupInfoText);
         startupBuildVersionText = findViewById(R.id.startupBuildVersion);
+        startupOverlayViews.step1Card = startupStep1Card;
+        startupOverlayViews.step2Card = startupStep2Card;
+        startupOverlayViews.step3Card = startupStep3Card;
+        startupOverlayViews.step1Badge = startupStep1Badge;
+        startupOverlayViews.step1Label = startupStep1Label;
+        startupOverlayViews.step1Detail = startupStep1Detail;
+        startupOverlayViews.step1Status = startupStep1Status;
+        startupOverlayViews.step2Badge = startupStep2Badge;
+        startupOverlayViews.step2Label = startupStep2Label;
+        startupOverlayViews.step2Detail = startupStep2Detail;
+        startupOverlayViews.step2Status = startupStep2Status;
+        startupOverlayViews.step3Badge = startupStep3Badge;
+        startupOverlayViews.step3Label = startupStep3Label;
+        startupOverlayViews.step3Detail = startupStep3Detail;
+        startupOverlayViews.step3Status = startupStep3Status;
+        startupOverlayViews.subtitleText = startupSubtitleText;
+        startupOverlayViews.infoText = startupInfoText;
         if (startupInfoText != null) {
             startupInfoText.setMovementMethod(new ScrollingMovementMethod());
         }
@@ -2377,76 +2395,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void applyStartupOverlayModel(StartupOverlayModelBuilder.Model model) {
-        applyStartupStepState(
-                model.step1State,
-                "1",
-                startupStep1Card,
-                startupStep1Badge,
-                startupStep1Label,
-                startupStep1Status,
-                startupStep1Detail,
-                model.step1Detail
-        );
-        applyStartupStepState(
-                model.step2State,
-                "2",
-                startupStep2Card,
-                startupStep2Badge,
-                startupStep2Label,
-                startupStep2Status,
-                startupStep2Detail,
-                model.step2Detail
-        );
-        applyStartupStepState(
-                model.step3State,
-                "3",
-                startupStep3Card,
-                startupStep3Badge,
-                startupStep3Label,
-                startupStep3Status,
-                startupStep3Detail,
-                model.step3Detail
-        );
-
-        if (startupSubtitleText != null) {
-            startupSubtitleText.setText(model.subtitle);
-            startupSubtitleText.setTextColor(model.step3State == StartupOverlayModelBuilder.Model.SS_OK
-                    ? Color.parseColor("#4ADE80")
-                    : model.step3State == StartupOverlayModelBuilder.Model.SS_ERROR
-                    ? Color.parseColor("#F87171")
-                    : Color.parseColor("#475569"));
-        }
-
-        if (startupInfoText != null) {
-            startupInfoText.setText(model.infoLog);
-            startupInfoText.setTextColor(Color.parseColor("#CBD5E1"));
-        }
-    }
-
-    private void applyStartupStepState(
-            int stepState,
-            String stepNumber,
-            View stepCard,
-            TextView stepBadge,
-            TextView stepLabel,
-            TextView stepStatus,
-            TextView stepDetail,
-            String detail
-    ) {
-        StartupStepStyler.applyStepState(
-                stepState,
-                preflightAnimTick,
-                StartupOverlayModelBuilder.Model.SS_OK,
-                StartupOverlayModelBuilder.Model.SS_ERROR,
-                StartupOverlayModelBuilder.Model.SS_ACTIVE,
-                stepNumber,
-                stepCard,
-                stepBadge,
-                stepLabel,
-                stepStatus,
-                stepDetail,
-                detail
-        );
+        StartupOverlayViewRenderer.applyModel(model, preflightAnimTick, startupOverlayViews);
     }
 
     private void applyPreflightTransition(boolean allOk) {
