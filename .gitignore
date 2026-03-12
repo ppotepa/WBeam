@@ -59,6 +59,9 @@ __pycache__/
 *.pyd
 .venv/
 venv/
+.env.sonar
+.sonar/
+.scannerwork/
 
 # Logs and runtime output
 *.log
