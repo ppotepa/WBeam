@@ -32,6 +32,7 @@ Parent Epic:
 Child issues in execution order:
 1. #31 Hygiene inventory and cleanup rules
    - https://github.com/ppotepa/WBeam/issues/31
+   - Status: in progress (inventory file: `docs/hygiene-inventory-2026-03-12.md`)
 2. #32 Harden `.gitignore` for runtime/build artifacts
    - https://github.com/ppotepa/WBeam/issues/32
 3. #33 Remove stale helper/leftover assets
