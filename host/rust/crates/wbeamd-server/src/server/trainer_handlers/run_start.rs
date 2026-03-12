@@ -1,5 +1,6 @@
 use std::fs::{self, OpenOptions};
 use std::io::Write;
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 use axum::extract::State;
@@ -11,37 +12,16 @@ use crate::AppState;
 
 use crate::server::runtime_utils::{bad_request_json, internal_json};
 use crate::server::trainer_models::{TrainerRun, TrainerStartRequest, TrainerStartResponse};
-use crate::server::trainer_process::{configure_trainer_command, normalize_start_request};
+use crate::server::trainer_process::{
+    configure_trainer_command, normalize_start_request, TrainerStartConfig,
+};
 use crate::server::trainer_support::{now_unix_ms, persist_trainer_run_artifacts, sanitize_profile_name, trainer_profile_root};
 
 pub(crate) async fn post_trainer_start(
     State(state): State<AppState>,
     body: Option<Json<TrainerStartRequest>>,
 ) -> impl IntoResponse {
-    let req = body.map(|Json(v)| v).unwrap_or(TrainerStartRequest {
-        serial: String::new(),
-        profile_name: "baseline".to_string(),
-        mode: None,
-        trials: None,
-        warmup_sec: None,
-        sample_sec: None,
-        overlay: None,
-        stream_port: None,
-        generations: None,
-        population: None,
-        elite_count: None,
-        mutation_rate: None,
-        crossover_rate: None,
-        bitrate_min_kbps: None,
-        bitrate_max_kbps: None,
-        encoder_mode: None,
-        encoders: None,
-        encoder_tuning_mode: None,
-        encoder_params: None,
-        hud_chart_mode: None,
-        hud_font_preset: None,
-        hud_layout: None,
-    });
+    let req = body.map(|Json(v)| v).unwrap_or_default();
 
     let profile_name = sanitize_profile_name(&req.profile_name);
     let config = match normalize_start_request(req, state.sessions.base_stream_port + 2, profile_name) {
@@ -89,14 +69,58 @@ pub(crate) async fn post_trainer_start(
         .stderr(Stdio::from(log_file_err))
         .current_dir(&state.trainer.root);
 
-    let mut child = match cmd.spawn() {
+    let child = match cmd.spawn() {
         Ok(c) => c,
         Err(err) => return internal_json(format!("failed to spawn trainer run: {err}")),
     };
 
-    let pid = child.id();
-    let run = TrainerRun {
-        run_id: run_id.clone(),
+    let run = build_trainer_run(
+        &config,
+        run_id.clone(),
+        engine,
+        child.id(),
+        &log_path,
+        &profile_dir,
+        &run_artifacts_dir,
+    );
+
+    let run_bootstrap = run_bootstrap_payload(&run, config.stream_port);
+    let _ = fs::write(
+        run_artifacts_dir.join("run.json"),
+        serde_json::to_vec_pretty(&run_bootstrap).unwrap_or_default(),
+    );
+
+    {
+        let mut runs = state.trainer.runs.lock().await;
+        runs.insert(run_id.clone(), run);
+    }
+
+    spawn_run_completion_watcher(state.trainer.clone(), run_id.clone(), child);
+
+    (
+        StatusCode::OK,
+        Json(TrainerStartResponse {
+            ok: true,
+            run_id,
+            status: "running".to_string(),
+            log_path: log_path.to_string_lossy().to_string(),
+            warnings: config.warnings,
+        }),
+    )
+        .into_response()
+}
+
+fn build_trainer_run(
+    config: &TrainerStartConfig,
+    run_id: String,
+    engine: String,
+    pid: u32,
+    log_path: &Path,
+    profile_dir: &Path,
+    run_artifacts_dir: &Path,
+) -> TrainerRun {
+    TrainerRun {
+        run_id,
         profile_name: config.profile_name.clone(),
         serial: config.serial.clone(),
         mode: config.mode.clone(),
@@ -128,11 +152,13 @@ pub(crate) async fn post_trainer_start(
         exit_code: None,
         pid: Some(pid),
         error: None,
-    };
+    }
+}
 
-    let run_bootstrap = serde_json::json!({
-        "run_id": run_id.clone(),
-        "status": "running",
+fn run_bootstrap_payload(run: &TrainerRun, stream_port: u16) -> serde_json::Value {
+    serde_json::json!({
+        "run_id": run.run_id.clone(),
+        "status": run.status,
         "started_at_unix_ms": run.started_at_unix_ms,
         "profile_name": run.profile_name,
         "serial": run.serial,
@@ -158,20 +184,15 @@ pub(crate) async fn post_trainer_start(
         "hud_chart_mode": run.hud_chart_mode,
         "hud_font_preset": run.hud_font_preset.clone(),
         "hud_layout": run.hud_layout.clone(),
-        "stream_port": config.stream_port,
-    });
-    let _ = fs::write(
-        run_artifacts_dir.join("run.json"),
-        serde_json::to_vec_pretty(&run_bootstrap).unwrap_or_default(),
-    );
+        "stream_port": stream_port,
+    })
+}
 
-    {
-        let mut runs = state.trainer.runs.lock().await;
-        runs.insert(run_id.clone(), run);
-    }
-
-    let trainer_state = state.trainer.clone();
-    let run_id_for_task = run_id.clone();
+fn spawn_run_completion_watcher(
+    trainer_state: std::sync::Arc<crate::server::trainer_models::TrainerState>,
+    run_id_for_task: String,
+    mut child: std::process::Child,
+) {
     tokio::spawn(async move {
         let wait_result = tokio::task::spawn_blocking(move || child.wait()).await;
         let finished_at = now_unix_ms();
@@ -209,16 +230,4 @@ pub(crate) async fn post_trainer_start(
             persist_trainer_run_artifacts(run);
         }
     });
-
-    (
-        StatusCode::OK,
-        Json(TrainerStartResponse {
-            ok: true,
-            run_id,
-            status: "running".to_string(),
-            log_path: log_path.to_string_lossy().to_string(),
-            warnings: config.warnings,
-        }),
-    )
-        .into_response()
 }

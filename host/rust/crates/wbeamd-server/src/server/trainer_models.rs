@@ -77,6 +77,35 @@ pub(crate) struct TrainerStartRequest {
     pub(crate) hud_layout: Option<String>,
 }
 
+impl Default for TrainerStartRequest {
+    fn default() -> Self {
+        Self {
+            serial: String::new(),
+            profile_name: "baseline".to_string(),
+            mode: None,
+            trials: None,
+            warmup_sec: None,
+            sample_sec: None,
+            overlay: None,
+            stream_port: None,
+            generations: None,
+            population: None,
+            elite_count: None,
+            mutation_rate: None,
+            crossover_rate: None,
+            bitrate_min_kbps: None,
+            bitrate_max_kbps: None,
+            encoder_mode: None,
+            encoders: None,
+            encoder_tuning_mode: None,
+            encoder_params: None,
+            hud_chart_mode: None,
+            hud_font_preset: None,
+            hud_layout: None,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub(crate) struct TrainerStopRequest {
     pub(crate) run_id: String,
