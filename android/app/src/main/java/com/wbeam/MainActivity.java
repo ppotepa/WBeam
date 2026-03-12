@@ -493,12 +493,9 @@ public class MainActivity extends AppCompatActivity {
         if (shouldStopLiveViewForDaemonState(state)) {
             stopLiveView();
         }
-        updateActionButtonsEnabled();
-        updateHostHint();
-        refreshStatusText();
+        refreshUiAfterDaemonStateChange();
         updateStatsLineFromMetrics(metrics, lastError);
         updatePerfHud(metrics);
-        updatePreflightOverlay();
     }
 
     private void updateStatsLineFromMetrics(JSONObject metrics, String lastError) {
@@ -605,6 +602,13 @@ public class MainActivity extends AppCompatActivity {
         daemonBuildRevision = (buildRevision == null || buildRevision.trim().isEmpty())
                 ? "-"
                 : buildRevision.trim();
+    }
+
+    private void refreshUiAfterDaemonStateChange() {
+        updateActionButtonsEnabled();
+        updateHostHint();
+        refreshStatusText();
+        updatePreflightOverlay();
     }
 
     private void notifyConnectedHost(String hostName) {
@@ -1106,17 +1110,20 @@ public class MainActivity extends AppCompatActivity {
     // ══════════════════════════════════════════════════════════════════════════
 
     private void updateDaemonStateFromJson(JSONObject status) {
-        if (status == null) return;
-        daemonReachable = true;
-        daemonHostName = status.optString("host_name", daemonHostName);
-        daemonState = status.optString("state", "IDLE").toUpperCase(Locale.US);
-        daemonLastError = status.optString("last_error", daemonLastError);
-        daemonRunId = status.optLong("run_id", daemonRunId);
-        daemonUptimeSec = status.optLong("uptime", daemonUptimeSec);
-        updateActionButtonsEnabled();
-        updateHostHint();
-        refreshStatusText();
-        updatePreflightOverlay();
+        if (status == null) {
+            return;
+        }
+        applyDaemonStatusSnapshot(
+                true,
+                status.optString("host_name", daemonHostName),
+                status.optString("state", "IDLE").toUpperCase(Locale.US),
+                status.optString("last_error", daemonLastError),
+                status.optLong("run_id", daemonRunId),
+                status.optLong("uptime", daemonUptimeSec),
+                daemonService,
+                daemonBuildRevision
+        );
+        refreshUiAfterDaemonStateChange();
     }
 
     private void ensureDecoderRunning() {
@@ -1145,13 +1152,29 @@ public class MainActivity extends AppCompatActivity {
                 this,
                 statusPoller,
                 this::updateStatus,
-                this::updateDaemonStateFromJson,
-                this::ensureDecoderRunning,
+                this::onSessionBridgeDaemonState,
+                this::onSessionBridgeEnsureDecoder,
                 this::stopLiveView,
                 this::appendLiveLogWarn,
-                this::handleApiFailure,
-                this::buildConfigPayload
+                this::onSessionBridgeApiFailure,
+                this::buildSessionConfigPayload
         );
+    }
+
+    private void onSessionBridgeDaemonState(JSONObject status) {
+        updateDaemonStateFromJson(status);
+    }
+
+    private void onSessionBridgeEnsureDecoder() {
+        ensureDecoderRunning();
+    }
+
+    private void onSessionBridgeApiFailure(String prefix, boolean userAction, Exception e) {
+        handleApiFailure(prefix, userAction, e);
+    }
+
+    private JSONObject buildSessionConfigPayload() {
+        return buildConfigPayload();
     }
 
     private void handleApiFailure(String prefix, boolean userAction, Exception e) {
