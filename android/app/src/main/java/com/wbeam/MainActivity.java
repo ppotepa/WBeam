@@ -52,6 +52,7 @@ import com.wbeam.startup.StartupOverlayModelBuilder;
 import com.wbeam.startup.StartupOverlayProbeHooksFactory;
 import com.wbeam.startup.StartupOverlayController;
 import com.wbeam.startup.StartupBuildVersionPresenter;
+import com.wbeam.startup.StartupOverlayStateSync;
 import com.wbeam.startup.StartupOverlayViewRenderer;
 import com.wbeam.startup.StartupOverlayViewsBinder;
 import com.wbeam.startup.TransportProbeCallbacksFactory;
@@ -1598,20 +1599,21 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updatePreflightOverlay() {
-        StartupOverlayCoordinator.State state = new StartupOverlayCoordinator.State();
-        state.startupBeganAtMs = startupBeganAtMs;
-        state.controlRetryCount = controlRetryCount;
-        state.startupDismissed = startupDismissed;
-        state.preflightComplete = preflightComplete;
+        StartupOverlayStateSync.StateValues current = new StartupOverlayStateSync.StateValues();
+        current.startupBeganAtMs = startupBeganAtMs;
+        current.controlRetryCount = controlRetryCount;
+        current.startupDismissed = startupDismissed;
+        current.preflightComplete = preflightComplete;
 
         StartupOverlayCoordinator.State next = StartupOverlayCoordinator.update(
                 createStartupOverlayHooks(),
-                state
+                StartupOverlayStateSync.snapshot(current)
         );
-        startupBeganAtMs = next.startupBeganAtMs;
-        controlRetryCount = next.controlRetryCount;
-        startupDismissed = next.startupDismissed;
-        preflightComplete = next.preflightComplete;
+        StartupOverlayStateSync.StateValues synced = StartupOverlayStateSync.fromState(next);
+        startupBeganAtMs = synced.startupBeganAtMs;
+        controlRetryCount = synced.controlRetryCount;
+        startupDismissed = synced.startupDismissed;
+        preflightComplete = synced.preflightComplete;
     }
 
     private StartupOverlayCoordinator.Hooks createStartupOverlayHooks() {
