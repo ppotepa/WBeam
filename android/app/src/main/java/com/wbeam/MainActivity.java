@@ -32,6 +32,7 @@ import com.wbeam.api.HostApiClient;
 import com.wbeam.hud.HudOverlayDisplay;
 import com.wbeam.api.StatusListener;
 import com.wbeam.api.StatusPoller;
+import com.wbeam.api.StatusPollerCallbacksFactory;
 import com.wbeam.hud.HudDebugLogLimiter;
 import com.wbeam.hud.MetricSeriesBuffer;
 import com.wbeam.hud.ResourceUsageTracker;
@@ -443,58 +444,19 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private StatusPoller createStatusPoller() {
-        return new StatusPoller(uiHandler, ioExecutor, new StatusPoller.Callbacks() {
-            @Override
-            public void onDaemonStatusUpdate(boolean reachable, boolean wasReachable,
-                    String hostName, String state, long runId, String lastError,
-                    boolean errorChanged, long uptimeSec, String service, String buildRevision, JSONObject metrics) {
-                handleDaemonStatusUpdate(
-                        reachable,
-                        wasReachable,
-                        hostName,
-                        state,
-                        runId,
-                        lastError,
-                        errorChanged,
-                        uptimeSec,
-                        service,
-                        buildRevision,
-                        metrics
-                );
-            }
-
-            @Override
-            public void onDaemonOffline(boolean wasReachable, Exception e) {
-                handleDaemonOffline(wasReachable, e);
-            }
-
-            @Override
-            public void onAutoStartRequired() {
-                handleAutoStartRequired();
-            }
-
-            @Override
-            public void onAutoStartFailed() {
-                handleAutoStartFailed();
-            }
-
-            @Override
-            public void ensureDecoderRunning() {
-                handleEnsureDecoderRunning();
-            }
-        });
-    }
-
-    private void handleAutoStartRequired() {
-        requestStartGuarded(false, true);
-    }
-
-    private void handleAutoStartFailed() {
-        appendLiveLogWarn("auto-start paused after failed capture; tap Start Live to retry");
-    }
-
-    private void handleEnsureDecoderRunning() {
-        ensureDecoderRunning();
+        return new StatusPoller(
+                uiHandler,
+                ioExecutor,
+                StatusPollerCallbacksFactory.create(
+                        this::handleDaemonStatusUpdate,
+                        this::handleDaemonOffline,
+                        () -> requestStartGuarded(false, true),
+                        () -> appendLiveLogWarn(
+                                "auto-start paused after failed capture; tap Start Live to retry"
+                        ),
+                        this::ensureDecoderRunning
+                )
+        );
     }
 
     private void handleDaemonStatusUpdate(
