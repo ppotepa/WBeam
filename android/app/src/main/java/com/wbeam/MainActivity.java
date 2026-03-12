@@ -57,6 +57,7 @@ import com.wbeam.ui.IntraOnlyButtonController;
 import com.wbeam.ui.LiveLogBuffer;
 import com.wbeam.ui.SettingsPayloadBuilder;
 import com.wbeam.ui.SettingsPanelController;
+import com.wbeam.ui.SettingsUiSupport;
 import com.wbeam.ui.SimpleMenuUi;
 import com.wbeam.ui.StatusTextFormatter;
 import com.wbeam.ui.StreamConfigResolver;
@@ -1062,9 +1063,9 @@ public class MainActivity extends AppCompatActivity {
     // ══════════════════════════════════════════════════════════════════════════
 
     private void loadSavedSettings() {
-        setSpinnerSelection(profileSpinner, PROFILE_OPTIONS, DEFAULT_PROFILE);
-        setSpinnerSelection(encoderSpinner, ENCODER_OPTIONS, PREFERRED_VIDEO);
-        setSpinnerSelection(cursorSpinner, CURSOR_OPTIONS, DEFAULT_CURSOR_MODE);
+        SettingsUiSupport.setSpinnerSelection(profileSpinner, PROFILE_OPTIONS, DEFAULT_PROFILE);
+        SettingsUiSupport.setSpinnerSelection(encoderSpinner, ENCODER_OPTIONS, PREFERRED_VIDEO);
+        SettingsUiSupport.setSpinnerSelection(cursorSpinner, CURSOR_OPTIONS, DEFAULT_CURSOR_MODE);
         resolutionSeek.setProgress(clamp(DEFAULT_RES_SCALE, 50, 100) - 50);
         fpsSeek.setProgress(clamp(DEFAULT_FPS, 24, 144) - 24);
         bitrateSeek.setProgress(clamp(DEFAULT_BITRATE_MBPS, 5, 300) - 5);
@@ -1091,9 +1092,9 @@ public class MainActivity extends AppCompatActivity {
         int bitrate = getSelectedBitrateMbps();
         int[] sz = computeScaledSize();
 
-        resValueText.setText(scale + "% (" + sz[0] + "x" + sz[1] + ")");
-        fpsValueText.setText(String.valueOf(fps));
-        bitrateValueText.setText(bitrate + " Mbps");
+        resValueText.setText(SettingsUiSupport.resolutionValueLabel(scale, sz[0], sz[1]));
+        fpsValueText.setText(SettingsUiSupport.fpsValueLabel(fps));
+        bitrateValueText.setText(SettingsUiSupport.bitrateValueLabel(bitrate));
     }
 
     private void updateIntraOnlyButton() {
@@ -1380,7 +1381,7 @@ public class MainActivity extends AppCompatActivity {
         String selectedEncoder = SimpleMenuUi.encoderFromMode(simpleMode, PREFERRED_VIDEO);
         int selectedFps = SimpleMenuUi.clampSimpleFps(simpleFps);
 
-        setSpinnerSelection(encoderSpinner, ENCODER_OPTIONS, selectedEncoder);
+        SettingsUiSupport.setSpinnerSelection(encoderSpinner, ENCODER_OPTIONS, selectedEncoder);
         fpsSeek.setProgress(clamp(selectedFps, 24, 144) - 24);
 
         updateIntraOnlyButton();
@@ -3204,17 +3205,6 @@ public class MainActivity extends AppCompatActivity {
 
     private static int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
-    }
-
-    private static void setSpinnerSelection(Spinner spinner, String[] options, String value) {
-        int idx = 0;
-        for (int i = 0; i < options.length; i++) {
-            if (options[i].equals(value)) {
-                idx = i;
-                break;
-            }
-        }
-        spinner.setSelection(idx, false);
     }
 
 }
