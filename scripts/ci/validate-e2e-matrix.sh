@@ -36,12 +36,13 @@ require_exec "./trainer.sh"
 require_exec "./desktop.sh"
 require_exec "./host/scripts/run_wbeamd.sh"
 require_exec "./host/scripts/run_wbeamd_debug.sh"
-require_exec "./archive/legacy/proto_x11/run.sh"
 
 echo "[matrix] check canonical workflow files"
 require_file "./host/training/wizard.py"
 require_file "./desktop/apps/trainer-tauri/package.json"
 require_file "./desktop/apps/desktop-tauri/package.json"
+
+echo "[matrix] check historical archive markers"
 require_file "./archive/legacy/proto/README.md"
 require_file "./archive/legacy/proto_x11/README.md"
 
