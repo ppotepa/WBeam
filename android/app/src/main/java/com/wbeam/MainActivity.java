@@ -60,8 +60,6 @@ import com.wbeam.ui.MainActivityStatusPresenter;
 import com.wbeam.ui.SettingsSelectionReader;
 import com.wbeam.ui.SettingsPayloadBuilder;
 import com.wbeam.ui.SettingsPanelController;
-import com.wbeam.ui.SettingsUiSupport;
-import com.wbeam.ui.SimpleMenuUi;
 import com.wbeam.ui.StatusTextFormatter;
 import com.wbeam.ui.StreamConfigResolver;
 import com.wbeam.widget.FpsLossGraphView;
@@ -935,12 +933,23 @@ public class MainActivity extends AppCompatActivity {
     // ══════════════════════════════════════════════════════════════════════════
 
     private void loadSavedSettings() {
-        SettingsUiSupport.setSpinnerSelection(profileSpinner, PROFILE_OPTIONS, DEFAULT_PROFILE);
-        SettingsUiSupport.setSpinnerSelection(encoderSpinner, ENCODER_OPTIONS, PREFERRED_VIDEO);
-        SettingsUiSupport.setSpinnerSelection(cursorSpinner, CURSOR_OPTIONS, DEFAULT_CURSOR_MODE);
-        resolutionSeek.setProgress(SettingsSelectionReader.clamp(DEFAULT_RES_SCALE, 50, 100) - 50);
-        fpsSeek.setProgress(SettingsSelectionReader.clamp(DEFAULT_FPS, 24, 144) - 24);
-        bitrateSeek.setProgress(SettingsSelectionReader.clamp(DEFAULT_BITRATE_MBPS, 5, 300) - 5);
+        MainActivitySettingsPresenter.applyDefaultSettings(
+                profileSpinner,
+                encoderSpinner,
+                cursorSpinner,
+                resolutionSeek,
+                fpsSeek,
+                bitrateSeek,
+                PROFILE_OPTIONS,
+                ENCODER_OPTIONS,
+                CURSOR_OPTIONS,
+                DEFAULT_PROFILE,
+                PREFERRED_VIDEO,
+                DEFAULT_CURSOR_MODE,
+                DEFAULT_RES_SCALE,
+                DEFAULT_FPS,
+                DEFAULT_BITRATE_MBPS
+        );
         if (cursorOverlayController != null) {
             cursorOverlayController.resetEnabledDefault();
         }
@@ -1256,7 +1265,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void selectSimpleFps(int fps) {
-        simpleFps = SimpleMenuUi.clampSimpleFps(fps);
+        simpleFps = MainActivitySettingsPresenter.simpleMenuFpsFromSelection(fps);
         refreshSimpleMenuButtons();
         scheduleSimpleMenuAutoHide();
     }
@@ -1265,8 +1274,11 @@ public class MainActivity extends AppCompatActivity {
         if (simpleMenuPanel == null) {
             return;
         }
-        simpleMode = SimpleMenuUi.modeFromEncoder(getSelectedEncoder(), PREFERRED_VIDEO);
-        simpleFps = SimpleMenuUi.clampSimpleFps(getSelectedFps());
+        simpleMode = MainActivitySettingsPresenter.simpleMenuModeFromSelection(
+                getSelectedEncoder(),
+                PREFERRED_VIDEO
+        );
+        simpleFps = MainActivitySettingsPresenter.simpleMenuFpsFromSelection(getSelectedFps());
         simpleMenuVisible = true;
         refreshSimpleMenuButtons();
         simpleMenuPanel.setVisibility(View.VISIBLE);
@@ -1299,12 +1311,14 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void applySimpleMenuToSettings() {
-        String selectedEncoder = SimpleMenuUi.encoderFromMode(simpleMode, PREFERRED_VIDEO);
-        int selectedFps = SimpleMenuUi.clampSimpleFps(simpleFps);
-
-        SettingsUiSupport.setSpinnerSelection(encoderSpinner, ENCODER_OPTIONS, selectedEncoder);
-        fpsSeek.setProgress(SettingsSelectionReader.clamp(selectedFps, 24, 144) - 24);
-
+        MainActivitySettingsPresenter.applySimpleMenuSettings(
+                encoderSpinner,
+                fpsSeek,
+                ENCODER_OPTIONS,
+                PREFERRED_VIDEO,
+                simpleMode,
+                simpleFps
+        );
         updateIntraOnlyButton();
         updateSettingValueLabels();
         updateHostHint();
@@ -1314,13 +1328,11 @@ public class MainActivity extends AppCompatActivity {
         if (simpleMenuPanel == null) {
             return;
         }
-        SimpleMenuUi.applyModeButtons(
+        MainActivitySettingsPresenter.applySimpleMenuButtons(
                 simpleModeH265Button,
                 simpleModeRawButton,
                 PREFERRED_VIDEO,
-                simpleMode
-        );
-        SimpleMenuUi.applyFpsButtons(
+                simpleMode,
                 simpleFps30Button,
                 simpleFps45Button,
                 simpleFps60Button,
