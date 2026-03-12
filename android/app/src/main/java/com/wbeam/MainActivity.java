@@ -59,6 +59,7 @@ import com.wbeam.stream.DecoderCapabilityInspector;
 import com.wbeam.telemetry.ClientMetricsReporter;
 import com.wbeam.telemetry.RuntimeTelemetryMapper;
 import com.wbeam.ui.ErrorTextUtil;
+import com.wbeam.ui.CursorOverlayUiCoordinator;
 import com.wbeam.ui.IntraOnlyButtonController;
 import com.wbeam.ui.LiveLogBuffer;
 import com.wbeam.ui.LiveLogUiAppender;
@@ -69,6 +70,7 @@ import com.wbeam.ui.HostOfflineHooksFactory;
 import com.wbeam.ui.MainActivityRuntimeStateView;
 import com.wbeam.ui.MainActivityInteractionPolicy;
 import com.wbeam.ui.MainActivityLifecycleCleaner;
+import com.wbeam.ui.MainActivitySimpleMenuCoordinator;
 import com.wbeam.ui.MainActivityUiBinder;
 import com.wbeam.ui.MainActivitySettingsPresenter;
 import com.wbeam.ui.MainActivityStatusPresenter;
@@ -223,9 +225,8 @@ public class MainActivity extends AppCompatActivity {
 
     // ── UI state ───────────────────────────────────────────────────────────────
     private boolean intraOnlyEnabled = false;
-    private boolean simpleMenuVisible = false;
-    private String simpleMode = PREFERRED_VIDEO;
-    private int simpleFps = 60;
+    private final MainActivitySimpleMenuCoordinator.State simpleMenuState =
+            new MainActivitySimpleMenuCoordinator.State();
     private boolean debugControlsVisible = false;
     private boolean debugOverlayVisible = false;
     private boolean trainerHudSessionActive = false;
@@ -655,7 +656,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public void onBackPressed() {
         if (MainActivityInteractionPolicy.handleBackNavigation(
-                simpleMenuVisible,
+                simpleMenuState.visible,
                 settingsPanelController != null && settingsPanelController.isVisible(),
                 this::hideSimpleMenu,
                 this::hideSettingsPanel
@@ -944,7 +945,7 @@ public class MainActivity extends AppCompatActivity {
                 simpleModeRawButton,
                 PREFERRED_VIDEO,
                 mode -> {
-                    simpleMode = mode;
+                    simpleMenuState.mode = mode;
                     refreshSimpleMenuButtons();
                     scheduleSimpleMenuAutoHide();
                 }
@@ -1029,8 +1030,9 @@ public class MainActivity extends AppCompatActivity {
         }
         enforceCursorOverlayPolicy(false);
         intraOnlyEnabled = false;
-        simpleMode = PREFERRED_VIDEO;
-        simpleFps = DEFAULT_FPS;
+        simpleMenuState.mode = PREFERRED_VIDEO;
+        simpleMenuState.fps = DEFAULT_FPS;
+        simpleMenuState.visible = false;
         refreshSettingsUi(true);
     }
 
@@ -1269,79 +1271,85 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void selectSimpleFps(int fps) {
-        simpleFps = MainActivitySettingsPresenter.simpleMenuFpsFromSelection(fps);
-        refreshSimpleMenuButtons();
-        scheduleSimpleMenuAutoHide();
+        MainActivitySimpleMenuCoordinator.selectFps(
+                fps,
+                simpleMenuState,
+                this::refreshSimpleMenuButtons,
+                this::scheduleSimpleMenuAutoHide
+        );
     }
 
     private void showSimpleMenu() {
-        if (simpleMenuPanel == null) {
-            return;
-        }
-        simpleMode = MainActivitySettingsPresenter.simpleMenuModeFromSelection(
+        MainActivitySimpleMenuCoordinator.show(
+                simpleMenuPanel,
                 getSelectedEncoder(),
-                PREFERRED_VIDEO
+                PREFERRED_VIDEO,
+                getSelectedFps(),
+                simpleMenuState,
+                this::refreshSimpleMenuButtons,
+                this::scheduleSimpleMenuAutoHide
         );
-        simpleFps = MainActivitySettingsPresenter.simpleMenuFpsFromSelection(getSelectedFps());
-        simpleMenuVisible = true;
-        refreshSimpleMenuButtons();
-        simpleMenuPanel.setVisibility(View.VISIBLE);
-        scheduleSimpleMenuAutoHide();
     }
 
     private void hideSimpleMenu() {
-        if (simpleMenuPanel == null) {
-            return;
-        }
-        simpleMenuVisible = false;
-        uiHandler.removeCallbacks(simpleMenuAutoHideTask);
-        simpleMenuPanel.setVisibility(View.GONE);
+        MainActivitySimpleMenuCoordinator.hide(
+                simpleMenuPanel,
+                uiHandler,
+                simpleMenuAutoHideTask,
+                simpleMenuState
+        );
     }
 
     private void toggleSimpleMenu() {
-        if (simpleMenuVisible) {
-            hideSimpleMenu();
-        } else {
-            showSimpleMenu();
-        }
+        MainActivitySimpleMenuCoordinator.toggle(
+                simpleMenuPanel,
+                uiHandler,
+                simpleMenuAutoHideTask,
+                simpleMenuState,
+                getSelectedEncoder(),
+                PREFERRED_VIDEO,
+                getSelectedFps(),
+                this::refreshSimpleMenuButtons,
+                this::scheduleSimpleMenuAutoHide
+        );
     }
 
     private void scheduleSimpleMenuAutoHide() {
-        if (!simpleMenuVisible || simpleMenuPanel == null) {
-            return;
-        }
-        uiHandler.removeCallbacks(simpleMenuAutoHideTask);
-        uiHandler.postDelayed(simpleMenuAutoHideTask, SIMPLE_MENU_AUTO_HIDE_MS);
+        MainActivitySimpleMenuCoordinator.scheduleAutoHide(
+                simpleMenuPanel,
+                uiHandler,
+                simpleMenuAutoHideTask,
+                simpleMenuState.visible,
+                SIMPLE_MENU_AUTO_HIDE_MS
+        );
     }
 
     private void applySimpleMenuToSettings() {
-        MainActivitySettingsPresenter.applySimpleMenuSettings(
+        MainActivitySimpleMenuCoordinator.applyToSettings(
                 encoderSpinner,
                 fpsSeek,
                 ENCODER_OPTIONS,
                 PREFERRED_VIDEO,
-                simpleMode,
-                simpleFps
+                simpleMenuState.mode,
+                simpleMenuState.fps
         );
         refreshSettingsUi(false);
     }
 
     private void refreshSimpleMenuButtons() {
-        if (simpleMenuPanel == null) {
-            return;
-        }
-        MainActivitySettingsPresenter.applySimpleMenuButtons(
+        MainActivitySimpleMenuCoordinator.refreshButtons(
+                simpleMenuPanel,
                 simpleModeH265Button,
                 simpleModeRawButton,
                 PREFERRED_VIDEO,
-                simpleMode,
+                simpleMenuState.mode,
                 simpleFps30Button,
                 simpleFps45Button,
                 simpleFps60Button,
                 simpleFps90Button,
                 simpleFps120Button,
                 simpleFps144Button,
-                simpleFps
+                simpleMenuState.fps
         );
     }
 
@@ -1355,32 +1363,28 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void toggleCursorOverlayMode() {
-        if (cursorOverlayController == null) {
-            return;
-        }
-        cursorOverlayController.toggleForCursorMode(getSelectedCursorMode());
-        enforceCursorOverlayPolicy(true);
+        CursorOverlayUiCoordinator.toggleMode(
+                cursorOverlayController,
+                getSelectedCursorMode(),
+                () -> enforceCursorOverlayPolicy(true)
+        );
     }
 
     private void enforceCursorOverlayPolicy(boolean persist) {
-        if (cursorOverlayController != null) {
-            cursorOverlayController.applyPolicy(getSelectedCursorMode());
-        }
-        if (persist) {
-            updateHostHint();
-        }
+        CursorOverlayUiCoordinator.applyPolicy(
+                cursorOverlayController,
+                getSelectedCursorMode(),
+                persist,
+                this::updateHostHint
+        );
     }
 
     private void updateCursorOverlay(float x, float y, int action) {
-        if (cursorOverlayController != null) {
-            cursorOverlayController.updateOverlay(x, y, action);
-        }
+        CursorOverlayUiCoordinator.updateOverlay(cursorOverlayController, x, y, action);
     }
 
     private void hideCursorOverlay() {
-        if (cursorOverlayController != null) {
-            cursorOverlayController.hideOverlay();
-        }
+        CursorOverlayUiCoordinator.hideOverlay(cursorOverlayController);
     }
 
     // ══════════════════════════════════════════════════════════════════════════
