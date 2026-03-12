@@ -2403,28 +2403,32 @@ public class MainActivity extends AppCompatActivity {
                 requiresTransportProbe(),
                 ioExecutor,
                 uiHandler,
-                new TransportProbeCoordinator.Callbacks() {
-                    @Override
-                    public String shortError(Exception e) {
-                        return ErrorTextUtil.shortError(e);
-                    }
-
-                    @Override
-                    public void onProbeLogInfo(String msg) {
-                        appendLiveLogInfo(msg);
-                    }
-
-                    @Override
-                    public void onProbeLogWarn(String msg) {
-                        appendLiveLogWarn(msg);
-                    }
-
-                    @Override
-                    public void onProbeStateChanged() {
-                        updatePreflightOverlay();
-                    }
-                }
+                createTransportProbeCallbacks()
         );
+    }
+
+    private TransportProbeCoordinator.Callbacks createTransportProbeCallbacks() {
+        return new TransportProbeCoordinator.Callbacks() {
+            @Override
+            public String shortError(Exception e) {
+                return ErrorTextUtil.shortError(e);
+            }
+
+            @Override
+            public void onProbeLogInfo(String msg) {
+                appendLiveLogInfo(msg);
+            }
+
+            @Override
+            public void onProbeLogWarn(String msg) {
+                appendLiveLogWarn(msg);
+            }
+
+            @Override
+            public void onProbeStateChanged() {
+                updatePreflightOverlay();
+            }
+        };
     }
 
     // ══════════════════════════════════════════════════════════════════════════
