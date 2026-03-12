@@ -62,6 +62,7 @@ import com.wbeam.telemetry.RuntimeTelemetryMapper;
 import com.wbeam.ui.ErrorTextUtil;
 import com.wbeam.ui.IntraOnlyButtonController;
 import com.wbeam.ui.LiveLogBuffer;
+import com.wbeam.ui.SettingsSelectionReader;
 import com.wbeam.ui.SettingsPayloadBuilder;
 import com.wbeam.ui.SettingsPanelController;
 import com.wbeam.ui.SettingsUiSupport;
@@ -982,9 +983,9 @@ public class MainActivity extends AppCompatActivity {
         SettingsUiSupport.setSpinnerSelection(profileSpinner, PROFILE_OPTIONS, DEFAULT_PROFILE);
         SettingsUiSupport.setSpinnerSelection(encoderSpinner, ENCODER_OPTIONS, PREFERRED_VIDEO);
         SettingsUiSupport.setSpinnerSelection(cursorSpinner, CURSOR_OPTIONS, DEFAULT_CURSOR_MODE);
-        resolutionSeek.setProgress(clamp(DEFAULT_RES_SCALE, 50, 100) - 50);
-        fpsSeek.setProgress(clamp(DEFAULT_FPS, 24, 144) - 24);
-        bitrateSeek.setProgress(clamp(DEFAULT_BITRATE_MBPS, 5, 300) - 5);
+        resolutionSeek.setProgress(SettingsSelectionReader.clamp(DEFAULT_RES_SCALE, 50, 100) - 50);
+        fpsSeek.setProgress(SettingsSelectionReader.clamp(DEFAULT_FPS, 24, 144) - 24);
+        bitrateSeek.setProgress(SettingsSelectionReader.clamp(DEFAULT_BITRATE_MBPS, 5, 300) - 5);
         if (cursorOverlayController != null) {
             cursorOverlayController.resetEnabledDefault();
         }
@@ -1312,7 +1313,7 @@ public class MainActivity extends AppCompatActivity {
         int selectedFps = SimpleMenuUi.clampSimpleFps(simpleFps);
 
         SettingsUiSupport.setSpinnerSelection(encoderSpinner, ENCODER_OPTIONS, selectedEncoder);
-        fpsSeek.setProgress(clamp(selectedFps, 24, 144) - 24);
+        fpsSeek.setProgress(SettingsSelectionReader.clamp(selectedFps, 24, 144) - 24);
 
         updateIntraOnlyButton();
         updateSettingValueLabels();
@@ -2321,31 +2322,27 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private int getResolutionScalePercent() {
-        return 50 + resolutionSeek.getProgress();
+        return SettingsSelectionReader.resolutionScalePercent(resolutionSeek);
     }
 
     private int getSelectedFps() {
-        return 24 + fpsSeek.getProgress();
+        return SettingsSelectionReader.selectedFps(fpsSeek);
     }
 
     private int getSelectedBitrateMbps() {
-        return 5 + bitrateSeek.getProgress();
+        return SettingsSelectionReader.selectedBitrateMbps(bitrateSeek);
     }
 
     private String getSelectedProfile() {
-        return String.valueOf(profileSpinner.getSelectedItem());
+        return SettingsSelectionReader.selectedItem(profileSpinner, DEFAULT_PROFILE);
     }
 
     private String getSelectedEncoder() {
-        return String.valueOf(encoderSpinner.getSelectedItem());
+        return SettingsSelectionReader.selectedItem(encoderSpinner, PREFERRED_VIDEO);
     }
 
     private String getSelectedCursorMode() {
-        return String.valueOf(cursorSpinner.getSelectedItem());
-    }
-
-    private static int clamp(int value, int min, int max) {
-        return Math.max(min, Math.min(max, value));
+        return SettingsSelectionReader.selectedItem(cursorSpinner, DEFAULT_CURSOR_MODE);
     }
 
 }
