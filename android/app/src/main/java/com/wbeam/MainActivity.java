@@ -63,6 +63,7 @@ import com.wbeam.ui.IntraOnlyButtonController;
 import com.wbeam.ui.LiveLogBuffer;
 import com.wbeam.ui.LiveLogUiAppender;
 import com.wbeam.ui.BuildRevisionGuard;
+import com.wbeam.ui.HostApiFailureNotifier;
 import com.wbeam.ui.MainActivityRuntimeStateView;
 import com.wbeam.ui.MainActivityInteractionPolicy;
 import com.wbeam.ui.MainActivityUiBinder;
@@ -1142,15 +1143,17 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void handleApiFailure(String prefix, boolean userAction, Exception e) {
-        String reason = ErrorTextUtil.shortError(e);
-        updateStatus(STATE_ERROR, prefix + ": " + reason, 0);
-        appendLiveLogError(prefix + ": " + reason);
-        Log.e(TAG, prefix + ": " + reason, e);
-        if (userAction) {
-            Toast.makeText(this,
-                    "Host API unreachable (" + reason + "). Check USB tethering/LAN and host IP: " + HostApiClient.API_BASE,
-                    Toast.LENGTH_LONG).show();
-        }
+        HostApiFailureNotifier.handle(
+                this,
+                TAG,
+                STATE_ERROR,
+                prefix,
+                userAction,
+                e,
+                HostApiClient.API_BASE,
+                this::updateStatus,
+                this::appendLiveLogError
+        );
     }
 
     private boolean isBuildMismatch() {
