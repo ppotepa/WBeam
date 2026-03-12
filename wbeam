@@ -46,7 +46,7 @@ Groups:
   host      build | run | debug | status | down | probe
   daemon    up | down | status   (alias for host)
   android   build | install | launch | deploy | deploy-all | build-release | install-release | deploy-release
-  x11proto  probe-host | doctor | status | start | stop | smoke | acceptance | android-build | android-deploy (legacy opt-in)
+  x11proto  probe-host | doctor | status | start | stop | smoke | acceptance | android-build | android-deploy (legacy opt-in + risk ack)
   train     wizard
   deps      virtual check [--json] | virtual install [--dry-run] [--yes]
   version   new | current | doctor
@@ -2072,6 +2072,15 @@ require_archive_legacy_optin() {
   if [[ "${WBEAM_ENABLE_ARCHIVE_LEGACY:-0}" != "1" ]]; then
     echo "[x11proto] archive legacy lane is disabled by default."
     echo "[x11proto] set WBEAM_ENABLE_ARCHIVE_LEGACY=1 to opt in explicitly."
+    exit 2
+  fi
+  if [[ "${WBEAM_ACK_ARCHIVE_LEGACY_RISKS:-0}" != "1" ]]; then
+    echo "[x11proto] compatibility lane requires risk acknowledgement."
+    echo "[x11proto] set WBEAM_ACK_ARCHIVE_LEGACY_RISKS=1 to continue."
+    exit 2
+  fi
+  if [[ ! -x "$ROOT_DIR/archive/legacy/proto_x11/run.sh" ]]; then
+    echo "[x11proto] missing archive runner: $ROOT_DIR/archive/legacy/proto_x11/run.sh"
     exit 2
   fi
 }
