@@ -2088,23 +2088,47 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        // Video test controller overrides the startup overlay
-        if (videoTestController != null && videoTestController.isOverlayActive()) {
-            if (startupTitleText != null)    startupTitleText.setText(videoTestController.getOverlayTitle());
-            if (startupSubtitleText != null) startupSubtitleText.setText(videoTestController.getOverlayBody());
-            if (startupInfoText != null) {
-                startupInfoText.setText(videoTestController.getOverlayHint());
-                startupInfoText.setTextColor(Color.parseColor("#FDE68A"));
-            }
-            setPreflightVisible(true);
+        if (applyVideoTestOverlayIfActive()) {
             return;
         }
 
         boolean shouldProbe = requiresTransportProbe();
+        maybeStartTransportProbeIfReady(shouldProbe);
+
+        StartupOverlayModelBuilder.Input input = buildStartupOverlayInput(shouldProbe);
+        StartupOverlayModelBuilder.Model model = StartupOverlayModelBuilder.build(input);
+        startupBeganAtMs = model.updatedStartupBeganAtMs;
+        controlRetryCount = model.updatedControlRetryCount;
+
+        applyStartupOverlayModel(model);
+        applyPreflightTransition(model.allOk);
+    }
+
+    private boolean applyVideoTestOverlayIfActive() {
+        if (videoTestController == null || !videoTestController.isOverlayActive()) {
+            return false;
+        }
+        if (startupTitleText != null) {
+            startupTitleText.setText(videoTestController.getOverlayTitle());
+        }
+        if (startupSubtitleText != null) {
+            startupSubtitleText.setText(videoTestController.getOverlayBody());
+        }
+        if (startupInfoText != null) {
+            startupInfoText.setText(videoTestController.getOverlayHint());
+            startupInfoText.setTextColor(Color.parseColor("#FDE68A"));
+        }
+        setPreflightVisible(true);
+        return true;
+    }
+
+    private void maybeStartTransportProbeIfReady(boolean shouldProbe) {
         if (daemonReachable && handshakeResolved && !isBuildMismatch() && shouldProbe) {
             maybeStartTransportProbe();
         }
+    }
 
+    private StartupOverlayModelBuilder.Input buildStartupOverlayInput(boolean shouldProbe) {
         StartupOverlayModelBuilder.Input input = new StartupOverlayModelBuilder.Input();
         input.daemonReachable = daemonReachable;
         input.daemonHostName = daemonHostName;
@@ -2133,11 +2157,10 @@ public class MainActivity extends AppCompatActivity {
         input.nowMs = SystemClock.elapsedRealtime();
         input.lastStatsLine = lastStatsLine;
         input.daemonErrCompact = ErrorTextUtil.compactDaemonErrorForUi(daemonLastError);
+        return input;
+    }
 
-        StartupOverlayModelBuilder.Model model = StartupOverlayModelBuilder.build(input);
-        startupBeganAtMs = model.updatedStartupBeganAtMs;
-        controlRetryCount = model.updatedControlRetryCount;
-
+    private void applyStartupOverlayModel(StartupOverlayModelBuilder.Model model) {
         StartupStepStyler.applyStepState(
                 model.step1State,
                 preflightAnimTick,
@@ -2176,9 +2199,11 @@ public class MainActivity extends AppCompatActivity {
             startupInfoText.setText(model.infoLog);
             startupInfoText.setTextColor(Color.parseColor("#CBD5E1"));
         }
+    }
 
+    private void applyPreflightTransition(boolean allOk) {
         PreflightStateMachine.Transition transition =
-                PreflightStateMachine.next(model.allOk, startupDismissed, 800L);
+                PreflightStateMachine.next(allOk, startupDismissed, 800L);
         startupDismissed = transition.startupDismissed;
         preflightComplete = transition.preflightComplete;
         if (transition.showOverlayNow) {
