@@ -1,7 +1,7 @@
 # Workload Plan (Epics)
 
 Date: 2026-03-12
-Branch: v0.1.1/e48/i49-policy-boundary
+Branch: v0.1.1/base
 
 ## 1. Issue Strategy (Execution Model)
 
@@ -24,8 +24,9 @@ Current status:
 - Child issues #31-#35 completed and closed.
 - Epic #37 completed: Single Source of Truth for Profiles/Config.
 - Child issues #38-#42 completed.
-- Epic #48 in progress: Legacy Decoupling (`archive/legacy`).
-- Next step: execute #50 after policy boundary decision (#49).
+- Epic #48 completed: Legacy Decoupling (`archive/legacy`).
+- Child issues #49-#53 completed and closed.
+- Next step: execute Epic #4 (Wrapper & Lane Policy Unification).
 
 ## 2. Epic #30 Breakdown (Step-by-step issues)
 
@@ -85,16 +86,16 @@ Child issues in execution order:
    - Status: completed (`docs/archive-legacy-policy-2026-03-12.md`)
 2. #50 Align checks and docs with archive policy
    - https://github.com/ppotepa/WBeam/issues/50
-   - Status: next
+   - Status: completed (CI matrix + structure/workflow docs aligned to true-archive policy)
 3. #51 Remove/isolate archive runtime references
    - https://github.com/ppotepa/WBeam/issues/51
-   - Status: todo
+   - Status: completed (x11proto runtime lane isolated behind explicit opt-in)
 4. #52 Add explicit compatibility guardrails
    - https://github.com/ppotepa/WBeam/issues/52
-   - Status: todo
+   - Status: completed (risk acknowledgement + missing-runner guardrails)
 5. #53 Final report and close Epic #48
    - https://github.com/ppotepa/WBeam/issues/53
-   - Status: todo
+   - Status: completed (epic closure done in GH issue trail)
 
 ## Execution Order
 
