@@ -1,7 +1,7 @@
 # Workload Plan (Epics)
 
 Date: 2026-03-12
-Branch: v0.1.1/base
+Branch: v0.1.1/e37/i42-final-report
 
 ## 1. Issue Strategy (Execution Model)
 
@@ -23,8 +23,8 @@ Current status:
 - Epic #30 completed: Repo/Runtime Hygiene.
 - Child issues #31-#35 completed and closed.
 - Epic #37 opened: Single Source of Truth for Profiles/Config.
-- Child issues #38-#42 opened.
-- Next step: execute #38 on a dedicated branch.
+- Child issues #38-#42 completed.
+- Next step: open Epic #3 and execute its child issues one-by-one.
 
 ## 2. Epic #30 Breakdown (Step-by-step issues)
 
@@ -70,7 +70,7 @@ Child issues in execution order:
    - Status: completed (`docs/openapi.yaml` profile/config alignment)
 5. #42 Final report and close Epic #37
    - https://github.com/ppotepa/WBeam/issues/42
-   - Status: next
+   - Status: completed (`docs/epic-37-final-report-2026-03-12.md`)
 
 ## Execution Order
 
