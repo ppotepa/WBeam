@@ -35,6 +35,8 @@ import com.wbeam.hud.HudDebugLogLimiter;
 import com.wbeam.hud.MetricSeriesBuffer;
 import com.wbeam.hud.ResourceUsageTracker;
 import com.wbeam.hud.RuntimeHudComputation;
+import com.wbeam.hud.RuntimeHudAvailabilityCoordinator;
+import com.wbeam.hud.RuntimeHudAvailabilityHooksFactory;
 import com.wbeam.hud.RuntimeHudOverlayPipeline;
 import com.wbeam.hud.RuntimeHudStateCoordinator;
 import com.wbeam.hud.RuntimeHudTrendComposer;
@@ -1444,17 +1446,27 @@ public class MainActivity extends AppCompatActivity {
         if (perfHudText == null) {
             return;
         }
-        latestTargetFps = getSelectedFps();
-        latestPresentFps = 0.0;
-        latestStreamUptimeSec = 0L;
-        latestFrameOutHost = 0L;
-        lastHudCompactLine = "hud: offline | waiting metrics";
-        showHudTextOnly("offline", "HUD OFFLINE\nwaiting for host metrics...", HUD_TEXT_COLOR_OFFLINE);
-        if (perfHudPanel != null) {
-            perfHudPanel.setAlpha(0.96f);
-        }
-        refreshDebugInfoOverlay();
-        emitHudDebugAdb("state=offline waiting_metrics=1");
+        RuntimeHudAvailabilityCoordinator.applyUnavailable(
+                getSelectedFps(),
+                HUD_TEXT_COLOR_OFFLINE,
+                RuntimeHudAvailabilityHooksFactory.create(
+                        (targetFps, presentFps, uptimeSec, frameOutHost) -> {
+                            latestTargetFps = targetFps;
+                            latestPresentFps = presentFps;
+                            latestStreamUptimeSec = uptimeSec;
+                            latestFrameOutHost = frameOutHost;
+                        },
+                        line -> lastHudCompactLine = line,
+                        this::showHudTextOnly,
+                        alpha -> {
+                            if (perfHudPanel != null) {
+                                perfHudPanel.setAlpha(alpha);
+                            }
+                        },
+                        this::refreshDebugInfoOverlay,
+                        this::emitHudDebugAdb
+                )
+        );
     }
 
     private void updatePerfHud(JSONObject metrics) {
@@ -1474,14 +1486,18 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private boolean handleMissingPerfMetrics(JSONObject metrics, long nowMs) {
-        if (metrics != null) {
-            return false;
-        }
-        if (daemonReachable
-                && lastPerfMetricsAtMs > 0L
-                && (nowMs - lastPerfMetricsAtMs) <= METRICS_STALE_GRACE_MS) {
+        if (RuntimeHudAvailabilityCoordinator.shouldKeepLastMetrics(
+                metrics,
+                daemonReachable,
+                lastPerfMetricsAtMs,
+                nowMs,
+                METRICS_STALE_GRACE_MS
+        )) {
             emitHudDebugAdb("state=metrics_stale grace=1");
             return true;
+        }
+        if (metrics != null) {
+            return false;
         }
         updatePerfHudUnavailable();
         return true;
