@@ -49,6 +49,7 @@ import com.wbeam.startup.StartupOverlayInputFactory;
 import com.wbeam.startup.StartupOverlayModelBuilder;
 import com.wbeam.startup.StartupOverlayController;
 import com.wbeam.startup.StartupOverlayViewRenderer;
+import com.wbeam.startup.TransportProbeCallbacksFactory;
 import com.wbeam.startup.TransportProbeCoordinator;
 import com.wbeam.stream.H264TcpPlayer;
 import com.wbeam.stream.SessionUiBridge;
@@ -2073,32 +2074,12 @@ public class MainActivity extends AppCompatActivity {
                 requiresTransportProbe(),
                 ioExecutor,
                 uiHandler,
-                createTransportProbeCallbacks()
+                TransportProbeCallbacksFactory.create(
+                        this::appendLiveLogInfo,
+                        this::appendLiveLogWarn,
+                        this::updatePreflightOverlay
+                )
         );
-    }
-
-    private TransportProbeCoordinator.Callbacks createTransportProbeCallbacks() {
-        return new TransportProbeCoordinator.Callbacks() {
-            @Override
-            public String shortError(Exception e) {
-                return ErrorTextUtil.shortError(e);
-            }
-
-            @Override
-            public void onProbeLogInfo(String msg) {
-                appendLiveLogInfo(msg);
-            }
-
-            @Override
-            public void onProbeLogWarn(String msg) {
-                appendLiveLogWarn(msg);
-            }
-
-            @Override
-            public void onProbeStateChanged() {
-                updatePreflightOverlay();
-            }
-        };
     }
 
     // ══════════════════════════════════════════════════════════════════════════
