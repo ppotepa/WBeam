@@ -54,6 +54,7 @@ import com.wbeam.stream.H264TcpPlayer;
 import com.wbeam.stream.VideoTestController;
 import com.wbeam.stream.StreamSessionController;
 import com.wbeam.telemetry.ClientMetricsReporter;
+import com.wbeam.ui.ErrorTextUtil;
 import com.wbeam.ui.SettingsPayloadBuilder;
 import com.wbeam.ui.StatusTextFormatter;
 import com.wbeam.ui.StreamConfigResolver;
@@ -484,11 +485,11 @@ public class MainActivity extends AppCompatActivity {
                 }
                 updatePreflightOverlay();
                 if (wasReachable) {
-                    updateStatus(STATE_ERROR, "Host API offline: " + shortError(e), 0);
-                    appendLiveLogError("daemon poll failed: " + shortError(e)
+                    updateStatus(STATE_ERROR, "Host API offline: " + ErrorTextUtil.shortError(e), 0);
+                    appendLiveLogError("daemon poll failed: " + ErrorTextUtil.shortError(e)
                             + " | api=" + HostApiClient.API_BASE);
                     Toast.makeText(MainActivity.this,
-                            "Host API unreachable (" + shortError(e) + "). Check USB tethering/LAN and host IP: " + HostApiClient.API_BASE,
+                            "Host API unreachable (" + ErrorTextUtil.shortError(e) + "). Check USB tethering/LAN and host IP: " + HostApiClient.API_BASE,
                             Toast.LENGTH_LONG).show();
                 } else {
                     refreshStatusText();
@@ -1188,7 +1189,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void handleApiFailure(String prefix, boolean userAction, Exception e) {
-        String reason = shortError(e);
+        String reason = ErrorTextUtil.shortError(e);
         updateStatus(STATE_ERROR, prefix + ": " + reason, 0);
         appendLiveLogError(prefix + ": " + reason);
         Log.e(TAG, prefix + ": " + reason, e);
@@ -1225,34 +1226,6 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         sessionController.requestStart(userAction, ensureViewer);
-    }
-
-    private String shortError(Exception e) {
-        String msg = e.getMessage();
-        if (msg != null) {
-            msg = msg.trim();
-            if (!msg.isEmpty()) {
-                if (msg.length() > 120) {
-                    return msg.substring(0, 120);
-                }
-                return msg;
-            }
-        }
-        return e.getClass().getSimpleName();
-    }
-
-    private String compactDaemonErrorForUi(String raw) {
-        if (raw == null) {
-            return "";
-        }
-        String compact = raw.replace('\n', ' ').replace('\r', ' ').trim();
-        while (compact.contains("  ")) {
-            compact = compact.replace("  ", " ");
-        }
-        if (compact.length() > 120) {
-            return compact.substring(0, 120) + "...";
-        }
-        return compact;
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -1593,7 +1566,7 @@ public class MainActivity extends AppCompatActivity {
         lastUiBps = bps;
         refreshStatusText();
         refreshDebugInfoOverlay();
-        if (STATE_ERROR.equals(lastUiState) && isCriticalUiInfo(lastUiInfo)) {
+        if (STATE_ERROR.equals(lastUiState) && ErrorTextUtil.isCriticalUiInfo(lastUiInfo)) {
             long now = SystemClock.elapsedRealtime();
             boolean same = lastUiInfo.equals(lastCriticalErrorInfo);
             boolean stale = (now - lastCriticalErrorLogAtMs) > 30_000L;
@@ -1605,18 +1578,6 @@ public class MainActivity extends AppCompatActivity {
                 Log.e(TAG, line);
             }
         }
-    }
-
-    private boolean isCriticalUiInfo(String info) {
-        if (info == null) {
-            return false;
-        }
-        String text = info.toLowerCase(Locale.US);
-        return text.contains("offline")
-                || text.contains("ioexception")
-                || text.contains("stream error")
-                || text.contains("failed")
-                || text.contains("disconnected");
     }
 
     private void appendLiveLogInfo(String line) {
@@ -3261,7 +3222,7 @@ public class MainActivity extends AppCompatActivity {
         input.controlRetryCount = controlRetryCount;
         input.nowMs = SystemClock.elapsedRealtime();
         input.lastStatsLine = lastStatsLine;
-        input.daemonErrCompact = compactDaemonErrorForUi(daemonLastError);
+        input.daemonErrCompact = ErrorTextUtil.compactDaemonErrorForUi(daemonLastError);
 
         StartupOverlayModelBuilder.Model model = StartupOverlayModelBuilder.build(input);
         startupBeganAtMs = model.updatedStartupBeganAtMs;
@@ -3321,7 +3282,7 @@ public class MainActivity extends AppCompatActivity {
                 new TransportProbeCoordinator.Callbacks() {
                     @Override
                     public String shortError(Exception e) {
-                        return MainActivity.this.shortError(e);
+                        return ErrorTextUtil.shortError(e);
                     }
 
                     @Override
