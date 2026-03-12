@@ -38,8 +38,9 @@ import com.wbeam.hud.RuntimeHudComputation;
 import com.wbeam.hud.RuntimeHudOverlayPipeline;
 import com.wbeam.hud.RuntimeHudTrendComposer;
 import com.wbeam.hud.RuntimeHudUpdateState;
+import com.wbeam.hud.TrainerHudModeCoordinator;
+import com.wbeam.hud.TrainerHudModeHooksFactory;
 import com.wbeam.hud.TrainerHudOverlayPipeline;
-import com.wbeam.hud.TrainerHudRouting;
 import com.wbeam.input.CursorOverlayController;
 import com.wbeam.input.ImmersiveModeController;
 import com.wbeam.startup.StartupOverlayCoordinator;
@@ -1536,57 +1537,37 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private boolean handleTrainerHudPath(JSONObject metrics, long nowMs) {
-        String connectionMode = metrics.optString("connection_mode", "live")
-                .trim()
-                .toLowerCase(Locale.US);
-        JSONObject trainerHudJson = metrics.optJSONObject("trainer_hud_json");
-        boolean trainerHudFromJson = trainerHudJson != null && trainerHudJson.length() > 0;
-        String trainerHudText = metrics.optString("trainer_hud_text", "");
-        boolean trainerHudFromText = trainerHudText != null && !trainerHudText.trim().isEmpty();
-        boolean trainerHudFlag = metrics.optBoolean("trainer_hud_active", false);
-
-        TrainerHudRouting.Decision decision = TrainerHudRouting.decide(
-                connectionMode,
-                trainerHudFlag,
-                trainerHudFromJson,
-                trainerHudFromText,
+        TrainerHudModeCoordinator.State state = new TrainerHudModeCoordinator.State();
+        state.lastPayloadAtMs = lastTrainerHudPayloadAtMs;
+        state.sessionActive = trainerHudSessionActive;
+        boolean handled = TrainerHudModeCoordinator.handle(
+                metrics,
                 nowMs,
-                lastTrainerHudPayloadAtMs,
-                trainerHudSessionActive,
+                state,
                 TRAINER_HUD_PAYLOAD_GRACE_MS,
                 BuildConfig.DEBUG,
-                debugOverlayVisible
+                debugOverlayVisible,
+                TrainerHudModeHooksFactory.create(
+                        () -> setDebugOverlayVisible(true),
+                        this::emitHudDebugAdb,
+                        this::renderTrainerHudOverlayJson,
+                        this::renderTrainerHudOverlay,
+                        () -> { },
+                        this::renderTrainerHudOverlayPlaceholder,
+                        () -> {
+                            showHudTextOnly(
+                                    "trainer",
+                                    "TRAINING HUD\nwaiting for trainer metrics...",
+                                    HUD_TEXT_COLOR_LIVE
+                            );
+                            lastHudCompactLine = "trainer hud waiting metrics";
+                            refreshDebugInfoOverlay();
+                        }
+                )
         );
-        lastTrainerHudPayloadAtMs = decision.updatedLastPayloadAtMs;
-        trainerHudSessionActive = decision.updatedSessionActive;
-        if (decision.enableDebugOverlay) {
-            setDebugOverlayVisible(true);
-        }
-        if (decision.logMessage != null && !decision.logMessage.isEmpty()) {
-            emitHudDebugAdb(decision.logMessage);
-        }
-
-        switch (decision.action) {
-            case RENDER_JSON:
-                renderTrainerHudOverlayJson(trainerHudJson);
-                return true;
-            case RENDER_TEXT:
-                renderTrainerHudOverlay(trainerHudText);
-                return true;
-            case KEEP_LAST:
-                return true;
-            case RENDER_PLACEHOLDER:
-                renderTrainerHudOverlayPlaceholder();
-                return true;
-            case SHOW_WAITING:
-                showHudTextOnly("trainer", "TRAINING HUD\nwaiting for trainer metrics...", HUD_TEXT_COLOR_LIVE);
-                lastHudCompactLine = "trainer hud waiting metrics";
-                refreshDebugInfoOverlay();
-                return true;
-            case NONE:
-            default:
-                return decision.handled;
-        }
+        lastTrainerHudPayloadAtMs = state.lastPayloadAtMs;
+        trainerHudSessionActive = state.sessionActive;
+        return handled;
     }
 
     private void updateRuntimePerfHud(JSONObject metrics, long nowMs) {
