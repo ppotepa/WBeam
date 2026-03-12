@@ -347,7 +347,12 @@ public class MainActivity extends AppCompatActivity {
         setScreenAlwaysOn(true);
         bindStartupBuildVersion();
         setupSpinners();
-        setupSeekbars();
+        MainActivityUiBinder.setupSeekbars(
+                resolutionSeek,
+                fpsSeek,
+                bitrateSeek,
+                this::updateSettingValueLabels
+        );
         setupSurfaceCallbacks();
         setupButtons();
         loadSavedSettings();
@@ -380,7 +385,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void initializeStartupState() {
-        applySettings(false);
+        refreshSettingsUi(false);
         setDebugControlsVisible(false);
         applyBuildVariantUi();
         updateStatsLine(MainActivityStatusPresenter.DEFAULT_STATS_LINE);
@@ -809,10 +814,6 @@ public class MainActivity extends AppCompatActivity {
         simpleFps120Button = findViewById(R.id.simpleFps120Button);
         simpleFps144Button = findViewById(R.id.simpleFps144Button);
         simpleApplyButton = findViewById(R.id.simpleApplyButton);
-        setupTrainerHudWebView();
-    }
-
-    private void setupTrainerHudWebView() {
         MainActivityUiBinder.setupTrainerHudWebView(perfHudWebView);
     }
 
@@ -881,15 +882,6 @@ public class MainActivity extends AppCompatActivity {
                     enforceCursorOverlayPolicy(false);
                     updateHostHint();
                 }
-        );
-    }
-
-    private void setupSeekbars() {
-        MainActivityUiBinder.setupSeekbars(
-                resolutionSeek,
-                fpsSeek,
-                bitrateSeek,
-                this::updateSettingValueLabels
         );
     }
 
@@ -1037,10 +1029,6 @@ public class MainActivity extends AppCompatActivity {
         simpleMode = PREFERRED_VIDEO;
         simpleFps = DEFAULT_FPS;
         refreshSettingsUi(true);
-    }
-
-    private void applySettings(boolean userAction) {
-        refreshSettingsUi(false);
     }
 
     private void updateSettingValueLabels() {
