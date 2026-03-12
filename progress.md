@@ -12,7 +12,6 @@ Detailed implementation history is maintained in GitHub Issues and Pull Requests
   - `host/`
   - `desktop/`
   - `shared/`
-  - `archive/legacy/`
 - Main operational entrypoint remains `./wbeam`.
 - Desktop apps are clients; daemon remains runtime authority.
 
@@ -45,7 +44,7 @@ The following checks are expected to stay green:
 
 ## Open Work
 - Epic #1 and Epic #2 are complete.
-- Next planned lane: Epic #3 (Legacy Decoupling `archive/legacy`).
+- Legacy decoupling scope is completed and legacy archive paths were removed from runtime/CI.
 - New work should be opened as explicit issues with scope and acceptance criteria.
 
 ## Documentation Rules

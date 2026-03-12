@@ -42,10 +42,6 @@ require_file "./host/training/wizard.py"
 require_file "./desktop/apps/trainer-tauri/package.json"
 require_file "./desktop/apps/desktop-tauri/package.json"
 
-echo "[matrix] check historical archive markers"
-require_file "./archive/legacy/proto/README.md"
-require_file "./archive/legacy/proto_x11/README.md"
-
 echo "[matrix] check wrapper removal"
 require_absent "./src"
 require_absent "./proto"

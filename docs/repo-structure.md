@@ -19,7 +19,6 @@ WBeam/
   host/
   desktop/
   shared/
-  archive/
   docs/
   scripts/
   config/
@@ -40,9 +39,6 @@ WBeam/
   - `host/rust`, `host/scripts`, `host/daemon`, `host/training`
   - `desktop/apps/desktop-tauri`, `desktop/apps/trainer-tauri`
   - `shared/protocol`, `shared/compat`
-- Legacy prototypes are archived:
-  - `archive/legacy/proto`
-  - `archive/legacy/proto_x11`
 - Compatibility wrappers are removed:
   - no `src/*` alias layer
   - no root-level `proto` / `proto_x11` aliases
@@ -57,8 +53,6 @@ WBeam/
 - `src/protocol/rust` -> `shared/protocol/rust`
 - `src/compat/*` -> `shared/compat/*`
 - `src/domains/training` -> `host/training` (runtime-owned domain with desktop clients)
-- `proto/*` -> `archive/legacy/proto/*`
-- `proto_x11/*` -> `archive/legacy/proto_x11/*`
 
 ## Migration Rules
 
@@ -69,9 +63,8 @@ WBeam/
 
 ## Archive Policy
 
-- `archive/legacy/*` is historical-only (true archive), not default runtime source.
-- CI may verify archive presence as historical assets, but must not require archive executables for canonical runtime flow.
-- Any compatibility execution path touching archive content must be explicit opt-in and documented.
+- Legacy prototype lanes were removed from the repository.
+- Canonical runtime, CI, and docs must not depend on `archive/legacy/*`.
 
 ## Structure Validation
 

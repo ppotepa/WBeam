@@ -19,8 +19,6 @@ required_paths=(
   "host/README.md"
   "desktop/README.md"
   "shared/README.md"
-  "archive/legacy/proto/README.md"
-  "archive/legacy/proto_x11/README.md"
   "docs/agents.workflow.md"
   "docs/repo-structure.md"
   "wbeam"

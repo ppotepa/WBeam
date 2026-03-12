@@ -333,10 +333,6 @@ WBeam/
   host/
   desktop/
   shared/
-  archive/
-    legacy/
-      proto/
-      proto_x11/
   config/
   docs/
   logs/
