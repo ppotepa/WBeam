@@ -21,7 +21,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
-import java.nio.ByteBuffer;
 import java.util.Locale;
 
 /**
@@ -114,7 +113,11 @@ public final class H264TcpPlayer {
         this.decodeWidth    = decodeWidth;
         this.decodeHeight   = decodeHeight;
         this.frameUs        = frameUs;
-        this.frameBufferBudgetFrames = computeFrameBufferBudget(frameUs);
+        this.frameBufferBudgetFrames = StreamBufferMath.computeFrameBufferBudget(
+                frameUs,
+                PNG_BUFFER_MIN_FRAMES,
+                PNG_BUFFER_MAX_FRAMES
+        );
     }
 
     private static String resolveHost() {
@@ -248,7 +251,7 @@ public final class H264TcpPlayer {
         long pendingWithNoPresent = 0;
         long lastDecodeProgressMs = SystemClock.elapsedRealtime();
         MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
-        DrainStats drainStats = new DrainStats();
+        MediaCodecBridge.DrainStats drainStats = new MediaCodecBridge.DrainStats();
 
         while (running) {
             int count = input.read(readBuf);
@@ -292,7 +295,7 @@ public final class H264TcpPlayer {
                     if ((sTail - sHead) < 4 + nalSize) break;
 
                     frames++;
-                        drainLatestFrame(codec, bufferInfo, drainStats,
+                        MediaCodecBridge.drainLatestFrame(codec, bufferInfo, drainStats,
                             true,
                             pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES ? 16_000 : 5_000);
                     pendingDecodeQueue = Math.max(0, pendingDecodeQueue - drainStats.releasedCount);
@@ -309,7 +312,7 @@ public final class H264TcpPlayer {
                     if (pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES) {
                         if (StreamNalUtils.isRecoveryNal(streamBuf, sHead + 4, nalSize)) {
                             long t0 = SystemClock.elapsedRealtimeNanos();
-                            if (queueNal(codec, streamBuf, sHead + 4, nalSize, frames * frameUs, 1_000)) {
+                            if (MediaCodecBridge.queueNal(codec, streamBuf, sHead + 4, nalSize, frames * frameUs, 1_000)) {
                                 long dn = SystemClock.elapsedRealtimeNanos() - t0;
                                 decodeNsTotal += dn; decodeNsBuf[(decodeNsBufN++) & 127] = dn;
                                 avgNalSize = ((avgNalSize * 7) + nalSize) / 8;
@@ -319,7 +322,7 @@ public final class H264TcpPlayer {
                         } else { droppedSec++; }
                     } else {
                         long t0 = SystemClock.elapsedRealtimeNanos();
-                        if (queueNal(codec, streamBuf, sHead + 4, nalSize, frames * frameUs, 1_000)) {
+                        if (MediaCodecBridge.queueNal(codec, streamBuf, sHead + 4, nalSize, frames * frameUs, 1_000)) {
                             long dn = SystemClock.elapsedRealtimeNanos() - t0;
                             decodeNsTotal += dn; decodeNsBuf[(decodeNsBufN++) & 127] = dn;
                             avgNalSize = ((avgNalSize * 7) + nalSize) / 8;
@@ -341,7 +344,7 @@ public final class H264TcpPlayer {
                         int nalSize = next - sHead;
                         if (nalSize > 0) {
                             frames++;
-                                drainLatestFrame(codec, bufferInfo, drainStats,
+                                MediaCodecBridge.drainLatestFrame(codec, bufferInfo, drainStats,
                                     true,
                                     pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES ? 16_000 : 5_000);
                             pendingDecodeQueue = Math.max(0, pendingDecodeQueue - drainStats.releasedCount);
@@ -358,7 +361,7 @@ public final class H264TcpPlayer {
                             if (pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES) {
                                 if (StreamNalUtils.isRecoveryNal(streamBuf, sHead, nalSize)) {
                                     long t0 = SystemClock.elapsedRealtimeNanos();
-                                    if (queueNal(codec, streamBuf, sHead, nalSize, frames * frameUs, 1_000)) {
+                                    if (MediaCodecBridge.queueNal(codec, streamBuf, sHead, nalSize, frames * frameUs, 1_000)) {
                                         long dn = SystemClock.elapsedRealtimeNanos() - t0;
                                         decodeNsTotal += dn; decodeNsBuf[(decodeNsBufN++) & 127] = dn;
                                         avgNalSize = ((avgNalSize * 7) + nalSize) / 8;
@@ -368,7 +371,7 @@ public final class H264TcpPlayer {
                                 } else { droppedSec++; }
                             } else {
                                 long t0 = SystemClock.elapsedRealtimeNanos();
-                                if (queueNal(codec, streamBuf, sHead, nalSize, frames * frameUs, 1_000)) {
+                                if (MediaCodecBridge.queueNal(codec, streamBuf, sHead, nalSize, frames * frameUs, 1_000)) {
                                     long dn = SystemClock.elapsedRealtimeNanos() - t0;
                                     decodeNsTotal += dn; decodeNsBuf[(decodeNsBufN++) & 127] = dn;
                                     avgNalSize = ((avgNalSize * 7) + nalSize) / 8;
@@ -401,19 +404,19 @@ public final class H264TcpPlayer {
                                 + " | drops: " + droppedTotal
                                 + " | late: " + tooLateTotal
                                 + " | q(t/d/r): "
-                                + estimateTransportDepthFrames(sTail - sHead, avgNalSize) + "/"
+                                + StreamBufferMath.estimateTransportDepthFrames(sTail - sHead, avgNalSize) + "/"
                                 + Math.min(DECODE_QUEUE_MAX_FRAMES, pendingDecodeQueue) + "/"
                                 + renderQueueDepth
                                 + " | reconnects: " + reconnects
                 );
                 double decodeMsP50 = inFrames > 0 ? (decodeNsTotal / 1_000_000.0) / inFrames : 0.0;
-                double decodeMsP95 = percentileMs(decodeNsBuf, Math.min(decodeNsBufN, 128), 0.95, decodeNsScratch);
+                double decodeMsP95 = StreamBufferMath.percentileMs(decodeNsBuf, Math.min(decodeNsBufN, 128), 0.95, decodeNsScratch);
                 double renderMsP95 = renderNsMax / 1_000_000.0;
-                double e2eMs = estimateE2eLatencyMs(lastPresentedPtsUs);
+                double e2eMs = StreamBufferMath.estimateE2eLatencyMs(lastPresentedPtsUs);
                 statusListener.onClientMetrics(new ClientMetricsSample(
                         inFrames, inFrames, outFrames, bytes,
                         decodeMsP50, decodeMsP95, renderMsP95, e2eMs, e2eMs,
-                        estimateTransportDepthFrames(sTail - sHead, avgNalSize),
+                        StreamBufferMath.estimateTransportDepthFrames(sTail - sHead, avgNalSize),
                         Math.min(DECODE_QUEUE_MAX_FRAMES, pendingDecodeQueue),
                         Math.min(RENDER_QUEUE_MAX_FRAMES, renderQueueDepth),
                         0, droppedTotal, tooLateTotal,
@@ -475,30 +478,24 @@ public final class H264TcpPlayer {
         // blocks non-IDR frames until the codec gets a clean anchor.
         boolean waitForKeyframe    = false;
         MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
-        DrainStats drainStats = new DrainStats();
+        MediaCodecBridge.DrainStats drainStats = new MediaCodecBridge.DrainStats();
         int pendingDecodeQueue = 0;
 
         // ── Read WBTP HELLO handshake ─────────────────────────────────────────
-        readFully(input, helloBuf, HELLO_HEADER_SIZE);
-        int helloMagic = ((helloBuf[0] & 0xFF) << 24) | ((helloBuf[1] & 0xFF) << 16)
-                | ((helloBuf[2] & 0xFF) << 8) | (helloBuf[3] & 0xFF);
-        int helloLen = ((helloBuf[6] & 0xFF) << 8) | (helloBuf[7] & 0xFF);
-        if (helloMagic != HELLO_MAGIC || helloBuf[4] != HELLO_VERSION
-                || helloLen != HELLO_HEADER_SIZE) {
-            throw new IOException("WBTP: bad stream hello magic/version/len");
-        }
-        // byte[5]: codec flags + mode bits
-        final int helloFlags    = helloBuf[5] & 0xFF;
-        final boolean isPng     = (helloFlags & HELLO_CODEC_PNG) != 0;
-        final boolean isHevc    = !isPng && (helloFlags & HELLO_CODEC_HEVC) != 0;
-        final int streamMode    = helloFlags & HELLO_MODE_MASK;
+        WbtpProtocol.Hello hello = WbtpProtocol.readHello(
+                input,
+                helloBuf,
+                HELLO_MAGIC,
+                HELLO_VERSION,
+                HELLO_HEADER_SIZE
+        );
+        final int helloFlags = hello.flags;
+        final boolean isPng = (helloFlags & HELLO_CODEC_PNG) != 0;
+        final boolean isHevc = !isPng && (helloFlags & HELLO_CODEC_HEVC) != 0;
+        final int streamMode = helloFlags & HELLO_MODE_MASK;
         final boolean isUltraMode = streamMode == HELLO_MODE_ULTRA;
-        final String  videoMime = isPng ? "image/png" : (isHevc ? "video/hevc" : "video/avc");
-        long streamSessionId =
-                ((helloBuf[8]  & 0xFFL) << 56) | ((helloBuf[9]  & 0xFFL) << 48)
-              | ((helloBuf[10] & 0xFFL) << 40) | ((helloBuf[11] & 0xFFL) << 32)
-              | ((helloBuf[12] & 0xFFL) << 24) | ((helloBuf[13] & 0xFFL) << 16)
-              | ((helloBuf[14] & 0xFFL) <<  8) |  (helloBuf[15] & 0xFFL);
+        final String videoMime = isPng ? "image/png" : (isHevc ? "video/hevc" : "video/avc");
+        long streamSessionId = hello.sessionId;
         String modeLabel = streamMode == HELLO_MODE_ULTRA
                 ? "ultra"
                 : (streamMode == HELLO_MODE_QUALITY ? "quality" : "stable");
@@ -510,7 +507,7 @@ public final class H264TcpPlayer {
             return;
         }
 
-        final int seqGapBudget = computeSeqGapBudget(frameUs, isUltraMode);
+        final int seqGapBudget = StreamBufferMath.computeSeqGapBudget(frameUs, isUltraMode);
         final boolean dropLateOutput = isUltraMode;
 
         // ── Capability guard – reject HEVC early on devices without a decoder ──
@@ -545,34 +542,27 @@ public final class H264TcpPlayer {
 
         while (running) {
             // ── Read 22-byte header ───────────────────────────────────────────
-            readFully(input, hdrBuf, FRAME_HEADER_SIZE);
-            int magic = parseFrameMagic(hdrBuf);
-            if (magic != FRAME_MAGIC) {
-                boolean resynced = tryResyncHeader(input, hdrBuf, FRAME_RESYNC_SCAN_LIMIT);
-                if (!resynced) {
-                    resyncFailSec++;
-                    throw new IOException("WBTP: bad frame magic 0x" + Integer.toHexString(magic)
-                            + " – resync failed");
-                }
+            WbtpProtocol.FrameHeader frameHeader = WbtpProtocol.readFrameHeader(
+                    input,
+                    hdrBuf,
+                    FRAME_HEADER_SIZE,
+                    FRAME_MAGIC,
+                    FRAME_RESYNC_SCAN_LIMIT,
+                    FRAME_FLAG_KEYFRAME
+            );
+            if (frameHeader.resynced) {
                 resyncSuccessSec++;
             }
-            // byte[4]=version  byte[5]=flags (0x02=keyframe 0x04=eos)
-            // seq: bytes 6..9  capture_ts_us: bytes 10..17  payload_len: bytes 18..21
-                boolean frameIsKey = (hdrBuf[5] & FRAME_FLAG_KEYFRAME) != 0;
-                long seqU32 = ((hdrBuf[6] & 0xFFL) << 24) | ((hdrBuf[7] & 0xFFL) << 16)
-                    | ((hdrBuf[8] & 0xFFL) << 8) | (hdrBuf[9] & 0xFFL);
-            long ptsUs = ((hdrBuf[10] & 0xFFL) << 56) | ((hdrBuf[11] & 0xFFL) << 48)
-                    | ((hdrBuf[12] & 0xFFL) << 40) | ((hdrBuf[13] & 0xFFL) << 32)
-                    | ((hdrBuf[14] & 0xFFL) << 24) | ((hdrBuf[15] & 0xFFL) << 16)
-                    | ((hdrBuf[16] & 0xFFL) <<  8) |  (hdrBuf[17] & 0xFFL);
-            int payloadLen = ((hdrBuf[18] & 0xFF) << 24) | ((hdrBuf[19] & 0xFF) << 16)
-                    | ((hdrBuf[20] & 0xFF) << 8) | (hdrBuf[21] & 0xFF);
+            boolean frameIsKey = frameHeader.frameIsKey;
+            long seqU32 = frameHeader.seqU32;
+            long ptsUs = frameHeader.ptsUs;
+            int payloadLen = frameHeader.payloadLen;
 
             if (payloadLen <= 0 || payloadLen > FRAME_PAYLOAD_HARD_CAP) {
                 throw new IOException("WBTP: bad payload length " + payloadLen);
             }
             if (payloadLen > payloadBuf.length) {
-                int newCap = Math.min(FRAME_PAYLOAD_HARD_CAP, nextPowerOfTwo(payloadLen));
+                int newCap = Math.min(FRAME_PAYLOAD_HARD_CAP, WbtpFrameIo.nextPowerOfTwo(payloadLen));
                 if (newCap < payloadLen) {
                     throw new IOException("WBTP: payload exceeds dynamic cap " + payloadLen);
                 }
@@ -584,7 +574,7 @@ public final class H264TcpPlayer {
             maxPayloadSeen = Math.max(maxPayloadSeen, payloadLen);
 
             // ── Read payload ──────────────────────────────────────────────────
-            readFully(input, payloadBuf, payloadLen);
+            WbtpFrameIo.readFully(input, payloadBuf, payloadLen);
             bytes += FRAME_HEADER_SIZE + payloadLen;
 
             // Sequence gate: never display stale/out-of-order frames.
@@ -612,10 +602,17 @@ public final class H264TcpPlayer {
                 if (avcCsd.pps != null) legacyPps = avcCsd.pps;
                 if (legacySps != null && legacyPps != null) {
                     try {
-                        codec = createAvcDecoderWithCsd(legacySps, legacyPps);
+                        codec = MediaCodecBridge.createAvcDecoderWithCsd(
+                                legacySps,
+                                legacyPps,
+                                decodeWidth,
+                                decodeHeight,
+                                FRAME_PAYLOAD_INITIAL_CAP,
+                                surface
+                        );
                         codecRef[0] = codec;
-                        queueCodecConfig(codec, legacySps, 2_000);
-                        queueCodecConfig(codec, legacyPps, 2_000);
+                        MediaCodecBridge.queueCodecConfig(codec, legacySps, 2_000);
+                        MediaCodecBridge.queueCodecConfig(codec, legacyPps, 2_000);
                         waitForKeyframe = true;
                         Log.i(TAG, "legacy AVC decoder configured from in-stream SPS/PPS");
                     } catch (IOException e) {
@@ -636,7 +633,7 @@ public final class H264TcpPlayer {
                 continue;
             }
 
-            drainLatestFrame(codec, bufferInfo, drainStats,
+            MediaCodecBridge.drainLatestFrame(codec, bufferInfo, drainStats,
                 dropLateOutput,
                 pendingDecodeQueue >= DECODE_QUEUE_MAX_FRAMES ? 16_000 : 5_000);
             long nowAfterDrain = SystemClock.elapsedRealtime();
@@ -673,7 +670,7 @@ public final class H264TcpPlayer {
                     && (pendingDecodeQueue < DECODE_QUEUE_MAX_FRAMES || isRecovery);
             if (canQueue) {
                 long t0 = SystemClock.elapsedRealtimeNanos();
-                if (queueNal(codec, payloadBuf, 0, payloadLen, ptsUs, 1_000)) {
+                if (MediaCodecBridge.queueNal(codec, payloadBuf, 0, payloadLen, ptsUs, 1_000)) {
                     long dn = SystemClock.elapsedRealtimeNanos() - t0;
                     decodeNsTotal += dn;
                     decodeNsBuf[(decodeNsBufN++) & 127] = dn;
@@ -755,7 +752,7 @@ public final class H264TcpPlayer {
                                 + " | reconnects: " + reconnects
                 );
                 double decodeMsP50 = inFrames > 0 ? (decodeNsTotal / 1_000_000.0) / inFrames : 0.0;
-                double decodeMsP95 = percentileMs(decodeNsBuf, Math.min(decodeNsBufN, 128), 0.95, decodeNsScratch);
+                double decodeMsP95 = StreamBufferMath.percentileMs(decodeNsBuf, Math.min(decodeNsBufN, 128), 0.95, decodeNsScratch);
                 double renderMsP95 = renderNsMax / 1_000_000.0;
                 long nowEpochUs = System.currentTimeMillis() * 1000L;
                 long transportLagUs = (lastQueuedPtsUs > 0 && nowEpochUs > lastQueuedPtsUs)
@@ -767,7 +764,7 @@ public final class H264TcpPlayer {
                 ));
                 int queueDecodeDepth = Math.min(DECODE_QUEUE_MAX_FRAMES, pendingDecodeQueue);
                 int queueRenderDepth = Math.min(RENDER_QUEUE_MAX_FRAMES, drainStats.renderedCount > 0 ? 1 : 0);
-                double e2eMs = estimateE2eLatencyMs(lastPresentedPtsUs);
+                double e2eMs = StreamBufferMath.estimateE2eLatencyMs(lastPresentedPtsUs);
                 statusListener.onClientMetrics(new ClientMetricsSample(
                         inFrames, inFrames, outFrames, bytes,
                         decodeMsP50, decodeMsP95, renderMsP95, e2eMs, e2eMs,
@@ -820,31 +817,27 @@ public final class H264TcpPlayer {
         long lastPresentMs = SystemClock.elapsedRealtime();
         long expectedSeq = -1L;
         long lastQueuedPtsUs = -1L;
-        final int seqGapBudget = computeSeqGapBudget(frameUs, isUltraMode);
+        final int seqGapBudget = StreamBufferMath.computeSeqGapBudget(frameUs, isUltraMode);
         final boolean dropBacklogFrames = isUltraMode;
         Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
         Rect dstRect = new Rect();
         final int backlogFrameBudget = frameBufferBudgetFrames;
 
         while (running) {
-            readFully(input, hdrBuf, FRAME_HEADER_SIZE);
-            int magic = parseFrameMagic(hdrBuf);
-            if (magic != FRAME_MAGIC) {
-                boolean resynced = tryResyncHeader(input, hdrBuf, FRAME_RESYNC_SCAN_LIMIT);
-                if (!resynced) {
-                    resyncFailSec++;
-                    throw new IOException("WBTP: bad frame magic 0x" + Integer.toHexString(magic)
-                            + " – resync failed");
-                }
+            WbtpProtocol.FrameHeader frameHeader = WbtpProtocol.readFrameHeader(
+                    input,
+                    hdrBuf,
+                    FRAME_HEADER_SIZE,
+                    FRAME_MAGIC,
+                    FRAME_RESYNC_SCAN_LIMIT,
+                    FRAME_FLAG_KEYFRAME
+            );
+            if (frameHeader.resynced) {
                 resyncSuccessSec++;
             }
 
-            long seqU32 = ((hdrBuf[6] & 0xFFL) << 24) | ((hdrBuf[7] & 0xFFL) << 16)
-                    | ((hdrBuf[8] & 0xFFL) << 8) | (hdrBuf[9] & 0xFFL);
-            long ptsUs = ((hdrBuf[10] & 0xFFL) << 56) | ((hdrBuf[11] & 0xFFL) << 48)
-                    | ((hdrBuf[12] & 0xFFL) << 40) | ((hdrBuf[13] & 0xFFL) << 32)
-                    | ((hdrBuf[14] & 0xFFL) << 24) | ((hdrBuf[15] & 0xFFL) << 16)
-                    | ((hdrBuf[16] & 0xFFL) << 8) | (hdrBuf[17] & 0xFFL);
+            long seqU32 = frameHeader.seqU32;
+            long ptsUs = frameHeader.ptsUs;
 
             if (expectedSeq < 0) {
                 expectedSeq = seqU32;
@@ -862,14 +855,13 @@ public final class H264TcpPlayer {
                 continue;
             }
 
-            int payloadLen = ((hdrBuf[18] & 0xFF) << 24) | ((hdrBuf[19] & 0xFF) << 16)
-                    | ((hdrBuf[20] & 0xFF) << 8) | (hdrBuf[21] & 0xFF);
+            int payloadLen = frameHeader.payloadLen;
             if (payloadLen <= 0 || payloadLen > FRAME_PAYLOAD_HARD_CAP) {
                 throw new IOException("WBTP: bad payload length " + payloadLen);
             }
 
             if (payloadLen > payloadBuf.length) {
-                int newCap = Math.min(FRAME_PAYLOAD_HARD_CAP, nextPowerOfTwo(payloadLen));
+                int newCap = Math.min(FRAME_PAYLOAD_HARD_CAP, WbtpFrameIo.nextPowerOfTwo(payloadLen));
                 if (newCap < payloadLen) {
                     throw new IOException("WBTP: payload exceeds dynamic cap " + payloadLen);
                 }
@@ -879,7 +871,7 @@ public final class H264TcpPlayer {
             }
             maxPayloadSeen = Math.max(maxPayloadSeen, payloadLen);
 
-            readFully(input, payloadBuf, payloadLen);
+            WbtpFrameIo.readFully(input, payloadBuf, payloadLen);
             bytes += FRAME_HEADER_SIZE + payloadLen;
 
             int payloadEstimate = Math.max(8 * 1024, maxPayloadSeen + FRAME_HEADER_SIZE);
@@ -888,32 +880,27 @@ public final class H264TcpPlayer {
             int skippedBacklog = 0;
 
             while (dropBacklogFrames && backlogFramesEstimate > backlogFrameBudget) {
-                readFully(input, hdrBuf, FRAME_HEADER_SIZE);
-                int magic2 = parseFrameMagic(hdrBuf);
-                if (magic2 != FRAME_MAGIC) {
-                    boolean resynced2 = tryResyncHeader(input, hdrBuf, FRAME_RESYNC_SCAN_LIMIT);
-                    if (!resynced2) {
-                        resyncFailSec++;
-                        throw new IOException("WBTP: bad frame magic 0x" + Integer.toHexString(magic2)
-                                + " – resync failed");
-                    }
+                WbtpProtocol.FrameHeader skippedFrameHeader = WbtpProtocol.readFrameHeader(
+                        input,
+                        hdrBuf,
+                        FRAME_HEADER_SIZE,
+                        FRAME_MAGIC,
+                        FRAME_RESYNC_SCAN_LIMIT,
+                        FRAME_FLAG_KEYFRAME
+                );
+                if (skippedFrameHeader.resynced) {
                     resyncSuccessSec++;
                 }
 
-                seqU32 = ((hdrBuf[6] & 0xFFL) << 24) | ((hdrBuf[7] & 0xFFL) << 16)
-                        | ((hdrBuf[8] & 0xFFL) << 8) | (hdrBuf[9] & 0xFFL);
-                ptsUs = ((hdrBuf[10] & 0xFFL) << 56) | ((hdrBuf[11] & 0xFFL) << 48)
-                        | ((hdrBuf[12] & 0xFFL) << 40) | ((hdrBuf[13] & 0xFFL) << 32)
-                        | ((hdrBuf[14] & 0xFFL) << 24) | ((hdrBuf[15] & 0xFFL) << 16)
-                        | ((hdrBuf[16] & 0xFFL) << 8) | (hdrBuf[17] & 0xFFL);
+                seqU32 = skippedFrameHeader.seqU32;
+                ptsUs = skippedFrameHeader.ptsUs;
 
-                int nextLen = ((hdrBuf[18] & 0xFF) << 24) | ((hdrBuf[19] & 0xFF) << 16)
-                        | ((hdrBuf[20] & 0xFF) << 8) | (hdrBuf[21] & 0xFF);
+                int nextLen = skippedFrameHeader.payloadLen;
                 if (nextLen <= 0 || nextLen > FRAME_PAYLOAD_HARD_CAP) {
                     throw new IOException("WBTP: bad payload length " + nextLen);
                 }
                 if (nextLen > payloadBuf.length) {
-                    int newCap = Math.min(FRAME_PAYLOAD_HARD_CAP, nextPowerOfTwo(nextLen));
+                    int newCap = Math.min(FRAME_PAYLOAD_HARD_CAP, WbtpFrameIo.nextPowerOfTwo(nextLen));
                     if (newCap < nextLen) {
                         throw new IOException("WBTP: payload exceeds dynamic cap " + nextLen);
                     }
@@ -924,7 +911,7 @@ public final class H264TcpPlayer {
 
                 payloadLen = nextLen;
                 maxPayloadSeen = Math.max(maxPayloadSeen, payloadLen);
-                readFully(input, payloadBuf, payloadLen);
+                WbtpFrameIo.readFully(input, payloadBuf, payloadLen);
                 bytes += FRAME_HEADER_SIZE + payloadLen;
                 skippedBacklog++;
 
@@ -997,7 +984,7 @@ public final class H264TcpPlayer {
                 );
 
                 double decodeMsP50 = inFrames > 0 ? (decodeNsTotal / 1_000_000.0) / inFrames : 0.0;
-                double decodeMsP95 = percentileMs(decodeNsBuf, Math.min(decodeNsBufN, 128), 0.95, decodeNsScratch);
+                double decodeMsP95 = StreamBufferMath.percentileMs(decodeNsBuf, Math.min(decodeNsBufN, 128), 0.95, decodeNsScratch);
                 long nowEpochUs = System.currentTimeMillis() * 1000L;
                 long transportLagUs = (lastQueuedPtsUs > 0 && nowEpochUs > lastQueuedPtsUs)
                     ? (nowEpochUs - lastQueuedPtsUs)
@@ -1038,244 +1025,6 @@ public final class H264TcpPlayer {
         }
     }
 
-    // ── Static utilities ──────────────────────────────────────────────────────
-
-    private static int parseFrameMagic(byte[] hdrBuf) {
-        return ((hdrBuf[0] & 0xFF) << 24) | ((hdrBuf[1] & 0xFF) << 16)
-                | ((hdrBuf[2] & 0xFF) << 8) | (hdrBuf[3] & 0xFF);
-    }
-
-    private static int computeFrameBufferBudget(long frameUs) {
-        long safeFrameUs = Math.max(1L, frameUs);
-        long fps = Math.max(1L, 1_000_000L / safeFrameUs);
-        long budget = (fps + 9L) / 10L;
-        return (int) Math.max(PNG_BUFFER_MIN_FRAMES, Math.min(PNG_BUFFER_MAX_FRAMES, budget));
-    }
-
-    private static int computeSeqGapBudget(long frameUs, boolean isUltraMode) {
-        long safeFrameUs = Math.max(1L, frameUs);
-        long fps = Math.max(1L, 1_000_000L / safeFrameUs);
-        long base = isUltraMode ? Math.max(30L, fps / 2L) : fps;
-        return (int) Math.max(60L, Math.min(240L, base));
-    }
-
-    private static void readFully(InputStream input, byte[] buf, int len) throws IOException {
-        int read = 0;
-        while (read < len) {
-            int n = input.read(buf, read, len - read);
-            if (n < 0) throw new IOException("stream closed");
-            read += n;
-        }
-    }
-
-    private static boolean tryResyncHeader(InputStream input, byte[] hdrBuf, int scanLimit)
-            throws IOException {
-        int scanned = 0;
-        while (scanned < scanLimit) {
-            System.arraycopy(hdrBuf, 1, hdrBuf, 0, FRAME_HEADER_SIZE - 1);
-            int n = input.read(hdrBuf, FRAME_HEADER_SIZE - 1, 1);
-            if (n < 0) return false;
-            scanned++;
-            if (parseFrameMagic(hdrBuf) == FRAME_MAGIC) return true;
-        }
-        return false;
-    }
-
-    private static int nextPowerOfTwo(int value) {
-        if (value <= 1) return 1;
-        if (value >= (1 << 30)) return 1 << 30;
-        return Integer.highestOneBit(value - 1) << 1;
-    }
-
-    /**
-     * Percentile in ms from a nanosecond sample buffer without heap allocation.
-     * Caller provides reusable scratch buffer to avoid Arrays.copyOf churn.
-     */
-    private static double percentileMs(long[] buf, int n, double q, long[] scratch) {
-        if (n <= 0) return 0.0;
-        System.arraycopy(buf, 0, scratch, 0, n);
-        int idx = (int) Math.min(n - 1, Math.max(0, (int) (n * q)));
-        long selected = selectKth(scratch, n, idx);
-        return selected / 1_000_000.0;
-    }
-
-    private static long selectKth(long[] values, int n, int k) {
-        int left = 0;
-        int right = n - 1;
-        while (left < right) {
-            int pivotIndex = partition(values, left, right, (left + right) >>> 1);
-            if (k == pivotIndex) return values[k];
-            if (k < pivotIndex) right = pivotIndex - 1;
-            else left = pivotIndex + 1;
-        }
-        return values[left];
-    }
-
-    private static int partition(long[] values, int left, int right, int pivotIndex) {
-        long pivotValue = values[pivotIndex];
-        swap(values, pivotIndex, right);
-        int store = left;
-        for (int i = left; i < right; i++) {
-            if (values[i] < pivotValue) {
-                swap(values, store, i);
-                store++;
-            }
-        }
-        swap(values, right, store);
-        return store;
-    }
-
-    private static void swap(long[] values, int i, int j) {
-        long t = values[i];
-        values[i] = values[j];
-        values[j] = t;
-    }
-
-    private static boolean queueNal(
-            MediaCodec codec,
-            byte[]     data,
-            int        offset,
-            int        size,
-            long       ptsUs,
-            long       inputTimeoutUs
-    ) {
-        int inputIndex = codec.dequeueInputBuffer(inputTimeoutUs);
-        if (inputIndex < 0) return false;
-        ByteBuffer inputBuffer;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            inputBuffer = codec.getInputBuffer(inputIndex);
-        } else {
-            ByteBuffer[] inputBuffers = codec.getInputBuffers();
-            inputBuffer = (inputBuffers != null && inputIndex < inputBuffers.length)
-                    ? inputBuffers[inputIndex]
-                    : null;
-        }
-        if (inputBuffer == null) {
-            codec.queueInputBuffer(inputIndex, 0, 0, ptsUs, 0);
-            return false;
-        }
-        inputBuffer.clear();
-        if (size > inputBuffer.remaining()) {
-            codec.queueInputBuffer(inputIndex, 0, 0, ptsUs, 0);
-            return false;
-        }
-        inputBuffer.put(data, offset, size);
-        codec.queueInputBuffer(inputIndex, 0, size, ptsUs, 0);
-        return true;
-    }
-
-    private static boolean queueCodecConfig(MediaCodec codec, byte[] data, long inputTimeoutUs) {
-        if (codec == null || data == null || data.length == 0) return false;
-        int inputIndex = codec.dequeueInputBuffer(inputTimeoutUs);
-        if (inputIndex < 0) return false;
-        ByteBuffer inputBuffer;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            inputBuffer = codec.getInputBuffer(inputIndex);
-        } else {
-            ByteBuffer[] inputBuffers = codec.getInputBuffers();
-            inputBuffer = (inputBuffers != null && inputIndex < inputBuffers.length)
-                    ? inputBuffers[inputIndex]
-                    : null;
-        }
-        if (inputBuffer == null) {
-            codec.queueInputBuffer(inputIndex, 0, 0, 0, 0);
-            return false;
-        }
-        inputBuffer.clear();
-        if (data.length > inputBuffer.remaining()) {
-            codec.queueInputBuffer(inputIndex, 0, 0, 0, 0);
-            return false;
-        }
-        inputBuffer.put(data);
-        codec.queueInputBuffer(inputIndex, 0, data.length, 0, MediaCodec.BUFFER_FLAG_CODEC_CONFIG);
-        return true;
-    }
-
-    private MediaCodec createAvcDecoderWithCsd(byte[] sps, byte[] pps) throws IOException {
-        try {
-            MediaCodec codec = MediaCodec.createDecoderByType("video/avc");
-            MediaFormat fmt = MediaFormat.createVideoFormat("video/avc", decodeWidth, decodeHeight);
-            fmt.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, FRAME_PAYLOAD_INITIAL_CAP);
-            if (sps != null) fmt.setByteBuffer("csd-0", ByteBuffer.wrap(sps));
-            if (pps != null) fmt.setByteBuffer("csd-1", ByteBuffer.wrap(pps));
-            codec.configure(fmt, surface, null, 0);
-            codec.start();
-            return codec;
-        } catch (Exception e) {
-            throw new IOException("decoder init failed for legacy AVC", e);
-        }
-    }
-
-    private static void drainLatestFrame(
-            MediaCodec codec,
-            MediaCodec.BufferInfo info,
-            DrainStats stats,
-            boolean dropLateOutput,
-            long firstTimeoutUs
-    ) {
-        stats.reset();
-        int  latestRenderableIndex = -1;
-        long latestRenderablePtsUs = -1L;
-        long timeoutUs             = firstTimeoutUs;
-
-        while (true) {
-            int outputIndex = codec.dequeueOutputBuffer(info, timeoutUs);
-            timeoutUs = 0; // non-blocking for all subsequent backlog frames
-            if (outputIndex >= 0) {
-                stats.releasedCount++;
-                boolean renderable = (info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0;
-                if (!renderable) { codec.releaseOutputBuffer(outputIndex, false); continue; }
-                if (dropLateOutput) {
-                    if (latestRenderableIndex >= 0) {
-                        codec.releaseOutputBuffer(latestRenderableIndex, false);
-                        stats.droppedLateCount++;
-                    }
-                    latestRenderableIndex = outputIndex;
-                    latestRenderablePtsUs = info.presentationTimeUs;
-                } else {
-                    long renderStartNs = SystemClock.elapsedRealtimeNanos();
-                    codec.releaseOutputBuffer(outputIndex, true);
-                    stats.renderedCount++;
-                    stats.lastRenderedPtsUs = info.presentationTimeUs;
-                    stats.renderNsMax = Math.max(
-                            stats.renderNsMax,
-                            SystemClock.elapsedRealtimeNanos() - renderStartNs
-                    );
-                }
-                continue;
-            }
-            if (outputIndex == MediaCodec.INFO_TRY_AGAIN_LATER
-                    || outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) break;
-            break;
-        }
-
-        if (dropLateOutput && latestRenderableIndex >= 0) {
-            long renderStartNs = SystemClock.elapsedRealtimeNanos();
-            codec.releaseOutputBuffer(latestRenderableIndex, true);
-            stats.renderedCount = 1;
-            stats.lastRenderedPtsUs = latestRenderablePtsUs;
-            stats.renderNsMax   = SystemClock.elapsedRealtimeNanos() - renderStartNs;
-        }
-    }
-
-    private static double estimateE2eLatencyMs(long presentedPtsUs) {
-        if (presentedPtsUs <= 0L) {
-            return 0.0;
-        }
-        long nowUs = System.currentTimeMillis() * 1000L;
-        long lagUs = nowUs - presentedPtsUs;
-        if (lagUs <= 0L) {
-            return 0.0;
-        }
-        return lagUs / 1000.0;
-    }
-
-    private static int estimateTransportDepthFrames(int streamLen, int avgNalSize) {
-        int denom = Math.max(512, avgNalSize);
-        if (streamLen <= 0) return 0;
-        return Math.min(8, streamLen / denom);
-    }
-
     private void closeSocket() {
         Socket current = socket;
         socket = null;
@@ -1295,21 +1044,4 @@ public final class H264TcpPlayer {
                 || m.contains("software caused connection abort");
     }
 
-    // ── Inner helpers ─────────────────────────────────────────────────────────
-
-    private static final class DrainStats {
-        int  releasedCount;
-        int  renderedCount;
-        int  droppedLateCount;
-        long renderNsMax;
-        long lastRenderedPtsUs;
-
-        void reset() {
-            releasedCount  = 0;
-            renderedCount  = 0;
-            droppedLateCount = 0;
-            renderNsMax    = 0;
-            lastRenderedPtsUs = -1L;
-        }
-    }
 }
