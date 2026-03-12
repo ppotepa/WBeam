@@ -30,7 +30,7 @@ TRAINING_DIR = ROOT / "config" / "training"
 PROFILE_FILE = TRAINING_DIR / "profiles.json"
 PROFILE_OUTPUT_DIR = TRAINING_DIR / "profiles"
 DESKTOP_RUNTIME_FILE = (
-    ROOT / "src" / "apps" / "desktop-tauri" / "src" / "config" / "trained-profile-runtime.json"
+    ROOT / "desktop" / "apps" / "desktop-tauri" / "src" / "config" / "trained-profile-runtime.json"
 )
 LOG_DIR = ROOT / "logs"
 

@@ -347,79 +347,69 @@ fn runtime_config_path_for_session(root: &Path, session_label: Option<&str>) -> 
 }
 
 fn load_presets_from_training_files(root: &Path) -> Option<BTreeMap<String, ActiveConfig>> {
-    // New canonical path: config/training/profiles.json
-    // Legacy archived fallback: archive/legacy/proto/config/profiles.json
-    let candidates = [
-        root.join("config/training/profiles.json"),
-        root.join("archive/legacy/proto/config/profiles.json"),
-    ];
+    let path = root.join("config/training/profiles.json");
 
-    for path in candidates {
-        let raw = match std::fs::read_to_string(&path) {
-            Ok(v) => v,
-            Err(e) => {
-                debug!("presets: cannot read {}: {e}", path.display());
-                continue;
-            }
-        };
-        let value: serde_json::Value = match serde_json::from_str(&raw) {
-            Ok(v) => v,
-            Err(e) => {
-                warn!("presets: invalid JSON in {}: {e}", path.display());
-                continue;
-            }
-        };
-        let Some(profiles) = value.get("profiles").and_then(|v| v.as_object()) else {
-            warn!("presets: missing .profiles object in {}", path.display());
-            continue;
-        };
-
-        let mut out = BTreeMap::new();
-        for (name, node) in profiles {
-            let values = node.get("values").and_then(|v| v.as_object());
-            let size = values
-                .and_then(|v| v.get("PROTO_CAPTURE_SIZE"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("1280x720")
-                .to_string();
-            let fps = values
-                .and_then(|v| v.get("PROTO_CAPTURE_FPS"))
-                .and_then(|v| v.as_u64())
-                .unwrap_or(60) as u32;
-            let bitrate_kbps = values
-                .and_then(|v| v.get("PROTO_CAPTURE_BITRATE_KBPS"))
-                .and_then(|v| v.as_u64())
-                .unwrap_or(10_000) as u32;
-
-            out.insert(
-                name.clone(),
-                ActiveConfig {
-                    profile: name.clone(),
-                    encoder: "h264".to_string(),
-                    cursor_mode: "embedded".to_string(),
-                    size,
-                    fps,
-                    bitrate_kbps,
-                    debug_fps: 0,
-                    intra_only: false,
-                },
-            );
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(v) => v,
+        Err(e) => {
+            debug!("presets: cannot read {}: {e}", path.display());
+            return None;
         }
-
-        if out.is_empty() {
-            warn!("presets: no profiles loaded from {}", path.display());
-            continue;
+    };
+    let value: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!("presets: invalid JSON in {}: {e}", path.display());
+            return None;
         }
-        info!(
-            "presets: loaded {} profile(s) from {}",
-            out.len(),
-            path.display()
+    };
+    let Some(profiles) = value.get("profiles").and_then(|v| v.as_object()) else {
+        warn!("presets: missing .profiles object in {}", path.display());
+        return None;
+    };
+
+    let mut out = BTreeMap::new();
+    for (name, node) in profiles {
+        let values = node.get("values").and_then(|v| v.as_object());
+        let size = values
+            .and_then(|v| v.get("PROTO_CAPTURE_SIZE"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("1280x720")
+            .to_string();
+        let fps = values
+            .and_then(|v| v.get("PROTO_CAPTURE_FPS"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(60) as u32;
+        let bitrate_kbps = values
+            .and_then(|v| v.get("PROTO_CAPTURE_BITRATE_KBPS"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(10_000) as u32;
+
+        out.insert(
+            name.clone(),
+            ActiveConfig {
+                profile: name.clone(),
+                encoder: "h264".to_string(),
+                cursor_mode: "embedded".to_string(),
+                size,
+                fps,
+                bitrate_kbps,
+                debug_fps: 0,
+                intra_only: false,
+            },
         );
-        return Some(out);
     }
 
-    warn!("presets: no training profiles found in config/training or archive/legacy/proto/config");
-    None
+    if out.is_empty() {
+        warn!("presets: no profiles loaded from {}", path.display());
+        return None;
+    }
+    info!(
+        "presets: loaded {} profile(s) from {}",
+        out.len(),
+        path.display()
+    );
+    Some(out)
 }
 
 fn default_config_from_presets(presets: &BTreeMap<String, ActiveConfig>) -> ActiveConfig {
