@@ -1,10 +1,5 @@
 package com.wbeam.stream;
 
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.graphics.Canvas;
-import android.graphics.Paint;
-import android.graphics.Rect;
 import android.media.MediaCodec;
 import android.media.MediaFormat;
 import android.os.Build;
@@ -558,17 +553,17 @@ public final class H264TcpPlayer {
             long ptsUs = frameHeader.ptsUs;
             int payloadLen = frameHeader.payloadLen;
 
-            if (payloadLen <= 0 || payloadLen > FRAME_PAYLOAD_HARD_CAP) {
-                throw new IOException("WBTP: bad payload length " + payloadLen);
-            }
-            if (payloadLen > payloadBuf.length) {
-                int newCap = Math.min(FRAME_PAYLOAD_HARD_CAP, WbtpFrameIo.nextPowerOfTwo(payloadLen));
-                if (newCap < payloadLen) {
-                    throw new IOException("WBTP: payload exceeds dynamic cap " + payloadLen);
-                }
-                Log.w(TAG, "WBTP payload buffer grow " + payloadBuf.length + " -> " + newCap
-                        + " seq=" + seqU32 + " payload=" + payloadLen + " mode=" + modeLabel);
-                payloadBuf = new byte[newCap];
+            WbtpPayloadBuffer.validatePayloadLength(payloadLen, FRAME_PAYLOAD_HARD_CAP);
+            byte[] grownPayloadBuf = WbtpPayloadBuffer.ensureCapacity(
+                    payloadBuf,
+                    payloadLen,
+                    FRAME_PAYLOAD_HARD_CAP,
+                    TAG,
+                    "WBTP payload buffer grow "
+                            + " seq=" + seqU32 + " payload=" + payloadLen + " mode=" + modeLabel + " "
+            );
+            if (grownPayloadBuf != payloadBuf) {
+                payloadBuf = grownPayloadBuf;
                 payloadGrowEvents++;
             }
             maxPayloadSeen = Math.max(maxPayloadSeen, payloadLen);
@@ -819,8 +814,7 @@ public final class H264TcpPlayer {
         long lastQueuedPtsUs = -1L;
         final int seqGapBudget = StreamBufferMath.computeSeqGapBudget(frameUs, isUltraMode);
         final boolean dropBacklogFrames = isUltraMode;
-        Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
-        Rect dstRect = new Rect();
+        PngSurfaceRenderer pngRenderer = new PngSurfaceRenderer(surface);
         final int backlogFrameBudget = frameBufferBudgetFrames;
 
         while (running) {
@@ -856,17 +850,16 @@ public final class H264TcpPlayer {
             }
 
             int payloadLen = frameHeader.payloadLen;
-            if (payloadLen <= 0 || payloadLen > FRAME_PAYLOAD_HARD_CAP) {
-                throw new IOException("WBTP: bad payload length " + payloadLen);
-            }
-
-            if (payloadLen > payloadBuf.length) {
-                int newCap = Math.min(FRAME_PAYLOAD_HARD_CAP, WbtpFrameIo.nextPowerOfTwo(payloadLen));
-                if (newCap < payloadLen) {
-                    throw new IOException("WBTP: payload exceeds dynamic cap " + payloadLen);
-                }
-                Log.w(TAG, "WBTP PNG payload buffer grow " + payloadBuf.length + " -> " + newCap);
-                payloadBuf = new byte[newCap];
+            WbtpPayloadBuffer.validatePayloadLength(payloadLen, FRAME_PAYLOAD_HARD_CAP);
+            byte[] grownPayloadBuf = WbtpPayloadBuffer.ensureCapacity(
+                    payloadBuf,
+                    payloadLen,
+                    FRAME_PAYLOAD_HARD_CAP,
+                    TAG,
+                    "WBTP PNG payload buffer grow "
+            );
+            if (grownPayloadBuf != payloadBuf) {
+                payloadBuf = grownPayloadBuf;
                 payloadGrowEvents++;
             }
             maxPayloadSeen = Math.max(maxPayloadSeen, payloadLen);
@@ -896,16 +889,16 @@ public final class H264TcpPlayer {
                 ptsUs = skippedFrameHeader.ptsUs;
 
                 int nextLen = skippedFrameHeader.payloadLen;
-                if (nextLen <= 0 || nextLen > FRAME_PAYLOAD_HARD_CAP) {
-                    throw new IOException("WBTP: bad payload length " + nextLen);
-                }
-                if (nextLen > payloadBuf.length) {
-                    int newCap = Math.min(FRAME_PAYLOAD_HARD_CAP, WbtpFrameIo.nextPowerOfTwo(nextLen));
-                    if (newCap < nextLen) {
-                        throw new IOException("WBTP: payload exceeds dynamic cap " + nextLen);
-                    }
-                    Log.w(TAG, "WBTP PNG payload buffer grow " + payloadBuf.length + " -> " + newCap);
-                    payloadBuf = new byte[newCap];
+                WbtpPayloadBuffer.validatePayloadLength(nextLen, FRAME_PAYLOAD_HARD_CAP);
+                byte[] grownBacklogPayloadBuf = WbtpPayloadBuffer.ensureCapacity(
+                        payloadBuf,
+                        nextLen,
+                        FRAME_PAYLOAD_HARD_CAP,
+                        TAG,
+                        "WBTP PNG payload buffer grow "
+                );
+                if (grownBacklogPayloadBuf != payloadBuf) {
+                    payloadBuf = grownBacklogPayloadBuf;
                     payloadGrowEvents++;
                 }
 
@@ -925,37 +918,15 @@ public final class H264TcpPlayer {
             }
 
             long t0 = SystemClock.elapsedRealtimeNanos();
-            Bitmap bitmap = BitmapFactory.decodeByteArray(payloadBuf, 0, payloadLen);
-            if (bitmap == null) {
-                droppedSec++;
+            PngSurfaceRenderer.RenderResult renderResult = pngRenderer.render(payloadBuf, payloadLen);
+            if (renderResult.rendered) {
+                outFrames++;
+                lastPresentMs = SystemClock.elapsedRealtime();
+                lastQueuedPtsUs = ptsUs;
                 expectedSeq = seqU32 + 1;
             } else {
-                Canvas canvas = null;
-                try {
-                    canvas = surface.lockCanvas(null);
-                    if (canvas != null) {
-                        dstRect.set(0, 0, canvas.getWidth(), canvas.getHeight());
-                        canvas.drawBitmap(bitmap, null, dstRect, paint);
-                        outFrames++;
-                        lastPresentMs = SystemClock.elapsedRealtime();
-                        lastQueuedPtsUs = ptsUs;
-                        expectedSeq = seqU32 + 1;
-                    } else {
-                        droppedSec++;
-                        expectedSeq = seqU32 + 1;
-                    }
-                } catch (Exception e) {
-                    droppedSec++;
-                    expectedSeq = seqU32 + 1;
-                } finally {
-                    if (canvas != null) {
-                        try {
-                            surface.unlockCanvasAndPost(canvas);
-                        } catch (Exception ignored) {
-                        }
-                    }
-                }
-                bitmap.recycle();
+                droppedSec++;
+                expectedSeq = seqU32 + 1;
             }
 
             long dn = SystemClock.elapsedRealtimeNanos() - t0;
