@@ -36,7 +36,7 @@ import com.wbeam.hud.MetricSeriesBuffer;
 import com.wbeam.hud.ResourceUsageTracker;
 import com.wbeam.hud.RuntimeHudComputation;
 import com.wbeam.hud.RuntimeHudOverlayRenderer;
-import com.wbeam.hud.RuntimeTrendGridRenderer;
+import com.wbeam.hud.RuntimeHudTrendComposer;
 import com.wbeam.hud.TrainerHudOverlayRenderer;
 import com.wbeam.input.CursorOverlayController;
 import com.wbeam.input.ImmersiveModeController;
@@ -1888,21 +1888,19 @@ public class MainActivity extends AppCompatActivity {
         runtimeDropPrevCount = dropRate.updatedPrevCount;
         runtimeDropPrevAtMs = dropRate.updatedPrevAtMs;
         double bitrateMbps = runtime.bitrateMbps;
-        runtimePresentSeries.addSample(Math.max(0.0, presentFps));
-        runtimeMbpsSeries.addSample(Math.max(0.0, bitrateMbps));
-        runtimeDropSeries.addSample(Math.max(0.0, dropPerSec));
-        runtimeLatencySeries.addSample(Math.max(0.0, e2eP95));
-        runtimeQueueSeries.addSample(Math.max(0.0, qT + qD + qR));
-        String runtimeChartsHtml = RuntimeTrendGridRenderer.buildMetricTrendRowsHtml(
-                runtimePresentSeries.toJsonFinite(),
-                runtimeMbpsSeries.toJsonFinite(),
-                runtimeDropSeries.toJsonFinite(),
-                runtimeLatencySeries.toJsonFinite(),
-                runtimeQueueSeries.toJsonFinite(),
-                pressureState.tone,
-                pressureState.tone,
-                pressureState.tone,
-                pressureState.tone,
+        String runtimeChartsHtml = RuntimeHudTrendComposer.appendSamplesAndBuildHtml(
+                runtimePresentSeries,
+                runtimeMbpsSeries,
+                runtimeDropSeries,
+                runtimeLatencySeries,
+                runtimeQueueSeries,
+                presentFps,
+                bitrateMbps,
+                dropPerSec,
+                e2eP95,
+                qT,
+                qD,
+                qR,
                 pressureState.tone,
                 FPS_LOW_ANCHOR
         );
