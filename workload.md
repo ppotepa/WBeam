@@ -1,7 +1,7 @@
 # Workload Plan (Epics)
 
 Date: 2026-03-12
-Branch: v0.1.1/base
+Branch: feature/v0.1.1-epic30-issue31-hygiene-inventory
 
 ## 1. Issue Strategy (Execution Model)
 
@@ -20,8 +20,9 @@ Execution format:
 - Order is strict: finish one epic before moving to the next.
 
 Current status:
-- Epic #30 exists: Repo/Runtime Hygiene.
-- Next step: create child issues for #30 and execute them one-by-one.
+- Epic #30 completed: Repo/Runtime Hygiene.
+- Child issues #31-#35 completed and closed.
+- Next step: open Epic #2 and execute its child issues one-by-one.
 
 ## 2. Epic #30 Breakdown (Step-by-step issues)
 
