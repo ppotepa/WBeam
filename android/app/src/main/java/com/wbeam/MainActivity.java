@@ -52,6 +52,7 @@ import com.wbeam.startup.StartupOverlayInputFactory;
 import com.wbeam.startup.StartupOverlayModelBuilder;
 import com.wbeam.startup.StartupOverlayProbeHooksFactory;
 import com.wbeam.startup.StartupOverlayController;
+import com.wbeam.startup.StartupBuildVersionPresenter;
 import com.wbeam.startup.StartupOverlayViewRenderer;
 import com.wbeam.startup.StartupOverlayViewsBinder;
 import com.wbeam.startup.TransportProbeCallbacksFactory;
@@ -78,6 +79,7 @@ import com.wbeam.ui.MainActivityButtonsSetup;
 import com.wbeam.ui.MainActivityLifecycleCleaner;
 import com.wbeam.ui.MainActivitySimpleMenuCoordinator;
 import com.wbeam.ui.MainActivitySettingsInitializer;
+import com.wbeam.ui.MainActivitySpinnersSetup;
 import com.wbeam.ui.MainActivitySurfaceCallbacksFactory;
 import com.wbeam.ui.MainActivityUiBinder;
 import com.wbeam.ui.MainActivitySettingsPresenter;
@@ -337,8 +339,24 @@ public class MainActivity extends AppCompatActivity {
     private void initializeUiBindings() {
         bindViews();
         setScreenAlwaysOn(true);
-        bindStartupBuildVersion();
-        setupSpinners();
+        StartupBuildVersionPresenter.apply(startupBuildVersionText, BuildConfig.WBEAM_BUILD_REV);
+        MainActivitySpinnersSetup.setup(
+                this,
+                profileSpinner,
+                encoderSpinner,
+                cursorSpinner,
+                PROFILE_OPTIONS,
+                ENCODER_OPTIONS,
+                CURSOR_OPTIONS,
+                () -> {
+                    updateIntraOnlyButton();
+                    updateHostHint();
+                },
+                () -> {
+                    enforceCursorOverlayPolicy(false);
+                    updateHostHint();
+                }
+        );
         MainActivityUiBinder.setupSeekbars(
                 resolutionSeek,
                 fpsSeek,
@@ -766,17 +784,6 @@ public class MainActivity extends AppCompatActivity {
         MainActivityUiBinder.setupTrainerHudWebView(perfHudWebView);
     }
 
-    private void bindStartupBuildVersion() {
-        if (startupBuildVersionText == null) {
-            return;
-        }
-        String rev = BuildConfig.WBEAM_BUILD_REV == null ? "" : BuildConfig.WBEAM_BUILD_REV.trim();
-        if (rev.isEmpty()) {
-            rev = "unknown";
-        }
-        startupBuildVersionText.setText("build " + rev);
-    }
-
     private void applyBuildVariantUi() {
         hideSettingsPanel();
         hideSimpleMenu();
@@ -812,26 +819,6 @@ public class MainActivity extends AppCompatActivity {
         setFullscreen(true);
         MainActivityUiBinder.applyVisibility(View.GONE, debugInfoPanel);
         stopDebugGraphSampling();
-    }
-
-    private void setupSpinners() {
-        MainActivityUiBinder.setupSpinners(
-                this,
-                profileSpinner,
-                encoderSpinner,
-                cursorSpinner,
-                PROFILE_OPTIONS,
-                ENCODER_OPTIONS,
-                CURSOR_OPTIONS,
-                () -> {
-                    updateIntraOnlyButton();
-                    updateHostHint();
-                },
-                () -> {
-                    enforceCursorOverlayPolicy(false);
-                    updateHostHint();
-                }
-        );
     }
 
     private void setupSurfaceCallbacks() {
