@@ -392,7 +392,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void initializeControllers() {
-        metricsReporter = new ClientMetricsReporter(ioExecutor, msg -> appendLiveLogWarn(msg));
+        metricsReporter = new ClientMetricsReporter(ioExecutor, msg -> appendLiveLog("W", msg));
         videoTestController = createVideoTestController();
         statusPoller = createStatusPoller();
         sessionController = createSessionController();
@@ -423,9 +423,9 @@ public class MainActivity extends AppCompatActivity {
                 updateStatus(state, info, bps);
             }
             @Override public void onStatsLine(String line)  { updateStatsLine(line); }
-            @Override public void logInfo(String msg)  { appendLiveLogInfo(msg);  }
-            @Override public void logWarn(String msg)  { appendLiveLogWarn(msg);  }
-            @Override public void logError(String msg) { appendLiveLogError(msg); }
+            @Override public void logInfo(String msg)  { appendLiveLog("I", msg);  }
+            @Override public void logWarn(String msg)  { appendLiveLog("W", msg);  }
+            @Override public void logError(String msg) { appendLiveLog("E", msg); }
             @Override public void onOverlayChanged() { updatePreflightOverlay(); }
             @Override public void setLiveLogVisible(boolean v) { setLiveLogVisibleForTestMode(v); }
             @Override
@@ -475,7 +475,8 @@ public class MainActivity extends AppCompatActivity {
                         this::handleDaemonStatusUpdate,
                         this::handleDaemonOffline,
                         () -> requestStartGuarded(false, true),
-                        () -> appendLiveLogWarn(
+                        () -> appendLiveLog(
+                                "W",
                                 "auto-start paused after failed capture; tap Start Live to retry"
                         ),
                         this::ensureDecoderRunning
@@ -522,7 +523,7 @@ public class MainActivity extends AppCompatActivity {
                 StatusPollerUiUpdateCoordinator.shouldStopLiveViewForDaemonState(state),
                 StatusTransitionHooksFactory.create(
                         this::notifyConnectedHost,
-                        changedLastError -> appendLiveLogError("host last_error: " + changedLastError),
+                        changedLastError -> appendLiveLog("E", "host last_error: " + changedLastError),
                         this::stopLiveView
                 )
         );
@@ -545,7 +546,7 @@ public class MainActivity extends AppCompatActivity {
                         this::updateOfflineUiState,
                         this::refreshStatusText,
                         this::updateStatus,
-                        this::appendLiveLogError,
+                        line -> appendLiveLog("E", line),
                         message -> Toast.makeText(
                                 MainActivity.this,
                                 message,
@@ -646,7 +647,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void notifyConnectedHost(String hostName) {
         Toast.makeText(MainActivity.this, "Connected to " + hostName, Toast.LENGTH_SHORT).show();
-        appendLiveLogInfo("connected to host " + hostName);
+        appendLiveLog("I", "connected to host " + hostName);
     }
 
     private void resetStartupAfterDisconnect(boolean wasReachable) {
@@ -977,14 +978,12 @@ public class MainActivity extends AppCompatActivity {
 
     private void updateHostHint() {
         StreamConfigResolver.Resolved cfg = effectiveStreamConfig();
-        String daemonStateUi = MainActivityRuntimeStateView.effectiveDaemonState(
-                daemonState, latestPresentFps, latestStreamUptimeSec, latestFrameOutHost);
         HostHintPresenter.apply(
                 hostHintText,
                 daemonReachable,
                 HostApiClient.API_BASE,
                 daemonHostName,
-                daemonStateUi,
+                effectiveDaemonStateUi(),
                 daemonService,
                 getSelectedProfile(),
                 cfg,
@@ -1031,7 +1030,7 @@ public class MainActivity extends AppCompatActivity {
                 },
                 this::ensureDecoderRunning,
                 this::stopLiveView,
-                this::appendLiveLogWarn,
+                line -> appendLiveLog("W", line),
                 this::handleApiFailure,
                 () -> SettingsPayloadBuilder.buildPayload(
                         getSelectedProfile(),
@@ -1054,7 +1053,7 @@ public class MainActivity extends AppCompatActivity {
                 e,
                 HostApiClient.API_BASE,
                 this::updateStatus,
-                this::appendLiveLogError
+                line -> appendLiveLog("E", line)
         );
     }
 
@@ -1082,7 +1081,7 @@ public class MainActivity extends AppCompatActivity {
                 daemonBuildRevision
         );
         updateStatus(STATE_ERROR, msg, 0);
-        appendLiveLogError(msg);
+        appendLiveLog("E", msg);
         Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
     }
 
@@ -1317,21 +1316,9 @@ public class MainActivity extends AppCompatActivity {
         refreshStatusText();
         refreshDebugInfoOverlay();
         if (next.shouldLogCritical) {
-            appendLiveLogError(next.criticalLogLine);
+            appendLiveLog("E", next.criticalLogLine);
             Log.e(TAG, next.criticalLogLine);
         }
-    }
-
-    private void appendLiveLogInfo(String line) {
-        appendLiveLog("I", line);
-    }
-
-    private void appendLiveLogWarn(String line) {
-        appendLiveLog("W", line);
-    }
-
-    private void appendLiveLogError(String line) {
-        appendLiveLog("E", line);
     }
 
     private void appendLiveLog(String level, String line) {
@@ -1346,8 +1333,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void refreshStatusText() {
-        String daemonStateUi = MainActivityRuntimeStateView.effectiveDaemonState(
-                daemonState, latestPresentFps, latestStreamUptimeSec, latestFrameOutHost);
         MainActivityStatusPresenter.renderStatus(
                 statusText,
                 detailText,
@@ -1358,7 +1343,7 @@ public class MainActivity extends AppCompatActivity {
                 lastUiBps,
                 daemonReachable,
                 daemonHostName,
-                daemonStateUi,
+                effectiveDaemonStateUi(),
                 STATE_STREAMING,
                 STATE_CONNECTING
         );
@@ -1627,15 +1612,13 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void refreshDebugInfoOverlay() {
-        String daemonStateUi = MainActivityRuntimeStateView.effectiveDaemonState(
-                daemonState, latestPresentFps, latestStreamUptimeSec, latestFrameOutHost);
         MainActivityRuntimeStateView.refreshDebugOverlayText(
                 BuildConfig.DEBUG,
                 debugInfoText,
                 debugInfoPanel,
                 lastUiState,
                 daemonHostName,
-                daemonStateUi,
+                effectiveDaemonStateUi(),
                 latestTargetFps,
                 latestPresentFps,
                 getSelectedFps(),
@@ -1723,18 +1706,22 @@ public class MainActivity extends AppCompatActivity {
                 BuildConfig.WBEAM_STREAM_PORT,
                 BuildConfig.WBEAM_BUILD_REV,
                 lastUiInfo,
-                MainActivityRuntimeStateView.effectiveDaemonState(
-                        daemonState,
-                        latestPresentFps,
-                        latestStreamUptimeSec,
-                        latestFrameOutHost
-                ),
+                effectiveDaemonStateUi(),
                 latestPresentFps,
                 startupBeganAtMs,
                 controlRetryCount,
                 SystemClock.elapsedRealtime(),
                 lastStatsLine,
                 ErrorTextUtil.compactDaemonErrorForUi(daemonLastError)
+        );
+    }
+
+    private String effectiveDaemonStateUi() {
+        return MainActivityRuntimeStateView.effectiveDaemonState(
+                daemonState,
+                latestPresentFps,
+                latestStreamUptimeSec,
+                latestFrameOutHost
         );
     }
 
@@ -1755,8 +1742,8 @@ public class MainActivity extends AppCompatActivity {
                 ioExecutor,
                 uiHandler,
                 TransportProbeCallbacksFactory.create(
-                        this::appendLiveLogInfo,
-                        this::appendLiveLogWarn,
+                        line -> appendLiveLog("I", line),
+                        line -> appendLiveLog("W", line),
                         this::updatePreflightOverlay
                 )
         );
