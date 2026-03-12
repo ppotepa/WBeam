@@ -402,81 +402,24 @@ public class MainActivity extends AppCompatActivity {
             public void onDaemonStatusUpdate(boolean reachable, boolean wasReachable,
                     String hostName, String state, long runId, String lastError,
                     boolean errorChanged, long uptimeSec, String service, String buildRevision, JSONObject metrics) {
-                daemonReachable = reachable;
-                daemonHostName = hostName;
-                daemonState = state;
-                daemonLastError = lastError;
-                daemonRunId = runId;
-                daemonUptimeSec = uptimeSec;
-                daemonService = service;
-                daemonBuildRevision = (buildRevision == null || buildRevision.trim().isEmpty()) ? "-" : buildRevision.trim();
-                if (!handshakeResolved && !service.equals("-")) {
-                    handshakeResolved = true;
-                }
-
-                if (requiresTransportProbe()) {
-                    maybeStartTransportProbe();
-                }
-
-                if (!wasReachable) {
-                    Toast.makeText(MainActivity.this, "Connected to " + hostName, Toast.LENGTH_SHORT).show();
-                    appendLiveLogInfo("connected to host " + hostName);
-                }
-                if (errorChanged && !lastError.isEmpty()) {
-                    appendLiveLogError("host last_error: " + lastError);
-                }
-                if (!"STREAMING".equals(state)
-                        && !"STARTING".equals(state)
-                        && !"RECONNECTING".equals(state)) {
-                    stopLiveView();
-                }
-                updateActionButtonsEnabled();
-                updateHostHint();
-                refreshStatusText();
-                if (metrics != null) {
-                    long frameIn = metrics.optLong("frame_in", 0);
-                    long frameOut = metrics.optLong("frame_out", 0);
-                    long drops = metrics.optLong("drops", 0);
-                    long reconnects = metrics.optLong("reconnects", 0);
-                    long bps = metrics.optLong("bitrate_actual_bps", 0);
-                    String errCompact = lastError.length() > 80 ? lastError.substring(0, 80) + "..." : lastError;
-                    updateStatsLine("host in/out: " + frameIn + "/" + frameOut
-                            + " | drops: " + drops + " | reconnects: " + reconnects
-                            + " | bitrate: " + StatusTextFormatter.formatBps(bps)
-                            + (errCompact.isEmpty() ? "" : " | last_error: " + errCompact));
-                }
-                updatePerfHud(metrics);
-                updatePreflightOverlay();
+                handleDaemonStatusUpdate(
+                        reachable,
+                        wasReachable,
+                        hostName,
+                        state,
+                        runId,
+                        lastError,
+                        errorChanged,
+                        uptimeSec,
+                        service,
+                        buildRevision,
+                        metrics
+                );
             }
 
             @Override
             public void onDaemonOffline(boolean wasReachable, Exception e) {
-                daemonReachable = false;
-                daemonState = "DISCONNECTED";
-                stopLiveView();
-                handshakeResolved = false;
-                transportProbe.markWaitingForControlLink();
-                updateActionButtonsEnabled();
-                updateHostHint();
-                updatePerfHudUnavailable();
-                preflightComplete = false;
-                startupDismissed = false;
-                if (wasReachable) {
-                    // Host was reachable and just dropped — restart retry cycle clean
-                    startupBeganAtMs = SystemClock.elapsedRealtime();
-                    controlRetryCount = 0;
-                }
-                updatePreflightOverlay();
-                if (wasReachable) {
-                    updateStatus(STATE_ERROR, "Host API offline: " + ErrorTextUtil.shortError(e), 0);
-                    appendLiveLogError("daemon poll failed: " + ErrorTextUtil.shortError(e)
-                            + " | api=" + HostApiClient.API_BASE);
-                    Toast.makeText(MainActivity.this,
-                            "Host API unreachable (" + ErrorTextUtil.shortError(e) + "). Check USB tethering/LAN and host IP: " + HostApiClient.API_BASE,
-                            Toast.LENGTH_LONG).show();
-                } else {
-                    refreshStatusText();
-                }
+                handleDaemonOffline(wasReachable, e);
             }
 
             @Override
@@ -494,6 +437,102 @@ public class MainActivity extends AppCompatActivity {
                 MainActivity.this.ensureDecoderRunning();
             }
         });
+    }
+
+    private void handleDaemonStatusUpdate(
+            boolean reachable,
+            boolean wasReachable,
+            String hostName,
+            String state,
+            long runId,
+            String lastError,
+            boolean errorChanged,
+            long uptimeSec,
+            String service,
+            String buildRevision,
+            JSONObject metrics
+    ) {
+        daemonReachable = reachable;
+        daemonHostName = hostName;
+        daemonState = state;
+        daemonLastError = lastError;
+        daemonRunId = runId;
+        daemonUptimeSec = uptimeSec;
+        daemonService = service;
+        daemonBuildRevision =
+                (buildRevision == null || buildRevision.trim().isEmpty()) ? "-" : buildRevision.trim();
+        if (!handshakeResolved && !service.equals("-")) {
+            handshakeResolved = true;
+        }
+
+        if (requiresTransportProbe()) {
+            maybeStartTransportProbe();
+        }
+
+        if (!wasReachable) {
+            Toast.makeText(MainActivity.this, "Connected to " + hostName, Toast.LENGTH_SHORT).show();
+            appendLiveLogInfo("connected to host " + hostName);
+        }
+        if (errorChanged && !lastError.isEmpty()) {
+            appendLiveLogError("host last_error: " + lastError);
+        }
+        if (!"STREAMING".equals(state)
+                && !"STARTING".equals(state)
+                && !"RECONNECTING".equals(state)) {
+            stopLiveView();
+        }
+        updateActionButtonsEnabled();
+        updateHostHint();
+        refreshStatusText();
+        updateStatsLineFromMetrics(metrics, lastError);
+        updatePerfHud(metrics);
+        updatePreflightOverlay();
+    }
+
+    private void updateStatsLineFromMetrics(JSONObject metrics, String lastError) {
+        if (metrics == null) {
+            return;
+        }
+        long frameIn = metrics.optLong("frame_in", 0);
+        long frameOut = metrics.optLong("frame_out", 0);
+        long drops = metrics.optLong("drops", 0);
+        long reconnects = metrics.optLong("reconnects", 0);
+        long bps = metrics.optLong("bitrate_actual_bps", 0);
+        String errCompact = lastError.length() > 80 ? lastError.substring(0, 80) + "..." : lastError;
+        updateStatsLine("host in/out: " + frameIn + "/" + frameOut
+                + " | drops: " + drops + " | reconnects: " + reconnects
+                + " | bitrate: " + StatusTextFormatter.formatBps(bps)
+                + (errCompact.isEmpty() ? "" : " | last_error: " + errCompact));
+    }
+
+    private void handleDaemonOffline(boolean wasReachable, Exception e) {
+        daemonReachable = false;
+        daemonState = "DISCONNECTED";
+        stopLiveView();
+        handshakeResolved = false;
+        transportProbe.markWaitingForControlLink();
+        updateActionButtonsEnabled();
+        updateHostHint();
+        updatePerfHudUnavailable();
+        preflightComplete = false;
+        startupDismissed = false;
+        if (wasReachable) {
+            // Host was reachable and just dropped — restart retry cycle clean.
+            startupBeganAtMs = SystemClock.elapsedRealtime();
+            controlRetryCount = 0;
+        }
+        updatePreflightOverlay();
+        if (wasReachable) {
+            updateStatus(STATE_ERROR, "Host API offline: " + ErrorTextUtil.shortError(e), 0);
+            appendLiveLogError("daemon poll failed: " + ErrorTextUtil.shortError(e)
+                    + " | api=" + HostApiClient.API_BASE);
+            Toast.makeText(MainActivity.this,
+                    "Host API unreachable (" + ErrorTextUtil.shortError(e)
+                            + "). Check USB tethering/LAN and host IP: " + HostApiClient.API_BASE,
+                    Toast.LENGTH_LONG).show();
+        } else {
+            refreshStatusText();
+        }
     }
 
     private StreamSessionController createSessionController() {
