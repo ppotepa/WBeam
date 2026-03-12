@@ -32,15 +32,19 @@ Parent Epic:
 Child issues in execution order:
 1. #31 Hygiene inventory and cleanup rules
    - https://github.com/ppotepa/WBeam/issues/31
-   - Status: in progress (inventory file: `docs/hygiene-inventory-2026-03-12.md`)
+   - Status: completed (inventory file: `docs/hygiene-inventory-2026-03-12.md`)
 2. #32 Harden `.gitignore` for runtime/build artifacts
    - https://github.com/ppotepa/WBeam/issues/32
+   - Status: completed (`.gitignore` cache/coverage/profiler hardening)
 3. #33 Remove stale helper/leftover assets
    - https://github.com/ppotepa/WBeam/issues/33
+   - Status: completed (removed `scripts/diagnostics/audodaignose`, kept dir placeholder)
 4. #34 Stabilize CI hygiene checks after cleanup
    - https://github.com/ppotepa/WBeam/issues/34
+   - Status: completed (repo-layout, boundaries, e2e-matrix all green)
 5. #35 Final cleanup report and close Epic #30
    - https://github.com/ppotepa/WBeam/issues/35
+   - Status: completed (`docs/hygiene-report-2026-03-12.md`)
 
 ## Execution Order
 
