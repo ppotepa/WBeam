@@ -1,6 +1,6 @@
 # Repository Structure Source Of Truth
 
-Last updated: 2026-03-11
+Last updated: 2026-03-12
 
 ## Goal
 
@@ -66,6 +66,12 @@ WBeam/
 2. Do not add new compatibility wrappers or alias trees.
 3. Keep wrappers (`./wbeam`, `./trainer.sh`, `./desktop.sh`) stable.
 4. Keep CI guard scripts green for structure and boundary checks.
+
+## Archive Policy
+
+- `archive/legacy/*` is historical-only (true archive), not default runtime source.
+- CI may verify archive presence as historical assets, but must not require archive executables for canonical runtime flow.
+- Any compatibility execution path touching archive content must be explicit opt-in and documented.
 
 ## Structure Validation
 

@@ -58,6 +58,8 @@ Never place in public release assets/notes:
 - Avoid force-push on protected branches (`master`, `release`) except emergency alignment.
 - Keep branch protection enabled.
 - Keep docs under `docs/` and update workflow docs together with process changes.
+- Treat `archive/legacy/*` as true archive: historical assets only, no implicit runtime dependency.
+- If compatibility tooling uses archive assets, it must be explicit opt-in and documented.
 
 ## 9) Repository Structure Source Of Truth
 
