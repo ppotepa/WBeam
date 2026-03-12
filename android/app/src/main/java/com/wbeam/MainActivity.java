@@ -57,6 +57,7 @@ import com.wbeam.startup.StartupOverlayViewRenderer;
 import com.wbeam.startup.StartupOverlayViewsBinder;
 import com.wbeam.startup.TransportProbeCallbacksFactory;
 import com.wbeam.startup.TransportProbeCoordinator;
+import com.wbeam.startup.TransportProbeRuntimeCoordinator;
 import com.wbeam.stream.H264TcpPlayer;
 import com.wbeam.stream.LiveViewPlaybackCoordinator;
 import com.wbeam.stream.SessionUiBridge;
@@ -508,8 +509,8 @@ public class MainActivity extends AppCompatActivity {
                 service
         );
         StatusPollerUiUpdateCoordinator.maybeStartTransportProbe(
-                requiresTransportProbe(),
-                this::maybeStartTransportProbe
+                requiresTransportProbeNow(),
+                () -> maybeStartTransportProbeNow(requiresTransportProbeNow())
         );
         StatusPollerUiUpdateCoordinator.handleStatusTransition(
                 wasReachable,
@@ -1692,10 +1693,10 @@ public class MainActivity extends AppCompatActivity {
                 videoTestController,
                 STARTUP_VIDEO_TEST_HINT_COLOR,
                 StartupOverlayProbeHooksFactory.create(
-                        this::requiresTransportProbe,
+                        this::requiresTransportProbeNow,
                         () -> {
                             if (daemonReachable && handshakeResolved && !isBuildMismatch()) {
-                                maybeStartTransportProbe();
+                                maybeStartTransportProbeNow(requiresTransportProbeNow());
                             }
                         }
                 ),
@@ -1746,8 +1747,9 @@ public class MainActivity extends AppCompatActivity {
         );
     }
 
-    private boolean requiresTransportProbe() {
-        return transportProbe.requiresProbe(
+    private boolean requiresTransportProbeNow() {
+        return TransportProbeRuntimeCoordinator.requiresProbe(
+                transportProbe,
                 daemonReachable,
                 handshakeResolved,
                 BuildConfig.WBEAM_API_IMPL,
@@ -1755,9 +1757,10 @@ public class MainActivity extends AppCompatActivity {
         );
     }
 
-    private void maybeStartTransportProbe() {
-        transportProbe.maybeStartProbe(
-                requiresTransportProbe(),
+    private void maybeStartTransportProbeNow(boolean requiresProbe) {
+        TransportProbeRuntimeCoordinator.maybeStartProbe(
+                transportProbe,
+                requiresProbe,
                 ioExecutor,
                 uiHandler,
                 TransportProbeCallbacksFactory.create(
