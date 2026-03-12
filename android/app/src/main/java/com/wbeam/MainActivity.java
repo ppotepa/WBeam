@@ -36,9 +36,8 @@ import com.wbeam.hud.ResourceUsageTracker;
 import com.wbeam.hud.RuntimeHudComputation;
 import com.wbeam.hud.RuntimeHudAvailabilityCoordinator;
 import com.wbeam.hud.RuntimeHudAvailabilityHooksFactory;
-import com.wbeam.hud.RuntimeHudOverlayPipeline;
+import com.wbeam.hud.RuntimeHudRenderCoordinator;
 import com.wbeam.hud.RuntimeHudStateCoordinator;
-import com.wbeam.hud.RuntimeHudTrendComposer;
 import com.wbeam.hud.RuntimeHudUpdateState;
 import com.wbeam.hud.TrainerHudModeCoordinator;
 import com.wbeam.hud.TrainerHudModeHooksFactory;
@@ -1536,65 +1535,32 @@ public class MainActivity extends AppCompatActivity {
             Log.w(TAG, output.pressureLog);
         }
 
-        String runtimeChartsHtml = RuntimeHudTrendComposer.appendSamplesAndBuildHtml(
-                runtimePresentSeries,
-                runtimeMbpsSeries,
-                runtimeDropSeries,
-                runtimeLatencySeries,
-                runtimeQueueSeries,
-                state.presentFps,
-                state.bitrateMbps,
-                state.dropPerSec,
-                state.e2eP95,
-                state.qT,
-                state.qD,
-                state.qR,
-                state.pressureState.tone,
-                FPS_LOW_ANCHOR
-        );
         int[] streamSize = computeScaledSize();
-        RuntimeHudOverlayPipeline.render(
-                daemonReachable,
-                getSelectedProfile(),
-                getSelectedEncoder(),
-                streamSize[0],
-                streamSize[1],
-                daemonHostName,
-                output.daemonStateUi,
-                daemonBuildRevision,
-                BuildConfig.WBEAM_BUILD_REV,
-                daemonLastError,
-                state.targetFps,
-                state.presentFps,
-                state.recvFps,
-                state.decodeFps,
-                state.e2eP95,
-                state.decodeP95,
-                state.renderP95,
-                state.frametimeP95,
-                state.bitrateMbps,
-                state.dropPerSec,
-                state.qT,
-                state.qD,
-                state.qR,
-                state.qTMax,
-                state.qDMax,
-                state.qRMax,
-                state.adaptiveLevel,
-                state.adaptiveAction,
-                state.drops,
-                state.bpHigh,
-                state.bpRecover,
-                state.reason,
-                runtimeChartsHtml,
-                state.pressureState.tone,
-                resourceUsageTracker,
-                perfHudWebView,
-                perfHudText,
-                perfHudPanel,
-                hudOverlayState,
-                HUD_TEXT_COLOR_LIVE
-        );
+        RuntimeHudRenderCoordinator.Input renderInput = new RuntimeHudRenderCoordinator.Input();
+        renderInput.runtimePresentSeries = runtimePresentSeries;
+        renderInput.runtimeMbpsSeries = runtimeMbpsSeries;
+        renderInput.runtimeDropSeries = runtimeDropSeries;
+        renderInput.runtimeLatencySeries = runtimeLatencySeries;
+        renderInput.runtimeQueueSeries = runtimeQueueSeries;
+        renderInput.state = state;
+        renderInput.fpsLowAnchor = FPS_LOW_ANCHOR;
+        renderInput.daemonReachable = daemonReachable;
+        renderInput.selectedProfile = getSelectedProfile();
+        renderInput.selectedEncoder = getSelectedEncoder();
+        renderInput.streamWidth = streamSize[0];
+        renderInput.streamHeight = streamSize[1];
+        renderInput.daemonHostName = daemonHostName;
+        renderInput.daemonStateUi = output.daemonStateUi;
+        renderInput.daemonBuildRevision = daemonBuildRevision;
+        renderInput.appBuildRevision = BuildConfig.WBEAM_BUILD_REV;
+        renderInput.daemonLastError = daemonLastError;
+        renderInput.resourceUsageTracker = resourceUsageTracker;
+        renderInput.perfHudWebView = perfHudWebView;
+        renderInput.perfHudText = perfHudText;
+        renderInput.perfHudPanel = perfHudPanel;
+        renderInput.hudOverlayState = hudOverlayState;
+        renderInput.hudTextColorLive = HUD_TEXT_COLOR_LIVE;
+        RuntimeHudRenderCoordinator.render(renderInput);
 
         emitHudDebugAdb(output.debugSnapshot);
     }
