@@ -36,12 +36,11 @@ import androidx.core.content.ContextCompat;
 import com.wbeam.api.HostApiClient;
 import com.wbeam.api.StatusListener;
 import com.wbeam.api.StatusPoller;
-import com.wbeam.hud.RuntimeHudFallbackFormatter;
 import com.wbeam.hud.HudDebugLogLimiter;
 import com.wbeam.hud.MetricSeriesBuffer;
 import com.wbeam.hud.ResourceUsageTracker;
+import com.wbeam.hud.RuntimeHudOverlayRenderer;
 import com.wbeam.hud.RuntimeTrendGridRenderer;
-import com.wbeam.hud.RuntimeHudWebPayloadBuilder;
 import com.wbeam.hud.TrainerHudOverlayRenderer;
 import com.wbeam.input.CursorOverlayController;
 import com.wbeam.input.ImmersiveModeController;
@@ -1845,94 +1844,56 @@ public class MainActivity extends AppCompatActivity {
             String metricChartsHtml,
             String tone
     ) {
-        resourceUsageTracker.sample(targetFps, renderP95);
-        String resourceRows = resourceUsageTracker.buildRowsHtml();
-        if (perfHudWebView != null) {
-            int[] streamSize = computeScaledSize();
-            RuntimeHudWebPayloadBuilder.Input payload = new RuntimeHudWebPayloadBuilder.Input();
-            payload.selectedProfile = getSelectedProfile();
-            payload.selectedEncoder = getSelectedEncoder();
-            payload.streamWidth = streamSize[0];
-            payload.streamHeight = streamSize[1];
-            payload.daemonHostName = daemonHostName;
-            payload.daemonStateUi = daemonStateUi;
-            payload.daemonBuildRevision = daemonBuildRevision;
-            payload.appBuildRevision = BuildConfig.WBEAM_BUILD_REV;
-            payload.daemonLastError = daemonLastError;
-            payload.tone = tone;
-            payload.targetFps = targetFps;
-            payload.presentFps = presentFps;
-            payload.recvFps = recvFps;
-            payload.decodeFps = decodeFps;
-            payload.liveMbps = liveMbps;
-            payload.e2eP95 = e2eP95;
-            payload.decodeP95 = decodeP95;
-            payload.renderP95 = renderP95;
-            payload.frametimeP95 = frametimeP95;
-            payload.dropsPerSec = dropsPerSec;
-            payload.qT = qT;
-            payload.qD = qD;
-            payload.qR = qR;
-            payload.qTMax = qTMax;
-            payload.qDMax = qDMax;
-            payload.qRMax = qRMax;
-            payload.adaptiveLevel = adaptiveLevel;
-            payload.adaptiveAction = adaptiveAction;
-            payload.drops = drops;
-            payload.bpHigh = bpHigh;
-            payload.bpRecover = bpRecover;
-            payload.reason = reason;
-            payload.metricChartsHtml = metricChartsHtml;
-            payload.resourceRowsHtml = resourceRows;
+        RuntimeHudOverlayRenderer.Input input = new RuntimeHudOverlayRenderer.Input();
+        int[] streamSize = computeScaledSize();
+        input.daemonReachable = daemonReachable;
+        input.selectedProfile = getSelectedProfile();
+        input.selectedEncoder = getSelectedEncoder();
+        input.streamWidth = streamSize[0];
+        input.streamHeight = streamSize[1];
+        input.daemonHostName = daemonHostName;
+        input.daemonStateUi = daemonStateUi;
+        input.daemonBuildRevision = daemonBuildRevision;
+        input.appBuildRevision = BuildConfig.WBEAM_BUILD_REV;
+        input.daemonLastError = daemonLastError;
+        input.tone = tone;
+        input.targetFps = targetFps;
+        input.presentFps = presentFps;
+        input.recvFps = recvFps;
+        input.decodeFps = decodeFps;
+        input.liveMbps = liveMbps;
+        input.e2eP95 = e2eP95;
+        input.decodeP95 = decodeP95;
+        input.renderP95 = renderP95;
+        input.frametimeP95 = frametimeP95;
+        input.dropsPerSec = dropsPerSec;
+        input.qT = qT;
+        input.qD = qD;
+        input.qR = qR;
+        input.qTMax = qTMax;
+        input.qDMax = qDMax;
+        input.qRMax = qRMax;
+        input.adaptiveLevel = adaptiveLevel;
+        input.adaptiveAction = adaptiveAction;
+        input.drops = drops;
+        input.bpHigh = bpHigh;
+        input.bpRecover = bpRecover;
+        input.reason = reason;
+        input.metricChartsHtml = metricChartsHtml;
+        RuntimeHudOverlayRenderer.Rendered rendered = RuntimeHudOverlayRenderer.render(
+                input,
+                (target, render) -> {
+                    resourceUsageTracker.sample(target, render);
+                    return resourceUsageTracker.buildRowsHtml();
+                }
+        );
 
-            String html = RuntimeHudWebPayloadBuilder.build(payload);
-            if (!showHudWebHtml("runtime", html) && perfHudText != null) {
-                String hud = RuntimeHudFallbackFormatter.buildText(
-                        daemonReachable,
-                        targetFps,
-                        presentFps,
-                        frametimeP95,
-                        decodeP95,
-                        renderP95,
-                        e2eP95,
-                        qT,
-                        qD,
-                        qR,
-                        qTMax,
-                        qDMax,
-                        qRMax,
-                        adaptiveLevel,
-                        adaptiveAction,
-                        drops,
-                        bpHigh,
-                        bpRecover,
-                        reason
-                );
-                showHudTextOnly("runtime", hud, "#B3EAF4FF");
+        if (perfHudWebView != null) {
+            if (!showHudWebHtml("runtime", rendered.html) && perfHudText != null) {
+                showHudTextOnly("runtime", rendered.textFallback, "#B3EAF4FF");
             }
         } else if (perfHudText != null) {
-            String hud = RuntimeHudFallbackFormatter.buildText(
-                    daemonReachable,
-                    targetFps,
-                    presentFps,
-                    frametimeP95,
-                    decodeP95,
-                    renderP95,
-                    e2eP95,
-                    qT,
-                    qD,
-                    qR,
-                    qTMax,
-                    qDMax,
-                    qRMax,
-                    adaptiveLevel,
-                    adaptiveAction,
-                    drops,
-                    bpHigh,
-                    bpRecover,
-                    reason
-            );
-            showHudTextOnly("runtime", hud, "#B3EAF4FF");
+            showHudTextOnly("runtime", rendered.textFallback, "#B3EAF4FF");
         }
         if (perfHudPanel != null) {
             perfHudPanel.setAlpha(0.96f);
