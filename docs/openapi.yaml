@@ -193,13 +193,14 @@ components:
       properties:
         profile:
           type: string
-          enum: [lowlatency, balanced, ultra]
+          enum: [baseline]
+          description: Canonical runtime profile. Legacy aliases are normalized to baseline at input boundaries.
         encoder:
           type: string
-          enum: [auto, nvenc, openh264]
+          enum: [h264, h265, rawpng]
         cursor_mode:
           type: string
-          enum: [hidden, overlay, capture]
+          enum: [hidden, embedded, metadata]
         size:
           type: string
           example: "1920x1080"
@@ -220,12 +221,14 @@ components:
       properties:
         profile:
           type: string
-          enum: [lowlatency, balanced, ultra]
+          enum: [baseline]
+          description: Canonical runtime profile. Legacy aliases may be accepted and normalized to baseline.
         encoder:
           type: string
-          enum: [auto, nvenc, openh264]
+          enum: [h264, h265, rawpng]
         cursor_mode:
           type: string
+          enum: [hidden, embedded, metadata]
         size:
           type: string
           example: "1920x1080"
@@ -433,7 +436,7 @@ components:
               type: object
               additionalProperties:
                 $ref: "#/components/schemas/ActiveConfig"
-              description: Named preset map (lowlatency, balanced, ultra)
+              description: Named preset map keyed by canonical profile IDs (baseline)
             valid:
               $ref: "#/components/schemas/ValidValues"
 

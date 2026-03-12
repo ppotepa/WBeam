@@ -67,10 +67,10 @@ Child issues in execution order:
    - Status: completed (core loader canonicalized + wizard export path fixed)
 4. #41 Align API profile surface with canonical model
    - https://github.com/ppotepa/WBeam/issues/41
-   - Status: next
+   - Status: completed (`docs/openapi.yaml` profile/config alignment)
 5. #42 Final report and close Epic #37
    - https://github.com/ppotepa/WBeam/issues/42
-   - Status: todo
+   - Status: next
 
 ## Execution Order
 
