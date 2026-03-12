@@ -4,7 +4,6 @@ import android.Manifest;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Rect;
-import android.graphics.drawable.GradientDrawable;
 import android.media.MediaPlayer;
 import android.os.Build;
 import android.os.Bundle;
@@ -57,12 +56,12 @@ import com.wbeam.ui.IntraOnlyButtonController;
 import com.wbeam.ui.LiveLogBuffer;
 import com.wbeam.ui.MainActivityUiBinder;
 import com.wbeam.ui.MainActivitySettingsPresenter;
+import com.wbeam.ui.MainActivityStatusPresenter;
 import com.wbeam.ui.SettingsSelectionReader;
 import com.wbeam.ui.SettingsPayloadBuilder;
 import com.wbeam.ui.SettingsPanelController;
 import com.wbeam.ui.SettingsUiSupport;
 import com.wbeam.ui.SimpleMenuUi;
-import com.wbeam.ui.StatusColorResolver;
 import com.wbeam.ui.StatusTextFormatter;
 import com.wbeam.ui.StreamConfigResolver;
 import com.wbeam.widget.FpsLossGraphView;
@@ -228,7 +227,7 @@ public class MainActivity extends AppCompatActivity {
     private long lastUiBps = 0;
     private String lastCriticalErrorInfo = "";
     private long lastCriticalErrorLogAtMs = 0L;
-    private String lastStatsLine = "fps in/out: - | drops: - | late: - | q(t/d/r): -/-/- | reconnects: -";
+    private String lastStatsLine = MainActivityStatusPresenter.DEFAULT_STATS_LINE;
     private String lastHudCompactLine = "hud: waiting for metrics";
     private String hudOverlayMode = "none";
     private String lastHudWebHtml = "";
@@ -1376,8 +1375,8 @@ public class MainActivity extends AppCompatActivity {
     // ══════════════════════════════════════════════════════════════════════════
 
     private void updateStatus(String state, String info, long bps) {
-        lastUiState = state == null ? STATE_IDLE : state;
-        lastUiInfo = info == null ? "-" : info;
+        lastUiState = MainActivityStatusPresenter.normalizeState(state, STATE_IDLE);
+        lastUiInfo = MainActivityStatusPresenter.normalizeInfo(info);
         lastUiBps = bps;
         refreshStatusText();
         refreshDebugInfoOverlay();
@@ -1428,31 +1427,26 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void refreshStatusText() {
-        int color = StatusColorResolver.ledColorForState(lastUiState, STATE_STREAMING, STATE_CONNECTING);
         String daemonStateUi = effectiveDaemonState(
                 daemonState, latestPresentFps, latestStreamUptimeSec, latestFrameOutHost);
-
-        statusText.setText(lastUiState.toUpperCase(Locale.US));
-        detailText.setText(StatusTextFormatter.buildTransportDetail(
+        MainActivityStatusPresenter.renderStatus(
+                statusText,
+                detailText,
+                bpsText,
+                statusLed,
+                lastUiState,
                 lastUiInfo,
+                lastUiBps,
                 daemonReachable,
                 daemonHostName,
-                daemonStateUi
-        ));
-        bpsText.setText("throughput: " + StatusTextFormatter.formatBps(lastUiBps));
-
-        if (statusLed.getBackground() instanceof GradientDrawable) {
-            GradientDrawable drawable = (GradientDrawable) statusLed.getBackground().mutate();
-            drawable.setColor(color);
-        } else {
-            statusLed.setBackgroundColor(color);
-        }
+                daemonStateUi,
+                STATE_STREAMING,
+                STATE_CONNECTING
+        );
     }
 
     private void updateStatsLine(String line) {
-        lastStatsLine = line == null || line.trim().isEmpty()
-            ? "fps in/out: - | drops: - | late: - | q(t/d/r): -/-/- | reconnects: -"
-            : line;
+        lastStatsLine = MainActivityStatusPresenter.normalizeStatsLine(line);
         statsText.setText(lastStatsLine);
         refreshDebugInfoOverlay();
     }
