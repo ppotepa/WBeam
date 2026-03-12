@@ -67,6 +67,7 @@ import com.wbeam.stream.DecoderCapabilityInspector;
 import com.wbeam.telemetry.ClientMetricsReporter;
 import com.wbeam.ui.ErrorTextUtil;
 import com.wbeam.ui.CursorOverlayUiCoordinator;
+import com.wbeam.ui.HostHintPresenter;
 import com.wbeam.ui.IntraOnlyButtonController;
 import com.wbeam.ui.LiveLogBuffer;
 import com.wbeam.ui.LiveLogUiAppender;
@@ -986,21 +987,19 @@ public class MainActivity extends AppCompatActivity {
         StreamConfigResolver.Resolved cfg = effectiveStreamConfig();
         String daemonStateUi = MainActivityRuntimeStateView.effectiveDaemonState(
                 daemonState, latestPresentFps, latestStreamUptimeSec, latestFrameOutHost);
-        hostHintText.setText(MainActivitySettingsPresenter.buildHostHint(
+        HostHintPresenter.apply(
+                hostHintText,
                 daemonReachable,
                 HostApiClient.API_BASE,
                 daemonHostName,
                 daemonStateUi,
                 daemonService,
                 getSelectedProfile(),
-                cfg.width,
-                cfg.height,
-                cfg.fps,
-                cfg.bitrateMbps,
+                cfg,
                 getSelectedEncoder(),
                 intraOnlyEnabled,
                 getSelectedCursorMode()
-        ));
+        );
     }
 
     // ══════════════════════════════════════════════════════════════════════════
