@@ -65,4 +65,26 @@ public final class MainActivityStatusPresenter {
             statusLed.setBackgroundColor(color);
         }
     }
+
+    public static String buildHostStatsLine(
+            long frameIn,
+            long frameOut,
+            long drops,
+            long reconnects,
+            long bitrateBps,
+            String lastError
+    ) {
+        String errCompact = compactError(lastError, 80);
+        return "host in/out: " + frameIn + "/" + frameOut
+                + " | drops: " + drops + " | reconnects: " + reconnects
+                + " | bitrate: " + StatusTextFormatter.formatBps(bitrateBps)
+                + (errCompact.isEmpty() ? "" : " | last_error: " + errCompact);
+    }
+
+    private static String compactError(String text, int maxLen) {
+        if (text == null || text.isEmpty()) {
+            return "";
+        }
+        return text.length() > maxLen ? text.substring(0, maxLen) + "..." : text;
+    }
 }

@@ -495,11 +495,14 @@ public class MainActivity extends AppCompatActivity {
         long drops = metrics.optLong("drops", 0);
         long reconnects = metrics.optLong("reconnects", 0);
         long bps = metrics.optLong("bitrate_actual_bps", 0);
-        String errCompact = lastError.length() > 80 ? lastError.substring(0, 80) + "..." : lastError;
-        updateStatsLine("host in/out: " + frameIn + "/" + frameOut
-                + " | drops: " + drops + " | reconnects: " + reconnects
-                + " | bitrate: " + StatusTextFormatter.formatBps(bps)
-                + (errCompact.isEmpty() ? "" : " | last_error: " + errCompact));
+        updateStatsLine(MainActivityStatusPresenter.buildHostStatsLine(
+                frameIn,
+                frameOut,
+                drops,
+                reconnects,
+                bps,
+                lastError
+        ));
     }
 
     private void handleDaemonOffline(boolean wasReachable, Exception e) {
