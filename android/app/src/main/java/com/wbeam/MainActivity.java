@@ -38,6 +38,7 @@ import com.wbeam.hud.ResourceUsageTracker;
 import com.wbeam.hud.RuntimeHudComputation;
 import com.wbeam.hud.RuntimeHudOverlayPipeline;
 import com.wbeam.hud.RuntimeHudTrendComposer;
+import com.wbeam.hud.TrainerHudRouting;
 import com.wbeam.hud.TrainerHudOverlayRenderer;
 import com.wbeam.input.CursorOverlayController;
 import com.wbeam.input.ImmersiveModeController;
@@ -1705,58 +1706,54 @@ public class MainActivity extends AppCompatActivity {
         String connectionMode = metrics.optString("connection_mode", "live")
                 .trim()
                 .toLowerCase(Locale.US);
-        boolean isTrainingConnection = "training".equals(connectionMode);
         JSONObject trainerHudJson = metrics.optJSONObject("trainer_hud_json");
         boolean trainerHudFromJson = trainerHudJson != null && trainerHudJson.length() > 0;
         String trainerHudText = metrics.optString("trainer_hud_text", "");
         boolean trainerHudFromText = trainerHudText != null && !trainerHudText.trim().isEmpty();
         boolean trainerHudFlag = metrics.optBoolean("trainer_hud_active", false);
-        if (isTrainingConnection && (trainerHudFromJson || trainerHudFromText)) {
-            lastTrainerHudPayloadAtMs = nowMs;
+
+        TrainerHudRouting.Decision decision = TrainerHudRouting.decide(
+                connectionMode,
+                trainerHudFlag,
+                trainerHudFromJson,
+                trainerHudFromText,
+                nowMs,
+                lastTrainerHudPayloadAtMs,
+                trainerHudSessionActive,
+                TRAINER_HUD_PAYLOAD_GRACE_MS,
+                BuildConfig.DEBUG,
+                debugOverlayVisible
+        );
+        lastTrainerHudPayloadAtMs = decision.updatedLastPayloadAtMs;
+        trainerHudSessionActive = decision.updatedSessionActive;
+        if (decision.enableDebugOverlay) {
+            setDebugOverlayVisible(true);
         }
-        boolean trainerHudActive =
-                isTrainingConnection && (trainerHudFlag || trainerHudFromJson || trainerHudFromText);
-        if (!isTrainingConnection && (trainerHudFlag || trainerHudFromJson || trainerHudFromText)) {
-            emitHudDebugAdb("trainer_payload_ignored connection_mode=" + connectionMode);
-        }
-        if (trainerHudActive && !trainerHudSessionActive) {
-            trainerHudSessionActive = true;
-            if (BuildConfig.DEBUG && !debugOverlayVisible) {
-                setDebugOverlayVisible(true);
-            }
-        } else if (!trainerHudActive && trainerHudSessionActive) {
-            trainerHudSessionActive = false;
+        if (decision.logMessage != null && !decision.logMessage.isEmpty()) {
+            emitHudDebugAdb(decision.logMessage);
         }
 
-        if (isTrainingConnection && trainerHudFromJson) {
-            renderTrainerHudOverlayJson(trainerHudJson);
-            return true;
-        }
-        if (isTrainingConnection && trainerHudFromText) {
-            renderTrainerHudOverlay(trainerHudText);
-            return true;
-        }
-        if (isTrainingConnection && trainerHudActive) {
-            if (lastTrainerHudPayloadAtMs > 0L
-                    && (nowMs - lastTrainerHudPayloadAtMs) <= TRAINER_HUD_PAYLOAD_GRACE_MS) {
-                emitHudDebugAdb("trainer_payload_gap grace=1 keep_last=1");
+        switch (decision.action) {
+            case RENDER_JSON:
+                renderTrainerHudOverlayJson(trainerHudJson);
                 return true;
-            }
-            renderTrainerHudOverlayPlaceholder();
-            return true;
-        }
-        if (isTrainingConnection && trainerHudSessionActive) {
-            if (lastTrainerHudPayloadAtMs > 0L
-                    && (nowMs - lastTrainerHudPayloadAtMs) <= TRAINER_HUD_PAYLOAD_GRACE_MS) {
-                emitHudDebugAdb("trainer_payload_missing grace=1 keep_last=1");
+            case RENDER_TEXT:
+                renderTrainerHudOverlay(trainerHudText);
                 return true;
-            }
-            showHudTextOnly("trainer", "TRAINING HUD\nwaiting for trainer metrics...", HUD_TEXT_COLOR_LIVE);
-            lastHudCompactLine = "trainer hud waiting metrics";
-            refreshDebugInfoOverlay();
-            return true;
+            case KEEP_LAST:
+                return true;
+            case RENDER_PLACEHOLDER:
+                renderTrainerHudOverlayPlaceholder();
+                return true;
+            case SHOW_WAITING:
+                showHudTextOnly("trainer", "TRAINING HUD\nwaiting for trainer metrics...", HUD_TEXT_COLOR_LIVE);
+                lastHudCompactLine = "trainer hud waiting metrics";
+                refreshDebugInfoOverlay();
+                return true;
+            case NONE:
+            default:
+                return decision.handled;
         }
-        return isTrainingConnection;
     }
 
     private void updateRuntimePerfHud(JSONObject metrics, long nowMs) {
