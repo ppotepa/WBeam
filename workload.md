@@ -1,7 +1,7 @@
 # Workload Plan (Epics)
 
 Date: 2026-03-12
-Branch: v0.1.1/base
+Branch: v0.1.1/e48/i49-policy-boundary
 
 ## 1. Issue Strategy (Execution Model)
 
@@ -24,7 +24,8 @@ Current status:
 - Child issues #31-#35 completed and closed.
 - Epic #37 completed: Single Source of Truth for Profiles/Config.
 - Child issues #38-#42 completed.
-- Next step: execute Epic #3 child issues one-by-one.
+- Epic #48 in progress: Legacy Decoupling (`archive/legacy`).
+- Next step: execute #50 after policy boundary decision (#49).
 
 ## 2. Epic #30 Breakdown (Step-by-step issues)
 
@@ -71,6 +72,29 @@ Child issues in execution order:
 5. #42 Final report and close Epic #37
    - https://github.com/ppotepa/WBeam/issues/42
    - Status: completed (`docs/epic-37-final-report-2026-03-12.md`)
+
+## 4. Epic #48 Breakdown (Step-by-step issues)
+
+Parent Epic:
+- #48 Legacy Decoupling (`archive/legacy`)
+  - https://github.com/ppotepa/WBeam/issues/48
+
+Child issues in execution order:
+1. #49 Define archive/legacy policy boundary
+   - https://github.com/ppotepa/WBeam/issues/49
+   - Status: completed (`docs/archive-legacy-policy-2026-03-12.md`)
+2. #50 Align checks and docs with archive policy
+   - https://github.com/ppotepa/WBeam/issues/50
+   - Status: next
+3. #51 Remove/isolate archive runtime references
+   - https://github.com/ppotepa/WBeam/issues/51
+   - Status: todo
+4. #52 Add explicit compatibility guardrails
+   - https://github.com/ppotepa/WBeam/issues/52
+   - Status: todo
+5. #53 Final report and close Epic #48
+   - https://github.com/ppotepa/WBeam/issues/53
+   - Status: todo
 
 ## Execution Order
 
