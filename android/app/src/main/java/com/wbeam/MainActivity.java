@@ -315,6 +315,13 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        initializeUiBindings();
+        ensureNotificationPermissionIfNeeded();
+        initializeControllers();
+        initializeStartupState();
+    }
+
+    private void initializeUiBindings() {
         bindViews();
         setScreenAlwaysOn(true);
         bindStartupBuildVersion();
@@ -325,25 +332,37 @@ public class MainActivity extends AppCompatActivity {
         loadSavedSettings();
         hwAvcDecodeAvailable = DecoderCapabilityInspector.hasHardwareAvcDecoder(TAG);
         Log.i(TAG, "startup transport api_impl=" + BuildConfig.WBEAM_API_IMPL
-            + " api=" + HostApiClient.API_BASE
-            + " stream=tcp://" + BuildConfig.WBEAM_STREAM_HOST + ":" + BuildConfig.WBEAM_STREAM_PORT);
+                + " api=" + HostApiClient.API_BASE
+                + " stream=tcp://" + BuildConfig.WBEAM_STREAM_HOST + ":" + BuildConfig.WBEAM_STREAM_PORT);
+    }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                        != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this,
-                    new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1001);
+    private void ensureNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            return;
         }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                == PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
+        ActivityCompat.requestPermissions(
+                this,
+                new String[]{Manifest.permission.POST_NOTIFICATIONS},
+                1001
+        );
+    }
 
+    private void initializeControllers() {
         metricsReporter = new ClientMetricsReporter(ioExecutor, msg -> appendLiveLogWarn(msg));
         videoTestController = createVideoTestController();
         statusPoller = createStatusPoller();
         sessionController = createSessionController();
+    }
 
+    private void initializeStartupState() {
         applySettings(false);
         setDebugControlsVisible(false);
         applyBuildVariantUi();
-        updateStatsLine("fps in/out: - | drops: - | late: - | q(t/d/r): -/-/- | reconnects: -");
+        updateStatsLine(MainActivityStatusPresenter.DEFAULT_STATS_LINE);
         updatePerfHudUnavailable();
         startupBeganAtMs = SystemClock.elapsedRealtime();
         handshakeResolved = false;
@@ -447,15 +466,16 @@ public class MainActivity extends AppCompatActivity {
             String buildRevision,
             JSONObject metrics
     ) {
-        daemonReachable = reachable;
-        daemonHostName = hostName;
-        daemonState = state;
-        daemonLastError = lastError;
-        daemonRunId = runId;
-        daemonUptimeSec = uptimeSec;
-        daemonService = service;
-        daemonBuildRevision =
-                (buildRevision == null || buildRevision.trim().isEmpty()) ? "-" : buildRevision.trim();
+        applyDaemonStatusSnapshot(
+                reachable,
+                hostName,
+                state,
+                lastError,
+                runId,
+                uptimeSec,
+                service,
+                buildRevision
+        );
         if (!handshakeResolved && !service.equals("-")) {
             handshakeResolved = true;
         }
@@ -465,15 +485,12 @@ public class MainActivity extends AppCompatActivity {
         }
 
         if (!wasReachable) {
-            Toast.makeText(MainActivity.this, "Connected to " + hostName, Toast.LENGTH_SHORT).show();
-            appendLiveLogInfo("connected to host " + hostName);
+            notifyConnectedHost(hostName);
         }
         if (errorChanged && !lastError.isEmpty()) {
             appendLiveLogError("host last_error: " + lastError);
         }
-        if (!"STREAMING".equals(state)
-                && !"STARTING".equals(state)
-                && !"RECONNECTING".equals(state)) {
+        if (shouldStopLiveViewForDaemonState(state)) {
             stopLiveView();
         }
         updateActionButtonsEnabled();
@@ -512,13 +529,7 @@ public class MainActivity extends AppCompatActivity {
         updateActionButtonsEnabled();
         updateHostHint();
         updatePerfHudUnavailable();
-        preflightComplete = false;
-        startupDismissed = false;
-        if (wasReachable) {
-            // Host was reachable and just dropped — restart retry cycle clean.
-            startupBeganAtMs = SystemClock.elapsedRealtime();
-            controlRetryCount = 0;
-        }
+        resetStartupAfterDisconnect(wasReachable);
         updatePreflightOverlay();
         if (wasReachable) {
             updateStatus(STATE_ERROR, "Host API offline: " + ErrorTextUtil.shortError(e), 0);
@@ -558,6 +569,11 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        performLifecycleCleanup();
+        super.onDestroy();
+    }
+
+    private void performLifecycleCleanup() {
         statusPoller.stop();
         stopPreflightPulse();
         uiHandler.removeCallbacks(simpleMenuAutoHideTask);
@@ -567,7 +583,49 @@ public class MainActivity extends AppCompatActivity {
         videoTestController.release();
         stopLiveView();
         ioExecutor.shutdownNow();
-        super.onDestroy();
+    }
+
+    private void applyDaemonStatusSnapshot(
+            boolean reachable,
+            String hostName,
+            String state,
+            String lastError,
+            long runId,
+            long uptimeSec,
+            String service,
+            String buildRevision
+    ) {
+        daemonReachable = reachable;
+        daemonHostName = hostName;
+        daemonState = state;
+        daemonLastError = lastError;
+        daemonRunId = runId;
+        daemonUptimeSec = uptimeSec;
+        daemonService = service;
+        daemonBuildRevision = (buildRevision == null || buildRevision.trim().isEmpty())
+                ? "-"
+                : buildRevision.trim();
+    }
+
+    private void notifyConnectedHost(String hostName) {
+        Toast.makeText(MainActivity.this, "Connected to " + hostName, Toast.LENGTH_SHORT).show();
+        appendLiveLogInfo("connected to host " + hostName);
+    }
+
+    private boolean shouldStopLiveViewForDaemonState(String state) {
+        return !"STREAMING".equals(state)
+                && !"STARTING".equals(state)
+                && !"RECONNECTING".equals(state);
+    }
+
+    private void resetStartupAfterDisconnect(boolean wasReachable) {
+        preflightComplete = false;
+        startupDismissed = false;
+        if (wasReachable) {
+            // Host was reachable and just dropped — restart retry cycle clean.
+            startupBeganAtMs = SystemClock.elapsedRealtime();
+            controlRetryCount = 0;
+        }
     }
 
     @Override
