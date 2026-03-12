@@ -9,7 +9,6 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
-import android.text.method.ScrollingMovementMethod;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.Surface;
@@ -54,6 +53,7 @@ import com.wbeam.startup.StartupOverlayModelBuilder;
 import com.wbeam.startup.StartupOverlayProbeHooksFactory;
 import com.wbeam.startup.StartupOverlayController;
 import com.wbeam.startup.StartupOverlayViewRenderer;
+import com.wbeam.startup.StartupOverlayViewsBinder;
 import com.wbeam.startup.TransportProbeCallbacksFactory;
 import com.wbeam.startup.TransportProbeCoordinator;
 import com.wbeam.stream.H264TcpPlayer;
@@ -717,28 +717,7 @@ public class MainActivity extends AppCompatActivity {
         perfHudText = findViewById(R.id.perfHudText);
         perfHudWebView = findViewById(R.id.perfHudWebView);
         debugInfoText = findViewById(R.id.debugInfoText);
-        startupOverlayViews.titleText = findViewById(R.id.startupTitle);
-        startupOverlayViews.subtitleText = findViewById(R.id.startupSubtitle);
-        startupOverlayViews.step1Card = findViewById(R.id.startupStep1Row);
-        startupOverlayViews.step2Card = findViewById(R.id.startupStep2Row);
-        startupOverlayViews.step3Card = findViewById(R.id.startupStep3Row);
-        startupOverlayViews.step1Badge = findViewById(R.id.startupStep1Badge);
-        startupOverlayViews.step1Label = findViewById(R.id.startupStep1Label);
-        startupOverlayViews.step1Detail = findViewById(R.id.startupStep1Detail);
-        startupOverlayViews.step1Status = findViewById(R.id.startupStep1Status);
-        startupOverlayViews.step2Badge = findViewById(R.id.startupStep2Badge);
-        startupOverlayViews.step2Label = findViewById(R.id.startupStep2Label);
-        startupOverlayViews.step2Detail = findViewById(R.id.startupStep2Detail);
-        startupOverlayViews.step2Status = findViewById(R.id.startupStep2Status);
-        startupOverlayViews.step3Badge = findViewById(R.id.startupStep3Badge);
-        startupOverlayViews.step3Label = findViewById(R.id.startupStep3Label);
-        startupOverlayViews.step3Detail = findViewById(R.id.startupStep3Detail);
-        startupOverlayViews.step3Status = findViewById(R.id.startupStep3Status);
-        startupOverlayViews.infoText = findViewById(R.id.startupInfoText);
-        startupBuildVersionText = findViewById(R.id.startupBuildVersion);
-        if (startupOverlayViews.infoText != null) {
-            startupOverlayViews.infoText.setMovementMethod(new ScrollingMovementMethod());
-        }
+        startupBuildVersionText = StartupOverlayViewsBinder.bind(this, startupOverlayViews);
         startupOverlayController = new StartupOverlayController(uiHandler, preflightOverlay);
         startupOverlayController.setTickListener(animTick -> {
             preflightAnimTick = animTick;
