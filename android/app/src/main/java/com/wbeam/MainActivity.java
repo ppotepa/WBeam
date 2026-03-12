@@ -68,6 +68,7 @@ import com.wbeam.ui.HostOfflineFlowCoordinator;
 import com.wbeam.ui.HostOfflineHooksFactory;
 import com.wbeam.ui.MainActivityRuntimeStateView;
 import com.wbeam.ui.MainActivityInteractionPolicy;
+import com.wbeam.ui.MainActivityLifecycleCleaner;
 import com.wbeam.ui.MainActivityUiBinder;
 import com.wbeam.ui.MainActivitySettingsPresenter;
 import com.wbeam.ui.MainActivityStatusPresenter;
@@ -587,15 +588,18 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void performLifecycleCleanup() {
-        statusPoller.stop();
-        stopPreflightPulse();
-        uiHandler.removeCallbacks(simpleMenuAutoHideTask);
-        uiHandler.removeCallbacks(debugInfoFadeTask);
-        uiHandler.removeCallbacks(debugGraphSampleTask);
-        uiHandler.removeCallbacks(debugOverlayToggleTask);
-        videoTestController.release();
-        stopLiveView();
-        ioExecutor.shutdownNow();
+        MainActivityLifecycleCleaner.cleanup(
+                statusPoller,
+                this::stopPreflightPulse,
+                uiHandler,
+                simpleMenuAutoHideTask,
+                debugInfoFadeTask,
+                debugGraphSampleTask,
+                debugOverlayToggleTask,
+                videoTestController::release,
+                this::stopLiveView,
+                ioExecutor
+        );
     }
 
     private void applyDaemonStatusSnapshot(
