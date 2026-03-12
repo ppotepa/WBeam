@@ -74,8 +74,10 @@ import com.wbeam.ui.HostOfflineFlowCoordinator;
 import com.wbeam.ui.HostOfflineHooksFactory;
 import com.wbeam.ui.MainActivityRuntimeStateView;
 import com.wbeam.ui.MainActivityInteractionPolicy;
+import com.wbeam.ui.MainActivityButtonsSetup;
 import com.wbeam.ui.MainActivityLifecycleCleaner;
 import com.wbeam.ui.MainActivitySimpleMenuCoordinator;
+import com.wbeam.ui.MainActivitySettingsInitializer;
 import com.wbeam.ui.MainActivitySurfaceCallbacksFactory;
 import com.wbeam.ui.MainActivityUiBinder;
 import com.wbeam.ui.MainActivitySettingsPresenter;
@@ -864,16 +866,14 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void setupButtons() {
-        MainActivityUiBinder.bindSettingsCloseButton(settingsCloseButton, this::hideSettingsPanel);
-        MainActivityUiBinder.bindSimpleMenuTouchRefresh(simpleMenuPanel, this::scheduleSimpleMenuAutoHide);
-        MainActivityUiBinder.bindDebugInfoTouchFade(
+        MainActivityButtonsSetup.setup(
+                settingsCloseButton,
+                simpleMenuPanel,
                 debugInfoPanel,
                 uiHandler,
                 debugInfoFadeTask,
                 DEBUG_INFO_ALPHA_TOUCH,
-                DEBUG_INFO_ALPHA_RESET_MS
-        );
-        MainActivityUiBinder.bindSimpleModeButtons(
+                DEBUG_INFO_ALPHA_RESET_MS,
                 simpleModeH265Button,
                 simpleModeRawButton,
                 PREFERRED_VIDEO,
@@ -881,22 +881,23 @@ public class MainActivity extends AppCompatActivity {
                     simpleMenuState.mode = mode;
                     refreshSimpleMenuButtons();
                     scheduleSimpleMenuAutoHide();
-                }
-        );
-        MainActivityUiBinder.bindSimpleFpsButtons(
+                },
                 simpleFps30Button,
                 simpleFps45Button,
                 simpleFps60Button,
                 simpleFps90Button,
                 simpleFps120Button,
                 simpleFps144Button,
-                this::selectSimpleFps
+                this::selectSimpleFps,
+                simpleApplyButton,
+                this::hideSettingsPanel,
+                this::scheduleSimpleMenuAutoHide,
+                () -> {
+                    applySimpleMenuToSettings();
+                    requestStartGuarded(false, true);
+                    hideSimpleMenu();
+                }
         );
-        MainActivityUiBinder.bindSimpleApplyButton(simpleApplyButton, () -> {
-            applySimpleMenuToSettings();
-            requestStartGuarded(false, true);
-            hideSimpleMenu();
-        });
         updateActionButtonsEnabled();
     }
 
@@ -941,7 +942,7 @@ public class MainActivity extends AppCompatActivity {
     // ══════════════════════════════════════════════════════════════════════════
 
     private void loadSavedSettings() {
-        MainActivitySettingsPresenter.applyDefaultSettings(
+        MainActivitySettingsInitializer.loadDefaults(
                 profileSpinner,
                 encoderSpinner,
                 cursorSpinner,
@@ -956,17 +957,22 @@ public class MainActivity extends AppCompatActivity {
                 DEFAULT_CURSOR_MODE,
                 DEFAULT_RES_SCALE,
                 DEFAULT_FPS,
-                DEFAULT_BITRATE_MBPS
+                DEFAULT_BITRATE_MBPS,
+                cursorOverlayController,
+                simpleMenuState,
+                new MainActivitySettingsInitializer.Hooks() {
+                    @Override
+                    public void enforceCursorOverlayPolicy(boolean persist) {
+                        MainActivity.this.enforceCursorOverlayPolicy(persist);
+                    }
+
+                    @Override
+                    public void refreshSettingsUi(boolean includeSimpleMenuButtons) {
+                        MainActivity.this.refreshSettingsUi(includeSimpleMenuButtons);
+                    }
+                }
         );
-        if (cursorOverlayController != null) {
-            cursorOverlayController.resetEnabledDefault();
-        }
-        enforceCursorOverlayPolicy(false);
         intraOnlyEnabled = false;
-        simpleMenuState.mode = PREFERRED_VIDEO;
-        simpleMenuState.fps = DEFAULT_FPS;
-        simpleMenuState.visible = false;
-        refreshSettingsUi(true);
     }
 
     private void updateSettingValueLabels() {
