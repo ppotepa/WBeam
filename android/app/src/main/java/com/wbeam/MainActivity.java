@@ -414,7 +414,14 @@ public class MainActivity extends AppCompatActivity {
             @Override public void logError(String msg) { appendLiveLogError(msg); }
             @Override public void onOverlayChanged() { updatePreflightOverlay(); }
             @Override public void setLiveLogVisible(boolean v) { setLiveLogVisibleForTestMode(v); }
-            @Override public void showToast(String msg, boolean longT) { showVideoTestToast(msg, longT); }
+            @Override
+            public void showToast(String msg, boolean longT) {
+                Toast.makeText(
+                        MainActivity.this,
+                        msg,
+                        longT ? Toast.LENGTH_LONG : Toast.LENGTH_SHORT
+                ).show();
+            }
             @Override public VideoTestController.TestConfig getTestConfig() { return buildVideoTestConfig(); }
         });
     }
@@ -431,14 +438,6 @@ public class MainActivity extends AppCompatActivity {
         if (liveLogText != null) {
             liveLogText.setVisibility(visible ? View.VISIBLE : View.GONE);
         }
-    }
-
-    private void showVideoTestToast(String message, boolean longToast) {
-        Toast.makeText(
-                MainActivity.this,
-                message,
-                longToast ? Toast.LENGTH_LONG : Toast.LENGTH_SHORT
-        ).show();
     }
 
     private VideoTestController.TestConfig buildVideoTestConfig() {
