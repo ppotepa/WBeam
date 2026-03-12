@@ -148,10 +148,10 @@ Definition of Done:
 - No hidden production dependency on archive paths.
 
 Current state (as-is):
-- `archive/legacy/` is still part of expected repository layout and checks.
-- Legacy lane assets are present and can be confused with active runtime paths.
+- Legacy archive directory was removed from repository.
+- Runtime and CI checks no longer require archive paths.
 - Canonical runtime profile source was already moved away from archive fallback in Epic #37.
-- Boundary between "historical archive" and "supported compatibility lane" is still not formalized.
+- Boundary is formalized: no archive-backed runtime lane in canonical workflow.
 
 Epic 3 scope (to-do):
 1. Decide policy: `archive/legacy` is either:
