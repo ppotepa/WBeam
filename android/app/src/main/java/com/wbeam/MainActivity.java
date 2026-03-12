@@ -38,6 +38,7 @@ import com.wbeam.hud.ResourceUsageTracker;
 import com.wbeam.hud.RuntimeHudComputation;
 import com.wbeam.hud.RuntimeHudOverlayPipeline;
 import com.wbeam.hud.RuntimeHudTrendComposer;
+import com.wbeam.hud.RuntimeHudUpdateState;
 import com.wbeam.hud.TrainerHudRouting;
 import com.wbeam.hud.TrainerHudOverlayRenderer;
 import com.wbeam.input.CursorOverlayController;
@@ -1764,151 +1765,100 @@ public class MainActivity extends AppCompatActivity {
                 DECODE_QUEUE_MAX_FRAMES,
                 RENDER_QUEUE_MAX_FRAMES
         );
-        long frameInHost = runtime.frameInHost;
-        long frameOutHost = runtime.frameOutHost;
-        long streamUptimeSec = runtime.streamUptimeSec;
+        RuntimeHudUpdateState state = RuntimeHudUpdateState.fromSnapshot(
+                runtime,
+                nowMs,
+                latestStablePresentFps,
+                latestStablePresentFpsAtMs,
+                PRESENT_FPS_STALE_GRACE_MS,
+                runtimeDropPrevCount,
+                runtimeDropPrevAtMs
+        );
+        latestStablePresentFps = state.updatedStablePresentFps;
+        latestStablePresentFpsAtMs = state.updatedStablePresentFpsAtMs;
+        runtimeDropPrevCount = state.updatedDropPrevCount;
+        runtimeDropPrevAtMs = state.updatedDropPrevAtMs;
 
-        double targetFps = runtime.targetFps;
-        RuntimeHudComputation.FpsStabilizationResult fpsStabilization =
-                RuntimeHudComputation.stabilizePresentFps(
-                        runtime,
-                        nowMs,
-                        latestStablePresentFps,
-                        latestStablePresentFpsAtMs,
-                        PRESENT_FPS_STALE_GRACE_MS
-                );
-        double presentFps = fpsStabilization.presentFps;
-        latestStablePresentFps = fpsStabilization.updatedStablePresentFps;
-        latestStablePresentFpsAtMs = fpsStabilization.updatedStablePresentFpsAtMs;
-        double recvFps = runtime.recvFps;
-        double decodeFps = runtime.decodeFps;
         String daemonStateUi = MainActivityRuntimeStateView.effectiveDaemonState(
                 daemonState,
-                presentFps,
-                streamUptimeSec,
-                frameOutHost
+                state.presentFps,
+                state.streamUptimeSec,
+                state.frameOutHost
         );
-        latestTargetFps = targetFps;
-        latestPresentFps = presentFps;
-        latestStreamUptimeSec = streamUptimeSec;
-        latestFrameOutHost = frameOutHost;
-        double frametimeP95 = runtime.frametimeP95;
-        double decodeP95 = runtime.decodeP95;
-        double renderP95 = runtime.renderP95;
-        double e2eP95 = runtime.e2eP95;
-
-        int qT = runtime.qT;
-        int qD = runtime.qD;
-        int qR = runtime.qR;
-
-        int qTMax = runtime.qTMax;
-        int qDMax = runtime.qDMax;
-        int qRMax = runtime.qRMax;
-
-        int adaptiveLevel = runtime.adaptiveLevel;
-        String adaptiveAction = runtime.adaptiveAction;
-        long drops = runtime.drops;
-        long bpHigh = runtime.bpHigh;
-        long bpRecover = runtime.bpRecover;
-        String reason = runtime.reason;
+        latestTargetFps = state.targetFps;
+        latestPresentFps = state.presentFps;
+        latestStreamUptimeSec = state.streamUptimeSec;
+        latestFrameOutHost = state.frameOutHost;
 
         lastHudCompactLine = RuntimeHudComputation.formatCompactHudLine(
-                targetFps,
-                presentFps,
-                e2eP95,
-                decodeP95,
-                renderP95,
-                qT,
-                qD,
-                qR
+                state.targetFps,
+                state.presentFps,
+                state.e2eP95,
+                state.decodeP95,
+                state.renderP95,
+                state.qT,
+                state.qD,
+                state.qR
         );
         refreshDebugInfoOverlay();
 
-        RuntimeHudComputation.PressureState pressureState = RuntimeHudComputation.evaluatePressure(
-                targetFps,
-                presentFps,
-                decodeP95,
-                renderP95,
-                qT,
-                qD,
-                qR,
-                qTMax,
-                qDMax,
-                qRMax,
-                adaptiveAction,
-                streamUptimeSec
-        );
-        if (pressureState.highPressure) {
+        if (state.pressureState.highPressure) {
             Log.w(TAG, RuntimeHudComputation.formatHighPressureLog(
-                    pressureState,
-                    decodeP95,
-                    renderP95,
-                    qT,
-                    qD,
-                    qR,
-                    qTMax,
-                    qDMax,
-                    qRMax,
-                    presentFps,
-                    streamUptimeSec
+                    state.pressureState,
+                    state.decodeP95,
+                    state.renderP95,
+                    state.qT,
+                    state.qD,
+                    state.qR,
+                    state.qTMax,
+                    state.qDMax,
+                    state.qRMax,
+                    state.presentFps,
+                    state.streamUptimeSec
             ));
         }
-        long latestDroppedFrames = runtime.latestDroppedFrames;
-        long latestTooLateFrames = runtime.latestTooLateFrames;
-        RuntimeHudComputation.DropRateResult dropRate =
-                RuntimeHudComputation.computeDropRatePerSec(
-                        latestDroppedFrames,
-                        latestTooLateFrames,
-                        nowMs,
-                        runtimeDropPrevCount,
-                        runtimeDropPrevAtMs
-                );
-        double dropPerSec = dropRate.dropPerSec;
-        runtimeDropPrevCount = dropRate.updatedPrevCount;
-        runtimeDropPrevAtMs = dropRate.updatedPrevAtMs;
-        double bitrateMbps = runtime.bitrateMbps;
         String runtimeChartsHtml = RuntimeHudTrendComposer.appendSamplesAndBuildHtml(
                 runtimePresentSeries,
                 runtimeMbpsSeries,
                 runtimeDropSeries,
                 runtimeLatencySeries,
                 runtimeQueueSeries,
-                presentFps,
-                bitrateMbps,
-                dropPerSec,
-                e2eP95,
-                qT,
-                qD,
-                qR,
-                pressureState.tone,
+                state.presentFps,
+                state.bitrateMbps,
+                state.dropPerSec,
+                state.e2eP95,
+                state.qT,
+                state.qD,
+                state.qR,
+                state.pressureState.tone,
                 FPS_LOW_ANCHOR
         );
         renderRuntimeHudOverlay(
                 daemonStateUi,
-                targetFps,
-                presentFps,
-                recvFps,
-                decodeFps,
-                e2eP95,
-                decodeP95,
-                renderP95,
-                frametimeP95,
-                bitrateMbps,
-                dropPerSec,
-                qT,
-                qD,
-                qR,
-                qTMax,
-                qDMax,
-                qRMax,
-                adaptiveLevel,
-                adaptiveAction,
-                drops,
-                bpHigh,
-                bpRecover,
-                reason,
+                state.targetFps,
+                state.presentFps,
+                state.recvFps,
+                state.decodeFps,
+                state.e2eP95,
+                state.decodeP95,
+                state.renderP95,
+                state.frametimeP95,
+                state.bitrateMbps,
+                state.dropPerSec,
+                state.qT,
+                state.qD,
+                state.qR,
+                state.qTMax,
+                state.qDMax,
+                state.qRMax,
+                state.adaptiveLevel,
+                state.adaptiveAction,
+                state.drops,
+                state.bpHigh,
+                state.bpRecover,
+                state.reason,
                 runtimeChartsHtml,
-                pressureState.tone
+                state.pressureState.tone
         );
 
         emitHudDebugAdb(RuntimeHudComputation.buildRuntimeDebugSnapshot(
@@ -1916,27 +1866,27 @@ public class MainActivity extends AppCompatActivity {
                 daemonRunId,
                 daemonUptimeSec,
                 latestStreamUptimeSec,
-                frameInHost,
-                frameOutHost,
-                targetFps,
-                presentFps,
-                frametimeP95,
-                decodeP95,
-                renderP95,
-                e2eP95,
-                qT,
-                qD,
-                qR,
-                qTMax,
-                qDMax,
-                qRMax,
-                adaptiveLevel,
-                adaptiveAction,
-                drops,
-                bpHigh,
-                bpRecover,
-                pressureState,
-                reason,
+                state.frameInHost,
+                state.frameOutHost,
+                state.targetFps,
+                state.presentFps,
+                state.frametimeP95,
+                state.decodeP95,
+                state.renderP95,
+                state.e2eP95,
+                state.qT,
+                state.qD,
+                state.qR,
+                state.qTMax,
+                state.qDMax,
+                state.qRMax,
+                state.adaptiveLevel,
+                state.adaptiveAction,
+                state.drops,
+                state.bpHigh,
+                state.bpRecover,
+                state.pressureState,
+                state.reason,
                 daemonLastError
         ));
     }
