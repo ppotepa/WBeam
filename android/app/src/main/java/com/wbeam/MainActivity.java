@@ -41,6 +41,7 @@ import com.wbeam.api.StatusPoller;
 import com.wbeam.hud.HudRenderSupport;
 import com.wbeam.input.CursorOverlayController;
 import com.wbeam.input.ImmersiveModeController;
+import com.wbeam.startup.PreflightStateMachine;
 import com.wbeam.startup.StartupOverlayModelBuilder;
 import com.wbeam.startup.StartupOverlayController;
 import com.wbeam.startup.StartupStepStyler;
@@ -240,12 +241,6 @@ public class MainActivity extends AppCompatActivity {
     private boolean liveLogVisible = false;
     private long lastHudAdbLogAt = 0L;
     private String lastHudAdbSnapshot = "";
-    // startup step state constants
-    private static final int SS_PENDING = 0;
-    private static final int SS_ACTIVE  = 1;
-    private static final int SS_OK      = 2;
-    private static final int SS_ERROR   = 3;
-
     private boolean surfaceReady = false;
     private boolean preflightComplete = false;
     private int preflightAnimTick = 0;
@@ -3075,21 +3070,38 @@ public class MainActivity extends AppCompatActivity {
         startupBeganAtMs = model.updatedStartupBeganAtMs;
         controlRetryCount = model.updatedControlRetryCount;
 
-        StartupStepStyler.applyStepState(model.step1State, preflightAnimTick, SS_OK, SS_ERROR, SS_ACTIVE,
+        StartupStepStyler.applyStepState(
+                model.step1State,
+                preflightAnimTick,
+                StartupOverlayModelBuilder.Model.SS_OK,
+                StartupOverlayModelBuilder.Model.SS_ERROR,
+                StartupOverlayModelBuilder.Model.SS_ACTIVE,
                 "1", startupStep1Card, startupStep1Badge, startupStep1Label,
                 startupStep1Status, startupStep1Detail, model.step1Detail);
-        StartupStepStyler.applyStepState(model.step2State, preflightAnimTick, SS_OK, SS_ERROR, SS_ACTIVE,
+        StartupStepStyler.applyStepState(
+                model.step2State,
+                preflightAnimTick,
+                StartupOverlayModelBuilder.Model.SS_OK,
+                StartupOverlayModelBuilder.Model.SS_ERROR,
+                StartupOverlayModelBuilder.Model.SS_ACTIVE,
                 "2", startupStep2Card, startupStep2Badge, startupStep2Label,
                 startupStep2Status, startupStep2Detail, model.step2Detail);
-        StartupStepStyler.applyStepState(model.step3State, preflightAnimTick, SS_OK, SS_ERROR, SS_ACTIVE,
+        StartupStepStyler.applyStepState(
+                model.step3State,
+                preflightAnimTick,
+                StartupOverlayModelBuilder.Model.SS_OK,
+                StartupOverlayModelBuilder.Model.SS_ERROR,
+                StartupOverlayModelBuilder.Model.SS_ACTIVE,
                 "3", startupStep3Card, startupStep3Badge, startupStep3Label,
                 startupStep3Status, startupStep3Detail, model.step3Detail);
 
         if (startupSubtitleText != null) {
             startupSubtitleText.setText(model.subtitle);
-            startupSubtitleText.setTextColor(model.step3State == SS_OK
+            startupSubtitleText.setTextColor(model.step3State == StartupOverlayModelBuilder.Model.SS_OK
                     ? Color.parseColor("#4ADE80")
-                    : model.step3State == SS_ERROR ? Color.parseColor("#F87171") : Color.parseColor("#475569"));
+                    : model.step3State == StartupOverlayModelBuilder.Model.SS_ERROR
+                    ? Color.parseColor("#F87171")
+                    : Color.parseColor("#475569"));
         }
 
         if (startupInfoText != null) {
@@ -3097,18 +3109,19 @@ public class MainActivity extends AppCompatActivity {
             startupInfoText.setTextColor(Color.parseColor("#CBD5E1"));
         }
 
-        if (!model.allOk) {
-            startupDismissed = false;
-            preflightComplete = false;
+        PreflightStateMachine.Transition transition =
+                PreflightStateMachine.next(model.allOk, startupDismissed, 800L);
+        startupDismissed = transition.startupDismissed;
+        preflightComplete = transition.preflightComplete;
+        if (transition.showOverlayNow) {
             setPreflightVisible(true);
-        } else if (!startupDismissed) {
-            startupDismissed = true;
-            preflightComplete = true;
+        }
+        if (transition.scheduleHide) {
             uiHandler.postDelayed(() -> {
                 if (startupDismissed) {
                     setPreflightVisible(false);
                 }
-            }, 800);
+            }, transition.hideDelayMs);
         }
     }
 
