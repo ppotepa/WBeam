@@ -36,7 +36,7 @@ import com.wbeam.hud.HudDebugLogLimiter;
 import com.wbeam.hud.MetricSeriesBuffer;
 import com.wbeam.hud.ResourceUsageTracker;
 import com.wbeam.hud.RuntimeHudComputation;
-import com.wbeam.hud.RuntimeHudOverlayRenderer;
+import com.wbeam.hud.RuntimeHudOverlayPipeline;
 import com.wbeam.hud.RuntimeHudTrendComposer;
 import com.wbeam.hud.TrainerHudOverlayRenderer;
 import com.wbeam.input.CursorOverlayController;
@@ -1971,66 +1971,49 @@ public class MainActivity extends AppCompatActivity {
             String metricChartsHtml,
             String tone
     ) {
-        RuntimeHudOverlayRenderer.Input input = new RuntimeHudOverlayRenderer.Input();
         int[] streamSize = computeScaledSize();
-        input.daemonReachable = daemonReachable;
-        input.selectedProfile = getSelectedProfile();
-        input.selectedEncoder = getSelectedEncoder();
-        input.streamWidth = streamSize[0];
-        input.streamHeight = streamSize[1];
-        input.daemonHostName = daemonHostName;
-        input.daemonStateUi = daemonStateUi;
-        input.daemonBuildRevision = daemonBuildRevision;
-        input.appBuildRevision = BuildConfig.WBEAM_BUILD_REV;
-        input.daemonLastError = daemonLastError;
-        input.tone = tone;
-        input.targetFps = targetFps;
-        input.presentFps = presentFps;
-        input.recvFps = recvFps;
-        input.decodeFps = decodeFps;
-        input.liveMbps = liveMbps;
-        input.e2eP95 = e2eP95;
-        input.decodeP95 = decodeP95;
-        input.renderP95 = renderP95;
-        input.frametimeP95 = frametimeP95;
-        input.dropsPerSec = dropsPerSec;
-        input.qT = qT;
-        input.qD = qD;
-        input.qR = qR;
-        input.qTMax = qTMax;
-        input.qDMax = qDMax;
-        input.qRMax = qRMax;
-        input.adaptiveLevel = adaptiveLevel;
-        input.adaptiveAction = adaptiveAction;
-        input.drops = drops;
-        input.bpHigh = bpHigh;
-        input.bpRecover = bpRecover;
-        input.reason = reason;
-        input.metricChartsHtml = metricChartsHtml;
-        RuntimeHudOverlayRenderer.Rendered rendered = RuntimeHudOverlayRenderer.render(
-                input,
-                (target, render) -> {
-                    resourceUsageTracker.sample(target, render);
-                    return resourceUsageTracker.buildRowsHtml();
-                }
+        RuntimeHudOverlayPipeline.render(
+                daemonReachable,
+                getSelectedProfile(),
+                getSelectedEncoder(),
+                streamSize[0],
+                streamSize[1],
+                daemonHostName,
+                daemonStateUi,
+                daemonBuildRevision,
+                BuildConfig.WBEAM_BUILD_REV,
+                daemonLastError,
+                targetFps,
+                presentFps,
+                recvFps,
+                decodeFps,
+                e2eP95,
+                decodeP95,
+                renderP95,
+                frametimeP95,
+                liveMbps,
+                dropsPerSec,
+                qT,
+                qD,
+                qR,
+                qTMax,
+                qDMax,
+                qRMax,
+                adaptiveLevel,
+                adaptiveAction,
+                drops,
+                bpHigh,
+                bpRecover,
+                reason,
+                metricChartsHtml,
+                tone,
+                resourceUsageTracker,
+                perfHudWebView,
+                perfHudText,
+                perfHudPanel,
+                hudOverlayState,
+                HUD_TEXT_COLOR_LIVE
         );
-
-        if (perfHudWebView != null) {
-            if (!HudOverlayDisplay.showWebHtml(
-                    perfHudWebView,
-                    perfHudText,
-                    "runtime",
-                    rendered.html,
-                    hudOverlayState
-            ) && perfHudText != null) {
-                showHudTextOnly("runtime", rendered.textFallback, HUD_TEXT_COLOR_LIVE);
-            }
-        } else if (perfHudText != null) {
-            showHudTextOnly("runtime", rendered.textFallback, HUD_TEXT_COLOR_LIVE);
-        }
-        if (perfHudPanel != null) {
-            perfHudPanel.setAlpha(0.96f);
-        }
     }
 
     private void renderTrainerHudOverlay(String rawHudText) {
