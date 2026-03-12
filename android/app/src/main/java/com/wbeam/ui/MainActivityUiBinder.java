@@ -10,6 +10,7 @@ import android.view.View;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.widget.Button;
+import android.widget.TextView;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.SeekBar;
@@ -255,5 +256,30 @@ public final class MainActivityUiBinder {
             button.setEnabled(enabled);
             button.setAlpha(enabled ? 1.0f : 0.45f);
         }
+    }
+
+    public static void applyDebugControlsVisible(boolean visible, View debugControlsRow, Button testButton) {
+        int visibility = visible ? View.VISIBLE : View.GONE;
+        if (debugControlsRow != null) {
+            debugControlsRow.setVisibility(visibility);
+        }
+        if (testButton != null) {
+            testButton.setVisibility(visibility);
+        }
+    }
+
+    public static boolean applyLiveLogPanelState(
+            boolean currentlyVisible,
+            TextView liveLogText,
+            Button logButton
+    ) {
+        boolean nextVisible = !currentlyVisible;
+        if (liveLogText != null) {
+            liveLogText.setVisibility(nextVisible ? View.VISIBLE : View.GONE);
+        }
+        if (logButton != null) {
+            logButton.setText(nextVisible ? "Log ON" : "Log");
+        }
+        return nextVisible;
     }
 }

@@ -916,23 +916,15 @@ public class MainActivity extends AppCompatActivity {
 
     private void setDebugControlsVisible(boolean visible) {
         debugControlsVisible = visible;
-        int visibility = visible ? View.VISIBLE : View.GONE;
-        if (debugControlsRow != null) {
-            debugControlsRow.setVisibility(visibility);
-        }
-        if (testButton != null) {
-            testButton.setVisibility(visibility);
-        }
+        MainActivityUiBinder.applyDebugControlsVisible(visible, debugControlsRow, testButton);
     }
 
     private void toggleLiveLogPanel() {
-        liveLogVisible = !liveLogVisible;
-        if (liveLogText != null) {
-            liveLogText.setVisibility(liveLogVisible ? View.VISIBLE : View.GONE);
-        }
-        if (logButton != null) {
-            logButton.setText(liveLogVisible ? "Log ON" : "Log");
-        }
+        liveLogVisible = MainActivityUiBinder.applyLiveLogPanelState(
+                liveLogVisible,
+                liveLogText,
+                logButton
+        );
     }
 
     // ══════════════════════════════════════════════════════════════════════════
