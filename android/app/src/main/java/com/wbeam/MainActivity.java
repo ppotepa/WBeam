@@ -55,6 +55,7 @@ import com.wbeam.telemetry.RuntimeTelemetryMapper;
 import com.wbeam.ui.ErrorTextUtil;
 import com.wbeam.ui.IntraOnlyButtonController;
 import com.wbeam.ui.LiveLogBuffer;
+import com.wbeam.ui.MainActivityDebugInfoFormatter;
 import com.wbeam.ui.MainActivityUiBinder;
 import com.wbeam.ui.MainActivitySettingsPresenter;
 import com.wbeam.ui.MainActivityStatusPresenter;
@@ -2120,21 +2121,15 @@ public class MainActivity extends AppCompatActivity {
         if (!BuildConfig.DEBUG || debugInfoText == null || debugInfoPanel == null) {
             return;
         }
-        String state = lastUiState == null ? "IDLE" : lastUiState.toUpperCase(Locale.US);
         String daemonStateUi = effectiveDaemonState(
                 daemonState, latestPresentFps, latestStreamUptimeSec, latestFrameOutHost);
-        String host = daemonHostName == null || daemonHostName.trim().isEmpty() ? "-" : daemonHostName;
-        double safeTarget = latestTargetFps > 0.0 ? latestTargetFps : (double) getSelectedFps();
-        double lossPct = Math.max(0.0, ((safeTarget - latestPresentFps) / safeTarget) * 100.0);
-        String text = String.format(
-                Locale.US,
-                "DBG %s | host:%s | daemon:%s\nFPS %.0f/%.1f (loss %.0f%%)  thresholds: green <=20%% orange >20%% red >55%%\n%s\n%s",
-                state,
-                host,
+        String text = MainActivityDebugInfoFormatter.buildDebugOverlayText(
+                lastUiState,
+                daemonHostName,
                 daemonStateUi,
-                safeTarget,
+                latestTargetFps,
                 latestPresentFps,
-                lossPct,
+                getSelectedFps(),
                 lastStatsLine,
                 lastHudCompactLine
         );
