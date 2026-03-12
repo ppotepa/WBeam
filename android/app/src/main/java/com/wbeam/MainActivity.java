@@ -55,6 +55,7 @@ import com.wbeam.stream.SessionUiBridge;
 import com.wbeam.stream.VideoTestController;
 import com.wbeam.stream.StreamSessionController;
 import com.wbeam.telemetry.ClientMetricsReporter;
+import com.wbeam.telemetry.RuntimeTelemetryMapper;
 import com.wbeam.ui.ErrorTextUtil;
 import com.wbeam.ui.IntraOnlyButtonController;
 import com.wbeam.ui.LiveLogBuffer;
@@ -1617,30 +1618,21 @@ public class MainActivity extends AppCompatActivity {
         }
         hudOverlayMode = "runtime";
 
-        JSONObject kpi = metrics.optJSONObject("kpi");
-        JSONObject latest = metrics.optJSONObject("latest_client_metrics");
-        JSONObject limits = metrics.optJSONObject("queue_limits");
-        long frameInHost = metrics.optLong("frame_in", 0);
-        long frameOutHost = metrics.optLong("frame_out", 0);
-        long streamUptimeSec = metrics.optLong("stream_uptime_sec", 0);
+        RuntimeTelemetryMapper.Snapshot runtime = RuntimeTelemetryMapper.map(
+                metrics,
+                getSelectedFps(),
+                TRANSPORT_QUEUE_MAX_FRAMES,
+                DECODE_QUEUE_MAX_FRAMES,
+                RENDER_QUEUE_MAX_FRAMES
+        );
+        long frameInHost = runtime.frameInHost;
+        long frameOutHost = runtime.frameOutHost;
+        long streamUptimeSec = runtime.streamUptimeSec;
 
-        double targetFps = kpi != null ? kpi.optDouble("target_fps", getSelectedFps()) : getSelectedFps();
-        if (!Double.isFinite(targetFps) || targetFps <= 0.0) {
-            targetFps = getSelectedFps();
-        }
-        double presentFps = kpi != null ? kpi.optDouble("present_fps", 0.0) : 0.0;
-        double recvFps = kpi != null ? kpi.optDouble("recv_fps", 0.0) : 0.0;
-        double decodeFps = kpi != null ? kpi.optDouble("decode_fps", 0.0) : 0.0;
-        if (!Double.isFinite(presentFps) || presentFps < 0.0) {
-            presentFps = 0.0;
-        }
-        if (presentFps < 1.0) {
-            if (Double.isFinite(decodeFps) && decodeFps >= 1.0) {
-                presentFps = decodeFps;
-            } else if (Double.isFinite(recvFps) && recvFps >= 1.0) {
-                presentFps = recvFps;
-            }
-        }
+        double targetFps = runtime.targetFps;
+        double presentFps = runtime.presentFps;
+        double recvFps = runtime.recvFps;
+        double decodeFps = runtime.decodeFps;
         boolean hasFlowSignals = streamUptimeSec > 0 || frameOutHost > 0 || recvFps >= 1.0 || decodeFps >= 1.0;
         if (presentFps >= 1.0) {
             latestStablePresentFps = presentFps;
@@ -1655,28 +1647,25 @@ public class MainActivity extends AppCompatActivity {
         latestPresentFps = presentFps;
         latestStreamUptimeSec = streamUptimeSec;
         latestFrameOutHost = frameOutHost;
-        double frametimeP95 = kpi != null ? kpi.optDouble("frametime_ms_p95", 0.0) : 0.0;
-        double decodeP95 = kpi != null ? kpi.optDouble("decode_time_ms_p95", 0.0) : 0.0;
-        double renderP95 = kpi != null ? kpi.optDouble("render_time_ms_p95", 0.0) : 0.0;
-        double e2eP95 = kpi != null ? kpi.optDouble("e2e_latency_ms_p95", 0.0) : 0.0;
+        double frametimeP95 = runtime.frametimeP95;
+        double decodeP95 = runtime.decodeP95;
+        double renderP95 = runtime.renderP95;
+        double e2eP95 = runtime.e2eP95;
 
-        int qT = latest != null ? latest.optInt("transport_queue_depth", 0) : 0;
-        int qD = latest != null ? latest.optInt("decode_queue_depth", 0) : 0;
-        int qR = latest != null ? latest.optInt("render_queue_depth", 0) : 0;
+        int qT = runtime.qT;
+        int qD = runtime.qD;
+        int qR = runtime.qR;
 
-        int qTMax = limits != null ? limits.optInt("transport_queue_max", TRANSPORT_QUEUE_MAX_FRAMES) : TRANSPORT_QUEUE_MAX_FRAMES;
-        int qDMax = limits != null ? limits.optInt("decode_queue_max", DECODE_QUEUE_MAX_FRAMES) : DECODE_QUEUE_MAX_FRAMES;
-        int qRMax = limits != null ? limits.optInt("render_queue_max", RENDER_QUEUE_MAX_FRAMES) : RENDER_QUEUE_MAX_FRAMES;
+        int qTMax = runtime.qTMax;
+        int qDMax = runtime.qDMax;
+        int qRMax = runtime.qRMax;
 
-        int adaptiveLevel = metrics.optInt("adaptive_level", 0);
-        String adaptiveAction = metrics.optString("adaptive_action", "hold");
-        long drops = metrics.optLong("drops", 0);
-        long bpHigh = metrics.optLong("backpressure_high_events", 0);
-        long bpRecover = metrics.optLong("backpressure_recover_events", 0);
-        String reason = metrics.optString("adaptive_reason", "");
-        if (reason.length() > 44) {
-            reason = reason.substring(0, 44) + "...";
-        }
+        int adaptiveLevel = runtime.adaptiveLevel;
+        String adaptiveAction = runtime.adaptiveAction;
+        long drops = runtime.drops;
+        long bpHigh = runtime.bpHigh;
+        long bpRecover = runtime.bpRecover;
+        String reason = runtime.reason;
 
         boolean warmingUp = presentFps < 1.0 && streamUptimeSec < 5;
         String hud = String.format(
@@ -1754,8 +1743,8 @@ public class MainActivity extends AppCompatActivity {
         } else if (warmingUp || mediumPressure) {
             runtimeStateTone = "warn";
         }
-        long latestDroppedFrames = latest != null ? latest.optLong("dropped_frames", -1L) : -1L;
-        long latestTooLateFrames = latest != null ? latest.optLong("too_late_frames", 0L) : 0L;
+        long latestDroppedFrames = runtime.latestDroppedFrames;
+        long latestTooLateFrames = runtime.latestTooLateFrames;
         double dropPerSec = 0.0;
         if (latestDroppedFrames >= 0L) {
             long combined = latestDroppedFrames + Math.max(0L, latestTooLateFrames);
@@ -1767,16 +1756,7 @@ public class MainActivity extends AppCompatActivity {
             runtimeDropPrevCount = combined;
             runtimeDropPrevAtMs = nowMs;
         }
-        double bitrateMbps = 0.0;
-        if (latest != null) {
-            long recvBps = latest.optLong("recv_bps", 0L);
-            if (recvBps > 0L) {
-                bitrateMbps = recvBps / 1_000_000.0;
-            }
-        }
-        if (bitrateMbps <= 0.0) {
-            bitrateMbps = metrics.optLong("bitrate_actual_bps", 0L) / 1_000_000.0;
-        }
+        double bitrateMbps = runtime.bitrateMbps;
         runtimePresentSeries.addSample(Math.max(0.0, presentFps));
         runtimeMbpsSeries.addSample(Math.max(0.0, bitrateMbps));
         runtimeDropSeries.addSample(Math.max(0.0, dropPerSec));
