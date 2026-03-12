@@ -9,6 +9,7 @@ import android.widget.TextView;
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.wbeam.BuildConfig;
+import com.wbeam.R;
 import com.wbeam.api.HostApiClient;
 import com.wbeam.api.StatusPoller;
 import com.wbeam.startup.StartupBuildVersionPresenter;
@@ -36,16 +37,16 @@ public final class MainInitializationCoordinator {
     public static boolean initializeUiBindings(
             String logTag,
             AppCompatActivity activity,
-            TextView startupBuildVersionText,
-            Spinner profileSpinner,
-            Spinner encoderSpinner,
-            Spinner cursorSpinner,
+            TextView ignoredStartupBuildVersionText,
+            Spinner ignoredProfileSpinner,
+            Spinner ignoredEncoderSpinner,
+            Spinner ignoredCursorSpinner,
             String[] profileOptions,
             String[] encoderOptions,
             String[] cursorOptions,
-            SeekBar resolutionSeek,
-            SeekBar fpsSeek,
-            SeekBar bitrateSeek,
+            SeekBar ignoredResolutionSeek,
+            SeekBar ignoredFpsSeek,
+            SeekBar ignoredBitrateSeek,
             UiTask bindViewsTask,
             UiTask setScreenAlwaysOnTask,
             UiTask setupSurfaceCallbacksTask,
@@ -58,6 +59,15 @@ public final class MainInitializationCoordinator {
     ) {
         bindViewsTask.run();
         setScreenAlwaysOnTask.run();
+
+        TextView startupBuildVersionText = activity.findViewById(R.id.startupBuildVersion);
+        Spinner profileSpinner = activity.findViewById(R.id.profileSpinner);
+        Spinner encoderSpinner = activity.findViewById(R.id.encoderSpinner);
+        Spinner cursorSpinner = activity.findViewById(R.id.cursorSpinner);
+        SeekBar resolutionSeek = activity.findViewById(R.id.resolutionSeek);
+        SeekBar fpsSeek = activity.findViewById(R.id.fpsSeek);
+        SeekBar bitrateSeek = activity.findViewById(R.id.bitrateSeek);
+
         StartupBuildVersionPresenter.apply(startupBuildVersionText, BuildConfig.WBEAM_BUILD_REV);
         MainActivitySpinnersSetup.setup(
                 activity,
