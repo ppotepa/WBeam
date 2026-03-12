@@ -60,6 +60,7 @@ import com.wbeam.telemetry.RuntimeTelemetryMapper;
 import com.wbeam.ui.ErrorTextUtil;
 import com.wbeam.ui.IntraOnlyButtonController;
 import com.wbeam.ui.LiveLogBuffer;
+import com.wbeam.ui.BuildRevisionGuard;
 import com.wbeam.ui.MainActivityRuntimeStateView;
 import com.wbeam.ui.MainActivityInteractionPolicy;
 import com.wbeam.ui.MainActivityUiBinder;
@@ -1232,18 +1233,13 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private boolean isBuildMismatch() {
-        if (!daemonReachable || !handshakeResolved) {
-            return false;
-        }
-        if ("local".equalsIgnoreCase(BuildConfig.WBEAM_API_IMPL)) {
-            return false;
-        }
-        String hostRev = daemonBuildRevision == null ? "" : daemonBuildRevision.trim();
-        String appRev = BuildConfig.WBEAM_BUILD_REV == null ? "" : BuildConfig.WBEAM_BUILD_REV.trim();
-        if (hostRev.isEmpty() || "-".equals(hostRev) || appRev.isEmpty()) {
-            return false;
-        }
-        return !hostRev.equals(appRev);
+        return BuildRevisionGuard.isMismatch(
+                daemonReachable,
+                handshakeResolved,
+                BuildConfig.WBEAM_API_IMPL,
+                daemonBuildRevision,
+                BuildConfig.WBEAM_BUILD_REV
+        );
     }
 
     private void requestStartGuarded(boolean userAction, boolean ensureViewer) {
@@ -1255,9 +1251,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void handleBuildMismatchStartBlocked() {
-        String msg = "Build mismatch: app=" + BuildConfig.WBEAM_BUILD_REV
-                + " host=" + daemonBuildRevision
-                + " (redeploy APK or rebuild host)";
+        String msg = BuildRevisionGuard.buildMismatchMessage(
+                BuildConfig.WBEAM_BUILD_REV,
+                daemonBuildRevision
+        );
         updateStatus(STATE_ERROR, msg, 0);
         appendLiveLogError(msg);
         Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
