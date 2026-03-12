@@ -36,6 +36,7 @@ import com.wbeam.hud.MetricSeriesBuffer;
 import com.wbeam.hud.ResourceUsageTracker;
 import com.wbeam.hud.RuntimeHudComputation;
 import com.wbeam.hud.RuntimeHudOverlayPipeline;
+import com.wbeam.hud.RuntimeHudStateCoordinator;
 import com.wbeam.hud.RuntimeHudTrendComposer;
 import com.wbeam.hud.RuntimeHudUpdateState;
 import com.wbeam.hud.TrainerHudModeCoordinator;
@@ -58,7 +59,6 @@ import com.wbeam.stream.VideoTestController;
 import com.wbeam.stream.StreamSessionController;
 import com.wbeam.stream.DecoderCapabilityInspector;
 import com.wbeam.telemetry.ClientMetricsReporter;
-import com.wbeam.telemetry.RuntimeTelemetryMapper;
 import com.wbeam.ui.ErrorTextUtil;
 import com.wbeam.ui.CursorOverlayUiCoordinator;
 import com.wbeam.ui.IntraOnlyButtonController;
@@ -1571,65 +1571,44 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateRuntimePerfHud(JSONObject metrics, long nowMs) {
-        RuntimeTelemetryMapper.Snapshot runtime = RuntimeTelemetryMapper.map(
-                metrics,
-                getSelectedFps(),
-                TRANSPORT_QUEUE_MAX_FRAMES,
-                DECODE_QUEUE_MAX_FRAMES,
-                RENDER_QUEUE_MAX_FRAMES
-        );
-        RuntimeHudUpdateState state = RuntimeHudUpdateState.fromSnapshot(
-                runtime,
-                nowMs,
-                latestStablePresentFps,
-                latestStablePresentFpsAtMs,
-                PRESENT_FPS_STALE_GRACE_MS,
-                runtimeDropPrevCount,
-                runtimeDropPrevAtMs
-        );
+        RuntimeHudStateCoordinator.Input input = new RuntimeHudStateCoordinator.Input();
+        input.metrics = metrics;
+        input.selectedFps = getSelectedFps();
+        input.transportQueueMaxFrames = TRANSPORT_QUEUE_MAX_FRAMES;
+        input.decodeQueueMaxFrames = DECODE_QUEUE_MAX_FRAMES;
+        input.renderQueueMaxFrames = RENDER_QUEUE_MAX_FRAMES;
+        input.nowMs = nowMs;
+        input.stablePresentFps = latestStablePresentFps;
+        input.stablePresentFpsAtMs = latestStablePresentFpsAtMs;
+        input.presentFpsStaleGraceMs = PRESENT_FPS_STALE_GRACE_MS;
+        input.dropPrevCount = runtimeDropPrevCount;
+        input.dropPrevAtMs = runtimeDropPrevAtMs;
+        input.daemonState = daemonState;
+        input.latestStreamUptimeSec = latestStreamUptimeSec;
+        input.latestFrameOutHost = latestFrameOutHost;
+        input.daemonRunId = daemonRunId;
+        input.daemonUptimeSec = daemonUptimeSec;
+        input.daemonLastError = daemonLastError;
+        RuntimeHudStateCoordinator.Output output = RuntimeHudStateCoordinator.compute(input);
+        RuntimeHudUpdateState state = output.state;
+
         latestStablePresentFps = state.updatedStablePresentFps;
         latestStablePresentFpsAtMs = state.updatedStablePresentFpsAtMs;
         runtimeDropPrevCount = state.updatedDropPrevCount;
         runtimeDropPrevAtMs = state.updatedDropPrevAtMs;
 
-        String daemonStateUi = MainActivityRuntimeStateView.effectiveDaemonState(
-                daemonState,
-                state.presentFps,
-                state.streamUptimeSec,
-                state.frameOutHost
-        );
         latestTargetFps = state.targetFps;
         latestPresentFps = state.presentFps;
         latestStreamUptimeSec = state.streamUptimeSec;
         latestFrameOutHost = state.frameOutHost;
 
-        lastHudCompactLine = RuntimeHudComputation.formatCompactHudLine(
-                state.targetFps,
-                state.presentFps,
-                state.e2eP95,
-                state.decodeP95,
-                state.renderP95,
-                state.qT,
-                state.qD,
-                state.qR
-        );
+        lastHudCompactLine = output.compactLine;
         refreshDebugInfoOverlay();
 
-        if (state.pressureState.highPressure) {
-            Log.w(TAG, RuntimeHudComputation.formatHighPressureLog(
-                    state.pressureState,
-                    state.decodeP95,
-                    state.renderP95,
-                    state.qT,
-                    state.qD,
-                    state.qR,
-                    state.qTMax,
-                    state.qDMax,
-                    state.qRMax,
-                    state.presentFps,
-                    state.streamUptimeSec
-            ));
+        if (output.pressureLog != null) {
+            Log.w(TAG, output.pressureLog);
         }
+
         String runtimeChartsHtml = RuntimeHudTrendComposer.appendSamplesAndBuildHtml(
                 runtimePresentSeries,
                 runtimeMbpsSeries,
@@ -1654,7 +1633,7 @@ public class MainActivity extends AppCompatActivity {
                 streamSize[0],
                 streamSize[1],
                 daemonHostName,
-                daemonStateUi,
+                output.daemonStateUi,
                 daemonBuildRevision,
                 BuildConfig.WBEAM_BUILD_REV,
                 daemonLastError,
@@ -1690,34 +1669,7 @@ public class MainActivity extends AppCompatActivity {
                 HUD_TEXT_COLOR_LIVE
         );
 
-        emitHudDebugAdb(RuntimeHudComputation.buildRuntimeDebugSnapshot(
-                daemonStateUi,
-                daemonRunId,
-                daemonUptimeSec,
-                latestStreamUptimeSec,
-                state.frameInHost,
-                state.frameOutHost,
-                state.targetFps,
-                state.presentFps,
-                state.frametimeP95,
-                state.decodeP95,
-                state.renderP95,
-                state.e2eP95,
-                state.qT,
-                state.qD,
-                state.qR,
-                state.qTMax,
-                state.qDMax,
-                state.qRMax,
-                state.adaptiveLevel,
-                state.adaptiveAction,
-                state.drops,
-                state.bpHigh,
-                state.bpRecover,
-                state.pressureState,
-                state.reason,
-                daemonLastError
-        ));
+        emitHudDebugAdb(output.debugSnapshot);
     }
 
     private void renderTrainerHudOverlay(String rawHudText) {
