@@ -175,6 +175,13 @@ build_windows_server:
       if (Test-Path "C:\Users\ppotepa\.cargo\bin\cargo.exe") {
         $env:Path = "C:\Users\ppotepa\.cargo\bin;$env:Path"
       }
+      if (Test-Path "C:\Users\ppotepa\.rustup") {
+        $env:RUSTUP_HOME = "C:\Users\ppotepa\.rustup"
+      }
+      if (Test-Path "C:\Users\ppotepa\.cargo") {
+        $env:CARGO_HOME = "C:\Users\ppotepa\.cargo"
+      }
+      rustup default stable | Out-Null
       cargo --version
   script:
     - |
