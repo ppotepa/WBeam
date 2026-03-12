@@ -2377,30 +2377,36 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void applyStartupOverlayModel(StartupOverlayModelBuilder.Model model) {
-        StartupStepStyler.applyStepState(
+        applyStartupStepState(
                 model.step1State,
-                preflightAnimTick,
-                StartupOverlayModelBuilder.Model.SS_OK,
-                StartupOverlayModelBuilder.Model.SS_ERROR,
-                StartupOverlayModelBuilder.Model.SS_ACTIVE,
-                "1", startupStep1Card, startupStep1Badge, startupStep1Label,
-                startupStep1Status, startupStep1Detail, model.step1Detail);
-        StartupStepStyler.applyStepState(
+                "1",
+                startupStep1Card,
+                startupStep1Badge,
+                startupStep1Label,
+                startupStep1Status,
+                startupStep1Detail,
+                model.step1Detail
+        );
+        applyStartupStepState(
                 model.step2State,
-                preflightAnimTick,
-                StartupOverlayModelBuilder.Model.SS_OK,
-                StartupOverlayModelBuilder.Model.SS_ERROR,
-                StartupOverlayModelBuilder.Model.SS_ACTIVE,
-                "2", startupStep2Card, startupStep2Badge, startupStep2Label,
-                startupStep2Status, startupStep2Detail, model.step2Detail);
-        StartupStepStyler.applyStepState(
+                "2",
+                startupStep2Card,
+                startupStep2Badge,
+                startupStep2Label,
+                startupStep2Status,
+                startupStep2Detail,
+                model.step2Detail
+        );
+        applyStartupStepState(
                 model.step3State,
-                preflightAnimTick,
-                StartupOverlayModelBuilder.Model.SS_OK,
-                StartupOverlayModelBuilder.Model.SS_ERROR,
-                StartupOverlayModelBuilder.Model.SS_ACTIVE,
-                "3", startupStep3Card, startupStep3Badge, startupStep3Label,
-                startupStep3Status, startupStep3Detail, model.step3Detail);
+                "3",
+                startupStep3Card,
+                startupStep3Badge,
+                startupStep3Label,
+                startupStep3Status,
+                startupStep3Detail,
+                model.step3Detail
+        );
 
         if (startupSubtitleText != null) {
             startupSubtitleText.setText(model.subtitle);
@@ -2415,6 +2421,32 @@ public class MainActivity extends AppCompatActivity {
             startupInfoText.setText(model.infoLog);
             startupInfoText.setTextColor(Color.parseColor("#CBD5E1"));
         }
+    }
+
+    private void applyStartupStepState(
+            int stepState,
+            String stepNumber,
+            View stepCard,
+            TextView stepBadge,
+            TextView stepLabel,
+            TextView stepStatus,
+            TextView stepDetail,
+            String detail
+    ) {
+        StartupStepStyler.applyStepState(
+                stepState,
+                preflightAnimTick,
+                StartupOverlayModelBuilder.Model.SS_OK,
+                StartupOverlayModelBuilder.Model.SS_ERROR,
+                StartupOverlayModelBuilder.Model.SS_ACTIVE,
+                stepNumber,
+                stepCard,
+                stepBadge,
+                stepLabel,
+                stepStatus,
+                stepDetail,
+                detail
+        );
     }
 
     private void applyPreflightTransition(boolean allOk) {
