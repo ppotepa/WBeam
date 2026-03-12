@@ -36,7 +36,6 @@ public final class H264TcpPlayer {
 
     // ── WBTP/1 framing constants ──────────────────────────────────────────────
     private static final int  FRAME_MAGIC             = 0x57425450; // "WBTP"
-    private static final byte FRAME_VERSION           = 0x01;
     private static final int  FRAME_FLAG_KEYFRAME     = 0x02;
     private static final int  FRAME_HEADER_SIZE       = 22;
     // 2 MB: headroom for bursty IDR frames at 25 Mbps+ over USB tether
@@ -55,7 +54,6 @@ public final class H264TcpPlayer {
     private static final byte HELLO_CODEC_PNG         = 0x02;
     private static final int  HELLO_MODE_MASK         = 0x30;
     private static final int  HELLO_MODE_ULTRA        = 0x10;
-    private static final int  HELLO_MODE_STABLE       = 0x20;
     private static final int  HELLO_MODE_QUALITY      = 0x30;
 
     // ── Decode pipeline limits ────────────────────────────────────────────────
@@ -148,64 +146,7 @@ public final class H264TcpPlayer {
     // ── Main loop ─────────────────────────────────────────────────────────────
 
     private void runLoop() {
-        StreamReconnectLoop.RuntimeState runtimeState = new StreamReconnectLoop.RuntimeState() {
-            @Override
-            public boolean isRunning() {
-                return running;
-            }
-
-            @Override
-            public long getDroppedTotal() {
-                return droppedTotal;
-            }
-
-            @Override
-            public long getTooLateTotal() {
-                return tooLateTotal;
-            }
-
-            @Override
-            public long getReconnects() {
-                return reconnects;
-            }
-
-            @Override
-            public long incrementReconnects() {
-                reconnects++;
-                return reconnects;
-            }
-
-            @Override
-            public long getReconnectDelayMs() {
-                return reconnectDelayMs;
-            }
-
-            @Override
-            public void setReconnectDelayMs(long reconnectDelayMsValue) {
-                reconnectDelayMs = reconnectDelayMsValue;
-            }
-
-            @Override
-            public long incrementSessionConnectId() {
-                sessionConnectId++;
-                return sessionConnectId;
-            }
-
-            @Override
-            public void resetSampleSeq() {
-                sampleSeq = 0;
-            }
-
-            @Override
-            public void setSocket(Socket nextSocket) {
-                socket = nextSocket;
-            }
-
-            @Override
-            public void closeSocket() {
-                H264TcpPlayer.this.closeSocket();
-            }
-        };
+        PlayerRuntimeState runtimeState = new PlayerRuntimeState();
 
         new StreamReconnectLoop(
                 TAG,
@@ -225,52 +166,7 @@ public final class H264TcpPlayer {
 
     @SuppressWarnings("unused")
     private void decodeLoop(InputStream input, MediaCodec codec) throws IOException {
-        LegacyAnnexBDecodeLoop.RuntimeState runtimeState = new LegacyAnnexBDecodeLoop.RuntimeState() {
-            @Override
-            public boolean isRunning() {
-                return running;
-            }
-
-            @Override
-            public long getDroppedTotal() {
-                return droppedTotal;
-            }
-
-            @Override
-            public void addDroppedTotal(long delta) {
-                droppedTotal += delta;
-            }
-
-            @Override
-            public long getTooLateTotal() {
-                return tooLateTotal;
-            }
-
-            @Override
-            public void addTooLateTotal(long delta) {
-                tooLateTotal += delta;
-            }
-
-            @Override
-            public long getReconnects() {
-                return reconnects;
-            }
-
-            @Override
-            public long getSessionConnectId() {
-                return sessionConnectId;
-            }
-
-            @Override
-            public long nextSampleSeq() {
-                return sampleSeq++;
-            }
-
-            @Override
-            public void resetReconnectDelayMs() {
-                reconnectDelayMs = 800;
-            }
-        };
+        PlayerRuntimeState runtimeState = new PlayerRuntimeState();
         new LegacyAnnexBDecodeLoop(
                 TAG,
                 statusListener,
@@ -310,52 +206,7 @@ public final class H264TcpPlayer {
             return;
         }
 
-        FramedVideoDecodeLoop.RuntimeState runtimeState = new FramedVideoDecodeLoop.RuntimeState() {
-            @Override
-            public boolean isRunning() {
-                return running;
-            }
-
-            @Override
-            public long getDroppedTotal() {
-                return droppedTotal;
-            }
-
-            @Override
-            public void addDroppedTotal(long delta) {
-                droppedTotal += delta;
-            }
-
-            @Override
-            public long getTooLateTotal() {
-                return tooLateTotal;
-            }
-
-            @Override
-            public void addTooLateTotal(long delta) {
-                tooLateTotal += delta;
-            }
-
-            @Override
-            public long getReconnects() {
-                return reconnects;
-            }
-
-            @Override
-            public long getSessionConnectId() {
-                return sessionConnectId;
-            }
-
-            @Override
-            public long nextSampleSeq() {
-                return sampleSeq++;
-            }
-
-            @Override
-            public void resetReconnectDelayMs() {
-                reconnectDelayMs = 800;
-            }
-        };
+        PlayerRuntimeState runtimeState = new PlayerRuntimeState();
 
         new FramedVideoDecodeLoop(
                 TAG,
@@ -390,47 +241,7 @@ public final class H264TcpPlayer {
     }
 
     private void framedDecodeLoopPng(InputStream input, byte[] hdrBuf, byte[] payloadBuf, boolean isUltraMode) throws IOException {
-        FramedPngLoop.RuntimeState runtimeState = new FramedPngLoop.RuntimeState() {
-            @Override
-            public boolean isRunning() {
-                return running;
-            }
-
-            @Override
-            public long getDroppedTotal() {
-                return droppedTotal;
-            }
-
-            @Override
-            public void addDroppedTotal(long delta) {
-                droppedTotal += delta;
-            }
-
-            @Override
-            public long getTooLateTotal() {
-                return tooLateTotal;
-            }
-
-            @Override
-            public long getReconnects() {
-                return reconnects;
-            }
-
-            @Override
-            public long getSessionConnectId() {
-                return sessionConnectId;
-            }
-
-            @Override
-            public long nextSampleSeq() {
-                return sampleSeq++;
-            }
-
-            @Override
-            public void resetReconnectDelayMs() {
-                reconnectDelayMs = 800;
-            }
-        };
+        PlayerRuntimeState runtimeState = new PlayerRuntimeState();
         new FramedPngLoop(
                 TAG,
                 surface,
@@ -447,6 +258,95 @@ public final class H264TcpPlayer {
                 STATE_STREAMING,
                 frameBufferBudgetFrames
         ).run(input, hdrBuf, payloadBuf, isUltraMode);
+    }
+
+    private final class PlayerRuntimeState implements
+            StreamReconnectLoop.RuntimeState,
+            LegacyAnnexBDecodeLoop.RuntimeState,
+            FramedPngLoop.RuntimeState,
+            FramedVideoDecodeLoop.RuntimeState {
+
+        @Override
+        public boolean isRunning() {
+            return running;
+        }
+
+        @Override
+        public long getDroppedTotal() {
+            return droppedTotal;
+        }
+
+        @Override
+        public void addDroppedTotal(long delta) {
+            droppedTotal += delta;
+        }
+
+        @Override
+        public long getTooLateTotal() {
+            return tooLateTotal;
+        }
+
+        @Override
+        public void addTooLateTotal(long delta) {
+            tooLateTotal += delta;
+        }
+
+        @Override
+        public long getReconnects() {
+            return reconnects;
+        }
+
+        @Override
+        public long incrementReconnects() {
+            reconnects++;
+            return reconnects;
+        }
+
+        @Override
+        public long getReconnectDelayMs() {
+            return reconnectDelayMs;
+        }
+
+        @Override
+        public void setReconnectDelayMs(long reconnectDelayMsValue) {
+            reconnectDelayMs = reconnectDelayMsValue;
+        }
+
+        @Override
+        public long incrementSessionConnectId() {
+            sessionConnectId++;
+            return sessionConnectId;
+        }
+
+        @Override
+        public long getSessionConnectId() {
+            return sessionConnectId;
+        }
+
+        @Override
+        public void resetSampleSeq() {
+            sampleSeq = 0;
+        }
+
+        @Override
+        public long nextSampleSeq() {
+            return sampleSeq++;
+        }
+
+        @Override
+        public void setSocket(Socket nextSocket) {
+            socket = nextSocket;
+        }
+
+        @Override
+        public void closeSocket() {
+            H264TcpPlayer.this.closeSocket();
+        }
+
+        @Override
+        public void resetReconnectDelayMs() {
+            reconnectDelayMs = 800L;
+        }
     }
 
     private void closeSocket() {
