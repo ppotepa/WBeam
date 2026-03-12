@@ -54,4 +54,10 @@ public final class StatusPollerUiUpdateCoordinator {
                 lastError
         );
     }
+
+    public static boolean shouldStopLiveViewForDaemonState(String state) {
+        return !"STREAMING".equals(state)
+                && !"STARTING".equals(state)
+                && !"RECONNECTING".equals(state);
+    }
 }

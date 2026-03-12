@@ -510,7 +510,7 @@ public class MainActivity extends AppCompatActivity {
                 hostName,
                 errorChanged,
                 lastError,
-                shouldStopLiveViewForDaemonState(state),
+                StatusPollerUiUpdateCoordinator.shouldStopLiveViewForDaemonState(state),
                 StatusTransitionHooksFactory.create(
                         this::notifyConnectedHost,
                         changedLastError -> appendLiveLogError("host last_error: " + changedLastError),
@@ -638,12 +638,6 @@ public class MainActivity extends AppCompatActivity {
     private void notifyConnectedHost(String hostName) {
         Toast.makeText(MainActivity.this, "Connected to " + hostName, Toast.LENGTH_SHORT).show();
         appendLiveLogInfo("connected to host " + hostName);
-    }
-
-    private boolean shouldStopLiveViewForDaemonState(String state) {
-        return !"STREAMING".equals(state)
-                && !"STARTING".equals(state)
-                && !"RECONNECTING".equals(state);
     }
 
     private void resetStartupAfterDisconnect(boolean wasReachable) {
