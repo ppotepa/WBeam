@@ -66,6 +66,7 @@ import com.wbeam.stream.StreamSessionController;
 import com.wbeam.stream.DecoderCapabilityInspector;
 import com.wbeam.telemetry.ClientMetricsReporter;
 import com.wbeam.ui.ErrorTextUtil;
+import com.wbeam.ui.BuildVariantUiCoordinator;
 import com.wbeam.ui.CursorOverlayUiCoordinator;
 import com.wbeam.ui.HostHintPresenter;
 import com.wbeam.ui.IntraOnlyButtonController;
@@ -801,27 +802,18 @@ public class MainActivity extends AppCompatActivity {
                 logButton,
                 fullscreenButton
         );
-        if (BuildConfig.DEBUG) {
-            applyDebugVariantUi();
-            return;
-        }
-        applyReleaseVariantUi();
-    }
-
-    private void applyDebugVariantUi() {
-        setFullscreen(true);
-        if (debugFpsGraphView != null) {
-            debugFpsGraphView.setCapacity(DEBUG_FPS_GRAPH_POINTS);
-        }
-        setDebugOverlayVisible(debugOverlayVisible);
-        startDebugGraphSampling();
-        refreshDebugInfoOverlay();
-    }
-
-    private void applyReleaseVariantUi() {
-        setFullscreen(true);
-        MainActivityUiBinder.applyVisibility(View.GONE, debugInfoPanel);
-        stopDebugGraphSampling();
+        BuildVariantUiCoordinator.apply(
+                BuildConfig.DEBUG,
+                debugOverlayVisible,
+                debugFpsGraphView,
+                DEBUG_FPS_GRAPH_POINTS,
+                debugInfoPanel,
+                () -> setFullscreen(true),
+                this::setDebugOverlayVisible,
+                this::startDebugGraphSampling,
+                this::refreshDebugInfoOverlay,
+                this::stopDebugGraphSampling
+        );
     }
 
     private void setupSurfaceCallbacks() {
