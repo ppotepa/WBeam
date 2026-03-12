@@ -476,14 +476,33 @@ public class MainActivity extends AppCompatActivity {
                 service,
                 buildRevision
         );
-        if (!handshakeResolved && !service.equals("-")) {
+        updateHandshakeResolution(service);
+        startTransportProbeIfNeeded();
+        handleStatusTransitionNotifications(wasReachable, hostName, errorChanged, lastError, state);
+        refreshUiAfterDaemonStateChange();
+        updateStatsLineFromMetrics(metrics, lastError);
+        updatePerfHud(metrics);
+    }
+
+    private void updateHandshakeResolution(String service) {
+        if (!handshakeResolved && !"-".equals(service)) {
             handshakeResolved = true;
         }
+    }
 
+    private void startTransportProbeIfNeeded() {
         if (requiresTransportProbe()) {
             maybeStartTransportProbe();
         }
+    }
 
+    private void handleStatusTransitionNotifications(
+            boolean wasReachable,
+            String hostName,
+            boolean errorChanged,
+            String lastError,
+            String state
+    ) {
         if (!wasReachable) {
             notifyConnectedHost(hostName);
         }
@@ -493,9 +512,6 @@ public class MainActivity extends AppCompatActivity {
         if (shouldStopLiveViewForDaemonState(state)) {
             stopLiveView();
         }
-        refreshUiAfterDaemonStateChange();
-        updateStatsLineFromMetrics(metrics, lastError);
-        updatePerfHud(metrics);
     }
 
     private void updateStatsLineFromMetrics(JSONObject metrics, String lastError) {
@@ -518,27 +534,39 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void handleDaemonOffline(boolean wasReachable, Exception e) {
+        applyDisconnectedDaemonState();
+        updateOfflineUiState(wasReachable);
+        handleOfflineErrorNotification(wasReachable, e);
+    }
+
+    private void applyDisconnectedDaemonState() {
         daemonReachable = false;
         daemonState = "DISCONNECTED";
         stopLiveView();
         handshakeResolved = false;
         transportProbe.markWaitingForControlLink();
+    }
+
+    private void updateOfflineUiState(boolean wasReachable) {
         updateActionButtonsEnabled();
         updateHostHint();
         updatePerfHudUnavailable();
         resetStartupAfterDisconnect(wasReachable);
         updatePreflightOverlay();
-        if (wasReachable) {
-            updateStatus(STATE_ERROR, "Host API offline: " + ErrorTextUtil.shortError(e), 0);
-            appendLiveLogError("daemon poll failed: " + ErrorTextUtil.shortError(e)
-                    + " | api=" + HostApiClient.API_BASE);
-            Toast.makeText(MainActivity.this,
-                    "Host API unreachable (" + ErrorTextUtil.shortError(e)
-                            + "). Check USB tethering/LAN and host IP: " + HostApiClient.API_BASE,
-                    Toast.LENGTH_LONG).show();
-        } else {
+    }
+
+    private void handleOfflineErrorNotification(boolean wasReachable, Exception e) {
+        if (!wasReachable) {
             refreshStatusText();
+            return;
         }
+        String shortError = ErrorTextUtil.shortError(e);
+        updateStatus(STATE_ERROR, "Host API offline: " + shortError, 0);
+        appendLiveLogError("daemon poll failed: " + shortError + " | api=" + HostApiClient.API_BASE);
+        Toast.makeText(MainActivity.this,
+                "Host API unreachable (" + shortError
+                        + "). Check USB tethering/LAN and host IP: " + HostApiClient.API_BASE,
+                Toast.LENGTH_LONG).show();
     }
 
     private StreamSessionController createSessionController() {
