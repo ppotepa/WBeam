@@ -7,6 +7,7 @@ use axum::Json;
 
 use crate::AppState;
 
+use crate::server::runtime_utils::not_found_json;
 use crate::server::trainer_models::{TrainerRun, TrainerRunsResponse, TrainerRunTailQuery, TrainerRunTailResponse};
 pub(crate) async fn get_trainer_runs(State(state): State<AppState>) -> impl IntoResponse {
     let runs_map = state.trainer.runs.lock().await;
@@ -26,11 +27,7 @@ pub(crate) async fn get_trainer_run(
             Json(serde_json::json!({"ok": true, "run": run})),
         )
             .into_response(),
-        None => (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"ok": false, "error": "run not found"})),
-        )
-            .into_response(),
+        None => not_found_json("run not found"),
     }
 }
 
@@ -45,11 +42,7 @@ pub(crate) async fn get_trainer_run_tail(
         runs.get(run_id.as_str()).cloned()
     };
     let Some(run) = run else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"ok": false, "error": "run not found"})),
-        )
-            .into_response();
+        return not_found_json("run not found");
     };
     let content = fs::read_to_string(&run.log_path).unwrap_or_default();
     let mut lines: Vec<String> = content.lines().map(|v| v.to_string()).collect();

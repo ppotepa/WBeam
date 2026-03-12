@@ -8,7 +8,7 @@ use serde_json::Value;
 
 use crate::{AppState, SessionQuery};
 
-use crate::server::runtime_utils::core_error_response;
+use crate::server::runtime_utils::{bad_request_json, core_error_response, internal_json};
 use crate::server::trainer_models::{
     TrainerLiveApplyRequest, TrainerLiveSaveProfileRequest, TrainerLiveStartRequest,
 };
@@ -45,11 +45,7 @@ pub(crate) async fn post_trainer_live_start(
     let req = body.map(|Json(v)| v).unwrap_or_default();
     let serial = req.serial.trim().to_string();
     if serial.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"ok": false, "error": "serial is required"})),
-        )
-            .into_response();
+        return bad_request_json("serial is required");
     }
     let core = state
         .sessions
@@ -72,11 +68,7 @@ pub(crate) async fn post_trainer_live_apply(
     let req = body.map(|Json(v)| v).unwrap_or_default();
     let serial = req.serial.trim().to_string();
     if serial.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"ok": false, "error": "serial is required"})),
-        )
-            .into_response();
+        return bad_request_json("serial is required");
     }
     let core = state
         .sessions
@@ -105,19 +97,11 @@ pub(crate) async fn post_trainer_live_save_profile(
     });
     let serial = req.serial.trim().to_string();
     if serial.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"ok": false, "error": "serial is required"})),
-        )
-            .into_response();
+        return bad_request_json("serial is required");
     }
     let profile_name = sanitize_profile_name(req.profile_name.trim());
     if profile_name.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"ok": false, "error": "profile_name is required"})),
-        )
-            .into_response();
+        return bad_request_json("profile_name is required");
     }
 
     let core = state
@@ -131,11 +115,7 @@ pub(crate) async fn post_trainer_live_save_profile(
     let profile_root = trainer_profile_root(&state.trainer.root);
     let profile_dir = profile_root.join(&profile_name);
     if let Err(err) = fs::create_dir_all(&profile_dir) {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"ok": false, "error": format!("failed to create profile dir: {err}")})),
-        )
-            .into_response();
+        return internal_json(format!("failed to create profile dir: {err}"));
     }
     let now = now_unix_ms();
     let best_score = live_snapshot_score(&metrics);
@@ -185,21 +165,13 @@ pub(crate) async fn post_trainer_live_save_profile(
         &profile_path,
         serde_json::to_vec_pretty(&profile_json).unwrap_or_default(),
     ) {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"ok": false, "error": format!("failed to write profile json: {err}")})),
-        )
-            .into_response();
+        return internal_json(format!("failed to write profile json: {err}"));
     }
     if let Err(err) = fs::write(
         &params_path,
         serde_json::to_vec_pretty(&parameters_json).unwrap_or_default(),
     ) {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"ok": false, "error": format!("failed to write parameters json: {err}")})),
-        )
-            .into_response();
+        return internal_json(format!("failed to write parameters json: {err}"));
     }
     (
         StatusCode::OK,

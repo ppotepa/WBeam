@@ -8,6 +8,7 @@ use serde_json::Value;
 
 use crate::AppState;
 
+use crate::server::runtime_utils::not_found_json;
 use crate::server::trainer_models::{
     TrainerDevicesResponse, TrainerDiagnosticsResponse, TrainerProfileDetailResponse,
     TrainerProfilesResponse,
@@ -77,11 +78,7 @@ pub(crate) async fn get_trainer_profile(
     let profile_name = sanitize_profile_name(&profile_name);
     let dir = trainer_profile_root(&state.trainer.root).join(&profile_name);
     if !dir.is_dir() {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"ok": false, "error": "profile not found"})),
-        )
-            .into_response();
+        return not_found_json("profile not found");
     }
     let profile_path = dir.join(format!("{profile_name}.json"));
     let params_path = dir.join("parameters.json");
