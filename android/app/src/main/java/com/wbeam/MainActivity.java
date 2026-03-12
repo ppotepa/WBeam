@@ -88,6 +88,7 @@ import com.wbeam.ui.MainActivitySettingsInitializer;
 import com.wbeam.ui.MainActivitySettingsInitializerHooksFactory;
 import com.wbeam.ui.MainActivitySpinnersSetup;
 import com.wbeam.ui.MainActivitySurfaceCallbacksFactory;
+import com.wbeam.ui.MainActivitySurfaceSetup;
 import com.wbeam.ui.MainActivityUiBinder;
 import com.wbeam.ui.MainActivitySettingsPresenter;
 import com.wbeam.ui.MainActivityStatusPresenter;
@@ -817,34 +818,32 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void setupSurfaceCallbacks() {
-        SurfaceView preview = findViewById(R.id.previewSurface);
-        MainActivityUiBinder.setupSurfaceCallbacks(
-                preview,
-                MainActivitySurfaceCallbacksFactory.create(
-                        (nextSurface, ready) -> {
-                            surface = nextSurface;
-                            surfaceReady = ready;
-                            updatePreflightOverlay();
-                            updateStatus(STATE_IDLE, "surface ready", 0);
-                        },
-                        (nextSurface, ready) -> {
-                            surface = nextSurface;
-                            surfaceReady = ready;
-                            updatePreflightOverlay();
-                        },
-                        () -> {
-                            stopLiveView();
-                            surface = null;
-                            surfaceReady = false;
-                            preflightComplete = false;
-                            updatePreflightOverlay();
-                            hideCursorOverlay();
-                            updateStatus(STATE_IDLE, "surface destroyed", 0);
-                        },
-                        () -> cursorOverlayController != null && cursorOverlayController.isOverlayEnabled(),
-                        this::updateCursorOverlay
-                )
-        );
+        MainActivitySurfaceSetup.Input input = new MainActivitySurfaceSetup.Input();
+        input.preview = findViewById(R.id.previewSurface);
+        input.onSurfaceCreated = (nextSurface, ready) -> {
+            surface = nextSurface;
+            surfaceReady = ready;
+            updatePreflightOverlay();
+            updateStatus(STATE_IDLE, "surface ready", 0);
+        };
+        input.onSurfaceChanged = (nextSurface, ready) -> {
+            surface = nextSurface;
+            surfaceReady = ready;
+            updatePreflightOverlay();
+        };
+        input.onSurfaceDestroyed = () -> {
+            stopLiveView();
+            surface = null;
+            surfaceReady = false;
+            preflightComplete = false;
+            updatePreflightOverlay();
+            hideCursorOverlay();
+            updateStatus(STATE_IDLE, "surface destroyed", 0);
+        };
+        input.isCursorOverlayEnabled =
+                () -> cursorOverlayController != null && cursorOverlayController.isOverlayEnabled();
+        input.onCursorOverlayMotion = this::updateCursorOverlay;
+        MainActivitySurfaceSetup.setup(input);
     }
 
     private void setupButtons() {
