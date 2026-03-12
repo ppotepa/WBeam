@@ -46,6 +46,7 @@ import com.wbeam.api.HostApiClient;
 import com.wbeam.api.StatusListener;
 import com.wbeam.api.StatusPoller;
 import com.wbeam.hud.HudRenderSupport;
+import com.wbeam.startup.StartupOverlayModelBuilder;
 import com.wbeam.startup.StartupOverlayController;
 import com.wbeam.startup.StartupStepStyler;
 import com.wbeam.startup.TransportProbeCoordinator;
@@ -3232,216 +3233,67 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        long elapsedMs = startupBeganAtMs > 0L
-                ? Math.max(0L, SystemClock.elapsedRealtime() - startupBeganAtMs)
-                : 0L;
-
-        // If we've been waiting > 20s with no response, auto-reset the window
-        // so the overlay cycles back to ACTIVE (endless retry) rather than
-        // permanently showing red ERROR.
-        if (!daemonReachable && elapsedMs > 20_000L) {
-            controlRetryCount++;
-            startupBeganAtMs = SystemClock.elapsedRealtime();
-            elapsedMs = 0L;
-        }
-        // Also reset counter when daemon connects successfully
-        if (daemonReachable && controlRetryCount > 0) {
-            controlRetryCount = 0;
+        boolean shouldProbe = requiresTransportProbe();
+        if (daemonReachable && handshakeResolved && !isBuildMismatch() && shouldProbe) {
+            maybeStartTransportProbe();
         }
 
-        // ── step 1: control link ──────────────────────────────────────────────
-        int step1 = daemonReachable ? SS_OK : SS_ACTIVE;
-
-        String step1Detail;
-        if (step1 == SS_OK) {
-            boolean isLocalImpl = "local".equalsIgnoreCase(BuildConfig.WBEAM_API_IMPL);
-            if (isLocalImpl) {
-                step1Detail = "on-device (local api) \u00b7 no host connection needed";
-            } else {
-                step1Detail = "reachable \u00b7 api_impl=" + BuildConfig.WBEAM_API_IMPL
-                        + " \u00b7 " + daemonHostName;
-            }
-        } else if (controlRetryCount == 0) {
-            step1Detail = "polling " + HostApiClient.API_BASE
-                    + " \u2026 (" + (elapsedMs / 1000L) + "s)"
-                    + " \u00b7 install/start desktop service if this does not recover";
-        } else {
-            step1Detail = "no response \u00b7 retry #" + controlRetryCount
-                    + " \u00b7 polling " + HostApiClient.API_BASE
-                    + " (" + (elapsedMs / 1000L) + "s)"
-                    + " \u00b7 check desktop service status";
-        }
-
-        // ── step 2: handshake ─────────────────────────────────────────────────
-        int step2;
-        String step2Detail;
-        if (step1 != SS_OK) {
-            step2 = SS_PENDING;
-            step2Detail = "waiting for control link";
-        } else if (!handshakeResolved) {
-            step2 = SS_ACTIVE;
-            step2Detail = "resolving service / api version\u2026";
-        } else if (isBuildMismatch()) {
-            step2 = SS_ERROR;
-            step2Detail = "build mismatch · app=" + BuildConfig.WBEAM_BUILD_REV
-                    + " · host=" + daemonBuildRevision;
-        } else {
-            step2 = SS_OK;
-            if (requiresTransportProbe()) {
-                maybeStartTransportProbe();
-                if (transportProbe.isProbeOk()) {
-                    step2Detail = "service=" + daemonService + " · transport test OK";
-                } else if (transportProbe.isProbeInFlight()) {
-                    step2Detail = "service=" + daemonService + " · transport test in progress…";
-                } else {
-                    step2Detail = "service=" + daemonService + " · transport test pending";
-                }
-            } else {
-                step2Detail = "service=" + daemonService + " · " + BuildConfig.WBEAM_API_IMPL;
-            }
-        }
-
-        // ── step 3: stream ────────────────────────────────────────────────────
-        String effState = effectiveDaemonState(
+        StartupOverlayModelBuilder.Input input = new StartupOverlayModelBuilder.Input();
+        input.daemonReachable = daemonReachable;
+        input.daemonHostName = daemonHostName;
+        input.daemonService = daemonService;
+        input.daemonBuildRevision = daemonBuildRevision;
+        input.daemonState = daemonState;
+        input.daemonLastError = daemonLastError;
+        input.handshakeResolved = handshakeResolved;
+        input.buildMismatch = isBuildMismatch();
+        input.requiresTransportProbe = shouldProbe;
+        input.probeOk = transportProbe.isProbeOk();
+        input.probeInFlight = transportProbe.isProbeInFlight();
+        input.probeInfo = transportProbe.getProbeInfo();
+        input.apiImpl = BuildConfig.WBEAM_API_IMPL;
+        input.apiBase = HostApiClient.API_BASE;
+        input.apiHost = BuildConfig.WBEAM_API_HOST;
+        input.streamHost = BuildConfig.WBEAM_STREAM_HOST;
+        input.streamPort = BuildConfig.WBEAM_STREAM_PORT;
+        input.appBuildRevision = BuildConfig.WBEAM_BUILD_REV;
+        input.lastUiInfo = lastUiInfo;
+        input.effectiveDaemonState = effectiveDaemonState(
                 daemonState, latestPresentFps, latestStreamUptimeSec, latestFrameOutHost);
-        boolean streamFlowing = "STREAMING".equals(effState);
+        input.latestPresentFps = latestPresentFps;
+        input.startupBeganAtMs = startupBeganAtMs;
+        input.controlRetryCount = controlRetryCount;
+        input.nowMs = SystemClock.elapsedRealtime();
+        input.lastStatsLine = lastStatsLine;
+        input.daemonErrCompact = compactDaemonErrorForUi(daemonLastError);
 
-        // Parse stream reconnect count from lastStatsLine ("reconnects: N")
-        int streamReconnects = 0;
-        try {
-            int rIdx = lastStatsLine.indexOf("reconnects: ");
-            if (rIdx >= 0) {
-                String rPart = lastStatsLine.substring(rIdx + "reconnects: ".length()).trim();
-                int end = 0;
-                while (end < rPart.length() && Character.isDigit(rPart.charAt(end))) end++;
-                if (end > 0) streamReconnects = Integer.parseInt(rPart.substring(0, end));
-            }
-        } catch (Exception ignored) {}
+        StartupOverlayModelBuilder.Model model = StartupOverlayModelBuilder.build(input);
+        startupBeganAtMs = model.updatedStartupBeganAtMs;
+        controlRetryCount = model.updatedControlRetryCount;
 
-        // Build the stream address hint once (depends on build config, not runtime)
-        String streamHost = BuildConfig.WBEAM_STREAM_HOST;
-        boolean streamIsLoopback = streamHost == null
-                || streamHost.trim().isEmpty()
-                || streamHost.trim().equals("127.0.0.1")
-                || streamHost.trim().equals("localhost");
-        String streamAddr = (streamHost != null && !streamHost.trim().isEmpty())
-                ? streamHost.trim() : "127.0.0.1";
-        String daemonErrCompact = compactDaemonErrorForUi(daemonLastError);
-        boolean daemonStartFailure = !daemonErrCompact.isEmpty()
-                && daemonErrCompact.toLowerCase(Locale.US).contains("stream start aborted");
-        String streamFixHint = streamIsLoopback
-                ? "check ADB reverse for stream/control ports \u00b7 ensure desktop service is running"
-                : "check USB tethering / host IP / LAN \u00b7 ensure desktop service is running";
-
-        int step3;
-        String step3Detail;
-        if (step2 != SS_OK) {
-            step3 = SS_PENDING;
-            step3Detail = (step2 == SS_ERROR && isBuildMismatch())
-                    ? "blocked by build mismatch"
-                    : "waiting for handshake";
-        } else if (requiresTransportProbe() && !transportProbe.isProbeOk()) {
-            step3 = SS_ACTIVE;
-            if (transportProbe.isProbeInFlight()) {
-                step3Detail = "testing transport I/O… " + transportProbe.getProbeInfo();
-            } else {
-                step3Detail = "transport test retrying… " + transportProbe.getProbeInfo();
-            }
-        } else if (streamFlowing) {
-            step3 = SS_OK;
-            step3Detail = "live \u00b7 fps=" + String.format(Locale.US, "%.0f", latestPresentFps)
-                    + " \u00b7 " + effState.toLowerCase(Locale.US);
-        } else {
-            boolean hasWaited = elapsedMs > 5_000L;
-            if (daemonStartFailure && hasWaited) {
-                step3 = SS_ERROR;
-                step3Detail = "host stream start failed \u00b7 " + daemonErrCompact;
-            } else {
-                // Keep retrying by default for transient network/capture states.
-                step3 = SS_ACTIVE;
-                if (streamReconnects > 0 && hasWaited) {
-                    step3Detail = "retry #" + streamReconnects
-                            + " \u00b7 " + streamAddr + ":" + BuildConfig.WBEAM_STREAM_PORT
-                            + " unreachable \u00b7 " + streamFixHint
-                            + (daemonErrCompact.isEmpty() ? "" : " \u00b7 host error: " + daemonErrCompact);
-                } else if (streamReconnects > 0) {
-                    step3Detail = "reconnecting \u00b7 attempt #" + streamReconnects + " \u00b7 awaiting frames\u2026";
-                } else if (hasWaited) {
-                    step3Detail = "connecting to " + streamAddr + ":" + BuildConfig.WBEAM_STREAM_PORT
-                            + " \u00b7 " + streamFixHint
-                            + (daemonErrCompact.isEmpty() ? "" : " \u00b7 host error: " + daemonErrCompact);
-                } else {
-                    step3Detail = "decoder started \u00b7 awaiting frames\u2026";
-                }
-            }
-        }
-
-        StartupStepStyler.applyStepState(step1, preflightAnimTick, SS_OK, SS_ERROR, SS_ACTIVE,
+        StartupStepStyler.applyStepState(model.step1State, preflightAnimTick, SS_OK, SS_ERROR, SS_ACTIVE,
                 "1", startupStep1Card, startupStep1Badge, startupStep1Label,
-                startupStep1Status, startupStep1Detail, step1Detail);
-        StartupStepStyler.applyStepState(step2, preflightAnimTick, SS_OK, SS_ERROR, SS_ACTIVE,
+                startupStep1Status, startupStep1Detail, model.step1Detail);
+        StartupStepStyler.applyStepState(model.step2State, preflightAnimTick, SS_OK, SS_ERROR, SS_ACTIVE,
                 "2", startupStep2Card, startupStep2Badge, startupStep2Label,
-                startupStep2Status, startupStep2Detail, step2Detail);
-        StartupStepStyler.applyStepState(step3, preflightAnimTick, SS_OK, SS_ERROR, SS_ACTIVE,
+                startupStep2Status, startupStep2Detail, model.step2Detail);
+        StartupStepStyler.applyStepState(model.step3State, preflightAnimTick, SS_OK, SS_ERROR, SS_ACTIVE,
                 "3", startupStep3Card, startupStep3Badge, startupStep3Label,
-                startupStep3Status, startupStep3Detail, step3Detail);
+                startupStep3Status, startupStep3Detail, model.step3Detail);
 
-        // subtitle
         if (startupSubtitleText != null) {
-            String subtitle;
-            if (step1 != SS_OK) {
-                if (elapsedMs < 2000L && controlRetryCount == 0) {
-                    subtitle = "starting up\u2026";
-                } else if (controlRetryCount == 0) {
-                    subtitle = "awaiting control link \u00b7 start desktop service if needed\u2026";
-                } else {
-                    subtitle = "retrying control link \u00b7 attempt #" + controlRetryCount
-                            + " \u00b7 check desktop service\u2026";
-                }
-            } else if (step2 != SS_OK) {
-                subtitle = (step2 == SS_ERROR && isBuildMismatch())
-                        ? "build mismatch \u00b7 redeploy APK or rebuild host"
-                        : "handshake in progress\u2026";
-            } else if (step3 != SS_OK) {
-                if (step3 == SS_ERROR && daemonStartFailure) {
-                    subtitle = "host stream start failed \u00b7 check host logs";
-                } else {
-                    subtitle = streamReconnects > 0
-                            ? "stream reconnecting \u00b7 attempt #" + streamReconnects + "\u2026"
-                            : elapsedMs > 5_000L
-                                    ? "stream unreachable \u00b7 retrying\u2026"
-                                    : "waiting for video frames\u2026";
-                }
-            } else {
-                subtitle = "all systems ready";
-            }
-            startupSubtitleText.setText(subtitle);
-            startupSubtitleText.setTextColor(step3 == SS_OK
+            startupSubtitleText.setText(model.subtitle);
+            startupSubtitleText.setTextColor(model.step3State == SS_OK
                     ? Color.parseColor("#4ADE80")
-                    : step3 == SS_ERROR ? Color.parseColor("#F87171") : Color.parseColor("#475569"));
+                    : model.step3State == SS_ERROR ? Color.parseColor("#F87171") : Color.parseColor("#475569"));
         }
 
-        // info line
         if (startupInfoText != null) {
-            StringBuilder startupLog = new StringBuilder();
-            startupLog.append("api=").append(HostApiClient.API_BASE)
-                    .append("  impl=").append(BuildConfig.WBEAM_API_IMPL).append('\n')
-                    .append("stream=").append(BuildConfig.WBEAM_STREAM_HOST).append(':')
-                    .append(BuildConfig.WBEAM_STREAM_PORT).append('\n')
-                    .append("app=").append(BuildConfig.WBEAM_BUILD_REV)
-                    .append("  host=").append(daemonBuildRevision).append('\n')
-                    .append("state=").append(daemonState);
-            if (daemonLastError != null && !daemonLastError.trim().isEmpty()) {
-                startupLog.append('\n').append("error=").append(daemonLastError.trim());
-            } else if (lastUiInfo != null && !lastUiInfo.trim().isEmpty()) {
-                startupLog.append('\n').append("hint=").append(lastUiInfo.trim());
-            }
-            startupInfoText.setText(startupLog.toString());
+            startupInfoText.setText(model.infoLog);
             startupInfoText.setTextColor(Color.parseColor("#CBD5E1"));
         }
 
-        boolean allOk = step1 == SS_OK && step2 == SS_OK && step3 == SS_OK;
-        if (!allOk) {
+        if (!model.allOk) {
             startupDismissed = false;
             preflightComplete = false;
             setPreflightVisible(true);
