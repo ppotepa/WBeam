@@ -38,6 +38,7 @@ import androidx.core.content.ContextCompat;
 import com.wbeam.api.HostApiClient;
 import com.wbeam.api.StatusListener;
 import com.wbeam.api.StatusPoller;
+import com.wbeam.hud.RuntimeHudFallbackFormatter;
 import com.wbeam.hud.HudRenderSupport;
 import com.wbeam.hud.MetricSeriesBuffer;
 import com.wbeam.hud.RuntimeHudShellRenderer;
@@ -1929,10 +1930,8 @@ public class MainActivity extends AppCompatActivity {
                     "scale-1x"
             );
             if (!showHudWebHtml("runtime", html) && perfHudText != null) {
-                String hud = String.format(
-                        Locale.US,
-                        "HUD %s\nfps %.0f/%.1f frame %.2fms\ndec %.2fms ren %.2fms e2e %.2fms\nq %d/%d/%d max %d/%d/%d\nadapt L%d %s\ndrops %d bp %d/%d\n%s",
-                        daemonReachable ? "LIVE" : "DEGRADED",
+                String hud = RuntimeHudFallbackFormatter.buildText(
+                        daemonReachable,
                         targetFps,
                         presentFps,
                         frametimeP95,
@@ -1950,15 +1949,13 @@ public class MainActivity extends AppCompatActivity {
                         drops,
                         bpHigh,
                         bpRecover,
-                        reason == null || reason.isEmpty() ? "-" : reason
+                        reason
                 );
                 showHudTextOnly("runtime", hud, "#B3EAF4FF");
             }
         } else if (perfHudText != null) {
-            String hud = String.format(
-                    Locale.US,
-                    "HUD %s\nfps %.0f/%.1f frame %.2fms\ndec %.2fms ren %.2fms e2e %.2fms\nq %d/%d/%d max %d/%d/%d\nadapt L%d %s\ndrops %d bp %d/%d\n%s",
-                    daemonReachable ? "LIVE" : "DEGRADED",
+            String hud = RuntimeHudFallbackFormatter.buildText(
+                    daemonReachable,
                     targetFps,
                     presentFps,
                     frametimeP95,
@@ -1976,7 +1973,7 @@ public class MainActivity extends AppCompatActivity {
                     drops,
                     bpHigh,
                     bpRecover,
-                    reason == null || reason.isEmpty() ? "-" : reason
+                    reason
             );
             showHudTextOnly("runtime", hud, "#B3EAF4FF");
         }
