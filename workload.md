@@ -27,13 +27,19 @@ Current status:
 
 Parent Epic:
 - #30 Repo/Runtime Hygiene
+  - https://github.com/ppotepa/WBeam/issues/30
 
 Child issues in execution order:
 1. #31 Hygiene inventory and cleanup rules
+   - https://github.com/ppotepa/WBeam/issues/31
 2. #32 Harden `.gitignore` for runtime/build artifacts
+   - https://github.com/ppotepa/WBeam/issues/32
 3. #33 Remove stale helper/leftover assets
+   - https://github.com/ppotepa/WBeam/issues/33
 4. #34 Stabilize CI hygiene checks after cleanup
+   - https://github.com/ppotepa/WBeam/issues/34
 5. #35 Final cleanup report and close Epic #30
+   - https://github.com/ppotepa/WBeam/issues/35
 
 ## Execution Order
 
