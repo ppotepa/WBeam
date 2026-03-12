@@ -46,7 +46,7 @@ Groups:
   host      build | run | debug | status | down | probe
   daemon    up | down | status   (alias for host)
   android   build | install | launch | deploy | deploy-all | build-release | install-release | deploy-release
-  x11proto  probe-host | doctor | status | start | stop | smoke | acceptance | android-build | android-deploy
+  x11proto  probe-host | doctor | status | start | stop | smoke | acceptance | android-build | android-deploy (legacy opt-in)
   train     wizard
   deps      virtual check [--json] | virtual install [--dry-run] [--yes]
   version   new | current | doctor
@@ -2042,10 +2042,12 @@ deps_virtual_install() {
 }
 
 x11proto_run() {
+  require_archive_legacy_optin
   "$ROOT_DIR/archive/legacy/proto_x11/run.sh" "$@"
 }
 
 x11proto_android_build() {
+  require_archive_legacy_optin
   (
     ANDROID_PACKAGE="com.wbeam.x11"
     ANDROID_ACTIVITY="com.wbeam.MainActivity"
@@ -2056,6 +2058,7 @@ x11proto_android_build() {
 }
 
 x11proto_android_deploy() {
+  require_archive_legacy_optin
   (
     ANDROID_PACKAGE="com.wbeam.x11"
     ANDROID_ACTIVITY="com.wbeam.MainActivity"
@@ -2063,6 +2066,14 @@ x11proto_android_deploy() {
     export WBEAM_ANDROID_APP_NAME="WBeam X11"
     android_deploy
   )
+}
+
+require_archive_legacy_optin() {
+  if [[ "${WBEAM_ENABLE_ARCHIVE_LEGACY:-0}" != "1" ]]; then
+    echo "[x11proto] archive legacy lane is disabled by default."
+    echo "[x11proto] set WBEAM_ENABLE_ARCHIVE_LEGACY=1 to opt in explicitly."
+    exit 2
+  fi
 }
 
 train_wizard() {
