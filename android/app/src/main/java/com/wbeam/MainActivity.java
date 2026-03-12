@@ -57,7 +57,7 @@ import com.wbeam.telemetry.RuntimeTelemetryMapper;
 import com.wbeam.ui.ErrorTextUtil;
 import com.wbeam.ui.IntraOnlyButtonController;
 import com.wbeam.ui.LiveLogBuffer;
-import com.wbeam.ui.MainActivityDebugInfoFormatter;
+import com.wbeam.ui.MainActivityRuntimeStateView;
 import com.wbeam.ui.MainActivityUiBinder;
 import com.wbeam.ui.MainActivitySettingsPresenter;
 import com.wbeam.ui.MainActivityStatusPresenter;
@@ -1048,20 +1048,12 @@ public class MainActivity extends AppCompatActivity {
 
     private void setDebugOverlayVisible(boolean visible) {
         debugOverlayVisible = visible;
-        if (!BuildConfig.DEBUG) {
-            return;
-        }
-        // Unified HUD mode: keep only one on-screen overlay panel.
-        // Legacy debug panel (text + fps graph) stays disabled to avoid layered HUDs.
-        if (debugInfoPanel != null) {
-            debugInfoPanel.setVisibility(View.GONE);
-        }
-        if (perfHudPanel != null) {
-            perfHudPanel.setVisibility(visible ? View.VISIBLE : View.GONE);
-            if (visible) {
-                perfHudPanel.setAlpha(0.96f);
-            }
-        }
+        MainActivityRuntimeStateView.applyDebugOverlayVisibility(
+                BuildConfig.DEBUG,
+                visible,
+                debugInfoPanel,
+                perfHudPanel
+        );
     }
 
     private void updateActionButtonsEnabled() {
@@ -1156,7 +1148,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void updateHostHint() {
         StreamConfigResolver.Resolved cfg = effectiveStreamConfig();
-        String daemonStateUi = effectiveDaemonState(
+        String daemonStateUi = MainActivityRuntimeStateView.effectiveDaemonState(
                 daemonState, latestPresentFps, latestStreamUptimeSec, latestFrameOutHost);
         hostHintText.setText(MainActivitySettingsPresenter.buildHostHint(
                 daemonReachable,
@@ -1614,7 +1606,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void refreshStatusText() {
-        String daemonStateUi = effectiveDaemonState(
+        String daemonStateUi = MainActivityRuntimeStateView.effectiveDaemonState(
                 daemonState, latestPresentFps, latestStreamUptimeSec, latestFrameOutHost);
         MainActivityStatusPresenter.renderStatus(
                 statusText,
@@ -1793,7 +1785,12 @@ public class MainActivity extends AppCompatActivity {
         latestStablePresentFpsAtMs = fpsStabilization.updatedStablePresentFpsAtMs;
         double recvFps = runtime.recvFps;
         double decodeFps = runtime.decodeFps;
-        String daemonStateUi = effectiveDaemonState(daemonState, presentFps, streamUptimeSec, frameOutHost);
+        String daemonStateUi = MainActivityRuntimeStateView.effectiveDaemonState(
+                daemonState,
+                presentFps,
+                streamUptimeSec,
+                frameOutHost
+        );
         latestTargetFps = targetFps;
         latestPresentFps = presentFps;
         latestStreamUptimeSec = streamUptimeSec;
@@ -2114,12 +2111,12 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void refreshDebugInfoOverlay() {
-        if (!BuildConfig.DEBUG || debugInfoText == null || debugInfoPanel == null) {
-            return;
-        }
-        String daemonStateUi = effectiveDaemonState(
+        String daemonStateUi = MainActivityRuntimeStateView.effectiveDaemonState(
                 daemonState, latestPresentFps, latestStreamUptimeSec, latestFrameOutHost);
-        String text = MainActivityDebugInfoFormatter.buildDebugOverlayText(
+        MainActivityRuntimeStateView.refreshDebugOverlayText(
+                BuildConfig.DEBUG,
+                debugInfoText,
+                debugInfoPanel,
                 lastUiState,
                 daemonHostName,
                 daemonStateUi,
@@ -2129,16 +2126,6 @@ public class MainActivity extends AppCompatActivity {
                 lastStatsLine,
                 lastHudCompactLine
         );
-        debugInfoText.setText(text);
-    }
-
-    private String effectiveDaemonState(String rawState, double presentFps, long streamUptimeSec, long frameOutHost) {
-        String normalized = rawState == null ? "IDLE" : rawState.toUpperCase(Locale.US);
-        if (!"STREAMING".equals(normalized)) {
-            return normalized;
-        }
-        boolean flowing = presentFps >= 1.0 || streamUptimeSec > 0 || frameOutHost > 0;
-        return flowing ? "STREAMING" : "RECONNECTING";
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -2195,7 +2182,12 @@ public class MainActivity extends AppCompatActivity {
                 BuildConfig.WBEAM_STREAM_PORT,
                 BuildConfig.WBEAM_BUILD_REV,
                 lastUiInfo,
-                effectiveDaemonState(daemonState, latestPresentFps, latestStreamUptimeSec, latestFrameOutHost),
+                MainActivityRuntimeStateView.effectiveDaemonState(
+                        daemonState,
+                        latestPresentFps,
+                        latestStreamUptimeSec,
+                        latestFrameOutHost
+                ),
                 latestPresentFps,
                 startupBeganAtMs,
                 controlRetryCount,
