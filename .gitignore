@@ -53,8 +53,20 @@ __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .venv/
 venv/
+
+# JavaScript / TypeScript tool output
+*.tsbuildinfo
+**/.vite/
+**/.cache/
+coverage/
+**/coverage/
+.nyc_output/
+.coverage
 
 # Logs and runtime output
 *.log
@@ -70,6 +82,8 @@ shared/protocol/logs/**
 *.pid
 *.tmp
 *.cache
+*.profraw
+*.profdata
 all.log
 
 # Local generated helper files
