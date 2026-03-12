@@ -50,9 +50,11 @@ import com.wbeam.stream.VideoTestController;
 import com.wbeam.stream.StreamSessionController;
 import com.wbeam.telemetry.ClientMetricsReporter;
 import com.wbeam.ui.ErrorTextUtil;
+import com.wbeam.ui.IntraOnlyButtonController;
 import com.wbeam.ui.LiveLogBuffer;
 import com.wbeam.ui.SettingsPayloadBuilder;
 import com.wbeam.ui.SettingsPanelController;
+import com.wbeam.ui.SimpleMenuUi;
 import com.wbeam.ui.StatusTextFormatter;
 import com.wbeam.ui.StreamConfigResolver;
 import com.wbeam.widget.FpsLossGraphView;
@@ -1103,24 +1105,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateIntraOnlyButton() {
-        if (intraOnlyButton == null) return;
-        String encoder = getSelectedEncoder();
-        boolean supportsIntra = "h265".equals(encoder);
-        if (!supportsIntra) {
-            intraOnlyEnabled = false;
-        }
-        intraOnlyButton.setEnabled(supportsIntra);
-        intraOnlyButton.setAlpha(supportsIntra ? 1.0f : 0.45f);
-        intraOnlyButton.setText(intraOnlyEnabled
-                ? "All-Intra: ON  \u2014 zero artifacts (HEVC only)"
-            : (supportsIntra ? "All-Intra: OFF" : "All-Intra: N/A"));
-        int buttonColor = intraOnlyEnabled ? 0xFF16A34A : 0xFF374151;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            intraOnlyButton.setBackgroundTintList(
-                    android.content.res.ColorStateList.valueOf(buttonColor));
-        } else {
-            intraOnlyButton.setBackgroundColor(buttonColor);
-        }
+        intraOnlyEnabled = IntraOnlyButtonController.apply(
+                intraOnlyButton,
+                getSelectedEncoder(),
+                intraOnlyEnabled
+        );
     }
 
     private void updateHostHint() {
@@ -1353,7 +1342,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void selectSimpleFps(int fps) {
-        simpleFps = clamp(fps, 30, 144);
+        simpleFps = SimpleMenuUi.clampSimpleFps(fps);
         refreshSimpleMenuButtons();
         scheduleSimpleMenuAutoHide();
     }
@@ -1362,8 +1351,8 @@ public class MainActivity extends AppCompatActivity {
         if (simpleMenuPanel == null) {
             return;
         }
-        simpleMode = "raw-png".equals(getSelectedEncoder()) ? "raw-png" : PREFERRED_VIDEO;
-        simpleFps = clamp(getSelectedFps(), 30, 144);
+        simpleMode = SimpleMenuUi.modeFromEncoder(getSelectedEncoder(), PREFERRED_VIDEO);
+        simpleFps = SimpleMenuUi.clampSimpleFps(getSelectedFps());
         simpleMenuVisible = true;
         refreshSimpleMenuButtons();
         simpleMenuPanel.setVisibility(View.VISIBLE);
@@ -1396,8 +1385,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void applySimpleMenuToSettings() {
-        String selectedEncoder = "raw-png".equals(simpleMode) ? "raw-png" : PREFERRED_VIDEO;
-        int selectedFps = clamp(simpleFps, 30, 144);
+        String selectedEncoder = SimpleMenuUi.encoderFromMode(simpleMode, PREFERRED_VIDEO);
+        int selectedFps = SimpleMenuUi.clampSimpleFps(simpleFps);
 
         setSpinnerSelection(encoderSpinner, ENCODER_OPTIONS, selectedEncoder);
         fpsSeek.setProgress(clamp(selectedFps, 24, 144) - 24);
@@ -1411,32 +1400,21 @@ public class MainActivity extends AppCompatActivity {
         if (simpleMenuPanel == null) {
             return;
         }
-
-        setSimpleModeSelected(simpleModeH265Button, PREFERRED_VIDEO.equals(simpleMode));
-        setSimpleModeSelected(simpleModeRawButton, "raw-png".equals(simpleMode));
-
-        setSimpleFpsSelected(simpleFps30Button, simpleFps == 30);
-        setSimpleFpsSelected(simpleFps45Button, simpleFps == 45);
-        setSimpleFpsSelected(simpleFps60Button, simpleFps == 60);
-        setSimpleFpsSelected(simpleFps90Button, simpleFps == 90);
-        setSimpleFpsSelected(simpleFps120Button, simpleFps == 120);
-        setSimpleFpsSelected(simpleFps144Button, simpleFps == 144);
-    }
-
-    private void setSimpleModeSelected(Button button, boolean selected) {
-        if (button == null) {
-            return;
-        }
-        button.setSelected(selected);
-        button.setAlpha(selected ? 1f : 0.75f);
-    }
-
-    private void setSimpleFpsSelected(Button button, boolean selected) {
-        if (button == null) {
-            return;
-        }
-        button.setSelected(selected);
-        button.setAlpha(selected ? 1f : 0.75f);
+        SimpleMenuUi.applyModeButtons(
+                simpleModeH265Button,
+                simpleModeRawButton,
+                PREFERRED_VIDEO,
+                simpleMode
+        );
+        SimpleMenuUi.applyFpsButtons(
+                simpleFps30Button,
+                simpleFps45Button,
+                simpleFps60Button,
+                simpleFps90Button,
+                simpleFps120Button,
+                simpleFps144Button,
+                simpleFps
+        );
     }
 
     private void toggleCursorOverlayMode() {
