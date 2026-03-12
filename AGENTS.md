@@ -143,9 +143,16 @@ Core runtime:
 - `GET /v1/health`
 - `GET /v1/host-probe`
 - `GET /v1/status`
+- `GET /v1/presets`
 - `GET /v1/metrics`
+- `GET /v1/speedtest`
+- `GET /v1/virtual/probe`
+- `GET /v1/virtual/doctor`
 - `POST /v1/start`
 - `POST /v1/stop`
+- `POST /v1/apply`
+- `POST /v1/client-hello`
+- `POST /v1/client-metrics`
 
 Trainer run management:
 - `POST /v1/trainer/preflight`
