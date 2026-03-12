@@ -39,8 +39,8 @@ import com.wbeam.hud.RuntimeHudComputation;
 import com.wbeam.hud.RuntimeHudOverlayPipeline;
 import com.wbeam.hud.RuntimeHudTrendComposer;
 import com.wbeam.hud.RuntimeHudUpdateState;
+import com.wbeam.hud.TrainerHudOverlayPipeline;
 import com.wbeam.hud.TrainerHudRouting;
-import com.wbeam.hud.TrainerHudOverlayRenderer;
 import com.wbeam.input.CursorOverlayController;
 import com.wbeam.input.ImmersiveModeController;
 import com.wbeam.startup.PreflightStateMachine;
@@ -1964,79 +1964,50 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void renderTrainerHudOverlay(String rawHudText) {
-        if (perfHudText == null) {
-            return;
-        }
-        TrainerHudOverlayRenderer.Rendered rendered = TrainerHudOverlayRenderer.fromText(
+        TrainerHudOverlayPipeline.renderFromText(
                 rawHudText,
                 latestTargetFps,
                 FPS_LOW_ANCHOR,
-                trainerResourceRowsProvider()
+                resourceUsageTracker,
+                perfHudWebView,
+                perfHudText,
+                perfHudPanel,
+                hudOverlayState,
+                HUD_TEXT_COLOR_LIVE,
+                compactLine -> lastHudCompactLine = compactLine,
+                this::refreshDebugInfoOverlay
         );
-        applyTrainerHudRenderedAndPanel(rendered, true);
     }
 
     private void renderTrainerHudOverlayJson(JSONObject hudJson) {
-        if (perfHudText == null || hudJson == null) {
-            return;
-        }
-        TrainerHudOverlayRenderer.Rendered rendered = TrainerHudOverlayRenderer.fromJson(
+        TrainerHudOverlayPipeline.renderFromJson(
                 hudJson,
                 latestTargetFps,
                 FPS_LOW_ANCHOR,
-                trainerResourceRowsProvider()
+                resourceUsageTracker,
+                perfHudWebView,
+                perfHudText,
+                perfHudPanel,
+                hudOverlayState,
+                HUD_TEXT_COLOR_LIVE,
+                compactLine -> lastHudCompactLine = compactLine,
+                this::refreshDebugInfoOverlay
         );
-        applyTrainerHudRenderedAndPanel(rendered, false);
     }
 
     private void renderTrainerHudOverlayPlaceholder() {
-        if (perfHudText == null) {
-            return;
-        }
-        TrainerHudOverlayRenderer.Rendered rendered = TrainerHudOverlayRenderer.placeholder(
+        TrainerHudOverlayPipeline.renderPlaceholder(
                 latestTargetFps,
                 FPS_LOW_ANCHOR,
-                trainerResourceRowsProvider()
+                resourceUsageTracker,
+                perfHudWebView,
+                perfHudText,
+                perfHudPanel,
+                hudOverlayState,
+                HUD_TEXT_COLOR_LIVE,
+                compactLine -> lastHudCompactLine = compactLine,
+                this::refreshDebugInfoOverlay
         );
-        applyTrainerHudRenderedAndPanel(rendered, false);
-    }
-
-    private TrainerHudOverlayRenderer.ResourceRowsProvider trainerResourceRowsProvider() {
-        return (targetFps, renderP95Ms) -> {
-            resourceUsageTracker.sample(targetFps, renderP95Ms);
-            return resourceUsageTracker.buildRowsHtml();
-        };
-    }
-
-    private void applyTrainerHudRenderedAndPanel(
-            TrainerHudOverlayRenderer.Rendered rendered,
-            boolean skipIfEmpty
-    ) {
-        if (skipIfEmpty && rendered.html.isEmpty() && rendered.textFallback.isEmpty()) {
-            return;
-        }
-        applyTrainerHudRendered(rendered);
-        if (perfHudPanel != null) {
-            perfHudPanel.setAlpha(0.96f);
-        }
-    }
-
-    private void applyTrainerHudRendered(TrainerHudOverlayRenderer.Rendered rendered) {
-        if (perfHudWebView != null) {
-            if (!HudOverlayDisplay.showWebHtml(
-                    perfHudWebView,
-                    perfHudText,
-                    "trainer",
-                    rendered.html,
-                    hudOverlayState
-            )) {
-                showHudTextOnly("trainer", rendered.textFallback, HUD_TEXT_COLOR_LIVE);
-            }
-        } else {
-            showHudTextOnly("trainer", rendered.textFallback, HUD_TEXT_COLOR_LIVE);
-        }
-        lastHudCompactLine = rendered.compactLine;
-        refreshDebugInfoOverlay();
     }
 
     private void refreshDebugInfoOverlay() {
