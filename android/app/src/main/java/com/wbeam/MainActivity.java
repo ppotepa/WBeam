@@ -54,6 +54,7 @@ import com.wbeam.stream.StreamSessionController;
 import com.wbeam.telemetry.ClientMetricsReporter;
 import com.wbeam.ui.ErrorTextUtil;
 import com.wbeam.ui.SettingsPayloadBuilder;
+import com.wbeam.ui.SettingsPanelController;
 import com.wbeam.ui.StatusTextFormatter;
 import com.wbeam.ui.StreamConfigResolver;
 import com.wbeam.widget.FpsLossGraphView;
@@ -227,7 +228,6 @@ public class MainActivity extends AppCompatActivity {
 
     // ── UI state ───────────────────────────────────────────────────────────────
     private boolean intraOnlyEnabled = false;
-    private boolean settingsVisible = false;
     private boolean simpleMenuVisible = false;
     private String simpleMode = PREFERRED_VIDEO;
     private int simpleFps = 60;
@@ -310,6 +310,7 @@ public class MainActivity extends AppCompatActivity {
     private StartupOverlayController startupOverlayController;
     private CursorOverlayController cursorOverlayController;
     private ImmersiveModeController immersiveModeController;
+    private SettingsPanelController settingsPanelController;
 
     // ── Media ──────────────────────────────────────────────────────────────────
     private Surface surface;
@@ -621,7 +622,7 @@ public class MainActivity extends AppCompatActivity {
             hideSimpleMenu();
             return;
         }
-        if (settingsVisible) {
+        if (settingsPanelController != null && settingsPanelController.isVisible()) {
             hideSettingsPanel();
             return;
         }
@@ -678,6 +679,7 @@ public class MainActivity extends AppCompatActivity {
         topBar = findViewById(R.id.topBar);
         quickActionRow = findViewById(R.id.quickActionRow);
         settingsPanel = findViewById(R.id.settingsPanel);
+        settingsPanelController = new SettingsPanelController(settingsPanel);
         simpleMenuPanel = findViewById(R.id.simpleMenuPanel);
         statusPanel = findViewById(R.id.statusPanel);
         perfHudPanel = findViewById(R.id.perfHudPanel);
@@ -1302,45 +1304,21 @@ public class MainActivity extends AppCompatActivity {
     // ══════════════════════════════════════════════════════════════════════════
 
     private void toggleSettingsPanel() {
-        if (settingsVisible) {
-            hideSettingsPanel();
-        } else {
-            showSettingsPanel();
+        if (settingsPanelController != null) {
+            settingsPanelController.toggle();
         }
     }
 
     private void showSettingsPanel() {
-        if (settingsVisible) {
-            return;
+        if (settingsPanelController != null) {
+            settingsPanelController.show();
         }
-        settingsVisible = true;
-        settingsPanel.setVisibility(View.VISIBLE);
-        settingsPanel.post(() -> {
-            settingsPanel.setTranslationY(-settingsPanel.getHeight());
-            settingsPanel.setAlpha(0f);
-            settingsPanel.animate()
-                    .translationY(0f)
-                    .alpha(1f)
-                    .setDuration(180)
-                    .start();
-        });
     }
 
     private void hideSettingsPanel() {
-        if (!settingsVisible) {
-            return;
+        if (settingsPanelController != null) {
+            settingsPanelController.hide();
         }
-        settingsVisible = false;
-        settingsPanel.animate()
-                .translationY(-settingsPanel.getHeight())
-                .alpha(0f)
-                .setDuration(160)
-                .withEndAction(() -> {
-                    settingsPanel.setVisibility(View.GONE);
-                    settingsPanel.setAlpha(1f);
-                    settingsPanel.setTranslationY(0f);
-                })
-                .start();
     }
 
     // ══════════════════════════════════════════════════════════════════════════
