@@ -70,6 +70,9 @@ public final class MainActivityUiBinder {
             Runnable onEncoderSelectionChanged,
             Runnable onCursorSelectionChanged
     ) {
+        if (profileSpinner == null || encoderSpinner == null || cursorSpinner == null) {
+            return;
+        }
         profileSpinner.setAdapter(new ArrayAdapter<>(
                 activity, android.R.layout.simple_spinner_dropdown_item, profileOptions));
         encoderSpinner.setAdapter(new ArrayAdapter<>(
@@ -105,6 +108,9 @@ public final class MainActivityUiBinder {
             SeekBar bitrateSeek,
             Runnable onValuesChanged
     ) {
+        if (resolutionSeek == null || fpsSeek == null || bitrateSeek == null) {
+            return;
+        }
         resolutionSeek.setMax(50); // 50..100%
         fpsSeek.setMax(120); // 24..144 fps
         bitrateSeek.setMax(295); // 5..300 Mbps
