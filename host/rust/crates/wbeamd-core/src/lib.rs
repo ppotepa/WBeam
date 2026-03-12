@@ -1,12 +1,14 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
+#[cfg(unix)]
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+#[cfg(unix)]
 use nix::libc;
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -518,13 +520,24 @@ impl Inner {
 }
 
 pub struct InstanceLock {
-    file: File,
+    file: Option<File>,
+    #[cfg(windows)]
+    path: PathBuf,
 }
 
 impl Drop for InstanceLock {
     fn drop(&mut self) {
-        unsafe {
-            libc::flock(self.file.as_raw_fd(), libc::LOCK_UN);
+        #[cfg(unix)]
+        if let Some(file) = self.file.as_ref() {
+            unsafe {
+                libc::flock(file.as_raw_fd(), libc::LOCK_UN);
+            }
+        }
+        #[cfg(windows)]
+        {
+            // Close handle before cleanup, otherwise Windows keeps the file in-use.
+            self.file.take();
+            let _ = std::fs::remove_file(&self.path);
         }
     }
 }
@@ -569,24 +582,46 @@ impl DaemonCore {
     }
 
     pub fn acquire_lock(path: &Path) -> Result<InstanceLock, CoreError> {
-        let mut file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .open(path)
-            .map_err(|e| CoreError::Io(e.to_string()))?;
-
-        let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-        if rc != 0 {
-            return Err(CoreError::LockHeld(path.display().to_string()));
-        }
+        #[cfg(unix)]
+        let mut file = {
+            let file = OpenOptions::new()
+                .create(true)
+                .read(true)
+                .write(true)
+                .open(path)
+                .map_err(|e| CoreError::Io(e.to_string()))?;
+            let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+            if rc != 0 {
+                return Err(CoreError::LockHeld(path.display().to_string()));
+            }
+            file
+        };
+        #[cfg(windows)]
+        let mut file = {
+            match OpenOptions::new()
+                .create_new(true)
+                .read(true)
+                .write(true)
+                .open(path)
+            {
+                Ok(file) => file,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    return Err(CoreError::LockHeld(path.display().to_string()));
+                }
+                Err(e) => return Err(CoreError::Io(e.to_string())),
+            }
+        };
 
         let pid = std::process::id();
         file.set_len(0).map_err(|e| CoreError::Io(e.to_string()))?;
         file.write_all(pid.to_string().as_bytes())
             .map_err(|e| CoreError::Io(e.to_string()))?;
 
-        Ok(InstanceLock { file })
+        Ok(InstanceLock {
+            file: Some(file),
+            #[cfg(windows)]
+            path: path.to_path_buf(),
+        })
     }
 
     fn session_suffix(&self) -> String {
