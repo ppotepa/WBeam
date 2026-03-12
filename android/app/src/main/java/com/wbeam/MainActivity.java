@@ -19,14 +19,11 @@ import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
-import android.widget.AdapterView;
-import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.SeekBar;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
-import android.webkit.WebSettings;
 import android.webkit.WebView;
 
 import androidx.appcompat.app.AppCompatActivity;
@@ -59,6 +56,7 @@ import com.wbeam.telemetry.RuntimeTelemetryMapper;
 import com.wbeam.ui.ErrorTextUtil;
 import com.wbeam.ui.IntraOnlyButtonController;
 import com.wbeam.ui.LiveLogBuffer;
+import com.wbeam.ui.MainActivityUiBinder;
 import com.wbeam.ui.SettingsSelectionReader;
 import com.wbeam.ui.SettingsPayloadBuilder;
 import com.wbeam.ui.SettingsPanelController;
@@ -722,24 +720,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void setupTrainerHudWebView() {
-        if (perfHudWebView == null) {
-            return;
-        }
-        WebSettings settings = perfHudWebView.getSettings();
-        settings.setJavaScriptEnabled(false);
-        settings.setDomStorageEnabled(false);
-        settings.setAllowFileAccess(false);
-        settings.setBuiltInZoomControls(false);
-        settings.setDisplayZoomControls(false);
-        settings.setUseWideViewPort(false);
-        settings.setLoadWithOverviewMode(false);
-        perfHudWebView.setBackgroundColor(Color.TRANSPARENT);
-        perfHudWebView.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
-        perfHudWebView.setVerticalScrollBarEnabled(false);
-        perfHudWebView.setHorizontalScrollBarEnabled(false);
-        perfHudWebView.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        perfHudWebView.setPadding(0, 0, 0, 0);
-        perfHudWebView.setInitialScale(100);
+        MainActivityUiBinder.setupTrainerHudWebView(perfHudWebView);
     }
 
     private void bindStartupBuildVersion() {
@@ -797,78 +778,54 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void setupSpinners() {
-        profileSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, PROFILE_OPTIONS));
-        encoderSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, ENCODER_OPTIONS));
-        cursorSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, CURSOR_OPTIONS));
-        encoderSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                updateIntraOnlyButton();
-                updateHostHint();
-            }
-
-            @Override
-            public void onNothingSelected(AdapterView<?> parent) {
-            }
-        });
-        cursorSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                enforceCursorOverlayPolicy(false);
-                updateHostHint();
-            }
-
-            @Override
-            public void onNothingSelected(AdapterView<?> parent) {
-            }
-        });
+        MainActivityUiBinder.setupSpinners(
+                this,
+                profileSpinner,
+                encoderSpinner,
+                cursorSpinner,
+                PROFILE_OPTIONS,
+                ENCODER_OPTIONS,
+                CURSOR_OPTIONS,
+                () -> {
+                    updateIntraOnlyButton();
+                    updateHostHint();
+                },
+                () -> {
+                    enforceCursorOverlayPolicy(false);
+                    updateHostHint();
+                }
+        );
     }
 
     private void setupSeekbars() {
-        resolutionSeek.setMax(50); // 50..100%
-        fpsSeek.setMax(120); // 24..144 fps
-        bitrateSeek.setMax(295); // 5..300 Mbps
-
-        SeekBar.OnSeekBarChangeListener listener = new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                updateSettingValueLabels();
-            }
-
-            @Override
-            public void onStartTrackingTouch(SeekBar seekBar) {
-            }
-
-            @Override
-            public void onStopTrackingTouch(SeekBar seekBar) {
-            }
-        };
-
-        resolutionSeek.setOnSeekBarChangeListener(listener);
-        fpsSeek.setOnSeekBarChangeListener(listener);
-        bitrateSeek.setOnSeekBarChangeListener(listener);
+        MainActivityUiBinder.setupSeekbars(
+                resolutionSeek,
+                fpsSeek,
+                bitrateSeek,
+                this::updateSettingValueLabels
+        );
     }
 
     private void setupSurfaceCallbacks() {
         SurfaceView preview = findViewById(R.id.previewSurface);
-        preview.getHolder().addCallback(new SurfaceHolder.Callback() {
+        MainActivityUiBinder.setupSurfaceCallbacks(preview, new MainActivityUiBinder.SurfaceCallbacks() {
             @Override
-            public void surfaceCreated(SurfaceHolder holder) {
-                surface = holder.getSurface();
-                surfaceReady = surface != null && surface.isValid();
+            public void onSurfaceCreated(Surface nextSurface, boolean ready) {
+                surface = nextSurface;
+                surfaceReady = ready;
                 updatePreflightOverlay();
                 updateStatus(STATE_IDLE, "surface ready", 0);
             }
 
             @Override
-            public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
-                surface = holder.getSurface();
-                surfaceReady = surface != null && surface.isValid();
+            public void onSurfaceChanged(Surface nextSurface, boolean ready) {
+                surface = nextSurface;
+                surfaceReady = ready;
                 updatePreflightOverlay();
             }
 
             @Override
-            public void surfaceDestroyed(SurfaceHolder holder) {
+            public void onSurfaceDestroyed() {
                 stopLiveView();
                 surface = null;
                 surfaceReady = false;
@@ -877,25 +834,16 @@ public class MainActivity extends AppCompatActivity {
                 hideCursorOverlay();
                 updateStatus(STATE_IDLE, "surface destroyed", 0);
             }
-        });
 
-        preview.setOnTouchListener((v, event) -> {
-            if (cursorOverlayController == null || !cursorOverlayController.isOverlayEnabled()) {
-                return false;
+            @Override
+            public boolean isCursorOverlayEnabled() {
+                return cursorOverlayController != null && cursorOverlayController.isOverlayEnabled();
             }
-            updateCursorOverlay(event.getX(), event.getY(), event.getActionMasked());
-            return false;
-        });
 
-        preview.setOnGenericMotionListener((v, event) -> {
-            if (cursorOverlayController == null || !cursorOverlayController.isOverlayEnabled()) {
-                return false;
+            @Override
+            public void onCursorOverlayMotion(float x, float y, int actionMasked) {
+                updateCursorOverlay(x, y, actionMasked);
             }
-            if (event.getActionMasked() == MotionEvent.ACTION_HOVER_MOVE ||
-                    event.getActionMasked() == MotionEvent.ACTION_MOVE) {
-                updateCursorOverlay(event.getX(), event.getY(), event.getActionMasked());
-            }
-            return false;
         });
     }
 
