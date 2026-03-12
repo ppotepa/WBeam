@@ -82,6 +82,7 @@ import com.wbeam.ui.MainActivityInteractionPolicy;
 import com.wbeam.ui.MainActivityButtonsSetup;
 import com.wbeam.ui.MainActivityControlViewsBinder;
 import com.wbeam.ui.MainActivityLifecycleCleaner;
+import com.wbeam.ui.MainActivityPrimaryViewsBinder;
 import com.wbeam.ui.MainActivitySimpleMenuCoordinator;
 import com.wbeam.ui.MainActivitySettingsInitializer;
 import com.wbeam.ui.MainActivitySettingsInitializerHooksFactory;
@@ -716,29 +717,30 @@ public class MainActivity extends AppCompatActivity {
     // ══════════════════════════════════════════════════════════════════════════
 
     private void bindViews() {
-        rootLayout = findViewById(R.id.rootLayout);
-        immersiveModeController = new ImmersiveModeController(this, rootLayout);
-        topBar = findViewById(R.id.topBar);
-        quickActionRow = findViewById(R.id.quickActionRow);
-        settingsPanel = findViewById(R.id.settingsPanel);
-        settingsPanelController = new SettingsPanelController(settingsPanel);
-        simpleMenuPanel = findViewById(R.id.simpleMenuPanel);
-        statusPanel = findViewById(R.id.statusPanel);
-        perfHudPanel = findViewById(R.id.perfHudPanel);
-        debugInfoPanel = findViewById(R.id.debugInfoPanel);
-        debugFpsGraphView = findViewById(R.id.debugFpsGraph);
-        preflightOverlay = findViewById(R.id.preflightOverlay);
-        debugControlsRow = findViewById(R.id.debugControlsRow);
-        statusLed = findViewById(R.id.statusLed);
-        cursorOverlay = findViewById(R.id.cursorOverlay);
+        MainActivityPrimaryViewsBinder.Views primaryViews = MainActivityPrimaryViewsBinder.bind(this);
+        rootLayout = primaryViews.rootLayout;
+        topBar = primaryViews.topBar;
+        quickActionRow = primaryViews.quickActionRow;
+        settingsPanel = primaryViews.settingsPanel;
+        simpleMenuPanel = primaryViews.simpleMenuPanel;
+        statusPanel = primaryViews.statusPanel;
+        perfHudPanel = primaryViews.perfHudPanel;
+        debugInfoPanel = primaryViews.debugInfoPanel;
+        debugFpsGraphView = primaryViews.debugFpsGraphView;
+        preflightOverlay = primaryViews.preflightOverlay;
+        debugControlsRow = primaryViews.debugControlsRow;
+        statusLed = primaryViews.statusLed;
+        cursorOverlay = primaryViews.cursorOverlay;
+        statusText = primaryViews.statusText;
+        detailText = primaryViews.detailText;
+        bpsText = primaryViews.bpsText;
+        statsText = primaryViews.statsText;
+        perfHudText = primaryViews.perfHudText;
+        perfHudWebView = primaryViews.perfHudWebView;
+        debugInfoText = primaryViews.debugInfoText;
 
-        statusText = findViewById(R.id.statusText);
-        detailText = findViewById(R.id.detailText);
-        bpsText = findViewById(R.id.bpsText);
-        statsText = findViewById(R.id.statsText);
-        perfHudText = findViewById(R.id.perfHudText);
-        perfHudWebView = findViewById(R.id.perfHudWebView);
-        debugInfoText = findViewById(R.id.debugInfoText);
+        immersiveModeController = new ImmersiveModeController(this, rootLayout);
+        settingsPanelController = new SettingsPanelController(settingsPanel);
         startupBuildVersionText = StartupOverlayViewsBinder.bind(this, startupOverlayViews);
         startupOverlayController = new StartupOverlayController(uiHandler, preflightOverlay);
         startupOverlayController.setTickListener(animTick -> {
