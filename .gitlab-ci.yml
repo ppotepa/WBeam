@@ -148,6 +148,54 @@ build_apk_release:
     - if: $CI_COMMIT_TAG
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
+build_windows_server:
+  stage: build
+  tags:
+    - windows
+    - zerotier
+    - build
+  before_script:
+    - |
+      $ErrorActionPreference = "Stop"
+      if ($env:CI_COMMIT_TAG) {
+        $tag = $env:CI_COMMIT_TAG
+        if ($tag.StartsWith("v") -or $tag.StartsWith("V")) {
+          $tag = $tag.Substring(1)
+        }
+        $env:WBEAM_VERSION = $tag
+      } else {
+        $env:WBEAM_VERSION = "0.0.0.$($env:CI_DEFAULT_BRANCH).$($env:CI_PIPELINE_IID).$($env:CI_COMMIT_SHORT_SHA)"
+      }
+      cmd /c "\"C:\BuildTools\Common7\Tools\VsDevCmd.bat\" -host_arch=x64 -arch=x64 && set" |
+        ForEach-Object {
+          if ($_ -match "^(.*?)=(.*)$") {
+            [System.Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
+          }
+        }
+  script:
+    - |
+      Set-Location "$env:CI_PROJECT_DIR\host\rust"
+      cargo build --release -p wbeamd-server
+      New-Item -ItemType Directory -Path "$env:CI_PROJECT_DIR\dist" -Force | Out-Null
+      Copy-Item `
+        "$env:CI_PROJECT_DIR\host\rust\target\release\wbeamd-server.exe" `
+        "$env:CI_PROJECT_DIR\dist\wbeamd-server-$env:WBEAM_VERSION-windows-x86_64.exe" `
+        -Force
+      @(
+        "WBEAM_VERSION=$env:WBEAM_VERSION"
+        "CI_PIPELINE_ID=$env:CI_PIPELINE_ID"
+        "CI_COMMIT_SHA=$env:CI_COMMIT_SHA"
+        "CI_COMMIT_REF_NAME=$env:CI_COMMIT_REF_NAME"
+      ) | Set-Content -Path "$env:CI_PROJECT_DIR\dist\VERSION.txt" -Encoding ascii
+  artifacts:
+    paths:
+      - dist/*windows*.exe
+      - dist/VERSION.txt
+    expire_in: 14 days
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
 publish_github_release:
   stage: publish
   image: alpine:3.21
