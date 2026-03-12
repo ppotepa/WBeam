@@ -56,6 +56,7 @@ import com.wbeam.ui.ErrorTextUtil;
 import com.wbeam.ui.IntraOnlyButtonController;
 import com.wbeam.ui.LiveLogBuffer;
 import com.wbeam.ui.MainActivityUiBinder;
+import com.wbeam.ui.MainActivitySettingsPresenter;
 import com.wbeam.ui.SettingsSelectionReader;
 import com.wbeam.ui.SettingsPayloadBuilder;
 import com.wbeam.ui.SettingsPanelController;
@@ -973,10 +974,16 @@ public class MainActivity extends AppCompatActivity {
         int fps = getSelectedFps();
         int bitrate = getSelectedBitrateMbps();
         int[] sz = computeScaledSize();
-
-        resValueText.setText(SettingsUiSupport.resolutionValueLabel(scale, sz[0], sz[1]));
-        fpsValueText.setText(SettingsUiSupport.fpsValueLabel(fps));
-        bitrateValueText.setText(SettingsUiSupport.bitrateValueLabel(bitrate));
+        MainActivitySettingsPresenter.applySettingValueLabels(
+                resValueText,
+                fpsValueText,
+                bitrateValueText,
+                scale,
+                fps,
+                bitrate,
+                sz[0],
+                sz[1]
+        );
     }
 
     private void updateIntraOnlyButton() {
@@ -991,7 +998,7 @@ public class MainActivity extends AppCompatActivity {
         StreamConfigResolver.Resolved cfg = effectiveStreamConfig();
         String daemonStateUi = effectiveDaemonState(
                 daemonState, latestPresentFps, latestStreamUptimeSec, latestFrameOutHost);
-        hostHintText.setText(StatusTextFormatter.buildHostHintText(
+        hostHintText.setText(MainActivitySettingsPresenter.buildHostHint(
                 daemonReachable,
                 HostApiClient.API_BASE,
                 daemonHostName,
