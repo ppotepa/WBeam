@@ -1132,29 +1132,13 @@ public class MainActivity extends AppCompatActivity {
                 this,
                 statusPoller,
                 this::updateStatus,
-                this::onSessionBridgeDaemonState,
-                this::onSessionBridgeEnsureDecoder,
+                this::updateDaemonStateFromJson,
+                this::ensureDecoderRunning,
                 this::stopLiveView,
                 this::appendLiveLogWarn,
-                this::onSessionBridgeApiFailure,
-                this::buildSessionConfigPayload
+                this::handleApiFailure,
+                this::buildConfigPayload
         );
-    }
-
-    private void onSessionBridgeDaemonState(JSONObject status) {
-        updateDaemonStateFromJson(status);
-    }
-
-    private void onSessionBridgeEnsureDecoder() {
-        ensureDecoderRunning();
-    }
-
-    private void onSessionBridgeApiFailure(String prefix, boolean userAction, Exception e) {
-        handleApiFailure(prefix, userAction, e);
-    }
-
-    private JSONObject buildSessionConfigPayload() {
-        return buildConfigPayload();
     }
 
     private void handleApiFailure(String prefix, boolean userAction, Exception e) {
