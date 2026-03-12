@@ -376,9 +376,7 @@ public class MainActivity extends AppCompatActivity {
     private VideoTestController createVideoTestController() {
         return new VideoTestController(uiHandler, ioExecutor, new VideoTestController.Callbacks() {
             @Override public Surface getSurface() { return surface; }
-            @Override public void stopVideoPlayer() {
-                if (player != null) { player.stop(); player = null; }
-            }
+            @Override public void stopVideoPlayer() { stopVideoPlayerForTestMode(); }
             @Override public String getDaemonState()     { return daemonState;     }
             @Override public boolean isDaemonReachable() { return daemonReachable; }
             @Override public void onStatus(String state, String info, long bps) {
@@ -389,25 +387,45 @@ public class MainActivity extends AppCompatActivity {
             @Override public void logWarn(String msg)  { appendLiveLogWarn(msg);  }
             @Override public void logError(String msg) { appendLiveLogError(msg); }
             @Override public void onOverlayChanged() { updatePreflightOverlay(); }
-            @Override public void setLiveLogVisible(boolean v) {
-                liveLogVisible = v;
-                if (liveLogText != null) {
-                    liveLogText.setVisibility(v ? View.VISIBLE : View.GONE);
-                }
-            }
-            @Override public void showToast(String msg, boolean longT) {
-                Toast.makeText(MainActivity.this, msg,
-                        longT ? Toast.LENGTH_LONG : Toast.LENGTH_SHORT).show();
-            }
-            @Override public VideoTestController.TestConfig getTestConfig() {
-                int[] sz = computeScaledSize();
-                return new VideoTestController.TestConfig(
-                        getSelectedProfile(), getSelectedEncoder(),
-                        getSelectedCursorMode(),
-                        sz[0], sz[1],
-                        getSelectedFps(), getSelectedBitrateMbps());
-            }
+            @Override public void setLiveLogVisible(boolean v) { setLiveLogVisibleForTestMode(v); }
+            @Override public void showToast(String msg, boolean longT) { showVideoTestToast(msg, longT); }
+            @Override public VideoTestController.TestConfig getTestConfig() { return buildVideoTestConfig(); }
         });
+    }
+
+    private void stopVideoPlayerForTestMode() {
+        if (player != null) {
+            player.stop();
+            player = null;
+        }
+    }
+
+    private void setLiveLogVisibleForTestMode(boolean visible) {
+        liveLogVisible = visible;
+        if (liveLogText != null) {
+            liveLogText.setVisibility(visible ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    private void showVideoTestToast(String message, boolean longToast) {
+        Toast.makeText(
+                MainActivity.this,
+                message,
+                longToast ? Toast.LENGTH_LONG : Toast.LENGTH_SHORT
+        ).show();
+    }
+
+    private VideoTestController.TestConfig buildVideoTestConfig() {
+        int[] sz = computeScaledSize();
+        return new VideoTestController.TestConfig(
+                getSelectedProfile(),
+                getSelectedEncoder(),
+                getSelectedCursorMode(),
+                sz[0],
+                sz[1],
+                getSelectedFps(),
+                getSelectedBitrateMbps()
+        );
     }
 
     private StatusPoller createStatusPoller() {
