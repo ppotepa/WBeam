@@ -34,6 +34,7 @@ import com.wbeam.api.StatusPoller;
 import com.wbeam.hud.HudDebugLogLimiter;
 import com.wbeam.hud.MetricSeriesBuffer;
 import com.wbeam.hud.ResourceUsageTracker;
+import com.wbeam.hud.RuntimeHudComputation;
 import com.wbeam.hud.RuntimeHudOverlayRenderer;
 import com.wbeam.hud.RuntimeTrendGridRenderer;
 import com.wbeam.hud.TrainerHudOverlayRenderer;
@@ -1778,18 +1779,6 @@ public class MainActivity extends AppCompatActivity {
         return isTrainingConnection;
     }
 
-    private static final class RuntimePressureState {
-        final boolean warmingUp;
-        final String reason;
-        final String tone;
-
-        RuntimePressureState(boolean warmingUp, String reason, String tone) {
-            this.warmingUp = warmingUp;
-            this.reason = reason;
-            this.tone = tone;
-        }
-    }
-
     private void updateRuntimePerfHud(JSONObject metrics, long nowMs) {
         RuntimeTelemetryMapper.Snapshot runtime = RuntimeTelemetryMapper.map(
                 metrics,
@@ -1803,7 +1792,17 @@ public class MainActivity extends AppCompatActivity {
         long streamUptimeSec = runtime.streamUptimeSec;
 
         double targetFps = runtime.targetFps;
-        double presentFps = stabilizePresentFps(runtime, nowMs);
+        RuntimeHudComputation.FpsStabilizationResult fpsStabilization =
+                RuntimeHudComputation.stabilizePresentFps(
+                        runtime,
+                        nowMs,
+                        latestStablePresentFps,
+                        latestStablePresentFpsAtMs,
+                        PRESENT_FPS_STALE_GRACE_MS
+                );
+        double presentFps = fpsStabilization.presentFps;
+        latestStablePresentFps = fpsStabilization.updatedStablePresentFps;
+        latestStablePresentFpsAtMs = fpsStabilization.updatedStablePresentFpsAtMs;
         double recvFps = runtime.recvFps;
         double decodeFps = runtime.decodeFps;
         String daemonStateUi = effectiveDaemonState(daemonState, presentFps, streamUptimeSec, frameOutHost);
@@ -1845,7 +1844,7 @@ public class MainActivity extends AppCompatActivity {
         );
         refreshDebugInfoOverlay();
 
-        RuntimePressureState pressureState = evaluateRuntimePressure(
+        RuntimeHudComputation.PressureState pressureState = RuntimeHudComputation.evaluatePressure(
                 targetFps,
                 presentFps,
                 decodeP95,
@@ -1859,9 +1858,34 @@ public class MainActivity extends AppCompatActivity {
                 adaptiveAction,
                 streamUptimeSec
         );
+        if (pressureState.highPressure) {
+            logRuntimeHighPressure(
+                    pressureState,
+                    decodeP95,
+                    renderP95,
+                    qT,
+                    qD,
+                    qR,
+                    qTMax,
+                    qDMax,
+                    qRMax,
+                    presentFps,
+                    streamUptimeSec
+            );
+        }
         long latestDroppedFrames = runtime.latestDroppedFrames;
         long latestTooLateFrames = runtime.latestTooLateFrames;
-        double dropPerSec = computeDropRatePerSec(latestDroppedFrames, latestTooLateFrames, nowMs);
+        RuntimeHudComputation.DropRateResult dropRate =
+                RuntimeHudComputation.computeDropRatePerSec(
+                        latestDroppedFrames,
+                        latestTooLateFrames,
+                        nowMs,
+                        runtimeDropPrevCount,
+                        runtimeDropPrevAtMs
+                );
+        double dropPerSec = dropRate.dropPerSec;
+        runtimeDropPrevCount = dropRate.updatedPrevCount;
+        runtimeDropPrevAtMs = dropRate.updatedPrevAtMs;
         double bitrateMbps = runtime.bitrateMbps;
         runtimePresentSeries.addSample(Math.max(0.0, presentFps));
         runtimeMbpsSeries.addSample(Math.max(0.0, bitrateMbps));
@@ -1935,29 +1959,8 @@ public class MainActivity extends AppCompatActivity {
         ));
     }
 
-    private double stabilizePresentFps(RuntimeTelemetryMapper.Snapshot runtime, long nowMs) {
-        double presentFps = runtime.presentFps;
-        boolean hasFlowSignals =
-                runtime.streamUptimeSec > 0
-                        || runtime.frameOutHost > 0
-                        || runtime.recvFps >= 1.0
-                        || runtime.decodeFps >= 1.0;
-        if (presentFps >= 1.0) {
-            latestStablePresentFps = presentFps;
-            latestStablePresentFpsAtMs = nowMs;
-            return presentFps;
-        }
-        if (hasFlowSignals
-                && latestStablePresentFps >= 1.0
-                && (nowMs - latestStablePresentFpsAtMs) <= PRESENT_FPS_STALE_GRACE_MS) {
-            return latestStablePresentFps;
-        }
-        return presentFps;
-    }
-
-    private RuntimePressureState evaluateRuntimePressure(
-            double targetFps,
-            double presentFps,
+    private void logRuntimeHighPressure(
+            RuntimeHudComputation.PressureState pressureState,
             double decodeP95,
             double renderP95,
             int qT,
@@ -1966,84 +1969,17 @@ public class MainActivity extends AppCompatActivity {
             int qTMax,
             int qDMax,
             int qRMax,
-            String adaptiveAction,
+            double presentFps,
             long streamUptimeSec
     ) {
-        boolean warmingUp = presentFps < 1.0 && streamUptimeSec < 5;
-        StringBuilder pressureReasonBuilder = new StringBuilder();
-        double fpsFloor = targetFps * 0.90;
-        boolean fpsUnderPressure = presentFps > 0.0 && presentFps < fpsFloor;
-        boolean timingPressure = decodeP95 > 12.0 || renderP95 > 7.0;
-        boolean queuePressure = qT >= qTMax || qD >= qDMax || qR >= qRMax;
-        if (!warmingUp) {
-            if (fpsUnderPressure) {
-                pressureReasonBuilder.append("fps<").append(String.format(Locale.US, "%.1f", fpsFloor));
-            }
-            if (decodeP95 > 12.0) {
-                appendPressureSegment(pressureReasonBuilder, "dec>12(" + String.format(Locale.US, "%.1f", decodeP95) + ")");
-            }
-            if (renderP95 > 7.0) {
-                appendPressureSegment(pressureReasonBuilder, "ren>7(" + String.format(Locale.US, "%.1f", renderP95) + ")");
-            }
-            if (qT >= qTMax) {
-                appendPressureSegment(pressureReasonBuilder, "qT=" + qT + "/" + qTMax);
-            }
-            if (qD >= qDMax) {
-                appendPressureSegment(pressureReasonBuilder, "qD=" + qD + "/" + qDMax);
-            }
-            if (qR >= qRMax) {
-                appendPressureSegment(pressureReasonBuilder, "qR=" + qR + "/" + qRMax);
-            }
-        }
-        String pressureReason = pressureReasonBuilder.length() > 0
-                ? pressureReasonBuilder.toString()
-                : (warmingUp ? "warmup" : "ok");
-
-        boolean highPressure = !warmingUp && fpsUnderPressure && (timingPressure || queuePressure);
-        boolean mediumPressure = !warmingUp && (
-                adaptiveAction.startsWith("degrade")
-                        || fpsUnderPressure
-                        || timingPressure
-                        || queuePressure
-        );
-        String runtimeTone = "ok";
-        if (highPressure) {
-            runtimeTone = "risk";
-            Log.w(TAG, "HUD RED warmingUp=" + warmingUp + " hp=" + pressureReason
-                    + " dec_p95=" + String.format(Locale.US, "%.2f", decodeP95)
-                    + " ren_p95=" + String.format(Locale.US, "%.2f", renderP95)
-                    + " qT=" + qT + "/" + qTMax
-                    + " qD=" + qD + "/" + qDMax
-                    + " qR=" + qR + "/" + qRMax
-                    + " fps_present=" + String.format(Locale.US, "%.1f", presentFps)
-                    + " stream_up=" + streamUptimeSec + "s");
-        } else if (warmingUp || mediumPressure) {
-            runtimeTone = "warn";
-        }
-        return new RuntimePressureState(warmingUp, pressureReason, runtimeTone);
-    }
-
-    private void appendPressureSegment(StringBuilder sb, String segment) {
-        if (sb.length() > 0) {
-            sb.append(',');
-        }
-        sb.append(segment);
-    }
-
-    private double computeDropRatePerSec(long latestDroppedFrames, long latestTooLateFrames, long nowMs) {
-        if (latestDroppedFrames < 0L) {
-            return 0.0;
-        }
-        long combined = latestDroppedFrames + Math.max(0L, latestTooLateFrames);
-        double dropPerSec = 0.0;
-        if (runtimeDropPrevCount >= 0L && runtimeDropPrevAtMs > 0L && nowMs > runtimeDropPrevAtMs) {
-            long deltaFrames = Math.max(0L, combined - runtimeDropPrevCount);
-            long deltaMs = Math.max(1L, nowMs - runtimeDropPrevAtMs);
-            dropPerSec = (deltaFrames * 1000.0) / deltaMs;
-        }
-        runtimeDropPrevCount = combined;
-        runtimeDropPrevAtMs = nowMs;
-        return dropPerSec;
+        Log.w(TAG, "HUD RED warmingUp=" + pressureState.warmingUp + " hp=" + pressureState.reason
+                + " dec_p95=" + String.format(Locale.US, "%.2f", decodeP95)
+                + " ren_p95=" + String.format(Locale.US, "%.2f", renderP95)
+                + " qT=" + qT + "/" + qTMax
+                + " qD=" + qD + "/" + qDMax
+                + " qR=" + qR + "/" + qRMax
+                + " fps_present=" + String.format(Locale.US, "%.1f", presentFps)
+                + " stream_up=" + streamUptimeSec + "s");
     }
 
     private String buildRuntimeHudDebugSnapshot(
@@ -2067,7 +2003,7 @@ public class MainActivity extends AppCompatActivity {
             long drops,
             long bpHigh,
             long bpRecover,
-            RuntimePressureState pressureState,
+            RuntimeHudComputation.PressureState pressureState,
             String reason
     ) {
         return String.format(
@@ -2099,11 +2035,7 @@ public class MainActivity extends AppCompatActivity {
                 pressureState.warmingUp,
                 pressureState.reason,
                 reason.isEmpty() ? "-" : reason,
-                daemonLastError.isEmpty()
-                        ? "-"
-                        : (daemonLastError.length() > 44
-                        ? daemonLastError.substring(0, 44) + "..."
-                        : daemonLastError)
+                RuntimeHudComputation.compactHostError(daemonLastError, 44)
         );
     }
 
