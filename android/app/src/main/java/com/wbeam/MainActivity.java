@@ -64,6 +64,7 @@ import com.wbeam.stream.SessionUiBridge;
 import com.wbeam.stream.VideoTestController;
 import com.wbeam.stream.StreamSessionController;
 import com.wbeam.stream.DecoderCapabilityInspector;
+import com.wbeam.stream.VideoTestCallbacksFactory;
 import com.wbeam.telemetry.ClientMetricsReporter;
 import com.wbeam.ui.ErrorTextUtil;
 import com.wbeam.ui.BuildVariantUiCoordinator;
@@ -414,44 +415,39 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private VideoTestController createVideoTestController() {
-        return new VideoTestController(uiHandler, ioExecutor, new VideoTestController.Callbacks() {
-            @Override public Surface getSurface() { return surface; }
-            @Override public void stopVideoPlayer() { stopVideoPlayerForTestMode(); }
-            @Override public String getDaemonState()     { return daemonState;     }
-            @Override public boolean isDaemonReachable() { return daemonReachable; }
-            @Override public void onStatus(String state, String info, long bps) {
-                updateStatus(state, info, bps);
-            }
-            @Override public void onStatsLine(String line)  { updateStatsLine(line); }
-            @Override public void logInfo(String msg)  { appendLiveLog("I", msg);  }
-            @Override public void logWarn(String msg)  { appendLiveLog("W", msg);  }
-            @Override public void logError(String msg) { appendLiveLog("E", msg); }
-            @Override public void onOverlayChanged() { updatePreflightOverlay(); }
-            @Override public void setLiveLogVisible(boolean v) { setLiveLogVisibleForTestMode(v); }
-            @Override
-            public void showToast(String msg, boolean longT) {
-                Toast.makeText(
-                        MainActivity.this,
-                        msg,
-                        longT ? Toast.LENGTH_LONG : Toast.LENGTH_SHORT
-                ).show();
-            }
-            @Override public VideoTestController.TestConfig getTestConfig() { return buildVideoTestConfig(); }
-        });
-    }
-
-    private void stopVideoPlayerForTestMode() {
-        if (player != null) {
-            player.stop();
-            player = null;
-        }
-    }
-
-    private void setLiveLogVisibleForTestMode(boolean visible) {
-        liveLogVisible = visible;
-        if (liveLogText != null) {
-            liveLogText.setVisibility(visible ? View.VISIBLE : View.GONE);
-        }
+        return new VideoTestController(
+                uiHandler,
+                ioExecutor,
+                VideoTestCallbacksFactory.create(
+                        () -> surface,
+                        () -> {
+                            if (player != null) {
+                                player.stop();
+                                player = null;
+                            }
+                        },
+                        () -> daemonState,
+                        () -> daemonReachable,
+                        this::updateStatus,
+                        this::updateStatsLine,
+                        msg -> appendLiveLog("I", msg),
+                        msg -> appendLiveLog("W", msg),
+                        msg -> appendLiveLog("E", msg),
+                        this::updatePreflightOverlay,
+                        visible -> {
+                            liveLogVisible = visible;
+                            if (liveLogText != null) {
+                                liveLogText.setVisibility(visible ? View.VISIBLE : View.GONE);
+                            }
+                        },
+                        (msg, longToast) -> Toast.makeText(
+                                MainActivity.this,
+                                msg,
+                                longToast ? Toast.LENGTH_LONG : Toast.LENGTH_SHORT
+                        ).show(),
+                        this::buildVideoTestConfig
+                )
+        );
     }
 
     private VideoTestController.TestConfig buildVideoTestConfig() {
