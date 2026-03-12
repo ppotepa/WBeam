@@ -42,9 +42,7 @@ import com.wbeam.hud.MetricSeriesBuffer;
 import com.wbeam.hud.ResourceUsageTracker;
 import com.wbeam.hud.RuntimeTrendGridRenderer;
 import com.wbeam.hud.RuntimeHudWebPayloadBuilder;
-import com.wbeam.hud.TrainerHudPayloadBuilder;
-import com.wbeam.hud.TrainerHudShellRenderer;
-import com.wbeam.hud.TrainerProgressParser;
+import com.wbeam.hud.TrainerHudOverlayRenderer;
 import com.wbeam.input.CursorOverlayController;
 import com.wbeam.input.ImmersiveModeController;
 import com.wbeam.startup.PreflightStateMachine;
@@ -1945,57 +1943,8 @@ public class MainActivity extends AppCompatActivity {
         if (perfHudText == null) {
             return;
         }
-        String hudText = rawHudText == null ? "" : rawHudText.replace("\r", "");
-        hudText = hudText.replace("[MAIN]\n", "").replace("[MAIN]", "").trim();
-        if (hudText.isEmpty()) {
-            return;
-        }
-
-        String progressLine = TrainerProgressParser.buildProgressLine(hudText);
-        int progressPercent = TrainerProgressParser.parseProgressPercent(hudText);
-        if (perfHudWebView != null) {
-            String html = TrainerHudPayloadBuilder.buildFromText(
-                    hudText,
-                    progressLine,
-                    progressPercent,
-                    latestTargetFps,
-                    FPS_LOW_ANCHOR,
-                    (targetFps, renderP95Ms) -> {
-                        resourceUsageTracker.sample(targetFps, renderP95Ms);
-                        return resourceUsageTracker.buildRowsHtml();
-                    }
-            );
-            if (!showHudWebHtml("trainer", html)) {
-                String finalText = progressLine.isEmpty() ? hudText : progressLine + "\n" + hudText;
-                showHudTextOnly("trainer", finalText, "#B3EAF4FF");
-            }
-        } else {
-            String finalText = progressLine.isEmpty() ? hudText : progressLine + "\n" + hudText;
-            showHudTextOnly("trainer", finalText, "#B3EAF4FF");
-        }
-        if (perfHudPanel != null) {
-            perfHudPanel.setAlpha(0.96f);
-        }
-        lastHudCompactLine = progressLine.isEmpty() ? "hud: trainer overlay active" : progressLine;
-        refreshDebugInfoOverlay();
-    }
-
-    private void renderTrainerHudOverlayJson(JSONObject hudJson) {
-        if (perfHudText == null || hudJson == null) {
-            return;
-        }
-        int progressPercent = hudJson.optInt("progress_percent", -1);
-        String progressText = String.format(
-                Locale.US,
-                "TRAINING PROGRESS %d%%  (trial %d/%d)",
-                Math.max(0, progressPercent),
-                hudJson.optInt("trial_index", 0),
-                hudJson.optInt("trial_total", 0)
-        );
-        String html = TrainerHudPayloadBuilder.buildFromJson(
-                hudJson,
-                progressText,
-                progressPercent,
+        TrainerHudOverlayRenderer.Rendered rendered = TrainerHudOverlayRenderer.fromText(
+                rawHudText,
                 latestTargetFps,
                 FPS_LOW_ANCHOR,
                 (targetFps, renderP95Ms) -> {
@@ -2003,82 +1952,61 @@ public class MainActivity extends AppCompatActivity {
                     return resourceUsageTracker.buildRowsHtml();
                 }
         );
-        if (perfHudWebView != null) {
-            if (!showHudWebHtml("trainer", html)) {
-                showHudTextOnly("trainer", progressText, "#B3EAF4FF");
-            }
-        } else {
-            showHudTextOnly("trainer", progressText, "#B3EAF4FF");
+        if (rendered.html.isEmpty() && rendered.textFallback.isEmpty()) {
+            return;
         }
+        applyTrainerHudRendered(rendered);
         if (perfHudPanel != null) {
             perfHudPanel.setAlpha(0.96f);
         }
-        lastHudCompactLine = progressText;
-        refreshDebugInfoOverlay();
+    }
+
+    private void renderTrainerHudOverlayJson(JSONObject hudJson) {
+        if (perfHudText == null || hudJson == null) {
+            return;
+        }
+        TrainerHudOverlayRenderer.Rendered rendered = TrainerHudOverlayRenderer.fromJson(
+                hudJson,
+                latestTargetFps,
+                FPS_LOW_ANCHOR,
+                (targetFps, renderP95Ms) -> {
+                    resourceUsageTracker.sample(targetFps, renderP95Ms);
+                    return resourceUsageTracker.buildRowsHtml();
+                }
+        );
+        applyTrainerHudRendered(rendered);
+        if (perfHudPanel != null) {
+            perfHudPanel.setAlpha(0.96f);
+        }
     }
 
     private void renderTrainerHudOverlayPlaceholder() {
         if (perfHudText == null) {
             return;
         }
-        resourceUsageTracker.sample(latestTargetFps > 1.0 ? latestTargetFps : 60.0, 0.0);
-        String resourceRows = resourceUsageTracker.buildRowsHtml();
-        String html = TrainerHudShellRenderer.buildSotHtml(
-                "PENDING",
-                "PENDING",
-                "PENDING",
-                "PENDING",
-                0,
-                0,
-                0,
-                0,
-                0,
-                "T0",
-                0,
-                "TRAINING PROGRESS ...",
-                Double.NaN,
-                Double.NaN,
-                Double.NaN,
-                Double.NaN,
-                Double.NaN,
-                Double.NaN,
-                Double.NaN,
-                Double.NaN,
-                Double.NaN,
-                0,
-                "PENDING",
-                Double.NaN,
-                "pending",
-                "pending",
-                "pending",
-                "pending",
-                "pending",
-                "pending",
-                "trainer feed pending | placeholders visible",
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                resourceRows,
-                "wide",
-                "arcade",
-                FPS_LOW_ANCHOR
+        TrainerHudOverlayRenderer.Rendered rendered = TrainerHudOverlayRenderer.placeholder(
+                latestTargetFps,
+                FPS_LOW_ANCHOR,
+                (targetFps, renderP95Ms) -> {
+                    resourceUsageTracker.sample(targetFps, renderP95Ms);
+                    return resourceUsageTracker.buildRowsHtml();
+                }
         );
-        if (perfHudWebView != null) {
-            if (!showHudWebHtml("trainer", html)) {
-                showHudTextOnly("trainer", "TRAINER HUD PENDING\nplaceholder layout active", "#B3EAF4FF");
-            }
-        } else {
-            showHudTextOnly("trainer", "TRAINER HUD PENDING\nplaceholder layout active", "#B3EAF4FF");
-        }
+        applyTrainerHudRendered(rendered);
         if (perfHudPanel != null) {
             perfHudPanel.setAlpha(0.96f);
         }
-        lastHudCompactLine = "trainer hud pending placeholders";
+    }
+
+    private void applyTrainerHudRendered(TrainerHudOverlayRenderer.Rendered rendered) {
+        if (perfHudWebView != null) {
+            if (!showHudWebHtml("trainer", rendered.html)) {
+                showHudTextOnly("trainer", rendered.textFallback, "#B3EAF4FF");
+            }
+        } else {
+            showHudTextOnly("trainer", rendered.textFallback, "#B3EAF4FF");
+        }
+        lastHudCompactLine = rendered.compactLine;
         refreshDebugInfoOverlay();
     }
 
