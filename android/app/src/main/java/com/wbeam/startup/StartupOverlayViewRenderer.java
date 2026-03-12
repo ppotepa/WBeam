@@ -10,6 +10,7 @@ public final class StartupOverlayViewRenderer {
     private static final int INFO_TEXT_COLOR = 0xFFCBD5E1;
 
     public static final class Views {
+        public TextView titleText;
         public View step1Card;
         public View step2Card;
         public View step3Card;
@@ -30,6 +31,26 @@ public final class StartupOverlayViewRenderer {
     }
 
     private StartupOverlayViewRenderer() {
+    }
+
+    public static boolean applyVideoTestOverride(
+            Views views,
+            String title,
+            String body,
+            String hint,
+            int hintColor
+    ) {
+        if (views.titleText != null) {
+            views.titleText.setText(title);
+        }
+        if (views.subtitleText != null) {
+            views.subtitleText.setText(body);
+        }
+        if (views.infoText != null) {
+            views.infoText.setText(hint);
+            views.infoText.setTextColor(hintColor);
+        }
+        return true;
     }
 
     public static void applyModel(

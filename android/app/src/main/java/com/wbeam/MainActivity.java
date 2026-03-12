@@ -41,6 +41,7 @@ import com.wbeam.hud.TrainerHudOverlayRenderer;
 import com.wbeam.input.CursorOverlayController;
 import com.wbeam.input.ImmersiveModeController;
 import com.wbeam.startup.PreflightStateMachine;
+import com.wbeam.startup.StartupOverlayInputFactory;
 import com.wbeam.startup.StartupOverlayModelBuilder;
 import com.wbeam.startup.StartupOverlayController;
 import com.wbeam.startup.StartupOverlayViewRenderer;
@@ -819,6 +820,7 @@ public class MainActivity extends AppCompatActivity {
         startupStep3Status  = findViewById(R.id.startupStep3Status);
         startupInfoText     = findViewById(R.id.startupInfoText);
         startupBuildVersionText = findViewById(R.id.startupBuildVersion);
+        startupOverlayViews.titleText = startupTitleText;
         startupOverlayViews.step1Card = startupStep1Card;
         startupOverlayViews.step2Card = startupStep2Card;
         startupOverlayViews.step3Card = startupStep3Card;
@@ -2179,7 +2181,7 @@ public class MainActivity extends AppCompatActivity {
         boolean shouldProbe = requiresTransportProbe();
         maybeStartTransportProbeIfReady(shouldProbe);
 
-        StartupOverlayModelBuilder.Input input = buildStartupOverlayInput(shouldProbe);
+        StartupOverlayModelBuilder.Input input = buildStartupOverlayInputState(shouldProbe);
         StartupOverlayModelBuilder.Model model = StartupOverlayModelBuilder.build(input);
         startupBeganAtMs = model.updatedStartupBeganAtMs;
         controlRetryCount = model.updatedControlRetryCount;
@@ -2192,16 +2194,13 @@ public class MainActivity extends AppCompatActivity {
         if (videoTestController == null || !videoTestController.isOverlayActive()) {
             return false;
         }
-        if (startupTitleText != null) {
-            startupTitleText.setText(videoTestController.getOverlayTitle());
-        }
-        if (startupSubtitleText != null) {
-            startupSubtitleText.setText(videoTestController.getOverlayBody());
-        }
-        if (startupInfoText != null) {
-            startupInfoText.setText(videoTestController.getOverlayHint());
-            startupInfoText.setTextColor(STARTUP_VIDEO_TEST_HINT_COLOR);
-        }
+        StartupOverlayViewRenderer.applyVideoTestOverride(
+                startupOverlayViews,
+                videoTestController.getOverlayTitle(),
+                videoTestController.getOverlayBody(),
+                videoTestController.getOverlayHint(),
+                STARTUP_VIDEO_TEST_HINT_COLOR
+        );
         setPreflightVisible(true);
         return true;
     }
@@ -2212,36 +2211,36 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private StartupOverlayModelBuilder.Input buildStartupOverlayInput(boolean shouldProbe) {
-        StartupOverlayModelBuilder.Input input = new StartupOverlayModelBuilder.Input();
-        input.daemonReachable = daemonReachable;
-        input.daemonHostName = daemonHostName;
-        input.daemonService = daemonService;
-        input.daemonBuildRevision = daemonBuildRevision;
-        input.daemonState = daemonState;
-        input.daemonLastError = daemonLastError;
-        input.handshakeResolved = handshakeResolved;
-        input.buildMismatch = isBuildMismatch();
-        input.requiresTransportProbe = shouldProbe;
-        input.probeOk = transportProbe.isProbeOk();
-        input.probeInFlight = transportProbe.isProbeInFlight();
-        input.probeInfo = transportProbe.getProbeInfo();
-        input.apiImpl = BuildConfig.WBEAM_API_IMPL;
-        input.apiBase = HostApiClient.API_BASE;
-        input.apiHost = BuildConfig.WBEAM_API_HOST;
-        input.streamHost = BuildConfig.WBEAM_STREAM_HOST;
-        input.streamPort = BuildConfig.WBEAM_STREAM_PORT;
-        input.appBuildRevision = BuildConfig.WBEAM_BUILD_REV;
-        input.lastUiInfo = lastUiInfo;
-        input.effectiveDaemonState = effectiveDaemonState(
+    private StartupOverlayModelBuilder.Input buildStartupOverlayInputState(boolean shouldProbe) {
+        StartupOverlayInputFactory.State state = new StartupOverlayInputFactory.State();
+        state.daemonReachable = daemonReachable;
+        state.daemonHostName = daemonHostName;
+        state.daemonService = daemonService;
+        state.daemonBuildRevision = daemonBuildRevision;
+        state.daemonState = daemonState;
+        state.daemonLastError = daemonLastError;
+        state.handshakeResolved = handshakeResolved;
+        state.buildMismatch = isBuildMismatch();
+        state.requiresTransportProbe = shouldProbe;
+        state.probeOk = transportProbe.isProbeOk();
+        state.probeInFlight = transportProbe.isProbeInFlight();
+        state.probeInfo = transportProbe.getProbeInfo();
+        state.apiImpl = BuildConfig.WBEAM_API_IMPL;
+        state.apiBase = HostApiClient.API_BASE;
+        state.apiHost = BuildConfig.WBEAM_API_HOST;
+        state.streamHost = BuildConfig.WBEAM_STREAM_HOST;
+        state.streamPort = BuildConfig.WBEAM_STREAM_PORT;
+        state.appBuildRevision = BuildConfig.WBEAM_BUILD_REV;
+        state.lastUiInfo = lastUiInfo;
+        state.effectiveDaemonState = effectiveDaemonState(
                 daemonState, latestPresentFps, latestStreamUptimeSec, latestFrameOutHost);
-        input.latestPresentFps = latestPresentFps;
-        input.startupBeganAtMs = startupBeganAtMs;
-        input.controlRetryCount = controlRetryCount;
-        input.nowMs = SystemClock.elapsedRealtime();
-        input.lastStatsLine = lastStatsLine;
-        input.daemonErrCompact = ErrorTextUtil.compactDaemonErrorForUi(daemonLastError);
-        return input;
+        state.latestPresentFps = latestPresentFps;
+        state.startupBeganAtMs = startupBeganAtMs;
+        state.controlRetryCount = controlRetryCount;
+        state.nowMs = SystemClock.elapsedRealtime();
+        state.lastStatsLine = lastStatsLine;
+        state.daemonErrCompact = ErrorTextUtil.compactDaemonErrorForUi(daemonLastError);
+        return StartupOverlayInputFactory.build(state);
     }
 
     private void applyStartupOverlayModel(StartupOverlayModelBuilder.Model model) {
