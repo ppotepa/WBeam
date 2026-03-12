@@ -1,10 +1,14 @@
 package com.wbeam.startup;
 
-import android.graphics.Color;
 import android.view.View;
 import android.widget.TextView;
 
 public final class StartupOverlayViewRenderer {
+    private static final int SUBTITLE_OK_COLOR = 0xFF4ADE80;
+    private static final int SUBTITLE_ERROR_COLOR = 0xFFF87171;
+    private static final int SUBTITLE_NEUTRAL_COLOR = 0xFF475569;
+    private static final int INFO_TEXT_COLOR = 0xFFCBD5E1;
+
     public static final class Views {
         public View step1Card;
         public View step2Card;
@@ -70,15 +74,15 @@ public final class StartupOverlayViewRenderer {
         if (views.subtitleText != null) {
             views.subtitleText.setText(model.subtitle);
             views.subtitleText.setTextColor(model.step3State == StartupOverlayModelBuilder.Model.SS_OK
-                    ? Color.parseColor("#4ADE80")
+                    ? SUBTITLE_OK_COLOR
                     : model.step3State == StartupOverlayModelBuilder.Model.SS_ERROR
-                    ? Color.parseColor("#F87171")
-                    : Color.parseColor("#475569"));
+                    ? SUBTITLE_ERROR_COLOR
+                    : SUBTITLE_NEUTRAL_COLOR);
         }
 
         if (views.infoText != null) {
             views.infoText.setText(model.infoLog);
-            views.infoText.setTextColor(Color.parseColor("#CBD5E1"));
+            views.infoText.setTextColor(INFO_TEXT_COLOR);
         }
     }
 

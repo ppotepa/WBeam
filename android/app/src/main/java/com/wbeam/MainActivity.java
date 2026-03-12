@@ -118,6 +118,9 @@ public class MainActivity extends AppCompatActivity {
     private static final long DEBUG_OVERLAY_TOGGLE_HOLD_MS = 650L;
     private static final long PRESENT_FPS_STALE_GRACE_MS = 2500L;
     private static final long METRICS_STALE_GRACE_MS = 3000L;
+    private static final int HUD_TEXT_COLOR_OFFLINE = 0xFFFCA5A5;
+    private static final int HUD_TEXT_COLOR_LIVE = 0xB3EAF4FF;
+    private static final int STARTUP_VIDEO_TEST_HINT_COLOR = 0xFFFDE68A;
     // Denser chart history so adjacent samples are visually closer at 4 Hz.
     private static final int HUD_RESOURCE_SERIES_MAX = 120;
     private static final double FPS_LOW_ANCHOR = 10.0;
@@ -1657,7 +1660,7 @@ public class MainActivity extends AppCompatActivity {
         return true;
     }
 
-    private void showHudTextOnly(String modeTag, String text, String colorHex) {
+    private void showHudTextOnly(String modeTag, String text, int color) {
         hudOverlayMode = modeTag;
         lastHudWebHtml = "";
         if (perfHudWebView != null) {
@@ -1665,7 +1668,7 @@ public class MainActivity extends AppCompatActivity {
         }
         if (perfHudText != null) {
             perfHudText.setText(text == null ? "" : text);
-            perfHudText.setTextColor(Color.parseColor(colorHex));
+            perfHudText.setTextColor(color);
             perfHudText.setVisibility(View.VISIBLE);
         }
     }
@@ -1683,7 +1686,7 @@ public class MainActivity extends AppCompatActivity {
         latestStreamUptimeSec = 0L;
         latestFrameOutHost = 0L;
         lastHudCompactLine = "hud: offline | waiting metrics";
-        showHudTextOnly("offline", "HUD OFFLINE\nwaiting for host metrics...", "#FCA5A5");
+        showHudTextOnly("offline", "HUD OFFLINE\nwaiting for host metrics...", HUD_TEXT_COLOR_OFFLINE);
         if (perfHudPanel != null) {
             perfHudPanel.setAlpha(0.96f);
         }
@@ -1771,7 +1774,7 @@ public class MainActivity extends AppCompatActivity {
                 emitHudDebugAdb("trainer_payload_missing grace=1 keep_last=1");
                 return true;
             }
-            showHudTextOnly("trainer", "TRAINING HUD\nwaiting for trainer metrics...", "#B3EAF4FF");
+            showHudTextOnly("trainer", "TRAINING HUD\nwaiting for trainer metrics...", HUD_TEXT_COLOR_LIVE);
             lastHudCompactLine = "trainer hud waiting metrics";
             refreshDebugInfoOverlay();
             return true;
@@ -2112,10 +2115,10 @@ public class MainActivity extends AppCompatActivity {
 
         if (perfHudWebView != null) {
             if (!showHudWebHtml("runtime", rendered.html) && perfHudText != null) {
-                showHudTextOnly("runtime", rendered.textFallback, "#B3EAF4FF");
+                showHudTextOnly("runtime", rendered.textFallback, HUD_TEXT_COLOR_LIVE);
             }
         } else if (perfHudText != null) {
-            showHudTextOnly("runtime", rendered.textFallback, "#B3EAF4FF");
+            showHudTextOnly("runtime", rendered.textFallback, HUD_TEXT_COLOR_LIVE);
         }
         if (perfHudPanel != null) {
             perfHudPanel.setAlpha(0.96f);
@@ -2184,10 +2187,10 @@ public class MainActivity extends AppCompatActivity {
     private void applyTrainerHudRendered(TrainerHudOverlayRenderer.Rendered rendered) {
         if (perfHudWebView != null) {
             if (!showHudWebHtml("trainer", rendered.html)) {
-                showHudTextOnly("trainer", rendered.textFallback, "#B3EAF4FF");
+                showHudTextOnly("trainer", rendered.textFallback, HUD_TEXT_COLOR_LIVE);
             }
         } else {
-            showHudTextOnly("trainer", rendered.textFallback, "#B3EAF4FF");
+            showHudTextOnly("trainer", rendered.textFallback, HUD_TEXT_COLOR_LIVE);
         }
         lastHudCompactLine = rendered.compactLine;
         refreshDebugInfoOverlay();
@@ -2282,7 +2285,7 @@ public class MainActivity extends AppCompatActivity {
         }
         if (startupInfoText != null) {
             startupInfoText.setText(videoTestController.getOverlayHint());
-            startupInfoText.setTextColor(Color.parseColor("#FDE68A"));
+            startupInfoText.setTextColor(STARTUP_VIDEO_TEST_HINT_COLOR);
         }
         setPreflightVisible(true);
         return true;
