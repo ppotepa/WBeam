@@ -1122,7 +1122,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateHostHint() {
-        StreamConfig cfg = effectiveStreamConfig();
+        StreamConfigResolver.Resolved cfg = effectiveStreamConfig();
         String daemonStateUi = effectiveDaemonState(
                 daemonState, latestPresentFps, latestStreamUptimeSec, latestFrameOutHost);
         hostHintText.setText(StatusTextFormatter.buildHostHintText(
@@ -1171,18 +1171,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private JSONObject buildConfigPayload() {
-        StreamConfig cfg = effectiveStreamConfig();
-        StreamConfigResolver.Resolved resolved = new StreamConfigResolver.Resolved(
-                cfg.width,
-                cfg.height,
-                cfg.fps,
-                cfg.bitrateMbps
-        );
         return SettingsPayloadBuilder.buildPayload(
                 getSelectedProfile(),
                 getSelectedEncoder(),
                 getSelectedCursorMode(),
-                resolved,
+                effectiveStreamConfig(),
                 intraOnlyEnabled,
                 isLegacyAndroidDevice()
         );
@@ -1243,7 +1236,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        StreamConfig cfg = effectiveStreamConfig();
+        StreamConfigResolver.Resolved cfg = effectiveStreamConfig();
         long frameUs = Math.max(1L, 1_000_000L / Math.max(1, cfg.fps));
         SurfaceView preview = findViewById(R.id.previewSurface);
         Log.i(TAG, String.format(Locale.US,
@@ -3388,34 +3381,14 @@ public class MainActivity extends AppCompatActivity {
         return Build.VERSION.SDK_INT <= Build.VERSION_CODES.JELLY_BEAN_MR2;
     }
 
-    private StreamConfig effectiveStreamConfig() {
-        StreamConfigResolver.Resolved resolved = StreamConfigResolver.resolve(
+    private StreamConfigResolver.Resolved effectiveStreamConfig() {
+        return StreamConfigResolver.resolve(
                 getSelectedProfile(),
                 getResolutionScalePercent(),
                 getSelectedFps(),
                 getSelectedBitrateMbps(),
                 isLegacyAndroidDevice()
         );
-        return new StreamConfig(
-                resolved.width,
-                resolved.height,
-                resolved.fps,
-                resolved.bitrateMbps
-        );
-    }
-
-    private static final class StreamConfig {
-        final int width;
-        final int height;
-        final int fps;
-        final int bitrateMbps;
-
-        StreamConfig(int width, int height, int fps, int bitrateMbps) {
-            this.width = width;
-            this.height = height;
-            this.fps = fps;
-            this.bitrateMbps = bitrateMbps;
-        }
     }
 
     private int getResolutionScalePercent() {
