@@ -2175,7 +2175,34 @@ public class MainActivity extends AppCompatActivity {
         boolean shouldProbe = requiresTransportProbe();
         maybeStartTransportProbeIfReady(shouldProbe);
 
-        StartupOverlayModelBuilder.Input input = buildStartupOverlayInputState(shouldProbe);
+        StartupOverlayModelBuilder.Input input = StartupOverlayInputFactory.fromRuntimeState(
+                daemonReachable,
+                daemonHostName,
+                daemonService,
+                daemonBuildRevision,
+                daemonState,
+                daemonLastError,
+                handshakeResolved,
+                isBuildMismatch(),
+                shouldProbe,
+                transportProbe.isProbeOk(),
+                transportProbe.isProbeInFlight(),
+                transportProbe.getProbeInfo(),
+                BuildConfig.WBEAM_API_IMPL,
+                HostApiClient.API_BASE,
+                BuildConfig.WBEAM_API_HOST,
+                BuildConfig.WBEAM_STREAM_HOST,
+                BuildConfig.WBEAM_STREAM_PORT,
+                BuildConfig.WBEAM_BUILD_REV,
+                lastUiInfo,
+                effectiveDaemonState(daemonState, latestPresentFps, latestStreamUptimeSec, latestFrameOutHost),
+                latestPresentFps,
+                startupBeganAtMs,
+                controlRetryCount,
+                SystemClock.elapsedRealtime(),
+                lastStatsLine,
+                ErrorTextUtil.compactDaemonErrorForUi(daemonLastError)
+        );
         StartupOverlayModelBuilder.Model model = StartupOverlayModelBuilder.build(input);
         startupBeganAtMs = model.updatedStartupBeganAtMs;
         controlRetryCount = model.updatedControlRetryCount;
@@ -2203,38 +2230,6 @@ public class MainActivity extends AppCompatActivity {
         if (daemonReachable && handshakeResolved && !isBuildMismatch() && shouldProbe) {
             maybeStartTransportProbe();
         }
-    }
-
-    private StartupOverlayModelBuilder.Input buildStartupOverlayInputState(boolean shouldProbe) {
-        StartupOverlayInputFactory.State state = new StartupOverlayInputFactory.State();
-        state.daemonReachable = daemonReachable;
-        state.daemonHostName = daemonHostName;
-        state.daemonService = daemonService;
-        state.daemonBuildRevision = daemonBuildRevision;
-        state.daemonState = daemonState;
-        state.daemonLastError = daemonLastError;
-        state.handshakeResolved = handshakeResolved;
-        state.buildMismatch = isBuildMismatch();
-        state.requiresTransportProbe = shouldProbe;
-        state.probeOk = transportProbe.isProbeOk();
-        state.probeInFlight = transportProbe.isProbeInFlight();
-        state.probeInfo = transportProbe.getProbeInfo();
-        state.apiImpl = BuildConfig.WBEAM_API_IMPL;
-        state.apiBase = HostApiClient.API_BASE;
-        state.apiHost = BuildConfig.WBEAM_API_HOST;
-        state.streamHost = BuildConfig.WBEAM_STREAM_HOST;
-        state.streamPort = BuildConfig.WBEAM_STREAM_PORT;
-        state.appBuildRevision = BuildConfig.WBEAM_BUILD_REV;
-        state.lastUiInfo = lastUiInfo;
-        state.effectiveDaemonState = effectiveDaemonState(
-                daemonState, latestPresentFps, latestStreamUptimeSec, latestFrameOutHost);
-        state.latestPresentFps = latestPresentFps;
-        state.startupBeganAtMs = startupBeganAtMs;
-        state.controlRetryCount = controlRetryCount;
-        state.nowMs = SystemClock.elapsedRealtime();
-        state.lastStatsLine = lastStatsLine;
-        state.daemonErrCompact = ErrorTextUtil.compactDaemonErrorForUi(daemonLastError);
-        return StartupOverlayInputFactory.build(state);
     }
 
     private void applyStartupOverlayModel(StartupOverlayModelBuilder.Model model) {

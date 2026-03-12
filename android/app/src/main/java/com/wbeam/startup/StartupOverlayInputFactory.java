@@ -33,6 +33,64 @@ public final class StartupOverlayInputFactory {
     private StartupOverlayInputFactory() {
     }
 
+    public static StartupOverlayModelBuilder.Input fromRuntimeState(
+            boolean daemonReachable,
+            String daemonHostName,
+            String daemonService,
+            String daemonBuildRevision,
+            String daemonState,
+            String daemonLastError,
+            boolean handshakeResolved,
+            boolean buildMismatch,
+            boolean requiresTransportProbe,
+            boolean probeOk,
+            boolean probeInFlight,
+            String probeInfo,
+            String apiImpl,
+            String apiBase,
+            String apiHost,
+            String streamHost,
+            int streamPort,
+            String appBuildRevision,
+            String lastUiInfo,
+            String effectiveDaemonState,
+            double latestPresentFps,
+            long startupBeganAtMs,
+            int controlRetryCount,
+            long nowMs,
+            String lastStatsLine,
+            String daemonErrCompact
+    ) {
+        State state = new State();
+        state.daemonReachable = daemonReachable;
+        state.daemonHostName = daemonHostName;
+        state.daemonService = daemonService;
+        state.daemonBuildRevision = daemonBuildRevision;
+        state.daemonState = daemonState;
+        state.daemonLastError = daemonLastError;
+        state.handshakeResolved = handshakeResolved;
+        state.buildMismatch = buildMismatch;
+        state.requiresTransportProbe = requiresTransportProbe;
+        state.probeOk = probeOk;
+        state.probeInFlight = probeInFlight;
+        state.probeInfo = probeInfo;
+        state.apiImpl = apiImpl;
+        state.apiBase = apiBase;
+        state.apiHost = apiHost;
+        state.streamHost = streamHost;
+        state.streamPort = streamPort;
+        state.appBuildRevision = appBuildRevision;
+        state.lastUiInfo = lastUiInfo;
+        state.effectiveDaemonState = effectiveDaemonState;
+        state.latestPresentFps = latestPresentFps;
+        state.startupBeganAtMs = startupBeganAtMs;
+        state.controlRetryCount = controlRetryCount;
+        state.nowMs = nowMs;
+        state.lastStatsLine = lastStatsLine;
+        state.daemonErrCompact = daemonErrCompact;
+        return build(state);
+    }
+
     public static StartupOverlayModelBuilder.Input build(State state) {
         StartupOverlayModelBuilder.Input input = new StartupOverlayModelBuilder.Input();
         input.daemonReachable = state.daemonReachable;
