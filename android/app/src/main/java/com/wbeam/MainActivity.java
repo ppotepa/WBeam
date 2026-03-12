@@ -1527,17 +1527,32 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         long nowMs = SystemClock.elapsedRealtime();
-        if (metrics == null) {
-            if (daemonReachable
-                    && lastPerfMetricsAtMs > 0L
-                    && (nowMs - lastPerfMetricsAtMs) <= METRICS_STALE_GRACE_MS) {
-                emitHudDebugAdb("state=metrics_stale grace=1");
-                return;
-            }
-            updatePerfHudUnavailable();
+        if (handleMissingPerfMetrics(metrics, nowMs)) {
             return;
         }
         lastPerfMetricsAtMs = nowMs;
+        if (handleTrainerHudPath(metrics, nowMs)) {
+            return;
+        }
+        hudOverlayMode = "runtime";
+        updateRuntimePerfHud(metrics, nowMs);
+    }
+
+    private boolean handleMissingPerfMetrics(JSONObject metrics, long nowMs) {
+        if (metrics != null) {
+            return false;
+        }
+        if (daemonReachable
+                && lastPerfMetricsAtMs > 0L
+                && (nowMs - lastPerfMetricsAtMs) <= METRICS_STALE_GRACE_MS) {
+            emitHudDebugAdb("state=metrics_stale grace=1");
+            return true;
+        }
+        updatePerfHudUnavailable();
+        return true;
+    }
+
+    private boolean handleTrainerHudPath(JSONObject metrics, long nowMs) {
         String connectionMode = metrics.optString("connection_mode", "live")
                 .trim()
                 .toLowerCase(Locale.US);
@@ -1566,34 +1581,36 @@ public class MainActivity extends AppCompatActivity {
 
         if (isTrainingConnection && trainerHudFromJson) {
             renderTrainerHudOverlayJson(trainerHudJson);
-            return;
+            return true;
         }
         if (isTrainingConnection && trainerHudFromText) {
             renderTrainerHudOverlay(trainerHudText);
-            return;
+            return true;
         }
         if (isTrainingConnection && trainerHudActive) {
             if (lastTrainerHudPayloadAtMs > 0L
                     && (nowMs - lastTrainerHudPayloadAtMs) <= TRAINER_HUD_PAYLOAD_GRACE_MS) {
                 emitHudDebugAdb("trainer_payload_gap grace=1 keep_last=1");
-                return;
+                return true;
             }
             renderTrainerHudOverlayPlaceholder();
-            return;
+            return true;
         }
         if (isTrainingConnection && trainerHudSessionActive) {
             if (lastTrainerHudPayloadAtMs > 0L
                     && (nowMs - lastTrainerHudPayloadAtMs) <= TRAINER_HUD_PAYLOAD_GRACE_MS) {
                 emitHudDebugAdb("trainer_payload_missing grace=1 keep_last=1");
-                return;
+                return true;
             }
             showHudTextOnly("trainer", "TRAINING HUD\nwaiting for trainer metrics...", "#B3EAF4FF");
             lastHudCompactLine = "trainer hud waiting metrics";
             refreshDebugInfoOverlay();
-            return;
+            return true;
         }
-        hudOverlayMode = "runtime";
+        return isTrainingConnection;
+    }
 
+    private void updateRuntimePerfHud(JSONObject metrics, long nowMs) {
         RuntimeTelemetryMapper.Snapshot runtime = RuntimeTelemetryMapper.map(
                 metrics,
                 getSelectedFps(),
