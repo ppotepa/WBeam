@@ -46,6 +46,7 @@ import com.wbeam.api.HostApiClient;
 import com.wbeam.api.StatusListener;
 import com.wbeam.api.StatusPoller;
 import com.wbeam.hud.HudRenderSupport;
+import com.wbeam.input.CursorOverlayController;
 import com.wbeam.startup.StartupOverlayModelBuilder;
 import com.wbeam.startup.StartupOverlayController;
 import com.wbeam.startup.StartupStepStyler;
@@ -234,7 +235,6 @@ public class MainActivity extends AppCompatActivity {
     private String simpleMode = PREFERRED_VIDEO;
     private int simpleFps = 60;
     private boolean isFullscreen = false;
-    private boolean cursorOverlayEnabled = true;
     private boolean debugControlsVisible = false;
     private boolean debugOverlayVisible = false;
     private boolean trainerHudSessionActive = false;
@@ -312,6 +312,7 @@ public class MainActivity extends AppCompatActivity {
     private VideoTestController videoTestController;
     private final TransportProbeCoordinator transportProbe = new TransportProbeCoordinator();
     private StartupOverlayController startupOverlayController;
+    private CursorOverlayController cursorOverlayController;
 
     // ── Media ──────────────────────────────────────────────────────────────────
     private Surface surface;
@@ -723,6 +724,7 @@ public class MainActivity extends AppCompatActivity {
             preflightAnimTick = animTick;
             updatePreflightOverlay();
         });
+        cursorOverlayController = new CursorOverlayController(cursorOverlay, cursorOverlayButton);
         liveLogText = findViewById(R.id.liveLogText);
 
         resValueText = findViewById(R.id.resValueText);
@@ -922,7 +924,7 @@ public class MainActivity extends AppCompatActivity {
         });
 
         preview.setOnTouchListener((v, event) -> {
-            if (!cursorOverlayEnabled) {
+            if (cursorOverlayController == null || !cursorOverlayController.isOverlayEnabled()) {
                 return false;
             }
             updateCursorOverlay(event.getX(), event.getY(), event.getActionMasked());
@@ -930,7 +932,7 @@ public class MainActivity extends AppCompatActivity {
         });
 
         preview.setOnGenericMotionListener((v, event) -> {
-            if (!cursorOverlayEnabled) {
+            if (cursorOverlayController == null || !cursorOverlayController.isOverlayEnabled()) {
                 return false;
             }
             if (event.getActionMasked() == MotionEvent.ACTION_HOVER_MOVE ||
@@ -1074,7 +1076,9 @@ public class MainActivity extends AppCompatActivity {
         resolutionSeek.setProgress(clamp(DEFAULT_RES_SCALE, 50, 100) - 50);
         fpsSeek.setProgress(clamp(DEFAULT_FPS, 24, 144) - 24);
         bitrateSeek.setProgress(clamp(DEFAULT_BITRATE_MBPS, 5, 300) - 5);
-        cursorOverlayEnabled = true;
+        if (cursorOverlayController != null) {
+            cursorOverlayController.resetEnabledDefault();
+        }
         enforceCursorOverlayPolicy(false);
         intraOnlyEnabled = false;
         updateIntraOnlyButton();
@@ -1495,34 +1499,16 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void toggleCursorOverlayMode() {
-        if (!"hidden".equals(getSelectedCursorMode())) {
-            cursorOverlayEnabled = false;
-            hideCursorOverlay();
-            enforceCursorOverlayPolicy(true);
+        if (cursorOverlayController == null) {
             return;
         }
-        cursorOverlayEnabled = !cursorOverlayEnabled;
+        cursorOverlayController.toggleForCursorMode(getSelectedCursorMode());
         enforceCursorOverlayPolicy(true);
-        if (!cursorOverlayEnabled) {
-            hideCursorOverlay();
-        }
     }
 
     private void enforceCursorOverlayPolicy(boolean persist) {
-        String cursorMode = getSelectedCursorMode();
-        boolean allowLocalOverlay = "hidden".equals(cursorMode);
-        if (!allowLocalOverlay && cursorOverlayEnabled) {
-            cursorOverlayEnabled = false;
-            hideCursorOverlay();
-        }
-        if (cursorOverlayButton != null) {
-            cursorOverlayButton.setEnabled(allowLocalOverlay);
-            cursorOverlayButton.setAlpha(allowLocalOverlay ? 1.0f : 0.45f);
-            if (allowLocalOverlay) {
-                cursorOverlayButton.setText(cursorOverlayEnabled ? "Local Cursor Overlay ON" : "Local Cursor Overlay OFF");
-            } else {
-                cursorOverlayButton.setText("Local Cursor Overlay N/A (cursor hidden required)");
-            }
+        if (cursorOverlayController != null) {
+            cursorOverlayController.applyPolicy(getSelectedCursorMode());
         }
         if (persist) {
             updateHostHint();
@@ -1530,22 +1516,14 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateCursorOverlay(float x, float y, int action) {
-        if (cursorOverlay == null || !cursorOverlayEnabled) {
-            return;
-        }
-        cursorOverlay.setX(x - (cursorOverlay.getWidth() / 2f));
-        cursorOverlay.setY(y - (cursorOverlay.getHeight() / 2f));
-        cursorOverlay.setVisibility(View.VISIBLE);
-
-        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-            cursorOverlay.removeCallbacks(this::hideCursorOverlay);
-            cursorOverlay.postDelayed(this::hideCursorOverlay, 400);
+        if (cursorOverlayController != null) {
+            cursorOverlayController.updateOverlay(x, y, action);
         }
     }
 
     private void hideCursorOverlay() {
-        if (cursorOverlay != null) {
-            cursorOverlay.setVisibility(View.GONE);
+        if (cursorOverlayController != null) {
+            cursorOverlayController.hideOverlay();
         }
     }
 
