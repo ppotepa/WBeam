@@ -39,9 +39,11 @@ import com.wbeam.api.HostApiClient;
 import com.wbeam.api.StatusListener;
 import com.wbeam.api.StatusPoller;
 import com.wbeam.hud.RuntimeHudFallbackFormatter;
-import com.wbeam.hud.HudRenderSupport;
 import com.wbeam.hud.MetricSeriesBuffer;
+import com.wbeam.hud.ResourceUsageTracker;
+import com.wbeam.hud.RuntimeTrendGridRenderer;
 import com.wbeam.hud.RuntimeHudWebPayloadBuilder;
+import com.wbeam.hud.TrainerHudPayloadBuilder;
 import com.wbeam.hud.TrainerHudShellRenderer;
 import com.wbeam.hud.TrainerProgressParser;
 import com.wbeam.input.CursorOverlayController;
@@ -68,7 +70,6 @@ import com.wbeam.ui.StatusTextFormatter;
 import com.wbeam.ui.StreamConfigResolver;
 import com.wbeam.widget.FpsLossGraphView;
 
-import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedInputStream;
@@ -270,14 +271,7 @@ public class MainActivity extends AppCompatActivity {
     private long latestStablePresentFpsAtMs = 0L;
     private long lastPerfMetricsAtMs = 0L;
     private final LiveLogBuffer liveLogBuffer = new LiveLogBuffer(LIVE_LOG_MAX_LINES);
-    private long usageSampleLastRealtimeMs = 0L;
-    private long usageSampleLastCpuMs = 0L;
-    private double usageCpuPct = 0.0;
-    private double usageMemMb = 0.0;
-    private double usageGpuPct = 0.0;
-    private final MetricSeriesBuffer usageCpuSeries = new MetricSeriesBuffer(HUD_RESOURCE_SERIES_MAX);
-    private final MetricSeriesBuffer usageMemSeries = new MetricSeriesBuffer(HUD_RESOURCE_SERIES_MAX);
-    private final MetricSeriesBuffer usageGpuSeries = new MetricSeriesBuffer(HUD_RESOURCE_SERIES_MAX);
+    private final ResourceUsageTracker resourceUsageTracker = new ResourceUsageTracker(HUD_RESOURCE_SERIES_MAX);
     private final MetricSeriesBuffer runtimePresentSeries = new MetricSeriesBuffer(HUD_RESOURCE_SERIES_MAX);
     private final MetricSeriesBuffer runtimeMbpsSeries = new MetricSeriesBuffer(HUD_RESOURCE_SERIES_MAX);
     private final MetricSeriesBuffer runtimeDropSeries = new MetricSeriesBuffer(HUD_RESOURCE_SERIES_MAX);
@@ -1763,7 +1757,7 @@ public class MainActivity extends AppCompatActivity {
         runtimeDropSeries.addSample(Math.max(0.0, dropPerSec));
         runtimeLatencySeries.addSample(Math.max(0.0, e2eP95));
         runtimeQueueSeries.addSample(Math.max(0.0, qT + qD + qR));
-        String runtimeChartsHtml = buildMetricTrendRowsHtml(
+        String runtimeChartsHtml = RuntimeTrendGridRenderer.buildMetricTrendRowsHtml(
                 runtimePresentSeries.toJsonFinite(),
                 runtimeMbpsSeries.toJsonFinite(),
                 runtimeDropSeries.toJsonFinite(),
@@ -1773,7 +1767,8 @@ public class MainActivity extends AppCompatActivity {
                 runtimeStateTone,
                 runtimeStateTone,
                 runtimeStateTone,
-                runtimeStateTone
+                runtimeStateTone,
+                FPS_LOW_ANCHOR
         );
         renderRuntimeHudOverlay(
                 daemonStateUi,
@@ -1868,8 +1863,8 @@ public class MainActivity extends AppCompatActivity {
             String metricChartsHtml,
             String tone
     ) {
-        sampleDeviceResourceUsage(targetFps, renderP95);
-        String resourceRows = buildResourceRowsHtml();
+        resourceUsageTracker.sample(targetFps, renderP95);
+        String resourceRows = resourceUsageTracker.buildRowsHtml();
         if (perfHudWebView != null) {
             int[] streamSize = computeScaledSize();
             RuntimeHudWebPayloadBuilder.Input payload = new RuntimeHudWebPayloadBuilder.Input();
@@ -1975,7 +1970,17 @@ public class MainActivity extends AppCompatActivity {
         String progressLine = TrainerProgressParser.buildProgressLine(hudText);
         int progressPercent = TrainerProgressParser.parseProgressPercent(hudText);
         if (perfHudWebView != null) {
-            String html = buildTrainerHudHtml(hudText, progressLine, progressPercent);
+            String html = TrainerHudPayloadBuilder.buildFromText(
+                    hudText,
+                    progressLine,
+                    progressPercent,
+                    latestTargetFps,
+                    FPS_LOW_ANCHOR,
+                    (targetFps, renderP95Ms) -> {
+                        resourceUsageTracker.sample(targetFps, renderP95Ms);
+                        return resourceUsageTracker.buildRowsHtml();
+                    }
+            );
             if (!showHudWebHtml("trainer", html)) {
                 String finalText = progressLine.isEmpty() ? hudText : progressLine + "\n" + hudText;
                 showHudTextOnly("trainer", finalText, "#B3EAF4FF");
@@ -2003,7 +2008,17 @@ public class MainActivity extends AppCompatActivity {
                 hudJson.optInt("trial_index", 0),
                 hudJson.optInt("trial_total", 0)
         );
-        String html = buildTrainerHudHtmlFromJson(hudJson, progressText, progressPercent);
+        String html = TrainerHudPayloadBuilder.buildFromJson(
+                hudJson,
+                progressText,
+                progressPercent,
+                latestTargetFps,
+                FPS_LOW_ANCHOR,
+                (targetFps, renderP95Ms) -> {
+                    resourceUsageTracker.sample(targetFps, renderP95Ms);
+                    return resourceUsageTracker.buildRowsHtml();
+                }
+        );
         if (perfHudWebView != null) {
             if (!showHudWebHtml("trainer", html)) {
                 showHudTextOnly("trainer", progressText, "#B3EAF4FF");
@@ -2022,8 +2037,8 @@ public class MainActivity extends AppCompatActivity {
         if (perfHudText == null) {
             return;
         }
-        sampleDeviceResourceUsage(latestTargetFps > 1.0 ? latestTargetFps : 60.0, 0.0);
-        String resourceRows = buildResourceRowsHtml();
+        resourceUsageTracker.sample(latestTargetFps > 1.0 ? latestTargetFps : 60.0, 0.0);
+        String resourceRows = resourceUsageTracker.buildRowsHtml();
         String html = TrainerHudShellRenderer.buildSotHtml(
                 "PENDING",
                 "PENDING",
@@ -2081,455 +2096,6 @@ public class MainActivity extends AppCompatActivity {
         }
         lastHudCompactLine = "trainer hud pending placeholders";
         refreshDebugInfoOverlay();
-    }
-
-    private String buildTrainerHudHtml(String hudText, String progressLine, int progressPercent) {
-        StringBuilder details = new StringBuilder();
-        String[] lines = hudText.split("\n");
-        for (String raw : lines) {
-            String line = raw == null ? "" : raw.trim();
-            if (line.isEmpty()) {
-                continue;
-            }
-            if (line.startsWith("+") && line.endsWith("+")) {
-                details.append(hudDetailRow(" ", " "));
-                continue;
-            }
-            if (line.startsWith("|") && line.endsWith("|") && line.length() > 2) {
-                String content = line.substring(1, line.length() - 1).trim();
-                String[] parts = splitHudColumns(content);
-                details.append(hudDetailRow(parts[0], parts[1]));
-            } else {
-                details.append(hudDetailRow(line, "-"));
-            }
-        }
-        sampleDeviceResourceUsage(latestTargetFps > 1.0 ? latestTargetFps : 60.0, 0.0);
-        String resourceRows = buildResourceRowsHtml();
-        return TrainerHudShellRenderer.buildSotHtml(
-                "TEXT-SNAPSHOT",
-                "PENDING",
-                "PENDING",
-                "PENDING",
-                0,
-                0,
-                0,
-                0,
-                0,
-                "T0",
-                progressPercent,
-                progressLine,
-                Double.NaN,
-                Double.NaN,
-                Double.NaN,
-                Double.NaN,
-                Double.NaN,
-                Double.NaN,
-                Double.NaN,
-                Double.NaN,
-                Double.NaN,
-                0,
-                "PENDING",
-                Double.NaN,
-                "pending",
-                "pending",
-                "pending",
-                "pending",
-                "pending",
-                "pending",
-                "text snapshot mode | " + details.toString().replaceAll("<[^>]+>", " ").trim(),
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                resourceRows,
-                "wide",
-                "arcade",
-                FPS_LOW_ANCHOR
-        );
-    }
-
-    private String buildTrainerHudHtmlFromJson(JSONObject hud, String progressLine, int progressPercent) {
-        JSONObject sections = hud.optJSONObject("sections");
-        JSONObject header = sections != null ? sections.optJSONObject("header") : null;
-        JSONObject config = sections != null ? sections.optJSONObject("config") : null;
-        JSONObject kpi = sections != null ? sections.optJSONObject("kpi") : null;
-        JSONObject states = sections != null ? sections.optJSONObject("states") : null;
-        JSONObject trends = sections != null ? sections.optJSONObject("trends") : null;
-        JSONObject status = sections != null ? sections.optJSONObject("status") : null;
-
-        String runId = header != null ? header.optString("run_id", hud.optString("run_id", "-")) : hud.optString("run_id", "-");
-        String profile = header != null ? header.optString("profile_name", hud.optString("profile_name", "-")) : hud.optString("profile_name", "-");
-        String trialId = header != null ? header.optString("trial_id", hud.optString("trial_id", "-")) : hud.optString("trial_id", "-");
-        int gIdx = header != null ? header.optInt("generation_index", 0) : hud.optInt("generation_index", 0);
-        int gTotal = header != null ? header.optInt("generation_total", 0) : hud.optInt("generation_total", 0);
-        int tIdx = header != null ? header.optInt("trial_index", 0) : hud.optInt("trial_index", 0);
-        int tTotal = header != null ? header.optInt("trial_total", 0) : hud.optInt("trial_total", 0);
-
-        String encoder = config != null ? config.optString("encoder", "-") : "-";
-        String size = config != null ? config.optString("size", "-") : "-";
-        String fontProfile = config != null ? config.optString("font_profile", "arcade") : "arcade";
-        int fps = config != null ? config.optInt("fps", 0) : 0;
-        double targetMbps = config != null ? config.optDouble("target_mbps", 0.0) : 0.0;
-        String layoutMode = config != null ? config.optString("layout_mode", hud.optString("layout_mode", "wide")) : hud.optString("layout_mode", "wide");
-
-        double score = kpi != null ? kpi.optDouble("score", Double.NaN) : Double.NaN;
-        double present = kpi != null ? kpi.optDouble("present_fps", Double.NaN) : Double.NaN;
-        double recv = kpi != null ? kpi.optDouble("recv_fps", Double.NaN) : Double.NaN;
-        double decode = kpi != null ? kpi.optDouble("decode_fps", Double.NaN) : Double.NaN;
-        double liveMbps = kpi != null ? kpi.optDouble("live_mbps", Double.NaN) : Double.NaN;
-        JSONObject metricsObj = hud.optJSONObject("metrics");
-        if (Double.isNaN(liveMbps) || liveMbps <= 0.0) {
-            liveMbps = hud.optDouble("bitrate_mbps_mean", Double.NaN);
-        }
-        if ((Double.isNaN(liveMbps) || liveMbps <= 0.0) && metricsObj != null) {
-            liveMbps = metricsObj.optDouble("bitrate_mbps_mean", Double.NaN);
-        }
-        double latency = kpi != null ? kpi.optDouble("latency_ms_p95", Double.NaN) : Double.NaN;
-        double drops = kpi != null ? kpi.optDouble("drops_per_sec", Double.NaN) : Double.NaN;
-        double queue = kpi != null ? kpi.optDouble("queue_depth", Double.NaN) : Double.NaN;
-        double renderMs = kpi != null ? kpi.optDouble("render_time_ms_p95", Double.NaN) : Double.NaN;
-        if (Double.isNaN(renderMs)) {
-            renderMs = kpi != null ? kpi.optDouble("render_ms_p95", 0.0) : 0.0;
-        }
-
-        String fpsState = states != null ? states.optString("fps", "PENDING").toLowerCase(Locale.US) : "pending";
-        String latState = states != null ? states.optString("latency", "PENDING").toLowerCase(Locale.US) : "pending";
-        String mbpsState = states != null ? states.optString("mbps", "PENDING").toLowerCase(Locale.US) : "pending";
-        String dropState = states != null ? states.optString("drop", "PENDING").toLowerCase(Locale.US) : "pending";
-        String queueState = states != null ? states.optString("queue", "PENDING").toLowerCase(Locale.US) : "pending";
-        String qualityState = states != null ? states.optString("quality", "PENDING").toLowerCase(Locale.US) : "pending";
-
-        JSONArray trendScoreArr = trends != null ? trends.optJSONArray("score") : null;
-        JSONArray trendFpsArr = trends != null ? trends.optJSONArray("present_fps") : null;
-        JSONArray trendRecvArr = trends != null ? trends.optJSONArray("recv_fps") : null;
-        JSONArray trendDecodeArr = trends != null ? trends.optJSONArray("decode_fps") : null;
-        JSONArray trendMbpsArr = trends != null ? trends.optJSONArray("mbps") : null;
-        JSONArray trendDropArr = trends != null ? trends.optJSONArray("drop_per_sec") : null;
-        if ((trendDropArr == null || trendDropArr.length() == 0) && trends != null) {
-            trendDropArr = trends.optJSONArray("drop_pct");
-        }
-        JSONArray trendLatencyArr = trends != null ? trends.optJSONArray("latency_ms_p95") : null;
-        JSONArray trendQueueArr = trends != null ? trends.optJSONArray("queue_depth") : null;
-        JSONArray trendLateArr = trends != null ? trends.optJSONArray("late_per_sec") : null;
-        double late = kpi != null ? kpi.optDouble("late_per_sec", Double.NaN) : Double.NaN;
-        if (Double.isNaN(liveMbps) || liveMbps <= 0.0) {
-            liveMbps = latestFiniteFromSeries(trendMbpsArr);
-        }
-        if (Double.isNaN(present) || present <= 0.0) {
-            present = latestFiniteFromSeries(trendFpsArr);
-        }
-        if (Double.isNaN(recv) || recv <= 0.0) {
-            recv = latestFiniteFromSeries(trendRecvArr);
-        }
-        if (Double.isNaN(decode) || decode <= 0.0) {
-            decode = latestFiniteFromSeries(trendDecodeArr);
-        }
-        if (Double.isNaN(drops) || drops < 0.0) {
-            drops = latestFiniteFromSeries(trendDropArr);
-        }
-        if (Double.isNaN(latency) || latency < 0.0) {
-            latency = latestFiniteFromSeries(trendLatencyArr);
-        }
-        if (Double.isNaN(queue) || queue < 0.0) {
-            queue = latestFiniteFromSeries(trendQueueArr);
-        }
-        if (Double.isNaN(late) || late < 0.0) {
-            late = latestFiniteFromSeries(trendLateArr);
-        }
-        String statusNote = status != null ? status.optString("note", "") : "";
-        int sampleCount = status != null ? Math.max(0, status.optInt("sample_count", 0)) : 0;
-        String bestTrial = config != null ? config.optString("best_trial", "-") : "-";
-        double bestScore = config != null ? config.optDouble("best_score", Double.NaN) : Double.NaN;
-        sampleDeviceResourceUsage(fps > 1 ? fps : (latestTargetFps > 1.0 ? latestTargetFps : 60.0), Double.isNaN(renderMs) ? 0.0 : renderMs);
-        String resourceRows = buildResourceRowsHtml();
-        return TrainerHudShellRenderer.buildSotHtml(
-                runId,
-                profile,
-                encoder,
-                size,
-                Math.max(0, fps),
-                gIdx,
-                gTotal,
-                tIdx,
-                tTotal,
-                trialId,
-                progressPercent,
-                progressLine,
-                score,
-                present,
-                recv,
-                decode,
-                liveMbps,
-                latency,
-                drops,
-                queue,
-                late,
-                sampleCount,
-                bestTrial,
-                bestScore,
-                fpsState,
-                mbpsState,
-                latState,
-                dropState,
-                queueState,
-                qualityState,
-                statusNote,
-                trendScoreArr,
-                trendFpsArr,
-                trendMbpsArr,
-                trendLatencyArr,
-                trendDropArr,
-                trendQueueArr,
-                trendRecvArr,
-                trendDecodeArr,
-                resourceRows,
-                layoutMode,
-                fontProfile,
-                FPS_LOW_ANCHOR
-        );
-    }
-
-    private double clampDouble(double value, double min, double max) {
-        if (Double.isNaN(value) || Double.isInfinite(value)) {
-            return min;
-        }
-        return Math.max(min, Math.min(max, value));
-    }
-
-    private void sampleDeviceResourceUsage(double targetFps, double renderP95Ms) {
-        long nowMs = SystemClock.elapsedRealtime();
-        long procCpuNow = android.os.Process.getElapsedCpuTime();
-        if (usageSampleLastRealtimeMs > 0L && usageSampleLastCpuMs > 0L) {
-            long dWall = Math.max(1L, nowMs - usageSampleLastRealtimeMs);
-            long dCpu = Math.max(0L, procCpuNow - usageSampleLastCpuMs);
-            int cores = Math.max(1, Runtime.getRuntime().availableProcessors());
-            usageCpuPct = clampDouble((dCpu * 100.0) / (dWall * cores), 0.0, 100.0);
-        }
-        usageSampleLastRealtimeMs = nowMs;
-        usageSampleLastCpuMs = procCpuNow;
-
-        Runtime rt = Runtime.getRuntime();
-        double usedMb = (rt.totalMemory() - rt.freeMemory()) / (1024.0 * 1024.0);
-        usageMemMb = Math.max(0.0, usedMb);
-        double maxMb = Math.max(1.0, rt.maxMemory() / (1024.0 * 1024.0));
-        double memPct = clampDouble((usageMemMb / maxMb) * 100.0, 0.0, 100.0);
-
-        double frameBudgetMs = targetFps > 1.0 ? (1000.0 / targetFps) : 16.67;
-        usageGpuPct = clampDouble((Math.max(0.0, renderP95Ms) / Math.max(1.0, frameBudgetMs)) * 100.0, 0.0, 100.0);
-
-        usageCpuSeries.addSample(usageCpuPct);
-        usageMemSeries.addSample(memPct);
-        usageGpuSeries.addSample(usageGpuPct);
-    }
-
-    private String buildSparkBarsHtml(MetricSeriesBuffer series, String toneClass) {
-        if (series == null || series.isEmpty()) {
-            return buildSparkPlaceholderBars(toneClass, 18);
-        }
-        StringBuilder bars = new StringBuilder();
-        for (Double sample : series) {
-            double v = sample == null ? 0.0 : sample;
-            int height = (int) Math.round(clampDouble(v, 0.0, 100.0));
-            if (height < 8) {
-                height = 8;
-            }
-            bars.append("<span class='spark-bar ")
-                    .append(escapeHtml(toneClass))
-                    .append("' style='height:")
-                    .append(height)
-                    .append("%'></span>");
-        }
-        return bars.toString();
-    }
-
-    private String buildResourceRowsHtml() {
-        String cpuTone = usageCpuPct > 85.0 ? "state-risk" : (usageCpuPct > 65.0 ? "state-warn" : "state-ok");
-        double memPct = usageMemSeries.latest(0.0);
-        String memTone = memPct > 88.0 ? "state-risk" : (memPct > 70.0 ? "state-warn" : "state-ok");
-        String gpuTone = usageGpuPct > 90.0 ? "state-risk" : (usageGpuPct > 70.0 ? "state-warn" : "state-ok");
-
-        StringBuilder html = new StringBuilder();
-        html.append("<div class='res-row'><span class='rk'>CPU</span><span class='rv ")
-                .append(cpuTone)
-                .append("'>")
-                .append(String.format(Locale.US, "%.0f%%", usageCpuPct))
-                .append("</span><div class='spark'>")
-                .append(buildSparkBarsHtml(usageCpuSeries, cpuTone))
-                .append("</div></div>");
-        html.append("<div class='res-row'><span class='rk'>MEM</span><span class='rv ")
-                .append(memTone)
-                .append("'>")
-                .append(String.format(Locale.US, "%.0f MB", usageMemMb))
-                .append("</span><div class='spark'>")
-                .append(buildSparkBarsHtml(usageMemSeries, memTone))
-                .append("</div></div>");
-        html.append("<div class='res-row'><span class='rk'>GPU*</span><span class='rv ")
-                .append(gpuTone)
-                .append("'>")
-                .append(String.format(Locale.US, "%.0f%%", usageGpuPct))
-                .append("</span><div class='spark'>")
-                .append(buildSparkBarsHtml(usageGpuSeries, gpuTone))
-                .append("</div></div>");
-        return html.toString();
-    }
-
-    private String buildPendingMetricTrendRowsHtml() {
-        return buildTrainerTrendGridHtml(
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                "pending",
-                "pending",
-                "pending",
-                "pending",
-                "pending",
-                "pending",
-                "pending",
-                "pending",
-                "pending"
-        );
-    }
-
-    private String buildTrainerTrendGridHtml(
-            JSONArray score,
-            JSONArray fps,
-            JSONArray recv,
-            JSONArray decode,
-            JSONArray mbps,
-            JSONArray drops,
-            JSONArray latency,
-            JSONArray queue,
-            JSONArray late,
-            String scoreTone,
-            String fpsTone,
-            String recvTone,
-            String decodeTone,
-            String mbpsTone,
-            String dropTone,
-            String latTone,
-            String queueTone,
-            String lateTone
-    ) {
-        return buildTrendCardHtml("SCORE", score, HudRenderSupport.hudToneClass(scoreTone), "")
-                + buildTrendCardHtml("PRESENT FPS", fps, HudRenderSupport.hudToneClass(fpsTone), "")
-                + buildTrendCardHtml("RECV FPS", recv, HudRenderSupport.hudToneClass(recvTone), "")
-                + buildTrendCardHtml("DECODE FPS", decode, HudRenderSupport.hudToneClass(decodeTone), "")
-                + buildTrendCardHtml("LIVE MBPS", mbps, HudRenderSupport.hudToneClass(mbpsTone), "Mbps")
-                + buildTrendCardHtml("DROP / SEC", drops, HudRenderSupport.hudToneClass(dropTone), "")
-                + buildTrendCardHtml("LAT p95", latency, HudRenderSupport.hudToneClass(latTone), "ms")
-                + buildTrendCardHtml("QUEUE DEPTH", queue, HudRenderSupport.hudToneClass(queueTone), "")
-                + buildTrendCardHtml("LATE / SEC", late, HudRenderSupport.hudToneClass(lateTone), "");
-    }
-
-    private String buildMetricTrendRowsHtml(
-            JSONArray fps,
-            JSONArray mbps,
-            JSONArray drops,
-            JSONArray latency,
-            JSONArray queue,
-            String fpsTone,
-            String mbpsTone,
-            String dropTone,
-            String latTone,
-            String queueTone
-    ) {
-        return buildTrendCardHtml("FPS", fps, HudRenderSupport.hudToneClass(fpsTone), "")
-                + buildTrendCardHtml("MBPS", mbps, HudRenderSupport.hudToneClass(mbpsTone), "Mbps")
-                + buildTrendCardHtml("DROPS / SEC", drops, HudRenderSupport.hudToneClass(dropTone), "")
-                + buildTrendCardHtml("LAT p95", latency, HudRenderSupport.hudToneClass(latTone), "ms")
-                + buildTrendCardHtml("QUEUE DEPTH", queue, HudRenderSupport.hudToneClass(queueTone), "");
-    }
-
-    private String buildTrendCardHtml(String label, JSONArray series, String toneClass, String unitSuffix) {
-        String bars = buildTrendSparkChartFromJson(series, toneClass);
-        String stats = buildSeriesStats(series, unitSuffix);
-        String meta = buildSeriesMetaHtml(label, series, unitSuffix);
-        return "<div class='trend-card'><div class='trend-head'><span class='trend-label'>"
-                + escapeHtml(label)
-                + "</span><span class='trend-range "
-                + escapeHtml(toneClass == null ? "" : toneClass)
-                + "'>"
-                + escapeHtml(stats)
-                + "</span></div><div class='spark'>"
-                + bars
-                + "</div>"
-                + meta
-                + "</div>";
-    }
-
-    private String buildTrendRowHtml(String label, JSONArray series, String toneClass, String unitSuffix) {
-        String bars = buildTrendSparkChartFromJson(series, toneClass);
-        String stats = buildSeriesStats(series, unitSuffix);
-        return "<div class='trend-row'><span class='trend-label'>"
-                + escapeHtml(label)
-                + "</span><div class='spark'>"
-                + bars
-                + "</div><span class='trend-range "
-                + escapeHtml(toneClass == null ? "" : toneClass)
-                + "'>"
-                + escapeHtml(stats)
-                + "</span></div>";
-    }
-
-    private String buildTrendSparkChartFromJson(JSONArray series, String toneClass) {
-        return HudRenderSupport.buildTrendSparkChartFromJson(series, toneClass);
-    }
-
-    private String buildSparkPlaceholderBars(String toneClass, int count) {
-        return HudRenderSupport.buildSparkPlaceholderBars(toneClass, count);
-    }
-
-    private String buildSeriesStats(JSONArray series, String unitSuffix) {
-        return HudRenderSupport.buildSeriesStats(series, unitSuffix);
-    }
-
-    private String buildSeriesMetaHtml(String metricLabel, JSONArray series, String unitSuffix) {
-        return HudRenderSupport.buildSeriesMetaHtml(metricLabel, series, unitSuffix, FPS_LOW_ANCHOR);
-    }
-
-    private String fmt1(double value) {
-        return HudRenderSupport.fmt1(value);
-    }
-
-    private double latestFiniteFromSeries(JSONArray series) {
-        return HudRenderSupport.latestFiniteFromSeries(series);
-    }
-
-    private String hudDetailRow(String left, String right) {
-        return HudRenderSupport.hudDetailRow(left, right);
-    }
-
-    private String[] splitHudColumns(String content) {
-        if (content == null) {
-            return new String[]{"", ""};
-        }
-        int pivot = -1;
-        for (int i = 2; i < content.length() - 2; i++) {
-            if (content.charAt(i) == ' ' && content.charAt(i - 1) == ' ' && content.charAt(i + 1) == ' ') {
-                pivot = i;
-                break;
-            }
-        }
-        if (pivot < 0) {
-            return new String[]{content.trim(), ""};
-        }
-        String left = content.substring(0, pivot).trim();
-        String right = content.substring(pivot).trim();
-        return new String[]{left, right};
-    }
-
-    private String escapeHtml(String value) {
-        return HudRenderSupport.escapeHtml(value);
     }
 
     private void refreshDebugInfoOverlay() {
