@@ -176,6 +176,114 @@ public final class RuntimeHudComputation {
                 : daemonLastError;
     }
 
+    public static String formatCompactHudLine(
+            double targetFps,
+            double presentFps,
+            double e2eP95,
+            double decodeP95,
+            double renderP95,
+            int qT,
+            int qD,
+            int qR
+    ) {
+        return String.format(
+                Locale.US,
+                "hud fps %.0f/%.1f | e2e %.1fms | dec %.1fms | ren %.1fms | q %d/%d/%d",
+                targetFps,
+                presentFps,
+                e2eP95,
+                decodeP95,
+                renderP95,
+                qT,
+                qD,
+                qR
+        );
+    }
+
+    public static String formatHighPressureLog(
+            PressureState pressureState,
+            double decodeP95,
+            double renderP95,
+            int qT,
+            int qD,
+            int qR,
+            int qTMax,
+            int qDMax,
+            int qRMax,
+            double presentFps,
+            long streamUptimeSec
+    ) {
+        return "HUD RED warmingUp=" + pressureState.warmingUp + " hp=" + pressureState.reason
+                + " dec_p95=" + String.format(Locale.US, "%.2f", decodeP95)
+                + " ren_p95=" + String.format(Locale.US, "%.2f", renderP95)
+                + " qT=" + qT + "/" + qTMax
+                + " qD=" + qD + "/" + qDMax
+                + " qR=" + qR + "/" + qRMax
+                + " fps_present=" + String.format(Locale.US, "%.1f", presentFps)
+                + " stream_up=" + streamUptimeSec + "s";
+    }
+
+    public static String buildRuntimeDebugSnapshot(
+            String daemonStateUi,
+            long daemonRunId,
+            long daemonUptimeSec,
+            long streamUptimeSec,
+            long frameInHost,
+            long frameOutHost,
+            double targetFps,
+            double presentFps,
+            double frametimeP95,
+            double decodeP95,
+            double renderP95,
+            double e2eP95,
+            int qT,
+            int qD,
+            int qR,
+            int qTMax,
+            int qDMax,
+            int qRMax,
+            int adaptiveLevel,
+            String adaptiveAction,
+            long drops,
+            long bpHigh,
+            long bpRecover,
+            PressureState pressureState,
+            String reason,
+            String daemonLastError
+    ) {
+        return String.format(
+                Locale.US,
+                "state=%s run_id=%d up=%ds stream_up=%ds host_in_out=%d/%d fps_target=%.0f fps_present=%.1f frame_p95=%.2f dec_p95=%.2f ren_p95=%.2f e2e_p95=%.2f q=%d/%d/%d qmax=%d/%d/%d adapt=L%d:%s drops=%d bp=%d/%d warmup=%b hp=%s reason=%s host_err=%s",
+                daemonStateUi,
+                daemonRunId,
+                daemonUptimeSec,
+                streamUptimeSec,
+                frameInHost,
+                frameOutHost,
+                targetFps,
+                presentFps,
+                frametimeP95,
+                decodeP95,
+                renderP95,
+                e2eP95,
+                qT,
+                qD,
+                qR,
+                qTMax,
+                qDMax,
+                qRMax,
+                adaptiveLevel,
+                adaptiveAction,
+                drops,
+                bpHigh,
+                bpRecover,
+                pressureState.warmingUp,
+                pressureState.reason,
+                reason.isEmpty() ? "-" : reason,
+                compactHostError(daemonLastError, 44)
+        );
+    }
+
     private static void appendPressureSegment(StringBuilder sb, String segment) {
         if (sb.length() > 0) {
             sb.append(',');
