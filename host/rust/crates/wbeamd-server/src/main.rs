@@ -11,8 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use axum::extract::{Path as AxPath, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::IntoResponse;
-use axum::routing::{get, post};
-use axum::{Json, Router};
+use axum::Json;
 use clap::Parser;
 use serde::Deserialize;
 use serde::Serialize;
@@ -22,6 +21,10 @@ use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 use wbeamd_api::{ClientHelloRequest, ClientMetricsRequest, ConfigPatch, ErrorResponse};
 use wbeamd_core::{CoreError, DaemonCore};
+
+mod server;
+use server::kscreen_layout;
+use server::routes::build_router;
 
 #[derive(Debug, Parser)]
 #[command(name = "wbeamd-rust", about = "WBeam host daemon in Rust")]
@@ -551,18 +554,6 @@ impl SessionRegistry {
     }
 }
 
-#[derive(Debug, Clone)]
-struct KscreenOutput {
-    name: String,
-    enabled: bool,
-    connected: bool,
-    replication_source: i64,
-    x: i32,
-    y: i32,
-    width: i32,
-    height: i32,
-}
-
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
@@ -616,77 +607,7 @@ async fn main() {
     let trainer = Arc::new(TrainerState::new(root.clone(), args.control_port));
     let app_state = AppState { sessions, trainer };
 
-    let app = Router::new()
-        .route("/status", get(get_status))
-        .route("/host-probe", get(get_host_probe))
-        .route("/health", get(get_health))
-        .route("/presets", get(get_presets))
-        .route("/metrics", get(get_metrics))
-        .route("/speedtest", get(get_speedtest))
-        .route("/virtual/probe", get(get_virtual_probe))
-        .route("/virtual/doctor", get(get_virtual_doctor))
-        .route("/start", post(post_start))
-        .route("/stop", post(post_stop))
-        .route("/apply", post(post_apply))
-        .route("/client-metrics", post(post_client_metrics))
-        .route("/client-hello", post(post_client_hello))
-        .route("/trainer/preflight", post(post_trainer_preflight))
-        .route("/trainer/start", post(post_trainer_start))
-        .route("/trainer/stop", post(post_trainer_stop))
-        .route("/trainer/runs", get(get_trainer_runs))
-        .route("/trainer/runs/{run_id}", get(get_trainer_run))
-        .route("/trainer/runs/{run_id}/tail", get(get_trainer_run_tail))
-        .route("/trainer/profiles", get(get_trainer_profiles))
-        .route("/trainer/profiles/{profile_name}", get(get_trainer_profile))
-        .route("/trainer/datasets", get(get_trainer_datasets))
-        .route("/trainer/datasets/{run_id}", get(get_trainer_dataset))
-        .route(
-            "/trainer/datasets/{run_id}/find-optimal",
-            post(post_trainer_dataset_find_optimal),
-        )
-        .route("/trainer/devices", get(get_trainer_devices))
-        .route("/trainer/diagnostics", get(get_trainer_diagnostics))
-        .route("/trainer/live/status", get(get_trainer_live_status))
-        .route("/trainer/live/start", post(post_trainer_live_start))
-        .route("/trainer/live/apply", post(post_trainer_live_apply))
-        .route("/trainer/live/save-profile", post(post_trainer_live_save_profile))
-        .route("/v1/status", get(get_status))
-        .route("/v1/host-probe", get(get_host_probe))
-        .route("/v1/health", get(get_health))
-        .route("/v1/presets", get(get_presets))
-        .route("/v1/metrics", get(get_metrics))
-        .route("/v1/speedtest", get(get_speedtest))
-        .route("/v1/virtual/probe", get(get_virtual_probe))
-        .route("/v1/virtual/doctor", get(get_virtual_doctor))
-        .route("/v1/start", post(post_start))
-        .route("/v1/stop", post(post_stop))
-        .route("/v1/apply", post(post_apply))
-        .route("/v1/client-metrics", post(post_client_metrics))
-        .route("/v1/client-hello", post(post_client_hello))
-        .route("/v1/trainer/preflight", post(post_trainer_preflight))
-        .route("/v1/trainer/start", post(post_trainer_start))
-        .route("/v1/trainer/stop", post(post_trainer_stop))
-        .route("/v1/trainer/runs", get(get_trainer_runs))
-        .route("/v1/trainer/runs/{run_id}", get(get_trainer_run))
-        .route("/v1/trainer/runs/{run_id}/tail", get(get_trainer_run_tail))
-        .route("/v1/trainer/profiles", get(get_trainer_profiles))
-        .route(
-            "/v1/trainer/profiles/{profile_name}",
-            get(get_trainer_profile),
-        )
-        .route("/v1/trainer/datasets", get(get_trainer_datasets))
-        .route("/v1/trainer/datasets/{run_id}", get(get_trainer_dataset))
-        .route(
-            "/v1/trainer/datasets/{run_id}/find-optimal",
-            post(post_trainer_dataset_find_optimal),
-        )
-        .route("/v1/trainer/devices", get(get_trainer_devices))
-        .route("/v1/trainer/diagnostics", get(get_trainer_diagnostics))
-        .route("/v1/trainer/live/status", get(get_trainer_live_status))
-        .route("/v1/trainer/live/start", post(post_trainer_live_start))
-        .route("/v1/trainer/live/apply", post(post_trainer_live_apply))
-        .route("/v1/trainer/live/save-profile", post(post_trainer_live_save_profile))
-        .with_state(app_state.clone());
+    let app = build_router(app_state.clone());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], args.control_port));
     let listener = match tokio::net::TcpListener::bind(addr).await {
@@ -872,7 +793,7 @@ async fn post_start(
     let host_probe = core.host_probe().await;
     let is_wayland_portal = host_probe.capture_mode == "wayland_portal";
     let pre_enabled_outputs = if is_wayland_portal {
-        kscreen_enabled_output_names().ok()
+        kscreen_layout::kscreen_enabled_output_names().ok()
     } else {
         None
     };
@@ -2057,14 +1978,14 @@ async fn auto_layout_wayland_portal_outputs(
     if !wayland_portal_auto_layout_enabled() {
         return Ok(());
     }
-    if !command_exists("kscreen-doctor") {
+    if !kscreen_layout::command_exists("kscreen-doctor") {
         return Ok(());
     }
 
-    let outputs = kscreen_query_outputs()?;
+    let outputs = kscreen_layout::kscreen_query_outputs()?;
     let enabled_now: HashSet<String> = outputs
         .iter()
-        .filter(|o| output_ready_for_layout(o))
+        .filter(|o| kscreen_layout::output_ready_for_layout(o))
         .map(|o| o.name.clone())
         .collect();
 
@@ -2076,7 +1997,7 @@ async fn auto_layout_wayland_portal_outputs(
                 new_names.sort();
                 if let Some(chosen) = new_names
                     .iter()
-                    .find(|name| output_name_looks_virtual(name))
+                    .find(|name| kscreen_layout::output_name_looks_virtual(name))
                     .or_else(|| new_names.first())
                 {
                     sessions
@@ -2084,7 +2005,7 @@ async fn auto_layout_wayland_portal_outputs(
                         .await;
                     info!(
                         serial = serial_trimmed,
-                        output = chosen.as_str(),
+                        output = chosen,
                         "wayland portal output mapped for serial"
                     );
                 }
@@ -2093,15 +2014,15 @@ async fn auto_layout_wayland_portal_outputs(
     }
 
     let mapped = sessions.mapped_wayland_output_names().await;
-    let mut commands = build_non_overlapping_layout_commands(&outputs, Some(&mapped));
+    let mut commands = kscreen_layout::build_non_overlapping_layout_commands(&outputs, Some(&mapped));
     if commands.is_empty() {
-        commands = build_non_overlapping_layout_commands(&outputs, None);
+        commands = kscreen_layout::build_non_overlapping_layout_commands(&outputs, None);
     }
     if commands.is_empty() {
         return Ok(());
     }
 
-    apply_kscreen_layout(&commands)?;
+    kscreen_layout::apply_kscreen_layout(&commands)?;
     info!(commands = ?commands, "applied wayland portal non-overlap layout");
     Ok(())
 }
@@ -2112,203 +2033,6 @@ fn wayland_portal_auto_layout_enabled() -> bool {
         raw.trim().to_ascii_lowercase().as_str(),
         "0" | "false" | "no" | "off"
     )
-}
-
-fn command_exists(name: &str) -> bool {
-    Command::new("sh")
-        .args(["-c", &format!("command -v {name} >/dev/null 2>&1")])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
-fn kscreen_enabled_output_names() -> Result<HashSet<String>, String> {
-    let outputs = kscreen_query_outputs()?;
-    Ok(outputs
-        .into_iter()
-        .filter(output_ready_for_layout)
-        .map(|o| o.name)
-        .collect())
-}
-
-fn kscreen_query_outputs() -> Result<Vec<KscreenOutput>, String> {
-    let output = Command::new("kscreen-doctor")
-        .arg("-j")
-        .output()
-        .map_err(|e| format!("failed to execute kscreen-doctor -j: {e}"))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(if stderr.is_empty() {
-            format!("kscreen-doctor -j failed with status {}", output.status)
-        } else {
-            format!("kscreen-doctor -j failed: {stderr}")
-        });
-    }
-    let root: Value = serde_json::from_slice(&output.stdout)
-        .map_err(|e| format!("failed to parse kscreen-doctor json: {e}"))?;
-    let Some(outputs) = root.get("outputs").and_then(|v| v.as_array()) else {
-        return Ok(Vec::new());
-    };
-
-    let mut parsed = Vec::new();
-    for item in outputs {
-        let Some(name) = item.get("name").and_then(|v| v.as_str()) else {
-            continue;
-        };
-        let x = item
-            .get("pos")
-            .and_then(|v| v.get("x"))
-            .and_then(|v| v.as_i64())
-            .and_then(|v| i32::try_from(v).ok())
-            .unwrap_or(0);
-        let y = item
-            .get("pos")
-            .and_then(|v| v.get("y"))
-            .and_then(|v| v.as_i64())
-            .and_then(|v| i32::try_from(v).ok())
-            .unwrap_or(0);
-        let width = item
-            .get("size")
-            .and_then(|v| v.get("width"))
-            .and_then(|v| v.as_i64())
-            .and_then(|v| i32::try_from(v).ok())
-            .unwrap_or(-1);
-        let height = item
-            .get("size")
-            .and_then(|v| v.get("height"))
-            .and_then(|v| v.as_i64())
-            .and_then(|v| i32::try_from(v).ok())
-            .unwrap_or(-1);
-        let replication_source = item
-            .get("replicationSource")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
-        parsed.push(KscreenOutput {
-            name: name.to_string(),
-            enabled: item
-                .get("enabled")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false),
-            connected: item
-                .get("connected")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false),
-            replication_source,
-            x,
-            y,
-            width,
-            height,
-        });
-    }
-    Ok(parsed)
-}
-
-fn output_ready_for_layout(output: &KscreenOutput) -> bool {
-    output.enabled
-        && output.connected
-        && output.replication_source == 0
-        && output.width > 0
-        && output.height > 0
-}
-
-fn output_name_looks_virtual(name: &str) -> bool {
-    let low = name.to_ascii_lowercase();
-    low.contains("virtual")
-        || low.contains("wbeam")
-        || low.contains("headless")
-        || low.contains("dummy")
-        || low.contains("evdi")
-        || low.starts_with("dvi-")
-}
-
-fn build_non_overlapping_layout_commands(
-    outputs: &[KscreenOutput],
-    mapped: Option<&HashSet<String>>,
-) -> Vec<String> {
-    let managed = outputs
-        .iter()
-        .filter(|o| output_ready_for_layout(o))
-        .filter(|o| {
-            if let Some(names) = mapped {
-                if !names.is_empty() {
-                    return names.contains(&o.name);
-                }
-            }
-            output_name_looks_virtual(&o.name)
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    if managed.len() < 2 {
-        return Vec::new();
-    }
-    if !has_overlap(&managed) {
-        return Vec::new();
-    }
-
-    let managed_names: HashSet<String> = managed.iter().map(|o| o.name.clone()).collect();
-    let mut anchor_x = outputs
-        .iter()
-        .filter(|o| output_ready_for_layout(o))
-        .filter(|o| !managed_names.contains(&o.name))
-        .map(|o| o.x.saturating_add(o.width.max(320)))
-        .max()
-        .unwrap_or(0);
-    if anchor_x < 0 {
-        anchor_x = 0;
-    }
-
-    let mut ordered = managed;
-    ordered.sort_by(|a, b| {
-        a.x.cmp(&b.x)
-            .then_with(|| a.y.cmp(&b.y))
-            .then_with(|| a.name.cmp(&b.name))
-    });
-
-    let mut commands = Vec::new();
-    let mut x = anchor_x;
-    for output in ordered {
-        commands.push(format!("output.{}.position.{},{}", output.name, x, 0));
-        x = x.saturating_add(output.width.max(320));
-    }
-    commands
-}
-
-fn has_overlap(outputs: &[KscreenOutput]) -> bool {
-    for (idx, left) in outputs.iter().enumerate() {
-        for right in outputs.iter().skip(idx + 1) {
-            if rects_overlap(left, right) {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-fn rects_overlap(a: &KscreenOutput, b: &KscreenOutput) -> bool {
-    let aw = a.width.max(1);
-    let ah = a.height.max(1);
-    let bw = b.width.max(1);
-    let bh = b.height.max(1);
-    let ax2 = a.x.saturating_add(aw);
-    let ay2 = a.y.saturating_add(ah);
-    let bx2 = b.x.saturating_add(bw);
-    let by2 = b.y.saturating_add(bh);
-    a.x < bx2 && ax2 > b.x && a.y < by2 && ay2 > b.y
-}
-
-fn apply_kscreen_layout(commands: &[String]) -> Result<(), String> {
-    if commands.is_empty() {
-        return Ok(());
-    }
-    let status = Command::new("kscreen-doctor")
-        .args(commands)
-        .status()
-        .map_err(|e| format!("failed to execute kscreen-doctor layout: {e}"))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("kscreen-doctor layout failed with status {status}"))
-    }
 }
 
 async fn shutdown_signal() {
