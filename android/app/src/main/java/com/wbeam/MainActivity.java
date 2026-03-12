@@ -1006,23 +1006,6 @@ public class MainActivity extends AppCompatActivity {
     // Core helpers (called by callbacks and internally)
     // ══════════════════════════════════════════════════════════════════════════
 
-    private void updateDaemonStateFromJson(JSONObject status) {
-        if (status == null) {
-            return;
-        }
-        applyDaemonStatusSnapshot(
-                true,
-                status.optString("host_name", daemonHostName),
-                status.optString("state", "IDLE").toUpperCase(Locale.US),
-                status.optString("last_error", daemonLastError),
-                status.optLong("run_id", daemonRunId),
-                status.optLong("uptime", daemonUptimeSec),
-                daemonService,
-                daemonBuildRevision
-        );
-        refreshUiAfterDaemonStateChange();
-    }
-
     private void ensureDecoderRunning() {
         if (surface == null || !surface.isValid()) {
             return;
@@ -1033,28 +1016,39 @@ public class MainActivity extends AppCompatActivity {
         startLiveView();
     }
 
-    private JSONObject buildConfigPayload() {
-        return SettingsPayloadBuilder.buildPayload(
-                getSelectedProfile(),
-                getSelectedEncoder(),
-                getSelectedCursorMode(),
-                effectiveStreamConfig(),
-                intraOnlyEnabled,
-                isLegacyAndroidDevice()
-        );
-    }
-
     private SessionUiBridge buildSessionUiBridge() {
         return new SessionUiBridge(
                 this,
                 statusPoller,
                 this::updateStatus,
-                this::updateDaemonStateFromJson,
+                status -> {
+                    if (status == null) {
+                        return;
+                    }
+                    applyDaemonStatusSnapshot(
+                            true,
+                            status.optString("host_name", daemonHostName),
+                            status.optString("state", "IDLE").toUpperCase(Locale.US),
+                            status.optString("last_error", daemonLastError),
+                            status.optLong("run_id", daemonRunId),
+                            status.optLong("uptime", daemonUptimeSec),
+                            daemonService,
+                            daemonBuildRevision
+                    );
+                    refreshUiAfterDaemonStateChange();
+                },
                 this::ensureDecoderRunning,
                 this::stopLiveView,
                 this::appendLiveLogWarn,
                 this::handleApiFailure,
-                this::buildConfigPayload
+                () -> SettingsPayloadBuilder.buildPayload(
+                        getSelectedProfile(),
+                        getSelectedEncoder(),
+                        getSelectedCursorMode(),
+                        effectiveStreamConfig(),
+                        intraOnlyEnabled,
+                        isLegacyAndroidDevice()
+                )
         );
     }
 
