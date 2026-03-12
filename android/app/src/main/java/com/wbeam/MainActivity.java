@@ -13,10 +13,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
-import android.text.SpannableStringBuilder;
-import android.text.Spanned;
 import android.text.method.ScrollingMovementMethod;
-import android.text.style.ForegroundColorSpan;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -24,7 +21,6 @@ import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
-import android.view.WindowManager;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
@@ -38,31 +34,43 @@ import android.webkit.WebView;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
-import androidx.core.view.WindowCompat;
-import androidx.core.view.WindowInsetsCompat;
-import androidx.core.view.WindowInsetsControllerCompat;
 
 import com.wbeam.api.HostApiClient;
 import com.wbeam.api.StatusListener;
 import com.wbeam.api.StatusPoller;
+import com.wbeam.hud.HudRenderSupport;
+import com.wbeam.hud.MetricSeriesBuffer;
+import com.wbeam.hud.TrainerProgressParser;
+import com.wbeam.input.CursorOverlayController;
+import com.wbeam.input.ImmersiveModeController;
+import com.wbeam.startup.PreflightStateMachine;
+import com.wbeam.startup.StartupOverlayModelBuilder;
+import com.wbeam.startup.StartupOverlayController;
+import com.wbeam.startup.StartupStepStyler;
+import com.wbeam.startup.TransportProbeCoordinator;
 import com.wbeam.stream.H264TcpPlayer;
 import com.wbeam.stream.VideoTestController;
 import com.wbeam.stream.StreamSessionController;
 import com.wbeam.telemetry.ClientMetricsReporter;
+import com.wbeam.ui.ErrorTextUtil;
+import com.wbeam.ui.IntraOnlyButtonController;
+import com.wbeam.ui.LiveLogBuffer;
+import com.wbeam.ui.SettingsPayloadBuilder;
+import com.wbeam.ui.SettingsPanelController;
+import com.wbeam.ui.SettingsUiSupport;
+import com.wbeam.ui.SimpleMenuUi;
+import com.wbeam.ui.StatusTextFormatter;
+import com.wbeam.ui.StreamConfigResolver;
 import com.wbeam.widget.FpsLossGraphView;
 
-import org.json.JSONException;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedInputStream;
 import java.io.IOException;
-import java.util.ArrayDeque;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import okhttp3.Request;
 import okhttp3.Response;
@@ -81,8 +89,6 @@ public class MainActivity extends AppCompatActivity {
     private static final int DECODE_QUEUE_MAX_FRAMES = 2;
     private static final int RENDER_QUEUE_MAX_FRAMES = 1;
     private static final int BANDWIDTH_TEST_MB = 64;
-    private static final Pattern TRAINER_TRIAL_PROGRESS_RE =
-            Pattern.compile("TRIAL\\s+[^\\[]*\\[(\\d+)/(\\d+)]");
     private static final String TEST_VIDEO_URL =
             "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4";
 
@@ -221,12 +227,9 @@ public class MainActivity extends AppCompatActivity {
 
     // ── UI state ───────────────────────────────────────────────────────────────
     private boolean intraOnlyEnabled = false;
-    private boolean settingsVisible = false;
     private boolean simpleMenuVisible = false;
     private String simpleMode = PREFERRED_VIDEO;
     private int simpleFps = 60;
-    private boolean isFullscreen = false;
-    private boolean cursorOverlayEnabled = true;
     private boolean debugControlsVisible = false;
     private boolean debugOverlayVisible = false;
     private boolean trainerHudSessionActive = false;
@@ -236,12 +239,6 @@ public class MainActivity extends AppCompatActivity {
     private boolean liveLogVisible = false;
     private long lastHudAdbLogAt = 0L;
     private String lastHudAdbSnapshot = "";
-    // startup step state constants
-    private static final int SS_PENDING = 0;
-    private static final int SS_ACTIVE  = 1;
-    private static final int SS_OK      = 2;
-    private static final int SS_ERROR   = 3;
-
     private boolean surfaceReady = false;
     private boolean preflightComplete = false;
     private int preflightAnimTick = 0;
@@ -249,11 +246,6 @@ public class MainActivity extends AppCompatActivity {
     private boolean startupDismissed = false;
     private boolean handshakeResolved = false;
     private int controlRetryCount = 0;
-    private boolean transportProbeOk = false;
-    private boolean transportProbeInFlight = false;
-    private long transportProbeLastAtMs = 0L;
-    private long transportProbeRetryAfterMs = 0L;
-    private String transportProbeInfo = "not started";
     private boolean hwAvcDecodeAvailable = false;
     private String lastUiState = STATE_IDLE;
     private String lastUiInfo = "tap Settings -> Start Live";
@@ -272,20 +264,20 @@ public class MainActivity extends AppCompatActivity {
     private double latestStablePresentFps = 0.0;
     private long latestStablePresentFpsAtMs = 0L;
     private long lastPerfMetricsAtMs = 0L;
-    private final SpannableStringBuilder liveLogBuffer = new SpannableStringBuilder();
+    private final LiveLogBuffer liveLogBuffer = new LiveLogBuffer(LIVE_LOG_MAX_LINES);
     private long usageSampleLastRealtimeMs = 0L;
     private long usageSampleLastCpuMs = 0L;
     private double usageCpuPct = 0.0;
     private double usageMemMb = 0.0;
     private double usageGpuPct = 0.0;
-    private final ArrayDeque<Double> usageCpuSeries = new ArrayDeque<>();
-    private final ArrayDeque<Double> usageMemSeries = new ArrayDeque<>();
-    private final ArrayDeque<Double> usageGpuSeries = new ArrayDeque<>();
-    private final ArrayDeque<Double> runtimePresentSeries = new ArrayDeque<>();
-    private final ArrayDeque<Double> runtimeMbpsSeries = new ArrayDeque<>();
-    private final ArrayDeque<Double> runtimeDropSeries = new ArrayDeque<>();
-    private final ArrayDeque<Double> runtimeLatencySeries = new ArrayDeque<>();
-    private final ArrayDeque<Double> runtimeQueueSeries = new ArrayDeque<>();
+    private final MetricSeriesBuffer usageCpuSeries = new MetricSeriesBuffer(HUD_RESOURCE_SERIES_MAX);
+    private final MetricSeriesBuffer usageMemSeries = new MetricSeriesBuffer(HUD_RESOURCE_SERIES_MAX);
+    private final MetricSeriesBuffer usageGpuSeries = new MetricSeriesBuffer(HUD_RESOURCE_SERIES_MAX);
+    private final MetricSeriesBuffer runtimePresentSeries = new MetricSeriesBuffer(HUD_RESOURCE_SERIES_MAX);
+    private final MetricSeriesBuffer runtimeMbpsSeries = new MetricSeriesBuffer(HUD_RESOURCE_SERIES_MAX);
+    private final MetricSeriesBuffer runtimeDropSeries = new MetricSeriesBuffer(HUD_RESOURCE_SERIES_MAX);
+    private final MetricSeriesBuffer runtimeLatencySeries = new MetricSeriesBuffer(HUD_RESOURCE_SERIES_MAX);
+    private final MetricSeriesBuffer runtimeQueueSeries = new MetricSeriesBuffer(HUD_RESOURCE_SERIES_MAX);
     private long runtimeDropPrevCount = -1L;
     private long runtimeDropPrevAtMs = 0L;
 
@@ -307,19 +299,16 @@ public class MainActivity extends AppCompatActivity {
     private StreamSessionController sessionController;
     private ClientMetricsReporter metricsReporter;
     private VideoTestController videoTestController;
+    private final TransportProbeCoordinator transportProbe = new TransportProbeCoordinator();
+    private StartupOverlayController startupOverlayController;
+    private CursorOverlayController cursorOverlayController;
+    private ImmersiveModeController immersiveModeController;
+    private SettingsPanelController settingsPanelController;
 
     // ── Media ──────────────────────────────────────────────────────────────────
     private Surface surface;
     private H264TcpPlayer player;
     // ── Runnables ──────────────────────────────────────────────────────────────
-    private final Runnable preflightPulseTask = new Runnable() {
-        @Override
-        public void run() {
-            preflightAnimTick = (preflightAnimTick + 1) % 4;
-            updatePreflightOverlay();
-            uiHandler.postDelayed(this, 400);
-        }
-    };
     private final Runnable simpleMenuAutoHideTask = this::hideSimpleMenu;
     private final Runnable debugInfoFadeTask = () -> {
         if (debugInfoPanel != null) {
@@ -359,9 +348,9 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        setScreenAlwaysOn(true);
 
         bindViews();
+        setScreenAlwaysOn(true);
         bindStartupBuildVersion();
         setupSpinners();
         setupSeekbars();
@@ -475,10 +464,7 @@ public class MainActivity extends AppCompatActivity {
                 daemonState = "DISCONNECTED";
                 stopLiveView();
                 handshakeResolved = false;
-                transportProbeOk = false;
-                transportProbeInFlight = false;
-                transportProbeRetryAfterMs = 0L;
-                transportProbeInfo = "waiting for control link";
+                transportProbe.markWaitingForControlLink();
                 updateActionButtonsEnabled();
                 updateHostHint();
                 updatePerfHudUnavailable();
@@ -491,11 +477,11 @@ public class MainActivity extends AppCompatActivity {
                 }
                 updatePreflightOverlay();
                 if (wasReachable) {
-                    updateStatus(STATE_ERROR, "Host API offline: " + shortError(e), 0);
-                    appendLiveLogError("daemon poll failed: " + shortError(e)
+                    updateStatus(STATE_ERROR, "Host API offline: " + ErrorTextUtil.shortError(e), 0);
+                    appendLiveLogError("daemon poll failed: " + ErrorTextUtil.shortError(e)
                             + " | api=" + HostApiClient.API_BASE);
                     Toast.makeText(MainActivity.this,
-                            "Host API unreachable (" + shortError(e) + "). Check USB tethering/LAN and host IP: " + HostApiClient.API_BASE,
+                            "Host API unreachable (" + ErrorTextUtil.shortError(e) + "). Check USB tethering/LAN and host IP: " + HostApiClient.API_BASE,
                             Toast.LENGTH_LONG).show();
                 } else {
                     refreshStatusText();
@@ -629,7 +615,7 @@ public class MainActivity extends AppCompatActivity {
             hideSimpleMenu();
             return;
         }
-        if (settingsVisible) {
+        if (settingsPanelController != null && settingsPanelController.isVisible()) {
             hideSettingsPanel();
             return;
         }
@@ -682,9 +668,11 @@ public class MainActivity extends AppCompatActivity {
 
     private void bindViews() {
         rootLayout = findViewById(R.id.rootLayout);
+        immersiveModeController = new ImmersiveModeController(this, rootLayout);
         topBar = findViewById(R.id.topBar);
         quickActionRow = findViewById(R.id.quickActionRow);
         settingsPanel = findViewById(R.id.settingsPanel);
+        settingsPanelController = new SettingsPanelController(settingsPanel);
         simpleMenuPanel = findViewById(R.id.simpleMenuPanel);
         statusPanel = findViewById(R.id.statusPanel);
         perfHudPanel = findViewById(R.id.perfHudPanel);
@@ -724,6 +712,12 @@ public class MainActivity extends AppCompatActivity {
         if (startupInfoText != null) {
             startupInfoText.setMovementMethod(new ScrollingMovementMethod());
         }
+        startupOverlayController = new StartupOverlayController(uiHandler, preflightOverlay);
+        startupOverlayController.setTickListener(animTick -> {
+            preflightAnimTick = animTick;
+            updatePreflightOverlay();
+        });
+        cursorOverlayController = new CursorOverlayController(cursorOverlay, cursorOverlayButton);
         liveLogText = findViewById(R.id.liveLogText);
 
         resValueText = findViewById(R.id.resValueText);
@@ -923,7 +917,7 @@ public class MainActivity extends AppCompatActivity {
         });
 
         preview.setOnTouchListener((v, event) -> {
-            if (!cursorOverlayEnabled) {
+            if (cursorOverlayController == null || !cursorOverlayController.isOverlayEnabled()) {
                 return false;
             }
             updateCursorOverlay(event.getX(), event.getY(), event.getActionMasked());
@@ -931,7 +925,7 @@ public class MainActivity extends AppCompatActivity {
         });
 
         preview.setOnGenericMotionListener((v, event) -> {
-            if (!cursorOverlayEnabled) {
+            if (cursorOverlayController == null || !cursorOverlayController.isOverlayEnabled()) {
                 return false;
             }
             if (event.getActionMasked() == MotionEvent.ACTION_HOVER_MOVE ||
@@ -1069,13 +1063,15 @@ public class MainActivity extends AppCompatActivity {
     // ══════════════════════════════════════════════════════════════════════════
 
     private void loadSavedSettings() {
-        setSpinnerSelection(profileSpinner, PROFILE_OPTIONS, DEFAULT_PROFILE);
-        setSpinnerSelection(encoderSpinner, ENCODER_OPTIONS, PREFERRED_VIDEO);
-        setSpinnerSelection(cursorSpinner, CURSOR_OPTIONS, DEFAULT_CURSOR_MODE);
+        SettingsUiSupport.setSpinnerSelection(profileSpinner, PROFILE_OPTIONS, DEFAULT_PROFILE);
+        SettingsUiSupport.setSpinnerSelection(encoderSpinner, ENCODER_OPTIONS, PREFERRED_VIDEO);
+        SettingsUiSupport.setSpinnerSelection(cursorSpinner, CURSOR_OPTIONS, DEFAULT_CURSOR_MODE);
         resolutionSeek.setProgress(clamp(DEFAULT_RES_SCALE, 50, 100) - 50);
         fpsSeek.setProgress(clamp(DEFAULT_FPS, 24, 144) - 24);
         bitrateSeek.setProgress(clamp(DEFAULT_BITRATE_MBPS, 5, 300) - 5);
-        cursorOverlayEnabled = true;
+        if (cursorOverlayController != null) {
+            cursorOverlayController.resetEnabledDefault();
+        }
         enforceCursorOverlayPolicy(false);
         intraOnlyEnabled = false;
         updateIntraOnlyButton();
@@ -1096,47 +1092,38 @@ public class MainActivity extends AppCompatActivity {
         int bitrate = getSelectedBitrateMbps();
         int[] sz = computeScaledSize();
 
-        resValueText.setText(scale + "% (" + sz[0] + "x" + sz[1] + ")");
-        fpsValueText.setText(String.valueOf(fps));
-        bitrateValueText.setText(bitrate + " Mbps");
+        resValueText.setText(SettingsUiSupport.resolutionValueLabel(scale, sz[0], sz[1]));
+        fpsValueText.setText(SettingsUiSupport.fpsValueLabel(fps));
+        bitrateValueText.setText(SettingsUiSupport.bitrateValueLabel(bitrate));
     }
 
     private void updateIntraOnlyButton() {
-        if (intraOnlyButton == null) return;
-        String encoder = getSelectedEncoder();
-        boolean supportsIntra = "h265".equals(encoder);
-        if (!supportsIntra) {
-            intraOnlyEnabled = false;
-        }
-        intraOnlyButton.setEnabled(supportsIntra);
-        intraOnlyButton.setAlpha(supportsIntra ? 1.0f : 0.45f);
-        intraOnlyButton.setText(intraOnlyEnabled
-                ? "All-Intra: ON  \u2014 zero artifacts (HEVC only)"
-            : (supportsIntra ? "All-Intra: OFF" : "All-Intra: N/A"));
-        int buttonColor = intraOnlyEnabled ? 0xFF16A34A : 0xFF374151;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            intraOnlyButton.setBackgroundTintList(
-                    android.content.res.ColorStateList.valueOf(buttonColor));
-        } else {
-            intraOnlyButton.setBackgroundColor(buttonColor);
-        }
+        intraOnlyEnabled = IntraOnlyButtonController.apply(
+                intraOnlyButton,
+                getSelectedEncoder(),
+                intraOnlyEnabled
+        );
     }
 
     private void updateHostHint() {
-        StreamConfig cfg = effectiveStreamConfig();
-        String apiBase = HostApiClient.API_BASE;
+        StreamConfigResolver.Resolved cfg = effectiveStreamConfig();
         String daemonStateUi = effectiveDaemonState(
                 daemonState, latestPresentFps, latestStreamUptimeSec, latestFrameOutHost);
-        String line1 = "Control API " + (daemonReachable ? "connected" : "waiting")
-            + ": " + apiBase;
-        String line2 = "Host: " + daemonHostName + " | Daemon: " + daemonStateUi + " (" + daemonService + ")";
-        String line3 = "Outgoing config: " + getSelectedProfile()
-                + ", " + cfg.width + "x" + cfg.height
-                + ", " + cfg.fps + "fps, "
-                + cfg.bitrateMbps + "Mbps, "
-                + getSelectedEncoder() + (intraOnlyEnabled ? "+intra" : "")
-                + ", cursor " + getSelectedCursorMode();
-        hostHintText.setText(line1 + "\n" + line2 + "\n" + line3);
+        hostHintText.setText(StatusTextFormatter.buildHostHintText(
+                daemonReachable,
+                HostApiClient.API_BASE,
+                daemonHostName,
+                daemonStateUi,
+                daemonService,
+                getSelectedProfile(),
+                cfg.width,
+                cfg.height,
+                cfg.fps,
+                cfg.bitrateMbps,
+                getSelectedEncoder(),
+                intraOnlyEnabled,
+                getSelectedCursorMode()
+        ));
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -1168,32 +1155,18 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private JSONObject buildConfigPayload() {
-        StreamConfig cfg = effectiveStreamConfig();
-        JSONObject payload = new JSONObject();
-        try {
-            String uiEncoder = getSelectedEncoder();
-            // "raw-png" (UI label) → "rawpng" (API name); "h264"/"h265" pass through as-is.
-            String encoder = "raw-png".equals(uiEncoder) ? "rawpng" : uiEncoder;
-            if (isLegacyAndroidDevice() && !"rawpng".equals(encoder)) {
-                // API17-era decoders are unstable with modern presets/codecs.
-                encoder = "h264";
-            }
-            boolean intraOnly = "h265".equals(encoder) && intraOnlyEnabled;
-            payload.put("profile", getSelectedProfile());
-            payload.put("encoder", encoder);
-            payload.put("cursor_mode", getSelectedCursorMode());
-            payload.put("size", cfg.width + "x" + cfg.height);
-            payload.put("fps", cfg.fps);
-            payload.put("bitrate_kbps", cfg.bitrateMbps * 1000);
-            payload.put("debug_fps", 0);
-            payload.put("intra_only", intraOnly);
-        } catch (JSONException ignored) {
-        }
-        return payload;
+        return SettingsPayloadBuilder.buildPayload(
+                getSelectedProfile(),
+                getSelectedEncoder(),
+                getSelectedCursorMode(),
+                effectiveStreamConfig(),
+                intraOnlyEnabled,
+                isLegacyAndroidDevice()
+        );
     }
 
     private void handleApiFailure(String prefix, boolean userAction, Exception e) {
-        String reason = shortError(e);
+        String reason = ErrorTextUtil.shortError(e);
         updateStatus(STATE_ERROR, prefix + ": " + reason, 0);
         appendLiveLogError(prefix + ": " + reason);
         Log.e(TAG, prefix + ": " + reason, e);
@@ -1232,34 +1205,6 @@ public class MainActivity extends AppCompatActivity {
         sessionController.requestStart(userAction, ensureViewer);
     }
 
-    private String shortError(Exception e) {
-        String msg = e.getMessage();
-        if (msg != null) {
-            msg = msg.trim();
-            if (!msg.isEmpty()) {
-                if (msg.length() > 120) {
-                    return msg.substring(0, 120);
-                }
-                return msg;
-            }
-        }
-        return e.getClass().getSimpleName();
-    }
-
-    private String compactDaemonErrorForUi(String raw) {
-        if (raw == null) {
-            return "";
-        }
-        String compact = raw.replace('\n', ' ').replace('\r', ' ').trim();
-        while (compact.contains("  ")) {
-            compact = compact.replace("  ", " ");
-        }
-        if (compact.length() > 120) {
-            return compact.substring(0, 120) + "...";
-        }
-        return compact;
-    }
-
     // ══════════════════════════════════════════════════════════════════════════
     // Stream / media
     // ══════════════════════════════════════════════════════════════════════════
@@ -1275,7 +1220,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        StreamConfig cfg = effectiveStreamConfig();
+        StreamConfigResolver.Resolved cfg = effectiveStreamConfig();
         long frameUs = Math.max(1L, 1_000_000L / Math.max(1, cfg.fps));
         SurfaceView preview = findViewById(R.id.previewSurface);
         Log.i(TAG, String.format(Locale.US,
@@ -1339,45 +1284,21 @@ public class MainActivity extends AppCompatActivity {
     // ══════════════════════════════════════════════════════════════════════════
 
     private void toggleSettingsPanel() {
-        if (settingsVisible) {
-            hideSettingsPanel();
-        } else {
-            showSettingsPanel();
+        if (settingsPanelController != null) {
+            settingsPanelController.toggle();
         }
     }
 
     private void showSettingsPanel() {
-        if (settingsVisible) {
-            return;
+        if (settingsPanelController != null) {
+            settingsPanelController.show();
         }
-        settingsVisible = true;
-        settingsPanel.setVisibility(View.VISIBLE);
-        settingsPanel.post(() -> {
-            settingsPanel.setTranslationY(-settingsPanel.getHeight());
-            settingsPanel.setAlpha(0f);
-            settingsPanel.animate()
-                    .translationY(0f)
-                    .alpha(1f)
-                    .setDuration(180)
-                    .start();
-        });
     }
 
     private void hideSettingsPanel() {
-        if (!settingsVisible) {
-            return;
+        if (settingsPanelController != null) {
+            settingsPanelController.hide();
         }
-        settingsVisible = false;
-        settingsPanel.animate()
-                .translationY(-settingsPanel.getHeight())
-                .alpha(0f)
-                .setDuration(160)
-                .withEndAction(() -> {
-                    settingsPanel.setVisibility(View.GONE);
-                    settingsPanel.setAlpha(1f);
-                    settingsPanel.setTranslationY(0f);
-                })
-                .start();
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -1385,69 +1306,36 @@ public class MainActivity extends AppCompatActivity {
     // ══════════════════════════════════════════════════════════════════════════
 
     private void toggleFullscreen() {
-        setFullscreen(!isFullscreen);
+        boolean current = immersiveModeController != null && immersiveModeController.isFullscreen();
+        setFullscreen(!current);
     }
 
     private void setFullscreen(boolean enable) {
-        isFullscreen = enable;
-
-        if (enable) {
-            if (topBar != null) {
-                topBar.setVisibility(View.GONE);
-            }
-            if (statusPanel != null) {
-                statusPanel.setVisibility(View.GONE);
-            }
-            hideSettingsPanel();
-            enforceImmersiveModeIfNeeded();
-            return;
-        }
-
-        if (!BuildConfig.DEBUG) {
-            if (topBar != null) {
-                topBar.setVisibility(View.VISIBLE);
-            }
-            if (statusPanel != null) {
-                statusPanel.setVisibility(View.VISIBLE);
-            }
-        }
-
-        WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
-        WindowInsetsControllerCompat controller =
-                WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
-        if (controller != null) {
-            controller.show(WindowInsetsCompat.Type.systemBars());
+        if (immersiveModeController != null) {
+            immersiveModeController.setFullscreen(
+                    enable,
+                    BuildConfig.DEBUG,
+                    topBar,
+                    statusPanel,
+                    this::hideSettingsPanel
+            );
         }
     }
 
     private void enforceImmersiveModeIfNeeded() {
-        if (!isFullscreen) {
-            return;
-        }
-        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
-        WindowInsetsControllerCompat controller =
-                WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
-        if (controller != null) {
-            controller.setSystemBarsBehavior(
-                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            );
-            controller.hide(WindowInsetsCompat.Type.systemBars());
+        if (immersiveModeController != null) {
+            immersiveModeController.enforceImmersiveModeIfNeeded();
         }
     }
 
     private void setScreenAlwaysOn(boolean enable) {
-        if (enable) {
-            getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        } else {
-            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        }
-        if (rootLayout != null) {
-            rootLayout.setKeepScreenOn(enable);
+        if (immersiveModeController != null) {
+            immersiveModeController.setScreenAlwaysOn(enable);
         }
     }
 
     private void selectSimpleFps(int fps) {
-        simpleFps = clamp(fps, 30, 144);
+        simpleFps = SimpleMenuUi.clampSimpleFps(fps);
         refreshSimpleMenuButtons();
         scheduleSimpleMenuAutoHide();
     }
@@ -1456,8 +1344,8 @@ public class MainActivity extends AppCompatActivity {
         if (simpleMenuPanel == null) {
             return;
         }
-        simpleMode = "raw-png".equals(getSelectedEncoder()) ? "raw-png" : PREFERRED_VIDEO;
-        simpleFps = clamp(getSelectedFps(), 30, 144);
+        simpleMode = SimpleMenuUi.modeFromEncoder(getSelectedEncoder(), PREFERRED_VIDEO);
+        simpleFps = SimpleMenuUi.clampSimpleFps(getSelectedFps());
         simpleMenuVisible = true;
         refreshSimpleMenuButtons();
         simpleMenuPanel.setVisibility(View.VISIBLE);
@@ -1490,10 +1378,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void applySimpleMenuToSettings() {
-        String selectedEncoder = "raw-png".equals(simpleMode) ? "raw-png" : PREFERRED_VIDEO;
-        int selectedFps = clamp(simpleFps, 30, 144);
+        String selectedEncoder = SimpleMenuUi.encoderFromMode(simpleMode, PREFERRED_VIDEO);
+        int selectedFps = SimpleMenuUi.clampSimpleFps(simpleFps);
 
-        setSpinnerSelection(encoderSpinner, ENCODER_OPTIONS, selectedEncoder);
+        SettingsUiSupport.setSpinnerSelection(encoderSpinner, ENCODER_OPTIONS, selectedEncoder);
         fpsSeek.setProgress(clamp(selectedFps, 24, 144) - 24);
 
         updateIntraOnlyButton();
@@ -1505,63 +1393,34 @@ public class MainActivity extends AppCompatActivity {
         if (simpleMenuPanel == null) {
             return;
         }
-
-        setSimpleModeSelected(simpleModeH265Button, PREFERRED_VIDEO.equals(simpleMode));
-        setSimpleModeSelected(simpleModeRawButton, "raw-png".equals(simpleMode));
-
-        setSimpleFpsSelected(simpleFps30Button, simpleFps == 30);
-        setSimpleFpsSelected(simpleFps45Button, simpleFps == 45);
-        setSimpleFpsSelected(simpleFps60Button, simpleFps == 60);
-        setSimpleFpsSelected(simpleFps90Button, simpleFps == 90);
-        setSimpleFpsSelected(simpleFps120Button, simpleFps == 120);
-        setSimpleFpsSelected(simpleFps144Button, simpleFps == 144);
-    }
-
-    private void setSimpleModeSelected(Button button, boolean selected) {
-        if (button == null) {
-            return;
-        }
-        button.setSelected(selected);
-        button.setAlpha(selected ? 1f : 0.75f);
-    }
-
-    private void setSimpleFpsSelected(Button button, boolean selected) {
-        if (button == null) {
-            return;
-        }
-        button.setSelected(selected);
-        button.setAlpha(selected ? 1f : 0.75f);
+        SimpleMenuUi.applyModeButtons(
+                simpleModeH265Button,
+                simpleModeRawButton,
+                PREFERRED_VIDEO,
+                simpleMode
+        );
+        SimpleMenuUi.applyFpsButtons(
+                simpleFps30Button,
+                simpleFps45Button,
+                simpleFps60Button,
+                simpleFps90Button,
+                simpleFps120Button,
+                simpleFps144Button,
+                simpleFps
+        );
     }
 
     private void toggleCursorOverlayMode() {
-        if (!"hidden".equals(getSelectedCursorMode())) {
-            cursorOverlayEnabled = false;
-            hideCursorOverlay();
-            enforceCursorOverlayPolicy(true);
+        if (cursorOverlayController == null) {
             return;
         }
-        cursorOverlayEnabled = !cursorOverlayEnabled;
+        cursorOverlayController.toggleForCursorMode(getSelectedCursorMode());
         enforceCursorOverlayPolicy(true);
-        if (!cursorOverlayEnabled) {
-            hideCursorOverlay();
-        }
     }
 
     private void enforceCursorOverlayPolicy(boolean persist) {
-        String cursorMode = getSelectedCursorMode();
-        boolean allowLocalOverlay = "hidden".equals(cursorMode);
-        if (!allowLocalOverlay && cursorOverlayEnabled) {
-            cursorOverlayEnabled = false;
-            hideCursorOverlay();
-        }
-        if (cursorOverlayButton != null) {
-            cursorOverlayButton.setEnabled(allowLocalOverlay);
-            cursorOverlayButton.setAlpha(allowLocalOverlay ? 1.0f : 0.45f);
-            if (allowLocalOverlay) {
-                cursorOverlayButton.setText(cursorOverlayEnabled ? "Local Cursor Overlay ON" : "Local Cursor Overlay OFF");
-            } else {
-                cursorOverlayButton.setText("Local Cursor Overlay N/A (cursor hidden required)");
-            }
+        if (cursorOverlayController != null) {
+            cursorOverlayController.applyPolicy(getSelectedCursorMode());
         }
         if (persist) {
             updateHostHint();
@@ -1569,22 +1428,14 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateCursorOverlay(float x, float y, int action) {
-        if (cursorOverlay == null || !cursorOverlayEnabled) {
-            return;
-        }
-        cursorOverlay.setX(x - (cursorOverlay.getWidth() / 2f));
-        cursorOverlay.setY(y - (cursorOverlay.getHeight() / 2f));
-        cursorOverlay.setVisibility(View.VISIBLE);
-
-        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-            cursorOverlay.removeCallbacks(this::hideCursorOverlay);
-            cursorOverlay.postDelayed(this::hideCursorOverlay, 400);
+        if (cursorOverlayController != null) {
+            cursorOverlayController.updateOverlay(x, y, action);
         }
     }
 
     private void hideCursorOverlay() {
-        if (cursorOverlay != null) {
-            cursorOverlay.setVisibility(View.GONE);
+        if (cursorOverlayController != null) {
+            cursorOverlayController.hideOverlay();
         }
     }
 
@@ -1598,7 +1449,7 @@ public class MainActivity extends AppCompatActivity {
         lastUiBps = bps;
         refreshStatusText();
         refreshDebugInfoOverlay();
-        if (STATE_ERROR.equals(lastUiState) && isCriticalUiInfo(lastUiInfo)) {
+        if (STATE_ERROR.equals(lastUiState) && ErrorTextUtil.isCriticalUiInfo(lastUiInfo)) {
             long now = SystemClock.elapsedRealtime();
             boolean same = lastUiInfo.equals(lastCriticalErrorInfo);
             boolean stale = (now - lastCriticalErrorLogAtMs) > 30_000L;
@@ -1610,18 +1461,6 @@ public class MainActivity extends AppCompatActivity {
                 Log.e(TAG, line);
             }
         }
-    }
-
-    private boolean isCriticalUiInfo(String info) {
-        if (info == null) {
-            return false;
-        }
-        String text = info.toLowerCase(Locale.US);
-        return text.contains("offline")
-                || text.contains("ioexception")
-                || text.contains("stream error")
-                || text.contains("failed")
-                || text.contains("disconnected");
     }
 
     private void appendLiveLogInfo(String line) {
@@ -1645,37 +1484,7 @@ public class MainActivity extends AppCompatActivity {
             if (liveLogText == null) {
                 return;
             }
-
-            int color = Color.parseColor("#9CA3AF");
-            if ("I".equals(level)) {
-                color = Color.parseColor("#166534");
-            } else if ("W".equals(level)) {
-                color = Color.parseColor("#F59E0B");
-            } else if ("E".equals(level)) {
-                color = Color.parseColor("#7F1D1D");
-            }
-
-            String text = "[" + level + "] " + line + "\n";
-            int start = liveLogBuffer.length();
-            liveLogBuffer.append(text);
-            liveLogBuffer.setSpan(
-                    new ForegroundColorSpan(color),
-                    start,
-                    liveLogBuffer.length(),
-                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-            );
-
-            int linesToTrim = countLines(liveLogBuffer) - LIVE_LOG_MAX_LINES;
-            while (linesToTrim > 0) {
-                int newline = liveLogBuffer.toString().indexOf('\n');
-                if (newline < 0) {
-                    break;
-                }
-                liveLogBuffer.delete(0, newline + 1);
-                linesToTrim--;
-            }
-
-            liveLogText.setText(liveLogBuffer);
+            liveLogText.setText(liveLogBuffer.append(level, line));
             liveLogText.setVisibility(liveLogVisible ? View.VISIBLE : View.GONE);
         };
 
@@ -1686,35 +1495,19 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private int countLines(CharSequence text) {
-        if (text == null || text.length() == 0) {
-            return 0;
-        }
-        int lines = 1;
-        for (int i = 0; i < text.length(); i++) {
-            if (text.charAt(i) == '\n') {
-                lines++;
-            }
-        }
-        return lines;
-    }
-
     private void refreshStatusText() {
         int color = ledColorForState(lastUiState);
-        String host = daemonHostName == null || daemonHostName.trim().isEmpty() ? "-" : daemonHostName;
         String daemonStateUi = effectiveDaemonState(
                 daemonState, latestPresentFps, latestStreamUptimeSec, latestFrameOutHost);
-        String transport = "USB:" + (daemonReachable ? "Connected" : "Disconnected")
-                + " | Host:" + host
-            + " | Stream:" + daemonStateUi;
 
         statusText.setText(lastUiState.toUpperCase(Locale.US));
-        if (lastUiInfo == null || lastUiInfo.trim().isEmpty()) {
-            detailText.setText(transport);
-        } else {
-            detailText.setText(lastUiInfo + " | " + transport);
-        }
-        bpsText.setText("throughput: " + formatBps(lastUiBps));
+        detailText.setText(StatusTextFormatter.buildTransportDetail(
+                lastUiInfo,
+                daemonReachable,
+                daemonHostName,
+                daemonStateUi
+        ));
+        bpsText.setText("throughput: " + StatusTextFormatter.formatBps(lastUiBps));
 
         if (statusLed.getBackground() instanceof GradientDrawable) {
             GradientDrawable drawable = (GradientDrawable) statusLed.getBackground().mutate();
@@ -2023,17 +1816,17 @@ public class MainActivity extends AppCompatActivity {
         if (bitrateMbps <= 0.0) {
             bitrateMbps = metrics.optLong("bitrate_actual_bps", 0L) / 1_000_000.0;
         }
-        appendSeriesSample(runtimePresentSeries, Math.max(0.0, presentFps));
-        appendSeriesSample(runtimeMbpsSeries, Math.max(0.0, bitrateMbps));
-        appendSeriesSample(runtimeDropSeries, Math.max(0.0, dropPerSec));
-        appendSeriesSample(runtimeLatencySeries, Math.max(0.0, e2eP95));
-        appendSeriesSample(runtimeQueueSeries, Math.max(0.0, qT + qD + qR));
+        runtimePresentSeries.addSample(Math.max(0.0, presentFps));
+        runtimeMbpsSeries.addSample(Math.max(0.0, bitrateMbps));
+        runtimeDropSeries.addSample(Math.max(0.0, dropPerSec));
+        runtimeLatencySeries.addSample(Math.max(0.0, e2eP95));
+        runtimeQueueSeries.addSample(Math.max(0.0, qT + qD + qR));
         String runtimeChartsHtml = buildMetricTrendRowsHtml(
-                seriesToJson(runtimePresentSeries),
-                seriesToJson(runtimeMbpsSeries),
-                seriesToJson(runtimeDropSeries),
-                seriesToJson(runtimeLatencySeries),
-                seriesToJson(runtimeQueueSeries),
+                runtimePresentSeries.toJsonFinite(),
+                runtimeMbpsSeries.toJsonFinite(),
+                runtimeDropSeries.toJsonFinite(),
+                runtimeLatencySeries.toJsonFinite(),
+                runtimeQueueSeries.toJsonFinite(),
                 runtimeStateTone,
                 runtimeStateTone,
                 runtimeStateTone,
@@ -2145,39 +1938,39 @@ public class MainActivity extends AppCompatActivity {
                     streamSize[1],
                     targetFps
             );
-            String profileRev = safeText(daemonBuildRevision).equals("-")
-                    ? safeText(BuildConfig.WBEAM_BUILD_REV)
-                    : safeText(daemonBuildRevision);
+            String profileRev = HudRenderSupport.safeText(daemonBuildRevision).equals("-")
+                    ? HudRenderSupport.safeText(BuildConfig.WBEAM_BUILD_REV)
+                    : HudRenderSupport.safeText(daemonBuildRevision);
             StringBuilder chips = new StringBuilder();
             chips.append(hudChip("CURRENT PROFILE", getSelectedProfile(), ""));
             chips.append(hudChip("PROFILE REV", profileRev, ""));
             chips.append(hudChip("STREAM MODE", streamMode, ""));
             chips.append(hudChip("DEVICE", daemonHostName, ""));
-            chips.append(hudChip("STATE", daemonStateUi, hudToneClass(tone)));
+            chips.append(hudChip("STATE", daemonStateUi, HudRenderSupport.hudToneClass(tone)));
 
             StringBuilder cards = new StringBuilder();
-            cards.append(hudCard("PRESENT FPS", String.format(Locale.US, "%.1f", presentFps), hudToneClass(tone)));
+            cards.append(hudCard("PRESENT FPS", String.format(Locale.US, "%.1f", presentFps), HudRenderSupport.hudToneClass(tone)));
             cards.append(hudCard("RECV FPS", String.format(Locale.US, "%.1f", recvFps), ""));
             cards.append(hudCard("DECODE FPS", String.format(Locale.US, "%.1f", decodeFps), ""));
-            cards.append(hudCard("LIVE MBPS", fmtDoubleOrPlaceholder(liveMbps, "%.2f", "PENDING"), hudToneClass(tone)));
-            cards.append(hudCard("E2E p95", String.format(Locale.US, "%.1f ms", e2eP95), hudToneClass(tone)));
+            cards.append(hudCard("LIVE MBPS", HudRenderSupport.fmtDoubleOrPlaceholder(liveMbps, "%.2f", "PENDING"), HudRenderSupport.hudToneClass(tone)));
+            cards.append(hudCard("E2E p95", String.format(Locale.US, "%.1f ms", e2eP95), HudRenderSupport.hudToneClass(tone)));
             cards.append(hudCard("Decode p95", String.format(Locale.US, "%.2f ms", decodeP95), ""));
             cards.append(hudCard("Render p95", String.format(Locale.US, "%.2f ms", renderP95), ""));
             cards.append(hudCard("Frame p95", String.format(Locale.US, "%.2f ms", frametimeP95), ""));
-            cards.append(hudCard("Drops / s", fmtDoubleOrPlaceholder(dropsPerSec, "%.3f", "PENDING"), hudToneClass(tone)));
+            cards.append(hudCard("Drops / s", HudRenderSupport.fmtDoubleOrPlaceholder(dropsPerSec, "%.3f", "PENDING"), HudRenderSupport.hudToneClass(tone)));
             cards.append(hudCard("Drops total", String.valueOf(drops), ""));
 
             StringBuilder details = new StringBuilder();
-            details.append(hudDetailRow("Adaptive", "L" + adaptiveLevel + " " + safeText(adaptiveAction)));
+            details.append(hudDetailRow("Adaptive", "L" + adaptiveLevel + " " + HudRenderSupport.safeText(adaptiveAction)));
             details.append(hudDetailRow("Transport queue", qT + "/" + qTMax));
             details.append(hudDetailRow("Decode queue", qD + "/" + qDMax));
             details.append(hudDetailRow("Render queue", qR + "/" + qRMax));
             details.append(hudDetailRow("Backpressure", bpHigh + "/" + bpRecover));
             details.append(hudDetailRow("Connection mode", "runtime"));
-            details.append(hudDetailRow("Reason", safeText(reason)));
-            details.append(hudDetailRow("Host error", safeText(daemonLastError)));
-            details.append(hudDetailRow("App build", safeText(BuildConfig.WBEAM_BUILD_REV)));
-            details.append(hudDetailRow("Daemon build", safeText(daemonBuildRevision)));
+            details.append(hudDetailRow("Reason", HudRenderSupport.safeText(reason)));
+            details.append(hudDetailRow("Host error", HudRenderSupport.safeText(daemonLastError)));
+            details.append(hudDetailRow("App build", HudRenderSupport.safeText(BuildConfig.WBEAM_BUILD_REV)));
+            details.append(hudDetailRow("Daemon build", HudRenderSupport.safeText(daemonBuildRevision)));
 
             String trend = "runtime health=" + tone.toUpperCase(Locale.US)
                     + " | recv=" + String.format(Locale.US, "%.1f", recvFps)
@@ -2261,8 +2054,8 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        String progressLine = buildTrainerProgressLine(hudText);
-        int progressPercent = parseTrainerProgressPercent(hudText);
+        String progressLine = TrainerProgressParser.buildProgressLine(hudText);
+        int progressPercent = TrainerProgressParser.parseProgressPercent(hudText);
         if (perfHudWebView != null) {
             String html = buildTrainerHudHtml(hudText, progressLine, progressPercent);
             if (!showHudWebHtml("trainer", html)) {
@@ -2369,43 +2162,6 @@ public class MainActivity extends AppCompatActivity {
         }
         lastHudCompactLine = "trainer hud pending placeholders";
         refreshDebugInfoOverlay();
-    }
-
-    private String buildTrainerProgressLine(String hudText) {
-        Matcher matcher = TRAINER_TRIAL_PROGRESS_RE.matcher(hudText);
-        if (!matcher.find()) {
-            return "";
-        }
-        int cur;
-        int total;
-        try {
-            cur = Integer.parseInt(matcher.group(1));
-            total = Integer.parseInt(matcher.group(2));
-        } catch (Exception ignored) {
-            return "";
-        }
-        if (total <= 0 || cur <= 0) {
-            return "";
-        }
-        int pct = Math.max(0, Math.min(100, (int) Math.round((cur * 100.0) / total)));
-        return String.format(Locale.US, "TRAINING PROGRESS %d%%  (trial %d/%d)", pct, cur, total);
-    }
-
-    private int parseTrainerProgressPercent(String hudText) {
-        Matcher matcher = TRAINER_TRIAL_PROGRESS_RE.matcher(hudText == null ? "" : hudText);
-        if (!matcher.find()) {
-            return -1;
-        }
-        try {
-            int cur = Integer.parseInt(matcher.group(1));
-            int total = Integer.parseInt(matcher.group(2));
-            if (cur <= 0 || total <= 0) {
-                return -1;
-            }
-            return Math.max(0, Math.min(100, (int) Math.round((cur * 100.0) / total)));
-        } catch (Exception ignored) {
-            return -1;
-        }
     }
 
     private String buildTrainerHudHtml(String hudText, String progressLine, int progressPercent) {
@@ -2625,7 +2381,7 @@ public class MainActivity extends AppCompatActivity {
             String resourceRowsHtml,
             String scaleClass
     ) {
-        String bodyClass = "hud-live " + safeText(scaleClass);
+        String bodyClass = "hud-live " + HudRenderSupport.safeText(scaleClass);
         return "<!doctype html><html><head><meta charset='utf-8'/>"
                 + "<meta name='viewport' content='width=device-width,height=device-height,initial-scale=1,maximum-scale=1,viewport-fit=cover'/>"
                 + "<style>"
@@ -2677,7 +2433,7 @@ public class MainActivity extends AppCompatActivity {
                 + chipsHtml
                 + "</div>"
                 + "<div class='main'>"
-                + "<div class='panel panel-main'><div class='kpi'>" + cardsHtml + "</div><div class='metric-trends'>" + chartsHtml + "</div><div class='trend'>" + escapeHtml(safeText(trendText)) + "</div><div class='resource'><div class='title'>DEVICE RESOURCES (* GPU proxy from render time)</div>" + resourceRowsHtml + "</div></div>"
+                + "<div class='panel panel-main'><div class='kpi'>" + cardsHtml + "</div><div class='metric-trends'>" + chartsHtml + "</div><div class='trend'>" + escapeHtml(HudRenderSupport.safeText(trendText)) + "</div><div class='resource'><div class='title'>DEVICE RESOURCES (* GPU proxy from render time)</div>" + resourceRowsHtml + "</div></div>"
                 + "<div class='panel panel-side'><table class='detail-table'>" + detailsRowsHtml + "</table></div>"
                 + "</div>"
                 + "</div></body></html>";
@@ -2735,30 +2491,30 @@ public class MainActivity extends AppCompatActivity {
         String progressText = progressLine == null || progressLine.trim().isEmpty()
                 ? String.format(Locale.US, "TRAINING PROGRESS %d%%", pct)
                 : progressLine.trim();
-        String modeLine = safeText(encoder).toUpperCase(Locale.US)
-                + " | " + safeText(size)
+        String modeLine = HudRenderSupport.safeText(encoder).toUpperCase(Locale.US)
+                + " | " + HudRenderSupport.safeText(size)
                 + " | " + Math.max(0, fps) + "fps";
         String liveTriplet = String.format(
                 Locale.US,
                 "P/R/D %s / %s / %s",
-                fmtDoubleOrPlaceholder(present, "%.1f", "PENDING"),
-                fmtDoubleOrPlaceholder(recv, "%.1f", "PENDING"),
-                fmtDoubleOrPlaceholder(decode, "%.1f", "PENDING")
+                HudRenderSupport.fmtDoubleOrPlaceholder(present, "%.1f", "PENDING"),
+                HudRenderSupport.fmtDoubleOrPlaceholder(recv, "%.1f", "PENDING"),
+                HudRenderSupport.fmtDoubleOrPlaceholder(decode, "%.1f", "PENDING")
         );
-        String statusLine1 = "best_trial: " + safeText(bestTrial) + "    best_score: " + fmtDoubleOrPlaceholder(bestScore, "%.2f", "PENDING");
-        String statusLine2 = "sample_count: " + sampleCount + "    state.fps: " + safeText(fpsState);
-        String statusLine3 = "state.mbps: " + safeText(mbpsState) + "    state.latency: " + safeText(latState);
-        String statusLine4 = "state.drop: " + safeText(dropState) + "    state.queue: " + safeText(queueState);
-        String statusLine5 = "quality: " + safeText(qualityState) + "    note: " + safeText(statusNote);
+        String statusLine1 = "best_trial: " + HudRenderSupport.safeText(bestTrial) + "    best_score: " + HudRenderSupport.fmtDoubleOrPlaceholder(bestScore, "%.2f", "PENDING");
+        String statusLine2 = "sample_count: " + sampleCount + "    state.fps: " + HudRenderSupport.safeText(fpsState);
+        String statusLine3 = "state.mbps: " + HudRenderSupport.safeText(mbpsState) + "    state.latency: " + HudRenderSupport.safeText(latState);
+        String statusLine4 = "state.drop: " + HudRenderSupport.safeText(dropState) + "    state.queue: " + HudRenderSupport.safeText(queueState);
+        String statusLine5 = "quality: " + HudRenderSupport.safeText(qualityState) + "    note: " + HudRenderSupport.safeText(statusNote);
 
-        String trendGrid = buildSotTrendCellHtml("SCORE TREND", trendScore, hudToneClass(qualityState), "")
-                + buildSotTrendCellHtml("PRESENT FPS TREND", trendPresent, hudToneClass(fpsState), "")
-                + buildSotTrendCellHtml("LIVE MBPS TREND", trendMbps, hudToneClass(mbpsState), "Mbps")
-                + buildSotTrendCellHtml("LAT p95 TREND", trendLatency, hudToneClass(latState), "ms")
-                + buildSotTrendCellHtml("DROPS/s TREND", trendDrops, hudToneClass(dropState), "")
-                + buildSotTrendCellHtml("QUEUE DEPTH TREND", trendQueue, hudToneClass(queueState), "")
-                + buildSotTrendCellHtml("RECV FPS TREND", trendRecv, hudToneClass(fpsState), "")
-                + buildSotTrendCellHtml("DECODE FPS TREND", trendDecode, hudToneClass(fpsState), "");
+        String trendGrid = buildSotTrendCellHtml("SCORE TREND", trendScore, HudRenderSupport.hudToneClass(qualityState), "")
+                + buildSotTrendCellHtml("PRESENT FPS TREND", trendPresent, HudRenderSupport.hudToneClass(fpsState), "")
+                + buildSotTrendCellHtml("LIVE MBPS TREND", trendMbps, HudRenderSupport.hudToneClass(mbpsState), "Mbps")
+                + buildSotTrendCellHtml("LAT p95 TREND", trendLatency, HudRenderSupport.hudToneClass(latState), "ms")
+                + buildSotTrendCellHtml("DROPS/s TREND", trendDrops, HudRenderSupport.hudToneClass(dropState), "")
+                + buildSotTrendCellHtml("QUEUE DEPTH TREND", trendQueue, HudRenderSupport.hudToneClass(queueState), "")
+                + buildSotTrendCellHtml("RECV FPS TREND", trendRecv, HudRenderSupport.hudToneClass(fpsState), "")
+                + buildSotTrendCellHtml("DECODE FPS TREND", trendDecode, HudRenderSupport.hudToneClass(fpsState), "");
 
         String hudShellClass = "sot shell " + trainerScaleClass(fontProfile);
         return "<!doctype html><html><head><meta charset='utf-8'/>"
@@ -2806,28 +2562,28 @@ public class MainActivity extends AppCompatActivity {
                 + "@media (max-width:1200px){.sot .main{grid-template-columns:1fr;}.sot .trend-grid{grid-template-columns:1fr;}.sot .footer{grid-template-columns:1fr;}}"
                 + "</style></head><body class='hud-trainer'><div class='" + hudShellClass + "'>"
                 + "<div class='panel header'>"
-                + "<div class='chip'><span class='k'>RUN / PROFILE</span><span class='v'>" + escapeHtml(safeText(runId) + " / " + safeText(profile)) + "</span></div>"
+                + "<div class='chip'><span class='k'>RUN / PROFILE</span><span class='v'>" + escapeHtml(HudRenderSupport.safeText(runId) + " / " + HudRenderSupport.safeText(profile)) + "</span></div>"
                 + "<div class='chip'><span class='k'>GEN</span><span class='v'>" + escapeHtml(gIdx + "/" + gTotal) + "</span></div>"
-                + "<div class='chip'><span class='k'>TRIAL</span><span class='v'>" + escapeHtml(tIdx + "/" + tTotal + " (" + safeText(trialId) + ")") + "</span></div>"
+                + "<div class='chip'><span class='k'>TRIAL</span><span class='v'>" + escapeHtml(tIdx + "/" + tTotal + " (" + HudRenderSupport.safeText(trialId) + ")") + "</span></div>"
                 + "<div class='chip'><span class='k'>CURRENT MODE</span><span class='v'>" + escapeHtml(modeLine) + "</span></div>"
                 + "<div class='chip'><span class='k'>PROGRESS</span><span class='v'>" + escapeHtml(progressText + " | " + pct + "%") + "</span></div>"
                 + "</div>"
                 + "<div class='main'>"
                 + "<div class='panel left-col'>"
                 + "<div class='kpi-block'>"
-                + "<div class='kpi-item'><span class='k'>SCORE</span><span class='v " + escapeHtml(hudToneClass(qualityState)) + "'>" + escapeHtml(fmtDoubleOrPlaceholder(score, "%.2f", "PENDING")) + "</span></div>"
-                + "<div class='kpi-item'><span class='k'>PRESENT FPS</span><span class='v " + escapeHtml(hudToneClass(fpsState)) + "'>" + escapeHtml(fmtDoubleOrPlaceholder(present, "%.1f", "PENDING")) + "</span></div>"
-                + "<div class='kpi-item'><span class='k'>LIVE MBPS</span><span class='v " + escapeHtml(hudToneClass(mbpsState)) + "'>" + escapeHtml(fmtLiveMbps(liveMbps, Double.NaN) + " Mbps") + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>SCORE</span><span class='v " + escapeHtml(HudRenderSupport.hudToneClass(qualityState)) + "'>" + escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(score, "%.2f", "PENDING")) + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>PRESENT FPS</span><span class='v " + escapeHtml(HudRenderSupport.hudToneClass(fpsState)) + "'>" + escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(present, "%.1f", "PENDING")) + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>LIVE MBPS</span><span class='v " + escapeHtml(HudRenderSupport.hudToneClass(mbpsState)) + "'>" + escapeHtml(HudRenderSupport.fmtLiveMbps(liveMbps, Double.NaN) + " Mbps") + "</span></div>"
                 + "</div>"
                 + "<div class='kpi-block'>"
-                + "<div class='kpi-item'><span class='k'>RECV FPS</span><span class='v'>" + escapeHtml(fmtDoubleOrPlaceholder(recv, "%.1f", "PENDING")) + "</span></div>"
-                + "<div class='kpi-item'><span class='k'>DECODE FPS</span><span class='v'>" + escapeHtml(fmtDoubleOrPlaceholder(decode, "%.1f", "PENDING")) + "</span></div>"
-                + "<div class='kpi-item'><span class='k'>LAT p95</span><span class='v " + escapeHtml(hudToneClass(latState)) + "'>" + escapeHtml(fmtDoubleOrPlaceholder(latency, "%.1f ms", "PENDING")) + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>RECV FPS</span><span class='v'>" + escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(recv, "%.1f", "PENDING")) + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>DECODE FPS</span><span class='v'>" + escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(decode, "%.1f", "PENDING")) + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>LAT p95</span><span class='v " + escapeHtml(HudRenderSupport.hudToneClass(latState)) + "'>" + escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(latency, "%.1f ms", "PENDING")) + "</span></div>"
                 + "</div>"
                 + "<div class='kpi-block'>"
-                + "<div class='kpi-item'><span class='k'>DROPS/s</span><span class='v " + escapeHtml(hudToneClass(dropState)) + "'>" + escapeHtml(fmtDoubleOrPlaceholder(drops, "%.3f", "PENDING")) + "</span></div>"
-                + "<div class='kpi-item'><span class='k'>LATE/s</span><span class='v " + escapeHtml(hudToneClass(dropState)) + "'>" + escapeHtml(fmtDoubleOrPlaceholder(late, "%.3f", "PENDING")) + "</span></div>"
-                + "<div class='kpi-item'><span class='k'>QUEUE</span><span class='v " + escapeHtml(hudToneClass(queueState)) + "'>" + escapeHtml(fmtDoubleOrPlaceholder(queue, "%.3f", "PENDING")) + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>DROPS/s</span><span class='v " + escapeHtml(HudRenderSupport.hudToneClass(dropState)) + "'>" + escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(drops, "%.3f", "PENDING")) + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>LATE/s</span><span class='v " + escapeHtml(HudRenderSupport.hudToneClass(dropState)) + "'>" + escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(late, "%.3f", "PENDING")) + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>QUEUE</span><span class='v " + escapeHtml(HudRenderSupport.hudToneClass(queueState)) + "'>" + escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(queue, "%.3f", "PENDING")) + "</span></div>"
                 + "</div>"
                 + "<div class='status'>"
                 + "<div class='row'>" + escapeHtml(statusLine1) + "</div>"
@@ -2841,7 +2597,7 @@ public class MainActivity extends AppCompatActivity {
                 + "<div class='panel right-col'><div class='trend-grid'>" + trendGrid + "</div></div>"
                 + "</div>"
                 + "<div class='footer'>"
-                + "<div class='foot'><strong>LAYOUT/FONT</strong><br/>layout=" + escapeHtml(safeText(layoutMode)) + " | font=" + escapeHtml(safeText(fontProfile)) + "</div>"
+                + "<div class='foot'><strong>LAYOUT/FONT</strong><br/>layout=" + escapeHtml(HudRenderSupport.safeText(layoutMode)) + " | font=" + escapeHtml(HudRenderSupport.safeText(fontProfile)) + "</div>"
                 + "<div class='foot'><strong>DEVICE RESOURCES (* GPU proxy)</strong><br/>" + resourceRowsHtml + "</div>"
                 + "<div class='foot'><strong>THRESHOLDS</strong><br/><span class='ok'>OK</span> stable | <span class='warn'>WARN</span> drift | <span class='risk'>RISK</span> critical</div>"
                 + "</div>"
@@ -2884,16 +2640,6 @@ public class MainActivity extends AppCompatActivity {
         return Math.max(min, Math.min(max, value));
     }
 
-    private void appendSeriesSample(ArrayDeque<Double> series, double value) {
-        if (series == null) {
-            return;
-        }
-        series.addLast(value);
-        while (series.size() > HUD_RESOURCE_SERIES_MAX) {
-            series.removeFirst();
-        }
-    }
-
     private void sampleDeviceResourceUsage(double targetFps, double renderP95Ms) {
         long nowMs = SystemClock.elapsedRealtime();
         long procCpuNow = android.os.Process.getElapsedCpuTime();
@@ -2915,12 +2661,12 @@ public class MainActivity extends AppCompatActivity {
         double frameBudgetMs = targetFps > 1.0 ? (1000.0 / targetFps) : 16.67;
         usageGpuPct = clampDouble((Math.max(0.0, renderP95Ms) / Math.max(1.0, frameBudgetMs)) * 100.0, 0.0, 100.0);
 
-        appendSeriesSample(usageCpuSeries, usageCpuPct);
-        appendSeriesSample(usageMemSeries, memPct);
-        appendSeriesSample(usageGpuSeries, usageGpuPct);
+        usageCpuSeries.addSample(usageCpuPct);
+        usageMemSeries.addSample(memPct);
+        usageGpuSeries.addSample(usageGpuPct);
     }
 
-    private String buildSparkBarsHtml(ArrayDeque<Double> series, String toneClass) {
+    private String buildSparkBarsHtml(MetricSeriesBuffer series, String toneClass) {
         if (series == null || series.isEmpty()) {
             return buildSparkPlaceholderBars(toneClass, 18);
         }
@@ -2942,7 +2688,7 @@ public class MainActivity extends AppCompatActivity {
 
     private String buildResourceRowsHtml() {
         String cpuTone = usageCpuPct > 85.0 ? "state-risk" : (usageCpuPct > 65.0 ? "state-warn" : "state-ok");
-        double memPct = usageMemSeries.isEmpty() ? 0.0 : (usageMemSeries.peekLast() != null ? usageMemSeries.peekLast() : 0.0);
+        double memPct = usageMemSeries.latest(0.0);
         String memTone = memPct > 88.0 ? "state-risk" : (memPct > 70.0 ? "state-warn" : "state-ok");
         String gpuTone = usageGpuPct > 90.0 ? "state-risk" : (usageGpuPct > 70.0 ? "state-warn" : "state-ok");
 
@@ -2969,20 +2715,6 @@ public class MainActivity extends AppCompatActivity {
                 .append(buildSparkBarsHtml(usageGpuSeries, gpuTone))
                 .append("</div></div>");
         return html.toString();
-    }
-
-    private JSONArray seriesToJson(ArrayDeque<Double> series) {
-        JSONArray arr = new JSONArray();
-        if (series == null || series.isEmpty()) {
-            return arr;
-        }
-        for (Double v : series) {
-            if (v == null || !Double.isFinite(v)) {
-                continue;
-            }
-            arr.put(v);
-        }
-        return arr;
     }
 
     private String buildPendingMetricTrendRowsHtml() {
@@ -3028,15 +2760,15 @@ public class MainActivity extends AppCompatActivity {
             String queueTone,
             String lateTone
     ) {
-        return buildTrendCardHtml("SCORE", score, hudToneClass(scoreTone), "")
-                + buildTrendCardHtml("PRESENT FPS", fps, hudToneClass(fpsTone), "")
-                + buildTrendCardHtml("RECV FPS", recv, hudToneClass(recvTone), "")
-                + buildTrendCardHtml("DECODE FPS", decode, hudToneClass(decodeTone), "")
-                + buildTrendCardHtml("LIVE MBPS", mbps, hudToneClass(mbpsTone), "Mbps")
-                + buildTrendCardHtml("DROP / SEC", drops, hudToneClass(dropTone), "")
-                + buildTrendCardHtml("LAT p95", latency, hudToneClass(latTone), "ms")
-                + buildTrendCardHtml("QUEUE DEPTH", queue, hudToneClass(queueTone), "")
-                + buildTrendCardHtml("LATE / SEC", late, hudToneClass(lateTone), "");
+        return buildTrendCardHtml("SCORE", score, HudRenderSupport.hudToneClass(scoreTone), "")
+                + buildTrendCardHtml("PRESENT FPS", fps, HudRenderSupport.hudToneClass(fpsTone), "")
+                + buildTrendCardHtml("RECV FPS", recv, HudRenderSupport.hudToneClass(recvTone), "")
+                + buildTrendCardHtml("DECODE FPS", decode, HudRenderSupport.hudToneClass(decodeTone), "")
+                + buildTrendCardHtml("LIVE MBPS", mbps, HudRenderSupport.hudToneClass(mbpsTone), "Mbps")
+                + buildTrendCardHtml("DROP / SEC", drops, HudRenderSupport.hudToneClass(dropTone), "")
+                + buildTrendCardHtml("LAT p95", latency, HudRenderSupport.hudToneClass(latTone), "ms")
+                + buildTrendCardHtml("QUEUE DEPTH", queue, HudRenderSupport.hudToneClass(queueTone), "")
+                + buildTrendCardHtml("LATE / SEC", late, HudRenderSupport.hudToneClass(lateTone), "");
     }
 
     private String buildMetricTrendRowsHtml(
@@ -3051,11 +2783,11 @@ public class MainActivity extends AppCompatActivity {
             String latTone,
             String queueTone
     ) {
-        return buildTrendCardHtml("FPS", fps, hudToneClass(fpsTone), "")
-                + buildTrendCardHtml("MBPS", mbps, hudToneClass(mbpsTone), "Mbps")
-                + buildTrendCardHtml("DROPS / SEC", drops, hudToneClass(dropTone), "")
-                + buildTrendCardHtml("LAT p95", latency, hudToneClass(latTone), "ms")
-                + buildTrendCardHtml("QUEUE DEPTH", queue, hudToneClass(queueTone), "");
+        return buildTrendCardHtml("FPS", fps, HudRenderSupport.hudToneClass(fpsTone), "")
+                + buildTrendCardHtml("MBPS", mbps, HudRenderSupport.hudToneClass(mbpsTone), "Mbps")
+                + buildTrendCardHtml("DROPS / SEC", drops, HudRenderSupport.hudToneClass(dropTone), "")
+                + buildTrendCardHtml("LAT p95", latency, HudRenderSupport.hudToneClass(latTone), "ms")
+                + buildTrendCardHtml("QUEUE DEPTH", queue, HudRenderSupport.hudToneClass(queueTone), "");
     }
 
     private String buildTrendCardHtml(String label, JSONArray series, String toneClass, String unitSuffix) {
@@ -3090,348 +2822,39 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private String buildTrendSparkChartFromJson(JSONArray series, String toneClass) {
-        if (series == null || series.length() == 0) {
-            return buildTrendSparkPlaceholderSvg(toneClass);
-        }
-        ArrayDeque<Double> values = new ArrayDeque<>();
-        double lo = Double.POSITIVE_INFINITY;
-        double hi = Double.NEGATIVE_INFINITY;
-        for (int i = 0; i < series.length(); i++) {
-            if (series.isNull(i)) {
-                continue;
-            }
-            double v = series.optDouble(i, Double.NaN);
-            if (!Double.isFinite(v)) {
-                continue;
-            }
-            values.addLast(v);
-            lo = Math.min(lo, v);
-            hi = Math.max(hi, v);
-        }
-        if (!Double.isFinite(lo) || !Double.isFinite(hi) || values.isEmpty()) {
-            return buildTrendSparkPlaceholderSvg(toneClass);
-        }
-        double span = hi - lo;
-        if (span < 1e-3) {
-            span = Math.max(1.0, Math.abs(hi) * 0.25);
-        }
-        double pad = Math.max(0.1, span * 0.12);
-        double yMin = lo - pad;
-        double yMax = hi + pad;
-        double ySpan = Math.max(1e-3, yMax - yMin);
-
-        int n = values.size();
-        String stroke = toneStrokeColor(toneClass);
-        String fill = toneFillColor(toneClass);
-        String dot = toneDotColor(toneClass);
-        if (n == 1) {
-            double single = values.peekFirst() == null ? yMin : values.peekFirst();
-            double norm = clampDouble((single - yMin) / ySpan, 0.0, 1.0);
-            double y = 100.0 - (norm * 100.0);
-            return "<svg class='spark-svg' viewBox='0 0 100 100' preserveAspectRatio='none'>"
-                    + "<rect x='0' y='0' width='100' height='100' fill='transparent'/>"
-                    + "<line x1='0' y1='" + fmt2(y) + "' x2='100' y2='" + fmt2(y) + "' stroke='" + stroke + "' stroke-width='2.4'/>"
-                    + "<circle cx='50' cy='" + fmt2(y) + "' r='2.2' fill='" + dot + "'/>"
-                    + "</svg>";
-        }
-        StringBuilder polyline = new StringBuilder();
-        StringBuilder area = new StringBuilder("M 0 100 ");
-        StringBuilder dots = new StringBuilder();
-        int idx = 0;
-        for (Double raw : values) {
-            double v = raw == null ? yMin : raw;
-            double norm = (v - yMin) / ySpan;
-            norm = clampDouble(norm, 0.0, 1.0);
-            double x = (idx * 100.0) / Math.max(1, n - 1);
-            double y = 100.0 - (norm * 100.0);
-            if (idx == 0) {
-                area.append("L ").append(fmt2(x)).append(" ").append(fmt2(y)).append(" ");
-            } else {
-                area.append("L ").append(fmt2(x)).append(" ").append(fmt2(y)).append(" ");
-            }
-            polyline.append(fmt2(x)).append(",").append(fmt2(y)).append(" ");
-            dots.append("<circle cx='")
-                    .append(fmt2(x))
-                    .append("' cy='")
-                    .append(fmt2(y))
-                    .append("' r='1.0' fill='")
-                    .append(dot)
-                    .append("'/>");
-            idx++;
-        }
-        area.append("L 100 100 Z");
-        return "<svg class='spark-svg' viewBox='0 0 100 100' preserveAspectRatio='none'>"
-                + "<rect x='0' y='0' width='100' height='100' fill='transparent'/>"
-                + "<path d='" + area + "' fill='" + fill + "'/>"
-                + "<polyline points='" + polyline + "' fill='none' stroke='" + stroke + "' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/>"
-                + dots
-                + "</svg>";
-    }
-
-    private String buildTrendSparkPlaceholderSvg(String toneClass) {
-        String stroke = toneStrokeColor(toneClass);
-        String fill = toneFillColor(toneClass);
-        return "<svg class='spark-svg' viewBox='0 0 100 100' preserveAspectRatio='none'>"
-                + "<rect x='0' y='0' width='100' height='100' fill='transparent'/>"
-                + "<path d='M 0 100 L 0 70 L 15 68 L 30 72 L 45 66 L 60 69 L 75 63 L 90 65 L 100 62 L 100 100 Z' fill='" + fill + "'/>"
-                + "<polyline points='0,70 15,68 30,72 45,66 60,69 75,63 90,65 100,62' fill='none' stroke='" + stroke + "' stroke-width='2.1' stroke-linecap='round' stroke-linejoin='round' stroke-dasharray='4 4'/>"
-                + "</svg>";
-    }
-
-    private String toneStrokeColor(String toneClass) {
-        String tone = toneClass == null ? "" : toneClass.trim().toLowerCase(Locale.US);
-        if ("state-risk".equals(tone)) {
-            return "#f87171";
-        }
-        if ("state-warn".equals(tone)) {
-            return "#fbbf24";
-        }
-        if ("state-ok".equals(tone)) {
-            return "#6ee7b7";
-        }
-        return "#8dd9ff";
-    }
-
-    private String toneFillColor(String toneClass) {
-        String tone = toneClass == null ? "" : toneClass.trim().toLowerCase(Locale.US);
-        if ("state-risk".equals(tone)) {
-            return "rgba(248,113,113,0.20)";
-        }
-        if ("state-warn".equals(tone)) {
-            return "rgba(251,191,36,0.22)";
-        }
-        if ("state-ok".equals(tone)) {
-            return "rgba(110,231,183,0.20)";
-        }
-        return "rgba(141,217,255,0.20)";
-    }
-
-    private String toneDotColor(String toneClass) {
-        String tone = toneClass == null ? "" : toneClass.trim().toLowerCase(Locale.US);
-        if ("state-risk".equals(tone)) {
-            return "#fecaca";
-        }
-        if ("state-warn".equals(tone)) {
-            return "#fde68a";
-        }
-        if ("state-ok".equals(tone)) {
-            return "#bbf7d0";
-        }
-        return "#dbeafe";
-    }
-
-    private String fmt2(double value) {
-        if (!Double.isFinite(value)) {
-            return "0.00";
-        }
-        return String.format(Locale.US, "%.2f", value);
+        return HudRenderSupport.buildTrendSparkChartFromJson(series, toneClass);
     }
 
     private String buildSparkPlaceholderBars(String toneClass, int count) {
-        int n = Math.max(8, Math.min(64, count));
-        String cls = escapeHtml(toneClass == null ? "" : toneClass);
-        StringBuilder bars = new StringBuilder();
-        for (int i = 0; i < n; i++) {
-            int h = 12 + ((i % 4) * 3);
-            bars.append("<span class='spark-bar ")
-                    .append(cls)
-                    .append("' style='height:")
-                    .append(h)
-                    .append("%'></span>");
-        }
-        return bars.toString();
+        return HudRenderSupport.buildSparkPlaceholderBars(toneClass, count);
     }
 
     private String buildSeriesStats(JSONArray series, String unitSuffix) {
-        if (series == null || series.length() == 0) {
-            return "PENDING";
-        }
-        double last = Double.NaN;
-        double lo = Double.POSITIVE_INFINITY;
-        double hi = Double.NEGATIVE_INFINITY;
-        for (int i = 0; i < series.length(); i++) {
-            if (series.isNull(i)) {
-                continue;
-            }
-            double v = series.optDouble(i, Double.NaN);
-            if (!Double.isFinite(v)) {
-                continue;
-            }
-            last = v;
-            lo = Math.min(lo, v);
-            hi = Math.max(hi, v);
-        }
-        if (!Double.isFinite(last) || !Double.isFinite(lo) || !Double.isFinite(hi)) {
-            return "PENDING";
-        }
-        String unit = unitSuffix == null ? "" : unitSuffix.trim();
-        if (!unit.isEmpty()) {
-            unit = " " + unit;
-        }
-        return String.format(Locale.US, "L %.2f%s · %.2f..%.2f", last, unit, lo, hi);
+        return HudRenderSupport.buildSeriesStats(series, unitSuffix);
     }
 
     private String buildSeriesMetaHtml(String metricLabel, JSONArray series, String unitSuffix) {
-        double[] w = computeSeriesWindow(metricLabel, series);
-        String unit = unitSuffix == null ? "" : unitSuffix.trim();
-        if (!unit.isEmpty()) {
-            unit = " " + unit;
-        }
-        if (w == null) {
-            return "<div class='trend-meta'>"
-                    + "<div class='trend-meta-row'>"
-                    + "<span class='trend-meta-item low'>LOW: -</span>"
-                    + "<span class='trend-meta-item mid'>MID: -</span>"
-                    + "<span class='trend-meta-item high'>HIGH: -</span>"
-                    + "</div>"
-                    + "<div class='trend-meta-cur'>CUR: -</div>"
-                    + "</div>";
-        }
-        return "<div class='trend-meta'>"
-                + "<div class='trend-meta-row'>"
-                + "<span class='trend-meta-item low'>LOW: " + escapeHtml(fmt1(w[1]) + unit) + "</span>"
-                + "<span class='trend-meta-item mid'>MID: " + escapeHtml(fmt1(w[2]) + unit) + "</span>"
-                + "<span class='trend-meta-item high'>HIGH: " + escapeHtml(fmt1(w[3]) + unit) + "</span>"
-                + "</div>"
-                + "<div class='trend-meta-cur'>CUR: " + escapeHtml(fmt1(w[0]) + unit) + "</div>"
-                + "</div>";
-    }
-
-    private double[] computeSeriesWindow(String metricLabel, JSONArray series) {
-        if (series == null || series.length() == 0) {
-            return null;
-        }
-        double last = Double.NaN;
-        double lo = Double.POSITIVE_INFINITY;
-        double hi = Double.NEGATIVE_INFINITY;
-        for (int i = 0; i < series.length(); i++) {
-            if (series.isNull(i)) {
-                continue;
-            }
-            double v = series.optDouble(i, Double.NaN);
-            if (!Double.isFinite(v)) {
-                continue;
-            }
-            last = v;
-            lo = Math.min(lo, v);
-            hi = Math.max(hi, v);
-        }
-        if (!Double.isFinite(last) || !Double.isFinite(lo) || !Double.isFinite(hi)) {
-            return null;
-        }
-        String key = normalizeMetricKey(metricLabel);
-        double displayLow;
-        if ("fps".equals(key)) {
-            displayLow = FPS_LOW_ANCHOR;
-        } else if ("mbps".equals(key) || "latency".equals(key) || "drops".equals(key) || "queue".equals(key)) {
-            displayLow = 0.0;
-        } else {
-            displayLow = Math.max(0.0, Math.min(lo, hi));
-        }
-        double displayHigh = Math.max(hi, displayLow + 1.0);
-        double mid = (displayLow + displayHigh) * 0.5;
-        return new double[]{last, displayLow, mid, displayHigh};
-    }
-
-    private String normalizeMetricKey(String metricLabel) {
-        String label = metricLabel == null ? "" : metricLabel.trim().toUpperCase(Locale.US);
-        if (label.contains("FPS")) {
-            return "fps";
-        }
-        if (label.contains("MBPS") || label.contains("BITRATE")) {
-            return "mbps";
-        }
-        if (label.contains("LAT")) {
-            return "latency";
-        }
-        if (label.contains("DROP") || label.contains("LATE")) {
-            return "drops";
-        }
-        if (label.contains("QUEUE")) {
-            return "queue";
-        }
-        return "generic";
+        return HudRenderSupport.buildSeriesMetaHtml(metricLabel, series, unitSuffix, FPS_LOW_ANCHOR);
     }
 
     private String fmt1(double value) {
-        if (!Double.isFinite(value)) {
-            return "-";
-        }
-        return String.format(Locale.US, "%.1f", value);
+        return HudRenderSupport.fmt1(value);
     }
 
     private double latestFiniteFromSeries(JSONArray series) {
-        if (series == null || series.length() == 0) {
-            return Double.NaN;
-        }
-        for (int i = series.length() - 1; i >= 0; i--) {
-            if (series.isNull(i)) {
-                continue;
-            }
-            double value = series.optDouble(i, Double.NaN);
-            if (Double.isFinite(value)) {
-                return value;
-            }
-        }
-        return Double.NaN;
-    }
-
-    private String fmtDoubleOrPlaceholder(double value, String pattern, String fallback) {
-        if (Double.isNaN(value) || Double.isInfinite(value) || value < 0.0) {
-            return fallback;
-        }
-        return String.format(Locale.US, pattern, value);
-    }
-
-    private String fmtLiveMbps(double liveMbps, double targetMbps) {
-        if (!Double.isNaN(liveMbps) && !Double.isInfinite(liveMbps) && liveMbps > 0.0) {
-            return String.format(Locale.US, "%.2f", liveMbps);
-        }
-        if (!Double.isNaN(targetMbps) && !Double.isInfinite(targetMbps) && targetMbps > 0.0) {
-            return String.format(Locale.US, "%.2f (target)", targetMbps);
-        }
-        return "PENDING";
-    }
-
-    private String safeText(String value) {
-        if (value == null || value.trim().isEmpty()) {
-            return "-";
-        }
-        return value.trim();
-    }
-
-    private String hudToneClass(String tone) {
-        String t = tone == null ? "" : tone.trim().toLowerCase(Locale.US);
-        if ("risk".equals(t) || "bad".equals(t) || "red".equals(t)) {
-            return "state-risk";
-        }
-        if ("warn".equals(t) || "orange".equals(t) || "yellow".equals(t)) {
-            return "state-warn";
-        }
-        if ("ok".equals(t) || "good".equals(t) || "green".equals(t)) {
-            return "state-ok";
-        }
-        return "state-pending";
+        return HudRenderSupport.latestFiniteFromSeries(series);
     }
 
     private String hudChip(String key, String value, String toneClass) {
-        String tone = toneClass == null ? "" : toneClass.trim();
-        String cls = tone.isEmpty() ? "v" : "v " + tone;
-        return "<div class='chip'><span class='k'>" + escapeHtml(safeText(key))
-                + "</span><span class='" + escapeHtml(cls) + "'>"
-                + escapeHtml(safeText(value)) + "</span></div>";
+        return HudRenderSupport.hudChip(key, value, toneClass);
     }
 
     private String hudCard(String key, String value, String toneClass) {
-        String tone = toneClass == null ? "" : toneClass.trim();
-        String cls = tone.isEmpty() ? "v" : "v " + tone;
-        return "<div class='item'><span class='k'>" + escapeHtml(safeText(key))
-                + "</span><span class='" + escapeHtml(cls) + "'>"
-                + escapeHtml(safeText(value)) + "</span></div>";
+        return HudRenderSupport.hudCard(key, value, toneClass);
     }
 
     private String hudDetailRow(String left, String right) {
-        return "<tr><td>" + escapeHtml(safeText(left)) + "</td><td>" + escapeHtml(safeText(right)) + "</td></tr>";
+        return HudRenderSupport.hudDetailRow(left, right);
     }
 
     private String[] splitHudColumns(String content) {
@@ -3454,15 +2877,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private String escapeHtml(String value) {
-        if (value == null) {
-            return "";
-        }
-        return value
-                .replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\"", "&quot;")
-                .replace("'", "&#39;");
+        return HudRenderSupport.escapeHtml(value);
     }
 
     private void refreshDebugInfoOverlay() {
@@ -3504,33 +2919,21 @@ public class MainActivity extends AppCompatActivity {
     // ══════════════════════════════════════════════════════════════════════════
 
     private void startPreflightPulse() {
-        uiHandler.removeCallbacks(preflightPulseTask);
-        uiHandler.post(preflightPulseTask);
+        if (startupOverlayController != null) {
+            startupOverlayController.startPulse();
+        }
     }
 
     private void stopPreflightPulse() {
-        uiHandler.removeCallbacks(preflightPulseTask);
+        if (startupOverlayController != null) {
+            startupOverlayController.stopPulse();
+        }
     }
 
     private void setPreflightVisible(boolean visible) {
-        if (preflightOverlay == null) {
-            return;
+        if (startupOverlayController != null) {
+            startupOverlayController.setVisible(visible);
         }
-        if (visible) {
-            preflightOverlay.setVisibility(View.VISIBLE);
-            preflightOverlay.setAlpha(1f);
-            return;
-        }
-        preflightOverlay.animate()
-                .alpha(0f)
-                .setDuration(180)
-                .withEndAction(() -> {
-                    if (preflightOverlay != null) {
-                        preflightOverlay.setVisibility(View.GONE);
-                        preflightOverlay.setAlpha(1f);
-                    }
-                })
-                .start();
     }
 
     private void updatePreflightOverlay() {
@@ -3550,370 +2953,135 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        long elapsedMs = startupBeganAtMs > 0L
-                ? Math.max(0L, SystemClock.elapsedRealtime() - startupBeganAtMs)
-                : 0L;
-
-        // If we've been waiting > 20s with no response, auto-reset the window
-        // so the overlay cycles back to ACTIVE (endless retry) rather than
-        // permanently showing red ERROR.
-        if (!daemonReachable && elapsedMs > 20_000L) {
-            controlRetryCount++;
-            startupBeganAtMs = SystemClock.elapsedRealtime();
-            elapsedMs = 0L;
-        }
-        // Also reset counter when daemon connects successfully
-        if (daemonReachable && controlRetryCount > 0) {
-            controlRetryCount = 0;
+        boolean shouldProbe = requiresTransportProbe();
+        if (daemonReachable && handshakeResolved && !isBuildMismatch() && shouldProbe) {
+            maybeStartTransportProbe();
         }
 
-        // ── step 1: control link ──────────────────────────────────────────────
-        int step1 = daemonReachable ? SS_OK : SS_ACTIVE;
-
-        String step1Detail;
-        if (step1 == SS_OK) {
-            boolean isLocalImpl = "local".equalsIgnoreCase(BuildConfig.WBEAM_API_IMPL);
-            if (isLocalImpl) {
-                step1Detail = "on-device (local api) \u00b7 no host connection needed";
-            } else {
-                step1Detail = "reachable \u00b7 api_impl=" + BuildConfig.WBEAM_API_IMPL
-                        + " \u00b7 " + daemonHostName;
-            }
-        } else if (controlRetryCount == 0) {
-            step1Detail = "polling " + HostApiClient.API_BASE
-                    + " \u2026 (" + (elapsedMs / 1000L) + "s)"
-                    + " \u00b7 install/start desktop service if this does not recover";
-        } else {
-            step1Detail = "no response \u00b7 retry #" + controlRetryCount
-                    + " \u00b7 polling " + HostApiClient.API_BASE
-                    + " (" + (elapsedMs / 1000L) + "s)"
-                    + " \u00b7 check desktop service status";
-        }
-
-        // ── step 2: handshake ─────────────────────────────────────────────────
-        int step2;
-        String step2Detail;
-        if (step1 != SS_OK) {
-            step2 = SS_PENDING;
-            step2Detail = "waiting for control link";
-        } else if (!handshakeResolved) {
-            step2 = SS_ACTIVE;
-            step2Detail = "resolving service / api version\u2026";
-        } else if (isBuildMismatch()) {
-            step2 = SS_ERROR;
-            step2Detail = "build mismatch · app=" + BuildConfig.WBEAM_BUILD_REV
-                    + " · host=" + daemonBuildRevision;
-        } else {
-            step2 = SS_OK;
-            if (requiresTransportProbe()) {
-                maybeStartTransportProbe();
-                if (transportProbeOk) {
-                    step2Detail = "service=" + daemonService + " · transport test OK";
-                } else if (transportProbeInFlight) {
-                    step2Detail = "service=" + daemonService + " · transport test in progress…";
-                } else {
-                    step2Detail = "service=" + daemonService + " · transport test pending";
-                }
-            } else {
-                step2Detail = "service=" + daemonService + " · " + BuildConfig.WBEAM_API_IMPL;
-            }
-        }
-
-        // ── step 3: stream ────────────────────────────────────────────────────
-        String effState = effectiveDaemonState(
+        StartupOverlayModelBuilder.Input input = new StartupOverlayModelBuilder.Input();
+        input.daemonReachable = daemonReachable;
+        input.daemonHostName = daemonHostName;
+        input.daemonService = daemonService;
+        input.daemonBuildRevision = daemonBuildRevision;
+        input.daemonState = daemonState;
+        input.daemonLastError = daemonLastError;
+        input.handshakeResolved = handshakeResolved;
+        input.buildMismatch = isBuildMismatch();
+        input.requiresTransportProbe = shouldProbe;
+        input.probeOk = transportProbe.isProbeOk();
+        input.probeInFlight = transportProbe.isProbeInFlight();
+        input.probeInfo = transportProbe.getProbeInfo();
+        input.apiImpl = BuildConfig.WBEAM_API_IMPL;
+        input.apiBase = HostApiClient.API_BASE;
+        input.apiHost = BuildConfig.WBEAM_API_HOST;
+        input.streamHost = BuildConfig.WBEAM_STREAM_HOST;
+        input.streamPort = BuildConfig.WBEAM_STREAM_PORT;
+        input.appBuildRevision = BuildConfig.WBEAM_BUILD_REV;
+        input.lastUiInfo = lastUiInfo;
+        input.effectiveDaemonState = effectiveDaemonState(
                 daemonState, latestPresentFps, latestStreamUptimeSec, latestFrameOutHost);
-        boolean streamFlowing = "STREAMING".equals(effState);
+        input.latestPresentFps = latestPresentFps;
+        input.startupBeganAtMs = startupBeganAtMs;
+        input.controlRetryCount = controlRetryCount;
+        input.nowMs = SystemClock.elapsedRealtime();
+        input.lastStatsLine = lastStatsLine;
+        input.daemonErrCompact = ErrorTextUtil.compactDaemonErrorForUi(daemonLastError);
 
-        // Parse stream reconnect count from lastStatsLine ("reconnects: N")
-        int streamReconnects = 0;
-        try {
-            int rIdx = lastStatsLine.indexOf("reconnects: ");
-            if (rIdx >= 0) {
-                String rPart = lastStatsLine.substring(rIdx + "reconnects: ".length()).trim();
-                int end = 0;
-                while (end < rPart.length() && Character.isDigit(rPart.charAt(end))) end++;
-                if (end > 0) streamReconnects = Integer.parseInt(rPart.substring(0, end));
-            }
-        } catch (Exception ignored) {}
+        StartupOverlayModelBuilder.Model model = StartupOverlayModelBuilder.build(input);
+        startupBeganAtMs = model.updatedStartupBeganAtMs;
+        controlRetryCount = model.updatedControlRetryCount;
 
-        // Build the stream address hint once (depends on build config, not runtime)
-        String streamHost = BuildConfig.WBEAM_STREAM_HOST;
-        boolean streamIsLoopback = streamHost == null
-                || streamHost.trim().isEmpty()
-                || streamHost.trim().equals("127.0.0.1")
-                || streamHost.trim().equals("localhost");
-        String streamAddr = (streamHost != null && !streamHost.trim().isEmpty())
-                ? streamHost.trim() : "127.0.0.1";
-        String daemonErrCompact = compactDaemonErrorForUi(daemonLastError);
-        boolean daemonStartFailure = !daemonErrCompact.isEmpty()
-                && daemonErrCompact.toLowerCase(Locale.US).contains("stream start aborted");
-        String streamFixHint = streamIsLoopback
-                ? "check ADB reverse for stream/control ports \u00b7 ensure desktop service is running"
-                : "check USB tethering / host IP / LAN \u00b7 ensure desktop service is running";
+        StartupStepStyler.applyStepState(
+                model.step1State,
+                preflightAnimTick,
+                StartupOverlayModelBuilder.Model.SS_OK,
+                StartupOverlayModelBuilder.Model.SS_ERROR,
+                StartupOverlayModelBuilder.Model.SS_ACTIVE,
+                "1", startupStep1Card, startupStep1Badge, startupStep1Label,
+                startupStep1Status, startupStep1Detail, model.step1Detail);
+        StartupStepStyler.applyStepState(
+                model.step2State,
+                preflightAnimTick,
+                StartupOverlayModelBuilder.Model.SS_OK,
+                StartupOverlayModelBuilder.Model.SS_ERROR,
+                StartupOverlayModelBuilder.Model.SS_ACTIVE,
+                "2", startupStep2Card, startupStep2Badge, startupStep2Label,
+                startupStep2Status, startupStep2Detail, model.step2Detail);
+        StartupStepStyler.applyStepState(
+                model.step3State,
+                preflightAnimTick,
+                StartupOverlayModelBuilder.Model.SS_OK,
+                StartupOverlayModelBuilder.Model.SS_ERROR,
+                StartupOverlayModelBuilder.Model.SS_ACTIVE,
+                "3", startupStep3Card, startupStep3Badge, startupStep3Label,
+                startupStep3Status, startupStep3Detail, model.step3Detail);
 
-        int step3;
-        String step3Detail;
-        if (step2 != SS_OK) {
-            step3 = SS_PENDING;
-            step3Detail = (step2 == SS_ERROR && isBuildMismatch())
-                    ? "blocked by build mismatch"
-                    : "waiting for handshake";
-        } else if (requiresTransportProbe() && !transportProbeOk) {
-            step3 = SS_ACTIVE;
-            if (transportProbeInFlight) {
-                step3Detail = "testing transport I/O… " + transportProbeInfo;
-            } else {
-                step3Detail = "transport test retrying… " + transportProbeInfo;
-            }
-        } else if (streamFlowing) {
-            step3 = SS_OK;
-            step3Detail = "live \u00b7 fps=" + String.format(Locale.US, "%.0f", latestPresentFps)
-                    + " \u00b7 " + effState.toLowerCase(Locale.US);
-        } else {
-            boolean hasWaited = elapsedMs > 5_000L;
-            if (daemonStartFailure && hasWaited) {
-                step3 = SS_ERROR;
-                step3Detail = "host stream start failed \u00b7 " + daemonErrCompact;
-            } else {
-                // Keep retrying by default for transient network/capture states.
-                step3 = SS_ACTIVE;
-                if (streamReconnects > 0 && hasWaited) {
-                    step3Detail = "retry #" + streamReconnects
-                            + " \u00b7 " + streamAddr + ":" + BuildConfig.WBEAM_STREAM_PORT
-                            + " unreachable \u00b7 " + streamFixHint
-                            + (daemonErrCompact.isEmpty() ? "" : " \u00b7 host error: " + daemonErrCompact);
-                } else if (streamReconnects > 0) {
-                    step3Detail = "reconnecting \u00b7 attempt #" + streamReconnects + " \u00b7 awaiting frames\u2026";
-                } else if (hasWaited) {
-                    step3Detail = "connecting to " + streamAddr + ":" + BuildConfig.WBEAM_STREAM_PORT
-                            + " \u00b7 " + streamFixHint
-                            + (daemonErrCompact.isEmpty() ? "" : " \u00b7 host error: " + daemonErrCompact);
-                } else {
-                    step3Detail = "decoder started \u00b7 awaiting frames\u2026";
-                }
-            }
-        }
-
-        applyStepState(step1, "1", startupStep1Card, startupStep1Badge, startupStep1Label,
-                startupStep1Status, startupStep1Detail, step1Detail);
-        applyStepState(step2, "2", startupStep2Card, startupStep2Badge, startupStep2Label,
-                startupStep2Status, startupStep2Detail, step2Detail);
-        applyStepState(step3, "3", startupStep3Card, startupStep3Badge, startupStep3Label,
-                startupStep3Status, startupStep3Detail, step3Detail);
-
-        // subtitle
         if (startupSubtitleText != null) {
-            String subtitle;
-            if (step1 != SS_OK) {
-                if (elapsedMs < 2000L && controlRetryCount == 0) {
-                    subtitle = "starting up\u2026";
-                } else if (controlRetryCount == 0) {
-                    subtitle = "awaiting control link \u00b7 start desktop service if needed\u2026";
-                } else {
-                    subtitle = "retrying control link \u00b7 attempt #" + controlRetryCount
-                            + " \u00b7 check desktop service\u2026";
-                }
-            } else if (step2 != SS_OK) {
-                subtitle = (step2 == SS_ERROR && isBuildMismatch())
-                        ? "build mismatch \u00b7 redeploy APK or rebuild host"
-                        : "handshake in progress\u2026";
-            } else if (step3 != SS_OK) {
-                if (step3 == SS_ERROR && daemonStartFailure) {
-                    subtitle = "host stream start failed \u00b7 check host logs";
-                } else {
-                    subtitle = streamReconnects > 0
-                            ? "stream reconnecting \u00b7 attempt #" + streamReconnects + "\u2026"
-                            : elapsedMs > 5_000L
-                                    ? "stream unreachable \u00b7 retrying\u2026"
-                                    : "waiting for video frames\u2026";
-                }
-            } else {
-                subtitle = "all systems ready";
-            }
-            startupSubtitleText.setText(subtitle);
-            startupSubtitleText.setTextColor(step3 == SS_OK
+            startupSubtitleText.setText(model.subtitle);
+            startupSubtitleText.setTextColor(model.step3State == StartupOverlayModelBuilder.Model.SS_OK
                     ? Color.parseColor("#4ADE80")
-                    : step3 == SS_ERROR ? Color.parseColor("#F87171") : Color.parseColor("#475569"));
+                    : model.step3State == StartupOverlayModelBuilder.Model.SS_ERROR
+                    ? Color.parseColor("#F87171")
+                    : Color.parseColor("#475569"));
         }
 
-        // info line
         if (startupInfoText != null) {
-            StringBuilder startupLog = new StringBuilder();
-            startupLog.append("api=").append(HostApiClient.API_BASE)
-                    .append("  impl=").append(BuildConfig.WBEAM_API_IMPL).append('\n')
-                    .append("stream=").append(BuildConfig.WBEAM_STREAM_HOST).append(':')
-                    .append(BuildConfig.WBEAM_STREAM_PORT).append('\n')
-                    .append("app=").append(BuildConfig.WBEAM_BUILD_REV)
-                    .append("  host=").append(daemonBuildRevision).append('\n')
-                    .append("state=").append(daemonState);
-            if (daemonLastError != null && !daemonLastError.trim().isEmpty()) {
-                startupLog.append('\n').append("error=").append(daemonLastError.trim());
-            } else if (lastUiInfo != null && !lastUiInfo.trim().isEmpty()) {
-                startupLog.append('\n').append("hint=").append(lastUiInfo.trim());
-            }
-            startupInfoText.setText(startupLog.toString());
+            startupInfoText.setText(model.infoLog);
             startupInfoText.setTextColor(Color.parseColor("#CBD5E1"));
         }
 
-        boolean allOk = step1 == SS_OK && step2 == SS_OK && step3 == SS_OK;
-        if (!allOk) {
-            startupDismissed = false;
-            preflightComplete = false;
+        PreflightStateMachine.Transition transition =
+                PreflightStateMachine.next(model.allOk, startupDismissed, 800L);
+        startupDismissed = transition.startupDismissed;
+        preflightComplete = transition.preflightComplete;
+        if (transition.showOverlayNow) {
             setPreflightVisible(true);
-        } else if (!startupDismissed) {
-            startupDismissed = true;
-            preflightComplete = true;
+        }
+        if (transition.scheduleHide) {
             uiHandler.postDelayed(() -> {
                 if (startupDismissed) {
                     setPreflightVisible(false);
                 }
-            }, 800);
+            }, transition.hideDelayMs);
         }
-    }
-
-    private boolean isLoopbackHost(String host) {
-        if (host == null) {
-            return true;
-        }
-        String trimmed = host.trim();
-        return trimmed.isEmpty()
-                || "127.0.0.1".equals(trimmed)
-                || "localhost".equalsIgnoreCase(trimmed);
     }
 
     private boolean requiresTransportProbe() {
-        if (!daemonReachable || !handshakeResolved) {
-            return false;
-        }
-        if ("local".equalsIgnoreCase(BuildConfig.WBEAM_API_IMPL)) {
-            return false;
-        }
-        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.JELLY_BEAN_MR1) {
-            return false;
-        }
-        return !isLoopbackHost(BuildConfig.WBEAM_API_HOST);
+        return transportProbe.requiresProbe(
+                daemonReachable,
+                handshakeResolved,
+                BuildConfig.WBEAM_API_IMPL,
+                BuildConfig.WBEAM_API_HOST
+        );
     }
 
     private void maybeStartTransportProbe() {
-        if (!requiresTransportProbe()) {
-            return;
-        }
-        long now = SystemClock.elapsedRealtime();
-        if (transportProbeOk || transportProbeInFlight || now < transportProbeRetryAfterMs) {
-            return;
-        }
+        transportProbe.maybeStartProbe(
+                requiresTransportProbe(),
+                ioExecutor,
+                uiHandler,
+                new TransportProbeCoordinator.Callbacks() {
+                    @Override
+                    public String shortError(Exception e) {
+                        return ErrorTextUtil.shortError(e);
+                    }
 
-        transportProbeInFlight = true;
-        transportProbeLastAtMs = now;
-        transportProbeInfo = "starting";
+                    @Override
+                    public void onProbeLogInfo(String msg) {
+                        appendLiveLogInfo(msg);
+                    }
 
-        ioExecutor.execute(() -> {
-            try {
-                long elapsed = HostApiClient.runTransportProbeMs(1);
-                uiHandler.post(() -> {
-                    transportProbeOk = true;
-                    transportProbeInFlight = false;
-                    transportProbeRetryAfterMs = 0L;
-                    transportProbeInfo = "1MB in " + elapsed + "ms";
-                    appendLiveLogInfo("transport probe OK: " + transportProbeInfo);
-                    updatePreflightOverlay();
-                });
-            } catch (Exception e) {
-                uiHandler.post(() -> {
-                    transportProbeOk = false;
-                    transportProbeInFlight = false;
-                    transportProbeRetryAfterMs = SystemClock.elapsedRealtime() + 4_000L;
-                    transportProbeInfo = shortError(e);
-                    appendLiveLogWarn("transport probe failed: " + transportProbeInfo);
-                    updatePreflightOverlay();
-                });
-            }
-        });
-    }
+                    @Override
+                    public void onProbeLogWarn(String msg) {
+                        appendLiveLogWarn(msg);
+                    }
 
-    private void applyStepState(int state, String number,
-            View card, TextView badge, TextView label, TextView status, TextView detail,
-            String detailText) {
-        if (badge == null || label == null || status == null || detail == null || card == null) {
-            return;
-        }
-        int badgeBg, badgeFg, labelColor, statusColor, cardBg;
-        String statusStr;
-        String icon = stepIconForNumber(number);
-        boolean blink = (preflightAnimTick % 2) == 0;
-        switch (state) {
-            case SS_OK:
-                cardBg     = Color.parseColor("#0F2E25");
-                badgeBg    = Color.parseColor("#14532D");
-                badgeFg    = Color.parseColor("#4ADE80");
-                labelColor = Color.parseColor("#86EFAC");
-                statusColor= Color.parseColor("#4ADE80");
-                statusStr  = "OK";
-                badge.setText(icon);
-                detail.setTextColor(Color.parseColor("#86EFAC"));
-                break;
-            case SS_ERROR:
-                cardBg     = Color.parseColor("#361113");
-                badgeBg    = Color.parseColor("#7F1D1D");
-                badgeFg    = Color.parseColor("#FCA5A5");
-                labelColor = Color.parseColor("#FCA5A5");
-                statusColor= Color.parseColor("#FCA5A5");
-                statusStr  = "ERR";
-                badge.setText(icon);
-                detail.setTextColor(Color.parseColor("#FCA5A5"));
-                break;
-            case SS_ACTIVE:
-                cardBg     = blink ? Color.parseColor("#3A2A0F") : Color.parseColor("#2B1F0F");
-                badgeBg    = blink ? Color.parseColor("#A16207") : Color.parseColor("#854D0E");
-                badgeFg    = Color.parseColor("#FEF08A");
-                labelColor = Color.parseColor("#FEF08A");
-                statusColor= Color.parseColor("#FDE68A");
-                statusStr  = "BUSY";
-                badge.setText(icon);
-                detail.setTextColor(Color.parseColor("#FDE68A"));
-                break;
-            default: // SS_PENDING
-                cardBg     = Color.parseColor("#111827");
-                badgeBg    = Color.parseColor("#1E293B");
-                badgeFg    = Color.parseColor("#64748B");
-                labelColor = Color.parseColor("#64748B");
-                statusColor= Color.parseColor("#64748B");
-                statusStr  = "WAIT";
-                badge.setText(icon);
-                detail.setTextColor(Color.parseColor("#94A3B8"));
-                break;
-        }
-        if (card.getBackground() instanceof GradientDrawable) {
-            GradientDrawable cardDrawable = (GradientDrawable) card.getBackground().mutate();
-            cardDrawable.setColor(cardBg);
-        } else {
-            card.setBackgroundColor(cardBg);
-        }
-        badge.setBackgroundColor(badgeBg);
-        badge.setTextColor(badgeFg);
-        label.setTextColor(labelColor);
-        status.setText(statusStr);
-        status.setTextColor(statusColor);
-        detail.setText(detailText != null ? detailText : "");
-    }
-
-    private String stepIconForNumber(String number) {
-        if ("1".equals(number)) {
-            return "\u21C4"; // link
-        }
-        if ("2".equals(number)) {
-            return "\u2699"; // handshake/config
-        }
-        return "\u25B6"; // stream/play
-    }
-
-    private String spinnerGlyph() {
-        switch (preflightAnimTick) {
-            case 1:  return "/";
-            case 2:  return "-";
-            case 3:  return "\\";
-            default: return "|";
-        }
+                    @Override
+                    public void onProbeStateChanged() {
+                        updatePreflightOverlay();
+                    }
+                }
+        );
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -3987,62 +3155,28 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private String formatBps(long bps) {
-        if (bps <= 0) {
-            return "-";
-        }
-        if (bps >= 1024L * 1024L) {
-            return String.format(Locale.US, "%.2f MB/s", bps / (1024.0 * 1024.0));
-        }
-        if (bps >= 1024L) {
-            return String.format(Locale.US, "%.1f KB/s", bps / 1024.0);
-        }
-        return bps + " B/s";
+        return StatusTextFormatter.formatBps(bps);
     }
 
     private int[] computeScaledSize() {
-        String profile = getSelectedProfile();
-        int baseW = "ultra".equals(profile) ? 2560 : 1920;
-        int baseH = "ultra".equals(profile) ? 1440 : 1080;
-
-        int scale = getResolutionScalePercent();
-        int w = Math.max(640, (baseW * scale / 100) & ~1);
-        int h = Math.max(360, (baseH * scale / 100) & ~1);
-        return new int[]{w, h};
+        return StreamConfigResolver.computeScaledSize(
+                getSelectedProfile(),
+                getResolutionScalePercent()
+        );
     }
 
     private boolean isLegacyAndroidDevice() {
         return Build.VERSION.SDK_INT <= Build.VERSION_CODES.JELLY_BEAN_MR2;
     }
 
-    private StreamConfig effectiveStreamConfig() {
-        int[] sz = computeScaledSize();
-        int width = sz[0];
-        int height = sz[1];
-        int fps = getSelectedFps();
-        int bitrateMbps = getSelectedBitrateMbps();
-        if (isLegacyAndroidDevice()) {
-            // API17 transport is highly sensitive to sender timeouts under
-            // high throughput; pin a conservative profile by default.
-            width = 640;
-            height = 360;
-            fps = Math.min(fps, 24);
-            bitrateMbps = Math.min(bitrateMbps, 2);
-        }
-        return new StreamConfig(width, height, fps, bitrateMbps);
-    }
-
-    private static final class StreamConfig {
-        final int width;
-        final int height;
-        final int fps;
-        final int bitrateMbps;
-
-        StreamConfig(int width, int height, int fps, int bitrateMbps) {
-            this.width = width;
-            this.height = height;
-            this.fps = fps;
-            this.bitrateMbps = bitrateMbps;
-        }
+    private StreamConfigResolver.Resolved effectiveStreamConfig() {
+        return StreamConfigResolver.resolve(
+                getSelectedProfile(),
+                getResolutionScalePercent(),
+                getSelectedFps(),
+                getSelectedBitrateMbps(),
+                isLegacyAndroidDevice()
+        );
     }
 
     private int getResolutionScalePercent() {
@@ -4071,17 +3205,6 @@ public class MainActivity extends AppCompatActivity {
 
     private static int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
-    }
-
-    private static void setSpinnerSelection(Spinner spinner, String[] options, String value) {
-        int idx = 0;
-        for (int i = 0; i < options.length; i++) {
-            if (options[i].equals(value)) {
-                idx = i;
-                break;
-            }
-        }
-        spinner.setSelection(idx, false);
     }
 
 }
