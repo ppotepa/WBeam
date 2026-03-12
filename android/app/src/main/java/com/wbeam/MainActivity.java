@@ -908,14 +908,6 @@ public class MainActivity extends AppCompatActivity {
         MainActivityUiBinder.applyDebugControlsVisible(visible, debugControlsRow, testButton);
     }
 
-    private void toggleLiveLogPanel() {
-        liveLogVisible = MainActivityUiBinder.applyLiveLogPanelState(
-                liveLogVisible,
-                liveLogText,
-                logButton
-        );
-    }
-
     // ══════════════════════════════════════════════════════════════════════════
     // Settings
     // ══════════════════════════════════════════════════════════════════════════
