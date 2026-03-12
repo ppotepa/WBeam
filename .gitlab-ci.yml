@@ -166,7 +166,7 @@ build_windows_server:
       } else {
         $env:WBEAM_VERSION = "0.0.0.$($env:CI_DEFAULT_BRANCH).$($env:CI_PIPELINE_IID).$($env:CI_COMMIT_SHORT_SHA)"
       }
-      cmd /c "\"C:\BuildTools\Common7\Tools\VsDevCmd.bat\" -host_arch=x64 -arch=x64 && set" |
+      cmd /c "C:\BuildTools\Common7\Tools\VsDevCmd.bat -host_arch=x64 -arch=x64 && set" |
         ForEach-Object {
           if ($_ -match "^(.*?)=(.*)$") {
             [System.Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
