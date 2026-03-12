@@ -900,10 +900,22 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void setupButtons() {
+        bindSettingsCloseButton();
+        bindSimpleMenuTouchRefresh();
+        bindDebugInfoTouchFade();
+        bindSimpleModeButtons();
+        bindSimpleFpsButtons();
+        bindSimpleApplyButton();
+        updateActionButtonsEnabled();
+    }
+
+    private void bindSettingsCloseButton() {
         if (settingsCloseButton != null) {
             settingsCloseButton.setOnClickListener(v -> hideSettingsPanel());
         }
+    }
 
+    private void bindSimpleMenuTouchRefresh() {
         if (simpleMenuPanel != null) {
             simpleMenuPanel.setOnTouchListener((v, event) -> {
                 if (event.getActionMasked() == MotionEvent.ACTION_DOWN
@@ -914,7 +926,9 @@ public class MainActivity extends AppCompatActivity {
                 return false;
             });
         }
+    }
 
+    private void bindDebugInfoTouchFade() {
         if (debugInfoPanel != null) {
             debugInfoPanel.setOnTouchListener((v, event) -> {
                 int action = event.getActionMasked();
@@ -928,7 +942,9 @@ public class MainActivity extends AppCompatActivity {
                 return false;
             });
         }
+    }
 
+    private void bindSimpleModeButtons() {
         if (simpleModeH265Button != null) {
             // Relabel button to match the preferred codec for this device.
             simpleModeH265Button.setText("h264".equals(PREFERRED_VIDEO) ? "H.264" : "H.265");
@@ -945,14 +961,18 @@ public class MainActivity extends AppCompatActivity {
                 scheduleSimpleMenuAutoHide();
             });
         }
+    }
 
+    private void bindSimpleFpsButtons() {
         if (simpleFps30Button != null) simpleFps30Button.setOnClickListener(v -> selectSimpleFps(30));
         if (simpleFps45Button != null) simpleFps45Button.setOnClickListener(v -> selectSimpleFps(45));
         if (simpleFps60Button != null) simpleFps60Button.setOnClickListener(v -> selectSimpleFps(60));
         if (simpleFps90Button != null) simpleFps90Button.setOnClickListener(v -> selectSimpleFps(90));
         if (simpleFps120Button != null) simpleFps120Button.setOnClickListener(v -> selectSimpleFps(120));
         if (simpleFps144Button != null) simpleFps144Button.setOnClickListener(v -> selectSimpleFps(144));
+    }
 
+    private void bindSimpleApplyButton() {
         if (simpleApplyButton != null) {
             simpleApplyButton.setOnClickListener(v -> {
                 applySimpleMenuToSettings();
@@ -960,8 +980,6 @@ public class MainActivity extends AppCompatActivity {
                 hideSimpleMenu();
             });
         }
-
-        updateActionButtonsEnabled();
     }
 
     private void setActionButtonEnabled(Button button, boolean enabled) {
