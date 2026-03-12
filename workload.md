@@ -58,10 +58,10 @@ Parent Epic:
 Child issues in execution order:
 1. #38 Profile/config source inventory and mapping
    - https://github.com/ppotepa/WBeam/issues/38
-   - Status: todo
+   - Status: completed (`docs/profile-config-inventory-2026-03-12.md`)
 2. #39 Define canonical profile/config contract
    - https://github.com/ppotepa/WBeam/issues/39
-   - Status: todo
+   - Status: next
 3. #40 Implement canonical loading and remove fallback drift
    - https://github.com/ppotepa/WBeam/issues/40
    - Status: todo
