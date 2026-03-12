@@ -61,10 +61,10 @@ Child issues in execution order:
    - Status: completed (`docs/profile-config-inventory-2026-03-12.md`)
 2. #39 Define canonical profile/config contract
    - https://github.com/ppotepa/WBeam/issues/39
-   - Status: next
+   - Status: completed (`docs/profile-config-canonical-contract-2026-03-12.md`)
 3. #40 Implement canonical loading and remove fallback drift
    - https://github.com/ppotepa/WBeam/issues/40
-   - Status: todo
+   - Status: next
 4. #41 Align API profile surface with canonical model
    - https://github.com/ppotepa/WBeam/issues/41
    - Status: todo
