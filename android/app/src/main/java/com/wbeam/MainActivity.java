@@ -3,7 +3,6 @@ package com.wbeam;
 import android.Manifest;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
-import android.graphics.Rect;
 import android.media.MediaPlayer;
 import android.os.Build;
 import android.os.Bundle;
@@ -30,7 +29,6 @@ import androidx.core.content.ContextCompat;
 
 import com.wbeam.api.HostApiClient;
 import com.wbeam.hud.HudOverlayDisplay;
-import com.wbeam.api.StatusListener;
 import com.wbeam.api.StatusPoller;
 import com.wbeam.api.StatusPollerCallbacksFactory;
 import com.wbeam.hud.HudDebugLogLimiter;
@@ -53,6 +51,7 @@ import com.wbeam.startup.StartupOverlayViewRenderer;
 import com.wbeam.startup.TransportProbeCallbacksFactory;
 import com.wbeam.startup.TransportProbeCoordinator;
 import com.wbeam.stream.H264TcpPlayer;
+import com.wbeam.stream.LiveViewPlaybackCoordinator;
 import com.wbeam.stream.SessionUiBridge;
 import com.wbeam.stream.VideoTestController;
 import com.wbeam.stream.StreamSessionController;
@@ -62,12 +61,14 @@ import com.wbeam.telemetry.RuntimeTelemetryMapper;
 import com.wbeam.ui.ErrorTextUtil;
 import com.wbeam.ui.IntraOnlyButtonController;
 import com.wbeam.ui.LiveLogBuffer;
+import com.wbeam.ui.LiveLogUiAppender;
 import com.wbeam.ui.BuildRevisionGuard;
 import com.wbeam.ui.MainActivityRuntimeStateView;
 import com.wbeam.ui.MainActivityInteractionPolicy;
 import com.wbeam.ui.MainActivityUiBinder;
 import com.wbeam.ui.MainActivitySettingsPresenter;
 import com.wbeam.ui.MainActivityStatusPresenter;
+import com.wbeam.ui.MainActivityStatusTracker;
 import com.wbeam.ui.SettingsSelectionReader;
 import com.wbeam.ui.SettingsPayloadBuilder;
 import com.wbeam.ui.SettingsPanelController;
@@ -1229,101 +1230,33 @@ public class MainActivity extends AppCompatActivity {
 
     private void startLiveView() {
         videoTestController.release();
-        if (!isSurfaceReadyForLiveView()) {
-            return;
-        }
-        if (isLivePlayerAlreadyRunning()) {
-            return;
-        }
-
-        StreamConfigResolver.Resolved cfg = effectiveStreamConfig();
-        long frameUs = Math.max(1L, 1_000_000L / Math.max(1, cfg.fps));
-        SurfaceView preview = findViewById(R.id.previewSurface);
-        logStartLiveViewConfig(cfg, preview);
-        // Keep the Surface buffer sized from layout so video can scale to fill the screen.
-        // setFixedSize(stream_w, stream_h) causes a "small centered video" effect whenever the
-        // stream resolution differs from the view size (default config scales stream size).
-        preview.getHolder().setSizeFromLayout();
-        logSurfaceFrame(preview);
-        createAndStartPlayer(cfg, frameUs);
-        hideSettingsPanel();
-    }
-
-    private boolean isSurfaceReadyForLiveView() {
-        if (surface != null && surface.isValid()) {
-            return true;
-        }
-        updateStatus(STATE_ERROR, "surface not ready yet", 0);
-        return false;
-    }
-
-    private boolean isLivePlayerAlreadyRunning() {
-        if (player == null || !player.isRunning()) {
-            return false;
-        }
-        updateStatus(STATE_STREAMING, "already running", 0);
-        return true;
-    }
-
-    private void logStartLiveViewConfig(StreamConfigResolver.Resolved cfg, SurfaceView preview) {
-        Log.i(TAG, String.format(Locale.US,
-                "startLiveView: cfg=%dx%d@%dfps view=%dx%d surfaceValid=%s",
-                cfg.width, cfg.height, cfg.fps,
-                preview.getWidth(), preview.getHeight(),
-                surface != null && surface.isValid()));
-    }
-
-    private void logSurfaceFrame(SurfaceView preview) {
-        try {
-            Rect frame = preview.getHolder().getSurfaceFrame();
-            if (frame != null) {
-                Log.i(TAG, String.format(Locale.US,
-                        "startLiveView: surfaceFrame=%dx%d",
-                        frame.width(), frame.height()));
-            }
-        } catch (Exception ignored) {
-        }
-    }
-
-    private void createAndStartPlayer(StreamConfigResolver.Resolved cfg, long frameUs) {
-        player = new H264TcpPlayer(
+        player = LiveViewPlaybackCoordinator.start(
+                TAG,
                 surface,
-                buildPlayerStatusListener(),
-                cfg.width,
-                cfg.height,
-                frameUs
+                player,
+                findViewById(R.id.previewSurface),
+                effectiveStreamConfig(),
+                this::updateStatus,
+                this::updateStatsLine,
+                metricsReporter::push,
+                this::runOnUiThread,
+                this::hideSettingsPanel,
+                STATE_ERROR,
+                STATE_STREAMING
         );
-        player.start();
-    }
-
-    private StatusListener buildPlayerStatusListener() {
-        return new StatusListener() {
-            @Override
-            public void onStatus(String state, String info, long bps) {
-                runOnUiThread(() -> updateStatus(state, info, bps));
-            }
-
-            @Override
-            public void onStats(String line) {
-                runOnUiThread(() -> updateStatsLine(line));
-            }
-
-            @Override
-            public void onClientMetrics(ClientMetricsSample metrics) {
-                metricsReporter.push(metrics);
-            }
-        };
     }
 
     private void stopLiveView() {
-        if (player != null) {
-            player.stop();
-            player = null;
-        }
-        videoTestController.release();
-        hideCursorOverlay();
-        updateStatsLine("fps in/out: - | drops: - | late: - | q(t/d/r): -/-/- | reconnects: -");
-        updateStatus(STATE_IDLE, "stopped", 0);
+        player = LiveViewPlaybackCoordinator.stop(
+                player,
+                () -> {
+                    videoTestController.release();
+                    hideCursorOverlay();
+                },
+                this::updateStatsLine,
+                this::updateStatus,
+                STATE_IDLE
+        );
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -1501,22 +1434,27 @@ public class MainActivity extends AppCompatActivity {
     // ══════════════════════════════════════════════════════════════════════════
 
     private void updateStatus(String state, String info, long bps) {
-        lastUiState = MainActivityStatusPresenter.normalizeState(state, STATE_IDLE);
-        lastUiInfo = MainActivityStatusPresenter.normalizeInfo(info);
-        lastUiBps = bps;
+        MainActivityStatusTracker.UpdateResult next = MainActivityStatusTracker.update(
+                state,
+                info,
+                bps,
+                STATE_IDLE,
+                STATE_ERROR,
+                SystemClock.elapsedRealtime(),
+                30_000L,
+                lastCriticalErrorInfo,
+                lastCriticalErrorLogAtMs
+        );
+        lastUiState = next.state;
+        lastUiInfo = next.info;
+        lastUiBps = next.bps;
+        lastCriticalErrorInfo = next.criticalErrorInfo;
+        lastCriticalErrorLogAtMs = next.criticalErrorLogAtMs;
         refreshStatusText();
         refreshDebugInfoOverlay();
-        if (STATE_ERROR.equals(lastUiState) && ErrorTextUtil.isCriticalUiInfo(lastUiInfo)) {
-            long now = SystemClock.elapsedRealtime();
-            boolean same = lastUiInfo.equals(lastCriticalErrorInfo);
-            boolean stale = (now - lastCriticalErrorLogAtMs) > 30_000L;
-            if (!same || stale) {
-                lastCriticalErrorInfo = lastUiInfo;
-                lastCriticalErrorLogAtMs = now;
-                String line = "status=" + lastUiState + " info=" + lastUiInfo + " bps=" + bps;
-                appendLiveLogError(line);
-                Log.e(TAG, line);
-            }
+        if (next.shouldLogCritical) {
+            appendLiveLogError(next.criticalLogLine);
+            Log.e(TAG, next.criticalLogLine);
         }
     }
 
@@ -1533,23 +1471,14 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void appendLiveLog(String level, String line) {
-        if (line == null || line.trim().isEmpty()) {
-            return;
-        }
-
-        Runnable task = () -> {
-            if (liveLogText == null) {
-                return;
-            }
-            liveLogText.setText(liveLogBuffer.append(level, line));
-            liveLogText.setVisibility(liveLogVisible ? View.VISIBLE : View.GONE);
-        };
-
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            task.run();
-        } else {
-            runOnUiThread(task);
-        }
+        LiveLogUiAppender.append(
+                liveLogText,
+                liveLogBuffer,
+                liveLogVisible,
+                level,
+                line,
+                this::runOnUiThread
+        );
     }
 
     private void refreshStatusText() {
