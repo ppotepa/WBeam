@@ -1,7 +1,7 @@
 # Workload Plan (Epics)
 
 Date: 2026-03-12
-Branch: v0.1.1/e37/i42-final-report
+Branch: v0.1.1/base
 
 ## 1. Issue Strategy (Execution Model)
 
@@ -22,9 +22,9 @@ Execution format:
 Current status:
 - Epic #30 completed: Repo/Runtime Hygiene.
 - Child issues #31-#35 completed and closed.
-- Epic #37 opened: Single Source of Truth for Profiles/Config.
+- Epic #37 completed: Single Source of Truth for Profiles/Config.
 - Child issues #38-#42 completed.
-- Next step: open Epic #3 and execute its child issues one-by-one.
+- Next step: execute Epic #3 child issues one-by-one.
 
 ## 2. Epic #30 Breakdown (Step-by-step issues)
 
@@ -121,6 +121,24 @@ Why after #2:
 Definition of Done:
 - Clear boundary: true archive or supported lane.
 - No hidden production dependency on archive paths.
+
+Current state (as-is):
+- `archive/legacy/` is still part of expected repository layout and checks.
+- Legacy lane assets are present and can be confused with active runtime paths.
+- Canonical runtime profile source was already moved away from archive fallback in Epic #37.
+- Boundary between "historical archive" and "supported compatibility lane" is still not formalized.
+
+Epic 3 scope (to-do):
+1. Decide policy: `archive/legacy` is either:
+   - true archive (no active runtime/CI dependencies), or
+   - explicitly supported compatibility lane (renamed/documented as such).
+2. Apply policy to CI/layout checks and docs:
+   - align `docs/repo-structure.md`, `AGENTS.md`, workflow notes.
+3. Remove or isolate any remaining runtime/operational references to archive paths.
+4. Add explicit compatibility guardrails:
+   - if compatibility lane remains, gate it with explicit opt-in and documentation.
+5. Add final verification pass:
+   - repo layout checks, boundary checks, e2e matrix checks.
 
 ## 4) Wrapper & Lane Policy Unification
 Goal:
