@@ -1937,39 +1937,39 @@ public class MainActivity extends AppCompatActivity {
                     streamSize[1],
                     targetFps
             );
-            String profileRev = safeText(daemonBuildRevision).equals("-")
-                    ? safeText(BuildConfig.WBEAM_BUILD_REV)
-                    : safeText(daemonBuildRevision);
+            String profileRev = HudRenderSupport.safeText(daemonBuildRevision).equals("-")
+                    ? HudRenderSupport.safeText(BuildConfig.WBEAM_BUILD_REV)
+                    : HudRenderSupport.safeText(daemonBuildRevision);
             StringBuilder chips = new StringBuilder();
             chips.append(hudChip("CURRENT PROFILE", getSelectedProfile(), ""));
             chips.append(hudChip("PROFILE REV", profileRev, ""));
             chips.append(hudChip("STREAM MODE", streamMode, ""));
             chips.append(hudChip("DEVICE", daemonHostName, ""));
-            chips.append(hudChip("STATE", daemonStateUi, hudToneClass(tone)));
+            chips.append(hudChip("STATE", daemonStateUi, HudRenderSupport.hudToneClass(tone)));
 
             StringBuilder cards = new StringBuilder();
-            cards.append(hudCard("PRESENT FPS", String.format(Locale.US, "%.1f", presentFps), hudToneClass(tone)));
+            cards.append(hudCard("PRESENT FPS", String.format(Locale.US, "%.1f", presentFps), HudRenderSupport.hudToneClass(tone)));
             cards.append(hudCard("RECV FPS", String.format(Locale.US, "%.1f", recvFps), ""));
             cards.append(hudCard("DECODE FPS", String.format(Locale.US, "%.1f", decodeFps), ""));
-            cards.append(hudCard("LIVE MBPS", fmtDoubleOrPlaceholder(liveMbps, "%.2f", "PENDING"), hudToneClass(tone)));
-            cards.append(hudCard("E2E p95", String.format(Locale.US, "%.1f ms", e2eP95), hudToneClass(tone)));
+            cards.append(hudCard("LIVE MBPS", HudRenderSupport.fmtDoubleOrPlaceholder(liveMbps, "%.2f", "PENDING"), HudRenderSupport.hudToneClass(tone)));
+            cards.append(hudCard("E2E p95", String.format(Locale.US, "%.1f ms", e2eP95), HudRenderSupport.hudToneClass(tone)));
             cards.append(hudCard("Decode p95", String.format(Locale.US, "%.2f ms", decodeP95), ""));
             cards.append(hudCard("Render p95", String.format(Locale.US, "%.2f ms", renderP95), ""));
             cards.append(hudCard("Frame p95", String.format(Locale.US, "%.2f ms", frametimeP95), ""));
-            cards.append(hudCard("Drops / s", fmtDoubleOrPlaceholder(dropsPerSec, "%.3f", "PENDING"), hudToneClass(tone)));
+            cards.append(hudCard("Drops / s", HudRenderSupport.fmtDoubleOrPlaceholder(dropsPerSec, "%.3f", "PENDING"), HudRenderSupport.hudToneClass(tone)));
             cards.append(hudCard("Drops total", String.valueOf(drops), ""));
 
             StringBuilder details = new StringBuilder();
-            details.append(hudDetailRow("Adaptive", "L" + adaptiveLevel + " " + safeText(adaptiveAction)));
+            details.append(hudDetailRow("Adaptive", "L" + adaptiveLevel + " " + HudRenderSupport.safeText(adaptiveAction)));
             details.append(hudDetailRow("Transport queue", qT + "/" + qTMax));
             details.append(hudDetailRow("Decode queue", qD + "/" + qDMax));
             details.append(hudDetailRow("Render queue", qR + "/" + qRMax));
             details.append(hudDetailRow("Backpressure", bpHigh + "/" + bpRecover));
             details.append(hudDetailRow("Connection mode", "runtime"));
-            details.append(hudDetailRow("Reason", safeText(reason)));
-            details.append(hudDetailRow("Host error", safeText(daemonLastError)));
-            details.append(hudDetailRow("App build", safeText(BuildConfig.WBEAM_BUILD_REV)));
-            details.append(hudDetailRow("Daemon build", safeText(daemonBuildRevision)));
+            details.append(hudDetailRow("Reason", HudRenderSupport.safeText(reason)));
+            details.append(hudDetailRow("Host error", HudRenderSupport.safeText(daemonLastError)));
+            details.append(hudDetailRow("App build", HudRenderSupport.safeText(BuildConfig.WBEAM_BUILD_REV)));
+            details.append(hudDetailRow("Daemon build", HudRenderSupport.safeText(daemonBuildRevision)));
 
             String trend = "runtime health=" + tone.toUpperCase(Locale.US)
                     + " | recv=" + String.format(Locale.US, "%.1f", recvFps)
@@ -2380,7 +2380,7 @@ public class MainActivity extends AppCompatActivity {
             String resourceRowsHtml,
             String scaleClass
     ) {
-        String bodyClass = "hud-live " + safeText(scaleClass);
+        String bodyClass = "hud-live " + HudRenderSupport.safeText(scaleClass);
         return "<!doctype html><html><head><meta charset='utf-8'/>"
                 + "<meta name='viewport' content='width=device-width,height=device-height,initial-scale=1,maximum-scale=1,viewport-fit=cover'/>"
                 + "<style>"
@@ -2432,7 +2432,7 @@ public class MainActivity extends AppCompatActivity {
                 + chipsHtml
                 + "</div>"
                 + "<div class='main'>"
-                + "<div class='panel panel-main'><div class='kpi'>" + cardsHtml + "</div><div class='metric-trends'>" + chartsHtml + "</div><div class='trend'>" + escapeHtml(safeText(trendText)) + "</div><div class='resource'><div class='title'>DEVICE RESOURCES (* GPU proxy from render time)</div>" + resourceRowsHtml + "</div></div>"
+                + "<div class='panel panel-main'><div class='kpi'>" + cardsHtml + "</div><div class='metric-trends'>" + chartsHtml + "</div><div class='trend'>" + escapeHtml(HudRenderSupport.safeText(trendText)) + "</div><div class='resource'><div class='title'>DEVICE RESOURCES (* GPU proxy from render time)</div>" + resourceRowsHtml + "</div></div>"
                 + "<div class='panel panel-side'><table class='detail-table'>" + detailsRowsHtml + "</table></div>"
                 + "</div>"
                 + "</div></body></html>";
@@ -2490,30 +2490,30 @@ public class MainActivity extends AppCompatActivity {
         String progressText = progressLine == null || progressLine.trim().isEmpty()
                 ? String.format(Locale.US, "TRAINING PROGRESS %d%%", pct)
                 : progressLine.trim();
-        String modeLine = safeText(encoder).toUpperCase(Locale.US)
-                + " | " + safeText(size)
+        String modeLine = HudRenderSupport.safeText(encoder).toUpperCase(Locale.US)
+                + " | " + HudRenderSupport.safeText(size)
                 + " | " + Math.max(0, fps) + "fps";
         String liveTriplet = String.format(
                 Locale.US,
                 "P/R/D %s / %s / %s",
-                fmtDoubleOrPlaceholder(present, "%.1f", "PENDING"),
-                fmtDoubleOrPlaceholder(recv, "%.1f", "PENDING"),
-                fmtDoubleOrPlaceholder(decode, "%.1f", "PENDING")
+                HudRenderSupport.fmtDoubleOrPlaceholder(present, "%.1f", "PENDING"),
+                HudRenderSupport.fmtDoubleOrPlaceholder(recv, "%.1f", "PENDING"),
+                HudRenderSupport.fmtDoubleOrPlaceholder(decode, "%.1f", "PENDING")
         );
-        String statusLine1 = "best_trial: " + safeText(bestTrial) + "    best_score: " + fmtDoubleOrPlaceholder(bestScore, "%.2f", "PENDING");
-        String statusLine2 = "sample_count: " + sampleCount + "    state.fps: " + safeText(fpsState);
-        String statusLine3 = "state.mbps: " + safeText(mbpsState) + "    state.latency: " + safeText(latState);
-        String statusLine4 = "state.drop: " + safeText(dropState) + "    state.queue: " + safeText(queueState);
-        String statusLine5 = "quality: " + safeText(qualityState) + "    note: " + safeText(statusNote);
+        String statusLine1 = "best_trial: " + HudRenderSupport.safeText(bestTrial) + "    best_score: " + HudRenderSupport.fmtDoubleOrPlaceholder(bestScore, "%.2f", "PENDING");
+        String statusLine2 = "sample_count: " + sampleCount + "    state.fps: " + HudRenderSupport.safeText(fpsState);
+        String statusLine3 = "state.mbps: " + HudRenderSupport.safeText(mbpsState) + "    state.latency: " + HudRenderSupport.safeText(latState);
+        String statusLine4 = "state.drop: " + HudRenderSupport.safeText(dropState) + "    state.queue: " + HudRenderSupport.safeText(queueState);
+        String statusLine5 = "quality: " + HudRenderSupport.safeText(qualityState) + "    note: " + HudRenderSupport.safeText(statusNote);
 
-        String trendGrid = buildSotTrendCellHtml("SCORE TREND", trendScore, hudToneClass(qualityState), "")
-                + buildSotTrendCellHtml("PRESENT FPS TREND", trendPresent, hudToneClass(fpsState), "")
-                + buildSotTrendCellHtml("LIVE MBPS TREND", trendMbps, hudToneClass(mbpsState), "Mbps")
-                + buildSotTrendCellHtml("LAT p95 TREND", trendLatency, hudToneClass(latState), "ms")
-                + buildSotTrendCellHtml("DROPS/s TREND", trendDrops, hudToneClass(dropState), "")
-                + buildSotTrendCellHtml("QUEUE DEPTH TREND", trendQueue, hudToneClass(queueState), "")
-                + buildSotTrendCellHtml("RECV FPS TREND", trendRecv, hudToneClass(fpsState), "")
-                + buildSotTrendCellHtml("DECODE FPS TREND", trendDecode, hudToneClass(fpsState), "");
+        String trendGrid = buildSotTrendCellHtml("SCORE TREND", trendScore, HudRenderSupport.hudToneClass(qualityState), "")
+                + buildSotTrendCellHtml("PRESENT FPS TREND", trendPresent, HudRenderSupport.hudToneClass(fpsState), "")
+                + buildSotTrendCellHtml("LIVE MBPS TREND", trendMbps, HudRenderSupport.hudToneClass(mbpsState), "Mbps")
+                + buildSotTrendCellHtml("LAT p95 TREND", trendLatency, HudRenderSupport.hudToneClass(latState), "ms")
+                + buildSotTrendCellHtml("DROPS/s TREND", trendDrops, HudRenderSupport.hudToneClass(dropState), "")
+                + buildSotTrendCellHtml("QUEUE DEPTH TREND", trendQueue, HudRenderSupport.hudToneClass(queueState), "")
+                + buildSotTrendCellHtml("RECV FPS TREND", trendRecv, HudRenderSupport.hudToneClass(fpsState), "")
+                + buildSotTrendCellHtml("DECODE FPS TREND", trendDecode, HudRenderSupport.hudToneClass(fpsState), "");
 
         String hudShellClass = "sot shell " + trainerScaleClass(fontProfile);
         return "<!doctype html><html><head><meta charset='utf-8'/>"
@@ -2561,28 +2561,28 @@ public class MainActivity extends AppCompatActivity {
                 + "@media (max-width:1200px){.sot .main{grid-template-columns:1fr;}.sot .trend-grid{grid-template-columns:1fr;}.sot .footer{grid-template-columns:1fr;}}"
                 + "</style></head><body class='hud-trainer'><div class='" + hudShellClass + "'>"
                 + "<div class='panel header'>"
-                + "<div class='chip'><span class='k'>RUN / PROFILE</span><span class='v'>" + escapeHtml(safeText(runId) + " / " + safeText(profile)) + "</span></div>"
+                + "<div class='chip'><span class='k'>RUN / PROFILE</span><span class='v'>" + escapeHtml(HudRenderSupport.safeText(runId) + " / " + HudRenderSupport.safeText(profile)) + "</span></div>"
                 + "<div class='chip'><span class='k'>GEN</span><span class='v'>" + escapeHtml(gIdx + "/" + gTotal) + "</span></div>"
-                + "<div class='chip'><span class='k'>TRIAL</span><span class='v'>" + escapeHtml(tIdx + "/" + tTotal + " (" + safeText(trialId) + ")") + "</span></div>"
+                + "<div class='chip'><span class='k'>TRIAL</span><span class='v'>" + escapeHtml(tIdx + "/" + tTotal + " (" + HudRenderSupport.safeText(trialId) + ")") + "</span></div>"
                 + "<div class='chip'><span class='k'>CURRENT MODE</span><span class='v'>" + escapeHtml(modeLine) + "</span></div>"
                 + "<div class='chip'><span class='k'>PROGRESS</span><span class='v'>" + escapeHtml(progressText + " | " + pct + "%") + "</span></div>"
                 + "</div>"
                 + "<div class='main'>"
                 + "<div class='panel left-col'>"
                 + "<div class='kpi-block'>"
-                + "<div class='kpi-item'><span class='k'>SCORE</span><span class='v " + escapeHtml(hudToneClass(qualityState)) + "'>" + escapeHtml(fmtDoubleOrPlaceholder(score, "%.2f", "PENDING")) + "</span></div>"
-                + "<div class='kpi-item'><span class='k'>PRESENT FPS</span><span class='v " + escapeHtml(hudToneClass(fpsState)) + "'>" + escapeHtml(fmtDoubleOrPlaceholder(present, "%.1f", "PENDING")) + "</span></div>"
-                + "<div class='kpi-item'><span class='k'>LIVE MBPS</span><span class='v " + escapeHtml(hudToneClass(mbpsState)) + "'>" + escapeHtml(fmtLiveMbps(liveMbps, Double.NaN) + " Mbps") + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>SCORE</span><span class='v " + escapeHtml(HudRenderSupport.hudToneClass(qualityState)) + "'>" + escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(score, "%.2f", "PENDING")) + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>PRESENT FPS</span><span class='v " + escapeHtml(HudRenderSupport.hudToneClass(fpsState)) + "'>" + escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(present, "%.1f", "PENDING")) + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>LIVE MBPS</span><span class='v " + escapeHtml(HudRenderSupport.hudToneClass(mbpsState)) + "'>" + escapeHtml(HudRenderSupport.fmtLiveMbps(liveMbps, Double.NaN) + " Mbps") + "</span></div>"
                 + "</div>"
                 + "<div class='kpi-block'>"
-                + "<div class='kpi-item'><span class='k'>RECV FPS</span><span class='v'>" + escapeHtml(fmtDoubleOrPlaceholder(recv, "%.1f", "PENDING")) + "</span></div>"
-                + "<div class='kpi-item'><span class='k'>DECODE FPS</span><span class='v'>" + escapeHtml(fmtDoubleOrPlaceholder(decode, "%.1f", "PENDING")) + "</span></div>"
-                + "<div class='kpi-item'><span class='k'>LAT p95</span><span class='v " + escapeHtml(hudToneClass(latState)) + "'>" + escapeHtml(fmtDoubleOrPlaceholder(latency, "%.1f ms", "PENDING")) + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>RECV FPS</span><span class='v'>" + escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(recv, "%.1f", "PENDING")) + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>DECODE FPS</span><span class='v'>" + escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(decode, "%.1f", "PENDING")) + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>LAT p95</span><span class='v " + escapeHtml(HudRenderSupport.hudToneClass(latState)) + "'>" + escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(latency, "%.1f ms", "PENDING")) + "</span></div>"
                 + "</div>"
                 + "<div class='kpi-block'>"
-                + "<div class='kpi-item'><span class='k'>DROPS/s</span><span class='v " + escapeHtml(hudToneClass(dropState)) + "'>" + escapeHtml(fmtDoubleOrPlaceholder(drops, "%.3f", "PENDING")) + "</span></div>"
-                + "<div class='kpi-item'><span class='k'>LATE/s</span><span class='v " + escapeHtml(hudToneClass(dropState)) + "'>" + escapeHtml(fmtDoubleOrPlaceholder(late, "%.3f", "PENDING")) + "</span></div>"
-                + "<div class='kpi-item'><span class='k'>QUEUE</span><span class='v " + escapeHtml(hudToneClass(queueState)) + "'>" + escapeHtml(fmtDoubleOrPlaceholder(queue, "%.3f", "PENDING")) + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>DROPS/s</span><span class='v " + escapeHtml(HudRenderSupport.hudToneClass(dropState)) + "'>" + escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(drops, "%.3f", "PENDING")) + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>LATE/s</span><span class='v " + escapeHtml(HudRenderSupport.hudToneClass(dropState)) + "'>" + escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(late, "%.3f", "PENDING")) + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>QUEUE</span><span class='v " + escapeHtml(HudRenderSupport.hudToneClass(queueState)) + "'>" + escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(queue, "%.3f", "PENDING")) + "</span></div>"
                 + "</div>"
                 + "<div class='status'>"
                 + "<div class='row'>" + escapeHtml(statusLine1) + "</div>"
@@ -2596,7 +2596,7 @@ public class MainActivity extends AppCompatActivity {
                 + "<div class='panel right-col'><div class='trend-grid'>" + trendGrid + "</div></div>"
                 + "</div>"
                 + "<div class='footer'>"
-                + "<div class='foot'><strong>LAYOUT/FONT</strong><br/>layout=" + escapeHtml(safeText(layoutMode)) + " | font=" + escapeHtml(safeText(fontProfile)) + "</div>"
+                + "<div class='foot'><strong>LAYOUT/FONT</strong><br/>layout=" + escapeHtml(HudRenderSupport.safeText(layoutMode)) + " | font=" + escapeHtml(HudRenderSupport.safeText(fontProfile)) + "</div>"
                 + "<div class='foot'><strong>DEVICE RESOURCES (* GPU proxy)</strong><br/>" + resourceRowsHtml + "</div>"
                 + "<div class='foot'><strong>THRESHOLDS</strong><br/><span class='ok'>OK</span> stable | <span class='warn'>WARN</span> drift | <span class='risk'>RISK</span> critical</div>"
                 + "</div>"
@@ -2759,15 +2759,15 @@ public class MainActivity extends AppCompatActivity {
             String queueTone,
             String lateTone
     ) {
-        return buildTrendCardHtml("SCORE", score, hudToneClass(scoreTone), "")
-                + buildTrendCardHtml("PRESENT FPS", fps, hudToneClass(fpsTone), "")
-                + buildTrendCardHtml("RECV FPS", recv, hudToneClass(recvTone), "")
-                + buildTrendCardHtml("DECODE FPS", decode, hudToneClass(decodeTone), "")
-                + buildTrendCardHtml("LIVE MBPS", mbps, hudToneClass(mbpsTone), "Mbps")
-                + buildTrendCardHtml("DROP / SEC", drops, hudToneClass(dropTone), "")
-                + buildTrendCardHtml("LAT p95", latency, hudToneClass(latTone), "ms")
-                + buildTrendCardHtml("QUEUE DEPTH", queue, hudToneClass(queueTone), "")
-                + buildTrendCardHtml("LATE / SEC", late, hudToneClass(lateTone), "");
+        return buildTrendCardHtml("SCORE", score, HudRenderSupport.hudToneClass(scoreTone), "")
+                + buildTrendCardHtml("PRESENT FPS", fps, HudRenderSupport.hudToneClass(fpsTone), "")
+                + buildTrendCardHtml("RECV FPS", recv, HudRenderSupport.hudToneClass(recvTone), "")
+                + buildTrendCardHtml("DECODE FPS", decode, HudRenderSupport.hudToneClass(decodeTone), "")
+                + buildTrendCardHtml("LIVE MBPS", mbps, HudRenderSupport.hudToneClass(mbpsTone), "Mbps")
+                + buildTrendCardHtml("DROP / SEC", drops, HudRenderSupport.hudToneClass(dropTone), "")
+                + buildTrendCardHtml("LAT p95", latency, HudRenderSupport.hudToneClass(latTone), "ms")
+                + buildTrendCardHtml("QUEUE DEPTH", queue, HudRenderSupport.hudToneClass(queueTone), "")
+                + buildTrendCardHtml("LATE / SEC", late, HudRenderSupport.hudToneClass(lateTone), "");
     }
 
     private String buildMetricTrendRowsHtml(
@@ -2782,11 +2782,11 @@ public class MainActivity extends AppCompatActivity {
             String latTone,
             String queueTone
     ) {
-        return buildTrendCardHtml("FPS", fps, hudToneClass(fpsTone), "")
-                + buildTrendCardHtml("MBPS", mbps, hudToneClass(mbpsTone), "Mbps")
-                + buildTrendCardHtml("DROPS / SEC", drops, hudToneClass(dropTone), "")
-                + buildTrendCardHtml("LAT p95", latency, hudToneClass(latTone), "ms")
-                + buildTrendCardHtml("QUEUE DEPTH", queue, hudToneClass(queueTone), "");
+        return buildTrendCardHtml("FPS", fps, HudRenderSupport.hudToneClass(fpsTone), "")
+                + buildTrendCardHtml("MBPS", mbps, HudRenderSupport.hudToneClass(mbpsTone), "Mbps")
+                + buildTrendCardHtml("DROPS / SEC", drops, HudRenderSupport.hudToneClass(dropTone), "")
+                + buildTrendCardHtml("LAT p95", latency, HudRenderSupport.hudToneClass(latTone), "ms")
+                + buildTrendCardHtml("QUEUE DEPTH", queue, HudRenderSupport.hudToneClass(queueTone), "");
     }
 
     private String buildTrendCardHtml(String label, JSONArray series, String toneClass, String unitSuffix) {
@@ -2842,22 +2842,6 @@ public class MainActivity extends AppCompatActivity {
 
     private double latestFiniteFromSeries(JSONArray series) {
         return HudRenderSupport.latestFiniteFromSeries(series);
-    }
-
-    private String fmtDoubleOrPlaceholder(double value, String pattern, String fallback) {
-        return HudRenderSupport.fmtDoubleOrPlaceholder(value, pattern, fallback);
-    }
-
-    private String fmtLiveMbps(double liveMbps, double targetMbps) {
-        return HudRenderSupport.fmtLiveMbps(liveMbps, targetMbps);
-    }
-
-    private String safeText(String value) {
-        return HudRenderSupport.safeText(value);
-    }
-
-    private String hudToneClass(String tone) {
-        return HudRenderSupport.hudToneClass(tone);
     }
 
     private String hudChip(String key, String value, String toneClass) {
