@@ -703,38 +703,19 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     public void onBackPressed() {
-        if (handleBackNavigation()) {
+        if (MainActivityInteractionPolicy.handleBackNavigation(
+                simpleMenuVisible,
+                settingsPanelController != null && settingsPanelController.isVisible(),
+                this::hideSimpleMenu,
+                this::hideSettingsPanel
+        )) {
             return;
         }
         super.onBackPressed();
     }
 
-    private boolean handleBackNavigation() {
-        return MainActivityInteractionPolicy.handleBackNavigation(
-                simpleMenuVisible,
-                settingsPanelController != null && settingsPanelController.isVisible(),
-                this::hideSimpleMenu,
-                this::hideSettingsPanel
-        );
-    }
-
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (handleDebugOverlayToggleKeyDown(keyCode, event)) {
-            return true;
-        }
-        return super.onKeyDown(keyCode, event);
-    }
-
-    @Override
-    public boolean onKeyUp(int keyCode, KeyEvent event) {
-        if (handleDebugOverlayToggleKeyUp(keyCode)) {
-            return true;
-        }
-        return super.onKeyUp(keyCode, event);
-    }
-
-    private boolean handleDebugOverlayToggleKeyDown(int keyCode, KeyEvent event) {
         MainActivityInteractionPolicy.ToggleAction action =
                 MainActivityInteractionPolicy.handleDebugToggleKeyDown(
                         debugToggleState,
@@ -742,35 +723,36 @@ public class MainActivity extends AppCompatActivity {
                         keyCode,
                         event.getRepeatCount()
                 );
-        if (!action.handled) {
-            return false;
+        if (action.handled) {
+            if (action.cancelScheduledToggle) {
+                uiHandler.removeCallbacks(debugOverlayToggleTask);
+            }
+            if (action.scheduleToggle) {
+                uiHandler.postDelayed(debugOverlayToggleTask, DEBUG_OVERLAY_TOGGLE_HOLD_MS);
+            }
+            return true;
         }
-        if (action.cancelScheduledToggle) {
-            uiHandler.removeCallbacks(debugOverlayToggleTask);
-        }
-        if (action.scheduleToggle) {
-            uiHandler.postDelayed(debugOverlayToggleTask, DEBUG_OVERLAY_TOGGLE_HOLD_MS);
-        }
-        return true;
+        return super.onKeyDown(keyCode, event);
     }
 
-    private boolean handleDebugOverlayToggleKeyUp(int keyCode) {
+    @Override
+    public boolean onKeyUp(int keyCode, KeyEvent event) {
         MainActivityInteractionPolicy.ToggleAction action =
                 MainActivityInteractionPolicy.handleDebugToggleKeyUp(
                         debugToggleState,
                         BuildConfig.DEBUG,
                         keyCode
                 );
-        if (!action.handled) {
-            return false;
+        if (action.handled) {
+            if (action.cancelScheduledToggle) {
+                uiHandler.removeCallbacks(debugOverlayToggleTask);
+            }
+            if (action.resetArmed) {
+                debugToggleState.debugOverlayToggleArmed = false;
+            }
+            return true;
         }
-        if (action.cancelScheduledToggle) {
-            uiHandler.removeCallbacks(debugOverlayToggleTask);
-        }
-        if (action.resetArmed) {
-            debugToggleState.debugOverlayToggleArmed = false;
-        }
-        return true;
+        return super.onKeyUp(keyCode, event);
     }
 
     // ══════════════════════════════════════════════════════════════════════════
