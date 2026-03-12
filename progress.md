@@ -30,6 +30,12 @@ Detailed implementation history is maintained in GitHub Issues and Pull Requests
   - outputs:
     - `docs/hygiene-inventory-2026-03-12.md`
     - `docs/hygiene-report-2026-03-12.md`
+- Profile/config source-of-truth epic completed:
+  - issue `#37` (child lane `#38`, `#39`, `#40`, `#41`, `#42`)
+  - outputs:
+    - `docs/profile-config-inventory-2026-03-12.md`
+    - `docs/profile-config-canonical-contract-2026-03-12.md`
+    - `docs/epic-37-final-report-2026-03-12.md`
 
 ## Quality Gates
 The following checks are expected to stay green:
@@ -38,8 +44,8 @@ The following checks are expected to stay green:
 - `scripts/ci/validate-e2e-matrix.sh`
 
 ## Open Work
-- Epic #1 is complete; next planned lane is Epic #2:
-  - Single Source of Truth for Profiles/Config
+- Epic #1 and Epic #2 are complete.
+- Next planned lane: Epic #3 (Legacy Decoupling `archive/legacy`).
 - New work should be opened as explicit issues with scope and acceptance criteria.
 
 ## Documentation Rules
