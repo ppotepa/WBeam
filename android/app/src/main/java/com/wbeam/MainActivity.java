@@ -29,6 +29,7 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
 import com.wbeam.api.HostApiClient;
+import com.wbeam.hud.HudOverlayDisplay;
 import com.wbeam.api.StatusListener;
 import com.wbeam.api.StatusPoller;
 import com.wbeam.hud.HudDebugLogLimiter;
@@ -234,8 +235,7 @@ public class MainActivity extends AppCompatActivity {
     private long lastCriticalErrorLogAtMs = 0L;
     private String lastStatsLine = MainActivityStatusPresenter.DEFAULT_STATS_LINE;
     private String lastHudCompactLine = "hud: waiting for metrics";
-    private String hudOverlayMode = "none";
-    private String lastHudWebHtml = "";
+    private final HudOverlayDisplay.State hudOverlayState = new HudOverlayDisplay.State();
     private long lastTrainerHudPayloadAtMs = 0L;
     private double latestTargetFps = 60.0;
     private double latestPresentFps = 0.0;
@@ -1647,33 +1647,15 @@ public class MainActivity extends AppCompatActivity {
         uiHandler.removeCallbacks(debugGraphSampleTask);
     }
 
-    private boolean showHudWebHtml(String modeTag, String html) {
-        if (perfHudWebView == null || html == null) {
-            return false;
-        }
-        if (!modeTag.equals(hudOverlayMode) || !html.equals(lastHudWebHtml)) {
-            perfHudWebView.loadDataWithBaseURL(null, html, "text/html", "utf-8", null);
-            lastHudWebHtml = html;
-        }
-        hudOverlayMode = modeTag;
-        perfHudWebView.setVisibility(View.VISIBLE);
-        if (perfHudText != null) {
-            perfHudText.setVisibility(View.GONE);
-        }
-        return true;
-    }
-
     private void showHudTextOnly(String modeTag, String text, int color) {
-        hudOverlayMode = modeTag;
-        lastHudWebHtml = "";
-        if (perfHudWebView != null) {
-            perfHudWebView.setVisibility(View.GONE);
-        }
-        if (perfHudText != null) {
-            perfHudText.setText(text == null ? "" : text);
-            perfHudText.setTextColor(color);
-            perfHudText.setVisibility(View.VISIBLE);
-        }
+        HudOverlayDisplay.showTextOnly(
+                perfHudWebView,
+                perfHudText,
+                modeTag,
+                text,
+                color,
+                hudOverlayState
+        );
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -1709,7 +1691,7 @@ public class MainActivity extends AppCompatActivity {
         if (handleTrainerHudPath(metrics, nowMs)) {
             return;
         }
-        hudOverlayMode = "runtime";
+        hudOverlayState.mode = "runtime";
         updateRuntimePerfHud(metrics, nowMs);
     }
 
@@ -2037,7 +2019,13 @@ public class MainActivity extends AppCompatActivity {
         );
 
         if (perfHudWebView != null) {
-            if (!showHudWebHtml("runtime", rendered.html) && perfHudText != null) {
+            if (!HudOverlayDisplay.showWebHtml(
+                    perfHudWebView,
+                    perfHudText,
+                    "runtime",
+                    rendered.html,
+                    hudOverlayState
+            ) && perfHudText != null) {
                 showHudTextOnly("runtime", rendered.textFallback, HUD_TEXT_COLOR_LIVE);
             }
         } else if (perfHudText != null) {
@@ -2109,7 +2097,13 @@ public class MainActivity extends AppCompatActivity {
 
     private void applyTrainerHudRendered(TrainerHudOverlayRenderer.Rendered rendered) {
         if (perfHudWebView != null) {
-            if (!showHudWebHtml("trainer", rendered.html)) {
+            if (!HudOverlayDisplay.showWebHtml(
+                    perfHudWebView,
+                    perfHudText,
+                    "trainer",
+                    rendered.html,
+                    hudOverlayState
+            )) {
                 showHudTextOnly("trainer", rendered.textFallback, HUD_TEXT_COLOR_LIVE);
             }
         } else {
