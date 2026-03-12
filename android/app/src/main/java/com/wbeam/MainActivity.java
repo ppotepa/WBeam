@@ -24,7 +24,6 @@ import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
-import android.view.WindowManager;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
@@ -38,15 +37,13 @@ import android.webkit.WebView;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
-import androidx.core.view.WindowCompat;
-import androidx.core.view.WindowInsetsCompat;
-import androidx.core.view.WindowInsetsControllerCompat;
 
 import com.wbeam.api.HostApiClient;
 import com.wbeam.api.StatusListener;
 import com.wbeam.api.StatusPoller;
 import com.wbeam.hud.HudRenderSupport;
 import com.wbeam.input.CursorOverlayController;
+import com.wbeam.input.ImmersiveModeController;
 import com.wbeam.startup.StartupOverlayModelBuilder;
 import com.wbeam.startup.StartupOverlayController;
 import com.wbeam.startup.StartupStepStyler;
@@ -234,7 +231,6 @@ public class MainActivity extends AppCompatActivity {
     private boolean simpleMenuVisible = false;
     private String simpleMode = PREFERRED_VIDEO;
     private int simpleFps = 60;
-    private boolean isFullscreen = false;
     private boolean debugControlsVisible = false;
     private boolean debugOverlayVisible = false;
     private boolean trainerHudSessionActive = false;
@@ -313,6 +309,7 @@ public class MainActivity extends AppCompatActivity {
     private final TransportProbeCoordinator transportProbe = new TransportProbeCoordinator();
     private StartupOverlayController startupOverlayController;
     private CursorOverlayController cursorOverlayController;
+    private ImmersiveModeController immersiveModeController;
 
     // ── Media ──────────────────────────────────────────────────────────────────
     private Surface surface;
@@ -357,9 +354,9 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        setScreenAlwaysOn(true);
 
         bindViews();
+        setScreenAlwaysOn(true);
         bindStartupBuildVersion();
         setupSpinners();
         setupSeekbars();
@@ -677,6 +674,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void bindViews() {
         rootLayout = findViewById(R.id.rootLayout);
+        immersiveModeController = new ImmersiveModeController(this, rootLayout);
         topBar = findViewById(R.id.topBar);
         quickActionRow = findViewById(R.id.quickActionRow);
         settingsPanel = findViewById(R.id.settingsPanel);
@@ -1350,64 +1348,31 @@ public class MainActivity extends AppCompatActivity {
     // ══════════════════════════════════════════════════════════════════════════
 
     private void toggleFullscreen() {
-        setFullscreen(!isFullscreen);
+        boolean current = immersiveModeController != null && immersiveModeController.isFullscreen();
+        setFullscreen(!current);
     }
 
     private void setFullscreen(boolean enable) {
-        isFullscreen = enable;
-
-        if (enable) {
-            if (topBar != null) {
-                topBar.setVisibility(View.GONE);
-            }
-            if (statusPanel != null) {
-                statusPanel.setVisibility(View.GONE);
-            }
-            hideSettingsPanel();
-            enforceImmersiveModeIfNeeded();
-            return;
-        }
-
-        if (!BuildConfig.DEBUG) {
-            if (topBar != null) {
-                topBar.setVisibility(View.VISIBLE);
-            }
-            if (statusPanel != null) {
-                statusPanel.setVisibility(View.VISIBLE);
-            }
-        }
-
-        WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
-        WindowInsetsControllerCompat controller =
-                WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
-        if (controller != null) {
-            controller.show(WindowInsetsCompat.Type.systemBars());
+        if (immersiveModeController != null) {
+            immersiveModeController.setFullscreen(
+                    enable,
+                    BuildConfig.DEBUG,
+                    topBar,
+                    statusPanel,
+                    this::hideSettingsPanel
+            );
         }
     }
 
     private void enforceImmersiveModeIfNeeded() {
-        if (!isFullscreen) {
-            return;
-        }
-        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
-        WindowInsetsControllerCompat controller =
-                WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
-        if (controller != null) {
-            controller.setSystemBarsBehavior(
-                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            );
-            controller.hide(WindowInsetsCompat.Type.systemBars());
+        if (immersiveModeController != null) {
+            immersiveModeController.enforceImmersiveModeIfNeeded();
         }
     }
 
     private void setScreenAlwaysOn(boolean enable) {
-        if (enable) {
-            getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        } else {
-            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        }
-        if (rootLayout != null) {
-            rootLayout.setKeepScreenOn(enable);
+        if (immersiveModeController != null) {
+            immersiveModeController.setScreenAlwaysOn(enable);
         }
     }
 
