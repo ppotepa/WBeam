@@ -39,6 +39,7 @@ import com.wbeam.api.HostApiClient;
 import com.wbeam.api.StatusListener;
 import com.wbeam.api.StatusPoller;
 import com.wbeam.hud.HudRenderSupport;
+import com.wbeam.hud.MetricSeriesBuffer;
 import com.wbeam.hud.TrainerProgressParser;
 import com.wbeam.input.CursorOverlayController;
 import com.wbeam.input.ImmersiveModeController;
@@ -66,7 +67,6 @@ import org.json.JSONObject;
 
 import java.io.BufferedInputStream;
 import java.io.IOException;
-import java.util.ArrayDeque;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -269,14 +269,14 @@ public class MainActivity extends AppCompatActivity {
     private double usageCpuPct = 0.0;
     private double usageMemMb = 0.0;
     private double usageGpuPct = 0.0;
-    private final ArrayDeque<Double> usageCpuSeries = new ArrayDeque<>();
-    private final ArrayDeque<Double> usageMemSeries = new ArrayDeque<>();
-    private final ArrayDeque<Double> usageGpuSeries = new ArrayDeque<>();
-    private final ArrayDeque<Double> runtimePresentSeries = new ArrayDeque<>();
-    private final ArrayDeque<Double> runtimeMbpsSeries = new ArrayDeque<>();
-    private final ArrayDeque<Double> runtimeDropSeries = new ArrayDeque<>();
-    private final ArrayDeque<Double> runtimeLatencySeries = new ArrayDeque<>();
-    private final ArrayDeque<Double> runtimeQueueSeries = new ArrayDeque<>();
+    private final MetricSeriesBuffer usageCpuSeries = new MetricSeriesBuffer(HUD_RESOURCE_SERIES_MAX);
+    private final MetricSeriesBuffer usageMemSeries = new MetricSeriesBuffer(HUD_RESOURCE_SERIES_MAX);
+    private final MetricSeriesBuffer usageGpuSeries = new MetricSeriesBuffer(HUD_RESOURCE_SERIES_MAX);
+    private final MetricSeriesBuffer runtimePresentSeries = new MetricSeriesBuffer(HUD_RESOURCE_SERIES_MAX);
+    private final MetricSeriesBuffer runtimeMbpsSeries = new MetricSeriesBuffer(HUD_RESOURCE_SERIES_MAX);
+    private final MetricSeriesBuffer runtimeDropSeries = new MetricSeriesBuffer(HUD_RESOURCE_SERIES_MAX);
+    private final MetricSeriesBuffer runtimeLatencySeries = new MetricSeriesBuffer(HUD_RESOURCE_SERIES_MAX);
+    private final MetricSeriesBuffer runtimeQueueSeries = new MetricSeriesBuffer(HUD_RESOURCE_SERIES_MAX);
     private long runtimeDropPrevCount = -1L;
     private long runtimeDropPrevAtMs = 0L;
 
@@ -1815,17 +1815,17 @@ public class MainActivity extends AppCompatActivity {
         if (bitrateMbps <= 0.0) {
             bitrateMbps = metrics.optLong("bitrate_actual_bps", 0L) / 1_000_000.0;
         }
-        appendSeriesSample(runtimePresentSeries, Math.max(0.0, presentFps));
-        appendSeriesSample(runtimeMbpsSeries, Math.max(0.0, bitrateMbps));
-        appendSeriesSample(runtimeDropSeries, Math.max(0.0, dropPerSec));
-        appendSeriesSample(runtimeLatencySeries, Math.max(0.0, e2eP95));
-        appendSeriesSample(runtimeQueueSeries, Math.max(0.0, qT + qD + qR));
+        runtimePresentSeries.addSample(Math.max(0.0, presentFps));
+        runtimeMbpsSeries.addSample(Math.max(0.0, bitrateMbps));
+        runtimeDropSeries.addSample(Math.max(0.0, dropPerSec));
+        runtimeLatencySeries.addSample(Math.max(0.0, e2eP95));
+        runtimeQueueSeries.addSample(Math.max(0.0, qT + qD + qR));
         String runtimeChartsHtml = buildMetricTrendRowsHtml(
-                seriesToJson(runtimePresentSeries),
-                seriesToJson(runtimeMbpsSeries),
-                seriesToJson(runtimeDropSeries),
-                seriesToJson(runtimeLatencySeries),
-                seriesToJson(runtimeQueueSeries),
+                runtimePresentSeries.toJsonFinite(),
+                runtimeMbpsSeries.toJsonFinite(),
+                runtimeDropSeries.toJsonFinite(),
+                runtimeLatencySeries.toJsonFinite(),
+                runtimeQueueSeries.toJsonFinite(),
                 runtimeStateTone,
                 runtimeStateTone,
                 runtimeStateTone,
@@ -2639,16 +2639,6 @@ public class MainActivity extends AppCompatActivity {
         return Math.max(min, Math.min(max, value));
     }
 
-    private void appendSeriesSample(ArrayDeque<Double> series, double value) {
-        if (series == null) {
-            return;
-        }
-        series.addLast(value);
-        while (series.size() > HUD_RESOURCE_SERIES_MAX) {
-            series.removeFirst();
-        }
-    }
-
     private void sampleDeviceResourceUsage(double targetFps, double renderP95Ms) {
         long nowMs = SystemClock.elapsedRealtime();
         long procCpuNow = android.os.Process.getElapsedCpuTime();
@@ -2670,12 +2660,12 @@ public class MainActivity extends AppCompatActivity {
         double frameBudgetMs = targetFps > 1.0 ? (1000.0 / targetFps) : 16.67;
         usageGpuPct = clampDouble((Math.max(0.0, renderP95Ms) / Math.max(1.0, frameBudgetMs)) * 100.0, 0.0, 100.0);
 
-        appendSeriesSample(usageCpuSeries, usageCpuPct);
-        appendSeriesSample(usageMemSeries, memPct);
-        appendSeriesSample(usageGpuSeries, usageGpuPct);
+        usageCpuSeries.addSample(usageCpuPct);
+        usageMemSeries.addSample(memPct);
+        usageGpuSeries.addSample(usageGpuPct);
     }
 
-    private String buildSparkBarsHtml(ArrayDeque<Double> series, String toneClass) {
+    private String buildSparkBarsHtml(MetricSeriesBuffer series, String toneClass) {
         if (series == null || series.isEmpty()) {
             return buildSparkPlaceholderBars(toneClass, 18);
         }
@@ -2697,7 +2687,7 @@ public class MainActivity extends AppCompatActivity {
 
     private String buildResourceRowsHtml() {
         String cpuTone = usageCpuPct > 85.0 ? "state-risk" : (usageCpuPct > 65.0 ? "state-warn" : "state-ok");
-        double memPct = usageMemSeries.isEmpty() ? 0.0 : (usageMemSeries.peekLast() != null ? usageMemSeries.peekLast() : 0.0);
+        double memPct = usageMemSeries.latest(0.0);
         String memTone = memPct > 88.0 ? "state-risk" : (memPct > 70.0 ? "state-warn" : "state-ok");
         String gpuTone = usageGpuPct > 90.0 ? "state-risk" : (usageGpuPct > 70.0 ? "state-warn" : "state-ok");
 
@@ -2724,20 +2714,6 @@ public class MainActivity extends AppCompatActivity {
                 .append(buildSparkBarsHtml(usageGpuSeries, gpuTone))
                 .append("</div></div>");
         return html.toString();
-    }
-
-    private JSONArray seriesToJson(ArrayDeque<Double> series) {
-        JSONArray arr = new JSONArray();
-        if (series == null || series.isEmpty()) {
-            return arr;
-        }
-        for (Double v : series) {
-            if (v == null || !Double.isFinite(v)) {
-                continue;
-            }
-            arr.put(v);
-        }
-        return arr;
     }
 
     private String buildPendingMetricTrendRowsHtml() {
