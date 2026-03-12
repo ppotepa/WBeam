@@ -1,7 +1,7 @@
 # Workload Plan (Epics)
 
 Date: 2026-03-12
-Branch: feature/v0.1.1-epic30-issue31-hygiene-inventory
+Branch: v0.1.1/e30/i31-hygiene
 
 ## 1. Issue Strategy (Execution Model)
 

@@ -1,6 +1,6 @@
 # WBeam Agent Handbook
 
-Last updated: 2026-03-11
+Last updated: 2026-03-12
 Primary entrypoint: `./wbeam`
 
 ## 1. Project Purpose
@@ -23,10 +23,20 @@ If process rules conflict elsewhere, follow `docs/agents.workflow.md`.
 Canonical repository layout and migration map:
 - `docs/repo-structure.md`
 
-Branch naming note:
-- repo currently uses `v0.1.1` as version-line branch naming,
-- feature branch naming should follow `feature/v0.1.1-<slug>`,
-- for the active sprint, follow current team instruction and keep branch usage explicit in PR/MR descriptions.
+Branch and issue workflow note:
+- repo uses version-line branches (currently `v0.1.1`),
+- working branch format is:
+  - `v0.1.1/e<epic>/i<issue>-<slug>`
+  - example: `v0.1.1/e30/i31-hygiene`
+- execution model:
+  - one issue = one branch = one PR/MR,
+  - child issues are executed sequentially inside the active epic,
+  - close child issue only after merged PR/MR,
+  - close epic only after all child issues are closed.
+- commit message convention:
+  - `e<epic>-i<issue>: <short action>`
+- PR/MR title convention:
+  - `[e<epic>-i<issue>] <short title>`
 
 ## 3. Canonical Entrypoints
 
