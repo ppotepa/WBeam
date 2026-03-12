@@ -69,6 +69,8 @@ import com.wbeam.ui.MainActivityUiBinder;
 import com.wbeam.ui.MainActivitySettingsPresenter;
 import com.wbeam.ui.MainActivityStatusPresenter;
 import com.wbeam.ui.MainActivityStatusTracker;
+import com.wbeam.ui.StatusPollerUiUpdateCoordinator;
+import com.wbeam.ui.StatusTransitionHooksFactory;
 import com.wbeam.ui.SettingsSelectionReader;
 import com.wbeam.ui.SettingsPayloadBuilder;
 import com.wbeam.ui.SettingsPanelController;
@@ -483,61 +485,32 @@ public class MainActivity extends AppCompatActivity {
                 service,
                 buildRevision
         );
-        updateHandshakeResolution(service);
-        startTransportProbeIfNeeded();
-        handleStatusTransitionNotifications(wasReachable, hostName, errorChanged, lastError, state);
+        handshakeResolved = StatusPollerUiUpdateCoordinator.resolveHandshake(
+                handshakeResolved,
+                service
+        );
+        StatusPollerUiUpdateCoordinator.maybeStartTransportProbe(
+                requiresTransportProbe(),
+                this::maybeStartTransportProbe
+        );
+        StatusPollerUiUpdateCoordinator.handleStatusTransition(
+                wasReachable,
+                hostName,
+                errorChanged,
+                lastError,
+                shouldStopLiveViewForDaemonState(state),
+                StatusTransitionHooksFactory.create(
+                        this::notifyConnectedHost,
+                        changedLastError -> appendLiveLogError("host last_error: " + changedLastError),
+                        this::stopLiveView
+                )
+        );
         refreshUiAfterDaemonStateChange();
-        updateStatsLineFromMetrics(metrics, lastError);
+        String hostStatsLine = StatusPollerUiUpdateCoordinator.buildStatsLine(metrics, lastError);
+        if (hostStatsLine != null) {
+            updateStatsLine(hostStatsLine);
+        }
         updatePerfHud(metrics);
-    }
-
-    private void updateHandshakeResolution(String service) {
-        if (!handshakeResolved && !"-".equals(service)) {
-            handshakeResolved = true;
-        }
-    }
-
-    private void startTransportProbeIfNeeded() {
-        if (requiresTransportProbe()) {
-            maybeStartTransportProbe();
-        }
-    }
-
-    private void handleStatusTransitionNotifications(
-            boolean wasReachable,
-            String hostName,
-            boolean errorChanged,
-            String lastError,
-            String state
-    ) {
-        if (!wasReachable) {
-            notifyConnectedHost(hostName);
-        }
-        if (errorChanged && !lastError.isEmpty()) {
-            appendLiveLogError("host last_error: " + lastError);
-        }
-        if (shouldStopLiveViewForDaemonState(state)) {
-            stopLiveView();
-        }
-    }
-
-    private void updateStatsLineFromMetrics(JSONObject metrics, String lastError) {
-        if (metrics == null) {
-            return;
-        }
-        long frameIn = metrics.optLong("frame_in", 0);
-        long frameOut = metrics.optLong("frame_out", 0);
-        long drops = metrics.optLong("drops", 0);
-        long reconnects = metrics.optLong("reconnects", 0);
-        long bps = metrics.optLong("bitrate_actual_bps", 0);
-        updateStatsLine(MainActivityStatusPresenter.buildHostStatsLine(
-                frameIn,
-                frameOut,
-                drops,
-                reconnects,
-                bps,
-                lastError
-        ));
     }
 
     private void handleDaemonOffline(boolean wasReachable, Exception e) {
