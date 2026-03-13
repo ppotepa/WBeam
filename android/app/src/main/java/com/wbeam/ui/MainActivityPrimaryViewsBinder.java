@@ -10,6 +10,10 @@ import com.wbeam.R;
 import com.wbeam.widget.FpsLossGraphView;
 
 public final class MainActivityPrimaryViewsBinder {
+    /**
+     * Plain data carrier for primary views binding.
+     */
+    @SuppressWarnings("java:S1104")
     public static final class Views {
         public View rootLayout;
         public View topBar;
