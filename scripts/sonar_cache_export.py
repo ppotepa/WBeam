@@ -195,7 +195,7 @@ def write_summary_files(issues: Iterable[Dict], output_dir: Path) -> None:
 def main(argv: List[str]) -> int:
     pre_parser = argparse.ArgumentParser(add_help=False)
     pre_parser.add_argument("--env-file", default=".env.sonar")
-    pre_args, remaining = pre_parser.parse_known_args(argv)
+    pre_args, _ = pre_parser.parse_known_args(argv)
 
     env_defaults = load_env_file(Path(pre_args.env_file))
     parser = build_arg_parser(env_defaults)
