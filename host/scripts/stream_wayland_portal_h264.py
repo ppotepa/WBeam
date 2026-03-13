@@ -551,24 +551,7 @@ def make_pipeline(
     scale = Gst.ElementFactory.make("videoscale", "scale")
     rate = Gst.ElementFactory.make("videorate", "rate")
     caps1 = Gst.ElementFactory.make("capsfilter", "caps1")
-    overlays = []
-    overlay_enabled = (
-        env_flag("WBEAM_OVERLAY_ENABLE", False)
-        or bool(os.getenv("WBEAM_OVERLAY_TEXT", "").strip())
-        or bool(os.getenv("WBEAM_OVERLAY_TEXT_FILE", "").strip())
-    )
-    if overlay_enabled:
-        # Single unified full-frame HUD overlay.
-        ov = Gst.ElementFactory.make("textoverlay", "hud_main")
-        if ov is not None:
-            set_if_supported(ov, "halignment", 0)  # left
-            set_if_supported(ov, "valignment", 0)  # top
-            set_if_supported(ov, "xpad", 6)
-            set_if_supported(ov, "ypad", 6)
-            overlays = [ov]
-        if not overlays:
-            print("[warn] textoverlay element unavailable; HUD overlay disabled", file=sys.stderr)
-            overlay_enabled = False
+    overlays, overlay_enabled = build_overlay_elements()
     tee = Gst.ElementFactory.make("tee", "tee")
 
     queue_main = Gst.ElementFactory.make("queue", "qmain")
@@ -581,31 +564,9 @@ def make_pipeline(
     else:
         sink = Gst.ElementFactory.make("tcpserversink", "sink")
 
-    elements = [src, queue, convert, scale, rate, caps1]
-    if overlays:
-        elements.extend(overlays)
-    elements.extend([tee, queue_main, enc, parse, caps2, sink])
+    elements = [src, queue, convert, scale, rate, caps1, *overlays, tee, queue_main, enc, parse, caps2, sink]
     if any(e is None for e in elements):
-        element_names = [
-            "pipewiresrc",
-            "queue",
-            "videoconvert",
-            "videoscale",
-            "videorate",
-            "capsfilter",
-        ]
-        if overlay_enabled:
-            element_names.extend(["textoverlay(hud_main)"])
-        element_names.extend(
-            [
-                "tee",
-                "queue",
-                "encoder",
-                "h264parse",
-                "capsfilter",
-                "appsink" if framed else "tcpserversink",
-            ]
-        )
+        element_names = required_element_names(overlay_enabled, framed)
         missing = [name for name, e in zip(element_names, elements) if e is None]
         raise RuntimeError(f"Missing GStreamer elements: {', '.join(missing)}")
 
@@ -768,6 +729,50 @@ def make_pipeline(
             )
 
     return pipeline, pipeline_fps_counter
+
+
+def build_overlay_elements():
+    overlay_enabled = (
+        env_flag("WBEAM_OVERLAY_ENABLE", False)
+        or bool(os.getenv("WBEAM_OVERLAY_TEXT", "").strip())
+        or bool(os.getenv("WBEAM_OVERLAY_TEXT_FILE", "").strip())
+    )
+    if not overlay_enabled:
+        return [], False
+    # Single unified full-frame HUD overlay.
+    ov = Gst.ElementFactory.make("textoverlay", "hud_main")
+    if ov is None:
+        print("[warn] textoverlay element unavailable; HUD overlay disabled", file=sys.stderr)
+        return [], False
+    set_if_supported(ov, "halignment", 0)  # left
+    set_if_supported(ov, "valignment", 0)  # top
+    set_if_supported(ov, "xpad", 6)
+    set_if_supported(ov, "ypad", 6)
+    return [ov], True
+
+
+def required_element_names(overlay_enabled: bool, framed: bool):
+    names = [
+        "pipewiresrc",
+        "queue",
+        "videoconvert",
+        "videoscale",
+        "videorate",
+        "capsfilter",
+    ]
+    if overlay_enabled:
+        names.append("textoverlay(hud_main)")
+    names.extend(
+        [
+            "tee",
+            "queue",
+            "encoder",
+            "h264parse",
+            "capsfilter",
+            "appsink" if framed else "tcpserversink",
+        ]
+    )
+    return names
 
 
 def on_bus_message(bus, message):
