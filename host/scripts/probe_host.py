@@ -136,49 +136,11 @@ def linux_probe() -> Dict[str, object]:
         or os.environ.get("SSH_CLIENT")
     )
 
-    loginctl_info: Dict[str, str] = {}
-    sid = os.environ.get("XDG_SESSION_ID", "").strip()
-    if tool_exists("loginctl"):
-        if not sid:
-            rc_ls, out_ls, _ = run_cmd(["loginctl", "list-sessions", "--no-legend"])
-            if rc_ls == 0:
-                uid_s = str(uid)
-                for row in out_ls.splitlines():
-                    cols = row.split()
-                    if len(cols) < 2:
-                        continue
-                    if cols[1] == uid_s:
-                        sid = cols[0]
-                        break
-        if sid:
-            rc, out, _ = run_cmd(
-                [
-                    "loginctl",
-                    "show-session",
-                    sid,
-                    "-p",
-                    "Type",
-                    "-p",
-                    "Name",
-                    "-p",
-                    "State",
-                    "-p",
-                    "Remote",
-                    "-p",
-                    "Display",
-                    "-p",
-                    "Desktop",
-                ]
-            )
-            if rc == 0:
-                for row in out.splitlines():
-                    if "=" in row:
-                        k, v = row.split("=", 1)
-                        loginctl_info[k] = v
-                if loginctl_info.get("Remote", "").lower() == "yes":
-                    remote = True
-                if desktop == "unknown":
-                    desktop = loginctl_info.get("Desktop", "") or desktop
+    loginctl_info = collect_loginctl_session_info(uid)
+    if loginctl_info.get("Remote", "").lower() == "yes":
+        remote = True
+    if desktop == "unknown":
+        desktop = loginctl_info.get("Desktop", "") or desktop
 
     if not session_type:
         if wayland_display:
@@ -189,14 +151,7 @@ def linux_probe() -> Dict[str, object]:
             session_type = "unknown"
 
     if desktop == "unknown":
-        # Best-effort process-based fallback for common desktop stacks.
-        rc, _, _ = run_cmd(["pgrep", "-x", "plasmashell"])
-        if rc == 0:
-            desktop = "KDE"
-        else:
-            rc_g, _, _ = run_cmd(["pgrep", "-x", "gnome-shell"])
-            if rc_g == 0:
-                desktop = "GNOME"
+        desktop = detect_desktop_from_processes(desktop)
 
     xrandr: Dict[str, object] = {
         "attempted": False,
@@ -206,22 +161,7 @@ def linux_probe() -> Dict[str, object]:
         "error": "",
     }
     if tool_exists("xrandr") and display:
-        xrandr["attempted"] = True
-        env = os.environ.copy()
-        env["DISPLAY"] = display
-        xauth = resolve_xauthority(uid)
-        if xauth:
-            env["XAUTHORITY"] = xauth
-        rc_p, out_p, err_p = run_cmd(["xrandr", "--listproviders"], env=env, timeout=4.0)
-        rc_q, out_q, err_q = run_cmd(["xrandr", "--query"], env=env, timeout=4.0)
-        if rc_p == 0 and rc_q == 0:
-            xrandr["ok"] = True
-            xrandr["providers"] = parse_xrandr_providers(out_p)
-            xrandr["outputs"] = parse_xrandr_outputs(out_q)
-        else:
-            xrandr["error"] = "; ".join(
-                part for part in [err_p or out_p, err_q or out_q] if part
-            )[:1200]
+        xrandr = collect_xrandr_probe(uid, display)
 
     providers = xrandr.get("providers", []) if isinstance(xrandr, dict) else []
     outputs = xrandr.get("outputs", []) if isinstance(xrandr, dict) else []
@@ -316,6 +256,88 @@ def linux_probe() -> Dict[str, object]:
         "virtual_real_output_ready": virtual_real_output_ready,
         "virtual_real_output_reason": virtual_reason,
     }
+
+
+def collect_loginctl_session_info(uid: int) -> Dict[str, str]:
+    info: Dict[str, str] = {}
+    if not tool_exists("loginctl"):
+        return info
+    sid = os.environ.get("XDG_SESSION_ID", "").strip() or find_loginctl_session_id(uid)
+    if not sid:
+        return info
+    rc, out, _ = run_cmd(
+        [
+            "loginctl",
+            "show-session",
+            sid,
+            "-p",
+            "Type",
+            "-p",
+            "Name",
+            "-p",
+            "State",
+            "-p",
+            "Remote",
+            "-p",
+            "Display",
+            "-p",
+            "Desktop",
+        ]
+    )
+    if rc != 0:
+        return info
+    for row in out.splitlines():
+        if "=" in row:
+            k, v = row.split("=", 1)
+            info[k] = v
+    return info
+
+
+def find_loginctl_session_id(uid: int) -> str:
+    rc_ls, out_ls, _ = run_cmd(["loginctl", "list-sessions", "--no-legend"])
+    if rc_ls != 0:
+        return ""
+    uid_s = str(uid)
+    for row in out_ls.splitlines():
+        cols = row.split()
+        if len(cols) >= 2 and cols[1] == uid_s:
+            return cols[0]
+    return ""
+
+
+def detect_desktop_from_processes(default: str) -> str:
+    # Best-effort process-based fallback for common desktop stacks.
+    rc, _, _ = run_cmd(["pgrep", "-x", "plasmashell"])
+    if rc == 0:
+        return "KDE"
+    rc_g, _, _ = run_cmd(["pgrep", "-x", "gnome-shell"])
+    if rc_g == 0:
+        return "GNOME"
+    return default
+
+
+def collect_xrandr_probe(uid: int, display: str) -> Dict[str, object]:
+    probe: Dict[str, object] = {
+        "attempted": True,
+        "ok": False,
+        "providers": [],
+        "outputs": [],
+        "error": "",
+    }
+    env = os.environ.copy()
+    env["DISPLAY"] = display
+    xauth = resolve_xauthority(uid)
+    if xauth:
+        env["XAUTHORITY"] = xauth
+    rc_p, out_p, err_p = run_cmd(["xrandr", "--listproviders"], env=env, timeout=4.0)
+    rc_q, out_q, err_q = run_cmd(["xrandr", "--query"], env=env, timeout=4.0)
+    if rc_p == 0 and rc_q == 0:
+        probe["ok"] = True
+        probe["providers"] = parse_xrandr_providers(out_p)
+        probe["outputs"] = parse_xrandr_outputs(out_q)
+    else:
+        probe["error"] = "; ".join(part for part in [err_p or out_p, err_q or out_q] if part)[:1200]
+    return probe
 
 
 def windows_probe() -> Dict[str, object]:
