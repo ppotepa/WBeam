@@ -112,6 +112,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String CURSOR_EMBEDDED = "embedded";
     private static final String METRIC_KEY_TRAINER_HUD_ACTIVE = "trainer_hud_active";
     private static final String METRIC_KEY_TRAINER_HUD_TEXT = "trainer_hud_text";
+    private static final String METRIC_KEY_TRAINER_HUD_JSON = "trainer_hud_json";
     private static final String[] CURSOR_OPTIONS = {CURSOR_EMBEDDED, "hidden", "metadata"};
     private static final String DEFAULT_CURSOR_MODE = CURSOR_EMBEDDED;
     private static final int DEFAULT_RES_SCALE = 100;
