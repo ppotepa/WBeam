@@ -191,15 +191,22 @@ public final class H264TcpPlayer {
                 HELLO_HEADER_SIZE
         );
         final int helloFlags = hello.flags;
+        final int streamMode = helloFlags & HELLO_MODE_MASK;
         final boolean isPng = (helloFlags & HELLO_CODEC_PNG) != 0;
-        final boolean isUltraMode = (helloFlags & HELLO_MODE_MASK) == HELLO_MODE_ULTRA;
+        final boolean isUltraMode = streamMode == HELLO_MODE_ULTRA;
         long streamSessionId = hello.sessionId;
-        String modeLabel = (helloFlags & HELLO_MODE_MASK) == HELLO_MODE_ULTRA
-                ? "ultra"
-                : (((helloFlags & HELLO_MODE_MASK) == HELLO_MODE_QUALITY) ? "quality" : "stable");
+        String modeLabel;
+        if (streamMode == HELLO_MODE_ULTRA) {
+            modeLabel = "ultra";
+        } else if (streamMode == HELLO_MODE_QUALITY) {
+            modeLabel = "quality";
+        } else {
+            modeLabel = "stable";
+        }
         boolean isHevc = !isPng && (helloFlags & HELLO_CODEC_HEVC) != 0;
+        String codecLabel = isPng ? "PNG" : (isHevc ? "HEVC" : "AVC");
         Log.i(TAG, String.format(Locale.US, "WBTP hello session=0x%016x codec=%s mode=%s",
-                streamSessionId, isPng ? "PNG" : (isHevc ? "HEVC" : "AVC"), modeLabel));
+                streamSessionId, codecLabel, modeLabel));
 
         if (isPng) {
             framedDecodeLoopPng(input, hdrBuf, payloadBuf, isUltraMode);
