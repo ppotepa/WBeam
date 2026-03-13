@@ -757,7 +757,7 @@ export default function App() {
       await refreshLiveSession();
       setLastRefreshAt(Date.now());
     });
-    pollId = window.setInterval(async () => {
+    pollId = globalThis.setInterval(async () => {
       try {
         await runPollingTick();
       } catch (err) {
