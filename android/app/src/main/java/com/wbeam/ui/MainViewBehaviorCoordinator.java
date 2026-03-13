@@ -61,6 +61,7 @@ public final class MainViewBehaviorCoordinator {
         MainActivitySurfaceSetup.setup(input);
     }
 
+    @SuppressWarnings("java:S107")
     public static void setupButtons(
             Button settingsCloseButton,
             View simpleMenuPanel,
@@ -111,6 +112,7 @@ public final class MainViewBehaviorCoordinator {
         );
     }
 
+    @SuppressWarnings("java:S107")
     public static void applyBuildVariantUi(
             boolean buildDebug,
             MainUiState uiState,
