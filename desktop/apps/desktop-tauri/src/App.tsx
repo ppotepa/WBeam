@@ -677,7 +677,7 @@ export default function App() {
               onChange={(event) => toggleWaylandExperimentalDuplication(event.currentTarget.checked)}
             />
             <span>
-              Use experimental virtual mirroring (Wayland only)
+              <span>Use experimental virtual mirroring (Wayland only)</span>
               <small>
                 Applies to Wayland connects only. For X11 this option is unavailable.
               </small>
