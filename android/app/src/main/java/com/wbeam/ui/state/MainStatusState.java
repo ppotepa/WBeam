@@ -2,6 +2,10 @@ package com.wbeam.ui.state;
 
 import com.wbeam.ui.MainActivityStatusPresenter;
 
+/**
+ * Plain data carrier for main status state.
+ */
+@SuppressWarnings("java:S1104")
 public final class MainStatusState {
     public String uiState;
     public String uiInfo;
