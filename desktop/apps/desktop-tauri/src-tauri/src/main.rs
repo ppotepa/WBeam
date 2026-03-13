@@ -1456,11 +1456,7 @@ fn virtual_install_deps_status() -> VirtualDepsInstallStatus {
     virtual_deps_snapshot()
 }
 
-fn run_virtual_install_job() {
-    let root = repo_root();
-    let wbeam = root.join("wbeam");
-    virtual_deps_push_log(format!("[virtual-deps] root={}", root.display()));
-
+fn build_virtual_install_command(root: &Path, wbeam: &Path) -> Result<Command, String> {
     let is_root = Command::new("id")
         .arg("-u")
         .output()
@@ -1469,30 +1465,63 @@ fn run_virtual_install_job() {
         .unwrap_or(false);
 
     let mut cmd = if is_root {
-        let mut c = Command::new(&wbeam);
+        let mut c = Command::new(wbeam);
         c.args(["deps", "virtual", "install", "--yes"]);
         c
     } else if command_exists("pkexec") {
         virtual_deps_push_log("[virtual-deps] requesting privilege elevation via pkexec");
         let mut c = Command::new("pkexec");
-        c.arg(&wbeam);
+        c.arg(wbeam);
         c.args(["deps", "virtual", "install", "--yes"]);
         c
     } else {
-        virtual_deps_push_log("[virtual-deps] ERROR: pkexec not available and user is not root");
-        virtual_deps_finish(
-            false,
-            "Root privileges required. Install polkit/pkexec or run as root.".to_string(),
-        );
-        return;
+        return Err("Root privileges required. Install polkit/pkexec or run as root.".to_string());
     };
-
-    let child_spawn = cmd
-        .current_dir(&root)
+    cmd.current_dir(root)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn();
-    let mut child = match child_spawn {
+        .stderr(Stdio::piped());
+    Ok(cmd)
+}
+
+fn spawn_virtual_log_reader<T>(stream: Option<T>, prefix: &str) -> Option<thread::JoinHandle<()>>
+where
+    T: std::io::Read + Send + 'static,
+{
+    stream.map(|input| {
+        let prefix_owned = prefix.to_string();
+        thread::spawn(move || {
+            let reader = BufReader::new(input);
+            for line in reader.lines().map_while(Result::ok) {
+                if prefix_owned.is_empty() {
+                    virtual_deps_push_log(line);
+                } else {
+                    virtual_deps_push_log(format!("{}{}", prefix_owned, line));
+                }
+            }
+        })
+    })
+}
+
+fn join_optional_thread(handle: Option<thread::JoinHandle<()>>) {
+    if let Some(h) = handle {
+        let _ = h.join();
+    }
+}
+
+fn run_virtual_install_job() {
+    let root = repo_root();
+    let wbeam = root.join("wbeam");
+    virtual_deps_push_log(format!("[virtual-deps] root={}", root.display()));
+
+    let mut cmd = match build_virtual_install_command(&root, &wbeam) {
+        Ok(cmd) => cmd,
+        Err(msg) => {
+            virtual_deps_push_log("[virtual-deps] ERROR: pkexec not available and user is not root");
+            virtual_deps_finish(false, msg);
+            return;
+        }
+    };
+    let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
             virtual_deps_finish(false, format!("Failed to start installer: {e}"));
@@ -1500,24 +1529,8 @@ fn run_virtual_install_job() {
         }
     };
 
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-    let out_thread = stdout.map(|out| {
-        thread::spawn(move || {
-            let reader = BufReader::new(out);
-            for line in reader.lines().map_while(Result::ok) {
-                virtual_deps_push_log(line);
-            }
-        })
-    });
-    let err_thread = stderr.map(|err| {
-        thread::spawn(move || {
-            let reader = BufReader::new(err);
-            for line in reader.lines().map_while(Result::ok) {
-                virtual_deps_push_log(format!("[stderr] {line}"));
-            }
-        })
-    });
+    let out_thread = spawn_virtual_log_reader(child.stdout.take(), "");
+    let err_thread = spawn_virtual_log_reader(child.stderr.take(), "[stderr] ");
 
     let status = match child.wait() {
         Ok(s) => s,
@@ -1526,12 +1539,8 @@ fn run_virtual_install_job() {
             return;
         }
     };
-    if let Some(h) = out_thread {
-        let _ = h.join();
-    }
-    if let Some(h) = err_thread {
-        let _ = h.join();
-    }
+    join_optional_thread(out_thread);
+    join_optional_thread(err_thread);
 
     if status.success() {
         virtual_deps_finish(true, "Dependencies installed successfully.".to_string());
