@@ -899,7 +899,7 @@ export default function App() {
         {(doctorAccessor) => {
           const doctor = doctorAccessor();
           return (
-            <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Virtual desktop setup">
+            <dialog class="modal-backdrop" open aria-label="Virtual desktop setup">
               <section class="connect-modal setup-modal">
                 <h3>Virtual desktop setup</h3>
                 <p class="connect-modal-subtitle">Host backend: {doctor.hostBackend}</p>
@@ -919,7 +919,7 @@ export default function App() {
                   </button>
                 </div>
               </section>
-            </div>
+            </dialog>
           );
         }}
       </Show>
