@@ -1095,7 +1095,7 @@ def _update_overlay_element(elem, new_text: str, key: str) -> bool:
         return False
 
 
-def setup_overlay_refresh(pipeline) -> None:
+def setup_overlay_refresh(pipeline) -> None:  # noqa: C901
     """Setup periodic refresh of overlay text from file."""
     overlay_file = os.getenv("WBEAM_OVERLAY_TEXT_FILE", "").strip()
     if not overlay_file:
