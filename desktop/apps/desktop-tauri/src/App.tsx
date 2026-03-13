@@ -788,7 +788,7 @@ export default function App() {
                       onChange={() => setConnectDialogMode("virtual_monitor")}
                     />
                     <span>
-                      Virtual monitor (extend host desktop)
+                      <span>Virtual monitor (extend host desktop)</span>
                       <small>
                         {virtualMonitorHint()}
                       </small>
