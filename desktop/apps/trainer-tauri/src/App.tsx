@@ -968,7 +968,7 @@ export default function App() {
                         </label>
                       </div>
                       <label title="B-frames count (0 for low-latency).">
-                        B-frames
+                        <span>B-frames</span>
                         <input type="number" min="0" max="4" value={manualH26xBframes()} onInput={(e) => setManualH26xBframes(Number(e.currentTarget.value || 0))} />
                       </label>
                     </Show>
