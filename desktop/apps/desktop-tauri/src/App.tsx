@@ -735,9 +735,16 @@ export default function App() {
         </section>
 
         <footer class="status-bar" title={session.service().summary}>
+          {(() => {
+            const serviceStateLabel = session.service().active
+              ? "running"
+              : session.service().installed
+                ? "stopped"
+                : "not installed";
+            return (
           <div class={`service-status-strip ${session.serviceState()}`}>
             <span class="service-status-main">
-              service: {session.service().active ? "running" : session.service().installed ? "stopped" : "not installed"}
+              service: {serviceStateLabel}
             </span>
             <span class="service-status-hint">
               {session.service().active
@@ -747,6 +754,8 @@ export default function App() {
                   : "Install + Start service to enable probing and streaming."}
             </span>
           </div>
+            );
+          })()}
           <span>{session.devices().length} devices ({session.tabletCount()} tablet, {session.phoneCount()} phone)</span>
           <span>
             host: {session.hostProbe().os}/{session.hostProbe().session}/{session.hostProbe().desktop} · capture={session.hostProbe().captureMode} · {session.hostProbe().supported ? "supported" : "unsupported"}
