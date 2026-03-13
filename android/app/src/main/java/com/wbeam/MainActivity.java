@@ -184,6 +184,7 @@ public class MainActivity extends AppCompatActivity {
     private Button settingsButton;
     private Button logButton;
     private Button settingsCloseButton;
+    @SuppressWarnings("java:S1068")
     private Button applySettingsButton;
     private Button quickStartButton;
     private Button quickStopButton;

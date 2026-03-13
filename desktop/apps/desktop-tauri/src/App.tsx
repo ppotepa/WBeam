@@ -687,7 +687,7 @@ export default function App() {
         </ul>
 
         <section class="wayland-experimental-control">
-          <label class={`checkbox-option ${isWaylandPortalHost() ? "" : "disabled"}`}>
+          <label class={`checkbox-option ${isWaylandPortalHost() ? "" : "disabled"}`} aria-label="Use experimental virtual mirroring (Wayland only)">
             <input
               type="checkbox"
               checked={waylandExperimentalDuplication()}
@@ -744,14 +744,16 @@ export default function App() {
 
         <footer class="status-bar" title={session.service().summary}>
           {(() => {
-            const serviceStateLabel = session.service().active
+            const isActive = session.service().active;
+            const isInstalled = session.service().installed;
+            const serviceStateLabel = isActive
               ? "running"
-              : session.service().installed
+              : isInstalled
                 ? "stopped"
                 : "not installed";
-            const serviceHint = session.service().active
+            const serviceHint = isActive
               ? "Service active: device probing enabled."
-              : session.service().installed
+              : isInstalled
                 ? "Service installed but stopped. Click Start."
                 : "Install + Start service to enable probing and streaming.";
             return (
@@ -807,7 +809,7 @@ export default function App() {
                     </p>
                   )}
                 >
-                  <label class={`mode-option ${virtualMonitorSelected() ? "selected" : ""} ${!virtualMonitorAvailable() ? "disabled" : ""}`}>
+                  <label class={`mode-option ${virtualMonitorSelected() ? "selected" : ""} ${!virtualMonitorAvailable() ? "disabled" : ""}`} aria-label="Virtual monitor (extend host desktop)">
                     <input
                       type="radio"
                       name="display-mode"
@@ -822,7 +824,7 @@ export default function App() {
                       </small>
                     </span>
                   </label>
-                  <label class={`mode-option ${connectDialogMode() === "duplicate" ? "selected" : ""}`}>
+                  <label class={`mode-option ${connectDialogMode() === "duplicate" ? "selected" : ""}`} aria-label="Duplicate mode (mirror host desktop)">
                     <input
                       type="radio"
                       name="display-mode"
@@ -933,16 +935,19 @@ export default function App() {
       </Show>
       <Show when={virtualInstallVisible()}>
         {(() => {
-          const installProgressClass = virtualInstallStatus().running
+          const running = virtualInstallStatus().running;
+          const done = virtualInstallStatus().done;
+          const success = virtualInstallStatus().success;
+          const installProgressClass = running
             ? "running"
-            : virtualInstallStatus().success
+            : success
               ? "ok"
               : "bad";
-          const installMessageClass = virtualInstallStatus().done
-            ? (virtualInstallStatus().success ? "install-ok" : "install-bad")
+          const installMessageClass = done
+            ? (success ? "install-ok" : "install-bad")
             : "";
-          const installStatusText = virtualInstallStatus().done
-            ? (virtualInstallStatus().success
+          const installStatusText = done
+            ? (success
               ? "Installation completed successfully."
               : "Installation failed.")
             : "Installing...";

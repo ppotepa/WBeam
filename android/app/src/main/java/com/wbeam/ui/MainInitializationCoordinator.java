@@ -34,7 +34,7 @@ public final class MainInitializationCoordinator {
     private MainInitializationCoordinator() {
     }
 
-    @SuppressWarnings("java:java:S107")
+    @SuppressWarnings("java:S107")
     public static boolean initializeUiBindings(
             String logTag,
             AppCompatActivity activity,
@@ -105,7 +105,7 @@ public final class MainInitializationCoordinator {
         );
         return hwAvcDecodeAvailable;
     }
- @SuppressWarnings("java:java:S107")
+ @SuppressWarnings("java:S107")
 
     public static void initializeStartupState(
             MainUiState uiState,
