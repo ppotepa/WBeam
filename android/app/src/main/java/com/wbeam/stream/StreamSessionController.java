@@ -19,6 +19,7 @@ import java.util.concurrent.ExecutorService;
  */
 public final class StreamSessionController {
 
+    @SuppressWarnings("java:S1068")
     private static final String TAG = "WBeamSessionCtrl";
     private static final String STATE_CONNECTING = "connecting";
 

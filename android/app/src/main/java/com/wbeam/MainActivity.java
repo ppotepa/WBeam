@@ -92,11 +92,14 @@ public class MainActivity extends AppCompatActivity {
     private static final String STATE_ERROR = "error";
 
     private static final long HUD_ADB_LOG_INTERVAL_MS = 1000;
+    @SuppressWarnings("java:S1068")
     private static final long LIVE_TEST_START_TIMEOUT_MS = 12000;
     private static final int TRANSPORT_QUEUE_MAX_FRAMES = 3;
     private static final int DECODE_QUEUE_MAX_FRAMES = 2;
     private static final int RENDER_QUEUE_MAX_FRAMES = 1;
+    @SuppressWarnings("java:S1068")
     private static final int BANDWIDTH_TEST_MB = 64;
+    @SuppressWarnings("java:S1068")
     private static final String TEST_VIDEO_URL =
             "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4";
     private static final String DEFAULT_PROFILE = "baseline";
@@ -216,6 +219,7 @@ public class MainActivity extends AppCompatActivity {
     private final MainActivityInteractionPolicy.ToggleState debugToggleState =
             new MainActivityInteractionPolicy.ToggleState();
     private final HudDebugLogLimiter hudDebugLogLimiter = new HudDebugLogLimiter(HUD_ADB_LOG_INTERVAL_MS);
+    @SuppressWarnings("java:S1068")
     private boolean hwAvcDecodeAvailable = false;
     private final MainStatusState statusState =
             new MainStatusState(STATE_IDLE, "tap Settings -> Start Live");
