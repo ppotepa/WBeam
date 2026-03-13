@@ -39,5 +39,4 @@ exec sonar-scanner \
   -Dsonar.token="${SONAR_TOKEN}" \
   -Dsonar.projectKey="${PROJECT_KEY}" \
   -Dsonar.projectName="${PROJECT_NAME}" \
-  -Dsonar.branch.name="${SONAR_BRANCH}" \
   -Dsonar.qualitygate.wait=false
