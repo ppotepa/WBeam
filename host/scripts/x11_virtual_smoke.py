@@ -64,38 +64,49 @@ def adb_reverse(serial: str, device_port: int, host_port: int) -> None:
 
 def adb_reverse_list(serial: str) -> list[tuple[int, int]]:
     cmd = ["adb", "-s", serial, "reverse", "--list"]
+    out = run_adb_reverse_list_with_retry(cmd)
+    return parse_adb_reverse_list_output(out.stdout)
+
+
+def run_adb_reverse_list_with_retry(cmd: list[str]) -> subprocess.CompletedProcess:
     last_err = ""
     for _ in range(6):
         out = subprocess.run(cmd, capture_output=True, text=True, check=False)
         if out.returncode == 0:
-            break
+            return out
         last_err = out.stderr.strip() or out.stdout.strip() or f"exit={out.returncode}"
         if "offline" in last_err.lower() or "not found" in last_err.lower():
             time.sleep(0.5)
             continue
         raise RuntimeError(f"adb reverse --list failed: {last_err}")
-    else:
-        raise RuntimeError(f"adb reverse --list failed after retries: {last_err}")
+    raise RuntimeError(f"adb reverse --list failed after retries: {last_err}")
 
+
+def parse_adb_reverse_list_output(stdout: str) -> list[tuple[int, int]]:
     mappings: list[tuple[int, int]] = []
-    for raw in out.stdout.splitlines():
+    for raw in stdout.splitlines():
         line = raw.strip()
         if not line:
             continue
         parts = line.split()
         if len(parts) < 3:
             continue
-        dev = parts[-2]
-        host = parts[-1]
-        if not dev.startswith("tcp:") or not host.startswith("tcp:"):
+        parsed = parse_tcp_mapping_pair(parts[-2], parts[-1])
+        if parsed is None:
             continue
-        try:
-            dport = int(dev.split(":", 1)[1])
-            hport = int(host.split(":", 1)[1])
-        except Exception:
-            continue
-        mappings.append((dport, hport))
+        mappings.append(parsed)
     return mappings
+
+
+def parse_tcp_mapping_pair(dev: str, host: str) -> tuple[int, int] | None:
+    if not dev.startswith("tcp:") or not host.startswith("tcp:"):
+        return None
+    try:
+        dport = int(dev.split(":", 1)[1])
+        hport = int(host.split(":", 1)[1])
+    except Exception:
+        return None
+    return (dport, hport)
 
 
 def ensure_reverse_sanity(serial: str, stream_port: int, control_port: int) -> None:
