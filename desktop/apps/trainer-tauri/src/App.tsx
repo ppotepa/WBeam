@@ -1791,7 +1791,7 @@ export default function App() {
                   </div>
                   <div class="meta-item">
                     <strong>Best encoder</strong>
-                    <span>{String(valueAt(datasetDetail()!.parameters, ["best", "config", "encoder"]) || "-")}</span>
+                    <span>{safeDisplay(valueAt(datasetDetail()!.parameters, ["best", "config", "encoder"]), "-")}</span>
                   </div>
                   <div class="meta-item">
                     <strong>Best size</strong>
