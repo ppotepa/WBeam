@@ -5,6 +5,10 @@ import android.webkit.WebView;
 import android.widget.TextView;
 
 public final class RuntimeHudRenderCoordinator {
+    /**
+     * Plain data carrier for HUD render coordinator input.
+     */
+    @SuppressWarnings("java:S1104")
     public static final class Input {
         public MetricSeriesBuffer runtimePresentSeries;
         public MetricSeriesBuffer runtimeMbpsSeries;
