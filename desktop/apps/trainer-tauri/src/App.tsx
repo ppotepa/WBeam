@@ -1295,7 +1295,7 @@ export default function App() {
                 <Show when={selectedEncoder() === "h264" || selectedEncoder() === "h265"}>
                   <div class="two-col">
                     <label>
-                      Encoder preset
+                      <span>Encoder preset</span>
                       <select value={manualH26xPreset()} onInput={(e) => setManualH26xPreset(e.currentTarget.value)}>
                         <option value="ultrafast">ultrafast</option>
                         <option value="fast">fast</option>
