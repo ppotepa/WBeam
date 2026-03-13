@@ -2101,7 +2101,7 @@ export default function App() {
                 </label>
               </div>
               <label title="Refresh interval for trainer polling.">
-                Polling (ms)
+                <span>Polling (ms)</span>
                 <select
                   value={String(settings().pollingMs)}
                   onInput={(e) => {
