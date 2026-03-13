@@ -909,7 +909,7 @@ export default function App() {
                 </label>
 
                 <label title="Profile folder name used for persistent outputs and run artifacts.">
-                  Profile name
+                  <span>Profile name</span>
                   <input value={profileName()} onInput={(e) => setProfileName(e.currentTarget.value)} />
                 </label>
 
