@@ -5,6 +5,10 @@ public final class RuntimeHudOverlayRenderer {
         String buildRows(double targetFps, double renderP95Ms);
     }
 
+    /**
+     * Plain data carrier for overlay renderer input.
+     */
+    @SuppressWarnings("java:S1104")
     public static final class Input {
         public boolean daemonReachable;
         public String selectedProfile;
