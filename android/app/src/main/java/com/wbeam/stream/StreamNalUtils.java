@@ -26,23 +26,37 @@ final class StreamNalUtils {
         int i = 0;
         while (i < limit - 3) {
             if (data[i] != 0 || data[i + 1] != 0) { i++; continue; }
-            final int nalByte;
-            if (data[i + 2] == 1) {
-                nalByte = i + 3;
-            } else if (i + 3 < limit && data[i + 2] == 0 && data[i + 3] == 1) {
-                nalByte = i + 4;
-            } else { i++; continue; }
+            final int nalByte = findNalHeaderOffset(data, i, limit);
+            if (nalByte < 0) { i++; continue; }
             if (nalByte >= limit) break;
-            final int type = isHevc
-                    ? ((data[nalByte] & 0x7E) >> 1)   // HEVC: bits[6:1] of first header byte
-                    : (data[nalByte] & 0x1F);         // H.264: bits[4:0]
-            if (isHevc
-                    ? (type == 19 || type == 20 || type == 21 || type == 32 || type == 33 || type == 34)
-                    : (type == 5  || type == 7  || type == 8))
+            final int type = nalType(data[nalByte], isHevc);
+            if (isRecoveryType(type, isHevc))
                 return true;
             i = nalByte + 1;
         }
         return false;
+    }
+
+    private static int findNalHeaderOffset(byte[] data, int index, int limit) {
+        if (data[index + 2] == 1) {
+            return index + 3;
+        }
+        if (index + 3 < limit && data[index + 2] == 0 && data[index + 3] == 1) {
+            return index + 4;
+        }
+        return -1;
+    }
+
+    private static int nalType(byte value, boolean isHevc) {
+        return isHevc
+                ? ((value & 0x7E) >> 1)  // HEVC: bits[6:1] of first header byte
+                : (value & 0x1F);        // H.264: bits[4:0]
+    }
+
+    private static boolean isRecoveryType(int type, boolean isHevc) {
+        return isHevc
+                ? (type == 19 || type == 20 || type == 21 || type == 32 || type == 33 || type == 34)
+                : (type == 5 || type == 7 || type == 8);
     }
 
     static AvcCsd extractAvcCsd(byte[] data, int size) {
@@ -95,4 +109,3 @@ final class StreamNalUtils {
         }
     }
 }
-
