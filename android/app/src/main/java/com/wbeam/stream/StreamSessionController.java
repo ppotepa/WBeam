@@ -20,6 +20,7 @@ import java.util.concurrent.ExecutorService;
 public final class StreamSessionController {
 
     private static final String TAG = "WBeamSessionCtrl";
+    private static final String STATE_CONNECTING = "connecting";
 
     private static final long AUTO_START_FAILURE_BACKOFF_MS = 30_000L;
     private static final long STOP_SUPPRESS_AUTO_START_MS   = 12_000L;
@@ -86,7 +87,7 @@ public final class StreamSessionController {
         callbacks.suppressAutoStart(0);          // clear suppression
         callbacks.setAutoStartPending(!userAction);
         callbacks.recordAutoStartAttempt();
-        callbacks.onStatus("connecting", "requesting host start", 0);
+        callbacks.onStatus(STATE_CONNECTING, "requesting host start", 0);
 
         JSONObject cfg = callbacks.buildConfigPayload();
         ioExecutor.execute(() -> {
@@ -152,14 +153,14 @@ public final class StreamSessionController {
             boolean toastOnSuccess,
             boolean ensureViewer
     ) {
-        callbacks.onStatus("connecting", "sending " + path, 0);
+        callbacks.onStatus(STATE_CONNECTING, "sending " + path, 0);
         ioExecutor.execute(() -> {
             try {
                 JSONObject response = HostApiClient.apiRequestWithRetry(
                         method, path, payload, HostApiClient.API_RETRY_ATTEMPTS);
                 uiHandler.post(() -> {
                     callbacks.onDaemonStatusJson(response);
-                    callbacks.onStatus("connecting", successInfo, 0);
+                    callbacks.onStatus(STATE_CONNECTING, successInfo, 0);
                     if (ensureViewer) {
                         callbacks.ensureDecoderRunning();
                     }
