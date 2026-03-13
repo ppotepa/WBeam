@@ -11,6 +11,8 @@ import java.util.Locale;
 public final class TrainerHudPayloadBuilder {
     private static final String FONT_PROFILE_ARCADE = "arcade";
     private static final String LAYOUT_MODE_KEY = "layout_mode";
+    private static final String PENDING = "PENDING";
+    private static final String PENDING_LOWERCASE = "pending";
 
     private TrainerHudPayloadBuilder() {}
 
@@ -54,9 +56,9 @@ public final class TrainerHudPayloadBuilder {
 
         return TrainerHudShellRenderer.buildSotHtml(
                 "TEXT-SNAPSHOT",
-                "PENDING",
-                "PENDING",
-                "PENDING",
+                PENDING,
+                PENDING,
+                PENDING,
                 0,
                 0,
                 0,
@@ -75,14 +77,14 @@ public final class TrainerHudPayloadBuilder {
                 Double.NaN,
                 Double.NaN,
                 0,
-                "PENDING",
+                PENDING,
                 Double.NaN,
-                "pending",
-                "pending",
-                "pending",
-                "pending",
-                "pending",
-                "pending",
+                PENDING_LOWERCASE,
+                PENDING_LOWERCASE,
+                PENDING_LOWERCASE,
+                PENDING_LOWERCASE,
+                PENDING_LOWERCASE,
+                PENDING_LOWERCASE,
                 "text snapshot mode | " + details.toString().replaceAll("<[^>]+>", " ").trim(),
                 null,
                 null,
