@@ -26,6 +26,7 @@ public final class VideoTestController {
 
     private static final String TAG = "WBeamVideoTest";
     private static final String RUN_TESTS_LOG_PREFIX = "[RUN TESTS LIVE] ";
+    private static final String STATUS_STREAMING = "streaming";
     private static final long   LIVE_TEST_START_TIMEOUT_MS = 12_000L;
     private static final int    BANDWIDTH_TEST_MB          = 64;
     private static final String TEST_VIDEO_URL =
@@ -221,7 +222,7 @@ public final class VideoTestController {
                     release();
                     return;
                 }
-                callbacks.onStatus("streaming", "RUN TESTS LIVE playing", 0);
+                callbacks.onStatus(STATUS_STREAMING, "RUN TESTS LIVE playing", 0);
                 setOverlay("RUN TESTS LIVE ACTIVE",
                         "preset\n" + cfg.toMultiline(), "phase: playback started");
                 uiHandler.postDelayed(this::clearOverlay, 900);
@@ -256,7 +257,7 @@ public final class VideoTestController {
                             "preset\n" + cfg.toMultiline(), "phase: buffering");
                 } else if (what == MediaPlayer.MEDIA_INFO_BUFFERING_END) {
                     logInfo("buffering end");
-                    callbacks.onStatus("streaming", "RUN TESTS LIVE playing", 0);
+                    callbacks.onStatus(STATUS_STREAMING, "RUN TESTS LIVE playing", 0);
                     setOverlay("RUN TESTS LIVE ACTIVE",
                             "preset\n" + cfg.toMultiline(), "phase: streaming frames");
                 }
@@ -387,7 +388,7 @@ public final class VideoTestController {
     }
 
     private static String uiStateFromDaemonState(String daemonState) {
-        if ("STREAMING".equals(daemonState))                            return "streaming";
+        if ("STREAMING".equals(daemonState))                            return STATUS_STREAMING;
         if ("STARTING".equals(daemonState)
                 || "RECONNECTING".equals(daemonState))                  return "connecting";
         if ("ERROR".equals(daemonState)
