@@ -5,6 +5,7 @@ import org.json.JSONObject;
 import java.util.Locale;
 
 public final class TrainerHudModeCoordinator {
+    @SuppressWarnings("java:S1104")
     public static final class State {
         public long lastPayloadAtMs;
         public boolean sessionActive;
