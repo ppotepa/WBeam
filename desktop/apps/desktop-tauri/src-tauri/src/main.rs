@@ -716,10 +716,7 @@ fn host_build_revision_from_health() -> Option<String> {
 
 fn daemon_stream_state_and_port(serial: &str, stream_port: Option<u16>) -> Option<(String, u16)> {
     let control_port = wbeam_control_port();
-    let mut url = format!("http://127.0.0.1:{control_port}/v1/status?serial={serial}");
-    if let Some(port) = stream_port {
-        url.push_str(&format!("&stream_port={port}"));
-    }
+    let url = daemon_status_url(control_port, serial, stream_port);
     let output = Command::new("curl")
         .args(["-fsS", "--max-time", "1", &url])
         .output();
@@ -729,15 +726,30 @@ fn daemon_stream_state_and_port(serial: &str, stream_port: Option<u16>) -> Optio
     }
     let body = String::from_utf8_lossy(&output.stdout);
     let json: Value = serde_json::from_str(&body).ok()?;
-    let target_serial = json
-        .get("target_serial")
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .unwrap_or("");
+    let target_serial = daemon_status_target_serial(&json);
     // Ignore default/non-matching daemon sessions when querying per-device state.
     if target_serial.is_empty() || target_serial != serial {
         return None;
     }
+    Some(daemon_status_state_and_port(&json, stream_port))
+}
+
+fn daemon_status_url(control_port: u16, serial: &str, stream_port: Option<u16>) -> String {
+    let mut url = format!("http://127.0.0.1:{control_port}/v1/status?serial={serial}");
+    if let Some(port) = stream_port {
+        url.push_str(&format!("&stream_port={port}"));
+    }
+    url
+}
+
+fn daemon_status_target_serial(json: &Value) -> &str {
+    json.get("target_serial")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .unwrap_or("")
+}
+
+fn daemon_status_state_and_port(json: &Value, requested_port: Option<u16>) -> (String, u16) {
     let state = json
         .get("state")
         .and_then(|v| v.as_str())
@@ -746,9 +758,9 @@ fn daemon_stream_state_and_port(serial: &str, stream_port: Option<u16>) -> Optio
         .get("stream_port")
         .and_then(|v| v.as_u64())
         .and_then(|v| u16::try_from(v).ok())
-        .or(stream_port)
+        .or(requested_port)
         .unwrap_or(0);
-    Some((state.to_string(), resolved_port))
+    (state.to_string(), resolved_port)
 }
 
 fn normalize_profile_name(value: Option<String>) -> Option<String> {
