@@ -1447,6 +1447,17 @@ fn resolve_xauthority_for_display(display: &str) -> Option<PathBuf> {
     let uid_num = uid.parse::<u32>().ok();
     let mut candidates: Vec<PathBuf> = Vec::new();
 
+    collect_env_xauth_candidates(&mut candidates);
+    candidates.extend(collect_tmp_xauth_candidates(uid_num));
+    candidates.extend(collect_run_dir_xauth_candidates(&uid, uid_num));
+    collect_home_xauth_candidate(&mut candidates);
+
+    candidates.dedup();
+
+    first_usable_xauth_candidate(display, &candidates)
+}
+
+fn collect_env_xauth_candidates(candidates: &mut Vec<PathBuf>) {
     // Prefer current process env first (set by run_wbeamd.sh after probe),
     // then evaluate discovered candidates.
     if let Ok(path) = std::env::var("XAUTHORITY") {
@@ -1455,84 +1466,85 @@ fn resolve_xauthority_for_display(display: &str) -> Option<PathBuf> {
             candidates.push(p);
         }
     }
+}
 
-    if let Ok(entries) = fs::read_dir("/tmp") {
-        let mut tmp_candidates: Vec<PathBuf> = entries
-            .flatten()
-            .map(|e| e.path())
-            .filter(|p| {
-                p.is_file()
-                    && p.file_name()
-                        .and_then(|n| n.to_str())
-                        .map(|n| n.starts_with("xauth_"))
-                        .unwrap_or(false)
-            })
-            .filter(|p| {
-                if let Some(expect_uid) = uid_num {
-                    if let Ok(meta) = fs::metadata(p) {
-                        use std::os::unix::fs::MetadataExt;
-                        return meta.uid() == expect_uid;
-                    }
-                    return false;
-                }
-                true
-            })
-            .collect();
-        tmp_candidates.sort_by_key(|p| {
-            std::fs::metadata(p)
-                .and_then(|m| m.modified())
-                .ok()
-                .unwrap_or(SystemTime::UNIX_EPOCH)
-        });
-        tmp_candidates.reverse();
-        candidates.extend(tmp_candidates);
-    }
-
-    let run_dir = PathBuf::from(format!("/run/user/{uid}"));
-    if run_dir.exists() {
-        let mut run_candidates: Vec<PathBuf> = Vec::new();
-        if let Ok(entries) = fs::read_dir(&run_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    if name.starts_with("xauth_") && path.is_file() {
-                        if let Some(expect_uid) = uid_num {
-                            if let Ok(meta) = fs::metadata(&path) {
-                                use std::os::unix::fs::MetadataExt;
-                                if meta.uid() != expect_uid {
-                                    continue;
-                                }
-                            }
-                        }
-                        run_candidates.push(path);
-                    }
-                }
-            }
-        }
-        run_candidates.sort_by_key(|p| {
-            std::fs::metadata(p)
-                .and_then(|m| m.modified())
-                .ok()
-                .unwrap_or(SystemTime::UNIX_EPOCH)
-        });
-        run_candidates.reverse();
-        candidates.extend(run_candidates);
-    }
-
+fn collect_home_xauth_candidate(candidates: &mut Vec<PathBuf>) {
     if let Some(home) = std::env::var_os("HOME") {
         let p = Path::new(&home).join(".Xauthority");
         if p.exists() {
             candidates.push(p);
         }
     }
+}
 
-    candidates.dedup();
+fn collect_tmp_xauth_candidates(uid_num: Option<u32>) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir("/tmp") else {
+        return Vec::new();
+    };
+    let mut tmp_candidates: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| is_xauth_file_for_uid(p, uid_num))
+        .collect();
+    sort_candidates_by_mtime_desc(&mut tmp_candidates);
+    tmp_candidates
+}
 
-    for candidate in &candidates {
-        if xrandr_output(&["--listproviders"], display, Some(candidate.as_path())).is_ok() {
-            return Some(candidate.clone());
-        }
+fn collect_run_dir_xauth_candidates(uid: &str, uid_num: Option<u32>) -> Vec<PathBuf> {
+    let run_dir = PathBuf::from(format!("/run/user/{uid}"));
+    if !run_dir.exists() {
+        return Vec::new();
     }
+    let Ok(entries) = fs::read_dir(&run_dir) else {
+        return Vec::new();
+    };
+    let mut run_candidates: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| is_xauth_file_for_uid(path, uid_num))
+        .collect();
+    sort_candidates_by_mtime_desc(&mut run_candidates);
+    run_candidates
+}
 
-    None
+fn is_xauth_file_for_uid(path: &Path, uid_num: Option<u32>) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    let is_xauth_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|n| n.starts_with("xauth_"))
+        .unwrap_or(false);
+    if !is_xauth_name {
+        return false;
+    }
+    if let Some(expect_uid) = uid_num {
+        if let Ok(meta) = fs::metadata(path) {
+            use std::os::unix::fs::MetadataExt;
+            return meta.uid() == expect_uid;
+        }
+        return false;
+    }
+    true
+}
+
+fn sort_candidates_by_mtime_desc(candidates: &mut [PathBuf]) {
+    candidates.sort_by_key(|p| {
+        std::fs::metadata(p)
+            .and_then(|m| m.modified())
+            .ok()
+            .unwrap_or(SystemTime::UNIX_EPOCH)
+    });
+    candidates.reverse();
+}
+
+fn first_usable_xauth_candidate(display: &str, candidates: &[PathBuf]) -> Option<PathBuf> {
+    candidates.iter().find_map(|candidate| {
+        if xrandr_output(&["--listproviders"], display, Some(candidate.as_path())).is_ok() {
+            Some(candidate.clone())
+        } else {
+            None
+        }
+    })
 }
