@@ -10,6 +10,7 @@ import java.util.Locale;
  */
 public final class TrainerHudPayloadBuilder {
     private static final String FONT_PROFILE_ARCADE = "arcade";
+    private static final String LAYOUT_MODE_KEY = "layout_mode";
 
     private TrainerHudPayloadBuilder() {}
 
@@ -137,7 +138,9 @@ public final class TrainerHudPayloadBuilder {
         String size = config != null ? config.optString("size", "-") : "-";
         String fontProfile = config != null ? config.optString("font_profile", FONT_PROFILE_ARCADE) : FONT_PROFILE_ARCADE;
         int fps = config != null ? config.optInt("fps", 0) : 0;
-        String layoutMode = config != null ? config.optString("layout_mode", hud.optString("layout_mode", "wide")) : hud.optString("layout_mode", "wide");
+        String layoutMode = config != null
+                ? config.optString(LAYOUT_MODE_KEY, hud.optString(LAYOUT_MODE_KEY, "wide"))
+                : hud.optString(LAYOUT_MODE_KEY, "wide");
 
         double score = kpi != null ? kpi.optDouble("score", Double.NaN) : Double.NaN;
         double present = kpi != null ? kpi.optDouble("present_fps", Double.NaN) : Double.NaN;
