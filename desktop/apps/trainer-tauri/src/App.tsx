@@ -769,7 +769,7 @@ export default function App() {
   createEffect(() => {
     const intervalMs = settings().pollingMs;
     if (!pollId) return;
-    window.clearInterval(pollId);
+    globalThis.clearInterval(pollId);
     pollId = window.setInterval(async () => {
       try {
         await runPollingTick();
