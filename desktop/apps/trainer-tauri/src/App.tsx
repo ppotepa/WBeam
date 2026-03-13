@@ -896,7 +896,7 @@ export default function App() {
                 <h2>Run Setup</h2>
 
                 <label>
-                  Device
+                  <span>Device</span>
                   <select value={serial()} onInput={(e) => setSerial(e.currentTarget.value)}>
                     <For each={devices()}>
                       {(d) => (
