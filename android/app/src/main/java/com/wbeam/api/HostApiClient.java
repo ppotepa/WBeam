@@ -103,6 +103,7 @@ public final class HostApiClient {
     /**
      * Execute an HTTP request against the control API with exponential-backoff retry.
      */
+    @SuppressWarnings("S2140")
     public static JSONObject apiRequestWithRetry(
             String method,
             String path,

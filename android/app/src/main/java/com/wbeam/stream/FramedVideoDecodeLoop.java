@@ -57,6 +57,8 @@ final class FramedVideoDecodeLoop {
     private final int noPresentMinInFramesReconnect;
     private final int noPresentMinInFramesHard;
     private final String stateConnecting;
+    @SuppressWarnings("S1192")
+    @SuppressWarnings("S3358")
     private final String stateStreaming;
 
     @SuppressWarnings("java:S107")

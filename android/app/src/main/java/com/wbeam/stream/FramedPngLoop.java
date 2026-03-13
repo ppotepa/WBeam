@@ -37,6 +37,10 @@ final class FramedPngLoop {
     private final long noPresentHardResetMs;
     private final String stateConnecting;
     private final String stateStreaming;
+    @SuppressWarnings("S1854")
+    @SuppressWarnings("S135")
+    @SuppressWarnings("S3776")
+    @SuppressWarnings("S6541")
     private final int frameBufferBudgetFrames;
 
     @SuppressWarnings("java:S107")

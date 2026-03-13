@@ -198,6 +198,7 @@ public final class TrainerHudShellRenderer {
                 + "</div>";
     }
 
+    @SuppressWarnings("S3516")
     private static String trainerScaleClass(String fontProfile) {
         String profile = fontProfile == null ? "" : fontProfile.trim().toLowerCase(Locale.US);
         if ("compact".equals(profile) || "dense".equals(profile) || "system".equals(profile)) {

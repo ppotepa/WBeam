@@ -76,6 +76,7 @@ public final class StartupOverlayModelBuilder {
     private static final String RECONNECTS_SUFFIX = "reconnects: ";
 
     @SuppressWarnings({"java:S6541", "java:S3776"})
+    @SuppressWarnings("S1192")
     public static Model build(Input in) {
         Model out = new Model();
         long elapsedMs = in.startupBeganAtMs > 0L

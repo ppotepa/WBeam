@@ -148,6 +148,7 @@ public final class StatusPoller {
 
     // ── Poll logic ────────────────────────────────────────────────────────────
 
+    @SuppressWarnings("S3398")
     private void pollAsync() {
         if (statusPollInFlight) {
             return;

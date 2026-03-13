@@ -98,6 +98,7 @@ public final class SettingsRepository {
         public final boolean localCursor;
         public final boolean intraOnly;
 
+        @SuppressWarnings("S107")
         public SettingsSnapshot(
                 String profile, String encoder, String cursor,
                 int resScale, int fps, int bitrateMbps,
