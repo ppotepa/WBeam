@@ -89,6 +89,7 @@ public final class MainActivityUiBinder {
 
             @Override
             public void onNothingSelected(AdapterView<?> parent) {
+                // No-op; spinner always has a selection
             }
         });
         cursorSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
