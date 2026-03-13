@@ -925,7 +925,7 @@ export default function App() {
                   </label>
 
                   <label title="Select the single encoder to train for this run.">
-                    Encoder
+                    <span>Encoder</span>
                     <select value={selectedEncoder()} onInput={(e) => setSelectedEncoder(e.currentTarget.value)}>
                       <option value="h264">h264</option>
                       <option value="h265">h265</option>
