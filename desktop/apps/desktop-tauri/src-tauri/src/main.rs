@@ -7,7 +7,7 @@ use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
@@ -166,15 +166,43 @@ fn ensure_user_wbeam_config(root: &PathBuf) -> Option<PathBuf> {
     Some(user_cfg)
 }
 
+fn wbeam_config_files(root: &Path) -> Vec<PathBuf> {
+    if let Some(user_cfg) = ensure_user_wbeam_config(&root.to_path_buf()) {
+        vec![user_cfg]
+    } else {
+        vec![root.join("config/wbeam.conf")]
+    }
+}
+
+fn unquote_config_value(raw: &str) -> String {
+    let bytes = raw.as_bytes();
+    if bytes.len() >= 2
+        && ((bytes[0] == b'"' && bytes[bytes.len() - 1] == b'"')
+            || (bytes[0] == b'\'' && bytes[bytes.len() - 1] == b'\''))
+    {
+        return raw[1..raw.len() - 1].to_string();
+    }
+    raw.to_string()
+}
+
+fn parse_wbeam_config_line(line: &str) -> Option<(String, String)> {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with('#') {
+        return None;
+    }
+    let (k, v) = line.split_once('=')?;
+    let key = k.trim();
+    if !key.starts_with("WBEAM_") {
+        return None;
+    }
+    let value = unquote_config_value(v.trim());
+    Some((key.to_string(), value))
+}
+
 fn wbeam_config_cache() -> &'static HashMap<String, String> {
     WBEAM_CONFIG_CACHE.get_or_init(|| {
         let root = repo_root();
-        let mut files: Vec<PathBuf> = Vec::new();
-        if let Some(user_cfg) = ensure_user_wbeam_config(&root) {
-            files.push(user_cfg);
-        } else {
-            files.push(root.join("config/wbeam.conf"));
-        }
+        let files = wbeam_config_files(&root);
 
         let mut map = HashMap::new();
         for file in files {
@@ -182,29 +210,13 @@ fn wbeam_config_cache() -> &'static HashMap<String, String> {
                 continue;
             };
             for line in raw.lines() {
-                let line = line.trim();
-                if line.is_empty() || line.starts_with('#') {
-                    continue;
-                }
-                let Some((k, v)) = line.split_once('=') else {
+                let Some((key, value)) = parse_wbeam_config_line(line) else {
                     continue;
                 };
-                let key = k.trim();
-                if !key.starts_with("WBEAM_") {
+                if map.contains_key(&key) {
                     continue;
                 }
-                if map.contains_key(key) {
-                    continue;
-                }
-                let mut value = v.trim().to_string();
-                let bytes = value.as_bytes();
-                if bytes.len() >= 2
-                    && ((bytes[0] == b'"' && bytes[bytes.len() - 1] == b'"')
-                        || (bytes[0] == b'\'' && bytes[bytes.len() - 1] == b'\''))
-                {
-                    value = value[1..value.len() - 1].to_string();
-                }
-                map.insert(key.to_string(), value);
+                map.insert(key, value);
             }
         }
         map
