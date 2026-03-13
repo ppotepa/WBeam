@@ -994,10 +994,10 @@ def main():
                 try:
                     text = Path(overlay_file).read_text(encoding="utf-8", errors="replace")
                 except FileNotFoundError:
-                    return True
+                    return
                 except Exception as exc:
                     print(f"[warn] failed to read overlay text {overlay_file}: {exc}", file=sys.stderr)
-                    return True
+                    return
 
                 sections = _parse_overlay_sections(text)
                 for key, elem in overlay_elements.items():
@@ -1015,10 +1015,14 @@ def main():
                         overlay_state[key] = new_text
                     except Exception as exc:
                         print(f"[warn] failed to set overlay text ({key}): {exc}", file=sys.stderr)
+                return
+
+            def _refresh_overlay_tick():
+                _refresh_overlay_text()
                 return True
 
             _refresh_overlay_text()
-            GLib.timeout_add(250, _refresh_overlay_text)
+            GLib.timeout_add(250, _refresh_overlay_tick)
 
     bus = pipeline.get_bus()
     bus.add_signal_watch()
