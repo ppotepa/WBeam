@@ -2193,6 +2193,23 @@ fn or_unknown(value: Option<String>) -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
+fn loginctl_session_type(session_id: &str) -> Option<String> {
+    let output = Command::new("loginctl")
+        .args(["show-session", session_id, "-p", "Type", "--value"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .to_ascii_lowercase();
+    if value.is_empty() {
+        return None;
+    }
+    Some(value)
+}
+
 fn detect_session_type_for_notice() -> Option<String> {
     if let Some(kind) = std::env::var("XDG_SESSION_TYPE")
         .ok()
@@ -2201,24 +2218,16 @@ fn detect_session_type_for_notice() -> Option<String> {
     {
         return Some(kind);
     }
-    if let Ok(session_id) = std::env::var("XDG_SESSION_ID") {
-        let trimmed = session_id.trim();
-        if !trimmed.is_empty() {
-            let output = Command::new("loginctl")
-                .args(["show-session", trimmed, "-p", "Type", "--value"])
-                .output();
-            if let Ok(output) = output {
-                if output.status.success() {
-                    let value = String::from_utf8_lossy(&output.stdout)
-                        .trim()
-                        .to_ascii_lowercase();
-                    if !value.is_empty() {
-                        return Some(value);
-                    }
-                }
-            }
-        }
+
+    if let Some(kind) = std::env::var("XDG_SESSION_ID")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .and_then(|session_id| loginctl_session_type(&session_id))
+    {
+        return Some(kind);
     }
+
     if std::env::var_os("WAYLAND_DISPLAY").is_some() {
         return Some("wayland".to_string());
     }
