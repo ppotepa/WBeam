@@ -110,6 +110,7 @@ public class MainActivity extends AppCompatActivity {
     static final String PREFERRED_VIDEO = DecoderCapabilityInspector.preferredVideoEncoder();
     private static final String[] ENCODER_OPTIONS = {PREFERRED_VIDEO, "raw-png"};
     private static final String CURSOR_EMBEDDED = "embedded";
+    private static final String METRIC_KEY_TRAINER_HUD_ACTIVE = "trainer_hud_active";
     private static final String[] CURSOR_OPTIONS = {CURSOR_EMBEDDED, "hidden", "metadata"};
     private static final String DEFAULT_CURSOR_MODE = CURSOR_EMBEDDED;
     private static final int DEFAULT_RES_SCALE = 100;
@@ -1183,6 +1184,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void updatePerfHud(JSONObject metrics) {
         MainHudCoordinator.update(buildHudInput(), metrics);
+    }
     }
 
     private MainHudCoordinator.Input buildHudInput() {
