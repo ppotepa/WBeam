@@ -936,6 +936,72 @@ fn adb_api_level(serial: &str) -> Option<u32> {
         .and_then(|v| v.trim().parse::<u32>().ok())
 }
 
+fn adb_reverse_primary(serial: &str, from_port: u16, to_port: u16) -> Result<String, String> {
+    adb_cmd(&[
+        "-s",
+        serial,
+        "reverse",
+        &format!("tcp:{from_port}"),
+        &format!("tcp:{to_port}"),
+    ])
+}
+
+fn log_reverse_result(
+    serial: &str,
+    stream_port: u16,
+    channel: &str,
+    from_port: u16,
+    to_port: u16,
+    result: &Result<String, String>,
+) {
+    match result {
+        Ok(out) => connect_log(
+            serial,
+            stream_port,
+            &format!("adb reverse {channel} primary ok {from_port}->{to_port} out='{out}'"),
+        ),
+        Err(err) => connect_log(
+            serial,
+            stream_port,
+            &format!("adb reverse {channel} primary failed {from_port}->{to_port}: {err}"),
+        ),
+    }
+}
+
+fn run_reverse_compat(serial: &str, stream_port: u16, port: u16, channel: &str, default_port: u16) {
+    if port == default_port {
+        return;
+    }
+    match adb_reverse_primary(serial, port, port) {
+        Ok(out) => connect_log(
+            serial,
+            stream_port,
+            &format!("adb reverse {channel} compat ok {port}->{port} out='{out}'"),
+        ),
+        Err(err) => connect_log(
+            serial,
+            stream_port,
+            &format!("adb reverse {channel} compat failed {port}->{port}: {err}"),
+        ),
+    }
+}
+
+fn can_skip_reverse_failure_for_legacy(serial: &str, stream_port: u16) -> bool {
+    let api_level = adb_api_level(serial).unwrap_or(0);
+    let legacy = api_level > 0 && api_level <= 18;
+    if legacy {
+        connect_log(
+            serial,
+            stream_port,
+            &format!(
+                "adb reverse failed but continuing for legacy api_level={} (tether/LAN path)",
+                api_level
+            ),
+        );
+    }
+    legacy
+}
+
 fn adb_prepare_connect(serial: &str, stream_port: u16) -> Result<(), String> {
     let control_port = wbeam_control_port();
     connect_log(
@@ -977,91 +1043,22 @@ fn adb_prepare_connect(serial: &str, stream_port: u16) -> Result<(), String> {
         return Err(msg);
     }
 
-    let rev_stream_primary = adb_cmd(&[
-        "-s",
+    let rev_stream_primary = adb_reverse_primary(serial, 5000, stream_port);
+    let rev_control_primary = adb_reverse_primary(serial, 5001, control_port);
+    log_reverse_result(serial, stream_port, "stream", 5000, stream_port, &rev_stream_primary);
+    log_reverse_result(
         serial,
-        "reverse",
-        "tcp:5000",
-        &format!("tcp:{stream_port}"),
-    ]);
-    if let Ok(out) = &rev_stream_primary {
-        connect_log(
-            serial,
-            stream_port,
-            &format!("adb reverse stream primary ok 5000->{stream_port} out='{out}'"),
-        );
-    }
-    let rev_control_primary = adb_cmd(&[
-        "-s",
-        serial,
-        "reverse",
-        "tcp:5001",
-        &format!("tcp:{control_port}"),
-    ]);
-    if let Ok(out) = &rev_control_primary {
-        connect_log(
-            serial,
-            stream_port,
-            &format!("adb reverse control primary ok 5001->{control_port} out='{out}'"),
-        );
-    }
-    if stream_port != 5000 {
-        match adb_cmd(&[
-            "-s",
-            serial,
-            "reverse",
-            &format!("tcp:{stream_port}"),
-            &format!("tcp:{stream_port}"),
-        ]) {
-            Ok(out) => connect_log(
-                serial,
-                stream_port,
-                &format!("adb reverse stream compat ok {stream_port}->{stream_port} out='{out}'"),
-            ),
-            Err(err) => connect_log(
-                serial,
-                stream_port,
-                &format!("adb reverse stream compat failed {stream_port}->{stream_port}: {err}"),
-            ),
-        }
-    }
-    if control_port != 5001 {
-        match adb_cmd(&[
-            "-s",
-            serial,
-            "reverse",
-            &format!("tcp:{control_port}"),
-            &format!("tcp:{control_port}"),
-        ]) {
-            Ok(out) => connect_log(
-                serial,
-                stream_port,
-                &format!(
-                    "adb reverse control compat ok {control_port}->{control_port} out='{out}'"
-                ),
-            ),
-            Err(err) => connect_log(
-                serial,
-                stream_port,
-                &format!(
-                    "adb reverse control compat failed {control_port}->{control_port}: {err}"
-                ),
-            ),
-        }
-    }
+        stream_port,
+        "control",
+        5001,
+        control_port,
+        &rev_control_primary,
+    );
+    run_reverse_compat(serial, stream_port, stream_port, "stream", 5000);
+    run_reverse_compat(serial, stream_port, control_port, "control", 5001);
 
     if rev_stream_primary.is_err() || rev_control_primary.is_err() {
-        let api_level = adb_api_level(serial).unwrap_or(0);
-        if api_level > 0 && api_level <= 18 {
-            connect_log(
-                serial,
-                stream_port,
-                &format!(
-                    "adb reverse failed but continuing for legacy api_level={} (tether/LAN path)",
-                    api_level
-                ),
-            );
-        } else {
+        if !can_skip_reverse_failure_for_legacy(serial, stream_port) {
             let msg = "ADB reverse failed. Run full redeploy or check USB transport permissions."
                 .to_string();
             connect_log(serial, stream_port, &msg);
