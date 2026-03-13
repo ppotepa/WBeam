@@ -6,6 +6,10 @@ import com.wbeam.ui.MainActivityRuntimeStateView;
 import org.json.JSONObject;
 
 public final class RuntimeHudStateCoordinator {
+    /**
+     * Plain data carrier for HUD state coordinator input.
+     */
+    @SuppressWarnings("java:S1104")
     public static final class Input {
         public JSONObject metrics;
         public int selectedFps;
@@ -26,6 +30,10 @@ public final class RuntimeHudStateCoordinator {
         public String daemonLastError;
     }
 
+    /**
+     * Plain data carrier for HUD state coordinator output.
+     */
+    @SuppressWarnings("java:S1104")
     public static final class Output {
         public RuntimeHudUpdateState state;
         public String daemonStateUi;
