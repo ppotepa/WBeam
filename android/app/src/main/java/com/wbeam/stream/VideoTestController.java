@@ -25,6 +25,7 @@ import okhttp3.ResponseBody;
 public final class VideoTestController {
 
     private static final String TAG = "WBeamVideoTest";
+    private static final String RUN_TESTS_LOG_PREFIX = "[RUN TESTS LIVE] ";
     private static final long   LIVE_TEST_START_TIMEOUT_MS = 12_000L;
     private static final int    BANDWIDTH_TEST_MB          = 64;
     private static final String TEST_VIDEO_URL =
@@ -409,16 +410,16 @@ public final class VideoTestController {
     }
 
     private void logInfo(String msg)  {
-        callbacks.logInfo("[RUN TESTS LIVE] " + msg);
-        Log.i(TAG, "[RUN TESTS LIVE] " + msg);
+        callbacks.logInfo(RUN_TESTS_LOG_PREFIX + msg);
+        Log.i(TAG, RUN_TESTS_LOG_PREFIX + msg);
     }
     private void logWarn(String msg)  {
-        callbacks.logWarn("[RUN TESTS LIVE] " + msg);
-        Log.w(TAG, "[RUN TESTS LIVE] " + msg);
+        callbacks.logWarn(RUN_TESTS_LOG_PREFIX + msg);
+        Log.w(TAG, RUN_TESTS_LOG_PREFIX + msg);
     }
     private void logError(String msg) {
-        callbacks.logError("[RUN TESTS LIVE] " + msg);
-        Log.e(TAG, "[RUN TESTS LIVE] " + msg);
+        callbacks.logError(RUN_TESTS_LOG_PREFIX + msg);
+        Log.e(TAG, RUN_TESTS_LOG_PREFIX + msg);
     }
 
     private static String shortError(Exception e) {
