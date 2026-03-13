@@ -94,6 +94,7 @@ all.log
 codebase_concat*.txt
 concat*.txt
 ALL_CODE*
+.sonarcache/
 .wbeam_android_pipeline
 .wbeam.conf
 .wbeam_build_version
