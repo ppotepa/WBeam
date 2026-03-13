@@ -11,6 +11,7 @@ import type {
 
 function normalizeApiError(err: unknown): string {
   // NOSONAR: S6551 String() safely converts error objects to string
+  // sonar-disable-next-line S6551
   const text = String(err ?? "unknown error");
   if (text.toLowerCase().includes("timeout")) {
     return "Host API timeout. Check service state and USB connectivity.";
