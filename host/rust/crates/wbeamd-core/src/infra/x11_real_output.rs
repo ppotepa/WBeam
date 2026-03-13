@@ -61,37 +61,24 @@ struct EvdiModuleStatus {
 
 pub fn probe(is_remote: bool) -> X11RealOutputProbe {
     if policy_flag_enabled("DISABLE_REAL_OUTPUT_BACKEND") {
-        return X11RealOutputProbe {
-            supported: false,
-            reason: format!(
+        return probe_unsupported_missing(
+            format!(
                 "real-output backend disabled by policy file ({})",
                 policy_file_location_hint()
             ),
-            missing_deps: vec!["real-output-disabled".to_string()],
-        };
+            "real-output-disabled",
+        );
     }
     if is_remote {
-        return X11RealOutputProbe {
-            supported: false,
-            reason: "remote X11 sessions typically cannot expose real virtual outputs".to_string(),
-            missing_deps: Vec::new(),
-        };
+        return probe_unsupported("remote X11 sessions typically cannot expose real virtual outputs");
     }
 
     let display = detect_x11_display().unwrap_or_default();
     if display.trim().is_empty() {
-        return X11RealOutputProbe {
-            supported: false,
-            reason: "DISPLAY is not set for daemon process".to_string(),
-            missing_deps: Vec::new(),
-        };
+        return probe_unsupported("DISPLAY is not set for daemon process");
     }
     if !command_exists("xrandr") {
-        return X11RealOutputProbe {
-            supported: false,
-            reason: "xrandr is not installed".to_string(),
-            missing_deps: vec!["xrandr".to_string()],
-        };
+        return probe_unsupported_missing("xrandr is not installed", "xrandr");
     }
 
     let xauth = resolve_xauthority_for_display(&display);
@@ -99,41 +86,29 @@ pub fn probe(is_remote: bool) -> X11RealOutputProbe {
 
     let providers = match xrandr_output(&["--listproviders"], &display, xauth.as_deref()) {
         Ok(v) => parse_providers(&v),
-        Err(e) => {
-            return X11RealOutputProbe {
-                supported: false,
-                reason: format!("xrandr --listproviders failed: {e}"),
-                missing_deps: Vec::new(),
-            }
-        }
+        Err(e) => return probe_unsupported(format!("xrandr --listproviders failed: {e}")),
     };
     let disp = display.clone();
     debug!(x_display = %disp, providers = providers.len(), "x11 real-output probe: providers");
     if let Some(reason) = reject_unsafe_provider_topology(&providers) {
         warn!("{reason}");
-        return X11RealOutputProbe {
-            supported: false,
-            reason,
-            missing_deps: vec!["xrandr-safe-topology".to_string()],
-        };
+        return probe_unsupported_with_missing(reason, vec!["xrandr-safe-topology".to_string()]);
     }
 
     let source_provider = choose_source_provider(&providers);
     if source_provider.is_none() {
         if evdi.available && !evdi.loaded {
             warn!("x11 real-output probe: evdi installed but module not loaded");
-            return X11RealOutputProbe {
-                supported: false,
-                reason: "evdi module is installed but not loaded (run: sudo modprobe evdi initial_device_count=1)".to_string(),
-                missing_deps: vec!["evdi-module-loaded".to_string()],
-            };
+            return probe_unsupported_missing(
+                "evdi module is installed but not loaded (run: sudo modprobe evdi initial_device_count=1)",
+                "evdi-module-loaded",
+            );
         }
         warn!("x11 real-output probe: no source provider with virtual output capability");
-        return X11RealOutputProbe {
-            supported: false,
-            reason: "no source provider with virtual output capability found".to_string(),
-            missing_deps: vec!["evdi-provider".to_string()],
-        };
+        return probe_unsupported_missing(
+            "no source provider with virtual output capability found",
+            "evdi-provider",
+        );
     }
 
     let source_provider = source_provider.unwrap();
@@ -143,51 +118,32 @@ pub fn probe(is_remote: bool) -> X11RealOutputProbe {
             source_provider_name = %source_provider.name,
             "{reason}"
         );
-        return X11RealOutputProbe {
-            supported: false,
-            reason,
-            missing_deps: vec!["xrandr-virtual-source-provider".to_string()],
-        };
+        return probe_unsupported_missing(reason, "xrandr-virtual-source-provider");
     }
     let sink_provider = choose_sink_provider(&providers, source_provider);
     if sink_provider.is_none() {
         warn!("x11 real-output probe: no Intel/AMD (non-NVIDIA) sink provider for provider link");
-        return X11RealOutputProbe {
-            supported: false,
-            reason: "no Intel/AMD (non-NVIDIA) sink provider found for provider link".to_string(),
-            missing_deps: vec!["xrandr-igpu-sink-provider".to_string()],
-        };
+        return probe_unsupported_missing(
+            "no Intel/AMD (non-NVIDIA) sink provider found for provider link",
+            "xrandr-igpu-sink-provider",
+        );
     }
     let sink_provider = sink_provider.unwrap();
     if should_block_real_output_on_nvidia_evdi(sink_provider) {
-        return X11RealOutputProbe {
-            supported: false,
-            reason: format!(
-                "real-output backend auto-disabled on NVIDIA+EVDI with NVIDIA sink provider ({})",
-                sink_provider.name
-            ),
-            missing_deps: Vec::new(),
-        };
+        return probe_unsupported(format!(
+            "real-output backend auto-disabled on NVIDIA+EVDI with NVIDIA sink provider ({})",
+            sink_provider.name
+        ));
     }
 
     let query = match xrandr_output(&["--query"], &display, xauth.as_deref()) {
         Ok(v) => v,
-        Err(e) => {
-            return X11RealOutputProbe {
-                supported: false,
-                reason: format!("xrandr --query failed: {e}"),
-                missing_deps: Vec::new(),
-            }
-        }
+        Err(e) => return probe_unsupported(format!("xrandr --query failed: {e}")),
     };
     let outputs = parse_outputs(&query);
     debug!(outputs = outputs.len(), "x11 real-output probe: outputs");
     if outputs.is_empty() {
-        return X11RealOutputProbe {
-            supported: false,
-            reason: "xrandr reported no outputs in this session".to_string(),
-            missing_deps: Vec::new(),
-        };
+        return probe_unsupported("xrandr reported no outputs in this session");
     }
 
     if choose_candidate_output(&outputs).is_none() {
@@ -195,25 +151,40 @@ pub fn probe(is_remote: bool) -> X11RealOutputProbe {
             warn!(
                 "x11 real-output probe: no disconnected output pre-link, but sink-only provider exists; deferring output detection to activation"
             );
-            return X11RealOutputProbe {
-                supported: true,
-                reason: "providers detected; output candidate will be resolved during activation"
-                    .to_string(),
-                missing_deps: Vec::new(),
-            };
+            return probe_supported("providers detected; output candidate will be resolved during activation");
         }
         warn!("x11 real-output probe: no disconnected virtual-capable output candidate");
-        return X11RealOutputProbe {
-            supported: false,
-            reason: "no disconnected virtual-capable output found".to_string(),
-            missing_deps: vec!["evdi-output".to_string()],
-        };
+        return probe_unsupported_missing("no disconnected virtual-capable output found", "evdi-output");
     }
 
+    probe_supported("X11 virtual output candidates detected")
+}
+
+fn probe_supported(reason: impl Into<String>) -> X11RealOutputProbe {
     X11RealOutputProbe {
         supported: true,
-        reason: "X11 virtual output candidates detected".to_string(),
+        reason: reason.into(),
         missing_deps: Vec::new(),
+    }
+}
+
+fn probe_unsupported(reason: impl Into<String>) -> X11RealOutputProbe {
+    X11RealOutputProbe {
+        supported: false,
+        reason: reason.into(),
+        missing_deps: Vec::new(),
+    }
+}
+
+fn probe_unsupported_missing(reason: impl Into<String>, dep: impl Into<String>) -> X11RealOutputProbe {
+    probe_unsupported_with_missing(reason, vec![dep.into()])
+}
+
+fn probe_unsupported_with_missing(reason: impl Into<String>, missing_deps: Vec<String>) -> X11RealOutputProbe {
+    X11RealOutputProbe {
+        supported: false,
+        reason: reason.into(),
+        missing_deps,
     }
 }
 
