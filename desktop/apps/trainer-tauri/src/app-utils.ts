@@ -19,17 +19,12 @@ export function toBars(values: number[], dangerAbove = false): { value: number; 
   const maxValue = Math.max(1, ...values);
   return values.map((item) => {
     const pct = Math.max(4, Math.min(100, (item / maxValue) * 100));
-    const cls = dangerAbove
-      ? item > maxValue * 0.65
-        ? "risk"
-        : item > maxValue * 0.4
-          ? "warn"
-          : "good"
-      : item < maxValue * 0.35
-        ? "risk"
-        : item < maxValue * 0.6
-          ? "warn"
-          : "good";
+    let cls: string;
+    if (dangerAbove) {
+      cls = item > maxValue * 0.65 ? "risk" : item > maxValue * 0.4 ? "warn" : "good";
+    } else {
+      cls = item < maxValue * 0.35 ? "risk" : item < maxValue * 0.6 ? "warn" : "good";
+    }
     return { value: item, pct, cls };
   });
 }
@@ -51,7 +46,7 @@ export function seriesSummary(values: number[]): { min: string; max: string; las
 }
 
 export function safeName(input: string): string {
-  return input.replace(/[^a-zA-Z0-9._-]+/g, "_");
+  return input.replaceAll(/[^a-zA-Z0-9._-]+/g, "_");
 }
 
 export function downloadJson(filename: string, payload: unknown): void {
@@ -67,7 +62,7 @@ export function downloadJson(filename: string, payload: unknown): void {
 }
 
 export function trialOrdinal(trialId: string): number {
-  const match = trialId.match(/t(\d+)/i);
+  const match = /t(\d+)/i.exec(trialId);
   if (!match) return Number.MAX_SAFE_INTEGER;
   return Number(match[1]);
 }
@@ -82,12 +77,15 @@ export function valueAt(obj: unknown, path: string[]): unknown {
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  return true;
 }
 
 export function parseHudMetric(value: string): number | null {
   if (!value) return null;
-  const cleaned = value.replace(/[^0-9.+-]/g, "");
+  const cleaned = value.replaceAll(/[^0-9.+-]/g, "");
   const num = Number(cleaned);
   return Number.isFinite(num) ? num : null;
 }
