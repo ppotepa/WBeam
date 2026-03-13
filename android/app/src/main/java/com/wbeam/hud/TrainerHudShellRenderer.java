@@ -8,9 +8,12 @@ import java.util.Locale;
  * Renders full HTML shell for trainer HUD (SOT layout).
  */
 public final class TrainerHudShellRenderer {
+    private static final String STATE_PENDING = STATE_PENDING;
+    private static final String SCALE_2X = SCALE_2X;
+
     private TrainerHudShellRenderer() {}
 
-    @SuppressWarnings("java:java:S107")
+    @SuppressWarnings("java:S107")
     public static String buildSotHtml(
             String runId,
             String profile,
@@ -70,12 +73,12 @@ public final class TrainerHudShellRenderer {
         String liveTriplet = String.format(
                 Locale.US,
                 "P/R/D %s / %s / %s",
-                HudRenderSupport.fmtDoubleOrPlaceholder(present, "%.1f", "PENDING"),
-                HudRenderSupport.fmtDoubleOrPlaceholder(recv, "%.1f", "PENDING"),
-                HudRenderSupport.fmtDoubleOrPlaceholder(decode, "%.1f", "PENDING")
+                HudRenderSupport.fmtDoubleOrPlaceholder(present, "%.1f", STATE_PENDING),
+                HudRenderSupport.fmtDoubleOrPlaceholder(recv, "%.1f", STATE_PENDING),
+                HudRenderSupport.fmtDoubleOrPlaceholder(decode, "%.1f", STATE_PENDING)
         );
         String statusLine1 = "best_trial: " + HudRenderSupport.safeText(bestTrial) + "    best_score: "
-                + HudRenderSupport.fmtDoubleOrPlaceholder(bestScore, "%.2f", "PENDING");
+                + HudRenderSupport.fmtDoubleOrPlaceholder(bestScore, "%.2f", STATE_PENDING);
         String statusLine2 = "sample_count: " + sampleCount + "    state.fps: " + HudRenderSupport.safeText(fpsState);
         String statusLine3 = "state.mbps: " + HudRenderSupport.safeText(mbpsState) + "    state.latency: " + HudRenderSupport.safeText(latState);
         String statusLine4 = "state.drop: " + HudRenderSupport.safeText(dropState) + "    state.queue: " + HudRenderSupport.safeText(queueState);
@@ -145,19 +148,19 @@ public final class TrainerHudShellRenderer {
                 + "<div class='main'>"
                 + "<div class='panel left-col'>"
                 + "<div class='kpi-block'>"
-                + "<div class='kpi-item'><span class='k'>SCORE</span><span class='v " + HudRenderSupport.escapeHtml(HudRenderSupport.hudToneClass(qualityState)) + "'>" + HudRenderSupport.escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(score, "%.2f", "PENDING")) + "</span></div>"
-                + "<div class='kpi-item'><span class='k'>PRESENT FPS</span><span class='v " + HudRenderSupport.escapeHtml(HudRenderSupport.hudToneClass(fpsState)) + "'>" + HudRenderSupport.escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(present, "%.1f", "PENDING")) + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>SCORE</span><span class='v " + HudRenderSupport.escapeHtml(HudRenderSupport.hudToneClass(qualityState)) + "'>" + HudRenderSupport.escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(score, "%.2f", STATE_PENDING)) + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>PRESENT FPS</span><span class='v " + HudRenderSupport.escapeHtml(HudRenderSupport.hudToneClass(fpsState)) + "'>" + HudRenderSupport.escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(present, "%.1f", STATE_PENDING)) + "</span></div>"
                 + "<div class='kpi-item'><span class='k'>LIVE MBPS</span><span class='v " + HudRenderSupport.escapeHtml(HudRenderSupport.hudToneClass(mbpsState)) + "'>" + HudRenderSupport.escapeHtml(HudRenderSupport.fmtLiveMbps(liveMbps, Double.NaN) + " Mbps") + "</span></div>"
                 + "</div>"
                 + "<div class='kpi-block'>"
-                + "<div class='kpi-item'><span class='k'>RECV FPS</span><span class='v'>" + HudRenderSupport.escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(recv, "%.1f", "PENDING")) + "</span></div>"
-                + "<div class='kpi-item'><span class='k'>DECODE FPS</span><span class='v'>" + HudRenderSupport.escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(decode, "%.1f", "PENDING")) + "</span></div>"
-                + "<div class='kpi-item'><span class='k'>LAT p95</span><span class='v " + HudRenderSupport.escapeHtml(HudRenderSupport.hudToneClass(latState)) + "'>" + HudRenderSupport.escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(latency, "%.1f ms", "PENDING")) + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>RECV FPS</span><span class='v'>" + HudRenderSupport.escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(recv, "%.1f", STATE_PENDING)) + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>DECODE FPS</span><span class='v'>" + HudRenderSupport.escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(decode, "%.1f", STATE_PENDING)) + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>LAT p95</span><span class='v " + HudRenderSupport.escapeHtml(HudRenderSupport.hudToneClass(latState)) + "'>" + HudRenderSupport.escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(latency, "%.1f ms", STATE_PENDING)) + "</span></div>"
                 + "</div>"
                 + "<div class='kpi-block'>"
-                + "<div class='kpi-item'><span class='k'>DROPS/s</span><span class='v " + HudRenderSupport.escapeHtml(HudRenderSupport.hudToneClass(dropState)) + "'>" + HudRenderSupport.escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(drops, "%.3f", "PENDING")) + "</span></div>"
-                + "<div class='kpi-item'><span class='k'>LATE/s</span><span class='v " + HudRenderSupport.escapeHtml(HudRenderSupport.hudToneClass(dropState)) + "'>" + HudRenderSupport.escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(late, "%.3f", "PENDING")) + "</span></div>"
-                + "<div class='kpi-item'><span class='k'>QUEUE</span><span class='v " + HudRenderSupport.escapeHtml(HudRenderSupport.hudToneClass(queueState)) + "'>" + HudRenderSupport.escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(queue, "%.3f", "PENDING")) + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>DROPS/s</span><span class='v " + HudRenderSupport.escapeHtml(HudRenderSupport.hudToneClass(dropState)) + "'>" + HudRenderSupport.escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(drops, "%.3f", STATE_PENDING)) + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>LATE/s</span><span class='v " + HudRenderSupport.escapeHtml(HudRenderSupport.hudToneClass(dropState)) + "'>" + HudRenderSupport.escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(late, "%.3f", STATE_PENDING)) + "</span></div>"
+                + "<div class='kpi-item'><span class='k'>QUEUE</span><span class='v " + HudRenderSupport.escapeHtml(HudRenderSupport.hudToneClass(queueState)) + "'>" + HudRenderSupport.escapeHtml(HudRenderSupport.fmtDoubleOrPlaceholder(queue, "%.3f", STATE_PENDING)) + "</span></div>"
                 + "</div>"
                 + "<div class='status'>"
                 + "<div class='row'>" + HudRenderSupport.escapeHtml(statusLine1) + "</div>"
@@ -198,12 +201,12 @@ public final class TrainerHudShellRenderer {
     private static String trainerScaleClass(String fontProfile) {
         String profile = fontProfile == null ? "" : fontProfile.trim().toLowerCase(Locale.US);
         if ("compact".equals(profile) || "dense".equals(profile) || "system".equals(profile)) {
-            return "scale-2x";
+            return SCALE_2X;
         }
         if ("arcade".equals(profile)) {
-            return "scale-2x";
+            return SCALE_2X;
         }
-        return "scale-2x";
+        return SCALE_2X;
     }
 
     private static int clampPercent(int progressPercent) {

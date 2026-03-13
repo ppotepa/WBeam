@@ -5,6 +5,9 @@ import org.json.JSONObject;
 import java.util.Locale;
 
 public final class TrainerHudOverlayRenderer {
+    private static final String STATE_PENDING = "PENDING";
+    private static final String STATE_PENDING_LOWER = "pending";
+
     public interface ResourceRowsProvider {
         String buildRows(double targetFps, double renderP95Ms);
     }
@@ -47,7 +50,7 @@ public final class TrainerHudOverlayRenderer {
                 progressPercent,
                 latestTargetFps,
                 fpsLowAnchor,
-                (targetFps, renderP95Ms) -> resourceRowsProvider.buildRows(targetFps, renderP95Ms)
+                resourceRowsProvider::buildRows
         );
         String textFallback = progressLine.isEmpty() ? hudText : progressLine + "\n" + hudText;
         String compact = progressLine.isEmpty() ? "hud: trainer overlay active" : progressLine;
@@ -77,7 +80,7 @@ public final class TrainerHudOverlayRenderer {
                 progressPercent,
                 latestTargetFps,
                 fpsLowAnchor,
-                (targetFps, renderP95Ms) -> resourceRowsProvider.buildRows(targetFps, renderP95Ms)
+                resourceRowsProvider::buildRows
         );
         return new Rendered(html, progressText, progressText);
     }
@@ -92,10 +95,10 @@ public final class TrainerHudOverlayRenderer {
                 0.0
         );
         String html = TrainerHudShellRenderer.buildSotHtml(
-                "PENDING",
-                "PENDING",
-                "PENDING",
-                "PENDING",
+                STATE_PENDING,
+                STATE_PENDING,
+                STATE_PENDING,
+                STATE_PENDING,
                 0,
                 0,
                 0,
@@ -114,14 +117,14 @@ public final class TrainerHudOverlayRenderer {
                 Double.NaN,
                 Double.NaN,
                 0,
-                "PENDING",
+                STATE_PENDING,
                 Double.NaN,
-                "pending",
-                "pending",
-                "pending",
-                "pending",
-                "pending",
-                "pending",
+                STATE_PENDING_LOWER,
+                STATE_PENDING_LOWER,
+                STATE_PENDING_LOWER,
+                STATE_PENDING_LOWER,
+                STATE_PENDING_LOWER,
+                STATE_PENDING_LOWER,
                 "trainer feed pending | placeholders visible",
                 null,
                 null,

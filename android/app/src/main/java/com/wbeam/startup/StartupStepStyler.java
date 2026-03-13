@@ -9,9 +9,13 @@ import android.widget.TextView;
  * Applies visual state and text for startup/preflight steps.
  */
 public final class StartupStepStyler {
+    private static final String COLOR_ERROR_LIGHT = "#FCA5A5";
+    private static final String COLOR_PENDING_BG = "#64748B";
+    private static final String COLOR_PENDING_LIGHT = "#94A3B8";
+
     private StartupStepStyler() {}
 
-    @SuppressWarnings("java:java:S107")
+    @SuppressWarnings("java:S107")
     public static void applyStepState(
             int state,
             int animTick,
@@ -49,12 +53,12 @@ public final class StartupStepStyler {
         } else if (state == ssError) {
             cardBg = Color.parseColor("#361113");
             badgeBg = Color.parseColor("#7F1D1D");
-            badgeFg = Color.parseColor("#FCA5A5");
-            labelColor = Color.parseColor("#FCA5A5");
-            statusColor = Color.parseColor("#FCA5A5");
+            badgeFg = Color.parseColor(COLOR_ERROR_LIGHT);
+            labelColor = Color.parseColor(COLOR_ERROR_LIGHT);
+            statusColor = Color.parseColor(COLOR_ERROR_LIGHT);
             statusStr = "ERR";
             badge.setText(icon);
-            detail.setTextColor(Color.parseColor("#FCA5A5"));
+            detail.setTextColor(Color.parseColor(COLOR_ERROR_LIGHT));
         } else if (state == ssActive) {
             cardBg = blink ? Color.parseColor("#3A2A0F") : Color.parseColor("#2B1F0F");
             badgeBg = blink ? Color.parseColor("#A16207") : Color.parseColor("#854D0E");
@@ -67,12 +71,12 @@ public final class StartupStepStyler {
         } else {
             cardBg = Color.parseColor("#111827");
             badgeBg = Color.parseColor("#1E293B");
-            badgeFg = Color.parseColor("#64748B");
-            labelColor = Color.parseColor("#64748B");
-            statusColor = Color.parseColor("#64748B");
+            badgeFg = Color.parseColor(COLOR_PENDING_BG);
+            labelColor = Color.parseColor(COLOR_PENDING_BG);
+            statusColor = Color.parseColor(COLOR_PENDING_BG);
             statusStr = "WAIT";
             badge.setText(icon);
-            detail.setTextColor(Color.parseColor("#94A3B8"));
+            detail.setTextColor(Color.parseColor(COLOR_PENDING_LIGHT));
         }
 
         if (card.getBackground() instanceof GradientDrawable) {
