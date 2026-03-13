@@ -1,16 +1,12 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type {
-  CurrentChildPreset,
   DatasetDetail,
   DatasetSummary,
   DeviceInfo,
   Diagnostics,
   Health,
-  HudSeries,
-  HudSnapshot,
   LivePatchChange,
   LiveSeries,
-  LiveStage,
   ProfileDetail,
   ProfileItem,
   RunItem,
@@ -18,7 +14,7 @@ import type {
   SettingsModel,
   Tab,
 } from "./app-types";
-import { inferLiveHealth, parseCurrentChildPreset, parseHud, parseHudSeries, parseLiveStages } from "./app-hud";
+import { parseCurrentChildPreset, parseHud, parseHudSeries, parseLiveStages } from "./app-hud";
 import {
   clampNum,
   downloadJson,
