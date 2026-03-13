@@ -1279,7 +1279,7 @@ export default function App() {
                 </Show>
                 <div class="two-col">
                   <label title="Cursor transport mode. Hot apply only.">
-                    Cursor mode
+                    <span>Cursor mode</span>
                     <select value={liveCursorMode()} onInput={(e) => setLiveCursorMode(e.currentTarget.value)}>
                       <option value="embedded">embedded</option>
                       <option value="hidden">hidden</option>
