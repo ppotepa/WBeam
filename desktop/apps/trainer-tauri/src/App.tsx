@@ -1245,7 +1245,7 @@ export default function App() {
                 </div>
                 <div class="two-col">
                   <label title="Resolution source. Auto-native keeps current running resolution.">
-                    Resolution mode
+                    <span>Resolution mode</span>
                     <select value={liveResolutionMode()} onInput={(e) => setLiveResolutionMode(e.currentTarget.value)}>
                       <option value="auto_native">auto_native</option>
                       <option value="preset">preset</option>
