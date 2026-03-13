@@ -627,6 +627,11 @@ export default function App() {
                     const disconnectDisabled = disconnectReason.length > 0;
                     const connectBusy = isDeviceActionBusy(device, "connect");
                     const disconnectBusy = isDeviceActionBusy(device, "disconnect");
+                    const connectTitle = connectBusy
+                      ? "Connecting..."
+                      : connectDisabled
+                        ? `Connect blocked: ${connectReason}`
+                        : "Start stream for this device";
                     return (
                       <>
                   <button
@@ -639,7 +644,7 @@ export default function App() {
                   </button>
                   <button
                     class="device-btn"
-                    title={connectBusy ? "Connecting..." : (connectDisabled ? `Connect blocked: ${connectReason}` : "Start stream for this device")}
+                    title={connectTitle}
                     disabled={connectBusy || connectDisabled}
                     onClick={() => openConnectDialog(device)}
                   >
