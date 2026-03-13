@@ -1,5 +1,9 @@
 package com.wbeam.ui.state;
 
+/**
+ * Plain data carrier for main UI state.
+ */
+@SuppressWarnings("java:S1104")
 public final class MainUiState {
     public boolean debugControlsVisible = false;
     public boolean debugOverlayVisible = false;
