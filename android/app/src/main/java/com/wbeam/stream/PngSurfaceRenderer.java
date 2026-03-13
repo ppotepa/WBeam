@@ -39,6 +39,7 @@ final class PngSurfaceRenderer {
                 try {
                     surface.unlockCanvasAndPost(canvas);
                 } catch (Exception ignored) {
+                    // Ignore exceptions when posting canvas
                 }
             }
             bitmap.recycle();
