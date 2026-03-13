@@ -1248,6 +1248,98 @@ impl DaemonCore {
         inner.no_present_streak = 0;
     }
 
+    fn spawn_reverse_task(&self) {
+        let root = self.root.clone();
+        let stream_port = self.stream_port;
+        let control_port = self.control_port;
+        let target_serial = self.target_serial.clone();
+        tokio::spawn(async move {
+            adb::ensure_usb_reverse(
+                &root,
+                stream_port,
+                control_port,
+                "start",
+                target_serial.as_deref(),
+            )
+            .await;
+        });
+    }
+
+    async fn should_suppress_duplicate_start(&self, cfg: &ActiveConfig) -> bool {
+        let inner = self.inner.lock().await;
+        let recent_start = inner
+            .run_started_at
+            .map(|started| started.elapsed() < DUPLICATE_START_GUARD)
+            .unwrap_or(false);
+        if inner.current_pid.is_some()
+            && cfg == &inner.active_config
+            && recent_start
+            && matches!(
+                inner.state.as_str(),
+                STATE_STARTING | STATE_STREAMING | STATE_RECONNECTING
+            )
+        {
+            info!(state = %inner.state, "suppressing duplicate start request");
+            return true;
+        }
+        false
+    }
+
+    async fn record_start_metadata(
+        &self,
+        cfg: &ActiveConfig,
+        reason: &str,
+        launch_size: &str,
+    ) -> (u64, Option<u32>, EffectiveRuntimeConfig) {
+        let mut inner = self.inner.lock().await;
+        let existing_pid = inner.current_pid;
+        inner.active_config = cfg.clone();
+        inner.last_error.clear();
+        inner.state = STATE_STARTING.to_string();
+        inner.metrics.start_count = inner.metrics.start_count.saturating_add(1);
+        inner.run_id = inner.run_id.saturating_add(1);
+        let run_id = inner.run_id;
+        inner.run_started_at = Some(Instant::now());
+        inner.stream_started_at = None;
+        inner.telemetry_file = telemetry::open_telemetry_file(run_id); // P2.3
+        inner.last_output_at = Some(Instant::now());
+        inner.last_streaming_line_at = None;
+        inner.no_present_streak = 0;
+        inner.pending_runtime_snapshot_reason = reason.to_string();
+        let provisional_effective = EffectiveRuntimeConfig {
+            requested_encoder: cfg.encoder.clone(),
+            resolved_backend: "unknown".to_string(),
+            raw_format: "unknown".to_string(),
+            size: launch_size.to_string(),
+            fps: cfg.fps,
+            bitrate_kbps: cfg.bitrate_kbps,
+            cursor_mode: cfg.cursor_mode.clone(),
+            gop: if cfg.intra_only {
+                1
+            } else {
+                (cfg.fps / 8).max(6)
+            },
+            intra_only: cfg.intra_only,
+            stream_mode: "unknown".to_string(),
+            queue_max_buffers: 0,
+            queue_max_time_ms: 0,
+            appsink_max_buffers: 0,
+            appsink_drop: false,
+            appsink_sync: false,
+            capture_backend: self.host_probe.capture_mode_name().to_string(),
+            parse_mode: "unknown".to_string(),
+            timeout_pull_ms: 0,
+            timeout_write_ms: 0,
+            timeout_disconnect: false,
+            videorate_drop_only: false,
+            pipewire_keepalive_ms: 0,
+            snapshot_unix_ms: now_unix_ms(),
+            snapshot_reason: format!("{reason}:provisional"),
+        };
+        inner.effective_runtime_config = Some(provisional_effective.clone());
+        (run_id, existing_pid, provisional_effective)
+    }
+
     async fn start_with_config(&self, cfg: ActiveConfig, reason: &str) -> Result<(), CoreError> {
         let requested_display_mode = {
             let inner = self.inner.lock().await;
@@ -1292,94 +1384,14 @@ impl DaemonCore {
         }
         // Do not block /start HTTP response on adb reverse, because Android API17
         // client timeout is short (~1.5s) and reverse may fail/lag on tethered links.
-        {
-            let root = self.root.clone();
-            let stream_port = self.stream_port;
-            let control_port = self.control_port;
-            let target_serial = self.target_serial.clone();
-            tokio::spawn(async move {
-                adb::ensure_usb_reverse(
-                    &root,
-                    stream_port,
-                    control_port,
-                    "start",
-                    target_serial.as_deref(),
-                )
-                .await;
-            });
+        self.spawn_reverse_task();
+
+        if self.should_suppress_duplicate_start(&cfg).await {
+            return Ok(());
         }
 
-        {
-            let inner = self.inner.lock().await;
-            let recent_start = inner
-                .run_started_at
-                .map(|started| started.elapsed() < DUPLICATE_START_GUARD)
-                .unwrap_or(false);
-
-            if inner.current_pid.is_some()
-                && cfg == inner.active_config
-                && recent_start
-                && matches!(
-                    inner.state.as_str(),
-                    STATE_STARTING | STATE_STREAMING | STATE_RECONNECTING
-                )
-            {
-                info!(state = %inner.state, "suppressing duplicate start request");
-                return Ok(());
-            }
-        }
-
-        let run_id;
-        let existing_pid;
-        let provisional_effective;
-        {
-            let mut inner = self.inner.lock().await;
-            existing_pid = inner.current_pid;
-            inner.active_config = cfg.clone();
-            inner.last_error.clear();
-            inner.state = STATE_STARTING.to_string();
-            inner.metrics.start_count = inner.metrics.start_count.saturating_add(1);
-            inner.run_id = inner.run_id.saturating_add(1);
-            run_id = inner.run_id;
-            inner.run_started_at = Some(Instant::now());
-            inner.stream_started_at = None;
-            inner.telemetry_file = telemetry::open_telemetry_file(run_id); // P2.3
-            inner.last_output_at = Some(Instant::now());
-            inner.last_streaming_line_at = None;
-            inner.no_present_streak = 0;
-            inner.pending_runtime_snapshot_reason = reason.to_string();
-            provisional_effective = EffectiveRuntimeConfig {
-                requested_encoder: cfg.encoder.clone(),
-                resolved_backend: "unknown".to_string(),
-                raw_format: "unknown".to_string(),
-                size: launch_size.clone(),
-                fps: cfg.fps,
-                bitrate_kbps: cfg.bitrate_kbps,
-                cursor_mode: cfg.cursor_mode.clone(),
-                gop: if cfg.intra_only {
-                    1
-                } else {
-                    (cfg.fps / 8).max(6)
-                },
-                intra_only: cfg.intra_only,
-                stream_mode: "unknown".to_string(),
-                queue_max_buffers: 0,
-                queue_max_time_ms: 0,
-                appsink_max_buffers: 0,
-                appsink_drop: false,
-                appsink_sync: false,
-                capture_backend: self.host_probe.capture_mode_name().to_string(),
-                parse_mode: "unknown".to_string(),
-                timeout_pull_ms: 0,
-                timeout_write_ms: 0,
-                timeout_disconnect: false,
-                videorate_drop_only: false,
-                pipewire_keepalive_ms: 0,
-                snapshot_unix_ms: now_unix_ms(),
-                snapshot_reason: format!("{reason}:provisional"),
-            };
-            inner.effective_runtime_config = Some(provisional_effective.clone());
-        }
+        let (run_id, existing_pid, provisional_effective) =
+            self.record_start_metadata(&cfg, reason, &launch_size).await;
         self.persist_effective_runtime_snapshot(run_id, &provisional_effective);
 
         {
