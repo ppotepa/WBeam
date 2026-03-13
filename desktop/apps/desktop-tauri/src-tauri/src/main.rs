@@ -400,6 +400,118 @@ fn virtual_deps_finish(success: bool, message: String) {
     state.message = message;
 }
 
+fn empty_devices_response(host_apk_version: String, daemon_apk_version: String) -> DevicesBasicResponse {
+    DevicesBasicResponse {
+        host_apk_version,
+        daemon_apk_version,
+        devices: Vec::new(),
+        error: None,
+    }
+}
+
+fn prune_stale_device_ports(
+    port_map: &mut HashMap<String, u16>,
+    connected: &HashSet<String>,
+) -> bool {
+    let stale = port_map
+        .keys()
+        .filter(|serial| !connected.contains(*serial))
+        .cloned()
+        .collect::<Vec<_>>();
+    if stale.is_empty() {
+        return false;
+    }
+    for serial in stale {
+        port_map.remove(&serial);
+    }
+    true
+}
+
+fn resolve_stream_state_for_device(
+    serial: &str,
+    mut stream_port: u16,
+    service_active: bool,
+    port_map: &mut HashMap<String, u16>,
+    used_ports: &mut HashSet<u16>,
+) -> (u16, String, bool) {
+    if !service_active {
+        return (stream_port, "unknown".to_string(), false);
+    }
+
+    let mut port_map_changed = false;
+    let (state, resolved_port) = daemon_stream_state_and_port(serial, Some(stream_port))
+        .or_else(|| daemon_stream_state_and_port(serial, None))
+        .unwrap_or_else(|| ("unknown".to_string(), stream_port));
+
+    if resolved_port > 0 && resolved_port != stream_port {
+        used_ports.remove(&stream_port);
+        stream_port = pick_unique_stream_port(resolved_port, wbeam_control_port(), used_ports);
+        used_ports.insert(stream_port);
+    }
+
+    if port_map.get(serial).copied() != Some(stream_port) {
+        port_map.insert(serial.to_string(), stream_port);
+        port_map_changed = true;
+    }
+
+    (stream_port, state, port_map_changed)
+}
+
+fn build_device_basic_entry(
+    serial: String,
+    idx: usize,
+    base_stream_port: u16,
+    control_port: u16,
+    service_active: bool,
+    host_apk_version: &str,
+    daemon_apk_version: &str,
+    port_map: &mut HashMap<String, u16>,
+    used_ports: &mut HashSet<u16>,
+) -> (DeviceBasic, bool) {
+    let snap = collect_device_snapshot(&serial);
+    let apk_matches_host = !host_apk_version.is_empty() && snap.apk_version == host_apk_version;
+    let apk_matches_daemon = !daemon_apk_version.is_empty() && snap.apk_version == daemon_apk_version;
+    let fallback_port = default_stream_port_for_index(base_stream_port, control_port, idx);
+    let preferred_port = port_map
+        .get(&serial)
+        .copied()
+        .filter(|p| *p > 0)
+        .unwrap_or(fallback_port);
+    let initial_port = pick_unique_stream_port(preferred_port, control_port, used_ports);
+    used_ports.insert(initial_port);
+
+    let (stream_port, stream_state, port_map_changed) = resolve_stream_state_for_device(
+        &serial,
+        initial_port,
+        service_active,
+        port_map,
+        used_ports,
+    );
+
+    (
+        DeviceBasic {
+            serial,
+            model: snap.model,
+            platform: snap.platform,
+            os_version: snap.os_version,
+            device_class: snap.device_class,
+            resolution: snap.resolution,
+            max_resolution: snap.max_resolution,
+            api_level: snap.api_level,
+            battery_percent: snap.battery_percent,
+            battery_level: snap.battery_level,
+            battery_charging: snap.battery_charging,
+            apk_installed: snap.apk_installed,
+            apk_version: snap.apk_version,
+            apk_matches_host,
+            apk_matches_daemon,
+            stream_port,
+            stream_state,
+        },
+        port_map_changed,
+    )
+}
+
 #[tauri::command]
 fn list_devices_basic() -> DevicesBasicResponse {
     ui_service_log("list_devices_basic", "begin", "");
@@ -423,72 +535,22 @@ fn list_devices_basic() -> DevicesBasicResponse {
     match adb_devices() {
         Ok(serials) => {
             let connected: HashSet<String> = serials.iter().cloned().collect();
-            let stale = port_map
-                .keys()
-                .filter(|serial| !connected.contains(*serial))
-                .cloned()
-                .collect::<Vec<_>>();
-            if !stale.is_empty() {
-                for serial in stale {
-                    port_map.remove(&serial);
-                }
-                port_map_changed = true;
-            }
+            port_map_changed |= prune_stale_device_ports(&mut port_map, &connected);
             let mut devices = Vec::new();
             for (idx, serial) in serials.into_iter().enumerate() {
-                let snap = collect_device_snapshot(&serial);
-                let apk_matches_host =
-                    !host_apk_version.is_empty() && snap.apk_version == host_apk_version;
-                let apk_matches_daemon =
-                    !daemon_apk_version.is_empty() && snap.apk_version == daemon_apk_version;
-                let fallback_port =
-                    default_stream_port_for_index(base_stream_port, control_port, idx);
-                let preferred_port = port_map
-                    .get(&serial)
-                    .copied()
-                    .filter(|p| *p > 0)
-                    .unwrap_or(fallback_port);
-                let mut stream_port =
-                    pick_unique_stream_port(preferred_port, control_port, &used_ports);
-                used_ports.insert(stream_port);
-                let stream_state = if svc.active {
-                    let (state, resolved_port) = daemon_stream_state_and_port(&serial, Some(stream_port))
-                        .or_else(|| daemon_stream_state_and_port(&serial, None))
-                        .unwrap_or_else(|| ("unknown".to_string(), stream_port));
-                    if resolved_port > 0 && resolved_port != stream_port {
-                        used_ports.remove(&stream_port);
-                        stream_port =
-                            pick_unique_stream_port(resolved_port, control_port, &used_ports);
-                        used_ports.insert(stream_port);
-                    }
-                    if port_map.get(&serial).copied() != Some(stream_port) {
-                        port_map.insert(serial.clone(), stream_port);
-                        port_map_changed = true;
-                    }
-                    state
-                } else {
-                    "unknown".to_string()
-                };
-
-                devices.push(DeviceBasic {
+                let (device, changed) = build_device_basic_entry(
                     serial,
-                    model: snap.model,
-                    platform: snap.platform,
-                    os_version: snap.os_version,
-                    device_class: snap.device_class,
-                    resolution: snap.resolution,
-                    max_resolution: snap.max_resolution,
-                    api_level: snap.api_level,
-                    battery_percent: snap.battery_percent,
-                    battery_level: snap.battery_level,
-                    battery_charging: snap.battery_charging,
-                    apk_installed: snap.apk_installed,
-                    apk_version: snap.apk_version,
-                    apk_matches_host,
-                    apk_matches_daemon,
-                    stream_port,
-                    stream_state,
-                });
+                    idx,
+                    base_stream_port,
+                    control_port,
+                    svc.active,
+                    &host_apk_version,
+                    &daemon_apk_version,
+                    &mut port_map,
+                    &mut used_ports,
+                );
+                port_map_changed |= changed;
+                devices.push(device);
             }
 
             let response = DevicesBasicResponse {
