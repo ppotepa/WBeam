@@ -1,6 +1,10 @@
 package com.wbeam.startup;
 
 public final class StartupOverlayInputFactory {
+    /**
+     * Plain data carrier for startup overlay input state.
+     */
+    @SuppressWarnings("java:S1104")
     public static final class State {
         public boolean daemonReachable;
         public String daemonHostName;
@@ -33,6 +37,7 @@ public final class StartupOverlayInputFactory {
     private StartupOverlayInputFactory() {
     }
 
+    @SuppressWarnings("java:S107")
     public static StartupOverlayModelBuilder.Input fromRuntimeState(
             boolean daemonReachable,
             String daemonHostName,
