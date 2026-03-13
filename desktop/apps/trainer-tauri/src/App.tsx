@@ -963,7 +963,7 @@ export default function App() {
                           </select>
                         </label>
                         <label title="Keyframe interval (frames).">
-                          GOP
+                          <span>GOP</span>
                           <input type="number" min="1" max="240" value={manualH26xGop()} onInput={(e) => setManualH26xGop(Number(e.currentTarget.value || 60))} />
                         </label>
                       </div>
