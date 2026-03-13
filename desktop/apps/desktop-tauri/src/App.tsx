@@ -944,7 +944,7 @@ function isVirtualMonitorResolver(resolver: string | undefined): boolean {
 }
 
 function isVirtualMonitorAvailable(doctor: VirtualDoctor | null): boolean {
-  if (!doctor || !doctor.ok) return false;
+  if (!doctor?.ok) return false;
   if (isVirtualMonitorResolver(doctor.resolver)) return true;
   return false;
 }
