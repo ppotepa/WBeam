@@ -210,11 +210,28 @@ public final class StatusPoller {
             return;
         }
 
+        if (!autoStartPending
+                && ("STARTING".equals(daemonState) || "RECONNECTING".equals(daemonState))
+                && canTriggerAutoStartNow()) {
+            autoStartPending = true;
+            lastAutoStartAt = SystemClock.elapsedRealtime();
+            callbacks.onAutoStartRequired();
+            return;
+        }
+
         if (autoStartPending && "IDLE".equals(daemonState)) {
             autoStartPending = false;
             permanentlySuppressAutoStart();
             callbacks.onAutoStartFailed();
         }
+    }
+
+    private boolean canTriggerAutoStartNow() {
+        long now = SystemClock.elapsedRealtime();
+        if (now < suppressAutoStartUntil) {
+            return false;
+        }
+        return (now - lastAutoStartAt) >= AUTO_START_COOLDOWN_MS;
     }
 
     private void maybeLogBuildMismatch() {
