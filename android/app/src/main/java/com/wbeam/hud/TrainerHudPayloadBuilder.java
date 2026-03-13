@@ -9,6 +9,8 @@ import java.util.Locale;
  * Builds trainer HUD HTML payloads from raw trainer text or structured JSON payloads.
  */
 public final class TrainerHudPayloadBuilder {
+    private static final String FONT_PROFILE_ARCADE = "arcade";
+
     private TrainerHudPayloadBuilder() {}
 
     public interface ResourceRowsProvider {
@@ -91,7 +93,7 @@ public final class TrainerHudPayloadBuilder {
                 null,
                 resourceRows,
                 "wide",
-                "arcade",
+                FONT_PROFILE_ARCADE,
                 fpsLowAnchor
         );
     }
@@ -133,7 +135,7 @@ public final class TrainerHudPayloadBuilder {
 
         String encoder = config != null ? config.optString("encoder", "-") : "-";
         String size = config != null ? config.optString("size", "-") : "-";
-        String fontProfile = config != null ? config.optString("font_profile", "arcade") : "arcade";
+        String fontProfile = config != null ? config.optString("font_profile", FONT_PROFILE_ARCADE) : FONT_PROFILE_ARCADE;
         int fps = config != null ? config.optInt("fps", 0) : 0;
         String layoutMode = config != null ? config.optString("layout_mode", hud.optString("layout_mode", "wide")) : hud.optString("layout_mode", "wide");
 
