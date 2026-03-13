@@ -635,29 +635,42 @@ pub fn destroy(handle: &X11RealOutputHandle) -> Result<(), String> {
         xauth.as_deref(),
     );
 
-    if let Some(mode_name) = handle.added_mode_name.as_deref() {
-        let _ = xrandr(
-            &["--delmode", &handle.output_name, mode_name],
-            &display,
-            xauth.as_deref(),
-        );
-        let _ = xrandr(&["--rmmode", mode_name], &display, xauth.as_deref());
-    }
-
-    if let Some(sink_id) = handle.provider_sink_id.as_deref() {
-        let _ = xrandr(
-            &["--setprovideroutputsource", sink_id, "0x0"],
-            &display,
-            xauth.as_deref(),
-        );
-    }
-
-    if let Some((w, h)) = handle.previous_fb {
-        let _ = xrandr(&["--fb", &format!("{w}x{h}")], &display, xauth.as_deref());
-    }
+    cleanup_added_mode(handle, &display, xauth.as_deref());
+    cleanup_provider_sink(handle, &display, xauth.as_deref());
+    restore_previous_fb(handle, &display, xauth.as_deref());
     info!(output = %handle.output_name, "x11 real-output destroy: cleanup complete");
 
     Ok(())
+}
+
+fn cleanup_added_mode(handle: &X11RealOutputHandle, display: &str, xauth: Option<&Path>) {
+    let Some(mode_name) = handle.added_mode_name.as_deref() else {
+        return;
+    };
+    let _ = xrandr(
+        &["--delmode", &handle.output_name, mode_name],
+        display,
+        xauth,
+    );
+    let _ = xrandr(&["--rmmode", mode_name], display, xauth);
+}
+
+fn cleanup_provider_sink(handle: &X11RealOutputHandle, display: &str, xauth: Option<&Path>) {
+    let Some(sink_id) = handle.provider_sink_id.as_deref() else {
+        return;
+    };
+    let _ = xrandr(
+        &["--setprovideroutputsource", sink_id, "0x0"],
+        display,
+        xauth,
+    );
+}
+
+fn restore_previous_fb(handle: &X11RealOutputHandle, display: &str, xauth: Option<&Path>) {
+    let Some((w, h)) = handle.previous_fb else {
+        return;
+    };
+    let _ = xrandr(&["--fb", &format!("{w}x{h}")], display, xauth);
 }
 
 fn parse_outputs(raw: &str) -> Vec<OutputInfo> {
