@@ -342,13 +342,13 @@ public final class VideoTestController {
         MediaPlayer mp = mediaPlayer;
         mediaPlayer = null;
         if (mp != null) {
-            try { mp.setOnPreparedListener(null);   } catch (Exception ignored) { }
-            try { mp.setOnCompletionListener(null); } catch (Exception ignored) { }
-            try { mp.setOnErrorListener(null);      } catch (Exception ignored) { }
-            try { mp.setOnInfoListener(null);       } catch (Exception ignored) { }
-            try { mp.stop();    } catch (Exception ignored) { }
-            try { mp.reset();   } catch (Exception ignored) { }
-            try { mp.release(); } catch (Exception ignored) { }
+            try { mp.setOnPreparedListener(null);   } catch (Exception ignored) { /* best-effort cleanup */ }
+            try { mp.setOnCompletionListener(null); } catch (Exception ignored) { /* best-effort cleanup */ }
+            try { mp.setOnErrorListener(null);      } catch (Exception ignored) { /* best-effort cleanup */ }
+            try { mp.setOnInfoListener(null);       } catch (Exception ignored) { /* best-effort cleanup */ }
+            try { mp.stop();    } catch (Exception ignored) { /* best-effort cleanup */ }
+            try { mp.reset();   } catch (Exception ignored) { /* best-effort cleanup */ }
+            try { mp.release(); } catch (Exception ignored) { /* best-effort cleanup */ }
         }
     }
 
