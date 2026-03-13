@@ -109,8 +109,9 @@ public class MainActivity extends AppCompatActivity {
      */
     static final String PREFERRED_VIDEO = DecoderCapabilityInspector.preferredVideoEncoder();
     private static final String[] ENCODER_OPTIONS = {PREFERRED_VIDEO, "raw-png"};
-    private static final String[] CURSOR_OPTIONS = {"embedded", "hidden", "metadata"};
-    private static final String DEFAULT_CURSOR_MODE = "embedded";
+    private static final String CURSOR_EMBEDDED = "embedded";
+    private static final String[] CURSOR_OPTIONS = {CURSOR_EMBEDDED, "hidden", "metadata"};
+    private static final String DEFAULT_CURSOR_MODE = CURSOR_EMBEDDED;
     private static final int DEFAULT_RES_SCALE = 100;
     private static final int DEFAULT_FPS = 60;
     private static final int DEFAULT_BITRATE_MBPS = 25;
