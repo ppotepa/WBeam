@@ -214,44 +214,56 @@ fn command_exists(name: &str) -> bool {
 }
 
 fn resolve_xauthority() -> Option<PathBuf> {
-    if let Ok(path) = std::env::var("XAUTHORITY") {
-        let p = PathBuf::from(path);
-        if p.exists() {
-            return Some(p);
-        }
-    }
+    find_xauthority_from_env()
+        .or_else(find_xauthority_in_home)
+        .or_else(find_xauthority_in_run_dir)
+}
 
-    if let Some(home) = std::env::var_os("HOME") {
-        let p = Path::new(&home).join(".Xauthority");
-        if p.exists() {
-            return Some(p);
-        }
-    }
+fn find_xauthority_from_env() -> Option<PathBuf> {
+    let path = std::env::var("XAUTHORITY").ok()?;
+    let candidate = PathBuf::from(path);
+    candidate.exists().then_some(candidate)
+}
 
+fn find_xauthority_in_home() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    let candidate = Path::new(&home).join(".Xauthority");
+    candidate.exists().then_some(candidate)
+}
+
+fn find_xauthority_in_run_dir() -> Option<PathBuf> {
     let uid = std::env::var("UID")
         .ok()
         .filter(|v| !v.trim().is_empty())
         .or_else(|| std::env::var("EUID").ok())
         .unwrap_or_else(|| "1000".to_string());
     let run_dir = PathBuf::from(format!("/run/user/{uid}"));
-    if run_dir.exists() {
-        let mut candidates: Vec<PathBuf> = Vec::new();
-        if let Ok(entries) = fs::read_dir(&run_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    if name.starts_with("xauth_") && path.is_file() {
-                        candidates.push(path);
-                    }
-                }
+    if !run_dir.exists() {
+        return None;
+    }
+    let mut candidates = run_dir_xauth_candidates(&run_dir);
+    candidates.sort();
+    candidates.pop()
+}
+
+fn run_dir_xauth_candidates(run_dir: &Path) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Ok(entries) = fs::read_dir(run_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if is_run_dir_xauth_file(&path) {
+                candidates.push(path);
             }
         }
-        candidates.sort();
-        if let Some(last) = candidates.pop() {
-            return Some(last);
-        }
     }
-    None
+    candidates
+}
+
+fn is_run_dir_xauth_file(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .map(|name| name.starts_with("xauth_") && path.is_file())
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
