@@ -110,8 +110,11 @@ public class MainActivity extends AppCompatActivity {
     static final String PREFERRED_VIDEO = DecoderCapabilityInspector.preferredVideoEncoder();
     private static final String[] ENCODER_OPTIONS = {PREFERRED_VIDEO, "raw-png"};
     private static final String CURSOR_EMBEDDED = "embedded";
+    @SuppressWarnings("java:S1068")
     private static final String METRIC_KEY_TRAINER_HUD_ACTIVE = "trainer_hud_active";
+    @SuppressWarnings("java:S1068")
     private static final String METRIC_KEY_TRAINER_HUD_TEXT = "trainer_hud_text";
+    @SuppressWarnings("java:S1068")
     private static final String METRIC_KEY_TRAINER_HUD_JSON = "trainer_hud_json";
     private static final String[] CURSOR_OPTIONS = {CURSOR_EMBEDDED, "hidden", "metadata"};
     private static final String DEFAULT_CURSOR_MODE = CURSOR_EMBEDDED;
