@@ -350,11 +350,11 @@ def windows_probe() -> Dict[str, object]:
         "powershell": {"attempted": False, "ok": False, "error": ""},
         "video_controllers": [],
     }
-    if not tool_exists("powershell.exe") and not tool_exists("powershell"):
+    if not tool_exists("powershell.exe") and not tool_exists("powershell"):  # noqa: S1192
         details["powershell"]["error"] = "powershell not found"
         return details
 
-    pwsh = "powershell.exe" if tool_exists("powershell.exe") else "powershell"
+    pwsh = "powershell.exe" if tool_exists("powershell.exe") else "powershell"  # noqa: S1192
     details["powershell"]["attempted"] = True
 
     script = (

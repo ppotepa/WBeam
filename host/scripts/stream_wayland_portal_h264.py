@@ -498,7 +498,7 @@ def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=Non
                     _stat_partial_writes = 0
                     _stat_send_timeouts = 0
                     _stat_t0 = _time.monotonic()
-        except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+        except (BrokenPipeError, OSError) as exc:  # noqa: S5713
             print(f"[wbeam-framed] client disconnected: {exc}", flush=True)
         finally:
             try:

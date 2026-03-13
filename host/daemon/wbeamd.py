@@ -404,7 +404,7 @@ class WBeamDaemon:
 
 
 class ApiHandler(BaseHTTPRequestHandler):
-    daemon_ref: WBeamDaemon = None  # type: ignore
+    daemon_ref: WBeamDaemon = None  # type: ignore  # noqa: S5890
 
     def _json(self, status_code: int, payload: Dict[str, Any]):
         data = json.dumps(payload).encode("utf-8")

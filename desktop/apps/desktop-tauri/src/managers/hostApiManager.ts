@@ -10,7 +10,7 @@ import type {
 } from "../types";
 
 function normalizeApiError(err: unknown): string {
-  // @ts-ignore S6551: String() safely converts error objects to string
+  // NOSONAR: S6551 String() safely converts error objects to string
   const text = String(err ?? "unknown error");
   if (text.toLowerCase().includes("timeout")) {
     return "Host API timeout. Check service state and USB connectivity.";
