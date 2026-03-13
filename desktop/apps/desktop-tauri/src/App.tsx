@@ -930,6 +930,9 @@ export default function App() {
             : virtualInstallStatus().success
               ? "ok"
               : "bad";
+          const installMessageClass = virtualInstallStatus().done
+            ? (virtualInstallStatus().success ? "install-ok" : "install-bad")
+            : "";
           return (
         <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Installing dependencies">
           <section class="connect-modal setup-modal install-modal">
@@ -938,7 +941,7 @@ export default function App() {
             <div class="install-progress">
               <div class={`install-progress-bar ${installProgressClass}`} />
             </div>
-            <p class={`setup-message ${virtualInstallStatus().done ? (virtualInstallStatus().success ? "install-ok" : "install-bad") : ""}`}>
+            <p class={`setup-message ${installMessageClass}`}>
               {virtualInstallStatus().done
                 ? (virtualInstallStatus().success
                   ? "Installation completed successfully."
