@@ -4,6 +4,7 @@ public final class MainHudInputFactory {
     private MainHudInputFactory() {
     }
 
+    @SuppressWarnings("java:S107")
     public static MainHudCoordinator.Input create(
             String logTag,
             MainHudState hudState,

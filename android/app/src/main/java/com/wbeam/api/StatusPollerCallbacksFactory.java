@@ -30,6 +30,7 @@ public final class StatusPollerCallbacksFactory {
     private StatusPollerCallbacksFactory() {
     }
 
+    @SuppressWarnings("java:S107")
     public static StatusPoller.Callbacks create(
             final DaemonStatusUpdate daemonStatusUpdate,
             final DaemonOffline daemonOffline,
