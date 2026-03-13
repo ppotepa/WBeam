@@ -1,5 +1,9 @@
 package com.wbeam.hud;
 
+/**
+ * Plain data carrier for HUD runtime state.
+ */
+@SuppressWarnings("java:S1104")
 public final class MainHudState {
     public boolean trainerSessionActive = false;
     public String compactLine = "hud: waiting for metrics";
