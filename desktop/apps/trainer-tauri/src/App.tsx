@@ -1041,7 +1041,7 @@ export default function App() {
                     <input type="number" min="1" max="128" value={trials()} onInput={(e) => setTrials(Number(e.currentTarget.value || 18))} />
                   </label>
                   <label title="Number of evolution loops.">
-                    Generations
+                    <span>Generations</span>
                     <input type="number" min="1" max="32" value={generations()} onInput={(e) => setGenerations(Number(e.currentTarget.value || 2))} />
                   </label>
                 </div>
