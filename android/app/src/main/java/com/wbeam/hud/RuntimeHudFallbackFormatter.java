@@ -8,6 +8,7 @@ import java.util.Locale;
 public final class RuntimeHudFallbackFormatter {
     private RuntimeHudFallbackFormatter() {}
 
+    @SuppressWarnings("java:S107")
     public static String buildText(
             boolean daemonReachable,
             double targetFps,
@@ -31,7 +32,7 @@ public final class RuntimeHudFallbackFormatter {
     ) {
         return String.format(
                 Locale.US,
-                "HUD %s\nfps %.0f/%.1f frame %.2fms\ndec %.2fms ren %.2fms e2e %.2fms\nq %d/%d/%d max %d/%d/%d\nadapt L%d %s\ndrops %d bp %d/%d\n%s",
+                "HUD %s%nfps %.0f/%.1f frame %.2fms%ndec %.2fms ren %.2fms e2e %.2fms%nq %d/%d/%d max %d/%d/%d%nadapt L%d %s%ndrops %d bp %d/%d%n%s",
                 daemonReachable ? "LIVE" : "DEGRADED",
                 targetFps,
                 presentFps,
