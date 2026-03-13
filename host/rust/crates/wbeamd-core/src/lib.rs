@@ -1784,12 +1784,7 @@ impl DaemonCore {
                 return;
             }
 
-            let cooldown_expired = inner
-                .suppress_auto_start_until
-                .map(|until| Instant::now() >= until)
-                .unwrap_or(true);
-
-            if self.auto_start && cooldown_expired {
+            if self.auto_start && Self::auto_restart_cooldown_expired(inner.suppress_auto_start_until) {
                 inner.state = STATE_RECONNECTING.to_string();
                 inner.metrics.restart_count = inner.metrics.restart_count.saturating_add(1);
                 (true, Some(inner.active_config.clone()))
@@ -1819,6 +1814,10 @@ impl DaemonCore {
                 }
             });
         }
+    }
+
+    fn auto_restart_cooldown_expired(until: Option<Instant>) -> bool {
+        until.map(|deadline| Instant::now() >= deadline).unwrap_or(true)
     }
 
     async fn watchdog_tick(&self) {
