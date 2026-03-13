@@ -949,84 +949,7 @@ def main():
     )
     STATE["pipeline"] = pipeline
 
-    overlay_file = os.getenv("WBEAM_OVERLAY_TEXT_FILE", "").strip()
-    if overlay_file:
-        overlay_elements = {"MAIN": pipeline.get_by_name("hud_main")}
-        if any(v is not None for v in overlay_elements.values()):
-            print(f"[wbeam] Overlay text source: {overlay_file}", flush=True)
-            overlay_state = {"MAIN": ""}
-
-            def _parse_overlay_sections(raw_text: str) -> dict[str, str]:
-                text = raw_text.replace("\r\n", "\n").replace("\r", "\n").strip()
-                out = {"MAIN": ""}
-                if not text:
-                    return out
-
-                section_rx = re.compile(r"^\[(MAIN|TL|TR|BL|BR)\]\s*$", re.IGNORECASE)
-                lines = text.split("\n")
-                current = None
-                buckets = {"MAIN": [], "TL": [], "TR": [], "BL": [], "BR": []}
-                section_count = 0
-                for line in lines:
-                    m = section_rx.match(line.strip())
-                    if m:
-                        current = m.group(1).upper()
-                        section_count += 1
-                        continue
-                    if current is not None:
-                        buckets[current].append(line.rstrip())
-
-                if section_count > 0:
-                    # Prefer new MAIN block, fallback to merged legacy quadrants.
-                    main = "\n".join(buckets["MAIN"]).strip()
-                    if main:
-                        out["MAIN"] = main
-                        return out
-                    merged = []
-                    for key in ("TL", "TR", "BL", "BR"):
-                        block = "\n".join(buckets[key]).strip()
-                        if block:
-                            merged.append(block)
-                    out["MAIN"] = "\n\n".join(merged).strip()
-                    return out
-
-                # Backward compatibility: old 1-block overlay goes to MAIN.
-                out["MAIN"] = text
-                return out
-
-            def _refresh_overlay_text():
-                try:
-                    text = Path(overlay_file).read_text(encoding="utf-8", errors="replace")
-                except FileNotFoundError:
-                    return
-                except Exception as exc:
-                    print(f"[warn] failed to read overlay text {overlay_file}: {exc}", file=sys.stderr)
-                    return
-
-                sections = _parse_overlay_sections(text)
-                for key, elem in overlay_elements.items():
-                    if elem is None:
-                        continue
-                    new_text = sections.get(key, "")
-                    if new_text == overlay_state[key]:
-                        continue
-                    try:
-                        try:
-                            elem.set_property("markup", new_text)
-                        except Exception:
-                            plain_text = re.sub(r"<[^>]+>", "", new_text)
-                            elem.set_property("text", plain_text)
-                        overlay_state[key] = new_text
-                    except Exception as exc:
-                        print(f"[warn] failed to set overlay text ({key}): {exc}", file=sys.stderr)
-                return
-
-            def _refresh_overlay_tick():
-                _refresh_overlay_text()
-                return True
-
-            _refresh_overlay_text()
-            GLib.timeout_add(250, _refresh_overlay_tick)
+    setup_overlay_refresh(pipeline)
 
     bus = pipeline.get_bus()
     bus.add_signal_watch()
@@ -1060,6 +983,90 @@ def main():
     main_loop = GLib.MainLoop()
     STATE["main_loop"] = main_loop
     main_loop.run()
+
+
+def setup_overlay_refresh(pipeline) -> None:
+    overlay_file = os.getenv("WBEAM_OVERLAY_TEXT_FILE", "").strip()
+    if not overlay_file:
+        return
+    overlay_elements = {"MAIN": pipeline.get_by_name("hud_main")}
+    if not any(v is not None for v in overlay_elements.values()):
+        return
+
+    print(f"[wbeam] Overlay text source: {overlay_file}", flush=True)
+    overlay_state = {"MAIN": ""}
+
+    def _parse_overlay_sections(raw_text: str) -> dict[str, str]:
+        text = raw_text.replace("\r\n", "\n").replace("\r", "\n").strip()
+        out = {"MAIN": ""}
+        if not text:
+            return out
+
+        section_rx = re.compile(r"^\[(MAIN|TL|TR|BL|BR)\]\s*$", re.IGNORECASE)
+        lines = text.split("\n")
+        current = None
+        buckets = {"MAIN": [], "TL": [], "TR": [], "BL": [], "BR": []}
+        section_count = 0
+        for line in lines:
+            m = section_rx.match(line.strip())
+            if m:
+                current = m.group(1).upper()
+                section_count += 1
+                continue
+            if current is not None:
+                buckets[current].append(line.rstrip())
+
+        if section_count > 0:
+            # Prefer new MAIN block, fallback to merged legacy quadrants.
+            main = "\n".join(buckets["MAIN"]).strip()
+            if main:
+                out["MAIN"] = main
+                return out
+            merged = []
+            for key in ("TL", "TR", "BL", "BR"):
+                block = "\n".join(buckets[key]).strip()
+                if block:
+                    merged.append(block)
+            out["MAIN"] = "\n\n".join(merged).strip()
+            return out
+
+        # Backward compatibility: old 1-block overlay goes to MAIN.
+        out["MAIN"] = text
+        return out
+
+    def _refresh_overlay_text():
+        try:
+            text = Path(overlay_file).read_text(encoding="utf-8", errors="replace")
+        except FileNotFoundError:
+            return
+        except Exception as exc:
+            print(f"[warn] failed to read overlay text {overlay_file}: {exc}", file=sys.stderr)
+            return
+
+        sections = _parse_overlay_sections(text)
+        for key, elem in overlay_elements.items():
+            if elem is None:
+                continue
+            new_text = sections.get(key, "")
+            if new_text == overlay_state[key]:
+                continue
+            try:
+                try:
+                    elem.set_property("markup", new_text)
+                except Exception:
+                    plain_text = re.sub(r"<[^>]+>", "", new_text)
+                    elem.set_property("text", plain_text)
+                overlay_state[key] = new_text
+            except Exception as exc:
+                print(f"[warn] failed to set overlay text ({key}): {exc}", file=sys.stderr)
+        return
+
+    def _refresh_overlay_tick():
+        _refresh_overlay_text()
+        return True
+
+    _refresh_overlay_text()
+    GLib.timeout_add(250, _refresh_overlay_tick)
 
 
 if __name__ == "__main__":
