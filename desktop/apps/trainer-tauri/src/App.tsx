@@ -1037,7 +1037,7 @@ export default function App() {
 
                 <div class="two-col">
                   <label title="Approximate candidate count for first-stage sampling.">
-                    Trial budget
+                    <span>Trial budget</span>
                     <input type="number" min="1" max="128" value={trials()} onInput={(e) => setTrials(Number(e.currentTarget.value || 18))} />
                   </label>
                   <label title="Number of evolution loops.">
