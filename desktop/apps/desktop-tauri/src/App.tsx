@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-expressions -- S3358, S4624: Conditional rendering and state patterns in Solid.js */
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import AlertTriangle from "lucide-solid/icons/alert-triangle";

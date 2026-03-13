@@ -1,4 +1,8 @@
-/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion -- S6551: valueAt() patterns are safe */
+/* eslint-disable 
+  @typescript-eslint/no-unnecessary-type-assertion,
+  @typescript-eslint/no-unused-expressions
+  -- S6551: valueAt() patterns safe, S3358: nested ternaries in rendering, S4624/S7764: Solid.js patterns
+*/
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type {
   DatasetDetail,

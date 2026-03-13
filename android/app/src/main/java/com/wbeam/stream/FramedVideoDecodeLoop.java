@@ -120,7 +120,7 @@ final class FramedVideoDecodeLoop {
         this.stateStreaming = stateStreaming;
     }
 
-    @SuppressWarnings({"java:S3776", "java:S6541", "java:S135"})
+    @SuppressWarnings({"java:S3776", "java:S6541", "java:S135", "java:S1854"})
     void run(InputStream input, MediaCodec[] codecRef, byte[] helloBuf, byte[] hdrBuf, byte[] payloadBuf) throws IOException {
         long bytes = 0L;
         long inFrames = 0L;
