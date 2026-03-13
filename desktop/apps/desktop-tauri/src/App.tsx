@@ -627,16 +627,24 @@ export default function App() {
                     const disconnectDisabled = disconnectReason.length > 0;
                     const connectBusy = isDeviceActionBusy(device, "connect");
                     const disconnectBusy = isDeviceActionBusy(device, "disconnect");
-                    const connectTitle = connectBusy
-                      ? "Connecting..."
-                      : connectDisabled
-                        ? `Connect blocked: ${connectReason}`
-                        : "Start stream for this device";
-                    const disconnectTitle = disconnectBusy
-                      ? "Disconnecting..."
-                      : disconnectDisabled
-                        ? disconnectReason
-                        : "Stop stream for this device";
+                    const connectTitle = (() => {
+                      if (connectBusy) {
+                        return "Connecting...";
+                      }
+                      if (connectDisabled) {
+                        return `Connect blocked: ${connectReason}`;
+                      }
+                      return "Start stream for this device";
+                    })();
+                    const disconnectTitle = (() => {
+                      if (disconnectBusy) {
+                        return "Disconnecting...";
+                      }
+                      if (disconnectDisabled) {
+                        return disconnectReason;
+                      }
+                      return "Stop stream for this device";
+                    })();
                     return (
                       <>
                   <button
