@@ -1,6 +1,10 @@
 package com.wbeam.ui;
 
 public final class MainActivityStatusTracker {
+    /**
+     * Plain data carrier for status tracker state.
+     */
+    @SuppressWarnings("java:S1104")
     public static final class State {
         public String lastUiState;
         public String lastUiInfo;
@@ -9,6 +13,10 @@ public final class MainActivityStatusTracker {
         public long lastCriticalErrorLogAtMs;
     }
 
+    /**
+     * Plain data carrier for status update result.
+     */
+    @SuppressWarnings("java:S1104")
     public static final class UpdateResult {
         public String state;
         public String info;
@@ -22,6 +30,7 @@ public final class MainActivityStatusTracker {
     private MainActivityStatusTracker() {
     }
 
+    @SuppressWarnings("java:S107")
     public static UpdateResult update(
             String state,
             String info,
