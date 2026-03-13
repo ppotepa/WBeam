@@ -469,7 +469,7 @@ export default function App() {
       if (!resp.ok) {
         throw new Error(String(body.error || "find-optimal failed"));
       }
-      const bestTrial = String(body.best_trial || "unknown");
+      const bestTrial = safeDisplay(body.best_trial, "unknown");
       const bestScore = Number(body.best_score || 0);
       setDatasetActionText(`recompute done: best=${bestTrial} score=${bestScore.toFixed(2)}`);
       await refreshDatasets();
