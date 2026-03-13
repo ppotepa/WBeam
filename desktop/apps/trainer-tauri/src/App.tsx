@@ -739,7 +739,7 @@ export default function App() {
         body: JSON.stringify({ run_id: runId }),
       });
       const body = (await resp.json()) as Record<string, unknown>;
-      if (!resp.ok) throw new Error(String(body.error || "stop failed"));
+      if (!resp.ok) throw new Error(safeDisplay(body.error, "stop failed"));
       await refreshRuns();
       await refreshTail();
     });
