@@ -8,6 +8,10 @@ import org.json.JSONObject;
 public final class RuntimeTelemetryMapper {
     private RuntimeTelemetryMapper() {}
 
+    /**
+     * Plain data carrier for telemetry snapshot.
+     */
+    @SuppressWarnings("java:S1104")
     public static final class Snapshot {
         public long frameInHost;
         public long frameOutHost;
