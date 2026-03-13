@@ -41,6 +41,10 @@ public final class MainHudCoordinator {
         void onSnapshot(String snapshot);
     }
 
+    /**
+     * Plain data carrier for HUD input.
+     */
+    @SuppressWarnings("java:S1104")
     public static final class Input {
         public String logTag;
         public MainHudState state;
