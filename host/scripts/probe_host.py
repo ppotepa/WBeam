@@ -83,14 +83,18 @@ def resolve_xauthority(uid: int) -> str:
 def parse_xrandr_providers(raw: str) -> List[Dict[str, object]]:
     providers: List[Dict[str, object]] = []
     for line in raw.splitlines():
-        if "Provider" not in line or "name:" not in line:
+        if "Provider" not in line or XRANDR_PROVIDER_NAME_TOKEN not in line:
             continue
         pid = ""
         for tok in line.replace(",", " ").split():
             if tok.startswith("0x"):
                 pid = tok
                 break
-        name = line.split("name:", 1)[1].strip() if "name:" in line else "unknown"
+        name = (
+            line.split(XRANDR_PROVIDER_NAME_TOKEN, 1)[1].strip()
+            if XRANDR_PROVIDER_NAME_TOKEN in line
+            else "unknown"
+        )
         providers.append({"id": pid or "0x0", "name": name, "raw": line.strip()})
     return providers
 
@@ -395,3 +399,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+XRANDR_PROVIDER_NAME_TOKEN = "name:"
