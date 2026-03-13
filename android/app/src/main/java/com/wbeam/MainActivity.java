@@ -99,9 +99,10 @@ public class MainActivity extends AppCompatActivity {
     private static final int BANDWIDTH_TEST_MB = 64;
     private static final String TEST_VIDEO_URL =
             "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4";
+    private static final String DEFAULT_PROFILE = "baseline";
 
     private static final String[] PROFILE_OPTIONS = {
-            "baseline"
+            DEFAULT_PROFILE
     };
     /**
      * Preferred video encoder for this device.
@@ -109,7 +110,6 @@ public class MainActivity extends AppCompatActivity {
     static final String PREFERRED_VIDEO = DecoderCapabilityInspector.preferredVideoEncoder();
     private static final String[] ENCODER_OPTIONS = {PREFERRED_VIDEO, "raw-png"};
     private static final String[] CURSOR_OPTIONS = {"embedded", "hidden", "metadata"};
-    private static final String DEFAULT_PROFILE = "baseline";
     private static final String DEFAULT_CURSOR_MODE = "embedded";
     private static final int DEFAULT_RES_SCALE = 100;
     private static final int DEFAULT_FPS = 60;
