@@ -142,7 +142,6 @@ export default function App() {
   const hud = createMemo(() => parseHud(tail()?.lines || []));
   const hudSeries = createMemo(() => parseHudSeries(tail()?.lines || []));
   const liveStages = createMemo(() => parseLiveStages(tail()?.lines || []));
-  const liveHealth = createMemo(() => inferLiveHealth(tail()?.lines || []));
   const currentChildPreset = createMemo(() => parseCurrentChildPreset(tail()?.lines || []));
   const hasLiveSamples = createMemo(() => hudSeries().score.length > 0 || hudSeries().present.length > 0);
 
