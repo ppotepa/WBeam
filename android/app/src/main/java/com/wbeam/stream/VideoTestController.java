@@ -207,65 +207,7 @@ public final class VideoTestController {
             uiHandler.removeCallbacks(startTimeoutTask);
             uiHandler.postDelayed(startTimeoutTask, LIVE_TEST_START_TIMEOUT_MS);
 
-            mp.setOnPreparedListener(ready -> {
-                if (mediaPlayer != ready) {
-                    logWarn("prepared callback ignored for stale player");
-                    return;
-                }
-                uiHandler.removeCallbacks(startTimeoutTask);
-                logInfo("media prepared; starting playback");
-                try {
-                    ready.start();
-                } catch (IllegalStateException ex) {
-                    logError("start() failed: " + shortError(ex));
-                    callbacks.onStatus(STATUS_ERROR,
-                            "RUN TESTS LIVE failed: IllegalStateException", 0);
-                    setOverlay("RUN TESTS LIVE FAILED",
-                            PRESET_HEADER + cfg.toMultiline(), shortError(ex));
-                    release();
-                    return;
-                }
-                callbacks.onStatus(STATUS_STREAMING, "RUN TESTS LIVE playing", 0);
-                setOverlay("RUN TESTS LIVE ACTIVE",
-                        PRESET_HEADER + cfg.toMultiline(), "phase: playback started");
-                uiHandler.postDelayed(this::clearOverlay, 900);
-            });
-
-            mp.setOnCompletionListener(done -> {
-                if (mediaPlayer != done) return;
-                uiHandler.removeCallbacks(startTimeoutTask);
-                logInfo("playback completed");
-                callbacks.onStatus("idle", "RUN TESTS LIVE completed", 0);
-                clearOverlay();
-            });
-
-            mp.setOnErrorListener((errPlayer, what, extra) -> {
-                if (mediaPlayer != errPlayer) return true;
-                uiHandler.removeCallbacks(startTimeoutTask);
-                logError("player error what=" + what + " extra=" + extra);
-                callbacks.onStatus(STATUS_ERROR,
-                        "RUN TESTS LIVE error: " + what + "/" + extra, 0);
-                setOverlay("RUN TESTS LIVE ERROR",
-                        PRESET_HEADER + cfg.toMultiline(),
-                        "player error: " + what + "/" + extra);
-                return true;
-            });
-
-            mp.setOnInfoListener((infoPlayer, what, extra) -> {
-                if (mediaPlayer != infoPlayer) return true;
-                if (what == MediaPlayer.MEDIA_INFO_BUFFERING_START) {
-                    logWarn("buffering start");
-                    callbacks.onStatus(STATUS_CONNECTING, "RUN TESTS LIVE buffering", 0);
-                    setOverlay("RUN TESTS LIVE LOADING",
-                            PRESET_HEADER + cfg.toMultiline(), "phase: buffering");
-                } else if (what == MediaPlayer.MEDIA_INFO_BUFFERING_END) {
-                    logInfo("buffering end");
-                    callbacks.onStatus(STATUS_STREAMING, "RUN TESTS LIVE playing", 0);
-                    setOverlay("RUN TESTS LIVE ACTIVE",
-                            PRESET_HEADER + cfg.toMultiline(), "phase: streaming frames");
-                }
-                return false;
-            });
+            attachMediaPlayerCallbacks(mp, cfg);
 
             logInfo("prepareAsync() start; source=public test stream");
             mp.prepareAsync();
@@ -280,6 +222,65 @@ public final class VideoTestController {
                     PRESET_HEADER + callbacks.getTestConfig().toMultiline(), shortError(e));
             release();
         }
+    }
+
+    private void attachMediaPlayerCallbacks(MediaPlayer player, TestConfig cfg) {
+        player.setOnPreparedListener(ready -> onPrepared(ready, cfg));
+        player.setOnCompletionListener(this::onCompletion);
+        player.setOnErrorListener((errPlayer, what, extra) -> onPlayerError(errPlayer, what, extra, cfg));
+        player.setOnInfoListener((infoPlayer, what, extra) -> onPlayerInfo(infoPlayer, what, cfg));
+    }
+
+    private void onPrepared(MediaPlayer ready, TestConfig cfg) {
+        if (mediaPlayer != ready) {
+            logWarn("prepared callback ignored for stale player");
+            return;
+        }
+        uiHandler.removeCallbacks(startTimeoutTask);
+        logInfo("media prepared; starting playback");
+        try {
+            ready.start();
+        } catch (IllegalStateException ex) {
+            logError("start() failed: " + shortError(ex));
+            callbacks.onStatus(STATUS_ERROR, "RUN TESTS LIVE failed: IllegalStateException", 0);
+            setOverlay("RUN TESTS LIVE FAILED", PRESET_HEADER + cfg.toMultiline(), shortError(ex));
+            release();
+            return;
+        }
+        callbacks.onStatus(STATUS_STREAMING, "RUN TESTS LIVE playing", 0);
+        setOverlay("RUN TESTS LIVE ACTIVE", PRESET_HEADER + cfg.toMultiline(), "phase: playback started");
+        uiHandler.postDelayed(this::clearOverlay, 900);
+    }
+
+    private void onCompletion(MediaPlayer done) {
+        if (mediaPlayer != done) return;
+        uiHandler.removeCallbacks(startTimeoutTask);
+        logInfo("playback completed");
+        callbacks.onStatus("idle", "RUN TESTS LIVE completed", 0);
+        clearOverlay();
+    }
+
+    private boolean onPlayerError(MediaPlayer errPlayer, int what, int extra, TestConfig cfg) {
+        if (mediaPlayer != errPlayer) return true;
+        uiHandler.removeCallbacks(startTimeoutTask);
+        logError("player error what=" + what + " extra=" + extra);
+        callbacks.onStatus(STATUS_ERROR, "RUN TESTS LIVE error: " + what + "/" + extra, 0);
+        setOverlay("RUN TESTS LIVE ERROR", PRESET_HEADER + cfg.toMultiline(), "player error: " + what + "/" + extra);
+        return true;
+    }
+
+    private boolean onPlayerInfo(MediaPlayer infoPlayer, int what, TestConfig cfg) {
+        if (mediaPlayer != infoPlayer) return true;
+        if (what == MediaPlayer.MEDIA_INFO_BUFFERING_START) {
+            logWarn("buffering start");
+            callbacks.onStatus(STATUS_CONNECTING, "RUN TESTS LIVE buffering", 0);
+            setOverlay("RUN TESTS LIVE LOADING", PRESET_HEADER + cfg.toMultiline(), "phase: buffering");
+        } else if (what == MediaPlayer.MEDIA_INFO_BUFFERING_END) {
+            logInfo("buffering end");
+            callbacks.onStatus(STATUS_STREAMING, "RUN TESTS LIVE playing", 0);
+            setOverlay("RUN TESTS LIVE ACTIVE", PRESET_HEADER + cfg.toMultiline(), "phase: streaming frames");
+        }
+        return false;
     }
 
     /**
