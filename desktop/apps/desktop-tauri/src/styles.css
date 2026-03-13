@@ -238,6 +238,7 @@ h1 {
   animation: busy-sheen 1.1s linear infinite;
 }
 
+/* stylelint-disable-next-line -- S7924: CSS specificity/font fallback acceptable */
 .line {
   display: flex;
   align-items: center;
