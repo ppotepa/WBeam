@@ -1054,7 +1054,7 @@ export default function App() {
                   <div class="advanced-box">
                     <div class="two-col">
                       <label title="Population size per generation.">
-                        Population
+                        <span>Population</span>
                         <input
                           type="number"
                           min="2"
