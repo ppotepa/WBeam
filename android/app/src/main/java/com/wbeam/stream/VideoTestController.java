@@ -27,6 +27,7 @@ public final class VideoTestController {
     private static final String TAG = "WBeamVideoTest";
     private static final String RUN_TESTS_LOG_PREFIX = "[RUN TESTS LIVE] ";
     private static final String STATUS_STREAMING = "streaming";
+    private static final String STATUS_ERROR = "error";
     private static final long   LIVE_TEST_START_TIMEOUT_MS = 12_000L;
     private static final int    BANDWIDTH_TEST_MB          = 64;
     private static final String TEST_VIDEO_URL =
@@ -152,7 +153,7 @@ public final class VideoTestController {
         this.callbacks  = callbacks;
         this.startTimeoutTask = () -> {
             logError("timed out waiting for media to prepare, aborting");
-            callbacks.onStatus("error", "RUN TESTS LIVE timeout", 0);
+            callbacks.onStatus(STATUS_ERROR, "RUN TESTS LIVE timeout", 0);
             setOverlay("RUN TESTS LIVE TIMEOUT", null,
                     "media never became ready \u2013 network too slow?");
             release();
@@ -175,7 +176,7 @@ public final class VideoTestController {
     public void startPublicVideoTest() {
         Surface surface = callbacks.getSurface();
         if (surface == null || !surface.isValid()) {
-            callbacks.onStatus("error", "surface not ready yet", 0);
+            callbacks.onStatus(STATUS_ERROR, "surface not ready yet", 0);
             return;
         }
 
@@ -215,7 +216,7 @@ public final class VideoTestController {
                     ready.start();
                 } catch (IllegalStateException ex) {
                     logError("start() failed: " + shortError(ex));
-                    callbacks.onStatus("error",
+                    callbacks.onStatus(STATUS_ERROR,
                             "RUN TESTS LIVE failed: IllegalStateException", 0);
                     setOverlay("RUN TESTS LIVE FAILED",
                             "preset\n" + cfg.toMultiline(), shortError(ex));
@@ -240,7 +241,7 @@ public final class VideoTestController {
                 if (mediaPlayer != errPlayer) return true;
                 uiHandler.removeCallbacks(startTimeoutTask);
                 logError("player error what=" + what + " extra=" + extra);
-                callbacks.onStatus("error",
+                callbacks.onStatus(STATUS_ERROR,
                         "RUN TESTS LIVE error: " + what + "/" + extra, 0);
                 setOverlay("RUN TESTS LIVE ERROR",
                         "preset\n" + cfg.toMultiline(),
@@ -271,7 +272,7 @@ public final class VideoTestController {
             uiHandler.removeCallbacks(startTimeoutTask);
             logError("startup failed: " + shortError(e));
             Log.e(TAG, "failed to start public test video", e);
-            callbacks.onStatus("error",
+            callbacks.onStatus(STATUS_ERROR,
                     "RUN TESTS LIVE failed: " + e.getClass().getSimpleName(), 0);
             setOverlay("RUN TESTS LIVE FAILED",
                     "preset\n" + callbacks.getTestConfig().toMultiline(), shortError(e));
@@ -285,7 +286,7 @@ public final class VideoTestController {
      */
     public void startBandwidthTest() {
         if (!callbacks.isDaemonReachable()) {
-            callbacks.onStatus("error",
+            callbacks.onStatus(STATUS_ERROR,
                     "host API offline - cannot run bandwidth test", 0);
             callbacks.showToast("Host API offline", false);
             return;
@@ -319,7 +320,7 @@ public final class VideoTestController {
             } catch (Exception e) {
                 uiHandler.post(() -> {
                     String reason = shortError(e);
-                    callbacks.onStatus("error",
+                    callbacks.onStatus(STATUS_ERROR,
                             "bandwidth test failed: " + reason, 0);
                     callbacks.logError("bandwidth test failed: " + reason);
                     callbacks.showToast(
@@ -392,7 +393,7 @@ public final class VideoTestController {
         if ("STARTING".equals(daemonState)
                 || "RECONNECTING".equals(daemonState))                  return "connecting";
         if ("ERROR".equals(daemonState)
-                || "DISCONNECTED".equals(daemonState))                  return "error";
+                || "DISCONNECTED".equals(daemonState))                  return STATUS_ERROR;
         return "idle";
     }
 
