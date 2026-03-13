@@ -937,7 +937,7 @@ export default function App() {
 
                 <div class="two-col">
                   <label title="Auto uses trainer defaults/adaptation. Manual exposes encoder-specific knobs.">
-                    Encoder tuning
+                    <span>Encoder tuning</span>
                     <select value={encoderTuneMode()} onInput={(e) => setEncoderTuneMode(e.currentTarget.value)}>
                       <option value="auto">auto</option>
                       <option value="manual">manual</option>
