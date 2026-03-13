@@ -69,46 +69,52 @@ public class StreamService extends Service {
         }
 
         running = true;
-        worker = new Thread(() -> {
-            while (running) {
-                 emitStatus(STATE_CONNECTING, "connecting to " + HOST + ":" + STREAM_PORT, 0);
-                 try (Socket socket = new Socket(HOST, STREAM_PORT);
-                     InputStream input = socket.getInputStream()) {
-                    Log.i(TAG, "connected to stream");
-                    emitStatus(STATE_STREAMING, "connected", 0);
-
-                    byte[] buffer = new byte[64 * 1024];
-                    long bytes = 0;
-                    long lastLog = System.currentTimeMillis();
-
-                    while (running) {
-                        int read = input.read(buffer);
-                        if (read < 0) {
-                            emitStatus(STATE_CONNECTING, "stream ended, reconnecting", 0);
-                            break;
-                        }
-                        bytes += read;
-
-                        long now = System.currentTimeMillis();
-                        if (now - lastLog >= 1000) {
-                            Log.i(TAG, "receiving h264 bytes/s ~ " + bytes);
-                            emitStatus(STATE_STREAMING, "receiving stream", bytes);
-                            bytes = 0;
-                            lastLog = now;
-                        }
-                    }
-                } catch (Exception e) {
-                    Log.e(TAG, "stream worker failed", e);
-                    emitStatus(STATE_ERROR, "stream error: " + e.getClass().getSimpleName(), 0);
-                }
-
-                if (running) {
-                    SystemClock.sleep(1000);
-                }
-            }
-        });
+        worker = new Thread(this::runWorkerLoop);
         worker.setName("wbeam-stream-worker");
         worker.start();
+    }
+
+    private void runWorkerLoop() {
+        while (running) {
+            emitStatus(STATE_CONNECTING, "connecting to " + HOST + ":" + STREAM_PORT, 0);
+            handleSingleStreamSession();
+            if (running) {
+                SystemClock.sleep(1000);
+            }
+        }
+    }
+
+    private void handleSingleStreamSession() {
+        try (Socket socket = new Socket(HOST, STREAM_PORT);
+             InputStream input = socket.getInputStream()) {
+            Log.i(TAG, "connected to stream");
+            emitStatus(STATE_STREAMING, "connected", 0);
+            receiveStreamLoop(input);
+        } catch (Exception e) {
+            Log.e(TAG, "stream worker failed", e);
+            emitStatus(STATE_ERROR, "stream error: " + e.getClass().getSimpleName(), 0);
+        }
+    }
+
+    private void receiveStreamLoop(InputStream input) throws Exception {
+        byte[] buffer = new byte[64 * 1024];
+        long bytes = 0;
+        long lastLog = System.currentTimeMillis();
+        while (running) {
+            int read = input.read(buffer);
+            if (read < 0) {
+                emitStatus(STATE_CONNECTING, "stream ended, reconnecting", 0);
+                return;
+            }
+            bytes += read;
+            long now = System.currentTimeMillis();
+            if (now - lastLog >= 1000) {
+                Log.i(TAG, "receiving h264 bytes/s ~ " + bytes);
+                emitStatus(STATE_STREAMING, "receiving stream", bytes);
+                bytes = 0;
+                lastLog = now;
+            }
+        }
     }
 
     @Override
