@@ -16,6 +16,8 @@ import java.util.Locale;
 
 final class FramedVideoDecodeLoop {
 
+    private static final String PAYLOAD_LABEL = " payload=";
+
     interface RuntimeState {
         boolean isRunning();
         long getDroppedTotal();
@@ -57,6 +59,7 @@ final class FramedVideoDecodeLoop {
     private final String stateConnecting;
     private final String stateStreaming;
 
+    @SuppressWarnings("java:S107")
     FramedVideoDecodeLoop(
             String tag,
             Surface surface,
@@ -117,6 +120,7 @@ final class FramedVideoDecodeLoop {
         this.stateStreaming = stateStreaming;
     }
 
+    @SuppressWarnings({"java:S3776", "java:S6541", "java:S135"})
     void run(InputStream input, MediaCodec[] codecRef, byte[] helloBuf, byte[] hdrBuf, byte[] payloadBuf) throws IOException {
         long bytes = 0L;
         long inFrames = 0L;
@@ -153,11 +157,23 @@ final class FramedVideoDecodeLoop {
         final boolean isHevc = !isPng && (helloFlags & helloCodecHevc) != 0;
         final int streamMode = helloFlags & helloModeMask;
         final boolean isUltraMode = streamMode == helloModeUltra;
-        final String videoMime = isPng ? "image/png" : (isHevc ? "video/hevc" : "video/avc");
+        final String videoMime;
+        if (isPng) {
+            videoMime = "image/png";
+        } else if (isHevc) {
+            videoMime = "video/hevc";
+        } else {
+            videoMime = "video/avc";
+        }
         long streamSessionId = hello.sessionId;
-        String modeLabel = streamMode == helloModeUltra
-                ? "ultra"
-                : (streamMode == helloModeQuality ? "quality" : "stable");
+        final String modeLabel;
+        if (streamMode == helloModeUltra) {
+            modeLabel = "ultra";
+        } else if (streamMode == helloModeQuality) {
+            modeLabel = "quality";
+        } else {
+            modeLabel = "stable";
+        }
         Log.i(tag, String.format(Locale.US, "WBTP hello session=0x%016x codec=%s mode=%s",
                 streamSessionId, isPng ? "PNG" : (isHevc ? "HEVC" : "AVC"), modeLabel));
 
@@ -220,7 +236,7 @@ final class FramedVideoDecodeLoop {
                     framePayloadHardCap,
                     tag,
                     "WBTP payload buffer grow "
-                            + " seq=" + seqU32 + " payload=" + payloadLen + " mode=" + modeLabel + " "
+                            + " seq=" + seqU32 + PAYLOAD_LABEL + payloadLen + " mode=" + modeLabel + " "
             );
             if (grownPayloadBuf != payloadBuf) {
                 payloadBuf = grownPayloadBuf;
