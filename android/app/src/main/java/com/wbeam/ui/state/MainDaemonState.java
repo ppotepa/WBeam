@@ -1,5 +1,9 @@
 package com.wbeam.ui.state;
 
+/**
+ * Plain data carrier for daemon state.
+ */
+@SuppressWarnings("java:S1104")
 public final class MainDaemonState {
     public boolean reachable = false;
     public String hostName = "-";
@@ -10,6 +14,7 @@ public final class MainDaemonState {
     public long runId = 0L;
     public long uptimeSec = 0L;
 
+    @SuppressWarnings("java:S107")
     public void applySnapshot(
             boolean nextReachable,
             String nextHostName,
