@@ -955,17 +955,7 @@ impl DaemonCore {
         &self,
         mut client: ClientMetricsRequest,
     ) -> Result<ClientMetricsResponse, CoreError> {
-        // P2.2: log trace_id so host logs can be correlated with Android logcat
-        info!(
-            "client-metrics trace_id={} present={:.1}fps decode_p95={:.1}ms e2e_p95={:.1}ms",
-            client
-                .trace_id
-                .map(|t| format!("{:#018x}", t))
-                .unwrap_or_else(|| "-".to_string()),
-            client.present_fps,
-            client.decode_time_ms_p95,
-            client.e2e_latency_ms_p95,
-        );
+        Self::log_client_metrics_summary(&client);
         if client.timestamp_ms == 0 {
             client.timestamp_ms = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1027,21 +1017,8 @@ impl DaemonCore {
                 let _ = writeln!(f, "{rec}");
             }
 
-            let no_present_stream = inner.state == STATE_STREAMING
-                && inner.current_pid.is_some()
-                && client.recv_fps >= NO_PRESENT_MIN_RECV_FPS
-                && client.present_fps <= NO_PRESENT_MAX_PRESENT_FPS;
-            if no_present_stream {
-                inner.no_present_streak = inner.no_present_streak.saturating_add(1);
-            } else {
-                inner.no_present_streak = 0;
-            }
-            let no_present_restart_ready = inner
-                .last_no_present_recovery_at
-                .map(|t| now.duration_since(t) >= NO_PRESENT_RESTART_COOLDOWN)
-                .unwrap_or(true);
-            let forced_no_present_restart = no_present_restart_ready
-                && inner.no_present_streak >= NO_PRESENT_RESTART_STREAK_REQUIRED;
+            let forced_no_present_restart =
+                Self::update_no_present_streak_and_check_restart(&mut inner, &client, now);
 
             if forced_no_present_restart && !trainer_run_active {
                 inner.no_present_streak = 0;
@@ -1195,6 +1172,41 @@ impl DaemonCore {
             ok: true,
             action,
         })
+    }
+
+    fn log_client_metrics_summary(client: &ClientMetricsRequest) {
+        // P2.2: log trace_id so host logs can be correlated with Android logcat
+        info!(
+            "client-metrics trace_id={} present={:.1}fps decode_p95={:.1}ms e2e_p95={:.1}ms",
+            client
+                .trace_id
+                .map(|t| format!("{:#018x}", t))
+                .unwrap_or_else(|| "-".to_string()),
+            client.present_fps,
+            client.decode_time_ms_p95,
+            client.e2e_latency_ms_p95,
+        );
+    }
+
+    fn update_no_present_streak_and_check_restart(
+        inner: &mut Inner,
+        client: &ClientMetricsRequest,
+        now: Instant,
+    ) -> bool {
+        let no_present_stream = inner.state == STATE_STREAMING
+            && inner.current_pid.is_some()
+            && client.recv_fps >= NO_PRESENT_MIN_RECV_FPS
+            && client.present_fps <= NO_PRESENT_MAX_PRESENT_FPS;
+        if no_present_stream {
+            inner.no_present_streak = inner.no_present_streak.saturating_add(1);
+        } else {
+            inner.no_present_streak = 0;
+        }
+        let no_present_restart_ready = inner
+            .last_no_present_recovery_at
+            .map(|t| now.duration_since(t) >= NO_PRESENT_RESTART_COOLDOWN)
+            .unwrap_or(true);
+        no_present_restart_ready && inner.no_present_streak >= NO_PRESENT_RESTART_STREAK_REQUIRED
     }
 
     pub async fn stop(&self) -> Result<StatusResponse, CoreError> {
