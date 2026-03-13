@@ -96,13 +96,11 @@ final class LegacyAnnexBDecodeLoop {
                     if (keep <= 0) {
                         sHead = 0;
                         sTail = 0;
-                        avail = 0;
                     } else {
                         int newHead = sHead + (avail - keep);
                         System.arraycopy(streamBuf, newHead, streamBuf, 0, keep);
                         sHead = 0;
                         sTail = keep;
-                        avail = keep;
                     }
                     droppedSec++;
                 } else {
@@ -128,7 +126,7 @@ final class LegacyAnnexBDecodeLoop {
                     int nalSize = ((streamBuf[sHead] & 0xFF) << 24)
                             | ((streamBuf[sHead + 1] & 0xFF) << 16)
                             | ((streamBuf[sHead + 2] & 0xFF) << 8)
-                            | ((streamBuf[sHead + 3] & 0xFF));
+                            | (streamBuf[sHead + 3] & 0xFF);
                     if (nalSize <= 0 || nalSize > streamBuf.length) {
                         sHead += 1;
                         droppedSec++;
