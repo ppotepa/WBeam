@@ -486,6 +486,34 @@ pub fn validate_config_with_presets(
     };
     cfg.profile = base_profile;
 
+    apply_patch_overrides(&mut cfg, patch);
+    normalize_encoder_alias(&mut cfg);
+
+    if !VALID_ENCODERS.contains(&cfg.encoder.as_str()) {
+        return Err(ValidationError::InvalidEncoder);
+    }
+    if !VALID_CURSOR_MODES.contains(&cfg.cursor_mode.as_str()) {
+        return Err(ValidationError::InvalidCursorMode);
+    }
+
+    let (w, h) = parse_and_normalize_size(&cfg.size)?;
+    cfg.size = format!("{w}x{h}");
+    cfg.fps = cfg.fps.clamp(24, 120);
+    cfg.bitrate_kbps = clamp_bitrate_for_encoder(cfg.bitrate_kbps, &cfg.encoder);
+    cfg.debug_fps = cfg.debug_fps.clamp(0, 10);
+
+    // RAW PNG is CPU/network heavy. Clamp to a latency-friendly envelope.
+    if cfg.encoder == "rawpng" {
+        cfg.fps = cfg.fps.clamp(5, 20);
+        let (rw, rh) = clamp_rawpng_size(w, h);
+        cfg.size = format!("{rw}x{rh}");
+        cfg.intra_only = false;
+    }
+
+    Ok(cfg)
+}
+
+fn apply_patch_overrides(cfg: &mut ActiveConfig, patch: ConfigPatch) {
     if let Some(encoder) = patch.encoder {
         cfg.encoder = encoder;
     }
@@ -507,78 +535,56 @@ pub fn validate_config_with_presets(
     if let Some(intra_only) = patch.intra_only {
         cfg.intra_only = intra_only;
     }
+}
 
+fn normalize_encoder_alias(cfg: &mut ActiveConfig) {
     cfg.encoder = match cfg.encoder.as_str() {
-        "h264" | "h265" | "rawpng" => cfg.encoder,
+        "h264" | "h265" | "rawpng" => cfg.encoder.clone(),
         // Backward-compatible migration of old modes to unified h265.
         "auto" | "nvenc" | "nvenc265" | "x265" | "openh264" => "h265".to_string(),
-        _ => cfg.encoder,
+        _ => cfg.encoder.clone(),
     };
+}
 
-    if !VALID_ENCODERS.contains(&cfg.encoder.as_str()) {
-        return Err(ValidationError::InvalidEncoder);
-    }
-    if !VALID_CURSOR_MODES.contains(&cfg.cursor_mode.as_str()) {
-        return Err(ValidationError::InvalidCursorMode);
-    }
-
-    let size = cfg.size.to_lowercase();
+fn parse_and_normalize_size(size: &str) -> Result<(u32, u32), ValidationError> {
+    let size = size.to_lowercase();
     let Some((w_str, h_str)) = size.split_once('x') else {
         return Err(ValidationError::InvalidSize);
     };
-
-    let Ok(mut w) = w_str.parse::<u32>() else {
+    let Ok(w) = w_str.parse::<u32>() else {
         return Err(ValidationError::InvalidSize);
     };
-    let Ok(mut h) = h_str.parse::<u32>() else {
+    let Ok(h) = h_str.parse::<u32>() else {
         return Err(ValidationError::InvalidSize);
     };
+    Ok((even_floor(w.clamp(640, 3840)), even_floor(h.clamp(360, 2160))))
+}
 
-    w = w.clamp(640, 3840);
-    h = h.clamp(360, 2160);
-    if w % 2 == 1 {
-        w -= 1;
+fn even_floor(value: u32) -> u32 {
+    if value % 2 == 1 {
+        value.saturating_sub(1)
+    } else {
+        value
     }
-    if h % 2 == 1 {
-        h -= 1;
-    }
+}
 
-    cfg.size = format!("{w}x{h}");
-    cfg.fps = cfg.fps.clamp(24, 120);
+fn clamp_bitrate_for_encoder(bitrate_kbps: u32, encoder: &str) -> u32 {
     // x265enc rejects values above ~100 Mbps on many hosts; keep config
     // within backend-safe limits to avoid runtime panics on stream start.
-    let bitrate_max = if cfg.encoder == "h265" {
-        100_000
-    } else {
-        300_000
-    };
-    cfg.bitrate_kbps = cfg.bitrate_kbps.clamp(4_000, bitrate_max);
-    cfg.debug_fps = cfg.debug_fps.clamp(0, 10);
+    let bitrate_max = if encoder == "h265" { 100_000 } else { 300_000 };
+    bitrate_kbps.clamp(4_000, bitrate_max)
+}
 
-    // RAW PNG is CPU/network heavy. Clamp to a latency-friendly envelope.
-    if cfg.encoder == "rawpng" {
-        cfg.fps = cfg.fps.clamp(5, 20);
-
-        let mut rw = w;
-        let mut rh = h;
-        let max_pixels: u32 = 1280 * 720;
-        let pixels = rw.saturating_mul(rh);
-        if pixels > max_pixels {
-            let scale = (max_pixels as f64 / pixels as f64).sqrt();
-            rw = ((rw as f64 * scale).floor() as u32).max(640);
-            rh = ((rh as f64 * scale).floor() as u32).max(360);
-            if rw % 2 == 1 {
-                rw -= 1;
-            }
-            if rh % 2 == 1 {
-                rh -= 1;
-            }
-        }
-        cfg.size = format!("{rw}x{rh}");
-        cfg.intra_only = false;
+fn clamp_rawpng_size(w: u32, h: u32) -> (u32, u32) {
+    let max_pixels: u32 = 1280 * 720;
+    let pixels = w.saturating_mul(h);
+    if pixels <= max_pixels {
+        return (w, h);
     }
-
-    Ok(cfg)
+    let scale = (max_pixels as f64 / pixels as f64).sqrt();
+    let rw = even_floor(((w as f64 * scale).floor() as u32).max(640));
+    let rh = even_floor(((h as f64 * scale).floor() as u32).max(360));
+    (rw, rh)
 }
 
 pub fn valid_values() -> ValidValues {
