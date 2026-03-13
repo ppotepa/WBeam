@@ -19,8 +19,8 @@ use tracing::{debug, error, info, warn};
 use wbeamd_api::{
     valid_values, validate_config_with_presets, ActiveConfig, BaseResponse, ClientMetricsRequest,
     ClientMetricsResponse, ConfigPatch, EffectiveRuntimeConfig, ErrorResponse, HealthResponse,
-    HostProbeResponse, KpiSnapshot, MetricsResponse, MetricsSnapshot, PresetsResponse, StatusResponse,
-    ValidationError, VirtualDisplayDoctorResponse, VirtualDisplayProbeResponse,
+    HostProbeResponse, KpiSnapshot, MetricsResponse, MetricsSnapshot, PresetsResponse,
+    StatusResponse, ValidationError, VirtualDisplayDoctorResponse, VirtualDisplayProbeResponse,
 };
 
 pub mod domain;
@@ -263,73 +263,58 @@ fn wbeam_setting_u64(settings: &HashMap<String, String>, key: &str, default: u64
         .unwrap_or(default)
 }
 
-fn resolve_xauthority_for_capture() -> Option<PathBuf> {
-    let uid = std::env::var("UID")
+fn read_uid_or_default() -> String {
+    std::env::var("UID")
         .ok()
         .filter(|v| !v.trim().is_empty())
         .or_else(|| std::env::var("EUID").ok())
-        .unwrap_or_else(|| "1000".to_string());
-    if let Ok(path) = std::env::var("XAUTHORITY") {
-        let p = PathBuf::from(path);
-        if p.exists() {
-            return Some(p);
-        }
-    }
+        .unwrap_or_else(|| "1000".to_string())
+}
 
-    if let Ok(entries) = std::fs::read_dir("/tmp") {
-        let mut tmp_candidates: Vec<PathBuf> = entries
-            .flatten()
-            .map(|e| e.path())
-            .filter(|p| {
-                p.is_file()
-                    && p.file_name()
-                        .and_then(|n| n.to_str())
-                        .map(|n| n.starts_with("xauth_"))
-                        .unwrap_or(false)
-            })
-            .collect();
-        tmp_candidates.sort_by_key(|p| {
-            std::fs::metadata(p)
-                .and_then(|m| m.modified())
-                .ok()
-                .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
-        });
-        if let Some(last) = tmp_candidates.pop() {
-            return Some(last);
-        }
-    }
+fn existing_xauthority_env_path() -> Option<PathBuf> {
+    std::env::var("XAUTHORITY")
+        .ok()
+        .map(PathBuf::from)
+        .filter(|p| p.exists())
+}
 
-    let run_dir = PathBuf::from(format!("/run/user/{uid}"));
-    if run_dir.exists() {
-        let mut candidates: Vec<PathBuf> = Vec::new();
-        if let Ok(entries) = std::fs::read_dir(&run_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    if name.starts_with("xauth_") && path.is_file() {
-                        candidates.push(path);
-                    }
-                }
-            }
-        }
-        candidates.sort_by_key(|p| {
-            std::fs::metadata(p)
-                .and_then(|m| m.modified())
-                .ok()
-                .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
-        });
-        if let Some(last) = candidates.pop() {
-            return Some(last);
-        }
-    }
+fn latest_xauth_candidate(dir: &Path) -> Option<PathBuf> {
+    let entries = std::fs::read_dir(dir).ok()?;
+    let mut candidates: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.is_file()
+                && p.file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| n.starts_with("xauth_"))
+                    .unwrap_or(false)
+        })
+        .collect();
+    candidates.sort_by_key(|p| {
+        std::fs::metadata(p)
+            .and_then(|m| m.modified())
+            .ok()
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+    });
+    candidates.pop()
+}
 
-    if let Ok(home) = std::env::var("HOME") {
-        let p = Path::new(&home).join(".Xauthority");
-        if p.exists() {
-            return Some(p);
-        }
+fn resolve_xauthority_for_capture() -> Option<PathBuf> {
+    if let Some(path) = existing_xauthority_env_path() {
+        return Some(path);
     }
-    None
+    if let Some(path) = latest_xauth_candidate(Path::new("/tmp")) {
+        return Some(path);
+    }
+    let run_dir = PathBuf::from(format!("/run/user/{}", read_uid_or_default()));
+    if let Some(path) = latest_xauth_candidate(&run_dir) {
+        return Some(path);
+    }
+    std::env::var("HOME")
+        .ok()
+        .map(|home| Path::new(&home).join(".Xauthority"))
+        .filter(|p| p.exists())
 }
 
 fn runtime_config_path_for_session(root: &Path, session_label: Option<&str>) -> PathBuf {
@@ -1371,7 +1356,11 @@ impl DaemonCore {
                 fps: cfg.fps,
                 bitrate_kbps: cfg.bitrate_kbps,
                 cursor_mode: cfg.cursor_mode.clone(),
-                gop: if cfg.intra_only { 1 } else { (cfg.fps / 8).max(6) },
+                gop: if cfg.intra_only {
+                    1
+                } else {
+                    (cfg.fps / 8).max(6)
+                },
                 intra_only: cfg.intra_only,
                 stream_mode: "unknown".to_string(),
                 queue_max_buffers: 0,
@@ -1412,10 +1401,7 @@ impl DaemonCore {
             wbeam_setting_bool(&self.settings, "WBEAM_USE_RUST_STREAMER", true);
         let rust_streamer_bin = wbeam_setting(&self.settings, "WBEAM_RUST_STREAMER_BIN")
             .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                self.root
-                    .join("host/rust/target/release/wbeamd-streamer")
-            });
+            .unwrap_or_else(|| self.root.join("host/rust/target/release/wbeamd-streamer"));
 
         let mut cmd;
         let capture_backend = self.host_probe.capture_mode_name();
@@ -1473,12 +1459,18 @@ impl DaemonCore {
                 }
             })
             .collect::<String>();
-        let restore_token_file =
-            format!("/tmp/wbeam-portal-restore-token-{}-{}", session_suffix, self.stream_port);
-        let trainer_active_marker =
-            format!("/tmp/wbeam-trainer-active-{}-{}.flag", session_suffix, self.stream_port);
-        let trainer_overlay_file =
-            format!("/tmp/wbeam-trainer-overlay-{}-{}.txt", session_suffix, self.stream_port);
+        let restore_token_file = format!(
+            "/tmp/wbeam-portal-restore-token-{}-{}",
+            session_suffix, self.stream_port
+        );
+        let trainer_active_marker = format!(
+            "/tmp/wbeam-trainer-active-{}-{}.flag",
+            session_suffix, self.stream_port
+        );
+        let trainer_overlay_file = format!(
+            "/tmp/wbeam-trainer-overlay-{}-{}.txt",
+            session_suffix, self.stream_port
+        );
         let trainer_run_active = Path::new(&trainer_active_marker).exists();
         let trainer_overlay_active = Path::new(&trainer_overlay_file).exists();
         let trainer_hud_burnin =
@@ -1580,9 +1572,7 @@ impl DaemonCore {
                 return Err(err);
             }
             warn!("WBEAM_USE_RUST_STREAMER=false – using legacy python streamer");
-            let stream_script = self
-                .root
-                .join("host/scripts/stream_wayland_portal_h264.py");
+            let stream_script = self.root.join("host/scripts/stream_wayland_portal_h264.py");
             cmd = Command::new("python3");
             cmd.arg("-u")
                 .arg(stream_script)
