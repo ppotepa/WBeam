@@ -720,7 +720,7 @@ export default function App() {
       });
       const body = (await resp.json()) as Record<string, unknown>;
       if (!resp.ok) throw new Error(String(body.error || "start failed"));
-      const newRunId = String(body.run_id || "").trim();
+      const newRunId = safeDisplay(body.run_id, "").trim();
       await refreshRuns();
       if (newRunId) {
         setSelectedRunId(newRunId);
