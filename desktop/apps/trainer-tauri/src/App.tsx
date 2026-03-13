@@ -783,7 +783,6 @@ export default function App() {
     if (pollId) window.clearInterval(pollId);
   });
 
-  const scoreBars = createMemo(() => toBars(hudSeries().score));
   const presentBars = createMemo(() => toBars(hudSeries().present));
   const recvBars = createMemo(() => toBars(hudSeries().recv));
   const dropBars = createMemo(() => toBars(hudSeries().drops, true));
