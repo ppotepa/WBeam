@@ -944,7 +944,7 @@ export default function App() {
                     </select>
                   </label>
                   <label title="Single-encoder flow is now mandatory for deterministic profile outputs.">
-                    Training profile mode
+                    <span>Training profile mode</span>
                     <input value="single encoder profile" disabled />
                   </label>
                 </div>
