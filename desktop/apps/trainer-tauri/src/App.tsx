@@ -1197,7 +1197,7 @@ export default function App() {
                     <input value={liveProfileDraft()} onInput={(e) => setLiveProfileDraft(e.currentTarget.value)} />
                   </label>
                   <label title="Encoder family to tune live.">
-                    Encoder
+                    <span>Encoder</span>
                     <select value={selectedEncoder()} onInput={(e) => setSelectedEncoder(e.currentTarget.value)}>
                       <option value="h264">h264</option>
                       <option value="h265">h265</option>
