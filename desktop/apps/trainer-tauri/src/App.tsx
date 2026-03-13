@@ -143,7 +143,6 @@ export default function App() {
   const hudSeries = createMemo(() => parseHudSeries(tail()?.lines || []));
   const liveStages = createMemo(() => parseLiveStages(tail()?.lines || []));
   const currentChildPreset = createMemo(() => parseCurrentChildPreset(tail()?.lines || []));
-  const hasLiveSamples = createMemo(() => hudSeries().score.length > 0 || hudSeries().present.length > 0);
 
   const hardBlockers = createMemo(() => {
     const problems: string[] = [];
