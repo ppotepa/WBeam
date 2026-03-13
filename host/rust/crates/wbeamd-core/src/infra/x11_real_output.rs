@@ -59,6 +59,7 @@ struct EvdiModuleStatus {
     loaded: bool,
 }
 
+#[allow(clippy::cognitive_complexity)]
 pub fn probe(is_remote: bool) -> X11RealOutputProbe {
     if policy_flag_enabled("DISABLE_REAL_OUTPUT_BACKEND") {
         return probe_unsupported_missing(
@@ -644,6 +645,7 @@ fn restore_previous_fb(handle: &X11RealOutputHandle, display: &str, xauth: Optio
     let _ = xrandr(&["--fb", &format!("{w}x{h}")], display, xauth);
 }
 
+#[allow(clippy::cognitive_complexity)]
 fn parse_outputs(raw: &str) -> Vec<OutputInfo> {
     let mut out = Vec::new();
     let mut current: Option<OutputInfo> = None;
