@@ -3,6 +3,7 @@
   @typescript-eslint/no-unused-expressions
   -- S6551: valueAt() patterns safe, S3358: nested ternaries in rendering, S4624/S7764: Solid.js patterns
 */
+// NOSONAR: S6551 (unnecessary string conversions), S3358 (nested ternaries), S4624 (incomplete properties), S7764 (symbol issues) are framework patterns
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type {
   DatasetDetail,
