@@ -353,7 +353,7 @@ public final class H264TcpPlayer {
         Socket current = socket;
         socket = null;
         if (current != null) {
-            try { current.close(); } catch (IOException ignored) {}
+            try { current.close(); } catch (IOException ignored) { /* best-effort cleanup */ }
         }
     }
 
