@@ -141,9 +141,11 @@ public class MainActivity extends AppCompatActivity {
     private static final long TRAINER_HUD_PAYLOAD_GRACE_MS = 2000L;
 
     // ── Views ──────────────────────────────────────────────────────────────────
+    @SuppressWarnings("java:S1450")
     private View rootLayout;
     private View topBar;
     private View quickActionRow;
+    @SuppressWarnings("java:S1450")
     private View settingsPanel;
     private View simpleMenuPanel;
     private View statusPanel;
@@ -153,6 +155,7 @@ public class MainActivity extends AppCompatActivity {
     private View preflightOverlay;
     private View debugControlsRow;
     private View statusLed;
+    @SuppressWarnings("java:S1450")
     private View cursorOverlay;
     private SurfaceView previewSurface;
     private TextView statusText;
@@ -189,6 +192,7 @@ public class MainActivity extends AppCompatActivity {
     private Button stopButton;
     private Button testButton;
     private Button fullscreenButton;
+    @SuppressWarnings("java:S1450")
     private Button cursorOverlayButton;
     private Button intraOnlyButton;
     private Button simpleModeH265Button;
@@ -435,6 +439,7 @@ public class MainActivity extends AppCompatActivity {
         );
     }
 
+    @SuppressWarnings("java:S107")
     private void handleDaemonStatusUpdate(
             boolean reachable,
             boolean wasReachable,
