@@ -27,6 +27,7 @@ import okhttp3.ResponseBody;
  */
 public final class HostApiClient {
     private static final String LOOPBACK_HOST = "127.0.0.1";
+    private static final String LOCAL_STATE_STREAMING = "STREAMING";
 
     private static final String API_IMPL = BuildConfig.WBEAM_API_IMPL == null
             ? "host"
@@ -300,7 +301,7 @@ public final class HostApiClient {
             if (LocalApiState.firstFlowAtSec == 0L) {
                 LocalApiState.firstFlowAtSec = nowSec;
             }
-            LocalApiState.state = "STREAMING";
+            LocalApiState.state = LOCAL_STATE_STREAMING;
             return;
         }
         if (!"IDLE".equals(LocalApiState.state)) {
@@ -310,7 +311,7 @@ public final class HostApiClient {
     }
 
     private static void refreshLocalApiState(long nowSec, long nowMs) {
-        if ("STREAMING".equals(LocalApiState.state)) {
+        if (LOCAL_STATE_STREAMING.equals(LocalApiState.state)) {
             long idleMs = LocalApiState.lastFlowAtMs > 0L
                     ? (nowMs - LocalApiState.lastFlowAtMs)
                     : Long.MAX_VALUE;
@@ -346,7 +347,7 @@ public final class HostApiClient {
         metrics.put("reconnects", 0);
         metrics.put("bitrate_actual_bps", LocalApiState.latestRecvBps);
         long streamUptimeSec = 0L;
-        if ("STREAMING".equals(LocalApiState.state)
+        if (LOCAL_STATE_STREAMING.equals(LocalApiState.state)
                 && LocalApiState.firstFlowAtSec > 0L
                 && nowSec >= LocalApiState.firstFlowAtSec) {
             streamUptimeSec = nowSec - LocalApiState.firstFlowAtSec;
