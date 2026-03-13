@@ -26,7 +26,13 @@ SOAK_FPS="${SOAK_FPS:-}"
 SOAK_BITRATE_KBPS="${SOAK_BITRATE_KBPS:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+if [[ -f "$SCRIPT_DIR/../../wbeam" ]]; then
+  ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+elif [[ -f "$SCRIPT_DIR/../../../wbeam" ]]; then
+  ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+else
+  ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+fi
 LOG_DIR="${WBEAM_SOAK_LOG_DIR:-$ROOT_DIR/host/rust/logs/soak}"
 mkdir -p "$LOG_DIR"
 TS="$(date +%Y%m%d-%H%M%S)"

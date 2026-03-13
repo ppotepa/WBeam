@@ -140,19 +140,9 @@ export function createSessionManager(api: HostApiManager) {
     if (!silent) setRefreshing(true);
     try {
       const [serviceChanged, probeChanged] = await Promise.all([loadServiceStatus(), loadHostProbe()]);
-      const canProbeDevices = service().active;
-      let devicesChanged = false;
-      if (canProbeDevices) {
-        devicesChanged = await loadDevices(loading(), forceDevices);
-      } else if (devices().length > 0 || hostVersion() || daemonVersion() || deviceActionBusy().length > 0) {
-        setDevices([]);
-        setHostVersion("");
-        setDaemonVersion("");
-        setDeviceActionBusy([]);
-        lastDevicesKey = "";
-        lastVersionKey = "";
-        devicesChanged = true;
-      }
+      // Keep ADB device list visible even when daemon service is stopped.
+      // Connect actions remain gated elsewhere by service/daemon readiness.
+      const devicesChanged = await loadDevices(loading(), forceDevices);
       if (serviceChanged || probeChanged || devicesChanged) {
         setUpdatedAt(new Date().toLocaleTimeString());
       }

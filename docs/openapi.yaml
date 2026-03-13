@@ -5,7 +5,8 @@ info:
   version: "1.0.0"
   description: >
     HTTP control API for wbeamd-rust (port 5001 over ADB USB reverse tunnel).
-    All endpoints are served at both `/v1/<path>` and `/<path>` (legacy alias).
+    Canonical contract is documented under `/v1/*`.
+    Legacy non-`/v1` aliases exist in implementation for compatibility, but are not listed as primary paths here.
 
 servers:
   - url: http://127.0.0.1:5001
@@ -18,6 +19,10 @@ tags:
     description: Stream lifecycle commands
   - name: telemetry
     description: Metrics ingestion and reporting
+  - name: diagnostics
+    description: Host diagnostics and virtual display checks
+  - name: trainer
+    description: Trainer run, profile, dataset, and live-control API
 
 paths:
   /v1/status:
@@ -158,6 +163,400 @@ paths:
               schema:
                 $ref: "#/components/schemas/ClientMetricsResponse"
 
+  /v1/host-probe:
+    get:
+      operationId: getHostProbe
+      tags: [diagnostics]
+      summary: Host capability probe
+      responses:
+        "200":
+          description: Host probe result
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /v1/speedtest:
+    get:
+      operationId: getSpeedtest
+      tags: [diagnostics]
+      summary: Local speed test and throughput diagnostics
+      responses:
+        "200":
+          description: Speed test result
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /v1/virtual/probe:
+    get:
+      operationId: getVirtualProbe
+      tags: [diagnostics]
+      summary: Probe virtual display support
+      responses:
+        "200":
+          description: Virtual display probe result
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /v1/virtual/doctor:
+    get:
+      operationId: getVirtualDoctor
+      tags: [diagnostics]
+      summary: Diagnose virtual display setup
+      responses:
+        "200":
+          description: Virtual display diagnostic result
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /v1/client-hello:
+    post:
+      operationId: postClientHello
+      tags: [telemetry]
+      summary: Client capability hello and handshake metadata
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Hello accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /v1/trainer/preflight:
+    post:
+      operationId: postTrainerPreflight
+      tags: [trainer]
+      summary: Trainer preflight checks (device, adb, health)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Preflight result
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /v1/trainer/start:
+    post:
+      operationId: postTrainerStart
+      tags: [trainer]
+      summary: Start trainer run
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Trainer run started
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /v1/trainer/stop:
+    post:
+      operationId: postTrainerStop
+      tags: [trainer]
+      summary: Stop trainer run
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Trainer run stop result
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /v1/trainer/runs:
+    get:
+      operationId: getTrainerRuns
+      tags: [trainer]
+      summary: List trainer runs
+      responses:
+        "200":
+          description: Trainer runs list
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /v1/trainer/runs/{run_id}:
+    get:
+      operationId: getTrainerRun
+      tags: [trainer]
+      summary: Get trainer run details
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Trainer run details
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /v1/trainer/runs/{run_id}/tail:
+    get:
+      operationId: getTrainerRunTail
+      tags: [trainer]
+      summary: Tail trainer run logs/output
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Trainer run tail
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /v1/trainer/profiles:
+    get:
+      operationId: getTrainerProfiles
+      tags: [trainer]
+      summary: List trainer profiles
+      responses:
+        "200":
+          description: Trainer profile list
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /v1/trainer/profiles/{profile_name}:
+    get:
+      operationId: getTrainerProfile
+      tags: [trainer]
+      summary: Get trainer profile details
+      parameters:
+        - name: profile_name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Trainer profile details
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /v1/trainer/datasets:
+    get:
+      operationId: getTrainerDatasets
+      tags: [trainer]
+      summary: List trainer datasets
+      responses:
+        "200":
+          description: Trainer dataset list
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /v1/trainer/datasets/{run_id}:
+    get:
+      operationId: getTrainerDataset
+      tags: [trainer]
+      summary: Get trainer dataset details by run id
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Trainer dataset details
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /v1/trainer/datasets/{run_id}/find-optimal:
+    post:
+      operationId: postTrainerDatasetFindOptimal
+      tags: [trainer]
+      summary: Compute/find optimal profile from dataset
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Optimal profile computation result
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /v1/trainer/devices:
+    get:
+      operationId: getTrainerDevices
+      tags: [trainer]
+      summary: List trainer-visible devices
+      responses:
+        "200":
+          description: Trainer devices list
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /v1/trainer/diagnostics:
+    get:
+      operationId: getTrainerDiagnostics
+      tags: [trainer]
+      summary: Trainer diagnostics report
+      responses:
+        "200":
+          description: Trainer diagnostics data
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /v1/trainer/live/status:
+    get:
+      operationId: getTrainerLiveStatus
+      tags: [trainer]
+      summary: Get trainer live mode status
+      responses:
+        "200":
+          description: Live mode status
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /v1/trainer/live/start:
+    post:
+      operationId: postTrainerLiveStart
+      tags: [trainer]
+      summary: Start trainer live mode session
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Live mode start result
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /v1/trainer/live/apply:
+    post:
+      operationId: postTrainerLiveApply
+      tags: [trainer]
+      summary: Apply trainer live mode config patch
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Live mode apply result
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /v1/trainer/live/save-profile:
+    post:
+      operationId: postTrainerLiveSaveProfile
+      tags: [trainer]
+      summary: Save current live mode config as profile
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Profile save result
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
 components:
   schemas:
 
@@ -193,13 +592,14 @@ components:
       properties:
         profile:
           type: string
-          enum: [lowlatency, balanced, ultra]
+          enum: [baseline]
+          description: Canonical runtime profile. Legacy aliases are normalized to baseline at input boundaries.
         encoder:
           type: string
-          enum: [auto, nvenc, openh264]
+          enum: [h264, h265, rawpng]
         cursor_mode:
           type: string
-          enum: [hidden, overlay, capture]
+          enum: [hidden, embedded, metadata]
         size:
           type: string
           example: "1920x1080"
@@ -220,12 +620,14 @@ components:
       properties:
         profile:
           type: string
-          enum: [lowlatency, balanced, ultra]
+          enum: [baseline]
+          description: Canonical runtime profile. Legacy aliases may be accepted and normalized to baseline.
         encoder:
           type: string
-          enum: [auto, nvenc, openh264]
+          enum: [h264, h265, rawpng]
         cursor_mode:
           type: string
+          enum: [hidden, embedded, metadata]
         size:
           type: string
           example: "1920x1080"
@@ -433,7 +835,7 @@ components:
               type: object
               additionalProperties:
                 $ref: "#/components/schemas/ActiveConfig"
-              description: Named preset map (lowlatency, balanced, ultra)
+              description: Named preset map keyed by canonical profile IDs (baseline)
             valid:
               $ref: "#/components/schemas/ValidValues"
 

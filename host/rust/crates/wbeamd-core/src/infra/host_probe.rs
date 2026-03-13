@@ -7,8 +7,7 @@
 use std::env;
 use std::fs;
 use std::path::Path;
-
-use nix::libc;
+use std::process::Command;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostOs {
@@ -259,7 +258,9 @@ fn detect_session(os: HostOs) -> SessionKind {
 }
 
 fn has_wayland_socket() -> bool {
-    let uid = unsafe { libc::geteuid() };
+    let Some(uid) = current_uid() else {
+        return false;
+    };
     if uid == 0 {
         return false;
     }
@@ -277,6 +278,20 @@ fn has_wayland_socket() -> bool {
         }
     }
     false
+}
+
+fn current_uid() -> Option<u32> {
+    if let Some(uid) = env::var("UID").ok().and_then(|raw| raw.parse::<u32>().ok()) {
+        return Some(uid);
+    }
+    let out = Command::new("id").arg("-u").output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse::<u32>()
+        .ok()
 }
 
 fn has_x11_socket() -> bool {

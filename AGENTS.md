@@ -1,6 +1,6 @@
 # WBeam Agent Handbook
 
-Last updated: 2026-03-11
+Last updated: 2026-03-12
 Primary entrypoint: `./wbeam`
 
 ## 1. Project Purpose
@@ -23,10 +23,20 @@ If process rules conflict elsewhere, follow `docs/agents.workflow.md`.
 Canonical repository layout and migration map:
 - `docs/repo-structure.md`
 
-Branch naming note:
-- repo currently uses `v0.1.1` as version-line branch naming,
-- feature branch naming should follow `feature/v0.1.1-<slug>`,
-- for the active sprint, follow current team instruction and keep branch usage explicit in PR/MR descriptions.
+Branch and issue workflow note:
+- repo uses version-line branches (currently `v0.1.1`),
+- working branch format is:
+  - `v0.1.1/e<epic>/i<issue>-<slug>`
+  - example: `v0.1.1/e30/i31-hygiene`
+- execution model:
+  - one issue = one branch = one PR/MR,
+  - child issues are executed sequentially inside the active epic,
+  - close child issue only after merged PR/MR,
+  - close epic only after all child issues are closed.
+- commit message convention:
+  - `e<epic>-i<issue>: <short action>`
+- PR/MR title convention:
+  - `[e<epic>-i<issue>] <short title>`
 
 ## 3. Canonical Entrypoints
 
@@ -58,17 +68,24 @@ Rules:
 ### 4.2 Streamer Pipeline
 
 - Pipeline assembly:
-  - `host/rust/crates/wbeamd-streamer/src/pipeline.rs`
+  - `host/rust/crates/wbeamd-streamer/src/pipeline/builder.rs`
+  - `host/rust/crates/wbeamd-streamer/src/pipeline/profile.rs`
 - Capture/runtime source:
-  - `host/rust/crates/wbeamd-streamer/src/capture.rs`
+  - `host/rust/crates/wbeamd-streamer/src/capture/mod.rs`
+  - `host/rust/crates/wbeamd-streamer/src/capture/portal.rs`
+  - `host/rust/crates/wbeamd-streamer/src/capture/backend/wayland.rs`
+  - `host/rust/crates/wbeamd-streamer/src/capture/backend/x11.rs`
+- Packetization:
+  - `host/rust/crates/wbeamd-streamer/src/packetize/mod.rs`
 - Framed transport:
-  - `host/rust/crates/wbeamd-streamer/src/transport.rs`
+  - `host/rust/crates/wbeamd-streamer/src/transport/mod.rs`
+  - `host/rust/crates/wbeamd-streamer/src/transport/sender.rs`
 - Encoder modular split:
-  - `host/rust/crates/wbeamd-streamer/src/encoder/mod.rs`
-  - `host/rust/crates/wbeamd-streamer/src/encoder/selector.rs`
-  - `host/rust/crates/wbeamd-streamer/src/encoder/h264.rs`
-  - `host/rust/crates/wbeamd-streamer/src/encoder/h265.rs`
-  - `host/rust/crates/wbeamd-streamer/src/encoder/rawpng.rs`
+  - `host/rust/crates/wbeamd-streamer/src/encode/mod.rs`
+  - `host/rust/crates/wbeamd-streamer/src/encode/selector.rs`
+  - `host/rust/crates/wbeamd-streamer/src/encode/h264.rs`
+  - `host/rust/crates/wbeamd-streamer/src/encode/h265.rs`
+  - `host/rust/crates/wbeamd-streamer/src/encode/rawpng.rs`
 
 ### 4.3 Desktop Apps
 
@@ -126,9 +143,16 @@ Core runtime:
 - `GET /v1/health`
 - `GET /v1/host-probe`
 - `GET /v1/status`
+- `GET /v1/presets`
 - `GET /v1/metrics`
+- `GET /v1/speedtest`
+- `GET /v1/virtual/probe`
+- `GET /v1/virtual/doctor`
 - `POST /v1/start`
 - `POST /v1/stop`
+- `POST /v1/apply`
+- `POST /v1/client-hello`
+- `POST /v1/client-metrics`
 
 Trainer run management:
 - `POST /v1/trainer/preflight`
@@ -312,15 +336,7 @@ WBeam/
   config/
   docs/
   logs/
-  proto/
-  proto_x11/
   scripts/
-  src/                  # compatibility aliases only
-    apps -> ../desktop/apps
-    host -> ../host
-    protocol -> ../shared/protocol
-    compat -> ../shared/compat
-    domains/training -> ../../host/training
 ```
 
 ## 15. Agent Guardrails

@@ -2,7 +2,6 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-STRICT="${WBEAM_LAYOUT_STRICT:-0}"
 failed=0
 
 require_path() {
@@ -14,7 +13,6 @@ require_path() {
 }
 
 echo "[layout] root=${ROOT}"
-echo "[layout] strict=${STRICT}"
 
 required_paths=(
   "android/README.md"
@@ -31,23 +29,15 @@ for rel in "${required_paths[@]}"; do
 done
 
 legacy_paths=(
-  "src/host"
-  "src/apps"
-  "src/protocol"
-  "src/domains"
-  "src/compat"
+  "src"
   "proto"
   "proto_x11"
 )
 
 for rel in "${legacy_paths[@]}"; do
-  if [[ -d "${ROOT}/${rel}" ]]; then
-    if [[ "${STRICT}" == "1" ]]; then
-      echo "[layout][ERROR] legacy path still present in strict mode: ${rel}"
-      failed=1
-    else
-      echo "[layout][INFO] legacy migration source still present: ${rel}"
-    fi
+  if [[ -e "${ROOT}/${rel}" ]]; then
+    echo "[layout][ERROR] legacy compatibility wrapper still present: ${rel}"
+    failed=1
   fi
 done
 

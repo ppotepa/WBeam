@@ -46,7 +46,6 @@ Groups:
   host      build | run | debug | status | down | probe
   daemon    up | down | status   (alias for host)
   android   build | install | launch | deploy | deploy-all | build-release | install-release | deploy-release
-  x11proto  probe-host | doctor | status | start | stop | smoke | acceptance | android-build | android-deploy
   train     wizard
   deps      virtual check [--json] | virtual install [--dry-run] [--yes]
   version   new | current | doctor
@@ -68,11 +67,7 @@ Examples:
   ./wbeam android build-release  # ./gradlew assembleRelease
   ./wbeam android install-release
   ./wbeam android deploy-release
-  ./wbeam x11proto doctor --serial <serial> --stream-port 5002
   ./wbeam train wizard
-  ./wbeam x11proto smoke --serial <serial> --stream-port 5002
-  ./wbeam x11proto acceptance --serial <serial> --stream-port 5002
-  ./wbeam x11proto android-deploy
   ./wbeam deps virtual check --json
   ./wbeam deps virtual install --dry-run
   ./wbeam version doctor         # diagnose host/APK version mismatch
@@ -2041,30 +2036,6 @@ deps_virtual_install() {
   "$ROOT_DIR/scripts/virtual-deps-install.sh" "$@"
 }
 
-x11proto_run() {
-  "$ROOT_DIR/proto_x11/run.sh" "$@"
-}
-
-x11proto_android_build() {
-  (
-    ANDROID_PACKAGE="com.wbeam.x11"
-    ANDROID_ACTIVITY="com.wbeam.MainActivity"
-    export WBEAM_ANDROID_APP_ID_SUFFIX=".x11"
-    export WBEAM_ANDROID_APP_NAME="WBeam X11"
-    android_build
-  )
-}
-
-x11proto_android_deploy() {
-  (
-    ANDROID_PACKAGE="com.wbeam.x11"
-    ANDROID_ACTIVITY="com.wbeam.MainActivity"
-    export WBEAM_ANDROID_APP_ID_SUFFIX=".x11"
-    export WBEAM_ANDROID_APP_NAME="WBeam X11"
-    android_deploy
-  )
-}
-
 train_wizard() {
   require_cmd python3
   "$ROOT_DIR/host/training/wizard.py" "$@"
@@ -2118,15 +2089,6 @@ case "$group" in
       install-release|release-install) android_install_release ;;
       deploy-release|release-deploy)   android_deploy_release ;;
       *)              print_help; exit 1 ;;
-    esac
-    ;;
-  x11proto)
-    case "$cmd" in
-      probe-host|probe) shift 2; x11proto_run probe-host "$@" ;;
-      doctor|status|start|stop|smoke|acceptance) shift 2; x11proto_run "$cmd" "$@" ;;
-      android-build) x11proto_android_build ;;
-      android-deploy) x11proto_android_deploy ;;
-      *) print_help; exit 1 ;;
     esac
     ;;
   train)

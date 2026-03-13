@@ -1,12 +1,14 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
+#[cfg(unix)]
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+#[cfg(unix)]
 use nix::libc;
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -345,79 +347,69 @@ fn runtime_config_path_for_session(root: &Path, session_label: Option<&str>) -> 
 }
 
 fn load_presets_from_training_files(root: &Path) -> Option<BTreeMap<String, ActiveConfig>> {
-    // New canonical path: config/training/profiles.json
-    // Legacy fallback: proto/config/profiles.json
-    let candidates = [
-        root.join("config/training/profiles.json"),
-        root.join("proto/config/profiles.json"),
-    ];
+    let path = root.join("config/training/profiles.json");
 
-    for path in candidates {
-        let raw = match std::fs::read_to_string(&path) {
-            Ok(v) => v,
-            Err(e) => {
-                debug!("presets: cannot read {}: {e}", path.display());
-                continue;
-            }
-        };
-        let value: serde_json::Value = match serde_json::from_str(&raw) {
-            Ok(v) => v,
-            Err(e) => {
-                warn!("presets: invalid JSON in {}: {e}", path.display());
-                continue;
-            }
-        };
-        let Some(profiles) = value.get("profiles").and_then(|v| v.as_object()) else {
-            warn!("presets: missing .profiles object in {}", path.display());
-            continue;
-        };
-
-        let mut out = BTreeMap::new();
-        for (name, node) in profiles {
-            let values = node.get("values").and_then(|v| v.as_object());
-            let size = values
-                .and_then(|v| v.get("PROTO_CAPTURE_SIZE"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("1280x720")
-                .to_string();
-            let fps = values
-                .and_then(|v| v.get("PROTO_CAPTURE_FPS"))
-                .and_then(|v| v.as_u64())
-                .unwrap_or(60) as u32;
-            let bitrate_kbps = values
-                .and_then(|v| v.get("PROTO_CAPTURE_BITRATE_KBPS"))
-                .and_then(|v| v.as_u64())
-                .unwrap_or(10_000) as u32;
-
-            out.insert(
-                name.clone(),
-                ActiveConfig {
-                    profile: name.clone(),
-                    encoder: "h264".to_string(),
-                    cursor_mode: "embedded".to_string(),
-                    size,
-                    fps,
-                    bitrate_kbps,
-                    debug_fps: 0,
-                    intra_only: false,
-                },
-            );
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(v) => v,
+        Err(e) => {
+            debug!("presets: cannot read {}: {e}", path.display());
+            return None;
         }
-
-        if out.is_empty() {
-            warn!("presets: no profiles loaded from {}", path.display());
-            continue;
+    };
+    let value: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!("presets: invalid JSON in {}: {e}", path.display());
+            return None;
         }
-        info!(
-            "presets: loaded {} profile(s) from {}",
-            out.len(),
-            path.display()
+    };
+    let Some(profiles) = value.get("profiles").and_then(|v| v.as_object()) else {
+        warn!("presets: missing .profiles object in {}", path.display());
+        return None;
+    };
+
+    let mut out = BTreeMap::new();
+    for (name, node) in profiles {
+        let values = node.get("values").and_then(|v| v.as_object());
+        let size = values
+            .and_then(|v| v.get("PROTO_CAPTURE_SIZE"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("1280x720")
+            .to_string();
+        let fps = values
+            .and_then(|v| v.get("PROTO_CAPTURE_FPS"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(60) as u32;
+        let bitrate_kbps = values
+            .and_then(|v| v.get("PROTO_CAPTURE_BITRATE_KBPS"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(10_000) as u32;
+
+        out.insert(
+            name.clone(),
+            ActiveConfig {
+                profile: name.clone(),
+                encoder: "h264".to_string(),
+                cursor_mode: "embedded".to_string(),
+                size,
+                fps,
+                bitrate_kbps,
+                debug_fps: 0,
+                intra_only: false,
+            },
         );
-        return Some(out);
     }
 
-    warn!("presets: no training profiles found in config/training or proto/config");
-    None
+    if out.is_empty() {
+        warn!("presets: no profiles loaded from {}", path.display());
+        return None;
+    }
+    info!(
+        "presets: loaded {} profile(s) from {}",
+        out.len(),
+        path.display()
+    );
+    Some(out)
 }
 
 fn default_config_from_presets(presets: &BTreeMap<String, ActiveConfig>) -> ActiveConfig {
@@ -518,13 +510,24 @@ impl Inner {
 }
 
 pub struct InstanceLock {
-    file: File,
+    file: Option<File>,
+    #[cfg(windows)]
+    path: PathBuf,
 }
 
 impl Drop for InstanceLock {
     fn drop(&mut self) {
-        unsafe {
-            libc::flock(self.file.as_raw_fd(), libc::LOCK_UN);
+        #[cfg(unix)]
+        if let Some(file) = self.file.as_ref() {
+            unsafe {
+                libc::flock(file.as_raw_fd(), libc::LOCK_UN);
+            }
+        }
+        #[cfg(windows)]
+        {
+            // Close handle before cleanup, otherwise Windows keeps the file in-use.
+            self.file.take();
+            let _ = std::fs::remove_file(&self.path);
         }
     }
 }
@@ -569,24 +572,73 @@ impl DaemonCore {
     }
 
     pub fn acquire_lock(path: &Path) -> Result<InstanceLock, CoreError> {
-        let mut file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .open(path)
-            .map_err(|e| CoreError::Io(e.to_string()))?;
-
-        let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-        if rc != 0 {
-            return Err(CoreError::LockHeld(path.display().to_string()));
-        }
+        #[cfg(unix)]
+        let mut file = {
+            let file = OpenOptions::new()
+                .create(true)
+                .read(true)
+                .write(true)
+                .open(path)
+                .map_err(|e| CoreError::Io(e.to_string()))?;
+            let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+            if rc != 0 {
+                return Err(CoreError::LockHeld(path.display().to_string()));
+            }
+            file
+        };
+        #[cfg(windows)]
+        let mut file = {
+            match OpenOptions::new()
+                .create_new(true)
+                .read(true)
+                .write(true)
+                .open(path)
+            {
+                Ok(file) => file,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    return Err(CoreError::LockHeld(path.display().to_string()));
+                }
+                Err(e) => return Err(CoreError::Io(e.to_string())),
+            }
+        };
 
         let pid = std::process::id();
         file.set_len(0).map_err(|e| CoreError::Io(e.to_string()))?;
         file.write_all(pid.to_string().as_bytes())
             .map_err(|e| CoreError::Io(e.to_string()))?;
 
-        Ok(InstanceLock { file })
+        Ok(InstanceLock {
+            file: Some(file),
+            #[cfg(windows)]
+            path: path.to_path_buf(),
+        })
+    }
+
+    fn session_suffix(&self) -> String {
+        self.target_serial
+            .as_deref()
+            .unwrap_or("default")
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                    ch
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>()
+    }
+
+    fn trainer_active_marker_path(&self) -> PathBuf {
+        PathBuf::from(format!(
+            "/tmp/wbeam-trainer-active-{}-{}.flag",
+            self.session_suffix(),
+            self.stream_port
+        ))
+    }
+
+    fn trainer_run_active(&self) -> bool {
+        self.trainer_active_marker_path().exists()
     }
 
     pub fn new(root: PathBuf, stream_port: u16, control_port: u16) -> Self {
@@ -930,6 +982,7 @@ impl DaemonCore {
 
         let mut restart_cfg: Option<ActiveConfig> = None;
         let action;
+        let trainer_run_active = self.trainer_run_active();
 
         {
             let mut inner = self.inner.lock().await;
@@ -997,7 +1050,7 @@ impl DaemonCore {
             let forced_no_present_restart = no_present_restart_ready
                 && inner.no_present_streak >= NO_PRESENT_RESTART_STREAK_REQUIRED;
 
-            if forced_no_present_restart {
+            if forced_no_present_restart && !trainer_run_active {
                 inner.no_present_streak = 0;
                 inner.last_no_present_recovery_at = Some(now);
                 inner.metrics.restart_count = inner.metrics.restart_count.saturating_add(1);
@@ -1020,6 +1073,16 @@ impl DaemonCore {
                     inner.run_id, inner.metrics.adaptive_reason
                 );
                 restart_cfg = Some(inner.active_config.clone());
+            } else if forced_no_present_restart && trainer_run_active {
+                inner.no_present_streak = 0;
+                inner.metrics.adaptive_level = inner.adaptation_level;
+                inner.metrics.adaptive_action = "recover-hold-training".to_string();
+                inner.metrics.adaptive_reason = format!(
+                    "training run active; suppress no-present restart present_fps={:.1} recv_fps={:.1}",
+                    client.present_fps, client.recv_fps
+                );
+                inner.last_error =
+                    "training run active: no-present recovery restart suppressed".to_string();
             } else if !can_adapt {
                 inner.high_pressure_streak = 0;
                 inner.low_pressure_streak = 0;
@@ -1090,11 +1153,22 @@ impl DaemonCore {
                     let target_cfg =
                         config_for_level(&inner.baseline_config, inner.adaptation_level);
                     if target_cfg != inner.active_config && inner.current_pid.is_some() {
-                        if self.allow_live_adaptive_restart {
+                        if self.allow_live_adaptive_restart && !trainer_run_active {
                             inner.active_config = target_cfg.clone();
                             inner.metrics.restart_count =
                                 inner.metrics.restart_count.saturating_add(1);
                             restart_cfg = Some(target_cfg);
+                        } else if trainer_run_active {
+                            inner.metrics.adaptive_action =
+                                format!("{}-hold-training", inner.metrics.adaptive_action);
+                            inner.metrics.adaptive_reason = format!(
+                                "{} | training run active; suppress restart size={} fps={} bitrate={}",
+                                reason, target_cfg.size, target_cfg.fps, target_cfg.bitrate_kbps
+                            );
+                            inner.last_error = format!(
+                                "adaptive hold during training L{}",
+                                inner.adaptation_level
+                            );
                         } else {
                             inner.metrics.adaptive_action =
                                 format!("{}-pending", inner.metrics.adaptive_action);
