@@ -19,6 +19,10 @@ public final class StatusPoller {
 
     private static final String TAG = "WBeamStatusPoller";
     private static final String API_SUFFIX = " api=";
+    private static final String TRAINER_HUD_ACTIVE = "trainer_hud_active";
+    private static final String TRAINER_HUD_TEXT = "trainer_hud_text";
+    private static final String TRAINER_HUD_JSON = "trainer_hud_json";
+    private static final String CONNECTION_MODE = "connection_mode";
 
     // 5 Hz telemetry/status polling for responsive HUD updates.
     private static final long STATUS_POLL_MS           = 200L;
@@ -60,8 +64,7 @@ public final class StatusPoller {
         }
     };
 
-    // ── Callback interface ────────────────────────────────────────────────────
-
+    @SuppressWarnings("java:S107")
     public interface Callbacks {
         /** Called on UI thread after a successful poll. */
         void onDaemonStatusUpdate(
@@ -282,17 +285,17 @@ public final class StatusPoller {
             merged = new JSONObject();
         }
 
-        if (payload.has("trainer_hud_active")) {
-            putQuietly(merged, "trainer_hud_active", payload.optBoolean("trainer_hud_active", false));
+        if (payload.has(TRAINER_HUD_ACTIVE)) {
+            putQuietly(merged, TRAINER_HUD_ACTIVE, payload.optBoolean(TRAINER_HUD_ACTIVE, false));
         }
-        if (payload.has("trainer_hud_text")) {
-            putQuietly(merged, "trainer_hud_text", payload.optString("trainer_hud_text", ""));
+        if (payload.has(TRAINER_HUD_TEXT)) {
+            putQuietly(merged, TRAINER_HUD_TEXT, payload.optString(TRAINER_HUD_TEXT, ""));
         }
-        if (payload.has("trainer_hud_json")) {
-            putQuietly(merged, "trainer_hud_json", payload.opt("trainer_hud_json"));
+        if (payload.has(TRAINER_HUD_JSON)) {
+            putQuietly(merged, TRAINER_HUD_JSON, payload.opt(TRAINER_HUD_JSON));
         }
-        if (payload.has("connection_mode")) {
-            putQuietly(merged, "connection_mode", payload.optString("connection_mode", "live"));
+        if (payload.has(CONNECTION_MODE)) {
+            putQuietly(merged, CONNECTION_MODE, payload.optString(CONNECTION_MODE, "live"));
         }
         return merged;
     }

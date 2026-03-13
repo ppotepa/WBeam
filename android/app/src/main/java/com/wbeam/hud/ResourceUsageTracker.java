@@ -11,6 +11,12 @@ import java.util.Locale;
  * - call {@link #buildRowsHtml()} to render current compact resource rows.
  */
 public final class ResourceUsageTracker {
+    private static final String STATE_RISK = "state-risk";
+    private static final String STATE_WARN = "state-warn";
+    private static final String STATE_OK = "state-ok";
+    private static final String SPARK_CLOSE = "</span><div class='spark'>";
+    private static final String ROW_CLOSE = "</div></div>";
+    
     private long usageSampleLastRealtimeMs = 0L;
     private long usageSampleLastCpuMs = 0L;
     private double usageCpuPct = 0.0;
@@ -58,29 +64,29 @@ public final class ResourceUsageTracker {
         
         String cpuTone;
         if (usageCpuPct > 85.0) {
-            cpuTone = "state-risk";
+            cpuTone = STATE_RISK;
         } else if (usageCpuPct > 65.0) {
-            cpuTone = "state-warn";
+            cpuTone = STATE_WARN;
         } else {
-            cpuTone = "state-ok";
+            cpuTone = STATE_OK;
         }
         
         String memTone;
         if (memPct > 88.0) {
-            memTone = "state-risk";
+            memTone = STATE_RISK;
         } else if (memPct > 70.0) {
-            memTone = "state-warn";
+            memTone = STATE_WARN;
         } else {
-            memTone = "state-ok";
+            memTone = STATE_OK;
         }
         
         String gpuTone;
         if (usageGpuPct > 90.0) {
-            gpuTone = "state-risk";
+            gpuTone = STATE_RISK;
         } else if (usageGpuPct > 70.0) {
-            gpuTone = "state-warn";
+            gpuTone = STATE_WARN;
         } else {
-            gpuTone = "state-ok";
+            gpuTone = STATE_OK;
         }
 
         StringBuilder html = new StringBuilder();
@@ -88,23 +94,23 @@ public final class ResourceUsageTracker {
                 .append(cpuTone)
                 .append("'>")
                 .append(String.format(Locale.US, "%.0f%%", usageCpuPct))
-                .append("</span><div class='spark'>")
+                .append(SPARK_CLOSE)
                 .append(buildSparkBarsHtml(usageCpuSeries, cpuTone))
-                .append("</div></div>");
+                .append(ROW_CLOSE);
         html.append("<div class='res-row'><span class='rk'>MEM</span><span class='rv ")
                 .append(memTone)
                 .append("'>")
                 .append(String.format(Locale.US, "%.0f MB", usageMemMb))
-                .append("</span><div class='spark'>")
+                .append(SPARK_CLOSE)
                 .append(buildSparkBarsHtml(usageMemSeries, memTone))
-                .append("</div></div>");
+                .append(ROW_CLOSE);
         html.append("<div class='res-row'><span class='rk'>GPU*</span><span class='rv ")
                 .append(gpuTone)
                 .append("'>")
                 .append(String.format(Locale.US, "%.0f%%", usageGpuPct))
-                .append("</span><div class='spark'>")
+                .append(SPARK_CLOSE)
                 .append(buildSparkBarsHtml(usageGpuSeries, gpuTone))
-                .append("</div></div>");
+                .append(ROW_CLOSE);
         return html.toString();
     }
 
