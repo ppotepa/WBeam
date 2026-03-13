@@ -44,6 +44,7 @@ public final class StartupOverlayModelBuilder {
         public String daemonErrCompact;
     }
 
+    @SuppressWarnings("java:S1104")
     public static final class Model {
         public static final int SS_PENDING = 0;
         public static final int SS_ACTIVE = 1;
@@ -53,7 +54,6 @@ public final class StartupOverlayModelBuilder {
         /**
          * Plain data carrier for startup overlay output model.
          */
-        @SuppressWarnings("java:S1104")
         public int step1State;
         public int step2State;
         public int step3State;

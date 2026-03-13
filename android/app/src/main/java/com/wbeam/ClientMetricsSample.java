@@ -26,6 +26,7 @@ public final class ClientMetricsSample {
     public final long   timestampMs;
     public final long   traceId; // (sessionConnectId<<32)|sampleSeq
 
+    @SuppressWarnings("java:S107")
     public ClientMetricsSample(
             double recvFps,
             double decodeFps,
