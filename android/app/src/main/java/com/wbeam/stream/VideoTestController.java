@@ -26,6 +26,7 @@ public final class VideoTestController {
 
     private static final String TAG = "WBeamVideoTest";
     private static final String RUN_TESTS_LOG_PREFIX = "[RUN TESTS LIVE] ";
+    private static final String STATUS_CONNECTING = "connecting";
     private static final String STATUS_STREAMING = "streaming";
     private static final String STATUS_ERROR = "error";
     private static final String PRESET_HEADER = "preset\n";
@@ -193,7 +194,7 @@ public final class VideoTestController {
         release();
 
         try {
-            callbacks.onStatus("connecting", "RUN TESTS LIVE loading", 0);
+            callbacks.onStatus(STATUS_CONNECTING, "RUN TESTS LIVE loading", 0);
             callbacks.onStatsLine("source: RUN TESTS LIVE | " + presetLine);
 
             MediaPlayer mp = new MediaPlayer();
@@ -254,7 +255,7 @@ public final class VideoTestController {
                 if (mediaPlayer != infoPlayer) return true;
                 if (what == MediaPlayer.MEDIA_INFO_BUFFERING_START) {
                     logWarn("buffering start");
-                    callbacks.onStatus("connecting", "RUN TESTS LIVE buffering", 0);
+                    callbacks.onStatus(STATUS_CONNECTING, "RUN TESTS LIVE buffering", 0);
                     setOverlay("RUN TESTS LIVE LOADING",
                             PRESET_HEADER + cfg.toMultiline(), "phase: buffering");
                 } else if (what == MediaPlayer.MEDIA_INFO_BUFFERING_END) {
@@ -293,7 +294,7 @@ public final class VideoTestController {
             return;
         }
 
-        callbacks.onStatus("connecting", "running USB bandwidth test...", 0);
+        callbacks.onStatus(STATUS_CONNECTING, "running USB bandwidth test...", 0);
         callbacks.onStatsLine(
                 "bandwidth test: downloading random payload from host API");
         callbacks.logInfo(
@@ -392,7 +393,7 @@ public final class VideoTestController {
     private static String uiStateFromDaemonState(String daemonState) {
         if ("STREAMING".equals(daemonState))                            return STATUS_STREAMING;
         if ("STARTING".equals(daemonState)
-                || "RECONNECTING".equals(daemonState))                  return "connecting";
+                || "RECONNECTING".equals(daemonState))                  return STATUS_CONNECTING;
         if ("ERROR".equals(daemonState)
                 || "DISCONNECTED".equals(daemonState))                  return STATUS_ERROR;
         return "idle";
