@@ -119,7 +119,7 @@ def parse_xrandr_outputs(raw: str) -> List[Dict[str, object]]:
     return outs
 
 
-def linux_probe() -> Dict[str, object]:
+def linux_probe() -> Dict[str, object]:  # noqa: S3776
     uid = os.getuid()
     session_type = os.environ.get("XDG_SESSION_TYPE", "").strip().lower()
     wayland_display = os.environ.get("WAYLAND_DISPLAY", "").strip()

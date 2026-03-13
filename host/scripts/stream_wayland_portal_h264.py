@@ -329,7 +329,7 @@ def env_int(name, default):
         return default
 
 
-def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=None, target_fps=60):
+def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=None, target_fps=60):  # noqa: S3776
     """WBTP/1 framed sender: accept one TCP client; send WBTP/1-framed H264 access units.
 
     Header (big-endian, 22 bytes):
@@ -572,7 +572,7 @@ def print_sender_stats(
     )
 
 
-def make_pipeline(
+def make_pipeline(  # noqa: S3776
     fd,
     node_id,
     width,
@@ -1095,7 +1095,7 @@ def _update_overlay_element(elem, new_text: str, key: str) -> bool:
         return False
 
 
-def setup_overlay_refresh(pipeline) -> None:  # noqa: C901
+def setup_overlay_refresh(pipeline) -> None:  # noqa: C901, S3776
     """Setup periodic refresh of overlay text from file."""
     overlay_file = os.getenv("WBEAM_OVERLAY_TEXT_FILE", "").strip()
     if not overlay_file:
