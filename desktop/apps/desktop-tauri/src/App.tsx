@@ -198,6 +198,15 @@ function resolveEncoderForProfile(profileId: string, mode: ConnectEncoderMode): 
   return "h264";
 }
 
+function getInitialConnectDialogMode(deviceSerial: string, waylandHost: boolean): DisplayMode {
+  if (waylandHost) return "virtual_monitor";
+  return loadSavedDisplayMode(deviceSerial) ?? "virtual_monitor";
+}
+
+function resolveConnectDialogDoctorLoading(waylandHost: boolean): boolean {
+  return !waylandHost;
+}
+
 export default function App() {
   const api = new HostApiManager();
   const session = createSessionManager(api);
@@ -290,31 +299,34 @@ export default function App() {
     saveWaylandExperimentalDuplication(enabled);
   }
 
-  function openConnectDialog(device: DeviceBasic): void {
-    const isWaylandHost = isWaylandPortalHost();
-    const saved = isWaylandHost ? "virtual_monitor" : (loadSavedDisplayMode(device.serial) ?? "virtual_monitor");
-    setConnectDialogMode(saved);
+  function resetConnectDialogForDevice(device: DeviceBasic, isWaylandHost: boolean): void {
+    setConnectDialogMode(getInitialConnectDialogMode(device.serial, isWaylandHost));
     setConnectDialogProfileId(TRAINED_PROFILE_DEFAULT_ID);
     setConnectDialogResolutionPresetId(RESOLUTION_PRESET_DEFAULT_ID);
     setConnectDialogEncoderMode(ENCODER_DEFAULT_MODE);
     setConnectDialogDoctor(null);
-    setConnectDialogDoctorLoading(!isWaylandHost);
+    setConnectDialogDoctorLoading(resolveConnectDialogDoctorLoading(isWaylandHost));
     setConnectDialogBlockReason(connectDisabledReason(device));
     setConnectDialogDevice(device);
-    if (isWaylandHost) {
-      return;
+  }
+
+  async function loadConnectDialogDoctor(device: DeviceBasic): Promise<void> {
+    try {
+      const doctor = await api.getVirtualDoctor(device);
+      setConnectDialogDoctor(doctor);
+    } catch {
+      setConnectDialogDoctor(null);
+    } finally {
+      setConnectDialogDoctorLoading(false);
     }
-    void api
-      .getVirtualDoctor(device)
-      .then((doctor) => {
-        setConnectDialogDoctor(doctor);
-      })
-      .catch(() => {
-        setConnectDialogDoctor(null);
-      })
-      .finally(() => {
-        setConnectDialogDoctorLoading(false);
-      });
+  }
+
+  function openConnectDialog(device: DeviceBasic): void {
+    const isWaylandHost = isWaylandPortalHost();
+    resetConnectDialogForDevice(device, isWaylandHost);
+    if (!isWaylandHost) {
+      void loadConnectDialogDoctor(device);
+    }
   }
 
   function closeConnectDialog(): void {
