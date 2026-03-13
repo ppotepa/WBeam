@@ -1176,7 +1176,7 @@ export default function App() {
               <article class="panel card">
                 <h2>Live Run</h2>
                 <div class="meta-grid">
-                  <div class="meta-item"><strong>Session state</strong><span>{String(valueAt(liveStatus(), ["base", "state"]) || "idle")}</span></div>
+                  <div class="meta-item"><strong>Session state</strong><span>{safeDisplay(valueAt(liveStatus(), ["base", "state"]), "idle")}</span></div>
                   <div class="meta-item"><strong>Device</strong><span>{serial() || "-"}</span></div>
                   <div class="meta-item"><strong>Stream port</strong><span>{currentStreamPort()}</span></div>
                   <div class="meta-item"><strong>Active encoder</strong><span>{String(valueAt(liveStatus(), ["base", "active_config", "encoder"]) || selectedEncoder())}</span></div>
