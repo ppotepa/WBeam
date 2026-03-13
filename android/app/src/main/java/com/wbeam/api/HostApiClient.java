@@ -230,6 +230,7 @@ public final class HostApiClient {
         return path.startsWith("/") ? path : ("/" + path);
     }
 
+    @SuppressWarnings("java:S3776")
     private static synchronized JSONObject localApiRequest(
             String method,
             String path,
