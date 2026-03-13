@@ -98,11 +98,15 @@ public final class StartupOverlayViewRenderer {
 
         if (views.subtitleText != null) {
             views.subtitleText.setText(model.subtitle);
-            views.subtitleText.setTextColor(model.step3State == StartupOverlayModelBuilder.Model.SS_OK
-                    ? SUBTITLE_OK_COLOR
-                    : model.step3State == StartupOverlayModelBuilder.Model.SS_ERROR
-                    ? SUBTITLE_ERROR_COLOR
-                    : SUBTITLE_NEUTRAL_COLOR);
+            final int subtitleColor;
+            if (model.step3State == StartupOverlayModelBuilder.Model.SS_OK) {
+                subtitleColor = SUBTITLE_OK_COLOR;
+            } else if (model.step3State == StartupOverlayModelBuilder.Model.SS_ERROR) {
+                subtitleColor = SUBTITLE_ERROR_COLOR;
+            } else {
+                subtitleColor = SUBTITLE_NEUTRAL_COLOR;
+            }
+            views.subtitleText.setTextColor(subtitleColor);
         }
 
         if (views.infoText != null) {
@@ -111,6 +115,7 @@ public final class StartupOverlayViewRenderer {
         }
     }
 
+    @SuppressWarnings("java:S107")
     private static void applyStepState(
             int stepState,
             String stepNumber,
