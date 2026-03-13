@@ -119,6 +119,7 @@ final class StreamReconnectLoop {
                     try {
                         codec.stop();
                     } catch (Exception ignored) {
+                        // Best-effort shutdown; codec might already be stopped.
                     }
                     try {
                         codec.release();
