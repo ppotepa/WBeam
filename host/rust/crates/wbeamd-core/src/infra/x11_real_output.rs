@@ -308,7 +308,8 @@ fn policy_file_path() -> Option<PathBuf> {
         let trimmed = user.trim();
         if !trimmed.is_empty() {
             return Some(
-                PathBuf::from(format!("/home/{trimmed}")).join(".config/wbeam/x11-virtual-policy.conf"),
+                PathBuf::from(format!("/home/{trimmed}"))
+                    .join(".config/wbeam/x11-virtual-policy.conf"),
             );
         }
     }
@@ -349,28 +350,98 @@ fn is_evdi_loaded() -> bool {
         .unwrap_or(false)
 }
 
-pub fn create(_serial: &str, size: &str, mirror_to_primary: bool) -> Result<X11RealOutputHandle, String> {
+pub fn create(
+    _serial: &str,
+    size: &str,
+    mirror_to_primary: bool,
+) -> Result<X11RealOutputHandle, String> {
     let display = detect_x11_display().unwrap_or_default();
     if display.trim().is_empty() {
         return Err("DISPLAY is not set for daemon process".to_string());
     }
     let xauth = resolve_xauthority_for_display(&display);
+    let (source, sink) = select_provider_pair(&display, xauth.as_deref())?;
 
-    let providers_raw = xrandr_output(&["--listproviders"], &display, xauth.as_deref())
+    let _ = xrandr(
+        &["--setprovideroutputsource", &sink.id, &source.id],
+        &display,
+        xauth.as_deref(),
+    );
+    wait_for_xrandr_settle(&display, xauth.as_deref());
+
+    let (query, outputs) = query_outputs(&display, xauth.as_deref())?;
+    let output = choose_candidate_output(&outputs)
+        .ok_or_else(|| "no disconnected output available for virtual monitor".to_string())?
+        .clone();
+    info!(output = %output.name, "x11 real-output create: selected output candidate");
+
+    let (w, h) = parse_size(size);
+    let primary = outputs.iter().find(|o| o.connected).map(|o| o.name.clone());
+    let previous_fb = parse_current_fb(&query);
+    let (chosen_mode, added_mode_name) =
+        resolve_mode_for_output(&output, w, h, &display, xauth.as_deref())?;
+    enable_output_mode(
+        &output.name,
+        &chosen_mode,
+        primary.as_deref(),
+        mirror_to_primary,
+        &display,
+        xauth.as_deref(),
+    )?;
+
+    let (x, y, aw, ah, mirrored_with) =
+        inspect_active_output(&output.name, &display, xauth.as_deref())?;
+    validate_mirroring_state(
+        &output.name,
+        mirror_to_primary,
+        &mirrored_with,
+        x,
+        y,
+        aw,
+        ah,
+    )?;
+
+    Ok(X11RealOutputHandle {
+        backend_kind: classify_backend_kind(&output.name, &source.name),
+        provider_source_id: Some(source.id),
+        provider_sink_id: Some(sink.id),
+        output_name: output.name,
+        primary_output_name: primary,
+        added_mode_name,
+        previous_fb,
+        x,
+        y,
+        width: aw,
+        height: ah,
+    })
+}
+
+fn select_provider_pair(
+    display: &str,
+    xauth: Option<&Path>,
+) -> Result<(ProviderInfo, ProviderInfo), String> {
+    let providers_raw = xrandr_output(&["--listproviders"], display, xauth)
         .map_err(|e| format!("xrandr --listproviders failed: {e}"))?;
     let providers = parse_providers(&providers_raw);
-    debug!(providers = providers.len(), "x11 real-output create: parsed providers");
+    debug!(
+        providers = providers.len(),
+        "x11 real-output create: parsed providers"
+    );
     if let Some(reason) = reject_unsafe_provider_topology(&providers) {
         return Err(reason);
     }
     let source = choose_source_provider(&providers)
-        .ok_or_else(|| "no source provider found for virtual output".to_string())?;
-    if let Some(reason) = reject_unsafe_source_provider(source) {
+        .ok_or_else(|| "no source provider found for virtual output".to_string())?
+        .clone();
+    if let Some(reason) = reject_unsafe_source_provider(&source) {
         return Err(reason);
     }
-    let sink = choose_sink_provider(&providers, source)
-        .ok_or_else(|| "no Intel/AMD (non-NVIDIA) sink provider found for source provider".to_string())?;
-    if should_block_real_output_on_nvidia_evdi(sink) {
+    let sink = choose_sink_provider(&providers, &source)
+        .ok_or_else(|| {
+            "no Intel/AMD (non-NVIDIA) sink provider found for source provider".to_string()
+        })?
+        .clone();
+    if should_block_real_output_on_nvidia_evdi(&sink) {
         return Err(format!(
             "refusing provider-link on NVIDIA+EVDI with NVIDIA sink provider ({})",
             sink.name
@@ -383,28 +454,27 @@ pub fn create(_serial: &str, size: &str, mirror_to_primary: bool) -> Result<X11R
         sink_provider_name = %sink.name,
         "x11 real-output create: selected providers"
     );
+    Ok((source, sink))
+}
 
-    let _ = xrandr(
-        &["--setprovideroutputsource", &sink.id, &source.id],
-        &display,
-        xauth.as_deref(),
-    );
-
-    wait_for_xrandr_settle(&display, xauth.as_deref());
-
-    let query = xrandr_output(&["--query"], &display, xauth.as_deref())
+fn query_outputs(display: &str, xauth: Option<&Path>) -> Result<(String, Vec<OutputInfo>), String> {
+    let query = xrandr_output(&["--query"], display, xauth)
         .map_err(|e| format!("xrandr --query failed: {e}"))?;
     let outputs = parse_outputs(&query);
-    debug!(outputs = outputs.len(), "x11 real-output create: parsed outputs");
+    debug!(
+        outputs = outputs.len(),
+        "x11 real-output create: parsed outputs"
+    );
+    Ok((query, outputs))
+}
 
-    let output = choose_candidate_output(&outputs)
-        .ok_or_else(|| "no disconnected output available for virtual monitor".to_string())?;
-    info!(output = %output.name, "x11 real-output create: selected output candidate");
-
-    let (w, h) = parse_size(size);
-    let primary = outputs.iter().find(|o| o.connected).map(|o| o.name.clone());
-    let previous_fb = parse_current_fb(&query);
-
+fn resolve_mode_for_output(
+    output: &OutputInfo,
+    w: u32,
+    h: u32,
+    display: &str,
+    xauth: Option<&Path>,
+) -> Result<(String, Option<String>), String> {
     let desired_mode = format!("{w}x{h}");
     let mut chosen_mode = output
         .modes
@@ -414,18 +484,17 @@ pub fn create(_serial: &str, size: &str, mirror_to_primary: bool) -> Result<X11R
     let mut added_mode_name = None;
 
     if chosen_mode.is_none() {
-        if let Ok(mode_name) = ensure_mode_with_cvt(&output.name, w, h, &display, xauth.as_deref())
-        {
+        if let Ok(mode_name) = ensure_mode_with_cvt(&output.name, w, h, display, xauth) {
             chosen_mode = Some(mode_name.clone());
             added_mode_name = Some(mode_name);
         }
     }
 
-    wait_for_xrandr_settle(&display, xauth.as_deref());
-    let query_after_mode = xrandr_output(&["--query"], &display, xauth.as_deref())
-        .map_err(|e| format!("xrandr --query after mode injection failed: {e}"))?;
-    let outputs_after_mode = parse_outputs(&query_after_mode);
+    wait_for_xrandr_settle(display, xauth);
     if chosen_mode.is_none() {
+        let query_after_mode = xrandr_output(&["--query"], display, xauth)
+            .map_err(|e| format!("xrandr --query after mode injection failed: {e}"))?;
+        let outputs_after_mode = parse_outputs(&query_after_mode);
         if let Some(refreshed) = outputs_after_mode.iter().find(|o| o.name == output.name) {
             chosen_mode = refreshed
                 .modes
@@ -435,57 +504,70 @@ pub fn create(_serial: &str, size: &str, mirror_to_primary: bool) -> Result<X11R
         }
     }
 
-    let chosen_mode = chosen_mode.ok_or_else(|| {
+    let mode = chosen_mode.ok_or_else(|| {
         format!(
             "failed to find usable mode for output {} (wanted {desired_mode})",
             output.name
         )
     })?;
+    Ok((mode, added_mode_name))
+}
 
+fn enable_output_mode(
+    output_name: &str,
+    mode: &str,
+    primary: Option<&str>,
+    mirror_to_primary: bool,
+    display: &str,
+    xauth: Option<&Path>,
+) -> Result<(), String> {
     let mut args = vec![
         "--output".to_string(),
-        output.name.clone(),
+        output_name.to_string(),
         "--mode".to_string(),
-        chosen_mode.clone(),
+        mode.to_string(),
     ];
     if mirror_to_primary {
-        if let Some(p) = primary.as_deref() {
+        if let Some(primary_output) = primary {
             args.push("--same-as".to_string());
-            args.push(p.to_string());
+            args.push(primary_output.to_string());
         } else {
             warn!(
-                output = %output.name,
+                output = %output_name,
                 "x11 real-output create: mirror requested but no primary output detected; falling back to extended placement"
             );
         }
     }
-    if !mirror_to_primary || primary.is_none() {
-        if let Some(p) = primary.as_deref() {
-            args.push("--right-of".to_string());
-            args.push(p.to_string());
-        }
+    if (!mirror_to_primary || primary.is_none()) && primary.is_some() {
+        args.push("--right-of".to_string());
+        args.push(primary.unwrap_or_default().to_string());
     }
     let arg_refs = args.iter().map(|s| s.as_str()).collect::<Vec<_>>();
-    xrandr(&arg_refs, &display, xauth.as_deref())
-        .map_err(|e| format!("failed to enable output {}: {e}", output.name))?;
+    xrandr(&arg_refs, display, xauth)
+        .map_err(|e| format!("failed to enable output {output_name}: {e}"))?;
+    wait_for_xrandr_settle(display, xauth);
+    Ok(())
+}
 
-    wait_for_xrandr_settle(&display, xauth.as_deref());
-
-    let query_after = xrandr_output(&["--query"], &display, xauth.as_deref())
+fn inspect_active_output(
+    output_name: &str,
+    display: &str,
+    xauth: Option<&Path>,
+) -> Result<(i32, i32, u32, u32, Vec<String>), String> {
+    let query_after = xrandr_output(&["--query"], display, xauth)
         .map_err(|e| format!("xrandr --query after output enable failed: {e}"))?;
     let outputs_after = parse_outputs(&query_after);
     let active = outputs_after
         .iter()
-        .find(|o| o.name == output.name && o.geometry.is_some())
+        .find(|o| o.name == output_name && o.geometry.is_some())
         .ok_or_else(|| "output did not expose geometry after enable".to_string())?;
 
     let (x, y, aw, ah) = active
         .geometry
         .ok_or_else(|| "active output has no geometry".to_string())?;
-
     let mirrored_with = outputs_after
         .iter()
-        .filter(|o| o.name != output.name && o.connected)
+        .filter(|o| o.name != output_name && o.connected)
         .filter_map(|o| {
             o.geometry.and_then(|(ox, oy, ow, oh)| {
                 if ox == x && oy == y && ow == aw && oh == ah {
@@ -496,23 +578,34 @@ pub fn create(_serial: &str, size: &str, mirror_to_primary: bool) -> Result<X11R
             })
         })
         .collect::<Vec<_>>();
+    Ok((x, y, aw, ah, mirrored_with))
+}
 
+fn validate_mirroring_state(
+    output_name: &str,
+    mirror_to_primary: bool,
+    mirrored_with: &[String],
+    x: i32,
+    y: i32,
+    aw: u32,
+    ah: u32,
+) -> Result<(), String> {
     if !mirrored_with.is_empty() {
         if mirror_to_primary {
             info!(
-                output = %output.name,
+                output = %output_name,
                 mirrors = %mirrored_with.join(","),
                 "x11 real-output create: experimental mirror active"
             );
         } else {
             warn!(
-                output = %output.name,
+                output = %output_name,
                 mirrors = %mirrored_with.join(","),
                 "x11 real-output create: enabled output mirrors active output(s)"
             );
             return Err(format!(
                 "output {} enabled but mirrors active output(s): {} at {}x{}+{}+{}",
-                output.name,
+                output_name,
                 mirrored_with.join(","),
                 aw,
                 ah,
@@ -522,24 +615,11 @@ pub fn create(_serial: &str, size: &str, mirror_to_primary: bool) -> Result<X11R
         }
     } else if mirror_to_primary {
         warn!(
-            output = %output.name,
+            output = %output_name,
             "x11 real-output create: mirror requested but output is not mirrored after activation"
         );
     }
-
-    Ok(X11RealOutputHandle {
-        backend_kind: classify_backend_kind(&output.name, &source.name),
-        provider_source_id: Some(source.id.clone()),
-        provider_sink_id: Some(sink.id.clone()),
-        output_name: output.name.clone(),
-        primary_output_name: primary,
-        added_mode_name,
-        previous_fb,
-        x,
-        y,
-        width: aw,
-        height: ah,
-    })
+    Ok(())
 }
 
 pub fn destroy(handle: &X11RealOutputHandle) -> Result<(), String> {
@@ -1365,7 +1445,8 @@ Provider 1: id: 0x48 cap: 0xf, Source Output, Sink Output, Source Offload, Sink 
 
     #[test]
     fn parse_connected_geometry_and_fb() {
-        let line = "eDP-1 connected primary 1920x1080+0+0 (normal left inverted right x axis y axis)";
+        let line =
+            "eDP-1 connected primary 1920x1080+0+0 (normal left inverted right x axis y axis)";
         assert_eq!(parse_connected_geometry(line), Some((0, 0, 1920, 1080)));
 
         let query = "Screen 0: minimum 8 x 8, current 3280 x 1080, maximum 32767 x 32767";
