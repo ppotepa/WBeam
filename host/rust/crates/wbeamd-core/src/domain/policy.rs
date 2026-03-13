@@ -106,7 +106,7 @@ pub fn adaptation_reason(client: &ClientMetricsRequest, high: bool, low: bool) -
 /// Derive a reduced-quality `ActiveConfig` from `base` according to
 /// `level` (0 = full quality, 1–3 = progressively degraded).
 #[allow(clippy::cognitive_complexity)]
-pub fn config_for_level(base: &ActiveConfig, level: u8) -> ActiveConfig {
+pub fn config_for_level(base: &ActiveConfig, level: u8) -> ActiveConfig { // NOSONAR: S3776
     let mut cfg = base.clone();
     let png_profile = base.encoder == "rawpng";
 

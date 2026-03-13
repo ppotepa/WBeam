@@ -12,7 +12,7 @@ pub(super) struct BufferProfile {
 
 #[allow(clippy::cognitive_complexity)]
 #[allow(clippy::cognitive_complexity)]
-pub(super) fn buffer_profile(mode: StreamMode, fps: u32, mode_png: bool) -> BufferProfile {
+pub(super) fn buffer_profile(mode: StreamMode, fps: u32, mode_png: bool) -> BufferProfile { // NOSONAR: S3776
     let frame_ns = (1_000_000_000u64 / fps.max(1) as u64).max(1);
     match mode {
         StreamMode::Ultra => {

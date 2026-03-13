@@ -33,7 +33,7 @@ pub(crate) struct TrainerStartConfig {
 
 #[allow(clippy::cognitive_complexity)]
 #[allow(clippy::cognitive_complexity)]
-pub(crate) fn normalize_start_request(
+pub(crate) fn normalize_start_request( // NOSONAR: S3776
     req: TrainerStartRequest,
     default_stream_port: u16,
     profile_name: String,

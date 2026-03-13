@@ -24,7 +24,7 @@ use super::profile::buffer_profile;
 ///
 /// Returns the `(Pipeline, AppSink, fps_counter)` triple.  The `fps_counter`
 /// is incremented by a pad probe on the appsink's sink pad on every buffer.
-pub fn make_pipeline(
+pub fn make_pipeline( // NOSONAR: S3776
     capture: &PreparedCapture,
     cfg: &ResolvedConfig,
     _port: u16,

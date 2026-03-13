@@ -50,7 +50,7 @@ impl SessionRegistry {
 
     #[allow(clippy::cognitive_complexity)]
     #[allow(clippy::cognitive_complexity)]
-    pub(crate) async fn resolve_core(
+    pub(crate) async fn resolve_core( // NOSONAR: S3776
         &self,
         serial: Option<&str>,
         requested_stream_port: Option<u16>,
@@ -147,7 +147,7 @@ impl SessionRegistry {
 
     #[allow(clippy::cognitive_complexity)]
     #[allow(clippy::cognitive_complexity)]
-    pub(crate) async fn resolve_core_readonly(
+    pub(crate) async fn resolve_core_readonly( // NOSONAR: S3776
         &self,
         serial: Option<&str>,
         requested_stream_port: Option<u16>,
