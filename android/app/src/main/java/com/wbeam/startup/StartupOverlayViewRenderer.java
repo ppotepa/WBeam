@@ -9,6 +9,10 @@ public final class StartupOverlayViewRenderer {
     private static final int SUBTITLE_NEUTRAL_COLOR = 0xFF475569;
     private static final int INFO_TEXT_COLOR = 0xFFCBD5E1;
 
+    /**
+     * Plain data carrier for startup overlay views.
+     */
+    @SuppressWarnings("java:S1104")
     public static final class Views {
         public TextView titleText;
         public View step1Card;
