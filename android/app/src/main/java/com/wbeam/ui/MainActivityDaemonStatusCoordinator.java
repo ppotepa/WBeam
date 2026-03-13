@@ -7,6 +7,10 @@ public final class MainActivityDaemonStatusCoordinator {
         void start();
     }
 
+    /**
+     * Plain data carrier for daemon status coordinator input.
+     */
+    @SuppressWarnings("java:S1104")
     public static final class Input {
         public boolean reachable;
         public boolean wasReachable;
@@ -20,6 +24,10 @@ public final class MainActivityDaemonStatusCoordinator {
         public boolean requiresTransportProbeNow;
     }
 
+    /**
+     * Plain data carrier for daemon status coordinator output.
+     */
+    @SuppressWarnings("java:S1104")
     public static final class Output {
         public boolean handshakeResolved;
         public String hostStatsLine;
