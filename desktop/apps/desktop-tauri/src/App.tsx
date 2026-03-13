@@ -787,7 +787,7 @@ export default function App() {
             connectDialogEncoderMode(),
           );
           return (
-            <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Select display mode">
+            <dialog class="modal-backdrop" open aria-label="Select display mode">
               <section class="connect-modal">
                 <h3>Connect session</h3>
                 <p class="connect-modal-subtitle">{device.model} ({device.serial})</p>
@@ -891,7 +891,7 @@ export default function App() {
                   </button>
                 </div>
               </section>
-            </div>
+            </dialog>
           );
         }}
       </Show>
