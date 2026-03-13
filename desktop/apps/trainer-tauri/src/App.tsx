@@ -980,7 +980,7 @@ export default function App() {
                     </Show>
                     <Show when={selectedEncoder() === "rawpng"}>
                       <label title="PNG compression level (0 fastest, 9 smallest).">
-                        PNG compression level
+                        <span>PNG compression level</span>
                         <input type="number" min="0" max="9" value={manualPngCompression()} onInput={(e) => setManualPngCompression(Number(e.currentTarget.value || 4))} />
                       </label>
                     </Show>
