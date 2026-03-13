@@ -582,7 +582,7 @@ export default function App() {
         body: JSON.stringify(plan.patch),
       });
       const body = (await resp.json()) as Record<string, unknown>;
-      if (!resp.ok) throw new Error(String(body.error || "live apply failed"));
+      if (!resp.ok) throw new Error(safeDisplay(body.error, "live apply failed"));
       setLiveActionText(
         `Live config applied (${plan.changes.length} field${plan.changes.length === 1 ? "" : "s"}${plan.restartRequired ? ", restart required" : ", hot"}).`,
       );
