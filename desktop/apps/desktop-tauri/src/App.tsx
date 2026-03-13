@@ -741,17 +741,18 @@ export default function App() {
               : session.service().installed
                 ? "stopped"
                 : "not installed";
+            const serviceHint = session.service().active
+              ? "Service active: device probing enabled."
+              : session.service().installed
+                ? "Service installed but stopped. Click Start."
+                : "Install + Start service to enable probing and streaming.";
             return (
           <div class={`service-status-strip ${session.serviceState()}`}>
             <span class="service-status-main">
               service: {serviceStateLabel}
             </span>
             <span class="service-status-hint">
-              {session.service().active
-                ? "Service active: device probing enabled."
-                : session.service().installed
-                  ? "Service installed but stopped. Click Start."
-                  : "Install + Start service to enable probing and streaming."}
+              {serviceHint}
             </span>
           </div>
             );
