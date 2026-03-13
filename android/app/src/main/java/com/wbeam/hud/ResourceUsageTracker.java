@@ -54,10 +54,34 @@ public final class ResourceUsageTracker {
     }
 
     public String buildRowsHtml() {
-        String cpuTone = usageCpuPct > 85.0 ? "state-risk" : (usageCpuPct > 65.0 ? "state-warn" : "state-ok");
         double memPct = usageMemSeries.latest(0.0);
-        String memTone = memPct > 88.0 ? "state-risk" : (memPct > 70.0 ? "state-warn" : "state-ok");
-        String gpuTone = usageGpuPct > 90.0 ? "state-risk" : (usageGpuPct > 70.0 ? "state-warn" : "state-ok");
+        
+        String cpuTone;
+        if (usageCpuPct > 85.0) {
+            cpuTone = "state-risk";
+        } else if (usageCpuPct > 65.0) {
+            cpuTone = "state-warn";
+        } else {
+            cpuTone = "state-ok";
+        }
+        
+        String memTone;
+        if (memPct > 88.0) {
+            memTone = "state-risk";
+        } else if (memPct > 70.0) {
+            memTone = "state-warn";
+        } else {
+            memTone = "state-ok";
+        }
+        
+        String gpuTone;
+        if (usageGpuPct > 90.0) {
+            gpuTone = "state-risk";
+        } else if (usageGpuPct > 70.0) {
+            gpuTone = "state-warn";
+        } else {
+            gpuTone = "state-ok";
+        }
 
         StringBuilder html = new StringBuilder();
         html.append("<div class='res-row'><span class='rk'>CPU</span><span class='rv ")
