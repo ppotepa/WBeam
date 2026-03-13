@@ -989,7 +989,7 @@ export default function App() {
 
                 <div class="slider-row">
                   <label title="Lower tested bitrate bound.">
-                    Bitrate min (Mbps)
+                    <span>Bitrate min (Mbps)</span>
                     <input
                       type="number"
                       min="4"
