@@ -25,6 +25,10 @@ public final class MainStartupCoordinator {
         void onLine(String line);
     }
 
+    /**
+     * Plain data carrier for startup coordinator input.
+     */
+    @SuppressWarnings("java:S1104")
     public static final class Input {
         public View preflightOverlay;
         public StartupOverlayController startupOverlayController;
