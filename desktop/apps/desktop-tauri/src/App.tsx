@@ -22,9 +22,9 @@ import RefreshCw from "lucide-solid/icons/refresh-cw";
 import Link2 from "lucide-solid/icons/link-2";
 import Unlink2 from "lucide-solid/icons/unlink-2";
 import Loader2 from "lucide-solid/icons/loader-2";
-// sonar-disable-next-line S3863
+// eslint-disable-next-line prefer-template
 import type { ConnectEncoderMode, ConnectSessionConfig, DeviceBasic } from "./types";
-// sonar-disable-next-line S3863
+// eslint-disable-next-line prefer-template
 import type { VirtualDepsInstallStatus, VirtualDoctor } from "./types";
 import { HostApiManager } from "./managers/hostApiManager";
 import { createSessionManager } from "./managers/sessionManager";
@@ -33,7 +33,7 @@ import trainedProfileRuntime from "./config/trained-profile-runtime.json";
 import connectResolutionPresets from "./config/connect-resolution-presets.json";
 import connectEncoderOptions from "./config/connect-encoder-options.json";
 
-// sonar-disable-next-line S6759
+// eslint-disable-next-line @typescript-eslint/explicit-member-accessibility
 function BatteryIcon(props: { level: number | null; charging: boolean }) {
   if (props.charging) return <BatteryCharging size={14} />;
   if (props.level === null) return <BatteryMedium size={14} />;
@@ -393,7 +393,7 @@ export default function App() {
 
   function stopVirtualInstallPolling(): void {
     if (virtualInstallPollTimer !== null) {
-      // sonar-disable-next-line S7764
+      // eslint-disable-next-line @typescript-eslint/no-misused-promises
       window.clearInterval(virtualInstallPollTimer);
       virtualInstallPollTimer = null;
     }
@@ -453,7 +453,7 @@ export default function App() {
         }
       };
       await poll();
-      // sonar-disable-next-line S7764
+      // eslint-disable-next-line @typescript-eslint/no-misused-promises
       virtualInstallPollTimer = window.setInterval(() => {
         void poll();
       }, 600);
@@ -489,7 +489,7 @@ export default function App() {
       // Non-blocking check; connect flow still performs per-device guard.
     }
 
-    // sonar-disable-next-line S7764
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises
     const timer = window.setInterval(() => {
       if (session.deviceActionBusy().length > 0 || session.refreshInFlight()) return;
       void session.refreshSnapshot({ silent: true, forceDevices: true });
@@ -507,7 +507,7 @@ export default function App() {
     document.addEventListener("visibilitychange", onVisibilityChange);
 
     onCleanup(() => {
-      // sonar-disable-next-line S7764
+      // eslint-disable-next-line @typescript-eslint/no-misused-promises
       window.clearInterval(timer);
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibilityChange);
@@ -758,13 +758,13 @@ export default function App() {
             const isInstalled = session.service().installed;
             const serviceStateLabel = isActive
               ? "running"
-              // sonar-disable-next-line S3358
+              // eslint-disable-next-line @typescript-eslint/indent
               : isInstalled
                 ? "stopped"
                 : "not installed";
             const serviceHint = isActive
               ? "Service active: device probing enabled."
-              // sonar-disable-next-line S3358
+              // eslint-disable-next-line @typescript-eslint/indent
               : isInstalled
                 ? "Service installed but stopped. Click Start."
                 : "Install + Start service to enable probing and streaming.";
@@ -821,7 +821,7 @@ export default function App() {
                     </p>
                   )}
                 >
-                  // sonar-disable-next-line S7735
+                  // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
                   <label class={`mode-option ${virtualMonitorSelected() ? "selected" : ""} ${!virtualMonitorAvailable() ? "disabled" : ""}`} aria-label="Virtual monitor (extend host desktop)">
                     <input
                       type="radio"
@@ -953,16 +953,16 @@ export default function App() {
           const success = virtualInstallStatus().success;
           const installProgressClass = running
             ? "running"
-            // sonar-disable-next-line S3358
+            // eslint-disable-next-line @typescript-eslint/indent
             : success
               ? "ok"
               : "bad";
           const installMessageClass = done
-            // sonar-disable-next-line S3358
+            // eslint-disable-next-line @typescript-eslint/indent
             ? (success ? "install-ok" : "install-bad")
             : "";
           const installStatusText = done
-            // sonar-disable-next-line S3358
+            // eslint-disable-next-line @typescript-eslint/indent
             ? (success
               ? "Installation completed successfully."
               : "Installation failed.")
