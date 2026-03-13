@@ -1272,7 +1272,7 @@ export default function App() {
                       <input type="number" min="320" max="7680" value={liveCustomWidth()} onInput={(e) => setLiveCustomWidth(Number(e.currentTarget.value || 2000))} />
                     </label>
                     <label title="Custom height in pixels. Range: 240..4320.">
-                      Height
+                      <span>Height</span>
                       <input type="number" min="240" max="4320" value={liveCustomHeight()} onInput={(e) => setLiveCustomHeight(Number(e.currentTarget.value || 1200))} />
                     </label>
                   </div>
