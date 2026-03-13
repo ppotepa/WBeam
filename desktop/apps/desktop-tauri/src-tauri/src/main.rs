@@ -1150,19 +1150,15 @@ fn systemctl_show_prop(prop: &str) -> Option<String> {
     let mut cmd = Command::new("systemctl");
     cmd.args(["--user", "show", "-p", prop, "--value", SERVICE_NAME]);
     apply_systemctl_user_env(&mut cmd);
-    cmd.output()
-        .ok()
-        .and_then(|out| {
-            if !out.status.success() {
-                return None;
-            }
-            let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if v.is_empty() {
-                None
-            } else {
-                Some(v)
-            }
-        })
+    let out = cmd.output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let value = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if value.is_empty() {
+        return None;
+    }
+    Some(value)
 }
 
 fn daemon_lock_hint() -> Option<String> {
