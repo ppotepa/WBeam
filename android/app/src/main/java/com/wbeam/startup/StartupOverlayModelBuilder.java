@@ -7,9 +7,14 @@ import java.util.Locale;
  */
 public final class StartupOverlayModelBuilder {
     private static final String SERVICE_PREFIX = "service=";
+    private static final String BULLET = " \u00b7 ";
 
     private StartupOverlayModelBuilder() {}
 
+    /**
+     * Plain data carrier for startup overlay input.
+     */
+    @SuppressWarnings("java:S1104")
     public static final class Input {
         public boolean daemonReachable;
         public String daemonHostName;
@@ -45,6 +50,10 @@ public final class StartupOverlayModelBuilder {
         public static final int SS_OK = 2;
         public static final int SS_ERROR = 3;
 
+        /**
+         * Plain data carrier for startup overlay output model.
+         */
+        @SuppressWarnings("java:S1104")
         public int step1State;
         public int step2State;
         public int step3State;
@@ -86,18 +95,18 @@ public final class StartupOverlayModelBuilder {
             if (isLocalImpl) {
                 step1Detail = "on-device (local api) \u00b7 no host connection needed";
             } else {
-                step1Detail = "reachable \u00b7 api_impl=" + safe(in.apiImpl)
-                        + " \u00b7 " + safe(in.daemonHostName);
+                step1Detail = "reachable" + BULLET + "api_impl=" + safe(in.apiImpl)
+                        + BULLET + safe(in.daemonHostName);
             }
         } else if (updatedControlRetryCount == 0) {
             step1Detail = "polling " + safe(in.apiBase)
                     + " \u2026 (" + (elapsedMs / 1000L) + "s)"
-                    + " \u00b7 install/start desktop service if this does not recover";
+                    + BULLET + "install/start desktop service if this does not recover";
         } else {
-            step1Detail = "no response \u00b7 retry #" + updatedControlRetryCount
-                    + " \u00b7 polling " + safe(in.apiBase)
+            step1Detail = "no response" + BULLET + "retry #" + updatedControlRetryCount
+                    + BULLET + "polling " + safe(in.apiBase)
                     + " (" + (elapsedMs / 1000L) + "s)"
-                    + " \u00b7 check desktop service status";
+                    + BULLET + "check desktop service status";
         }
 
         int step2;
@@ -116,14 +125,14 @@ public final class StartupOverlayModelBuilder {
             step2 = Model.SS_OK;
             if (in.requiresTransportProbe) {
                 if (in.probeOk) {
-                    step2Detail = SERVICE_PREFIX + safe(in.daemonService) + " · transport test OK";
+                    step2Detail = SERVICE_PREFIX + safe(in.daemonService) + BULLET + "transport test OK";
                 } else if (in.probeInFlight) {
-                    step2Detail = SERVICE_PREFIX + safe(in.daemonService) + " · transport test in progress…";
+                    step2Detail = SERVICE_PREFIX + safe(in.daemonService) + BULLET + "transport test in progress\u2026";
                 } else {
-                    step2Detail = SERVICE_PREFIX + safe(in.daemonService) + " · transport test pending";
+                    step2Detail = SERVICE_PREFIX + safe(in.daemonService) + BULLET + "transport test pending";
                 }
             } else {
-                step2Detail = SERVICE_PREFIX + safe(in.daemonService) + " · " + safe(in.apiImpl);
+                step2Detail = SERVICE_PREFIX + safe(in.daemonService) + BULLET + safe(in.apiImpl);
             }
         }
 
@@ -135,8 +144,8 @@ public final class StartupOverlayModelBuilder {
                 .contains("stream start aborted");
         boolean streamIsLoopback = isLoopbackHost(in.streamHost);
         String streamFixHint = streamIsLoopback
-                ? "check ADB reverse for stream/control ports \u00b7 ensure desktop service is running"
-                : "check USB tethering / host IP / LAN \u00b7 ensure desktop service is running";
+                ? "check ADB reverse for stream/control ports" + BULLET + "ensure desktop service is running"
+                : "check USB tethering / host IP / LAN" + BULLET + "ensure desktop service is running";
 
         int step3;
         String step3Detail;
@@ -148,34 +157,34 @@ public final class StartupOverlayModelBuilder {
         } else if (in.requiresTransportProbe && !in.probeOk) {
             step3 = Model.SS_ACTIVE;
             if (in.probeInFlight) {
-                step3Detail = "testing transport I/O… " + safe(in.probeInfo);
+                step3Detail = "testing transport I/O\u2026 " + safe(in.probeInfo);
             } else {
-                step3Detail = "transport test retrying… " + safe(in.probeInfo);
+                step3Detail = "transport test retrying\u2026 " + safe(in.probeInfo);
             }
         } else if (streamFlowing) {
             step3 = Model.SS_OK;
-            step3Detail = "live \u00b7 fps=" + String.format(Locale.US, "%.0f", in.latestPresentFps)
-                    + " \u00b7 " + safe(in.effectiveDaemonState).toLowerCase(Locale.US);
+            step3Detail = "live" + BULLET + "fps=" + String.format(Locale.US, "%.0f", in.latestPresentFps)
+                    + BULLET + safe(in.effectiveDaemonState).toLowerCase(Locale.US);
         } else {
             boolean hasWaited = elapsedMs > 5_000L;
             if (daemonStartFailure && hasWaited) {
                 step3 = Model.SS_ERROR;
-                step3Detail = "host stream start failed \u00b7 " + safe(in.daemonErrCompact);
+                step3Detail = "host stream start failed" + BULLET + safe(in.daemonErrCompact);
             } else {
                 step3 = Model.SS_ACTIVE;
                 if (streamReconnects > 0 && hasWaited) {
                     step3Detail = "retry #" + streamReconnects
-                            + " \u00b7 " + streamAddr + ":" + in.streamPort
-                            + " unreachable \u00b7 " + streamFixHint
-                            + (safe(in.daemonErrCompact).isEmpty() ? "" : " \u00b7 host error: " + safe(in.daemonErrCompact));
+                            + BULLET + streamAddr + ":" + in.streamPort
+                            + " unreachable" + BULLET + streamFixHint
+                            + (safe(in.daemonErrCompact).isEmpty() ? "" : BULLET + "host error: " + safe(in.daemonErrCompact));
                 } else if (streamReconnects > 0) {
-                    step3Detail = "reconnecting \u00b7 attempt #" + streamReconnects + " \u00b7 awaiting frames\u2026";
+                    step3Detail = "reconnecting" + BULLET + "attempt #" + streamReconnects + BULLET + "awaiting frames\u2026";
                 } else if (hasWaited) {
                     step3Detail = "connecting to " + streamAddr + ":" + in.streamPort
-                            + " \u00b7 " + streamFixHint
-                            + (safe(in.daemonErrCompact).isEmpty() ? "" : " \u00b7 host error: " + safe(in.daemonErrCompact));
+                            + BULLET + streamFixHint
+                            + (safe(in.daemonErrCompact).isEmpty() ? "" : BULLET + "host error: " + safe(in.daemonErrCompact));
                 } else {
-                    step3Detail = "decoder started \u00b7 awaiting frames\u2026";
+                    step3Detail = "decoder started" + BULLET + "awaiting frames\u2026";
                 }
             }
         }
@@ -185,23 +194,23 @@ public final class StartupOverlayModelBuilder {
             if (elapsedMs < 2000L && updatedControlRetryCount == 0) {
                 subtitle = "starting up\u2026";
             } else if (updatedControlRetryCount == 0) {
-                subtitle = "awaiting control link \u00b7 start desktop service if needed\u2026";
+                subtitle = "awaiting control link" + BULLET + "start desktop service if needed\u2026";
             } else {
-                subtitle = "retrying control link \u00b7 attempt #" + updatedControlRetryCount
-                        + " \u00b7 check desktop service\u2026";
+                subtitle = "retrying control link" + BULLET + "attempt #" + updatedControlRetryCount
+                        + BULLET + "check desktop service\u2026";
             }
         } else if (step2 != Model.SS_OK) {
             subtitle = (step2 == Model.SS_ERROR && in.buildMismatch)
-                    ? "build mismatch \u00b7 redeploy APK or rebuild host"
+                    ? "build mismatch" + BULLET + "redeploy APK or rebuild host"
                     : "handshake in progress\u2026";
         } else if (step3 != Model.SS_OK) {
             if (step3 == Model.SS_ERROR && daemonStartFailure) {
-                subtitle = "host stream start failed \u00b7 check host logs";
+                subtitle = "host stream start failed" + BULLET + "check host logs";
             } else {
                 subtitle = streamReconnects > 0
-                        ? "stream reconnecting \u00b7 attempt #" + streamReconnects + "\u2026"
+                        ? "stream reconnecting" + BULLET + "attempt #" + streamReconnects + "\u2026"
                         : elapsedMs > 5_000L
-                                ? "stream unreachable \u00b7 retrying\u2026"
+                                ? "stream unreachable" + BULLET + "retrying\u2026"
                                 : "waiting for video frames\u2026";
             }
         } else {
