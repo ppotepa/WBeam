@@ -974,7 +974,7 @@ export default function App() {
                     </Show>
                     <Show when={selectedEncoder() === "mjpeg"}>
                       <label title="MJPEG quality factor (higher = better quality, more bandwidth).">
-                        MJPEG quality
+                        <span>MJPEG quality</span>
                         <input type="number" min="1" max="100" value={manualMjpegQuality()} onInput={(e) => setManualMjpegQuality(Number(e.currentTarget.value || 85))} />
                       </label>
                     </Show>
