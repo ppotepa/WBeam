@@ -1064,7 +1064,7 @@ export default function App() {
                         />
                       </label>
                       <label title="Elite candidates carried to next generation. Must stay below population.">
-                        Elite count
+                        <span>Elite count</span>
                         <input
                           type="number"
                           min="1"
