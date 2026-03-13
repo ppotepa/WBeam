@@ -39,7 +39,7 @@ final class FramedPngLoop {
     private final String stateStreaming;
     private final int frameBufferBudgetFrames;
 
-    @SuppressWarnings("java:java:S107")
+    @SuppressWarnings("java:S107")
     FramedPngLoop(
             String tag,
             Surface surface,
@@ -72,7 +72,7 @@ final class FramedPngLoop {
         this.frameBufferBudgetFrames = frameBufferBudgetFrames;
     }
  @SuppressWarnings("java:java:S6541")
- @SuppressWarnings("java:java:S3776")
+ @SuppressWarnings({"java:S3776","java:S6541","java:S107","java:S135","java:S1854"})
 
     void run(InputStream input, byte[] hdrBuf, byte[] payloadBuf, boolean isUltraMode) throws IOException {
         long bytes = 0L;

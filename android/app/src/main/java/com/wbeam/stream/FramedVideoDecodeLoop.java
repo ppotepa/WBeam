@@ -174,8 +174,9 @@ final class FramedVideoDecodeLoop {
         } else {
             modeLabel = "stable";
         }
+        final String codecLabel = isPng ? "PNG" : (isHevc ? "HEVC" : "AVC");
         Log.i(tag, String.format(Locale.US, "WBTP hello session=0x%016x codec=%s mode=%s",
-                streamSessionId, isPng ? "PNG" : (isHevc ? "HEVC" : "AVC"), modeLabel));
+                streamSessionId, codecLabel, modeLabel));
 
         if (isPng) {
             throw new IOException("WBTP PNG lane passed to video decode loop");
