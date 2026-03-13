@@ -9,8 +9,14 @@ import java.util.Locale;
  * Pure HUD rendering/formatting helpers used by runtime and trainer overlays.
  */
 public final class HudRenderSupport {
+    private static final String STATE_RISK = "state-risk";
+    private static final String STATE_WARN = "state-warn";
+    private static final String STATE_OK = "state-ok";
+    private static final String PENDING = "PENDING";
+
     private HudRenderSupport() {}
 
+    @SuppressWarnings("java:S3776")
     public static String buildTrendSparkChartFromJson(JSONArray series, String toneClass) {
         if (series == null || series.length() == 0) {
             return buildTrendSparkPlaceholderSvg(toneClass);
@@ -98,13 +104,13 @@ public final class HudRenderSupport {
 
     private static String toneStrokeColor(String toneClass) {
         String tone = toneClass == null ? "" : toneClass.trim().toLowerCase(Locale.US);
-        if ("state-risk".equals(tone)) {
+        if (STATE_RISK.equals(tone)) {
             return "#f87171";
         }
-        if ("state-warn".equals(tone)) {
+        if (STATE_WARN.equals(tone)) {
             return "#fbbf24";
         }
-        if ("state-ok".equals(tone)) {
+        if (STATE_OK.equals(tone)) {
             return "#6ee7b7";
         }
         return "#8dd9ff";
@@ -162,7 +168,7 @@ public final class HudRenderSupport {
 
     public static String buildSeriesStats(JSONArray series, String unitSuffix) {
         if (series == null || series.length() == 0) {
-            return "PENDING";
+            return PENDING;
         }
         double last = Double.NaN;
         double lo = Double.POSITIVE_INFINITY;
@@ -180,7 +186,7 @@ public final class HudRenderSupport {
             hi = Math.max(hi, v);
         }
         if (!Double.isFinite(last) || !Double.isFinite(lo) || !Double.isFinite(hi)) {
-            return "PENDING";
+            return PENDING;
         }
         String unit = unitSuffix == null ? "" : unitSuffix.trim();
         if (!unit.isEmpty()) {
@@ -226,7 +232,7 @@ public final class HudRenderSupport {
             double fpsLowAnchor
     ) {
         if (series == null || series.length() == 0) {
-            return null;
+            return new double[]{};
         }
         double last = Double.NaN;
         double lo = Double.POSITIVE_INFINITY;
@@ -244,7 +250,7 @@ public final class HudRenderSupport {
             hi = Math.max(hi, v);
         }
         if (!Double.isFinite(last) || !Double.isFinite(lo) || !Double.isFinite(hi)) {
-            return null;
+            return new double[]{};
         }
         String key = normalizeMetricKey(metricLabel);
         double displayLow;
