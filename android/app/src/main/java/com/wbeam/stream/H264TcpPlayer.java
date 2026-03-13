@@ -204,7 +204,14 @@ public final class H264TcpPlayer {
             modeLabel = "stable";
         }
         boolean isHevc = !isPng && (helloFlags & HELLO_CODEC_HEVC) != 0;
-        String codecLabel = isPng ? "PNG" : (isHevc ? "HEVC" : "AVC");
+        final String codecLabel;
+        if (isPng) {
+            codecLabel = "PNG";
+        } else if (isHevc) {
+            codecLabel = "HEVC";
+        } else {
+            codecLabel = "AVC";
+        }
         Log.i(TAG, String.format(Locale.US, "WBTP hello session=0x%016x codec=%s mode=%s",
                 streamSessionId, codecLabel, modeLabel));
 
