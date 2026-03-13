@@ -75,6 +75,29 @@ STATE = {
 }
 
 
+def advance_iov_cursor(views, idx, offset, sent_bytes):
+    remaining = sent_bytes
+    while idx < len(views):
+        left = len(views[idx]) - offset
+        if remaining < left:
+            return idx, offset + remaining
+        remaining -= left
+        idx += 1
+        offset = 0
+        if remaining == 0:
+            return idx, offset
+    return idx, offset
+
+
+def pending_chunks(views, idx, offset):
+    if offset:
+        chunks = [views[idx][offset:]]
+        if idx + 1 < len(views):
+            chunks.extend(views[idx + 1 :])
+        return chunks
+    return views[idx:]
+
+
 def send_all_iov(conn, iov):
     """Send full iovec payload via sendmsg, handling partial writes."""
     views = [memoryview(chunk) for chunk in iov if len(chunk)]
@@ -85,30 +108,11 @@ def send_all_iov(conn, iov):
     offset = 0
     send_calls = 0
     while idx < len(views):
-        if offset:
-            chunks = [views[idx][offset:]]
-            if idx + 1 < len(views):
-                chunks.extend(views[idx + 1 :])
-        else:
-            chunks = views[idx:]
-
-        sent = conn.sendmsg(chunks)
+        sent = conn.sendmsg(pending_chunks(views, idx, offset))
         send_calls += 1
         if sent <= 0:
             raise BrokenPipeError("sendmsg returned 0 bytes")
-
-        remaining = sent
-        while idx < len(views):
-            left = len(views[idx]) - offset
-            if remaining < left:
-                offset += remaining
-                break
-            remaining -= left
-            idx += 1
-            offset = 0
-            if remaining == 0:
-                break
-
+        idx, offset = advance_iov_cursor(views, idx, offset, sent)
     return send_calls
 
 
