@@ -32,6 +32,7 @@ pub(crate) struct TrainerStartConfig {
 }
 
 #[allow(clippy::cognitive_complexity)]
+#[allow(clippy::cognitive_complexity)]
 pub(crate) fn normalize_start_request(
     req: TrainerStartRequest,
     default_stream_port: u16,

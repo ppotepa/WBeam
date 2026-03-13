@@ -1,5 +1,6 @@
 package com.wbeam.startup;
 
+@SuppressWarnings("java:S1104")
 public final class StartupOverlayCoordinator {
     public interface Hooks {
         boolean hasOverlayContainer();

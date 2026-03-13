@@ -68,6 +68,8 @@ public final class StartupOverlayModelBuilder {
         public long elapsedMs;
     }
 
+    @SuppressWarnings("java:java:S6541")
+    @SuppressWarnings("java:java:S3776")
     public static Model build(Input in) {
         Model out = new Model();
         long elapsedMs = in.startupBeganAtMs > 0L

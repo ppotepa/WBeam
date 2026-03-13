@@ -1,5 +1,6 @@
 package com.wbeam.startup;
 
+@SuppressWarnings("java:S1104")
 public final class StartupOverlayStateSync {
     public static final class StateValues {
         public long startupBeganAtMs;

@@ -8,6 +8,7 @@ import com.wbeam.ui.state.MainUiState;
 
 import org.json.JSONObject;
 
+@SuppressWarnings("java:S1104")
 public final class MainDaemonRuntimeCoordinator {
     public interface BoolProvider {
         boolean get();

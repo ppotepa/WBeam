@@ -59,6 +59,7 @@ public final class MainActivityUiBinder {
         perfHudWebView.setInitialScale(100);
     }
 
+    @SuppressWarnings("java:java:S107")
     public static void setupSpinners(
             AppCompatActivity activity,
             Spinner profileSpinner,

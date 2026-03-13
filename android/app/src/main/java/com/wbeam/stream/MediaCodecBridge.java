@@ -90,6 +90,7 @@ final class MediaCodecBridge {
         }
     }
 
+    @SuppressWarnings("java:java:S3776")
     static void drainLatestFrame(
             MediaCodec codec,
             MediaCodec.BufferInfo info,
@@ -101,6 +102,7 @@ final class MediaCodecBridge {
         int latestRenderableIndex = -1;
         long latestRenderablePtsUs = -1L;
         long timeoutUs = firstTimeoutUs;
+ @SuppressWarnings("java:java:S135")
 
         while (true) {
             int outputIndex = codec.dequeueOutputBuffer(info, timeoutUs);

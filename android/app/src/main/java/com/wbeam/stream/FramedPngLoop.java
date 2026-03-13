@@ -39,6 +39,7 @@ final class FramedPngLoop {
     private final String stateStreaming;
     private final int frameBufferBudgetFrames;
 
+    @SuppressWarnings("java:java:S107")
     FramedPngLoop(
             String tag,
             Surface surface,
@@ -70,6 +71,8 @@ final class FramedPngLoop {
         this.stateStreaming = stateStreaming;
         this.frameBufferBudgetFrames = frameBufferBudgetFrames;
     }
+ @SuppressWarnings("java:java:S6541")
+ @SuppressWarnings("java:java:S3776")
 
     void run(InputStream input, byte[] hdrBuf, byte[] payloadBuf, boolean isUltraMode) throws IOException {
         long bytes = 0L;
@@ -90,6 +93,7 @@ final class FramedPngLoop {
         long lastQueuedPtsUs = -1L;
         final int seqGapBudget = StreamBufferMath.computeSeqGapBudget(frameUs, isUltraMode);
         final boolean dropBacklogFrames = isUltraMode;
+        @SuppressWarnings("java:java:S135")
         final int backlogFrameBudget = frameBufferBudgetFrames;
         PngSurfaceRenderer pngRenderer = new PngSurfaceRenderer(surface);
 

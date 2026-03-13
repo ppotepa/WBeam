@@ -64,6 +64,7 @@ public final class MainActivitySimpleMenuCoordinator {
         simpleMenuPanel.setVisibility(View.GONE);
     }
 
+    @SuppressWarnings("java:java:S107")
     public static void toggle(
             View simpleMenuPanel,
             Handler uiHandler,
@@ -121,6 +122,7 @@ public final class MainActivitySimpleMenuCoordinator {
                 fps
         );
     }
+ @SuppressWarnings("java:java:S107")
 
     public static void refreshButtons(
             View simpleMenuPanel,

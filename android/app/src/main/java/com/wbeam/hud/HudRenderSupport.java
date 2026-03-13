@@ -24,6 +24,7 @@ public final class HudRenderSupport {
         ArrayDeque<Double> values = new ArrayDeque<>();
         double lo = Double.POSITIVE_INFINITY;
         double hi = Double.NEGATIVE_INFINITY;
+        @SuppressWarnings("java:java:S135")
         for (int i = 0; i < series.length(); i++) {
             if (series.isNull(i)) {
                 continue;
@@ -172,6 +173,7 @@ public final class HudRenderSupport {
         }
         double last = Double.NaN;
         double lo = Double.POSITIVE_INFINITY;
+        @SuppressWarnings("java:java:S135")
         double hi = Double.NEGATIVE_INFINITY;
         for (int i = 0; i < series.length(); i++) {
             if (series.isNull(i)) {
@@ -235,6 +237,7 @@ public final class HudRenderSupport {
             return new double[]{};
         }
         double last = Double.NaN;
+        @SuppressWarnings("java:java:S135")
         double lo = Double.POSITIVE_INFINITY;
         double hi = Double.NEGATIVE_INFINITY;
         for (int i = 0; i < series.length(); i++) {

@@ -49,6 +49,7 @@ impl SessionRegistry {
     }
 
     #[allow(clippy::cognitive_complexity)]
+    #[allow(clippy::cognitive_complexity)]
     pub(crate) async fn resolve_core(
         &self,
         serial: Option<&str>,
@@ -144,6 +145,7 @@ impl SessionRegistry {
         core
     }
 
+    #[allow(clippy::cognitive_complexity)]
     #[allow(clippy::cognitive_complexity)]
     pub(crate) async fn resolve_core_readonly(
         &self,

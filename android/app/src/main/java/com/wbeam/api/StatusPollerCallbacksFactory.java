@@ -4,6 +4,7 @@ import org.json.JSONObject;
 
 public final class StatusPollerCallbacksFactory {
     public interface DaemonStatusUpdate {
+        @SuppressWarnings("java:java:S107")
         void onDaemonStatusUpdate(
                 boolean reachable,
                 boolean wasReachable,

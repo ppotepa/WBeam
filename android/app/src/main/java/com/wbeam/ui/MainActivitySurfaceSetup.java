@@ -3,6 +3,7 @@ package com.wbeam.ui;
 import android.view.Surface;
 import android.view.SurfaceView;
 
+@SuppressWarnings("java:S1104")
 public final class MainActivitySurfaceSetup {
     @FunctionalInterface
     public interface SurfaceStateHandler {

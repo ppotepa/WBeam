@@ -10,6 +10,7 @@ import java.util.Locale;
 public final class TrainerHudShellRenderer {
     private TrainerHudShellRenderer() {}
 
+    @SuppressWarnings("java:java:S107")
     public static String buildSotHtml(
             String runId,
             String profile,

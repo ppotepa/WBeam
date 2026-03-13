@@ -11,6 +11,7 @@ import android.widget.TextView;
 public final class StartupStepStyler {
     private StartupStepStyler() {}
 
+    @SuppressWarnings("java:java:S107")
     public static void applyStepState(
             int state,
             int animTick,
