@@ -802,7 +802,7 @@ export default function App() {
                       onChange={() => setConnectDialogMode("duplicate")}
                     />
                     <span>
-                      Duplicate current screen
+                      <span>Duplicate current screen</span>
                       <small>Works with current host backend.</small>
                     </span>
                   </label>
