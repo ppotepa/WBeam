@@ -280,7 +280,6 @@ public final class HostApiClient {
         LocalApiState.startedAtSec = nowSec;
         LocalApiState.lastFlowAtMs = 0L;
         LocalApiState.firstFlowAtSec = 0L;
-        LocalApiState.latestRecvFps = 0.0;
         LocalApiState.latestPresentFps = 0.0;
         LocalApiState.latestRecvBps = 0L;
     }
@@ -289,7 +288,6 @@ public final class HostApiClient {
         double recvFps = payload != null ? payload.optDouble("recv_fps", 0.0) : 0.0;
         double presentFps = payload != null ? payload.optDouble("present_fps", 0.0) : 0.0;
         long recvBps = payload != null ? payload.optLong("recv_bps", 0L) : 0L;
-        LocalApiState.latestRecvFps = recvFps;
         LocalApiState.latestPresentFps = presentFps;
         LocalApiState.latestRecvBps = recvBps;
 
@@ -382,7 +380,6 @@ public final class HostApiClient {
         private static long startedAtSec = System.currentTimeMillis() / 1000L;
         private static long firstFlowAtSec = 0L;
         private static long lastFlowAtMs = 0L;
-        private static double latestRecvFps = 0.0;
         private static double latestPresentFps = 0.0;
         private static long latestRecvBps = 0L;
         private static final String HOST_NAME = "android-local";
