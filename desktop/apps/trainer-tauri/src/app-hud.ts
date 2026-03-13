@@ -149,10 +149,10 @@ export function inferLiveHealth(lines: string[]): { state: string; tone: "ok" | 
 }
 
 export function parseCurrentChildPreset(lines: string[]): CurrentChildPreset | null {
-  const applyRe = /^\[(t\d+)\]\s+apply\s+encoder=([^\s]+)\s+size=([^\s]+)\s+fps=([0-9]+)\s+bitrate=([0-9]+)/;
+  const applyRe = /^\[(t\d+)\]\s+apply\s+encoder=([^\s]+)\s+size=([^\s]+)\s+fps=(\d+)\s+bitrate=(\d+)/;
   for (let i = lines.length - 1; i >= 0; i -= 1) {
     const line = lines[i];
-    const match = line.match(applyRe);
+    const match = line.exec(applyRe);
     if (!match) continue;
     return {
       trialId: match[1],
