@@ -54,7 +54,7 @@ sonar_scan_push_011_base:
       -Dsonar.branch.name="${CI_COMMIT_BRANCH}"
       -Dsonar.qualitygate.wait=false
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "0.1.1/base"'
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "v0.1.1/base"'
 
 build_deb:
   stage: build

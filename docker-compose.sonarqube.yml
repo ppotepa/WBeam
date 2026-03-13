@@ -42,7 +42,7 @@ services:
       PRE_SCAN_CMD: ./scripts/ci/sonar-prepare.sh
       PROJECT_KEY: wbeam
       PROJECT_NAME: WBeam
-      SONAR_BRANCH: ${SONAR_BRANCH:-0.1.1/base}
+      SONAR_BRANCH: ${SONAR_BRANCH:-v0.1.1/base}
     volumes:
       - ./:/workspace
     working_dir: /workspace
