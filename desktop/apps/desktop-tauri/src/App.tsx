@@ -939,7 +939,7 @@ export default function App() {
               : "Installation failed.")
             : "Installing...";
           return (
-        <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Installing dependencies">
+        <dialog class="modal-backdrop" open aria-label="Installing dependencies">
           <section class="connect-modal setup-modal install-modal">
             <h3>Installing virtual desktop dependencies</h3>
             <p class="connect-modal-subtitle">Elevation is required (root/pkexec prompt).</p>
@@ -965,7 +965,7 @@ export default function App() {
               </button>
             </div>
           </section>
-        </div>
+        </dialog>
           );
         })()}
       </Show>
