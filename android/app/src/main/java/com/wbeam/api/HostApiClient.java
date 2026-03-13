@@ -26,6 +26,7 @@ import okhttp3.ResponseBody;
  * Holds shared OkHttp instances and provides retry-aware request helpers.
  */
 public final class HostApiClient {
+    private static final String LOOPBACK_HOST = "127.0.0.1";
 
     private static final String API_IMPL = BuildConfig.WBEAM_API_IMPL == null
             ? "host"
@@ -70,10 +71,10 @@ public final class HostApiClient {
             configured = BuildConfig.WBEAM_HOST;
         }
         if (configured == null) {
-            return "127.0.0.1";
+            return LOOPBACK_HOST;
         }
         String trimmed = configured.trim();
-        return trimmed.isEmpty() ? "127.0.0.1" : trimmed;
+        return trimmed.isEmpty() ? LOOPBACK_HOST : trimmed;
     }
 
     private static String resolveTargetSerial() {
@@ -309,7 +310,7 @@ public final class HostApiClient {
         if ("GET".equals(m) && ("/status".equals(p) || "/health".equals(p))) {
             JSONObject out = new JSONObject();
             out.put("state", LocalApiState.state);
-            out.put("host_name", LocalApiState.hostName);
+            out.put("host_name", LocalApiState.HOST_NAME);
             out.put("run_id", LocalApiState.runId);
             out.put("last_error", LocalApiState.lastError);
             out.put("uptime", Math.max(0L, nowSec - LocalApiState.startedAtSec));
@@ -377,6 +378,6 @@ public final class HostApiClient {
         private static double latestRecvFps = 0.0;
         private static double latestPresentFps = 0.0;
         private static long latestRecvBps = 0L;
-        private static final String hostName = "android-local";
+        private static final String HOST_NAME = "android-local";
     }
 }
