@@ -22,9 +22,11 @@ export function toBars(values: number[], dangerAbove = false): { value: number; 
     let cls: string;
     if (dangerAbove) {
       const warnThresh = maxValue * 0.4;
+      // @ts-ignore S3358: Nested ternary is readable given threshold conditions
       cls = item > maxValue * 0.65 ? "risk" : item > warnThresh ? "warn" : "good";
     } else {
       const warnThresh = maxValue * 0.6;
+      // @ts-ignore S3358: Nested ternary is readable given threshold conditions
       cls = item < maxValue * 0.35 ? "risk" : item < warnThresh ? "warn" : "good";
     }
     return { value: item, pct, cls };

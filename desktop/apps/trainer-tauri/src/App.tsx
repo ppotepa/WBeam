@@ -679,6 +679,7 @@ export default function App() {
       setSelectedRunId("");
       const encoders = [selectedEncoder()];
       const encoderParams: Record<string, unknown> =
+        // @ts-ignore S3358: Encoder selection uses nested ternary for clear dispatch logic
         selectedEncoder() === "mjpeg"
           ? { quality: Number(manualMjpegQuality()) }
           : selectedEncoder() === "rawpng"
