@@ -38,6 +38,7 @@ public final class RuntimeHudUpdateState {
     public final long updatedDropPrevCount;
     public final long updatedDropPrevAtMs;
 
+    @SuppressWarnings("java:S107")
     private RuntimeHudUpdateState(
             long frameInHost,
             long frameOutHost,

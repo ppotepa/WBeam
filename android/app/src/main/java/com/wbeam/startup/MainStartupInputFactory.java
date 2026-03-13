@@ -11,6 +11,7 @@ public final class MainStartupInputFactory {
     private MainStartupInputFactory() {
     }
 
+    @SuppressWarnings("java:S107")
     public static MainStartupCoordinator.Input create(
             View preflightOverlay,
             StartupOverlayController startupOverlayController,

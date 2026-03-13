@@ -19,6 +19,7 @@ public final class HostApiFailureNotifier {
     private HostApiFailureNotifier() {
     }
 
+    @SuppressWarnings("java:S107")
     public static void handle(
             Context context,
             String tag,

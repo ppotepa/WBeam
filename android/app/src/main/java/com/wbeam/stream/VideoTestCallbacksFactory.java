@@ -61,6 +61,7 @@ public final class VideoTestCallbacksFactory {
     private VideoTestCallbacksFactory() {
     }
 
+    @SuppressWarnings("java:S107")
     public static VideoTestController.Callbacks create(
             SurfaceProvider surfaceProvider,
             Action stopVideoPlayer,

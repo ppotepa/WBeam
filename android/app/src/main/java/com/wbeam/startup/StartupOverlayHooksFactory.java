@@ -29,6 +29,7 @@ public final class StartupOverlayHooksFactory {
     private StartupOverlayHooksFactory() {
     }
 
+    @SuppressWarnings("java:S107")
     public static StartupOverlayCoordinator.Hooks create(
             final View overlayContainer,
             final StartupOverlayViewRenderer.Views views,

@@ -18,6 +18,7 @@ public final class BuildVariantUiCoordinator {
     private BuildVariantUiCoordinator() {
     }
 
+    @SuppressWarnings("java:S107")
     public static void apply(
             boolean debugBuild,
             boolean debugOverlayVisible,

@@ -26,7 +26,7 @@ public final class TrainerHudRouting {
     private TrainerHudRouting() {
     }
 
-    @SuppressWarnings("java:S107")
+    @SuppressWarnings({"java:S107", "java:S3776"})
     public static Decision decide(
             String connectionMode,
             boolean trainerHudFlag,

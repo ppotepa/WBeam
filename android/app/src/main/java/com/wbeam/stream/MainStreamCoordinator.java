@@ -26,6 +26,7 @@ public final class MainStreamCoordinator {
     private final String stateIdle;
     private H264TcpPlayer player;
 
+    @SuppressWarnings("java:S107")
     public MainStreamCoordinator(
             String tag,
             SurfaceView previewSurface,

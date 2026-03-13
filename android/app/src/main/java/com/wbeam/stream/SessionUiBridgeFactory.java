@@ -26,6 +26,7 @@ public final class SessionUiBridgeFactory {
     private SessionUiBridgeFactory() {
     }
 
+    @SuppressWarnings("java:S107")
     public static SessionUiBridge create(
             Context context,
             StatusPoller statusPoller,

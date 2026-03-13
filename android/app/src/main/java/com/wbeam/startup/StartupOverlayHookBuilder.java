@@ -8,6 +8,7 @@ public final class StartupOverlayHookBuilder {
     private StartupOverlayHookBuilder() {
     }
 
+    @SuppressWarnings("java:S107")
     public static StartupOverlayCoordinator.Hooks create(
             View preflightOverlay,
             StartupOverlayViewRenderer.Views startupOverlayViews,
