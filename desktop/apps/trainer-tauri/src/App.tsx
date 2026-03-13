@@ -1268,7 +1268,7 @@ export default function App() {
                 <Show when={liveResolutionMode() === "custom"}>
                   <div class="two-col">
                     <label title="Custom width in pixels. Range: 320..7680.">
-                      Width
+                      <span>Width</span>
                       <input type="number" min="320" max="7680" value={liveCustomWidth()} onInput={(e) => setLiveCustomWidth(Number(e.currentTarget.value || 2000))} />
                     </label>
                     <label title="Custom height in pixels. Range: 240..4320.">
