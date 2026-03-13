@@ -28,6 +28,7 @@ public final class VideoTestController {
     private static final String RUN_TESTS_LOG_PREFIX = "[RUN TESTS LIVE] ";
     private static final String STATUS_STREAMING = "streaming";
     private static final String STATUS_ERROR = "error";
+    private static final String PRESET_HEADER = "preset\n";
     private static final long   LIVE_TEST_START_TIMEOUT_MS = 12_000L;
     private static final int    BANDWIDTH_TEST_MB          = 64;
     private static final String TEST_VIDEO_URL =
@@ -186,7 +187,7 @@ public final class VideoTestController {
 
         callbacks.setLiveLogVisible(true);
         setOverlay("RUN TESTS LIVE LOADING",
-                "preset\n" + cfg.toMultiline(),
+                PRESET_HEADER + cfg.toMultiline(),
                 "phase: preparing media pipeline");
         callbacks.stopVideoPlayer();
         release();
@@ -219,13 +220,13 @@ public final class VideoTestController {
                     callbacks.onStatus(STATUS_ERROR,
                             "RUN TESTS LIVE failed: IllegalStateException", 0);
                     setOverlay("RUN TESTS LIVE FAILED",
-                            "preset\n" + cfg.toMultiline(), shortError(ex));
+                            PRESET_HEADER + cfg.toMultiline(), shortError(ex));
                     release();
                     return;
                 }
                 callbacks.onStatus(STATUS_STREAMING, "RUN TESTS LIVE playing", 0);
                 setOverlay("RUN TESTS LIVE ACTIVE",
-                        "preset\n" + cfg.toMultiline(), "phase: playback started");
+                        PRESET_HEADER + cfg.toMultiline(), "phase: playback started");
                 uiHandler.postDelayed(this::clearOverlay, 900);
             });
 
@@ -244,7 +245,7 @@ public final class VideoTestController {
                 callbacks.onStatus(STATUS_ERROR,
                         "RUN TESTS LIVE error: " + what + "/" + extra, 0);
                 setOverlay("RUN TESTS LIVE ERROR",
-                        "preset\n" + cfg.toMultiline(),
+                        PRESET_HEADER + cfg.toMultiline(),
                         "player error: " + what + "/" + extra);
                 return true;
             });
@@ -255,12 +256,12 @@ public final class VideoTestController {
                     logWarn("buffering start");
                     callbacks.onStatus("connecting", "RUN TESTS LIVE buffering", 0);
                     setOverlay("RUN TESTS LIVE LOADING",
-                            "preset\n" + cfg.toMultiline(), "phase: buffering");
+                            PRESET_HEADER + cfg.toMultiline(), "phase: buffering");
                 } else if (what == MediaPlayer.MEDIA_INFO_BUFFERING_END) {
                     logInfo("buffering end");
                     callbacks.onStatus(STATUS_STREAMING, "RUN TESTS LIVE playing", 0);
                     setOverlay("RUN TESTS LIVE ACTIVE",
-                            "preset\n" + cfg.toMultiline(), "phase: streaming frames");
+                            PRESET_HEADER + cfg.toMultiline(), "phase: streaming frames");
                 }
                 return false;
             });
@@ -275,7 +276,7 @@ public final class VideoTestController {
             callbacks.onStatus(STATUS_ERROR,
                     "RUN TESTS LIVE failed: " + e.getClass().getSimpleName(), 0);
             setOverlay("RUN TESTS LIVE FAILED",
-                    "preset\n" + callbacks.getTestConfig().toMultiline(), shortError(e));
+                    PRESET_HEADER + callbacks.getTestConfig().toMultiline(), shortError(e));
             release();
         }
     }
