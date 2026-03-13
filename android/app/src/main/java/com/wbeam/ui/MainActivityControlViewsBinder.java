@@ -10,6 +10,10 @@ import androidx.appcompat.app.AppCompatActivity;
 import com.wbeam.R;
 
 public final class MainActivityControlViewsBinder {
+    /**
+     * Plain data carrier for control views binding.
+     */
+    @SuppressWarnings("java:S1104")
     public static final class Views {
         public TextView liveLogText;
         public TextView resValueText;
