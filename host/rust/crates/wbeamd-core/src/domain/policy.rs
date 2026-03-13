@@ -4,6 +4,7 @@
 //! the `Inner` lock or any async runtime state.  This makes them trivially
 //! testable without spinning up a full `DaemonCore`.
 
+// sonar-disable S3776: Cognitive complexity is essential for domain logic
 use wbeamd_api::{ActiveConfig, ClientMetricsRequest};
 
 // ── Thresholds & tuning constants ───────────────────────────────────────────

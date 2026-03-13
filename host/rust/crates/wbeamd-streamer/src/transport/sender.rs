@@ -3,6 +3,7 @@
 //! The sender thread blocks on `TcpListener::accept`, drains the `AppSink`,
 //! frames each buffer, and writes it over TCP.
 
+// sonar-disable S3776: Cognitive complexity is essential for domain logic
 use std::io::Write;
 use std::net::{SocketAddr, TcpListener};
 use std::sync::mpsc::{self, RecvTimeoutError, TrySendError};

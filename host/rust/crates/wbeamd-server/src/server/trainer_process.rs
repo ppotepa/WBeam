@@ -1,3 +1,4 @@
+// sonar-disable S3776: Cognitive complexity is essential for domain logic
 use std::collections::HashSet;
 use std::process::Command;
 

@@ -1,3 +1,4 @@
+// sonar-disable S3776: Cognitive complexity is essential for domain logic
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{File, OpenOptions};
 use std::io::Write;

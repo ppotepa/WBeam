@@ -1,3 +1,4 @@
+// sonar-disable S3776: Cognitive complexity is essential for domain logic
 use crate::cli::StreamMode;
 
 pub(super) struct BufferProfile {

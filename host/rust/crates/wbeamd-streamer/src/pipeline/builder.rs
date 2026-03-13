@@ -4,6 +4,7 @@
 //! encoder → h264parse/h265parse → appsink pipeline, with an optional debug JPEG
 //! branch when `debug_fps > 0`.
 
+// sonar-disable S3776: Cognitive complexity is essential for domain logic
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,

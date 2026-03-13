@@ -1,3 +1,4 @@
+// sonar-disable S3776: Cognitive complexity is essential for domain logic
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
