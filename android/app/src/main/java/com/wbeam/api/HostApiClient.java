@@ -278,7 +278,6 @@ public final class HostApiClient {
     private static void resetLocalApiCounters(long nowSec) {
         LocalApiState.lastError = "";
         LocalApiState.startedAtSec = nowSec;
-        LocalApiState.lastClientMetricAtMs = 0L;
         LocalApiState.lastFlowAtMs = 0L;
         LocalApiState.firstFlowAtSec = 0L;
         LocalApiState.latestRecvFps = 0.0;
@@ -293,7 +292,6 @@ public final class HostApiClient {
         LocalApiState.latestRecvFps = recvFps;
         LocalApiState.latestPresentFps = presentFps;
         LocalApiState.latestRecvBps = recvBps;
-        LocalApiState.lastClientMetricAtMs = nowMs;
 
         boolean flowing = recvBps > 0L || recvFps >= 1.0 || presentFps >= 1.0;
         if (flowing) {
@@ -383,7 +381,6 @@ public final class HostApiClient {
         private static long runId = 0L;
         private static long startedAtSec = System.currentTimeMillis() / 1000L;
         private static long firstFlowAtSec = 0L;
-        private static long lastClientMetricAtMs = 0L;
         private static long lastFlowAtMs = 0L;
         private static double latestRecvFps = 0.0;
         private static double latestPresentFps = 0.0;
