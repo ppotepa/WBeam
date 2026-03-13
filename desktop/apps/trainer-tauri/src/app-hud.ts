@@ -14,11 +14,11 @@ export function parseHud(lines: string[]): HudSnapshot {
 
   const trialStartRe = /^\[(t\d+)] apply /;
   const trialScoreRe =
-    /^\[(t\d+)] score=([0-9.-]+) present=([0-9.-]+) recv=([0-9.-]+) e2e95=([0-9.-]+)ms drops\/s=([0-9.-]+)(?: mbps=([0-9.-]+))?/;
+    /^\[(t\d+)] score=([-0-9.]+) present=([-0-9.]+) recv=([-0-9.]+) e2e95=([-0-9.]+)ms drops\/s=([-0-9.]+)(?: mbps=([-0-9.]+))?/;
   const progressRe = /^trial space=(\d+) running=(\d+)/;
   const protoTrialRe = /\btrial=([A-Za-z0-9_.:-]+)/;
   const protoDoneRe =
-    /done trial=([A-Za-z0-9_.:-]+) score=([0-9.-]+).*sender_p50=([0-9.-]+).*pipe_p50=([0-9.-]+).*timeout_mean=([0-9.-]+).*drop=([0-9.-]+)%(?:.*mbps=([0-9.-]+))?/;
+    /done trial=([A-Za-z0-9_.:-]+) score=([-0-9.]+).*sender_p50=([-0-9.]+).*pipe_p50=([-0-9.]+).*timeout_mean=([-0-9.]+).*drop=([-0-9.]+)%(?:.*mbps=([-0-9.]+))?/;
   const protoGenRe = /generation\s+(\d+)\/(\d+):\s+population=(\d+)\s+\(start\)/;
   const modeRe = /"mode"\s*:\s*"([^"]+)"/;
 
@@ -71,9 +71,9 @@ export function parseHud(lines: string[]): HudSnapshot {
 
 export function parseHudSeries(lines: string[]): HudSeries {
   const trialScoreRe =
-    /^\[(t\d+)] score=([0-9.-]+) present=([0-9.-]+) recv=([0-9.-]+) e2e95=([0-9.-]+)ms drops\/s=([0-9.-]+)/;
+    /^\[(t\d+)] score=([-0-9.]+) present=([-0-9.]+) recv=([-0-9.]+) e2e95=([-0-9.]+)ms drops\/s=([-0-9.]+)/;
   const protoDoneRe =
-    /done trial=([A-Za-z0-9_.:-]+) score=([0-9.-]+).*sender_p50=([0-9.-]+).*pipe_p50=([0-9.-]+).*timeout_mean=([0-9.-]+).*drop=([0-9.-]+)%/;
+    /done trial=([A-Za-z0-9_.:-]+) score=([-0-9.]+).*sender_p50=([-0-9.]+).*pipe_p50=([-0-9.]+).*timeout_mean=([-0-9.]+).*drop=([-0-9.]+)%/;
   const series: HudSeries = { score: [], present: [], recv: [], drops: [] };
   for (const line of lines) {
     let match = trialScoreRe.exec(line);

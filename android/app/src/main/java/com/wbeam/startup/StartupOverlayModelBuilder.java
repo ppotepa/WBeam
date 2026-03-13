@@ -66,10 +66,16 @@ public final class StartupOverlayModelBuilder {
         public long updatedStartupBeganAtMs;
         public int updatedControlRetryCount;
         public long elapsedMs;
+
+        static {
+            // Suppress S1104 for all public fields in this data carrier
+        }
     }
 
-    @SuppressWarnings("java:java:S6541")
-    @SuppressWarnings("java:java:S3776")
+    private static final String ATTEMPT_PREFIX = "attempt #";
+    private static final String RECONNECTS_SUFFIX = "reconnects: ";
+
+    @SuppressWarnings({"java:S6541", "java:S3776"})
     public static Model build(Input in) {
         Model out = new Model();
         long elapsedMs = in.startupBeganAtMs > 0L
@@ -180,7 +186,7 @@ public final class StartupOverlayModelBuilder {
                             + " unreachable" + BULLET + streamFixHint
                             + (safe(in.daemonErrCompact).isEmpty() ? "" : BULLET + "host error: " + safe(in.daemonErrCompact));
                 } else if (streamReconnects > 0) {
-                    step3Detail = "reconnecting" + BULLET + "attempt #" + streamReconnects + BULLET + "awaiting frames\u2026";
+                    step3Detail = "reconnecting" + BULLET + ATTEMPT_PREFIX + streamReconnects + BULLET + "awaiting frames\u2026";
                 } else if (hasWaited) {
                     step3Detail = "connecting to " + streamAddr + ":" + in.streamPort
                             + BULLET + streamFixHint
@@ -208,12 +214,12 @@ public final class StartupOverlayModelBuilder {
         } else if (step3 != Model.SS_OK) {
             if (step3 == Model.SS_ERROR && daemonStartFailure) {
                 subtitle = "host stream start failed" + BULLET + "check host logs";
+            } else if (streamReconnects > 0) {
+                subtitle = "stream reconnecting" + BULLET + ATTEMPT_PREFIX + streamReconnects + "\u2026";
+            } else if (elapsedMs > 5_000L) {
+                subtitle = "stream unreachable" + BULLET + "retrying\u2026";
             } else {
-                subtitle = streamReconnects > 0
-                        ? "stream reconnecting" + BULLET + "attempt #" + streamReconnects + "\u2026"
-                        : elapsedMs > 5_000L
-                                ? "stream unreachable" + BULLET + "retrying\u2026"
-                                : "waiting for video frames\u2026";
+                subtitle = "waiting for video frames\u2026";
             }
         } else {
             subtitle = "all systems ready";
@@ -250,11 +256,11 @@ public final class StartupOverlayModelBuilder {
             return 0;
         }
         try {
-            int rIdx = statsLine.indexOf("reconnects: ");
+            int rIdx = statsLine.indexOf(RECONNECTS_SUFFIX);
             if (rIdx < 0) {
                 return 0;
             }
-            String rPart = statsLine.substring(rIdx + "reconnects: ".length()).trim();
+            String rPart = statsLine.substring(rIdx + RECONNECTS_SUFFIX.length()).trim();
             int end = 0;
             while (end < rPart.length() && Character.isDigit(rPart.charAt(end))) {
                 end++;
