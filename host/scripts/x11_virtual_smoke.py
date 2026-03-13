@@ -110,7 +110,7 @@ def ensure_reverse_sanity(serial: str, stream_port: int, control_port: int) -> N
         )
 
 
-def main() -> int:
+def create_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         description="Smoke test for WBeam X11 virtual monitor path"
     )
@@ -152,7 +152,101 @@ def main() -> int:
         default=True,
         help="Require expected adb reverse mappings during run",
     )
-    args = ap.parse_args()
+    return ap
+
+
+def prepare_android_side(args) -> None:
+    if args.launch_android_app:
+        adb_launch_main(args.serial)
+        print("[smoke] android app launch requested")
+        time.sleep(1.0)
+    if args.adb_reverse:
+        adb_reverse(args.serial, 5000, args.stream_port)
+        adb_reverse(args.serial, 5001, args.control_port)
+        if args.stream_port != 5000:
+            adb_reverse(args.serial, args.stream_port, args.stream_port)
+        print(
+            f"[smoke] adb reverse configured: device 5000->{args.stream_port}, 5001->{args.control_port}"
+        )
+
+
+def wait_for_streaming(status_url: str, timeout_sec: int) -> str:
+    deadline = time.time() + timeout_sec
+    last_state = "unknown"
+    while time.time() < deadline:
+        st = http_json(status_url)
+        last_state = str(st.get("state", "unknown")).upper()
+        print(f"[smoke] state={last_state} run_id={st.get('run_id', 0)}")
+        if last_state == "STREAMING":
+            break
+        time.sleep(0.7)
+    return last_state
+
+
+def parse_flow_metrics(metrics_payload: dict) -> tuple[int, float, int]:
+    m = metrics_payload.get("metrics", {}) if isinstance(metrics_payload, dict) else {}
+    frame_out = int(m.get("frame_out", 0) or 0)
+    latest = m.get("latest_client_metrics")
+    present_fps = 0.0
+    recv_bps = 0
+    if isinstance(latest, dict):
+        try:
+            present_fps = float(latest.get("present_fps", 0.0) or 0.0)
+        except Exception:
+            present_fps = 0.0
+        try:
+            recv_bps = int(latest.get("recv_bps", 0) or 0)
+        except Exception:
+            recv_bps = 0
+    return frame_out, present_fps, recv_bps
+
+
+def wait_for_flow(base: str, args) -> tuple[bool, bool, bool, dict]:
+    flow_ok = False
+    client_present_ok = False
+    recv_bps_ok = args.require_min_recv_bps <= 0
+    flow_deadline = time.time() + args.flow_timeout_sec
+    metrics = {}
+    while time.time() < flow_deadline:
+        metrics = http_json(
+            endpoint(base, "/metrics", serial=args.serial, stream_port=args.stream_port)
+        )
+        frame_out, present_fps, recv_bps = parse_flow_metrics(metrics)
+        if present_fps >= 1.0:
+            client_present_ok = True
+        if recv_bps >= args.require_min_recv_bps:
+            recv_bps_ok = True
+        if args.require_client_present:
+            if client_present_ok and recv_bps_ok:
+                flow_ok = True
+                break
+        elif (frame_out > 0 or client_present_ok) and recv_bps_ok:
+            flow_ok = True
+            break
+        time.sleep(0.7)
+    return flow_ok, client_present_ok, recv_bps_ok, metrics
+
+
+def validate_results(last_state: str, flow_ok: bool, client_present_ok: bool, recv_bps_ok: bool, args) -> int:
+    if last_state != "STREAMING":
+        print("[smoke] FAIL: did not reach STREAMING state within timeout")
+        return 3
+    if not flow_ok:
+        print("[smoke] FAIL: reached STREAMING but observed no frame/client flow")
+        return 4
+    if args.require_client_present and not client_present_ok:
+        print("[smoke] FAIL: host streams, but no client present_fps evidence")
+        return 5
+    if not recv_bps_ok:
+        print(
+            f"[smoke] FAIL: recv_bps did not reach threshold {args.require_min_recv_bps}"
+        )
+        return 6
+    return 0
+
+
+def main() -> int:
+    args = create_parser().parse_args()
 
     base = f"http://127.0.0.1:{args.control_port}/v1"
     print(f"[smoke] base={base} serial={args.serial} stream_port={args.stream_port}")
@@ -170,18 +264,7 @@ def main() -> int:
         print("[smoke] FAIL: virtual doctor is not ready")
         return 2
 
-    if args.launch_android_app:
-        adb_launch_main(args.serial)
-        print("[smoke] android app launch requested")
-        time.sleep(1.0)
-    if args.adb_reverse:
-        adb_reverse(args.serial, 5000, args.stream_port)
-        adb_reverse(args.serial, 5001, args.control_port)
-        if args.stream_port != 5000:
-            adb_reverse(args.serial, args.stream_port, args.stream_port)
-        print(
-            f"[smoke] adb reverse configured: device 5000->{args.stream_port}, 5001->{args.control_port}"
-        )
+    prepare_android_side(args)
 
     start_url = endpoint(
         base,
@@ -199,55 +282,12 @@ def main() -> int:
         serial=args.serial,
         stream_port=args.stream_port,
     )
-    deadline = time.time() + args.timeout_sec
-    last_state = "unknown"
-    while time.time() < deadline:
-        st = http_json(status_url)
-        last_state = str(st.get("state", "unknown")).upper()
-        print(f"[smoke] state={last_state} run_id={st.get('run_id', 0)}")
-        if last_state == "STREAMING":
-            break
-        time.sleep(0.7)
+    last_state = wait_for_streaming(status_url, args.timeout_sec)
 
     if args.require_reverse_sanity:
         ensure_reverse_sanity(args.serial, args.stream_port, args.control_port)
 
-    flow_ok = False
-    client_present_ok = False
-    recv_bps_ok = args.require_min_recv_bps <= 0
-    flow_deadline = time.time() + args.flow_timeout_sec
-    metrics = {}
-    while time.time() < flow_deadline:
-        metrics = http_json(
-            endpoint(base, "/metrics", serial=args.serial, stream_port=args.stream_port)
-        )
-        m = metrics.get("metrics", {}) if isinstance(metrics, dict) else {}
-        frame_out = int(m.get("frame_out", 0) or 0)
-        latest = m.get("latest_client_metrics")
-        present_fps = 0.0
-        recv_bps = 0
-        if isinstance(latest, dict):
-            try:
-                present_fps = float(latest.get("present_fps", 0.0) or 0.0)
-            except Exception:
-                present_fps = 0.0
-            try:
-                recv_bps = int(latest.get("recv_bps", 0) or 0)
-            except Exception:
-                recv_bps = 0
-        if present_fps >= 1.0:
-            client_present_ok = True
-        if recv_bps >= args.require_min_recv_bps:
-            recv_bps_ok = True
-        if args.require_client_present:
-            if client_present_ok and recv_bps_ok:
-                flow_ok = True
-                break
-        else:
-            if (frame_out > 0 or client_present_ok) and recv_bps_ok:
-                flow_ok = True
-                break
-        time.sleep(0.7)
+    flow_ok, client_present_ok, recv_bps_ok, metrics = wait_for_flow(base, args)
 
     print("[smoke] metrics snapshot:")
     print(json.dumps(metrics, indent=2, sort_keys=True))
@@ -259,21 +299,9 @@ def main() -> int:
     )
     print("[smoke] stop requested")
 
-    if last_state != "STREAMING":
-        print("[smoke] FAIL: did not reach STREAMING state within timeout")
-        return 3
-    if not flow_ok:
-        print("[smoke] FAIL: reached STREAMING but observed no frame/client flow")
-        return 4
-    if args.require_client_present and not client_present_ok:
-        print("[smoke] FAIL: host streams, but no client present_fps evidence")
-        return 5
-    if not recv_bps_ok:
-        print(
-            f"[smoke] FAIL: recv_bps did not reach threshold {args.require_min_recv_bps}"
-        )
-        return 6
-
+    result = validate_results(last_state, flow_ok, client_present_ok, recv_bps_ok, args)
+    if result != 0:
+        return result
     print("[smoke] OK")
     return 0
 
