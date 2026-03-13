@@ -91,7 +91,7 @@ final class StreamReconnectLoop {
                 statusListener.onStatus(stateStreaming, "connected [framed]", 0);
                 streamWorker.run(new BufferedInputStream(socket.getInputStream(), 256 * 1024), codecHolder);
 
-            } catch (Throwable e) {
+            } catch (Exception e) {
                 if (runtimeState.isRunning()) {
                     long reconnects = runtimeState.incrementReconnects();
                     long reconnectDelayMs = Math.min(5000L, runtimeState.getReconnectDelayMs() + 400L);
@@ -112,6 +112,9 @@ final class StreamReconnectLoop {
                                     + " | reconnects: " + runtimeState.getReconnects()
                     );
                 }
+            } catch (Error err) {
+                // Preserve previous behaviour of surfacing fatal errors to Android runtime.
+                throw err;
             } finally {
                 runtimeState.closeSocket();
                 MediaCodec codec = codecHolder[0];
@@ -124,6 +127,7 @@ final class StreamReconnectLoop {
                     try {
                         codec.release();
                     } catch (Exception ignored) {
+                        // Release is best-effort as codec may already be torn down.
                     }
                 }
             }
