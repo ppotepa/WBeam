@@ -5,6 +5,7 @@ public final class RuntimeHudTrendComposer {
     }
 
     @SuppressWarnings("java:S107")
+    @SuppressWarnings("java:S1905")
     public static String appendSamplesAndBuildHtml(
             MetricSeriesBuffer runtimePresentSeries,
             MetricSeriesBuffer runtimeMbpsSeries,

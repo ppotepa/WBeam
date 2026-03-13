@@ -170,6 +170,7 @@ public final class HostApiClient {
      * Perform a lightweight transport probe by downloading a fixed payload from
      * `/v1/speedtest`. Returns elapsed milliseconds when successful.
      */
+    @SuppressWarnings("java:S1905")
     public static long runTransportProbeMs(int mb) throws IOException {
         int sizeMb = Math.max(1, Math.min(8, mb));
         String url = API_BASE + appendSessionQuery("/v1/speedtest?mb=" + sizeMb);
