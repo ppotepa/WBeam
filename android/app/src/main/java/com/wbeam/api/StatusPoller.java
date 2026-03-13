@@ -18,6 +18,7 @@ import java.util.concurrent.ExecutorService;
 public final class StatusPoller {
 
     private static final String TAG = "WBeamStatusPoller";
+    private static final String API_SUFFIX = " api=";
 
     // 5 Hz telemetry/status polling for responsive HUD updates.
     private static final long STATUS_POLL_MS           = 200L;
@@ -193,7 +194,7 @@ public final class StatusPoller {
         if (!newSnapshot.equals(daemonStateSnapshot)) {
             daemonStateSnapshot = newSnapshot;
             Log.i(TAG, "daemon state=" + daemonState + " run_id=" + daemonRunId
-                    + " api=" + HostApiClient.API_BASE
+                    + API_SUFFIX + HostApiClient.API_BASE
                     + (daemonLastError.isEmpty() ? "" : " last_error=" + daemonLastError));
         }
 
@@ -230,11 +231,11 @@ public final class StatusPoller {
             buildMismatchSnapshot = snapshot;
             if (mismatch) {
                 Log.e(TAG, "build mismatch app=" + appRev + " host=" + hostRev
-                        + " api=" + HostApiClient.API_BASE
+                        + API_SUFFIX + HostApiClient.API_BASE
                         + " hint=rebuild host and redeploy APK with same WBEAM_BUILD_REV");
             } else if (daemonReachable && hostKnown && appKnown) {
                 Log.i(TAG, "build match restored app=" + appRev + " host=" + hostRev
-                        + " api=" + HostApiClient.API_BASE);
+                        + API_SUFFIX + HostApiClient.API_BASE);
             }
         }
     }
@@ -243,7 +244,7 @@ public final class StatusPoller {
         boolean wasReachable = daemonReachable;
         daemonReachable = false;
         daemonState     = "DISCONNECTED";
-        Log.e(TAG, "daemon poll failed api=" + HostApiClient.API_BASE, e);
+        Log.e(TAG, "daemon poll failed" + API_SUFFIX + HostApiClient.API_BASE, e);
         callbacks.onDaemonOffline(wasReachable, e);
     }
 
