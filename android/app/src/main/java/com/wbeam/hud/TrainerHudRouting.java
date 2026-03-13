@@ -10,6 +10,10 @@ public final class TrainerHudRouting {
         SHOW_WAITING
     }
 
+    /**
+     * Plain data carrier for routing decision.
+     */
+    @SuppressWarnings("java:S1104")
     public static final class Decision {
         public boolean updatedSessionActive;
         public long updatedLastPayloadAtMs;
@@ -22,6 +26,7 @@ public final class TrainerHudRouting {
     private TrainerHudRouting() {
     }
 
+    @SuppressWarnings("java:S107")
     public static Decision decide(
             String connectionMode,
             boolean trainerHudFlag,
