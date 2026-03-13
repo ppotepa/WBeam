@@ -60,29 +60,47 @@ final class StreamNalUtils {
     }
 
     static AvcCsd extractAvcCsd(byte[] data, int size) {
-        byte[] sps = null;
-        byte[] pps = null;
         int start = findStartCode(data, 0, size);
         if (start < 0) {
-            if (size > 0) {
-                int type = data[0] & 0x1F;
-                if (type == 7) sps = Arrays.copyOf(data, size);
-                if (type == 8) pps = Arrays.copyOf(data, size);
-            }
-            return new AvcCsd(sps, pps);
+            return extractSingleNalCsd(data, size);
         }
 
+        byte[] sps = null;
+        byte[] pps = null;
         while (start >= 0 && start < size) {
-            int nalHdrOff = (start + 2 < size && data[start + 2] == 1) ? (start + 3) : (start + 4);
-            int next = findStartCode(data, nalHdrOff + 1, size);
-            if (next < 0) next = size;
+            int nalHdrOff = nalHeaderOffset(start, size, data);
+            int next = nextStartOrEnd(data, nalHdrOff, size);
             int nalType = data[nalHdrOff] & 0x1F;
-            if (nalType == 7 && sps == null) sps = Arrays.copyOfRange(data, nalHdrOff, next);
-            if (nalType == 8 && pps == null) pps = Arrays.copyOfRange(data, nalHdrOff, next);
+            if (nalType == 7 && sps == null) {
+                sps = Arrays.copyOfRange(data, nalHdrOff, next);
+            }
+            if (nalType == 8 && pps == null) {
+                pps = Arrays.copyOfRange(data, nalHdrOff, next);
+            }
             if (sps != null && pps != null) break;
             start = next;
         }
         return new AvcCsd(sps, pps);
+    }
+
+    private static AvcCsd extractSingleNalCsd(byte[] data, int size) {
+        byte[] sps = null;
+        byte[] pps = null;
+        if (size > 0) {
+            int type = data[0] & 0x1F;
+            if (type == 7) sps = Arrays.copyOf(data, size);
+            if (type == 8) pps = Arrays.copyOf(data, size);
+        }
+        return new AvcCsd(sps, pps);
+    }
+
+    private static int nalHeaderOffset(int start, int size, byte[] data) {
+        return (start + 2 < size && data[start + 2] == 1) ? (start + 3) : (start + 4);
+    }
+
+    private static int nextStartOrEnd(byte[] data, int nalHdrOff, int size) {
+        int next = findStartCode(data, nalHdrOff + 1, size);
+        return next < 0 ? size : next;
     }
 
     private static int firstNalType(byte[] data, int offset, int size) {
