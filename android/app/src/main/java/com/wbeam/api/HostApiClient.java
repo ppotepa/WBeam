@@ -28,6 +28,8 @@ import okhttp3.ResponseBody;
 public final class HostApiClient {
     private static final String LOOPBACK_HOST = "127.0.0.1";
     private static final String LOCAL_STATE_STREAMING = "STREAMING";
+    private static final String LOCAL_STATE_STARTING = LOCAL_STATE_STARTING;
+    private static final String LOCAL_STATE_RECONNECTING = LOCAL_STATE_RECONNECTING;
 
     private static final String API_IMPL = BuildConfig.WBEAM_API_IMPL == null
             ? "host"
@@ -245,7 +247,7 @@ public final class HostApiClient {
 
         if ("POST".equals(m) && "/start".equals(p)) {
             resetLocalApiCounters(nowSec);
-            LocalApiState.state = "STARTING";
+            LocalApiState.state = LOCAL_STATE_STARTING;
             LocalApiState.runId++;
         } else if ("POST".equals(m) && ("/stop".equals(p) || "/apply".equals(p))) {
             resetLocalApiCounters(nowSec);
@@ -303,7 +305,7 @@ public final class HostApiClient {
         }
         if (!"IDLE".equals(LocalApiState.state)) {
             long sinceStartSec = Math.max(0L, nowSec - LocalApiState.startedAtSec);
-            LocalApiState.state = sinceStartSec < 3L ? "STARTING" : "RECONNECTING";
+            LocalApiState.state = sinceStartSec < 3L ? LOCAL_STATE_STARTING : LOCAL_STATE_RECONNECTING;
         }
     }
 
@@ -313,14 +315,14 @@ public final class HostApiClient {
                     ? (nowMs - LocalApiState.lastFlowAtMs)
                     : Long.MAX_VALUE;
             if (idleMs > 2500L) {
-                LocalApiState.state = "RECONNECTING";
+                LocalApiState.state = LOCAL_STATE_RECONNECTING;
             }
             return;
         }
         if (!"IDLE".equals(LocalApiState.state)) {
             long sinceStartSec = Math.max(0L, nowSec - LocalApiState.startedAtSec);
             if (sinceStartSec >= 3L) {
-                LocalApiState.state = "RECONNECTING";
+                LocalApiState.state = LOCAL_STATE_RECONNECTING;
             }
         }
     }
