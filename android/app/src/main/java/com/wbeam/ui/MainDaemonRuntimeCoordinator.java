@@ -45,6 +45,10 @@ public final class MainDaemonRuntimeCoordinator {
         void onMetrics(JSONObject metrics);
     }
 
+    /**
+     * Plain data carrier for daemon runtime coordinator status input.
+     */
+    @SuppressWarnings("java:S1104")
     public static final class StatusInput {
         public boolean reachable;
         public boolean wasReachable;
