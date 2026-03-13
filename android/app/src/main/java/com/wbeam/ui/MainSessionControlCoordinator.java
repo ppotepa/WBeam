@@ -22,6 +22,7 @@ public final class MainSessionControlCoordinator {
     private MainSessionControlCoordinator() {
     }
 
+    @SuppressWarnings("java:S107")
     public static void handleApiFailure(
             Context context,
             String tag,
@@ -59,6 +60,7 @@ public final class MainSessionControlCoordinator {
         );
     }
 
+    @SuppressWarnings("java:S107")
     public static void requestStartGuarded(
             Context context,
             boolean userAction,
