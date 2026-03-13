@@ -1254,7 +1254,7 @@ export default function App() {
                   </label>
                   <Show when={liveResolutionMode() === "preset"}>
                     <label title="Explicit capture size preset. Restart required when changed.">
-                      Size preset
+                      <span>Size preset</span>
                       <select value={livePresetSize()} onInput={(e) => setLivePresetSize(e.currentTarget.value)}>
                         <option value="1280x720">1280x720</option>
                         <option value="1600x900">1600x900</option>
