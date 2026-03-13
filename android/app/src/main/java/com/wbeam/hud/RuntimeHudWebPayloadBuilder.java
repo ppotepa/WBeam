@@ -8,6 +8,10 @@ import java.util.Locale;
 public final class RuntimeHudWebPayloadBuilder {
     private RuntimeHudWebPayloadBuilder() {}
 
+    /**
+     * Plain data carrier for HUD web payload builder input.
+     */
+    @SuppressWarnings("java:S1104")
     public static final class Input {
         public String selectedProfile;
         public String selectedEncoder;
