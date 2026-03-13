@@ -11,6 +11,7 @@ import android.content.SharedPreferences;
 public final class SettingsRepository {
 
     private static final String PREFS = "wbeam_settings";
+    private static final String PROFILE_BASELINE = "baseline";
 
     public static final String PREF_PROFILE          = "profile";
     public static final String PREF_ENCODER          = "encoder";
@@ -32,12 +33,12 @@ public final class SettingsRepository {
     public SettingsSnapshot load() {
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
 
-        String profile = prefs.getString(PREF_PROFILE, "baseline");
+        String profile = prefs.getString(PREF_PROFILE, PROFILE_BASELINE);
         String encoder = prefs.getString(PREF_ENCODER, "h265");
         String cursor  = prefs.getString(PREF_CURSOR, "embedded");
 
-        if (!"baseline".equals(profile)) {
-            profile = "baseline";
+        if (!PROFILE_BASELINE.equals(profile)) {
+            profile = PROFILE_BASELINE;
             prefs.edit().putString(PREF_PROFILE, profile).apply();
         }
 
