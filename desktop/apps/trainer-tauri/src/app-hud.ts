@@ -23,10 +23,10 @@ export function parseHud(lines: string[]): HudSnapshot {
   const modeRe = /"mode"\s*:\s*"([^"]+)"/;
 
   for (const line of lines) {
-    const start = line.match(trialStartRe);
+    let start = trialStartRe.exec(line);
     if (start) trialId = start[1];
 
-    const scoreMatch = line.match(trialScoreRe);
+    let scoreMatch = trialScoreRe.exec(line);
     if (scoreMatch) {
       trialId = scoreMatch[1];
       score = scoreMatch[2];
@@ -37,13 +37,13 @@ export function parseHud(lines: string[]): HudSnapshot {
       if (scoreMatch[7]) bitrateMbps = scoreMatch[7];
     }
 
-    const p = line.match(progressRe);
+    let p = progressRe.exec(line);
     if (p) progress = `${p[2]}/${p[1]}`;
 
-    const protoTrial = line.match(protoTrialRe);
+    let protoTrial = protoTrialRe.exec(line);
     if (protoTrial) trialId = protoTrial[1];
 
-    const protoDone = line.match(protoDoneRe);
+    let protoDone = protoDoneRe.exec(line);
     if (protoDone) {
       trialId = protoDone[1];
       score = protoDone[2];
@@ -54,13 +54,13 @@ export function parseHud(lines: string[]): HudSnapshot {
       if (protoDone[7]) bitrateMbps = protoDone[7];
     }
 
-    const protoGen = line.match(protoGenRe);
+    let protoGen = protoGenRe.exec(line);
     if (protoGen) {
       generation = `${protoGen[1]}/${protoGen[2]}`;
       progress = `gen ${protoGen[1]}/${protoGen[2]} pop ${protoGen[3]}`;
     }
 
-    const parsedMode = line.match(modeRe);
+    let parsedMode = modeRe.exec(line);
     if (parsedMode) {
       mode = parsedMode[1];
     }
@@ -76,7 +76,7 @@ export function parseHudSeries(lines: string[]): HudSeries {
     /done trial=([A-Za-z0-9_.:-]+) score=([0-9.\-]+).*sender_p50=([0-9.\-]+).*pipe_p50=([0-9.\-]+).*timeout_mean=([0-9.\-]+).*drop=([0-9.\-]+)%/;
   const series: HudSeries = { score: [], present: [], recv: [], drops: [] };
   for (const line of lines) {
-    const match = line.match(trialScoreRe);
+    let match = trialScoreRe.exec(line);
     if (match) {
       series.score.push(Number(match[2]));
       series.present.push(Number(match[3]));
@@ -84,7 +84,7 @@ export function parseHudSeries(lines: string[]): HudSeries {
       series.drops.push(Number(match[6]));
       continue;
     }
-    const protoDone = line.match(protoDoneRe);
+    let protoDone = protoDoneRe.exec(line);
     if (protoDone) {
       series.score.push(Number(protoDone[2]));
       series.present.push(Number(protoDone[3]));
@@ -127,7 +127,6 @@ export function parseLiveStages(lines: string[]): LiveStage[] {
     }
     if (line.includes("ERROR") || line.includes("failed")) {
       output.push({ label: "Failure", detail: line.trim(), ts, level: "risk" });
-      continue;
     }
   }
   return output.slice(-10).reverse();
