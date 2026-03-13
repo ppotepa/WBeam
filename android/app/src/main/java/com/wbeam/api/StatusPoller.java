@@ -248,8 +248,7 @@ public final class StatusPoller {
             buildMismatchSnapshot = snapshot;
             if (mismatch) {
                 Log.e(TAG, "build mismatch app=" + appRev + " host=" + hostRev
-                        + API_SUFFIX + HostApiClient.API_BASE
-                        + " hint=rebuild host and redeploy APK with same WBEAM_BUILD_REV");
+                        + API_SUFFIX + HostApiClient.API_BASE);
             } else if (daemonReachable && hostKnown && appKnown) {
                 Log.i(TAG, "build match restored app=" + appRev + " host=" + hostRev
                         + API_SUFFIX + HostApiClient.API_BASE);
