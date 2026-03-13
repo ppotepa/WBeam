@@ -632,6 +632,11 @@ export default function App() {
                       : connectDisabled
                         ? `Connect blocked: ${connectReason}`
                         : "Start stream for this device";
+                    const disconnectTitle = disconnectBusy
+                      ? "Disconnecting..."
+                      : disconnectDisabled
+                        ? disconnectReason
+                        : "Stop stream for this device";
                     return (
                       <>
                   <button
@@ -655,7 +660,7 @@ export default function App() {
                   </button>
                   <button
                     class="device-btn"
-                    title={disconnectBusy ? "Disconnecting..." : (disconnectDisabled ? disconnectReason : "Stop stream for this device")}
+                    title={disconnectTitle}
                     disabled={disconnectDisabled}
                     onClick={() => session.disconnectDevice(device)}
                   >
