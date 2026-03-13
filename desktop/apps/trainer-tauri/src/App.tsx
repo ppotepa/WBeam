@@ -1355,7 +1355,7 @@ export default function App() {
               <article class="panel card">
                 <h2>Live Snapshot</h2>
                 <div class="meta-grid">
-                  <div class="meta-item"><strong>State</strong><span>{String(valueAt(liveStatus(), ["base", "state"]) || "idle")}</span></div>
+                  <div class="meta-item"><strong>State</strong><span>{safeDisplay(valueAt(liveStatus(), ["base", "state"]), "idle")}</span></div>
                   <div class="meta-item"><strong>Present FPS</strong><span>{liveKpi().present.toFixed(1)}</span></div>
                   <div class="meta-item"><strong>Pipeline FPS</strong><span>{liveKpi().recv.toFixed(1)}</span></div>
                   <div class="meta-item"><strong>Live Mbps</strong><span>{liveKpi().mbps.toFixed(2)}</span></div>
