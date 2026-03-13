@@ -8,8 +8,8 @@ import java.util.Locale;
  * Renders full HTML shell for trainer HUD (SOT layout).
  */
 public final class TrainerHudShellRenderer {
-    private static final String STATE_PENDING = STATE_PENDING;
-    private static final String SCALE_2X = SCALE_2X;
+    private static final String STATE_PENDING = "PENDING";
+    private static final String SCALE_2X = "scale-2x";
 
     private TrainerHudShellRenderer() {}
 
