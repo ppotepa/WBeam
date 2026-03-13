@@ -205,32 +205,40 @@ fn load_wbeam_config(root: &Path) -> HashMap<String, String> {
             continue;
         };
         for line in raw.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            let Some((k, v)) = line.split_once('=') else {
+            let Some((key, value)) = parse_wbeam_config_line(line) else {
                 continue;
             };
-            let key = k.trim();
-            if !key.starts_with("WBEAM_") {
-                continue;
-            }
             if map.contains_key(key) {
                 continue;
-            }
-            let mut value = v.trim().to_string();
-            let bytes = value.as_bytes();
-            if bytes.len() >= 2
-                && ((bytes[0] == b'"' && bytes[bytes.len() - 1] == b'"')
-                    || (bytes[0] == b'\'' && bytes[bytes.len() - 1] == b'\''))
-            {
-                value = value[1..value.len() - 1].to_string();
             }
             map.insert(key.to_string(), value);
         }
     }
     map
+}
+
+fn parse_wbeam_config_line(line: &str) -> Option<(&str, String)> {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with('#') {
+        return None;
+    }
+    let (k, v) = line.split_once('=')?;
+    let key = k.trim();
+    if !key.starts_with("WBEAM_") {
+        return None;
+    }
+    Some((key, trim_wrapping_quotes(v.trim())))
+}
+
+fn trim_wrapping_quotes(value: &str) -> String {
+    let bytes = value.as_bytes();
+    if bytes.len() >= 2
+        && ((bytes[0] == b'"' && bytes[bytes.len() - 1] == b'"')
+            || (bytes[0] == b'\'' && bytes[bytes.len() - 1] == b'\''))
+    {
+        return value[1..value.len() - 1].to_string();
+    }
+    value.to_string()
 }
 
 fn wbeam_setting(settings: &HashMap<String, String>, key: &str) -> Option<String> {
