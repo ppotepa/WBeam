@@ -1193,7 +1193,7 @@ export default function App() {
                 </div>
                 <div class="two-col">
                   <label title="Used for Save Profile action.">
-                    Save profile as
+                    <span>Save profile as</span>
                     <input value={liveProfileDraft()} onInput={(e) => setLiveProfileDraft(e.currentTarget.value)} />
                   </label>
                   <label title="Encoder family to tune live.">
