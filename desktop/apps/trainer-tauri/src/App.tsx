@@ -1000,7 +1000,7 @@ export default function App() {
                     />
                   </label>
                   <label title="Upper tested bitrate bound.">
-                    Bitrate max (Mbps)
+                    <span>Bitrate max (Mbps)</span>
                     <input
                       type="number"
                       min="4"
