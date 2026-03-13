@@ -341,39 +341,21 @@ def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=Non
     srv.bind(("0.0.0.0", port))
     srv.listen(1)
     srv.settimeout(1.0)
-    # Default to blocking send for stability over ADB tunnel; set env >0 to enable timeout.
-    send_timeout_s = float(os.getenv("WBEAM_FRAMED_SEND_TIMEOUT_S", "0"))
-    duplicate_stale = env_flag("WBEAM_FRAMED_DUPLICATE_STALE", False)
-    # Dropping encoded H264 AUs can break inter-frame decode (P/B refs) and look like
-    # "frozen video". Keep disabled by default; q1/qmain already drop raw pre-encode.
-    drop_queued_encoded = env_flag("WBEAM_FRAMED_DROP_QUEUED", False)
+    cfg = build_framed_sender_config(target_fps)
+    send_timeout_s = cfg["send_timeout_s"]
+    duplicate_stale = cfg["duplicate_stale"]
+    drop_queued_encoded = cfg["drop_queued_encoded"]
     seq = 0
     print(f"[wbeam-framed] listening on :{port}", flush=True)
-    # Optional fallback: duplicate latest keyframe only after prolonged source stall.
-    # Re-sending delta/P-frames can create visible artifacts; keyframe-only duplication
-    # is visually safer (at the cost of less motion smoothness during hard stalls).
     last_keyframe = None
     last_keyframe_len = 0
-    # Pull timeout drives how quickly we can observe source stalls.
-    fps = max(1, int(target_fps))
-    pull_timeout_ms_auto = max(2, min(40, int(round(1000.0 / fps))))
-    pull_timeout_ms = max(1, min(100, env_int("WBEAM_FRAMED_PULL_TIMEOUT_MS", pull_timeout_ms_auto)))
-    pull_timeout_ns = int(pull_timeout_ms * 1_000_000)
-    frame_period_ns = int(1_000_000_000 / fps)
-    stale_start_ms = max(40, min(2000, env_int("WBEAM_FRAMED_STALE_START_MS", 180)))
-    stale_start_ns = stale_start_ms * 1_000_000
-    stale_dup_fps = max(1, min(30, env_int("WBEAM_FRAMED_STALE_DUP_FPS", 12)))
-    stale_period_ns = int(1_000_000_000 / stale_dup_fps)
+    pull_timeout_ns = cfg["pull_timeout_ns"]
+    frame_period_ns = cfg["frame_period_ns"]
+    stale_start_ns = cfg["stale_start_ns"]
+    stale_period_ns = cfg["stale_period_ns"]
     next_stale_due_ns = 0
     last_real_sample_ns = _time.monotonic_ns()
-    print(
-        "[wbeam-framed] sender_cfg "
-        f"fps={fps} pull_timeout_ms={pull_timeout_ms} "
-        f"duplicate_stale={int(duplicate_stale)} drop_queued={int(drop_queued_encoded)} "
-        f"send_timeout_s={send_timeout_s} "
-        f"stale_start_ms={stale_start_ms} stale_dup_fps={stale_dup_fps}",
-        flush=True,
-    )
+    print_sender_config(cfg)
 
     while not stop_event.is_set():
         try:
@@ -426,11 +408,12 @@ def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=Non
                             if pipeline_fps_counter is not None:
                                 pipe_fps = pipeline_fps_counter[0]
                                 pipeline_fps_counter[0] = 0
-                            print(
-                                f"[wbeam-framed] pipeline_fps={pipe_fps} sender_fps={sent_fps:.1f}"
-                                f" timeout_misses={_stat_timeout_misses}"
-                                f" stale_dupe={_stat_stale_duplicates} seq={seq}",
-                                flush=True,
+                            print_sender_stats(
+                                pipe_fps,
+                                sent_fps,
+                                _stat_timeout_misses,
+                                _stat_stale_duplicates,
+                                seq,
                             )
                             _stat_frames = 0
                             _stat_timeout_misses = 0
@@ -498,15 +481,15 @@ def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=Non
                     if pipeline_fps_counter is not None:
                         pipe_fps = pipeline_fps_counter[0]
                         pipeline_fps_counter[0] = 0
-                    print(
-                        f"[wbeam-framed] pipeline_fps={pipe_fps} sender_fps={sent_fps:.1f}"
-                        f" timeout_misses={_stat_timeout_misses}"
-                        f" stale_dupe={_stat_stale_duplicates}"
-                        f" dropped_queued={_stat_dropped_queued}"
-                        f" partial_writes={_stat_partial_writes}"
-                        f" send_timeouts={_stat_send_timeouts}"
-                        f" seq={seq}",
-                        flush=True,
+                    print_sender_stats(
+                        pipe_fps,
+                        sent_fps,
+                        _stat_timeout_misses,
+                        _stat_stale_duplicates,
+                        seq,
+                        dropped_queued=_stat_dropped_queued,
+                        partial_writes=_stat_partial_writes,
+                        send_timeouts=_stat_send_timeouts,
                     )
                     _stat_frames = 0
                     _stat_timeout_misses = 0
@@ -527,6 +510,66 @@ def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=Non
     except Exception:
         pass
     print("[wbeam-framed] sender thread stopped", flush=True)
+
+
+def build_framed_sender_config(target_fps):
+    # Optional fallback: duplicate latest keyframe only after prolonged source stall.
+    # Re-sending delta/P-frames can create visible artifacts; keyframe-only duplication
+    # is visually safer (at the cost of less motion smoothness during hard stalls).
+    fps = max(1, int(target_fps))
+    pull_timeout_ms_auto = max(2, min(40, int(round(1000.0 / fps))))
+    pull_timeout_ms = max(1, min(100, env_int("WBEAM_FRAMED_PULL_TIMEOUT_MS", pull_timeout_ms_auto)))
+    stale_start_ms = max(40, min(2000, env_int("WBEAM_FRAMED_STALE_START_MS", 180)))
+    stale_dup_fps = max(1, min(30, env_int("WBEAM_FRAMED_STALE_DUP_FPS", 12)))
+    return {
+        # Default to blocking send for stability over ADB tunnel; set env >0 to enable timeout.
+        "send_timeout_s": float(os.getenv("WBEAM_FRAMED_SEND_TIMEOUT_S", "0")),
+        "duplicate_stale": env_flag("WBEAM_FRAMED_DUPLICATE_STALE", False),
+        # Dropping encoded H264 AUs can break inter-frame decode (P/B refs) and look like
+        # "frozen video". Keep disabled by default; q1/qmain already drop raw pre-encode.
+        "drop_queued_encoded": env_flag("WBEAM_FRAMED_DROP_QUEUED", False),
+        "fps": fps,
+        "pull_timeout_ms": pull_timeout_ms,
+        "pull_timeout_ns": int(pull_timeout_ms * 1_000_000),
+        "frame_period_ns": int(1_000_000_000 / fps),
+        "stale_start_ms": stale_start_ms,
+        "stale_start_ns": stale_start_ms * 1_000_000,
+        "stale_dup_fps": stale_dup_fps,
+        "stale_period_ns": int(1_000_000_000 / stale_dup_fps),
+    }
+
+
+def print_sender_config(cfg):
+    print(
+        "[wbeam-framed] sender_cfg "
+        f"fps={cfg['fps']} pull_timeout_ms={cfg['pull_timeout_ms']} "
+        f"duplicate_stale={int(cfg['duplicate_stale'])} drop_queued={int(cfg['drop_queued_encoded'])} "
+        f"send_timeout_s={cfg['send_timeout_s']} "
+        f"stale_start_ms={cfg['stale_start_ms']} stale_dup_fps={cfg['stale_dup_fps']}",
+        flush=True,
+    )
+
+
+def print_sender_stats(
+    pipe_fps,
+    sent_fps,
+    timeout_misses,
+    stale_dupe,
+    seq,
+    dropped_queued=0,
+    partial_writes=0,
+    send_timeouts=0,
+):
+    print(
+        f"[wbeam-framed] pipeline_fps={pipe_fps} sender_fps={sent_fps:.1f}"
+        f" timeout_misses={timeout_misses}"
+        f" stale_dupe={stale_dupe}"
+        f" dropped_queued={dropped_queued}"
+        f" partial_writes={partial_writes}"
+        f" send_timeouts={send_timeouts}"
+        f" seq={seq}",
+        flush=True,
+    )
 
 
 def make_pipeline(
