@@ -923,12 +923,19 @@ export default function App() {
         }}
       </Show>
       <Show when={virtualInstallVisible()}>
+        {(() => {
+          const installProgressClass = virtualInstallStatus().running
+            ? "running"
+            : virtualInstallStatus().success
+              ? "ok"
+              : "bad";
+          return (
         <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Installing dependencies">
           <section class="connect-modal setup-modal install-modal">
             <h3>Installing virtual desktop dependencies</h3>
             <p class="connect-modal-subtitle">Elevation is required (root/pkexec prompt).</p>
             <div class="install-progress">
-              <div class={`install-progress-bar ${virtualInstallStatus().running ? "running" : virtualInstallStatus().success ? "ok" : "bad"}`} />
+              <div class={`install-progress-bar ${installProgressClass}`} />
             </div>
             <p class={`setup-message ${virtualInstallStatus().done ? (virtualInstallStatus().success ? "install-ok" : "install-bad") : ""}`}>
               {virtualInstallStatus().done
@@ -954,6 +961,8 @@ export default function App() {
             </div>
           </section>
         </div>
+          );
+        })()}
       </Show>
     </main>
   );
