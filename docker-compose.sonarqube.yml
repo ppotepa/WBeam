@@ -27,27 +27,26 @@ services:
       - sonarqube_extensions:/opt/sonarqube/extensions
     restart: unless-stopped
 
-  sonar-scanner-watch:
+  sonar-scanner-once:
     image: sonarsource/sonar-scanner-cli:latest
-    container_name: wbeam-sonar-scanner-watch
+    container_name: wbeam-sonar-scanner-once
     user: "0:0"
     depends_on:
       - sonarqube
-    profiles: ["watch"]
+    profiles: ["scan"]
     environment:
       SONAR_HOST_URL: http://sonarqube:9000
       SONAR_TOKEN: ${SONAR_TOKEN}
       SONAR_USER_HOME: /workspace/.sonar
       REPO_DIR: /workspace
       PRE_SCAN_CMD: ./scripts/ci/sonar-prepare.sh
-      SCAN_INTERVAL_SECONDS: 300
       PROJECT_KEY: wbeam
       PROJECT_NAME: WBeam
+      SONAR_BRANCH: ${SONAR_BRANCH:-0.1.1/base}
     volumes:
       - ./:/workspace
     working_dir: /workspace
-    command: ["/bin/sh", "/workspace/scripts/ci/sonar-scan-watch.sh"]
-    restart: unless-stopped
+    command: ["/bin/sh", "/workspace/scripts/ci/sonar-scan-once.sh"]
 
 volumes:
   sonardb_data:
