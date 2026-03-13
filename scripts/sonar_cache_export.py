@@ -85,6 +85,11 @@ def build_arg_parser(env_defaults: Dict[str, str]) -> argparse.ArgumentParser:
         default=CACHE_DIR,
         help="Directory for cached files (default: .sonarcache/).",
     )
+    parser.add_argument(
+        "--statuses",
+        default="OPEN",
+        help="Comma-separated issue statuses to fetch (default: %(default)s; use 'OPEN,CONFIRMED,REOPENED' for more).",
+    )
     return parser
 
 
@@ -106,11 +111,12 @@ def sonar_request(host: str, token: str, path: str, params: Dict[str, str]) -> D
 
 
 def fetch_all_issues(
-    host: str, token: str, project_key: str, page_size: int, component_key: str | None
+    host: str, token: str, project_key: str, page_size: int, component_key: str | None, statuses: str = "OPEN"
 ) -> Tuple[List[Dict], Dict]:
     issues: List[Dict] = []
     page = 1
     total = None
+    status_list = [s.strip() for s in statuses.split(",")]
     while True:
         payload = sonar_request(
             host,
@@ -119,6 +125,7 @@ def fetch_all_issues(
             {
                 "componentKeys": component_key or project_key,
                 "projects": project_key,
+                "statuses": ",".join(status_list),
                 "p": page,
                 "ps": min(page_size, 500),
             },
@@ -199,7 +206,7 @@ def main(argv: List[str]) -> int:
         parser.error("Missing Sonar token. Provide --token or set SONAR_TOKEN.")
 
     issues, _ = fetch_all_issues(
-        args.host, token, args.project, args.page_size, args.component_key
+        args.host, token, args.project, args.page_size, args.component_key, args.statuses
     )
 
     write_summary_files(issues, args.output_dir)
