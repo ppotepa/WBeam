@@ -6,6 +6,8 @@ import java.util.Locale;
  * Builds preflight/startup overlay model from current runtime snapshot.
  */
 public final class StartupOverlayModelBuilder {
+    private static final String SERVICE_PREFIX = "service=";
+
     private StartupOverlayModelBuilder() {}
 
     public static final class Input {
@@ -114,14 +116,14 @@ public final class StartupOverlayModelBuilder {
             step2 = Model.SS_OK;
             if (in.requiresTransportProbe) {
                 if (in.probeOk) {
-                    step2Detail = "service=" + safe(in.daemonService) + " · transport test OK";
+                    step2Detail = SERVICE_PREFIX + safe(in.daemonService) + " · transport test OK";
                 } else if (in.probeInFlight) {
-                    step2Detail = "service=" + safe(in.daemonService) + " · transport test in progress…";
+                    step2Detail = SERVICE_PREFIX + safe(in.daemonService) + " · transport test in progress…";
                 } else {
-                    step2Detail = "service=" + safe(in.daemonService) + " · transport test pending";
+                    step2Detail = SERVICE_PREFIX + safe(in.daemonService) + " · transport test pending";
                 }
             } else {
-                step2Detail = "service=" + safe(in.daemonService) + " · " + safe(in.apiImpl);
+                step2Detail = SERVICE_PREFIX + safe(in.daemonService) + " · " + safe(in.apiImpl);
             }
         }
 
