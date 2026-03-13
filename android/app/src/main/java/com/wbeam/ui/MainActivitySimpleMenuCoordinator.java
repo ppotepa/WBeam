@@ -7,6 +7,7 @@ import android.widget.SeekBar;
 import android.widget.Spinner;
 
 public final class MainActivitySimpleMenuCoordinator {
+    @SuppressWarnings("java:S1104")
     public static final class State {
         public boolean visible;
         public String mode;
@@ -64,7 +65,7 @@ public final class MainActivitySimpleMenuCoordinator {
         simpleMenuPanel.setVisibility(View.GONE);
     }
 
-    @SuppressWarnings("java:java:S107")
+    @SuppressWarnings("java:S107")
     public static void toggle(
             View simpleMenuPanel,
             Handler uiHandler,
@@ -122,8 +123,8 @@ public final class MainActivitySimpleMenuCoordinator {
                 fps
         );
     }
- @SuppressWarnings("java:java:S107")
 
+    @SuppressWarnings("java:S107")
     public static void refreshButtons(
             View simpleMenuPanel,
             Button simpleModeH265Button,

@@ -59,7 +59,7 @@ public final class MainActivityUiBinder {
         perfHudWebView.setInitialScale(100);
     }
 
-    @SuppressWarnings("java:java:S107")
+    @SuppressWarnings("java:S107")
     public static void setupSpinners(
             AppCompatActivity activity,
             Spinner profileSpinner,
@@ -99,6 +99,7 @@ public final class MainActivityUiBinder {
 
             @Override
             public void onNothingSelected(AdapterView<?> parent) {
+                // Not needed; we track selection via onItemSelected
             }
         });
     }
@@ -124,10 +125,12 @@ public final class MainActivityUiBinder {
 
             @Override
             public void onStartTrackingTouch(SeekBar seekBar) {
+                // No-op; onProgressChanged handles all changes
             }
 
             @Override
             public void onStopTrackingTouch(SeekBar seekBar) {
+                // No-op; onProgressChanged handles all changes
             }
         };
 
