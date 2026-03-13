@@ -14,6 +14,7 @@ public final class MainActivitySettingsInitializer {
     private MainActivitySettingsInitializer() {
     }
 
+    @SuppressWarnings("java:S107")
     public static void loadDefaults(
             Spinner profileSpinner,
             Spinner encoderSpinner,

@@ -51,6 +51,7 @@ fn sender_queue_capacity(mode: StreamMode) -> usize {
 /// 3. Pulls frames from `appsink`, wraps them in WBTP headers, and sends them.
 /// 4. Falls back to repeating the last keyframe when no new sample arrives.
 /// 5. Exits when `stop` is set to `true`.
+#[allow(clippy::cognitive_complexity)]
 pub fn spawn_sender(
     appsink: gst_app::AppSink,
     port: u16,

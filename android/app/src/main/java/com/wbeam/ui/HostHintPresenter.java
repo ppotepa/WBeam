@@ -6,6 +6,7 @@ public final class HostHintPresenter {
     private HostHintPresenter() {
     }
 
+    @SuppressWarnings("java:S107")
     public static void apply(
             TextView hostHintText,
             boolean daemonReachable,

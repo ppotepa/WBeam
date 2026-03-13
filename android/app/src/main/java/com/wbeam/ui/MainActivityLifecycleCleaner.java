@@ -10,6 +10,7 @@ public final class MainActivityLifecycleCleaner {
     private MainActivityLifecycleCleaner() {
     }
 
+    @SuppressWarnings("java:S107")
     public static void cleanup(
             StatusPoller statusPoller,
             Runnable stopPreflightPulse,

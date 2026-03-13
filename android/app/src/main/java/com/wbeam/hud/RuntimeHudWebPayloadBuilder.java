@@ -6,6 +6,8 @@ import java.util.Locale;
  * Builds runtime HUD web payload (chips/cards/details/trend/html shell).
  */
 public final class RuntimeHudWebPayloadBuilder {
+    private static final String FMT_MS_P95 = FMT_MS_P95;
+
     private RuntimeHudWebPayloadBuilder() {}
 
     /**
@@ -80,9 +82,9 @@ public final class RuntimeHudWebPayloadBuilder {
         cards.append(HudRenderSupport.hudCard("DECODE FPS", String.format(Locale.US, "%.1f", in.decodeFps), ""));
         cards.append(HudRenderSupport.hudCard("LIVE MBPS", HudRenderSupport.fmtDoubleOrPlaceholder(in.liveMbps, "%.2f", "PENDING"), HudRenderSupport.hudToneClass(in.tone)));
         cards.append(HudRenderSupport.hudCard("E2E p95", String.format(Locale.US, "%.1f ms", in.e2eP95), HudRenderSupport.hudToneClass(in.tone)));
-        cards.append(HudRenderSupport.hudCard("Decode p95", String.format(Locale.US, "%.2f ms", in.decodeP95), ""));
-        cards.append(HudRenderSupport.hudCard("Render p95", String.format(Locale.US, "%.2f ms", in.renderP95), ""));
-        cards.append(HudRenderSupport.hudCard("Frame p95", String.format(Locale.US, "%.2f ms", in.frametimeP95), ""));
+        cards.append(HudRenderSupport.hudCard("Decode p95", String.format(Locale.US, FMT_MS_P95, in.decodeP95), ""));
+        cards.append(HudRenderSupport.hudCard("Render p95", String.format(Locale.US, FMT_MS_P95, in.renderP95), ""));
+        cards.append(HudRenderSupport.hudCard("Frame p95", String.format(Locale.US, FMT_MS_P95, in.frametimeP95), ""));
         cards.append(HudRenderSupport.hudCard("Drops / s", HudRenderSupport.fmtDoubleOrPlaceholder(in.dropsPerSec, "%.3f", "PENDING"), HudRenderSupport.hudToneClass(in.tone)));
         cards.append(HudRenderSupport.hudCard("Drops total", String.valueOf(in.drops), ""));
 

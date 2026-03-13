@@ -6,14 +6,16 @@ import android.widget.Button;
  * Helper methods for simple-mode menu state and button visuals.
  */
 public final class SimpleMenuUi {
+    private static final String RAW_PNG = RAW_PNG;
+
     private SimpleMenuUi() {}
 
     public static String modeFromEncoder(String selectedEncoder, String preferredVideo) {
-        return "raw-png".equals(selectedEncoder) ? "raw-png" : preferredVideo;
+        return RAW_PNG.equals(selectedEncoder) ? RAW_PNG : preferredVideo;
     }
 
     public static String encoderFromMode(String simpleMode, String preferredVideo) {
-        return "raw-png".equals(simpleMode) ? "raw-png" : preferredVideo;
+        return RAW_PNG.equals(simpleMode) ? RAW_PNG : preferredVideo;
     }
 
     public static int clampSimpleFps(int fps) {
@@ -22,7 +24,7 @@ public final class SimpleMenuUi {
 
     public static void applyModeButtons(Button modePrimary, Button modeRaw, String preferredVideo, String simpleMode) {
         setSelected(modePrimary, preferredVideo.equals(simpleMode));
-        setSelected(modeRaw, "raw-png".equals(simpleMode));
+        setSelected(modeRaw, RAW_PNG.equals(simpleMode));
     }
 
     public static void applyFpsButtons(

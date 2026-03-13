@@ -30,6 +30,7 @@ public final class SettingsPayloadBuilder {
             payload.put("debug_fps", 0);
             payload.put("intra_only", intraOnly);
         } catch (JSONException ignored) {
+            // Ignore JSON build failures; partial payload is returned
         }
         return payload;
     }

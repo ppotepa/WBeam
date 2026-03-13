@@ -25,6 +25,7 @@ public final class MainActivityStatusPresenter {
         return line == null || line.trim().isEmpty() ? DEFAULT_STATS_LINE : line;
     }
 
+    @SuppressWarnings("java:S107")
     public static void renderStatus(
             TextView statusText,
             TextView detailText,

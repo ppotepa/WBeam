@@ -29,6 +29,7 @@ public final class MainActivityRuntimeStateView {
         }
     }
 
+    @SuppressWarnings("java:S107")
     public static void refreshDebugOverlayText(
             boolean debugBuild,
             TextView debugInfoText,

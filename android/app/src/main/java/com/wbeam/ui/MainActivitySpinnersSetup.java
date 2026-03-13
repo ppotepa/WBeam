@@ -13,6 +13,7 @@ public final class MainActivitySpinnersSetup {
     private MainActivitySpinnersSetup() {
     }
 
+    @SuppressWarnings("java:S107")
     public static void setup(
             AppCompatActivity activity,
             Spinner profileSpinner,

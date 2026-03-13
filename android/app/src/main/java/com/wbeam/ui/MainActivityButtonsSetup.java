@@ -23,6 +23,7 @@ public final class MainActivityButtonsSetup {
     private MainActivityButtonsSetup() {
     }
 
+    @SuppressWarnings("java:S107")
     public static void setup(
             Button settingsCloseButton,
             View simpleMenuPanel,

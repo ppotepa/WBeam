@@ -8,6 +8,7 @@ import org.json.JSONArray;
 public final class RuntimeTrendGridRenderer {
     private RuntimeTrendGridRenderer() {}
 
+    @SuppressWarnings("java:S107")
     public static String buildMetricTrendRowsHtml(
             JSONArray fps,
             JSONArray mbps,

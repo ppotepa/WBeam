@@ -45,6 +45,7 @@ public final class RuntimeTelemetryMapper {
         public double bitrateMbps;
     }
 
+    @SuppressWarnings("java:S3776")
     public static Snapshot map(
             JSONObject metrics,
             int selectedFps,
