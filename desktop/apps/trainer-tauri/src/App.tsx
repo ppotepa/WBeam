@@ -915,7 +915,7 @@ export default function App() {
 
                 <div class="two-col">
                   <label title="Optimization objective used to score and rank trials.">
-                    Goal mode
+                    <span>Goal mode</span>
                     <select value={mode()} onInput={(e) => setMode(e.currentTarget.value)}>
                       <option value="quality">max_quality</option>
                       <option value="balanced">balanced</option>
