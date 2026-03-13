@@ -24,7 +24,7 @@ final class StreamBufferMath {
             return 0.0;
         }
         System.arraycopy(buf, 0, scratch, 0, n);
-        int idx = (int) Math.min(n - 1, Math.max(0, (int) (n * q)));
+        int idx = Math.min(n - 1, Math.max(0, (int) (n * q)));
         long selected = selectKth(scratch, n, idx);
         return selected / 1_000_000.0;
     }
