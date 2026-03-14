@@ -11,7 +11,6 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.util.Locale;
 
-@SuppressWarnings("java:S112") 
 final class StreamReconnectLoop {
 
     interface RuntimeState {
@@ -28,10 +27,8 @@ final class StreamReconnectLoop {
         void closeSocket();
     }
 
-    @SuppressWarnings("java:S112")
     interface StreamWorker {
-        @SuppressWarnings("java:S112")
-        void run(BufferedInputStream input, MediaCodec[] codecHolder) throws Exception;
+        void run(BufferedInputStream input, MediaCodec[] codecHolder) throws StreamException;
     }
 
     private final String tag;
