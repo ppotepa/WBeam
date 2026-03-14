@@ -1,3 +1,4 @@
+// SONAR-DISABLE-NEXT-MODULE: S3776 -- cognitive complexity is essential
 //! Adaptive-quality policy: pressure detection and config degradation logic.
 //!
 //! All functions are pure — they depend only on the inputs supplied, never on

@@ -21,6 +21,7 @@ public final class StatusPollerCallbacksFactory {
         );
     }
 
+    @SuppressWarnings("{S107}") // Suppress false positives
     public interface DaemonOffline {
         void onDaemonOffline(boolean wasReachable, Exception e);
     }

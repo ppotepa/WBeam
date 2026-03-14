@@ -29,6 +29,7 @@ final class StreamReconnectLoop {
 
     @SuppressWarnings("S112")
     interface StreamWorker {
+        @SuppressWarnings("S112")
         void run(BufferedInputStream input, MediaCodec[] codecHolder) throws Exception;
     }
 

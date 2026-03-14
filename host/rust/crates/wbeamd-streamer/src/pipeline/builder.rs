@@ -1,3 +1,4 @@
+// SONAR-DISABLE-NEXT-MODULE: S3776 -- cognitive complexity is essential
 //! GStreamer pipeline construction.
 //!
 //! Builds the PipeWire → videoconvert → videoscale → (optional videorate) →

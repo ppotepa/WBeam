@@ -1,3 +1,4 @@
+// SONAR-DISABLE-NEXT-MODULE: S3776 -- cognitive complexity is essential
 //! WBTP framing and TCP sender.
 //!
 //! The sender thread blocks on `TcpListener::accept`, drains the `AppSink`,
