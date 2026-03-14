@@ -235,7 +235,6 @@ public final class HostApiClient {
         return path.startsWith("/") ? path : ("/" + path);
     }
 
-    @SuppressWarnings("java:S3776")
     private static synchronized JSONObject localApiRequest(
             String method,
             String path,
@@ -248,27 +247,16 @@ public final class HostApiClient {
         final long nowSec = System.currentTimeMillis() / 1000L;
         final long nowMs = System.currentTimeMillis();
 
-        if ("POST".equals(m) && "/start".equals(p)) {
-            resetLocalApiCounters(nowSec);
-            LocalApiState.state = LOCAL_STATE_STARTING;
-            LocalApiState.runId++;
-        } else if ("POST".equals(m) && ("/stop".equals(p) || "/apply".equals(p))) {
-            resetLocalApiCounters(nowSec);
-            LocalApiState.state = "IDLE";
-        } else if ("POST".equals(m) && "/v1/client-metrics".equals(p)) {
-            applyClientMetrics(payload, nowSec, nowMs);
-            return new JSONObject();
+        JSONObject lifecycleResponse = handleLifecycleRequest(m, p, payload, nowSec, nowMs);
+        if (lifecycleResponse != null) {
+            return lifecycleResponse;
         }
 
         refreshLocalApiState(nowSec, nowMs);
 
-        if ("GET".equals(m) && ("/status".equals(p) || "/health".equals(p))) {
-            JSONObject out = buildStatusOrHealthResponse(nowSec);
-            if ("/health".equals(p)) {
-                out.put("service", "android-local-api");
-                out.put("stream_process_alive", false);
-            }
-            return out;
+        JSONObject statusResponse = handleStatusRequest(m, p, nowSec);
+        if (statusResponse != null) {
+            return statusResponse;
         }
 
         if ("GET".equals(m) && "/metrics".equals(p)) {
@@ -279,6 +267,49 @@ public final class HostApiClient {
         }
 
         return new JSONObject();
+    }
+
+    private static JSONObject handleLifecycleRequest(
+            String method,
+            String path,
+            JSONObject payload,
+            long nowSec,
+            long nowMs
+    ) throws JSONException {
+        if (!"POST".equals(method)) {
+            return null;
+        }
+        if ("/start".equals(path)) {
+            resetLocalApiCounters(nowSec);
+            LocalApiState.state = LOCAL_STATE_STARTING;
+            LocalApiState.runId++;
+            return null;
+        }
+        if ("/stop".equals(path) || "/apply".equals(path)) {
+            resetLocalApiCounters(nowSec);
+            LocalApiState.state = "IDLE";
+            return null;
+        }
+        if ("/v1/client-metrics".equals(path)) {
+            applyClientMetrics(payload, nowSec, nowMs);
+            return new JSONObject();
+        }
+        return null;
+    }
+
+    private static JSONObject handleStatusRequest(String method, String path, long nowSec) throws JSONException {
+        if (!"GET".equals(method)) {
+            return null;
+        }
+        if ("/status".equals(path) || "/health".equals(path)) {
+            JSONObject out = buildStatusOrHealthResponse(nowSec);
+            if ("/health".equals(path)) {
+                out.put("service", "android-local-api");
+                out.put("stream_process_alive", false);
+            }
+            return out;
+        }
+        return null;
     }
 
     private static void resetLocalApiCounters(long nowSec) {
