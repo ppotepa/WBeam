@@ -191,6 +191,11 @@ final class FramedVideoDecodeLoop {
             } catch (Exception e) {
                 throw new IOException("decoder init failed for " + videoMime, e);
             }
+            // Wait for the first IDR so we can extract and queue SPS/PPS as
+            // explicit CODEC_CONFIG buffers before handing the decoder any
+            // payload data.  Without this the decoder may show only the first
+            // keyframe (wallpaper) and refuse to render subsequent P-frames.
+            waitForKeyframe = true;
         } else {
             waitForKeyframe = true;
             Log.i(tag, "legacy AVC bootstrap enabled (API " + Build.VERSION.SDK_INT + ")");
@@ -323,6 +328,17 @@ final class FramedVideoDecodeLoop {
                 recoveryUnlockSec++;
                 Log.w(tag, "recovery-unlock: seq=" + seqU32 + " key=" + frameIsKey
                         + " payload=" + payloadLen + " qDecode=" + pendingDecodeQueue);
+                // For the modern AVC path the decoder was started without
+                // csd-0/csd-1 in the MediaFormat.  Extract SPS/PPS from the
+                // recovery frame (they are prepended by h264parse with
+                // config-interval=-1 + disable-passthrough=true) and queue
+                // them as BUFFER_FLAG_CODEC_CONFIG so the decoder knows the
+                // stream parameters before the first IDR payload is submitted.
+                if (!isHevc && !legacyAvcBootstrap && codec != null) {
+                    StreamNalUtils.AvcCsd csd = StreamNalUtils.extractAvcCsd(payloadBuf, payloadLen);
+                    if (csd.sps != null) MediaCodecBridge.queueCodecConfig(codec, csd.sps, 2_000);
+                    if (csd.pps != null) MediaCodecBridge.queueCodecConfig(codec, csd.pps, 2_000);
+                }
             }
             boolean canQueue = !waitForKeyframe
                     && (pendingDecodeQueue < decodeQueueMaxFrames || isRecovery);

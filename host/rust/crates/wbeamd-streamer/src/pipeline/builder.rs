@@ -244,7 +244,12 @@ pub fn make_pipeline(
         cfg.pipewire_keepalive_ms
     );
     if let Some(parse) = &parse {
-        parse.set_property("disable-passthrough", false);
+        // Force h264parse/h265parse out of passthrough mode so it actively
+        // re-packetises the stream and prepends SPS/PPS before every IDR
+        // (config-interval=-1).  Without this, when input is already byte-stream
+        // the parser silently passes data through and config-interval has no
+        // effect, meaning a reconnecting decoder receives no codec config.
+        parse.set_property("disable-passthrough", true);
         parse.set_property("config-interval", -1i32);
     }
 
