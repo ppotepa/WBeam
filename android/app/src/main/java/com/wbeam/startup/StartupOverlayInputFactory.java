@@ -19,7 +19,6 @@ public final class StartupOverlayInputFactory {
         private String probeInfo;
         private String apiImpl;
         private String apiBase;
-        private String apiHost;
         private String streamHost;
         private int streamPort;
         private String appBuildRevision;
@@ -52,7 +51,6 @@ public final class StartupOverlayInputFactory {
             String probeInfo,
             String apiImpl,
             String apiBase,
-            String apiHost,
             String streamHost,
             int streamPort,
             String appBuildRevision,
@@ -80,7 +78,6 @@ public final class StartupOverlayInputFactory {
         state.probeInfo = probeInfo;
         state.apiImpl = apiImpl;
         state.apiBase = apiBase;
-        state.apiHost = apiHost;
         state.streamHost = streamHost;
         state.streamPort = streamPort;
         state.appBuildRevision = appBuildRevision;

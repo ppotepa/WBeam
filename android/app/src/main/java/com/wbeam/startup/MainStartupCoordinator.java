@@ -167,7 +167,6 @@ public final class MainStartupCoordinator {
                         input.transportProbe,
                         input.apiImpl,
                         input.apiBase,
-                        input.apiHost,
                         input.streamHost,
                         input.streamPort,
                         input.appBuildRevision,

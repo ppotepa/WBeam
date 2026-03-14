@@ -168,27 +168,27 @@ public final class RuntimeHudComputation {
     }
 
     public static final class RuntimeDebugSnapshotInput {
-        public String daemonStateUi;
-        public long daemonRunId;
-        public long daemonUptimeSec;
-        public long streamUptimeSec;
-        public long frameInHost;
-        public long frameOutHost;
-        public double targetFps;
-        public double presentFps;
-        public double frametimeP95;
-        public double decodeP95;
-        public double renderP95;
-        public double e2eP95;
-        public QueueSnapshot queues;
-        public int adaptiveLevel;
-        public String adaptiveAction;
-        public long drops;
-        public long bpHigh;
-        public long bpRecover;
-        public PressureState pressureState;
-        public String reason;
-        public String daemonLastError;
+        private String daemonStateUi;
+        private long daemonRunId;
+        private long daemonUptimeSec;
+        private long streamUptimeSec;
+        private long frameInHost;
+        private long frameOutHost;
+        private double targetFps;
+        private double presentFps;
+        private double frametimeP95;
+        private double decodeP95;
+        private double renderP95;
+        private double e2eP95;
+        private QueueSnapshot queues;
+        private int adaptiveLevel;
+        private String adaptiveAction;
+        private long drops;
+        private long bpHigh;
+        private long bpRecover;
+        private PressureState pressureState;
+        private String reason;
+        private String daemonLastError;
 
         RuntimeDebugSnapshotInput setDaemonStateUi(String daemonStateUi) {
             this.daemonStateUi = daemonStateUi;

@@ -1107,7 +1107,7 @@ def setup_overlay_refresh(pipeline) -> None:  # noqa: C901
         return
 
     print(f"[wbeam] Overlay text source: {overlay_file}", flush=True)
-    overlay_state = {key: "" for key in overlay_elements}
+    overlay_state = dict.fromkeys(overlay_elements, "")
 
     def _refresh_overlay_text():
         sections = _load_overlay_sections(overlay_file)
