@@ -16,15 +16,47 @@ public final class HudRenderSupport {
 
     private HudRenderSupport() {}
 
-    @SuppressWarnings("java:S3776")
     public static String buildTrendSparkChartFromJson(JSONArray series, String toneClass) {
-        if (series == null || series.length() == 0) {
+        SparkSeriesData data = describeSparkSeries(series);
+        if (!data.hasValues()) {
             return buildTrendSparkPlaceholderSvg(toneClass);
         }
-        ArrayDeque<Double> values = new ArrayDeque<>();
-        double lo = Double.POSITIVE_INFINITY;
-        double hi = Double.NEGATIVE_INFINITY;
-        @SuppressWarnings("java:java:S135")
+
+        double span = data.hi - data.lo;
+        if (span < 1e-3) {
+            span = Math.max(1.0, Math.abs(data.hi) * 0.25);
+        }
+        double pad = Math.max(0.1, span * 0.12);
+        double yMin = data.lo - pad;
+        double yMax = data.hi + pad;
+        double ySpan = Math.max(1e-3, yMax - yMin);
+
+        String stroke = toneStrokeColor(toneClass);
+        String fill = toneFillColor(toneClass);
+        String dot = toneDotColor(toneClass);
+
+        if (data.count == 1) {
+            return renderSingleSpark(data.values.peekFirst(), yMin, ySpan, stroke, dot);
+        }
+
+        return renderSeriesSpark(data.values, data.count, yMin, ySpan, stroke, fill, dot);
+    }
+
+    private static String buildTrendSparkPlaceholderSvg(String toneClass) {
+        String stroke = toneStrokeColor(toneClass);
+        String fill = toneFillColor(toneClass);
+        return "<svg class='spark-svg' viewBox='0 0 100 100' preserveAspectRatio='none'>"
+                + "<rect x='0' y='0' width='100' height='100' fill='transparent'/>"
+                + "<path d='M 0 100 L 0 70 L 15 68 L 30 72 L 45 66 L 60 69 L 75 63 L 90 65 L 100 62 L 100 100 Z' fill='" + fill + "'/>"
+                + "<polyline points='0,70 15,68 30,72 45,66 60,69 75,63 90,65 100,62' fill='none' stroke='" + stroke + "' stroke-width='2.1' stroke-linecap='round' stroke-linejoin='round' stroke-dasharray='4 4'/>"
+                + "</svg>";
+    }
+
+    private static SparkSeriesData describeSparkSeries(JSONArray series) {
+        SparkSeriesData data = new SparkSeriesData();
+        if (series == null || series.length() == 0) {
+            return data;
+        }
         for (int i = 0; i < series.length(); i++) {
             if (series.isNull(i)) {
                 continue;
@@ -33,45 +65,42 @@ public final class HudRenderSupport {
             if (!Double.isFinite(v)) {
                 continue;
             }
-            values.addLast(v);
-            lo = Math.min(lo, v);
-            hi = Math.max(hi, v);
+            data.values.addLast(v);
+            data.lo = Math.min(data.lo, v);
+            data.hi = Math.max(data.hi, v);
+            data.count++;
         }
-        if (!Double.isFinite(lo) || !Double.isFinite(hi) || values.isEmpty()) {
-            return buildTrendSparkPlaceholderSvg(toneClass);
-        }
-        double span = hi - lo;
-        if (span < 1e-3) {
-            span = Math.max(1.0, Math.abs(hi) * 0.25);
-        }
-        double pad = Math.max(0.1, span * 0.12);
-        double yMin = lo - pad;
-        double yMax = hi + pad;
-        double ySpan = Math.max(1e-3, yMax - yMin);
+        return data;
+    }
 
-        int n = values.size();
-        String stroke = toneStrokeColor(toneClass);
-        String fill = toneFillColor(toneClass);
-        String dot = toneDotColor(toneClass);
-        if (n == 1) {
-            double single = values.peekFirst() == null ? yMin : values.peekFirst();
-            double norm = clampDouble((single - yMin) / ySpan, 0.0, 1.0);
-            double y = 100.0 - (norm * 100.0);
-            return "<svg class='spark-svg' viewBox='0 0 100 100' preserveAspectRatio='none'>"
-                    + "<rect x='0' y='0' width='100' height='100' fill='transparent'/>"
-                    + "<line x1='0' y1='" + fmt2(y) + "' x2='100' y2='" + fmt2(y) + "' stroke='" + stroke + "' stroke-width='2.4'/>"
-                    + "<circle cx='50' cy='" + fmt2(y) + "' r='2.2' fill='" + dot + "'/>"
-                    + "</svg>";
-        }
+    private static String renderSingleSpark(Double rawValue, double yMin, double ySpan, String stroke, String dot) {
+        double value = rawValue == null ? yMin : rawValue;
+        double norm = clampDouble((value - yMin) / ySpan, 0.0, 1.0);
+        double y = 100.0 - (norm * 100.0);
+        return "<svg class='spark-svg' viewBox='0 0 100 100' preserveAspectRatio='none'>"
+                + "<rect x='0' y='0' width='100' height='100' fill='transparent'/>"
+                + "<line x1='0' y1='" + fmt2(y) + "' x2='100' y2='" + fmt2(y) + "' stroke='" + stroke + "' stroke-width='2.4'/>"
+                + "<circle cx='50' cy='" + fmt2(y) + "' r='2.2' fill='" + dot + "'/>"
+                + "</svg>";
+    }
+
+    private static String renderSeriesSpark(
+            ArrayDeque<Double> values,
+            int count,
+            double yMin,
+            double ySpan,
+            String stroke,
+            String fill,
+            String dot
+    ) {
         StringBuilder polyline = new StringBuilder();
         StringBuilder area = new StringBuilder("M 0 100 ");
         StringBuilder dots = new StringBuilder();
         int idx = 0;
         for (Double raw : values) {
             double v = raw == null ? yMin : raw;
-            double norm = (v - yMin) / ySpan;
-            norm = clampDouble(norm, 0.0, 1.0);
-            double x = (idx * 100.0) / Math.max(1, n - 1);
+            double norm = clampDouble((v - yMin) / ySpan, 0.0, 1.0);
+            double x = (idx * 100.0) / Math.max(1, count - 1);
             double y = 100.0 - (norm * 100.0);
             area.append("L ").append(fmt2(x)).append(" ").append(fmt2(y)).append(" ");
             polyline.append(fmt2(x)).append(",").append(fmt2(y)).append(" ");
@@ -93,14 +122,15 @@ public final class HudRenderSupport {
                 + "</svg>";
     }
 
-    private static String buildTrendSparkPlaceholderSvg(String toneClass) {
-        String stroke = toneStrokeColor(toneClass);
-        String fill = toneFillColor(toneClass);
-        return "<svg class='spark-svg' viewBox='0 0 100 100' preserveAspectRatio='none'>"
-                + "<rect x='0' y='0' width='100' height='100' fill='transparent'/>"
-                + "<path d='M 0 100 L 0 70 L 15 68 L 30 72 L 45 66 L 60 69 L 75 63 L 90 65 L 100 62 L 100 100 Z' fill='" + fill + "'/>"
-                + "<polyline points='0,70 15,68 30,72 45,66 60,69 75,63 90,65 100,62' fill='none' stroke='" + stroke + "' stroke-width='2.1' stroke-linecap='round' stroke-linejoin='round' stroke-dasharray='4 4'/>"
-                + "</svg>";
+    private static final class SparkSeriesData {
+        private final ArrayDeque<Double> values = new ArrayDeque<>();
+        private double lo = Double.POSITIVE_INFINITY;
+        private double hi = Double.NEGATIVE_INFINITY;
+        private int count = 0;
+
+        private boolean hasValues() {
+            return count > 0 && Double.isFinite(lo) && Double.isFinite(hi);
+        }
     }
 
     private static String toneStrokeColor(String toneClass) {
@@ -173,7 +203,6 @@ public final class HudRenderSupport {
         }
         double last = Double.NaN;
         double lo = Double.POSITIVE_INFINITY;
-        @SuppressWarnings("java:java:S135")
         double hi = Double.NEGATIVE_INFINITY;
         for (int i = 0; i < series.length(); i++) {
             if (series.isNull(i)) {
