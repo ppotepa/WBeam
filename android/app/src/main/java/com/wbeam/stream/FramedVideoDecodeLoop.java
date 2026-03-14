@@ -14,7 +14,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.Locale;
 
-@SuppressWarnings("S1192", "S3358") 
+@SuppressWarnings("S1192")
 final class FramedVideoDecodeLoop {
 
     private static final String PAYLOAD_LABEL = " payload=";
@@ -59,7 +59,6 @@ final class FramedVideoDecodeLoop {
     private final int noPresentMinInFramesHard;
     private final String stateConnecting;
     @SuppressWarnings("S1192")
-    @SuppressWarnings("S3358")
     private final String stateStreaming;
 
     @SuppressWarnings("java:S107")
@@ -177,7 +176,7 @@ final class FramedVideoDecodeLoop {
         } else {
             modeLabel = "stable";
         }
-        final String codecLabel = isPng ? "PNG" : (isHevc ? "HEVC" : "AVC");
+        final String codecLabel = determineCodecLabel(isPng, isHevc);
         Log.i(tag, String.format(Locale.US, "WBTP hello session=0x%016x codec=%s mode=%s",
                 streamSessionId, codecLabel, modeLabel));
 
@@ -476,5 +475,15 @@ final class FramedVideoDecodeLoop {
                 lastLog = nowMs;
             }
         }
+    }
+
+    private static String determineCodecLabel(boolean isPng, boolean isHevc) {
+        if (isPng) {
+            return "PNG";
+        }
+        if (isHevc) {
+            return "HEVC";
+        }
+        return "AVC";
     }
 }
