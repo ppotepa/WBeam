@@ -14,7 +14,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.Locale;
 
-@SuppressWarnings("{S1192", "S3358}") 
+@SuppressWarnings("S1192", "S3358") 
 final class FramedVideoDecodeLoop {
 
     private static final String PAYLOAD_LABEL = " payload=";

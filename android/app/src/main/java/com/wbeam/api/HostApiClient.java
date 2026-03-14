@@ -25,7 +25,7 @@ import okhttp3.ResponseBody;
  * Thin HTTP client utilities for the WBeam control API (port 5001).
  * Holds shared OkHttp instances and provides retry-aware request helpers.
  */
-@SuppressWarnings("{S2140}") 
+@SuppressWarnings("S2140") 
 public final class HostApiClient {
     private static final String LOOPBACK_HOST = "127.0.0.1";
     private static final String LOCAL_STATE_STREAMING = "STREAMING";

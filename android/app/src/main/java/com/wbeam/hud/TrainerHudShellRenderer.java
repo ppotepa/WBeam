@@ -7,7 +7,7 @@ import java.util.Locale;
 /**
  * Renders full HTML shell for trainer HUD (SOT layout).
  */
-@SuppressWarnings("{S3516}") 
+@SuppressWarnings("S3516") 
 public final class TrainerHudShellRenderer {
     private static final String STATE_PENDING = "PENDING";
     private static final String SCALE_2X = "scale-2x";

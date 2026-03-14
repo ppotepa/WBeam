@@ -11,7 +11,7 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.util.Locale;
 
-@SuppressWarnings("{S112}") 
+@SuppressWarnings("S112") 
 final class StreamReconnectLoop {
 
     interface RuntimeState {
