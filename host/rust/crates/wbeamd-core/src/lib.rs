@@ -20,7 +20,7 @@ use wbeamd_api::{
     valid_values, validate_config_with_presets, ActiveConfig, BaseResponse, ClientMetricsRequest,
     ClientMetricsResponse, ConfigPatch, EffectiveRuntimeConfig, ErrorResponse, HealthResponse,
     HostProbeResponse, KpiSnapshot, MetricsResponse, MetricsSnapshot, PresetsResponse, StatusResponse,
-    ValidationError, VirtualDisplayDoctorResponse, VirtualDisplayProbeResponse,
+    TuningStatusPatch, ValidationError, VirtualDisplayDoctorResponse, VirtualDisplayProbeResponse,
 };
 
 pub mod domain;
@@ -811,6 +811,7 @@ impl DaemonCore {
             inner.last_adaptation_at = None;
             inner.no_present_streak = 0;
             inner.last_no_present_recovery_at = None;
+            inner.metrics.tuning = None;
         }
         self.start_with_config(cfg, "start_request").await?;
         Ok(self.status().await)
@@ -854,6 +855,57 @@ impl DaemonCore {
         }
 
         Ok(self.status().await)
+    }
+
+    pub async fn update_tuning_status(&self, patch: TuningStatusPatch) -> StatusResponse {
+        let mut inner = self.inner.lock().await;
+
+        if patch.clear.unwrap_or(false) {
+            inner.metrics.tuning = None;
+            return StatusResponse {
+                base: self.base_from_inner(&inner),
+                ok: true,
+            };
+        }
+
+        let mut tuning = inner.metrics.tuning.clone().unwrap_or_default();
+        if let Some(active) = patch.active {
+            tuning.active = active;
+        }
+        if let Some(codec) = patch.codec {
+            tuning.codec = codec.trim().to_string();
+        }
+        if let Some(phase) = patch.phase {
+            tuning.phase = phase.trim().to_string();
+        }
+        if let Some(generation) = patch.generation {
+            tuning.generation = generation;
+        }
+        if let Some(total_generations) = patch.total_generations {
+            tuning.total_generations = total_generations;
+        }
+        if let Some(child) = patch.child {
+            tuning.child = child;
+        }
+        if let Some(children_per_generation) = patch.children_per_generation {
+            tuning.children_per_generation = children_per_generation;
+        }
+        if let Some(score) = patch.score {
+            tuning.score = score;
+        }
+        if let Some(best_score) = patch.best_score {
+            tuning.best_score = best_score;
+        }
+        if let Some(note) = patch.note {
+            tuning.note = note.trim().to_string();
+        }
+        tuning.updated_unix_ms = now_unix_ms().min(u128::from(u64::MAX)) as u64;
+        inner.metrics.tuning = Some(tuning);
+
+        StatusResponse {
+            base: self.base_from_inner(&inner),
+            ok: true,
+        }
     }
 
     pub async fn ingest_client_metrics(
@@ -1109,6 +1161,7 @@ impl DaemonCore {
         inner.last_streaming_line_at = None;
         inner.telemetry_file = None; // P2.3: flush+close
         inner.no_present_streak = 0;
+        inner.metrics.tuning = None;
 
         Ok(StatusResponse {
             base: self.base_from_inner(&inner),

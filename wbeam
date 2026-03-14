@@ -43,7 +43,7 @@ Usage:
 
 Groups:
   ip        up | down | status
-  host      build | run | debug | status | down | probe
+  host      build | run | debug | status | down | probe | tuner
   daemon    up | down | status   (alias for host)
   android   build | install | launch | deploy | deploy-all | build-release | install-release | deploy-release
   deps      virtual check [--json] | virtual install [--dry-run] [--yes]
@@ -58,6 +58,7 @@ Examples:
   ./wbeam host run               # release binary, foreground
   ./wbeam host debug             # debug build + coloured logs + ADB sidecar
   ./wbeam host probe             # host fingerprint JSON (os/session/display/providers/tools)
+  ./wbeam host tuner             # interactive Rust TUI autotuner wizard
   ./wbeam android deploy         # build + install + launch in one step
   ./wbeam android deploy-all     # build once, install + launch on all connected devices
   ./wbeam android build          # ./gradlew assembleDebug only
@@ -969,6 +970,17 @@ host_probe() {
   fi
   echo "Missing required command: python3 (or python)" >&2
   exit 1
+}
+
+host_tuner() {
+  require_cmd cargo
+  local rust_dir="$ROOT_DIR/host/rust"
+  local tuner_args=("--host-url" "http://127.0.0.1:${CONTROL_PORT}")
+  if [[ -n "$ANDROID_SERIAL" ]]; then
+    tuner_args+=("--serial" "$ANDROID_SERIAL")
+  fi
+  tuner_args+=("$@")
+  cd "$rust_dir" && cargo run --release -p wbeamd-tuner -- "${tuner_args[@]}"
 }
 
 android_build() {
@@ -2057,6 +2069,7 @@ case "$group" in
       status)         daemon_status ;;
       down|stop)      daemon_down ;;
       probe)          shift 2; host_probe "$@" ;;
+      tuner|tune)     shift 2; host_tuner "$@" ;;
       *)              print_help; exit 1 ;;
     esac
     ;;

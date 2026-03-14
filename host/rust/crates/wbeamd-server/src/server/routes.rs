@@ -18,6 +18,7 @@ pub(crate) fn build_router(app_state: AppState) -> Router {
         .route("/start", post(post_start))
         .route("/stop", post(post_stop))
         .route("/apply", post(post_apply))
+        .route("/tuning", post(post_tuning))
         .route("/client-metrics", post(post_client_metrics))
         .route("/v1/status", get(get_status))
         .route("/v1/host-probe", get(get_host_probe))
@@ -30,6 +31,7 @@ pub(crate) fn build_router(app_state: AppState) -> Router {
         .route("/v1/start", post(post_start))
         .route("/v1/stop", post(post_stop))
         .route("/v1/apply", post(post_apply))
+        .route("/v1/tuning", post(post_tuning))
         .route("/v1/client-metrics", post(post_client_metrics))
         .with_state(app_state)
 }

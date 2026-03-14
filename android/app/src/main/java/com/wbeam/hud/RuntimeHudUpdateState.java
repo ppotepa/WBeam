@@ -29,6 +29,8 @@ public final class RuntimeHudUpdateState {
     public final long bpHigh;
     public final long bpRecover;
     public final String reason;
+    public final boolean tuningActive;
+    public final String tuningLine;
 
     public final double bitrateMbps;
     public final RuntimeHudComputation.PressureState pressureState;
@@ -62,6 +64,8 @@ public final class RuntimeHudUpdateState {
             long bpHigh,
             long bpRecover,
             String reason,
+            boolean tuningActive,
+            String tuningLine,
             double bitrateMbps,
             RuntimeHudComputation.PressureState pressureState,
             double dropPerSec,
@@ -93,6 +97,8 @@ public final class RuntimeHudUpdateState {
         this.bpHigh = bpHigh;
         this.bpRecover = bpRecover;
         this.reason = reason;
+        this.tuningActive = tuningActive;
+        this.tuningLine = tuningLine;
         this.bitrateMbps = bitrateMbps;
         this.pressureState = pressureState;
         this.dropPerSec = dropPerSec;
@@ -168,6 +174,8 @@ public final class RuntimeHudUpdateState {
                 runtime.bpHigh,
                 runtime.bpRecover,
                 runtime.reason,
+                runtime.tuningActive,
+                runtime.tuningLine,
                 runtime.bitrateMbps,
                 pressureState,
                 dropRate.dropPerSec,

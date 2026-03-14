@@ -11,7 +11,7 @@ use clap::Parser;
 use serde::Deserialize;
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
-use wbeamd_api::{ClientMetricsRequest, ConfigPatch};
+use wbeamd_api::{ClientMetricsRequest, ConfigPatch, TuningStatusPatch};
 use wbeamd_core::DaemonCore;
 
 mod server;
@@ -322,6 +322,18 @@ async fn post_apply(
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(err) => core_error_response(core, err).await,
     }
+}
+
+async fn post_tuning(
+    State(state): State<AppState>,
+    Query(query): Query<SessionQuery>,
+    body: Option<Json<TuningStatusPatch>>,
+) -> impl IntoResponse {
+    let serial = query.serial.as_deref();
+    let core = state.sessions.resolve_core(serial, query.stream_port).await;
+    let patch = body.map(|Json(v)| v).unwrap_or_default();
+    let resp = core.update_tuning_status(patch).await;
+    (StatusCode::OK, Json(resp)).into_response()
 }
 
 async fn post_client_metrics(

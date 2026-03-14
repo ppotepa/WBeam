@@ -45,6 +45,8 @@ public final class RuntimeHudWebPayloadBuilder {
         public long bpHigh;
         public long bpRecover;
         public String reason;
+        public boolean tuningActive;
+        public String tuningLine;
 
         public String metricChartsHtml;
         public String resourceRowsHtml;
@@ -69,6 +71,9 @@ public final class RuntimeHudWebPayloadBuilder {
         chips.append(HudRenderSupport.hudChip("STREAM MODE", streamMode, ""));
         chips.append(HudRenderSupport.hudChip("DEVICE", in.daemonHostName, ""));
         chips.append(HudRenderSupport.hudChip("STATE", in.daemonStateUi, HudRenderSupport.hudToneClass(in.tone)));
+        if (in.tuningActive) {
+            chips.append(HudRenderSupport.hudChip("TUNING", "ACTIVE", "state-warn"));
+        }
 
         StringBuilder cards = new StringBuilder();
         cards.append(HudRenderSupport.hudCard("PRESENT FPS", String.format(Locale.US, "%.1f", in.presentFps), HudRenderSupport.hudToneClass(in.tone)));
@@ -90,6 +95,9 @@ public final class RuntimeHudWebPayloadBuilder {
         details.append(HudRenderSupport.hudDetailRow("Backpressure", in.bpHigh + "/" + in.bpRecover));
         details.append(HudRenderSupport.hudDetailRow("Connection mode", "runtime"));
         details.append(HudRenderSupport.hudDetailRow("Reason", HudRenderSupport.safeText(in.reason)));
+        if (in.tuningActive) {
+            details.append(HudRenderSupport.hudDetailRow("Tuning", HudRenderSupport.safeText(in.tuningLine)));
+        }
         details.append(HudRenderSupport.hudDetailRow("Host error", HudRenderSupport.safeText(in.daemonLastError)));
         details.append(HudRenderSupport.hudDetailRow("App build", HudRenderSupport.safeText(in.appBuildRevision)));
         details.append(HudRenderSupport.hudDetailRow("Daemon build", HudRenderSupport.safeText(in.daemonBuildRevision)));
@@ -98,7 +106,8 @@ public final class RuntimeHudWebPayloadBuilder {
                 + " | recv=" + String.format(Locale.US, "%.1f", in.recvFps)
                 + " decode=" + String.format(Locale.US, "%.1f", in.decodeFps)
                 + " present=" + String.format(Locale.US, "%.1f", in.presentFps)
-                + " | drops=" + in.drops;
+                + " | drops=" + in.drops
+                + (in.tuningActive ? " | tune=" + HudRenderSupport.safeText(in.tuningLine) : "");
 
         return RuntimeHudShellRenderer.buildHtml(
                 chips.toString(),

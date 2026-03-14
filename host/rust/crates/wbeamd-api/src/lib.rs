@@ -94,6 +94,36 @@ pub struct ClientMetricsRequest {
     pub trace_id: Option<u64>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TuningStatus {
+    pub active: bool,
+    pub codec: String,
+    pub phase: String,
+    pub generation: u32,
+    pub total_generations: u32,
+    pub child: u32,
+    pub children_per_generation: u32,
+    pub score: f64,
+    pub best_score: f64,
+    pub note: String,
+    pub updated_unix_ms: u64,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct TuningStatusPatch {
+    pub clear: Option<bool>,
+    pub active: Option<bool>,
+    pub codec: Option<String>,
+    pub phase: Option<String>,
+    pub generation: Option<u32>,
+    pub total_generations: Option<u32>,
+    pub child: Option<u32>,
+    pub children_per_generation: Option<u32>,
+    pub score: Option<f64>,
+    pub best_score: Option<f64>,
+    pub note: Option<String>,
+}
+
 impl Default for ClientMetricsRequest {
     fn default() -> Self {
         Self {
@@ -287,6 +317,8 @@ pub struct MetricsSnapshot {
     pub backpressure_high_events: u64,
     pub backpressure_recover_events: u64,
     pub transport_runtime: TransportRuntimeSnapshot,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tuning: Option<TuningStatus>,
 }
 
 #[derive(Debug, Clone, Serialize)]
