@@ -11,6 +11,7 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Locale;
+import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.ConnectionPool;
@@ -25,8 +26,8 @@ import okhttp3.ResponseBody;
  * Thin HTTP client utilities for the WBeam control API (port 5001).
  * Holds shared OkHttp instances and provides retry-aware request helpers.
  */
-@SuppressWarnings("java:S2140") 
 public final class HostApiClient {
+    private static final Random RANDOM = new Random();
     private static final String LOOPBACK_HOST = "127.0.0.1";
     private static final String LOCAL_STATE_STREAMING = "STREAMING";
     private static final String LOCAL_STATE_STARTING = LOCAL_STATE_STARTING;
@@ -128,7 +129,7 @@ public final class HostApiClient {
                 }
                 long baseDelay = Math.min(5000L, API_RETRY_BASE_DELAY_MS * (1L << i));
                 long jitterBound = Math.max(1L, baseDelay / 4L + 1L);
-                long jitter = (long) (Math.random() * jitterBound);
+                long jitter = RANDOM.nextLong(jitterBound);
                 SystemClock.sleep(baseDelay + jitter);
             }
         }
@@ -172,7 +173,6 @@ public final class HostApiClient {
      * Perform a lightweight transport probe by downloading a fixed payload from
      * `/v1/speedtest`. Returns elapsed milliseconds when successful.
      */
-    @SuppressWarnings("java:S1905")
     public static long runTransportProbeMs(int mb) throws IOException {
         int sizeMb = Math.max(1, Math.min(8, mb));
         String url = API_BASE + appendSessionQuery("/v1/speedtest?mb=" + sizeMb);
@@ -204,7 +204,7 @@ public final class HostApiClient {
                 }
             }
 
-            long expectedMin = (long) sizeMb * 1024L * 1024L;
+            long expectedMin = sizeMb * 1024L * 1024L;
             if (bytes < expectedMin) {
                 throw new IOException("transport probe short read " + bytes + "B");
             }

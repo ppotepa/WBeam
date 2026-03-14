@@ -5,7 +5,6 @@ import java.util.Locale;
 /**
  * Builds preflight/startup overlay model from current runtime snapshot.
  */
-@SuppressWarnings("java:S1192") 
 public final class StartupOverlayModelBuilder {
     private static final String SERVICE_PREFIX = "service=";
     private static final String BULLET = " \u00b7 ";
@@ -77,7 +76,6 @@ public final class StartupOverlayModelBuilder {
     private static final String RECONNECTS_SUFFIX = "reconnects: ";
 
     @SuppressWarnings({"java:S6541", "java:S3776"})
-    @SuppressWarnings("java:S1192")
     public static Model build(Input in) {
         Model out = new Model();
         long elapsedMs = in.startupBeganAtMs > 0L
@@ -206,7 +204,7 @@ public final class StartupOverlayModelBuilder {
             } else if (updatedControlRetryCount == 0) {
                 subtitle = "awaiting control link" + BULLET + "start desktop service if needed\u2026";
             } else {
-                subtitle = "retrying control link" + BULLET + "attempt #" + updatedControlRetryCount
+                subtitle = "retrying control link" + BULLET + ATTEMPT_PREFIX + updatedControlRetryCount
                         + BULLET + "check desktop service\u2026";
             }
         } else if (step2 != Model.SS_OK) {

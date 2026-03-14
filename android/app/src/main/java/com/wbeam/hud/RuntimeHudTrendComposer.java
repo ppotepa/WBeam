@@ -1,13 +1,10 @@
 package com.wbeam.hud;
 
-@SuppressWarnings("java:S2184") 
 public final class RuntimeHudTrendComposer {
     private RuntimeHudTrendComposer() {
     }
 
     @SuppressWarnings("java:S107")
-    @SuppressWarnings("java:S1905")
-    @SuppressWarnings("java:S2184")
     public static String appendSamplesAndBuildHtml(
             MetricSeriesBuffer runtimePresentSeries,
             MetricSeriesBuffer runtimeMbpsSeries,
@@ -28,7 +25,7 @@ public final class RuntimeHudTrendComposer {
         runtimeMbpsSeries.addSample(Math.max(0.0, bitrateMbps));
         runtimeDropSeries.addSample(Math.max(0.0, dropPerSec));
         runtimeLatencySeries.addSample(Math.max(0.0, e2eP95));
-        runtimeQueueSeries.addSample(Math.max(0.0, qT + qD + qR));
+        runtimeQueueSeries.addSample(Math.max(0.0, (double) qT + qD + qR));
         return RuntimeTrendGridRenderer.buildMetricTrendRowsHtml(
                 runtimePresentSeries.toJsonFinite(),
                 runtimeMbpsSeries.toJsonFinite(),
