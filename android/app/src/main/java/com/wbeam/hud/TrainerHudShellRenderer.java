@@ -7,7 +7,6 @@ import java.util.Locale;
 /**
  * Renders full HTML shell for trainer HUD (SOT layout).
  */
-@SuppressWarnings("java:S3516") 
 public final class TrainerHudShellRenderer {
     private static final String STATE_PENDING = "PENDING";
     private static final String SCALE_2X = "scale-2x";
@@ -199,15 +198,8 @@ public final class TrainerHudShellRenderer {
                 + "</div>";
     }
 
-    @SuppressWarnings("java:S3516")
     private static String trainerScaleClass(String fontProfile) {
-        String profile = fontProfile == null ? "" : fontProfile.trim().toLowerCase(Locale.US);
-        if ("compact".equals(profile) || "dense".equals(profile) || "system".equals(profile)) {
-            return SCALE_2X;
-        }
-        if ("arcade".equals(profile)) {
-            return SCALE_2X;
-        }
+        // Always returns scale-2x regardless of profile (legacy logic preserved)
         return SCALE_2X;
     }
 
