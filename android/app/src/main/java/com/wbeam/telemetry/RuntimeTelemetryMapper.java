@@ -45,7 +45,6 @@ public final class RuntimeTelemetryMapper {
         public double bitrateMbps;
     }
 
-    @SuppressWarnings("java:S3776")
     public static Snapshot map(
             JSONObject metrics,
             int selectedFps,
@@ -58,10 +57,23 @@ public final class RuntimeTelemetryMapper {
         JSONObject latest = metrics.optJSONObject("latest_client_metrics");
         JSONObject limits = metrics.optJSONObject("queue_limits");
 
+        populateFrameStats(out, metrics);
+        populateKpiMetrics(out, kpi, selectedFps);
+        populateQueueMeasurements(out, latest, limits, transportQueueMaxFrames, decodeQueueMaxFrames, renderQueueMaxFrames);
+        populateAdaptiveState(out, metrics);
+        populateLatestSampleTotals(out, latest);
+        populateBitrate(out, latest, metrics);
+
+        return out;
+    }
+
+    private static void populateFrameStats(Snapshot out, JSONObject metrics) {
         out.frameInHost = metrics.optLong("frame_in", 0);
         out.frameOutHost = metrics.optLong("frame_out", 0);
         out.streamUptimeSec = metrics.optLong("stream_uptime_sec", 0);
+    }
 
+    private static void populateKpiMetrics(Snapshot out, JSONObject kpi, int selectedFps) {
         out.targetFps = kpi != null ? kpi.optDouble("target_fps", selectedFps) : selectedFps;
         if (!Double.isFinite(out.targetFps) || out.targetFps <= 0.0) {
             out.targetFps = selectedFps;
@@ -79,12 +91,20 @@ public final class RuntimeTelemetryMapper {
                 out.presentFps = out.recvFps;
             }
         }
-
         out.frametimeP95 = kpi != null ? kpi.optDouble("frametime_ms_p95", 0.0) : 0.0;
         out.decodeP95 = kpi != null ? kpi.optDouble("decode_time_ms_p95", 0.0) : 0.0;
         out.renderP95 = kpi != null ? kpi.optDouble("render_time_ms_p95", 0.0) : 0.0;
         out.e2eP95 = kpi != null ? kpi.optDouble("e2e_latency_ms_p95", 0.0) : 0.0;
+    }
 
+    private static void populateQueueMeasurements(
+            Snapshot out,
+            JSONObject latest,
+            JSONObject limits,
+            int transportQueueMaxFrames,
+            int decodeQueueMaxFrames,
+            int renderQueueMaxFrames
+    ) {
         out.qT = latest != null ? latest.optInt("transport_queue_depth", 0) : 0;
         out.qD = latest != null ? latest.optInt("decode_queue_depth", 0) : 0;
         out.qR = latest != null ? latest.optInt("render_queue_depth", 0) : 0;
@@ -98,7 +118,9 @@ public final class RuntimeTelemetryMapper {
         out.qRMax = limits != null
                 ? limits.optInt("render_queue_max", renderQueueMaxFrames)
                 : renderQueueMaxFrames;
+    }
 
+    private static void populateAdaptiveState(Snapshot out, JSONObject metrics) {
         out.adaptiveLevel = metrics.optInt("adaptive_level", 0);
         out.adaptiveAction = metrics.optString("adaptive_action", "hold");
         out.drops = metrics.optLong("drops", 0);
@@ -108,10 +130,14 @@ public final class RuntimeTelemetryMapper {
         if (out.reason.length() > 44) {
             out.reason = out.reason.substring(0, 44) + "...";
         }
+    }
 
+    private static void populateLatestSampleTotals(Snapshot out, JSONObject latest) {
         out.latestDroppedFrames = latest != null ? latest.optLong("dropped_frames", -1L) : -1L;
         out.latestTooLateFrames = latest != null ? latest.optLong("too_late_frames", 0L) : 0L;
+    }
 
+    private static void populateBitrate(Snapshot out, JSONObject latest, JSONObject metrics) {
         out.bitrateMbps = 0.0;
         if (latest != null) {
             long recvBps = latest.optLong("recv_bps", 0L);
@@ -122,7 +148,5 @@ public final class RuntimeTelemetryMapper {
         if (out.bitrateMbps <= 0.0) {
             out.bitrateMbps = metrics.optLong("bitrate_actual_bps", 0L) / 1_000_000.0;
         }
-
-        return out;
     }
 }
