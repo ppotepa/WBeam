@@ -14,37 +14,165 @@ public final class StartupOverlayModelBuilder {
     /**
      * Plain data carrier for startup overlay input.
      */
-    @SuppressWarnings("java:S1104")
     public static final class Input {
-        public boolean daemonReachable;
-        public String daemonHostName;
-        public String daemonService;
-        public String daemonBuildRevision;
-        public String daemonState;
-        public String daemonLastError;
-        public boolean handshakeResolved;
-        public boolean buildMismatch;
-        public boolean requiresTransportProbe;
-        public boolean probeOk;
-        public boolean probeInFlight;
-        public String probeInfo;
-        public String apiImpl;
-        public String apiBase;
-        public String apiHost;
-        public String streamHost;
-        public int streamPort;
-        public String appBuildRevision;
-        public String lastUiInfo;
-        public String effectiveDaemonState;
-        public double latestPresentFps;
-        public long startupBeganAtMs;
-        public int controlRetryCount;
-        public long nowMs;
-        public String lastStatsLine;
-        public String daemonErrCompact;
+        private boolean daemonReachable;
+        private String daemonHostName;
+        private String daemonService;
+        private String daemonBuildRevision;
+        private String daemonState;
+        private String daemonLastError;
+        private boolean handshakeResolved;
+        private boolean buildMismatch;
+        private boolean requiresTransportProbe;
+        private boolean probeOk;
+        private boolean probeInFlight;
+        private String probeInfo;
+        private String apiImpl;
+        private String apiBase;
+        private String apiHost;
+        private String streamHost;
+        private int streamPort;
+        private String appBuildRevision;
+        private String lastUiInfo;
+        private String effectiveDaemonState;
+        private double latestPresentFps;
+        private long startupBeganAtMs;
+        private int controlRetryCount;
+        private long nowMs;
+        private String lastStatsLine;
+        private String daemonErrCompact;
+
+        Input setDaemonReachable(boolean daemonReachable) {
+            this.daemonReachable = daemonReachable;
+            return this;
+        }
+
+        Input setDaemonHostName(String daemonHostName) {
+            this.daemonHostName = daemonHostName;
+            return this;
+        }
+
+        Input setDaemonService(String daemonService) {
+            this.daemonService = daemonService;
+            return this;
+        }
+
+        Input setDaemonBuildRevision(String daemonBuildRevision) {
+            this.daemonBuildRevision = daemonBuildRevision;
+            return this;
+        }
+
+        Input setDaemonState(String daemonState) {
+            this.daemonState = daemonState;
+            return this;
+        }
+
+        Input setDaemonLastError(String daemonLastError) {
+            this.daemonLastError = daemonLastError;
+            return this;
+        }
+
+        Input setHandshakeResolved(boolean handshakeResolved) {
+            this.handshakeResolved = handshakeResolved;
+            return this;
+        }
+
+        Input setBuildMismatch(boolean buildMismatch) {
+            this.buildMismatch = buildMismatch;
+            return this;
+        }
+
+        Input setRequiresTransportProbe(boolean requiresTransportProbe) {
+            this.requiresTransportProbe = requiresTransportProbe;
+            return this;
+        }
+
+        Input setProbeOk(boolean probeOk) {
+            this.probeOk = probeOk;
+            return this;
+        }
+
+        Input setProbeInFlight(boolean probeInFlight) {
+            this.probeInFlight = probeInFlight;
+            return this;
+        }
+
+        Input setProbeInfo(String probeInfo) {
+            this.probeInfo = probeInfo;
+            return this;
+        }
+
+        Input setApiImpl(String apiImpl) {
+            this.apiImpl = apiImpl;
+            return this;
+        }
+
+        Input setApiBase(String apiBase) {
+            this.apiBase = apiBase;
+            return this;
+        }
+
+        Input setApiHost(String apiHost) {
+            this.apiHost = apiHost;
+            return this;
+        }
+
+        Input setStreamHost(String streamHost) {
+            this.streamHost = streamHost;
+            return this;
+        }
+
+        Input setStreamPort(int streamPort) {
+            this.streamPort = streamPort;
+            return this;
+        }
+
+        Input setAppBuildRevision(String appBuildRevision) {
+            this.appBuildRevision = appBuildRevision;
+            return this;
+        }
+
+        Input setLastUiInfo(String lastUiInfo) {
+            this.lastUiInfo = lastUiInfo;
+            return this;
+        }
+
+        Input setEffectiveDaemonState(String effectiveDaemonState) {
+            this.effectiveDaemonState = effectiveDaemonState;
+            return this;
+        }
+
+        Input setLatestPresentFps(double latestPresentFps) {
+            this.latestPresentFps = latestPresentFps;
+            return this;
+        }
+
+        Input setStartupBeganAtMs(long startupBeganAtMs) {
+            this.startupBeganAtMs = startupBeganAtMs;
+            return this;
+        }
+
+        Input setControlRetryCount(int controlRetryCount) {
+            this.controlRetryCount = controlRetryCount;
+            return this;
+        }
+
+        Input setNowMs(long nowMs) {
+            this.nowMs = nowMs;
+            return this;
+        }
+
+        Input setLastStatsLine(String lastStatsLine) {
+            this.lastStatsLine = lastStatsLine;
+            return this;
+        }
+
+        Input setDaemonErrCompact(String daemonErrCompact) {
+            this.daemonErrCompact = daemonErrCompact;
+            return this;
+        }
     }
 
-    @SuppressWarnings("java:S1104")
     public static final class Model {
         public static final int SS_PENDING = 0;
         public static final int SS_ACTIVE = 1;
@@ -54,21 +182,65 @@ public final class StartupOverlayModelBuilder {
         /**
          * Plain data carrier for startup overlay output model.
          */
-        public int step1State;
-        public int step2State;
-        public int step3State;
-        public String step1Detail;
-        public String step2Detail;
-        public String step3Detail;
-        public String subtitle;
-        public String infoLog;
-        public boolean allOk;
-        public long updatedStartupBeganAtMs;
-        public int updatedControlRetryCount;
-        public long elapsedMs;
+        private int step1State;
+        private int step2State;
+        private int step3State;
+        private String step1Detail;
+        private String step2Detail;
+        private String step3Detail;
+        private String subtitle;
+        private String infoLog;
+        private boolean allOk;
+        private long updatedStartupBeganAtMs;
+        private int updatedControlRetryCount;
+        private long elapsedMs;
 
-        static {
-            // Suppress S1104 for all public fields in this data carrier
+        public int getStep1State() {
+            return step1State;
+        }
+
+        public int getStep2State() {
+            return step2State;
+        }
+
+        public int getStep3State() {
+            return step3State;
+        }
+
+        public String getStep1Detail() {
+            return step1Detail;
+        }
+
+        public String getStep2Detail() {
+            return step2Detail;
+        }
+
+        public String getStep3Detail() {
+            return step3Detail;
+        }
+
+        public String getSubtitle() {
+            return subtitle;
+        }
+
+        public String getInfoLog() {
+            return infoLog;
+        }
+
+        public boolean isAllOk() {
+            return allOk;
+        }
+
+        public long getUpdatedStartupBeganAtMs() {
+            return updatedStartupBeganAtMs;
+        }
+
+        public int getUpdatedControlRetryCount() {
+            return updatedControlRetryCount;
+        }
+
+        public long getElapsedMs() {
+            return elapsedMs;
         }
     }
 

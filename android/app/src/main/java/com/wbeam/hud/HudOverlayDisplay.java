@@ -4,11 +4,10 @@ import android.view.View;
 import android.webkit.WebView;
 import android.widget.TextView;
 
-@SuppressWarnings("java:S1104")
 public final class HudOverlayDisplay {
     public static final class State {
-        public String mode = "none";
-        public String lastWebHtml = "";
+        String mode = "none";
+        String lastWebHtml = "";
     }
 
     private HudOverlayDisplay() {

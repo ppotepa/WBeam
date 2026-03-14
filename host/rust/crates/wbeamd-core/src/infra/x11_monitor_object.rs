@@ -303,6 +303,8 @@ mod tests {
         let name = monitor_name_for_serial("ab:cd-ef_1234567890-XYZ-extra");
         assert!(name.starts_with("WBEAM_"));
         assert!(name.len() <= 24);
-        assert!(name.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_'));
+        assert!(name
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_'));
     }
 }

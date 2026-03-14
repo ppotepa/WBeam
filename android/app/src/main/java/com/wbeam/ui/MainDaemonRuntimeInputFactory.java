@@ -11,7 +11,6 @@ public final class MainDaemonRuntimeInputFactory {
     private MainDaemonRuntimeInputFactory() {
     }
 
-    @SuppressWarnings("java:java:S107")
     public static MainDaemonRuntimeCoordinator.StatusInput createStatusInput(
             boolean reachable,
             boolean wasReachable,
@@ -40,7 +39,6 @@ public final class MainDaemonRuntimeInputFactory {
         input.metrics = metrics;
         return input;
     }
- @SuppressWarnings("java:java:S107")
 
     public static MainDaemonRuntimeCoordinator.StatusContext createStatusContext(
             MainDaemonState daemon,
@@ -67,7 +65,6 @@ public final class MainDaemonRuntimeInputFactory {
         context.statsSink = statsSink;
         context.perfHudSink = perfHudSink;
         return context;
-    @SuppressWarnings("java:java:S107")
     }
 
     public static MainDaemonRuntimeCoordinator.OfflineContext createOfflineContext(

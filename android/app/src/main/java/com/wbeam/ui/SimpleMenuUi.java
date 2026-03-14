@@ -6,7 +6,7 @@ import android.widget.Button;
  * Helper methods for simple-mode menu state and button visuals.
  */
 public final class SimpleMenuUi {
-    private static final String RAW_PNG = RAW_PNG;
+    private static final String RAW_PNG = "raw-png";
 
     private SimpleMenuUi() {}
 

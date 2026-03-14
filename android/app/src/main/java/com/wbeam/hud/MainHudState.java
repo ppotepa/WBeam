@@ -1,20 +1,36 @@
 package com.wbeam.hud;
 
-/**
- * Plain data carrier for HUD runtime state.
- */
-@SuppressWarnings("java:S1104")
 public final class MainHudState {
-    public boolean trainerSessionActive = false;
-    public String compactLine = "hud: waiting for metrics";
-    public long lastTrainerPayloadAtMs = 0L;
-    public double latestTargetFps = 60.0;
-    public double latestPresentFps = 0.0;
-    public long latestStreamUptimeSec = 0L;
-    public long latestFrameOutHost = 0L;
-    public double latestStablePresentFps = 0.0;
-    public long latestStablePresentFpsAtMs = 0L;
-    public long lastPerfMetricsAtMs = 0L;
-    public long runtimeDropPrevCount = -1L;
-    public long runtimeDropPrevAtMs = 0L;
+    boolean trainerSessionActive = false;
+    String compactLine = "hud: waiting for metrics";
+    long lastTrainerPayloadAtMs = 0L;
+    double latestTargetFps = 60.0;
+    double latestPresentFps = 0.0;
+    long latestStreamUptimeSec = 0L;
+    long latestFrameOutHost = 0L;
+    double latestStablePresentFps = 0.0;
+    long latestStablePresentFpsAtMs = 0L;
+    long lastPerfMetricsAtMs = 0L;
+    long runtimeDropPrevCount = -1L;
+    long runtimeDropPrevAtMs = 0L;
+
+    public String getCompactLine() {
+        return compactLine;
+    }
+
+    public double getLatestTargetFps() {
+        return latestTargetFps;
+    }
+
+    public double getLatestPresentFps() {
+        return latestPresentFps;
+    }
+
+    public long getLatestStreamUptimeSec() {
+        return latestStreamUptimeSec;
+    }
+
+    public long getLatestFrameOutHost() {
+        return latestFrameOutHost;
+    }
 }

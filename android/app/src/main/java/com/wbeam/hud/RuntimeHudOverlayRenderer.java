@@ -8,42 +8,41 @@ public final class RuntimeHudOverlayRenderer {
     /**
      * Plain data carrier for overlay renderer input.
      */
-    @SuppressWarnings("java:S1104")
-    public static final class Input {
-        public boolean daemonReachable;
-        public String selectedProfile;
-        public String selectedEncoder;
-        public int streamWidth;
-        public int streamHeight;
-        public String daemonHostName;
-        public String daemonStateUi;
-        public String daemonBuildRevision;
-        public String appBuildRevision;
-        public String daemonLastError;
-        public String tone;
-        public double targetFps;
-        public double presentFps;
-        public double recvFps;
-        public double decodeFps;
-        public double liveMbps;
-        public double e2eP95;
-        public double decodeP95;
-        public double renderP95;
-        public double frametimeP95;
-        public double dropsPerSec;
-        public int qT;
-        public int qD;
-        public int qR;
-        public int qTMax;
-        public int qDMax;
-        public int qRMax;
-        public int adaptiveLevel;
-        public String adaptiveAction;
-        public long drops;
-        public long bpHigh;
-        public long bpRecover;
-        public String reason;
-        public String metricChartsHtml;
+    static final class Input {
+        boolean daemonReachable;
+        String selectedProfile;
+        String selectedEncoder;
+        int streamWidth;
+        int streamHeight;
+        String daemonHostName;
+        String daemonStateUi;
+        String daemonBuildRevision;
+        String appBuildRevision;
+        String daemonLastError;
+        String tone;
+        double targetFps;
+        double presentFps;
+        double recvFps;
+        double decodeFps;
+        double liveMbps;
+        double e2eP95;
+        double decodeP95;
+        double renderP95;
+        double frametimeP95;
+        double dropsPerSec;
+        int qT;
+        int qD;
+        int qR;
+        int qTMax;
+        int qDMax;
+        int qRMax;
+        int adaptiveLevel;
+        String adaptiveAction;
+        long drops;
+        long bpHigh;
+        long bpRecover;
+        String reason;
+        String metricChartsHtml;
     }
 
     public static final class Rendered {

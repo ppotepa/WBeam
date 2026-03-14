@@ -8,7 +8,9 @@ use axum::Json;
 use crate::AppState;
 
 use crate::server::runtime_utils::not_found_json;
-use crate::server::trainer_models::{TrainerRun, TrainerRunsResponse, TrainerRunTailQuery, TrainerRunTailResponse};
+use crate::server::trainer_models::{
+    TrainerRun, TrainerRunTailQuery, TrainerRunTailResponse, TrainerRunsResponse,
+};
 pub(crate) async fn get_trainer_runs(State(state): State<AppState>) -> impl IntoResponse {
     let runs_map = state.trainer.runs.lock().await;
     let mut runs: Vec<TrainerRun> = runs_map.values().cloned().collect();

@@ -54,9 +54,7 @@ pub async fn request_portal_stream(cfg: &ResolvedConfig) -> Result<PortalStream>
 
     if let Err(err) = select_with_token.await {
         if restore_token.is_some() {
-            eprintln!(
-                "[wbeam] restore-token select failed, retrying without token: {err}"
-            );
+            eprintln!("[wbeam] restore-token select failed, retrying without token: {err}");
             proxy
                 .select_sources(
                     &session,

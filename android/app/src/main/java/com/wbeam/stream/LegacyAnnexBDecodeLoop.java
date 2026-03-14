@@ -51,8 +51,6 @@ final class LegacyAnnexBDecodeLoop {
         this.stateStreaming = stateStreaming;
     }
 
-    @SuppressWarnings("java:java:S3776")
-    @SuppressWarnings("java:java:S6541")
     void run(InputStream input, MediaCodec codec) throws IOException {
         byte[] readBuf = new byte[64 * 1024];
         byte[] streamBuf = new byte[512 * 1024];
@@ -122,7 +120,6 @@ final class LegacyAnnexBDecodeLoop {
                 int probe = StreamNalUtils.findStartCode(streamBuf, sHead, Math.min(sHead + 128, sTail));
                 streamMode = (probe >= 0) ? 0 : 1;
             }
- @SuppressWarnings("java:java:S135")
 
             if (streamMode == 1) {
                 while ((sTail - sHead) >= 4) {

@@ -13,14 +13,13 @@ public final class TrainerHudRouting {
     /**
      * Plain data carrier for routing decision.
      */
-    @SuppressWarnings("java:S1104")
-    public static final class Decision {
-        public boolean updatedSessionActive;
-        public long updatedLastPayloadAtMs;
-        public boolean enableDebugOverlay;
-        public boolean handled;
-        public Action action = Action.NONE;
-        public String logMessage;
+    static final class Decision {
+        boolean updatedSessionActive;
+        long updatedLastPayloadAtMs;
+        boolean enableDebugOverlay;
+        boolean handled;
+        Action action = Action.NONE;
+        String logMessage;
     }
 
     private TrainerHudRouting() {

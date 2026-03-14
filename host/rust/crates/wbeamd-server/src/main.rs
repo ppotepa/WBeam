@@ -24,9 +24,7 @@ use server::runtime_utils::{
 };
 use server::session_registry::{SessionQuery, SessionRegistry};
 use server::trainer_models::*;
-use server::trainer_support::{
-    resolve_connection_mode, resolve_trainer_overlay_payload,
-};
+use server::trainer_support::{resolve_connection_mode, resolve_trainer_overlay_payload};
 
 #[derive(Debug, Parser)]
 #[command(name = "wbeamd-rust", about = "WBeam host daemon in Rust")]
@@ -201,11 +199,16 @@ async fn get_metrics(
         .resolve_core_readonly(serial, query.stream_port)
         .await
         .unwrap_or_else(|| state.sessions.default_core());
-    let mut payload = serde_json::to_value(core.metrics().await)
-        .unwrap_or_else(|_| serde_json::json!({}));
+    let mut payload =
+        serde_json::to_value(core.metrics().await).unwrap_or_else(|_| serde_json::json!({}));
     if let Value::Object(ref mut obj) = payload {
-        let serial_opt = query.serial.as_deref().map(str::trim).filter(|s| !s.is_empty());
-        let (hud_active, hud_text, hud_json) = resolve_trainer_overlay_payload(serial_opt, stream_port);
+        let serial_opt = query
+            .serial
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let (hud_active, hud_text, hud_json) =
+            resolve_trainer_overlay_payload(serial_opt, stream_port);
         obj.insert(
             "connection_mode".to_string(),
             Value::String(connection_mode.to_string()),
@@ -215,7 +218,10 @@ async fn get_metrics(
             "trainer_hud_text".to_string(),
             Value::String(hud_text.unwrap_or_default()),
         );
-        obj.insert("trainer_hud_json".to_string(), hud_json.unwrap_or(Value::Null));
+        obj.insert(
+            "trainer_hud_json".to_string(),
+            hud_json.unwrap_or(Value::Null),
+        );
     }
     Json(payload)
 }
@@ -421,7 +427,8 @@ async fn auto_layout_wayland_portal_outputs(
     }
 
     let mapped = sessions.mapped_wayland_output_names().await;
-    let mut commands = kscreen_layout::build_non_overlapping_layout_commands(&outputs, Some(&mapped));
+    let mut commands =
+        kscreen_layout::build_non_overlapping_layout_commands(&outputs, Some(&mapped));
     if commands.is_empty() {
         commands = kscreen_layout::build_non_overlapping_layout_commands(&outputs, None);
     }

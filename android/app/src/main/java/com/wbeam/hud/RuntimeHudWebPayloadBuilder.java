@@ -6,54 +6,53 @@ import java.util.Locale;
  * Builds runtime HUD web payload (chips/cards/details/trend/html shell).
  */
 public final class RuntimeHudWebPayloadBuilder {
-    private static final String FMT_MS_P95 = FMT_MS_P95;
+    private static final String FMT_MS_P95 = "%.1f ms";
 
     private RuntimeHudWebPayloadBuilder() {}
 
     /**
      * Plain data carrier for HUD web payload builder input.
      */
-    @SuppressWarnings("java:S1104")
-    public static final class Input {
-        public String selectedProfile;
-        public String selectedEncoder;
-        public int streamWidth;
-        public int streamHeight;
+    static final class Input {
+        String selectedProfile;
+        String selectedEncoder;
+        int streamWidth;
+        int streamHeight;
 
-        public String daemonHostName;
-        public String daemonStateUi;
-        public String daemonBuildRevision;
-        public String appBuildRevision;
-        public String daemonLastError;
-        public String tone;
+        String daemonHostName;
+        String daemonStateUi;
+        String daemonBuildRevision;
+        String appBuildRevision;
+        String daemonLastError;
+        String tone;
 
-        public double targetFps;
-        public double presentFps;
-        public double recvFps;
-        public double decodeFps;
-        public double liveMbps;
-        public double e2eP95;
-        public double decodeP95;
-        public double renderP95;
-        public double frametimeP95;
-        public double dropsPerSec;
+        double targetFps;
+        double presentFps;
+        double recvFps;
+        double decodeFps;
+        double liveMbps;
+        double e2eP95;
+        double decodeP95;
+        double renderP95;
+        double frametimeP95;
+        double dropsPerSec;
 
-        public int qT;
-        public int qD;
-        public int qR;
-        public int qTMax;
-        public int qDMax;
-        public int qRMax;
+        int qT;
+        int qD;
+        int qR;
+        int qTMax;
+        int qDMax;
+        int qRMax;
 
-        public int adaptiveLevel;
-        public String adaptiveAction;
-        public long drops;
-        public long bpHigh;
-        public long bpRecover;
-        public String reason;
+        int adaptiveLevel;
+        String adaptiveAction;
+        long drops;
+        long bpHigh;
+        long bpRecover;
+        String reason;
 
-        public String metricChartsHtml;
-        public String resourceRowsHtml;
+        String metricChartsHtml;
+        String resourceRowsHtml;
     }
 
     public static String build(Input in) {

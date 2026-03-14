@@ -465,12 +465,7 @@ pub fn validate_config_with_presets(
     current: &ActiveConfig,
     preset_map: &BTreeMap<String, ActiveConfig>,
 ) -> Result<ActiveConfig, ValidationError> {
-    let base_profile = canonical_profile_name(
-        patch
-        .profile
-        .as_deref()
-        .unwrap_or(&current.profile)
-    );
+    let base_profile = canonical_profile_name(patch.profile.as_deref().unwrap_or(&current.profile));
     if !preset_map.contains_key(&base_profile) {
         return Err(ValidationError::InvalidProfile);
     }
@@ -557,7 +552,10 @@ fn parse_and_normalize_size(size: &str) -> Result<(u32, u32), ValidationError> {
     let Ok(h) = h_str.parse::<u32>() else {
         return Err(ValidationError::InvalidSize);
     };
-    Ok((even_floor(w.clamp(640, 3840)), even_floor(h.clamp(360, 2160))))
+    Ok((
+        even_floor(w.clamp(640, 3840)),
+        even_floor(h.clamp(360, 2160)),
+    ))
 }
 
 fn even_floor(value: u32) -> u32 {

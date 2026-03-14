@@ -225,7 +225,11 @@ pub(crate) async fn resolve_connection_mode(
         };
         serial_ok && port_ok
     });
-    if is_training { "training" } else { "live" }
+    if is_training {
+        "training"
+    } else {
+        "live"
+    }
 }
 
 pub(crate) fn resolve_active_trainer_suffix(stream_port: u16) -> Option<String> {
@@ -311,10 +315,7 @@ pub(crate) fn live_snapshot_score(metrics: &Value) -> f64 {
         .get("e2e_latency_ms_p95")
         .and_then(|v| v.as_f64())
         .unwrap_or(0.0);
-    let drops = kpi
-        .get("drop_rate")
-        .and_then(|v| v.as_f64())
-        .unwrap_or(0.0);
+    let drops = kpi.get("drop_rate").and_then(|v| v.as_f64()).unwrap_or(0.0);
     // Weighted utility for live snapshot ranking.
     ((present * 2.0) - (e2e_p95 * 0.08) - (drops * 120.0)).max(0.0)
 }

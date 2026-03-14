@@ -46,7 +46,10 @@ pub(crate) fn build_router(app_state: AppState) -> Router {
         .route("/trainer/live/status", get(get_trainer_live_status))
         .route("/trainer/live/start", post(post_trainer_live_start))
         .route("/trainer/live/apply", post(post_trainer_live_apply))
-        .route("/trainer/live/save-profile", post(post_trainer_live_save_profile))
+        .route(
+            "/trainer/live/save-profile",
+            post(post_trainer_live_save_profile),
+        )
         .route("/v1/status", get(get_status))
         .route("/v1/host-probe", get(get_host_probe))
         .route("/v1/health", get(get_health))
@@ -67,7 +70,10 @@ pub(crate) fn build_router(app_state: AppState) -> Router {
         .route("/v1/trainer/runs/{run_id}", get(get_trainer_run))
         .route("/v1/trainer/runs/{run_id}/tail", get(get_trainer_run_tail))
         .route("/v1/trainer/profiles", get(get_trainer_profiles))
-        .route("/v1/trainer/profiles/{profile_name}", get(get_trainer_profile))
+        .route(
+            "/v1/trainer/profiles/{profile_name}",
+            get(get_trainer_profile),
+        )
         .route("/v1/trainer/datasets", get(get_trainer_datasets))
         .route("/v1/trainer/datasets/{run_id}", get(get_trainer_dataset))
         .route(
@@ -79,6 +85,9 @@ pub(crate) fn build_router(app_state: AppState) -> Router {
         .route("/v1/trainer/live/status", get(get_trainer_live_status))
         .route("/v1/trainer/live/start", post(post_trainer_live_start))
         .route("/v1/trainer/live/apply", post(post_trainer_live_apply))
-        .route("/v1/trainer/live/save-profile", post(post_trainer_live_save_profile))
+        .route(
+            "/v1/trainer/live/save-profile",
+            post(post_trainer_live_save_profile),
+        )
         .with_state(app_state)
 }

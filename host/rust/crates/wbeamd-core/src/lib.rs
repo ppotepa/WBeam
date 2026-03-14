@@ -952,7 +952,8 @@ impl DaemonCore {
         Ok(self.status().await)
     }
 
-    pub async fn ingest_client_metrics( // NOSONAR: S3776
+    pub async fn ingest_client_metrics(
+        // NOSONAR: S3776
         &self,
         mut client: ClientMetricsRequest,
     ) -> Result<ClientMetricsResponse, CoreError> {
@@ -1361,7 +1362,8 @@ impl DaemonCore {
         (run_id, existing_pid, provisional_effective)
     }
 
-    async fn start_with_config(&self, cfg: ActiveConfig, reason: &str) -> Result<(), CoreError> { // NOSONAR: S3776
+    async fn start_with_config(&self, cfg: ActiveConfig, reason: &str) -> Result<(), CoreError> {
+        // NOSONAR: S3776
         let requested_display_mode = {
             let inner = self.inner.lock().await;
             inner.requested_display_mode.clone()
@@ -1759,7 +1761,8 @@ impl DaemonCore {
         }
     }
 
-    async fn handle_child_exit(&self, run_id: u64, exit_code: i32) { // NOSONAR: S3776
+    async fn handle_child_exit(&self, run_id: u64, exit_code: i32) {
+        // NOSONAR: S3776
         info!(run_id, exit_code, "stream process exited");
         let (should_restart, cfg_for_restart) = {
             let mut inner = self.inner.lock().await;
@@ -1805,7 +1808,9 @@ impl DaemonCore {
                 return;
             }
 
-            if self.auto_start && Self::auto_restart_cooldown_expired(inner.suppress_auto_start_until) {
+            if self.auto_start
+                && Self::auto_restart_cooldown_expired(inner.suppress_auto_start_until)
+            {
                 inner.state = STATE_RECONNECTING.to_string();
                 inner.metrics.restart_count = inner.metrics.restart_count.saturating_add(1);
                 (true, Some(inner.active_config.clone()))
@@ -1838,7 +1843,9 @@ impl DaemonCore {
     }
 
     fn auto_restart_cooldown_expired(until: Option<Instant>) -> bool {
-        until.map(|deadline| Instant::now() >= deadline).unwrap_or(true)
+        until
+            .map(|deadline| Instant::now() >= deadline)
+            .unwrap_or(true)
     }
 
     async fn watchdog_tick(&self) {

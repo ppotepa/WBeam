@@ -44,55 +44,54 @@ public final class MainHudCoordinator {
     /**
      * Plain data carrier for HUD input.
      */
-    @SuppressWarnings("java:S1104")
     public static final class Input {
-        public String logTag;
-        public MainHudState state;
-        public HudOverlayDisplay.State overlayState;
+        String logTag;
+        MainHudState state;
+        HudOverlayDisplay.State overlayState;
 
-        public MetricSeriesBuffer runtimePresentSeries;
-        public MetricSeriesBuffer runtimeMbpsSeries;
-        public MetricSeriesBuffer runtimeDropSeries;
-        public MetricSeriesBuffer runtimeLatencySeries;
-        public MetricSeriesBuffer runtimeQueueSeries;
-        public ResourceUsageTracker resourceUsageTracker;
+        MetricSeriesBuffer runtimePresentSeries;
+        MetricSeriesBuffer runtimeMbpsSeries;
+        MetricSeriesBuffer runtimeDropSeries;
+        MetricSeriesBuffer runtimeLatencySeries;
+        MetricSeriesBuffer runtimeQueueSeries;
+        ResourceUsageTracker resourceUsageTracker;
 
-        public WebView perfHudWebView;
-        public TextView perfHudText;
-        public View perfHudPanel;
+        WebView perfHudWebView;
+        TextView perfHudText;
+        View perfHudPanel;
 
-        public int transportQueueMaxFrames;
-        public int decodeQueueMaxFrames;
-        public int renderQueueMaxFrames;
-        public long presentFpsStaleGraceMs;
-        public long metricsStaleGraceMs;
-        public long trainerHudPayloadGraceMs;
-        public double fpsLowAnchor;
-        public int hudTextColorOffline;
-        public int hudTextColorLive;
-        public String appBuildRevision;
+        int transportQueueMaxFrames;
+        int decodeQueueMaxFrames;
+        int renderQueueMaxFrames;
+        long presentFpsStaleGraceMs;
+        long metricsStaleGraceMs;
+        long trainerHudPayloadGraceMs;
+        double fpsLowAnchor;
+        int hudTextColorOffline;
+        int hudTextColorLive;
+        String appBuildRevision;
 
-        public IntProvider selectedFpsProvider;
-        public StringProvider selectedProfileProvider;
-        public StringProvider selectedEncoderProvider;
-        public StreamSizeProvider streamSizeProvider;
+        IntProvider selectedFpsProvider;
+        StringProvider selectedProfileProvider;
+        StringProvider selectedEncoderProvider;
+        StreamSizeProvider streamSizeProvider;
 
-        public BoolProvider daemonReachableProvider;
-        public StringProvider daemonStateProvider;
-        public StringProvider daemonHostNameProvider;
-        public StringProvider daemonBuildRevisionProvider;
-        public StringProvider daemonLastErrorProvider;
-        public LongProvider daemonRunIdProvider;
-        public LongProvider daemonUptimeSecProvider;
-        public StringProvider daemonStateUiProvider;
+        BoolProvider daemonReachableProvider;
+        StringProvider daemonStateProvider;
+        StringProvider daemonHostNameProvider;
+        StringProvider daemonBuildRevisionProvider;
+        StringProvider daemonLastErrorProvider;
+        LongProvider daemonRunIdProvider;
+        LongProvider daemonUptimeSecProvider;
+        StringProvider daemonStateUiProvider;
 
-        public BoolProvider debugOverlayVisibleProvider;
-        public boolean buildDebug;
+        BoolProvider debugOverlayVisibleProvider;
+        boolean buildDebug;
 
-        public ToggleDebugOverlayHandler debugOverlayHandler;
-        public HudTextOnlyHandler hudTextOnlyHandler;
-        public RefreshHandler refreshDebugOverlayHandler;
-        public SnapshotLogHandler snapshotLogHandler;
+        ToggleDebugOverlayHandler debugOverlayHandler;
+        HudTextOnlyHandler hudTextOnlyHandler;
+        RefreshHandler refreshDebugOverlayHandler;
+        SnapshotLogHandler snapshotLogHandler;
     }
 
     public interface LongProvider {

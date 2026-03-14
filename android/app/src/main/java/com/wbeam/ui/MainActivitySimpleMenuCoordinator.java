@@ -66,7 +66,7 @@ public final class MainActivitySimpleMenuCoordinator {
         state.setMode(MainActivitySettingsPresenter.simpleMenuModeFromSelection(
                 selectedEncoder,
                 preferredVideo
-        );
+        ));
         state.setFps(MainActivitySettingsPresenter.simpleMenuFpsFromSelection(selectedFps));
         state.setVisible(true);
         refreshButtons.run();

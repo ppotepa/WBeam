@@ -246,7 +246,7 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void run() {
             if (BuildConfig.DEBUG && debugFpsGraphView != null) {
-                debugFpsGraphView.addSample(hudState.latestTargetFps, hudState.latestPresentFps);
+                debugFpsGraphView.addSample(hudState.getLatestTargetFps(), hudState.getLatestPresentFps());
             }
             uiHandler.postDelayed(this, DEBUG_FPS_SAMPLE_MS);
         }
@@ -1228,11 +1228,11 @@ public class MainActivity extends AppCompatActivity {
                 statusState.uiState,
                 daemon.hostName,
                 effectiveDaemonStateUi(),
-                hudState.latestTargetFps,
-                hudState.latestPresentFps,
+                hudState.getLatestTargetFps(),
+                hudState.getLatestPresentFps(),
                 getSelectedFps(),
                 statusState.statsLine,
-                hudState.compactLine
+                hudState.getCompactLine()
         );
     }
 
@@ -1264,7 +1264,7 @@ public class MainActivity extends AppCompatActivity {
                 BuildConfig.WBEAM_STREAM_PORT,
                 BuildConfig.WBEAM_BUILD_REV,
                 statusState.uiInfo,
-                hudState.latestPresentFps,
+                hudState.getLatestPresentFps(),
                 statusState.statsLine,
                 ErrorTextUtil.compactDaemonErrorForUi(daemon.lastError),
                 uiState.preflightAnimTick,
@@ -1290,9 +1290,9 @@ public class MainActivity extends AppCompatActivity {
     private String effectiveDaemonStateUi() {
         return MainActivityRuntimeStateView.effectiveDaemonState(
                 daemon.state,
-                hudState.latestPresentFps,
-                hudState.latestStreamUptimeSec,
-                hudState.latestFrameOutHost
+                hudState.getLatestPresentFps(),
+                hudState.getLatestStreamUptimeSec(),
+                hudState.getLatestFrameOutHost()
         );
     }
 

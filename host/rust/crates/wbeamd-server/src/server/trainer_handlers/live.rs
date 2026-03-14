@@ -88,13 +88,15 @@ pub(crate) async fn post_trainer_live_save_profile(
     State(state): State<AppState>,
     body: Option<Json<TrainerLiveSaveProfileRequest>>,
 ) -> impl IntoResponse {
-    let req = body.map(|Json(v)| v).unwrap_or(TrainerLiveSaveProfileRequest {
-        serial: String::new(),
-        stream_port: None,
-        profile_name: String::new(),
-        description: None,
-        tags: None,
-    });
+    let req = body
+        .map(|Json(v)| v)
+        .unwrap_or(TrainerLiveSaveProfileRequest {
+            serial: String::new(),
+            stream_port: None,
+            profile_name: String::new(),
+            description: None,
+            tags: None,
+        });
     let serial = req.serial.trim().to_string();
     if serial.is_empty() {
         return bad_request_json("serial is required");

@@ -155,7 +155,7 @@ public final class H264TcpPlayer {
                 SOCKET_RECV_BUFFER_SIZE,
                 runtimeState,
                 statusListener,
-                this::framedDecodeLoop,
+                this::runFramedDecodeLoop,
                 STATE_CONNECTING,
                 STATE_STREAMING,
                 STATE_ERROR
@@ -252,6 +252,14 @@ public final class H264TcpPlayer {
                 STATE_CONNECTING,
                 STATE_STREAMING
         ).run(input, codecRef, helloBuf, hdrBuf, payloadBuf);
+    }
+
+    private void runFramedDecodeLoop(InputStream input, MediaCodec[] codecRef) throws StreamException {
+        try {
+            framedDecodeLoop(input, codecRef);
+        } catch (IOException e) {
+            throw new StreamException("framed decode loop failed", e);
+        }
     }
 
     private void framedDecodeLoopPng(InputStream input, byte[] hdrBuf, byte[] payloadBuf, boolean isUltraMode) throws IOException {

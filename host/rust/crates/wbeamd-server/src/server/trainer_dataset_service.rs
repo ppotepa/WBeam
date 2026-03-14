@@ -4,9 +4,7 @@ use std::time::UNIX_EPOCH;
 
 use serde_json::Value;
 
-use super::trainer_models::{
-    TrainerDatasetDetailResponse, TrainerDatasetSummary, TrainerRun,
-};
+use super::trainer_models::{TrainerDatasetDetailResponse, TrainerDatasetSummary, TrainerRun};
 use super::trainer_support::{read_json_value, sanitize_profile_name};
 
 pub(crate) fn trainer_dataset_summary_from_run(run: &TrainerRun) -> TrainerDatasetSummary {

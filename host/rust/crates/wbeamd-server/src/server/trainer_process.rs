@@ -1,4 +1,3 @@
-// sonar-disable S3776: Cognitive complexity is essential for domain logic
 use std::collections::HashSet;
 use std::process::Command;
 
@@ -32,23 +31,142 @@ pub(crate) struct TrainerStartConfig {
     pub(crate) warnings: Vec<String>,
 }
 
-#[allow(clippy::cognitive_complexity)]
-#[allow(clippy::cognitive_complexity)]
-pub(crate) fn normalize_start_request( // NOSONAR: S3776
+fn require_serial(serial: &str) -> Result<String, String> {
+    let normalized = serial.trim().to_string();
+    if normalized.is_empty() {
+        Err("serial is required".to_string())
+    } else {
+        Ok(normalized)
+    }
+}
+
+fn trimmed_choice(
+    value: Option<&str>,
+    default: &str,
+    allowed: &[&str],
+    error: &str,
+) -> Result<String, String> {
+    let normalized = value.unwrap_or(default).trim().to_string();
+    if allowed.contains(&normalized.as_str()) {
+        Ok(normalized)
+    } else {
+        Err(error.to_string())
+    }
+}
+
+fn lowercase_choice(
+    value: Option<&str>,
+    default: &str,
+    allowed: &[&str],
+    error: &str,
+) -> Result<String, String> {
+    let normalized = value.unwrap_or(default).trim().to_ascii_lowercase();
+    if allowed.contains(&normalized.as_str()) {
+        Ok(normalized)
+    } else {
+        Err(error.to_string())
+    }
+}
+
+fn canonical_encoder_name(value: &str) -> Option<&'static str> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "h264" => Some("h264"),
+        "h265" => Some("h265"),
+        "rawpng" => Some("rawpng"),
+        "jpeg" | "mjpeg" => Some("mjpeg"),
+        _ => None,
+    }
+}
+
+fn normalize_encoders(encoders: Option<Vec<String>>) -> Vec<String> {
+    let mut normalized = encoders
+        .unwrap_or_else(|| vec!["h265".to_string(), "h264".to_string()])
+        .into_iter()
+        .filter_map(|value| canonical_encoder_name(&value).map(str::to_string))
+        .collect::<Vec<_>>();
+    if normalized.is_empty() {
+        normalized.push("h264".to_string());
+    }
+    let mut seen = HashSet::new();
+    normalized.retain(|encoder| seen.insert(encoder.clone()));
+    normalized
+}
+
+fn normalize_encoder_selection(
+    req: &TrainerStartRequest,
+    warnings: &mut Vec<String>,
+) -> Result<(String, Vec<String>), String> {
+    let requested_mode = lowercase_choice(
+        req.encoder_mode.as_deref(),
+        "auto",
+        &["auto", "single", "multi"],
+        "invalid encoder_mode (use auto|single|multi)",
+    )?;
+    let mut encoders = normalize_encoders(req.encoders.clone());
+    let mut encoder_mode = match requested_mode.as_str() {
+        "auto" if encoders.len() > 1 => "multi".to_string(),
+        "auto" => "single".to_string(),
+        _ => requested_mode,
+    };
+
+    if encoder_mode == "single" && encoders.len() > 1 {
+        warnings.push(format!(
+            "encoder_mode=single requested with {} encoders; using first encoder '{}'",
+            encoders.len(),
+            encoders[0]
+        ));
+        encoders.truncate(1);
+    }
+    if encoder_mode == "multi" && encoders.len() == 1 {
+        warnings.push(
+            "encoder_mode=multi requested with one encoder; switching to single mode".to_string(),
+        );
+        encoder_mode = "single".to_string();
+    }
+
+    Ok((encoder_mode, encoders))
+}
+
+fn normalize_encoder_tuning(
+    req: &TrainerStartRequest,
+    warnings: &mut Vec<String>,
+) -> Result<(String, Value), String> {
+    let encoder_tuning_mode = lowercase_choice(
+        req.encoder_tuning_mode.as_deref(),
+        "auto",
+        &["auto", "manual"],
+        "invalid encoder_tuning_mode (use auto|manual)",
+    )?;
+    let encoder_params = req.encoder_params.clone().unwrap_or(Value::Null);
+
+    if encoder_tuning_mode == "manual" {
+        warnings.push(
+            "encoder_tuning_mode=manual is experimental; unsupported params may be ignored by runtime"
+                .to_string(),
+        );
+        if !encoder_params.is_null() {
+            warnings.push(
+                "encoder_params are accepted by trainer flow but may not map 1:1 to active streamer backend"
+                    .to_string(),
+            );
+        }
+    }
+
+    Ok((encoder_tuning_mode, encoder_params))
+}
+
+pub(crate) fn normalize_start_request(
     req: TrainerStartRequest,
     default_stream_port: u16,
     profile_name: String,
 ) -> Result<TrainerStartConfig, String> {
-    let serial = req.serial.trim().to_string();
-    if serial.is_empty() {
-        return Err("serial is required".to_string());
-    }
-
-    let mode = req.mode.as_deref().unwrap_or("quality").trim().to_string();
-    if !matches!(mode.as_str(), "quality" | "balanced" | "latency" | "custom") {
-        return Err("invalid mode".to_string());
-    }
-
+    let serial = require_serial(&req.serial)?;
+    let mode = trimmed_choice(
+        req.mode.as_deref(),
+        "quality",
+        &["quality", "balanced", "latency", "custom"],
+        "invalid mode",
+    )?;
     let trials = req.trials.unwrap_or(18).clamp(1, 128);
     let warmup_sec = req.warmup_sec.unwrap_or(4).clamp(1, 60);
     let sample_sec = req.sample_sec.unwrap_or(12).clamp(4, 180);
@@ -67,116 +185,28 @@ pub(crate) fn normalize_start_request( // NOSONAR: S3776
         .unwrap_or(200_000)
         .clamp(bitrate_min_kbps, 400_000);
 
-    let mut warnings: Vec<String> = Vec::new();
-    let requested_encoder_mode = req
-        .encoder_mode
-        .as_deref()
-        .unwrap_or("auto")
-        .trim()
-        .to_ascii_lowercase();
-    if !matches!(requested_encoder_mode.as_str(), "auto" | "single" | "multi") {
-        return Err("invalid encoder_mode (use auto|single|multi)".to_string());
-    }
-    let mut encoders = req
-        .encoders
-        .unwrap_or_else(|| vec!["h265".to_string(), "h264".to_string()])
-        .into_iter()
-        .map(|v| v.trim().to_ascii_lowercase())
-        .filter_map(|v| match v.as_str() {
-            "h264" => Some("h264".to_string()),
-            "h265" => Some("h265".to_string()),
-            "rawpng" => Some("rawpng".to_string()),
-            "jpeg" | "mjpeg" => Some("mjpeg".to_string()),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    if encoders.is_empty() {
-        encoders = vec!["h264".to_string()];
-    }
-    {
-        let mut seen = HashSet::new();
-        encoders.retain(|enc| seen.insert(enc.clone()));
-    }
+    let mut warnings = Vec::new();
+    let (encoder_mode, encoders) = normalize_encoder_selection(&req, &mut warnings)?;
+    let (encoder_tuning_mode, encoder_params) = normalize_encoder_tuning(&req, &mut warnings)?;
+    let hud_chart_mode = lowercase_choice(
+        req.hud_chart_mode.as_deref(),
+        "bars",
+        &["bars", "line"],
+        "invalid hud_chart_mode (use bars|line)",
+    )?;
+    let hud_font_preset = lowercase_choice(
+        req.hud_font_preset.as_deref(),
+        "compact",
+        &["compact", "dense", "arcade", "system"],
+        "invalid hud_font_preset (use compact|dense|arcade|system)",
+    )?;
+    let hud_layout = lowercase_choice(
+        req.hud_layout.as_deref(),
+        "wide",
+        &["compact", "wide"],
+        "invalid hud_layout (use compact|wide)",
+    )?;
 
-    let mut encoder_mode = if requested_encoder_mode == "auto" {
-        if encoders.len() > 1 {
-            "multi".to_string()
-        } else {
-            "single".to_string()
-        }
-    } else {
-        requested_encoder_mode
-    };
-    if encoder_mode == "single" && encoders.len() > 1 {
-        warnings.push(format!(
-            "encoder_mode=single requested with {} encoders; using first encoder '{}'",
-            encoders.len(),
-            encoders[0]
-        ));
-        encoders = vec![encoders[0].clone()];
-    }
-    if encoder_mode == "multi" && encoders.len() == 1 {
-        warnings.push(
-            "encoder_mode=multi requested with one encoder; switching to single mode".to_string(),
-        );
-        encoder_mode = "single".to_string();
-    }
-
-    let encoder_tuning_mode = req
-        .encoder_tuning_mode
-        .as_deref()
-        .unwrap_or("auto")
-        .trim()
-        .to_ascii_lowercase();
-    if !matches!(encoder_tuning_mode.as_str(), "auto" | "manual") {
-        return Err("invalid encoder_tuning_mode (use auto|manual)".to_string());
-    }
-    let encoder_params = req.encoder_params.unwrap_or(Value::Null);
-    if encoder_tuning_mode == "manual" {
-        warnings.push(
-            "encoder_tuning_mode=manual is experimental; unsupported params may be ignored by runtime".to_string(),
-        );
-    }
-    if encoder_tuning_mode == "manual" && !encoder_params.is_null() {
-        warnings.push(
-            "encoder_params are accepted by trainer flow but may not map 1:1 to active streamer backend".to_string(),
-        );
-    }
-
-    let hud_chart_mode = req
-        .hud_chart_mode
-        .as_deref()
-        .unwrap_or("bars")
-        .trim()
-        .to_ascii_lowercase();
-    if !matches!(hud_chart_mode.as_str(), "bars" | "line") {
-        return Err("invalid hud_chart_mode (use bars|line)".to_string());
-    }
-
-    let hud_font_preset = req
-        .hud_font_preset
-        .as_deref()
-        .unwrap_or("compact")
-        .trim()
-        .to_ascii_lowercase();
-    if !matches!(
-        hud_font_preset.as_str(),
-        "compact" | "dense" | "arcade" | "system"
-    ) {
-        return Err("invalid hud_font_preset (use compact|dense|arcade|system)".to_string());
-    }
-
-    let hud_layout = req
-        .hud_layout
-        .as_deref()
-        .unwrap_or("wide")
-        .trim()
-        .to_ascii_lowercase();
-    if !matches!(hud_layout.as_str(), "compact" | "wide") {
-        return Err("invalid hud_layout (use compact|wide)".to_string());
-    }
-
-    let stream_port = req.stream_port.unwrap_or(default_stream_port);
     Ok(TrainerStartConfig {
         serial,
         profile_name,
@@ -185,7 +215,7 @@ pub(crate) fn normalize_start_request( // NOSONAR: S3776
         warmup_sec,
         sample_sec,
         overlay,
-        stream_port,
+        stream_port: req.stream_port.unwrap_or(default_stream_port),
         generations,
         population,
         elite_count,

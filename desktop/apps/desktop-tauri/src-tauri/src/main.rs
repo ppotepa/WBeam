@@ -8,7 +8,7 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -412,7 +412,10 @@ fn virtual_deps_finish(success: bool, message: String) {
     state.message = message;
 }
 
-fn empty_devices_response(host_apk_version: String, daemon_apk_version: String) -> DevicesBasicResponse {
+fn empty_devices_response(
+    host_apk_version: String,
+    daemon_apk_version: String,
+) -> DevicesBasicResponse {
     DevicesBasicResponse {
         host_apk_version,
         daemon_apk_version,
@@ -482,7 +485,8 @@ fn build_device_basic_entry(
 ) -> (DeviceBasic, bool) {
     let snap = collect_device_snapshot(&serial);
     let apk_matches_host = !host_apk_version.is_empty() && snap.apk_version == host_apk_version;
-    let apk_matches_daemon = !daemon_apk_version.is_empty() && snap.apk_version == daemon_apk_version;
+    let apk_matches_daemon =
+        !daemon_apk_version.is_empty() && snap.apk_version == daemon_apk_version;
     let fallback_port = default_stream_port_for_index(base_stream_port, control_port, idx);
     let preferred_port = port_map
         .get(&serial)
@@ -601,7 +605,13 @@ fn resolve_stream_port_for_serial(serial: &str, requested_stream_port: u16) -> u
         .find(|device| device.serial == serial)
         .map(|device| device.stream_port)
         .filter(|port| *port > 0)
-        .unwrap_or_else(|| if requested_stream_port > 0 { requested_stream_port } else { 5000 })
+        .unwrap_or_else(|| {
+            if requested_stream_port > 0 {
+                requested_stream_port
+            } else {
+                5000
+            }
+        })
 }
 
 fn default_stream_port_for_index(base_stream_port: u16, control_port: u16, idx: usize) -> u16 {
@@ -630,7 +640,11 @@ fn pick_unique_stream_port(start: u16, control_port: u16, used: &HashSet<u16>) -
             port = 1;
         }
     }
-    if control_port == 1 { 2 } else { 1 }
+    if control_port == 1 {
+        2
+    } else {
+        1
+    }
 }
 
 fn load_device_port_map() -> std::collections::HashMap<String, u16> {
@@ -720,7 +734,9 @@ fn daemon_stream_state_and_port(serial: &str, stream_port: Option<u16>) -> Optio
     let output = Command::new("curl")
         .args(["-fsS", "--max-time", "1", &url])
         .output();
-    let Ok(output) = output else { return None; };
+    let Ok(output) = output else {
+        return None;
+    };
     if !output.status.success() {
         return None;
     }
@@ -810,11 +826,7 @@ fn normalize_display_mode_param(mode: &str) -> Option<&'static str> {
     }
 }
 
-fn append_display_mode_param(
-    url: &mut String,
-    action: &str,
-    display_mode: Option<&str>,
-) {
+fn append_display_mode_param(url: &mut String, action: &str, display_mode: Option<&str>) {
     if action != "start" {
         return;
     }
@@ -862,6 +874,53 @@ fn build_daemon_curl_args(url: &str, body_json: Option<&str>) -> Vec<String> {
     curl_args
 }
 
+fn build_daemon_action_url(
+    action: &str,
+    serial: &str,
+    stream_port: u16,
+    display_mode: Option<&str>,
+) -> String {
+    let control_port = wbeam_control_port();
+    let mut url = format!(
+        "http://127.0.0.1:{control_port}/v1/{action}?serial={serial}&stream_port={stream_port}"
+    );
+    append_display_mode_param(&mut url, action, display_mode);
+    url
+}
+
+fn daemon_curl_failure(stderr: &[u8]) -> String {
+    let stderr = String::from_utf8_lossy(stderr).trim().to_string();
+    if stderr.is_empty() {
+        "Host API unreachable. Verify desktop service is running.".to_string()
+    } else {
+        stderr
+    }
+}
+
+fn execute_daemon_post(curl_args: &[String]) -> Result<(String, String), String> {
+    let output = Command::new("curl")
+        .args(curl_args)
+        .output()
+        .map_err(|e| format!("curl failed: {e}"))?;
+    if !output.status.success() {
+        return Err(daemon_curl_failure(&output.stderr));
+    }
+
+    let body = String::from_utf8_lossy(&output.stdout).to_string();
+    let (payload, status_line) = body
+        .rsplit_once("\nHTTP_STATUS:")
+        .unwrap_or((body.as_str(), "000"));
+    Ok((payload.trim().to_string(), status_line.trim().to_string()))
+}
+
+fn daemon_http_error(action: &str, status_code: &str, payload: &str) -> String {
+    if payload.is_empty() {
+        format!("daemon action failed: {action} (http={status_code})")
+    } else {
+        payload.to_string()
+    }
+}
+
 fn daemon_post_action(
     action: &str,
     serial: &str,
@@ -869,32 +928,10 @@ fn daemon_post_action(
     display_mode: Option<&str>,
     start_patch: Option<&StartConfigPatch>,
 ) -> Result<String, String> {
-    let control_port = wbeam_control_port();
-    let mut url = format!(
-        "http://127.0.0.1:{control_port}/v1/{action}?serial={serial}&stream_port={stream_port}"
-    );
-    append_display_mode_param(&mut url, action, display_mode);
+    let url = build_daemon_action_url(action, serial, stream_port, display_mode);
     let body_json = serialize_start_body(action, start_patch)?;
     let curl_args = build_daemon_curl_args(&url, body_json.as_deref());
-
-    let output = Command::new("curl")
-        .args(&curl_args)
-        .output()
-        .map_err(|e| format!("curl failed: {e}"))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(if stderr.is_empty() {
-            "Host API unreachable. Verify desktop service is running.".to_string()
-        } else {
-            stderr
-        });
-    }
-
-    let body = String::from_utf8_lossy(&output.stdout).to_string();
-    let (payload, status_line) = body
-        .rsplit_once("\nHTTP_STATUS:")
-        .unwrap_or((body.as_str(), "000"));
-    let status_code = status_line.trim();
+    let (payload, status_code) = execute_daemon_post(&curl_args)?;
     ui_service_log(
         "daemon_post_action",
         "http",
@@ -904,15 +941,9 @@ fn daemon_post_action(
         ),
     );
     if !status_code.starts_with('2') {
-        let trimmed = payload.trim();
-        if trimmed.is_empty() {
-            return Err(format!(
-                "daemon action failed: {action} (http={status_code})"
-            ));
-        }
-        return Err(trimmed.to_string());
+        return Err(daemon_http_error(action, &status_code, &payload));
     }
-    Ok(payload.trim().to_string())
+    Ok(payload)
 }
 
 fn service_ready_for_device_actions() -> Result<(), String> {
@@ -1088,7 +1119,14 @@ fn adb_prepare_connect(serial: &str, stream_port: u16) -> Result<(), String> {
 
     let rev_stream_primary = adb_reverse_primary(serial, 5000, stream_port);
     let rev_control_primary = adb_reverse_primary(serial, 5001, control_port);
-    log_reverse_result(serial, stream_port, "stream", 5000, stream_port, &rev_stream_primary);
+    log_reverse_result(
+        serial,
+        stream_port,
+        "stream",
+        5000,
+        stream_port,
+        &rev_stream_primary,
+    );
     log_reverse_result(
         serial,
         stream_port,
@@ -1155,10 +1193,7 @@ fn service_status() -> ServiceStatus {
     let installed = load_state == "loaded" || unit_file_path().exists();
     // Treat transitional systemd states as active from UI perspective to avoid
     // "double click start" behavior when service is still activating.
-    let active = matches!(
-        active_state.as_str(),
-        "active" | "activating" | "reloading"
-    );
+    let active = matches!(active_state.as_str(), "active" | "activating" | "reloading");
     let enabled = systemctl_state("is-enabled").as_deref() == Some("enabled");
 
     let mut summary = format!(
@@ -1205,32 +1240,23 @@ fn systemctl_show_prop(prop: &str) -> Option<String> {
 }
 
 fn daemon_lock_hint() -> Option<String> {
-    for lock_path in ["/tmp/wbeamd-service-5001.lock", "/tmp/wbeamd.lock"] {
-        let pid_text = match fs::read_to_string(lock_path) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        let pid = match pid_text.trim().parse::<u32>() {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
+    ["/tmp/wbeamd-service-5001.lock", "/tmp/wbeamd.lock"]
+        .into_iter()
+        .find_map(daemon_lock_hint_for_path)
+}
 
-        let output = match Command::new("ps")
-            .args(["-p", &pid.to_string(), "-o", "comm="])
-            .output()
-        {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        if !output.status.success() {
-            continue;
-        }
-        let comm = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if comm.contains("wbeamd-server") {
-            return Some(format!("lock held by pid={pid} ({comm})"));
-        }
+fn daemon_lock_hint_for_path(lock_path: &str) -> Option<String> {
+    let pid = read_pid_from_path(Path::new(lock_path))?;
+    let comm = process_command_name(pid)?;
+    if comm.contains("wbeamd-server") {
+        Some(format!("lock held by pid={pid} ({comm})"))
+    } else {
+        None
     }
-    None
+}
+
+fn read_pid_from_path(path: &Path) -> Option<u32> {
+    fs::read_to_string(path).ok()?.trim().parse::<u32>().ok()
 }
 
 fn stop_conflicting_lock_holder() {
@@ -1247,8 +1273,7 @@ fn handle_lock_file(lock_path: &Path) {
 }
 
 fn lock_holder_pid(lock_path: &Path) -> Option<u32> {
-    let pid_text = fs::read_to_string(lock_path).ok()?;
-    let pid = pid_text.trim().parse::<u32>().ok()?;
+    let pid = read_pid_from_path(lock_path)?;
     if process_name_matches(pid, "wbeamd-server") {
         Some(pid)
     } else {
@@ -1317,19 +1342,26 @@ fn process_exists(pid: u32) -> bool {
         .unwrap_or(false)
 }
 
-fn process_name_matches(pid: u32, needle: &str) -> bool {
+fn process_command_name(pid: u32) -> Option<String> {
     let output = Command::new("ps")
         .args(["-p", &pid.to_string(), "-o", "comm="])
-        .output();
-    let Ok(output) = output else {
-        return false;
-    };
+        .output()
+        .ok()?;
     if !output.status.success() {
-        return false;
+        return None;
     }
-    String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .contains(needle)
+    let comm = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if comm.is_empty() {
+        None
+    } else {
+        Some(comm)
+    }
+}
+
+fn process_name_matches(pid: u32, needle: &str) -> bool {
+    process_command_name(pid)
+        .map(|comm| comm.contains(needle))
+        .unwrap_or(false)
 }
 
 #[tauri::command]
@@ -1549,52 +1581,67 @@ fn join_optional_thread(handle: Option<thread::JoinHandle<()>>) {
     }
 }
 
+fn start_virtual_install_child(root: &Path, wbeam: &Path) -> Result<Child, String> {
+    let mut cmd = match build_virtual_install_command(root, wbeam) {
+        Ok(cmd) => cmd,
+        Err(msg) => {
+            virtual_deps_push_log(
+                "[virtual-deps] ERROR: pkexec not available and user is not root",
+            );
+            return Err(msg);
+        }
+    };
+    cmd.spawn()
+        .map_err(|e| format!("Failed to start installer: {e}"))
+}
+
+fn wait_for_virtual_install(child: &mut Child) -> Result<ExitStatus, String> {
+    let out_thread = spawn_virtual_log_reader(child.stdout.take(), "");
+    let err_thread = spawn_virtual_log_reader(child.stderr.take(), "[stderr] ");
+    let status = child
+        .wait()
+        .map_err(|e| format!("Installer wait failed: {e}"));
+    join_optional_thread(out_thread);
+    join_optional_thread(err_thread);
+    status
+}
+
+fn finalize_virtual_install(status: ExitStatus) {
+    if status.success() {
+        virtual_deps_finish(true, "Dependencies installed successfully.".to_string());
+        return;
+    }
+
+    let code = status
+        .code()
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "signal".to_string());
+    virtual_deps_finish(
+        false,
+        format!("Dependency installation failed (exit: {code})."),
+    );
+}
+
 fn run_virtual_install_job() {
     let root = repo_root();
     let wbeam = root.join("wbeam");
     virtual_deps_push_log(format!("[virtual-deps] root={}", root.display()));
 
-    let mut cmd = match build_virtual_install_command(&root, &wbeam) {
-        Ok(cmd) => cmd,
+    let mut child = match start_virtual_install_child(&root, &wbeam) {
+        Ok(child) => child,
         Err(msg) => {
-            virtual_deps_push_log("[virtual-deps] ERROR: pkexec not available and user is not root");
             virtual_deps_finish(false, msg);
             return;
         }
     };
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) => {
-            virtual_deps_finish(false, format!("Failed to start installer: {e}"));
+    let status = match wait_for_virtual_install(&mut child) {
+        Ok(status) => status,
+        Err(msg) => {
+            virtual_deps_finish(false, msg);
             return;
         }
     };
-
-    let out_thread = spawn_virtual_log_reader(child.stdout.take(), "");
-    let err_thread = spawn_virtual_log_reader(child.stderr.take(), "[stderr] ");
-
-    let status = match child.wait() {
-        Ok(s) => s,
-        Err(e) => {
-            virtual_deps_finish(false, format!("Installer wait failed: {e}"));
-            return;
-        }
-    };
-    join_optional_thread(out_thread);
-    join_optional_thread(err_thread);
-
-    if status.success() {
-        virtual_deps_finish(true, "Dependencies installed successfully.".to_string());
-    } else {
-        let code = status
-            .code()
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| "signal".to_string());
-        virtual_deps_finish(
-            false,
-            format!("Dependency installation failed (exit: {code})."),
-        );
-    }
+    finalize_virtual_install(status);
 }
 
 #[tauri::command]
@@ -1658,9 +1705,12 @@ fn device_connect(
     );
     connect_log(&serial, effective_stream_port, "device_connect begin");
     let host_probe = host_probe_brief();
-    if let Err(msg) =
-        ensure_virtual_mode_ready(&serial, effective_stream_port, &normalized_mode, &host_probe)
-    {
+    if let Err(msg) = ensure_virtual_mode_ready(
+        &serial,
+        effective_stream_port,
+        &normalized_mode,
+        &host_probe,
+    ) {
         log_device_connect_error(
             &serial,
             stream_port,
@@ -1747,7 +1797,10 @@ fn ensure_virtual_mode_ready(
     let doctor = virtual_doctor(Some(serial.to_string()), Some(stream_port))?;
     if !doctor.ok {
         return if !doctor.install_hint.trim().is_empty() {
-            Err(format!("Virtual monitor unavailable: {}", doctor.install_hint))
+            Err(format!(
+                "Virtual monitor unavailable: {}",
+                doctor.install_hint
+            ))
         } else {
             Err(format!("Virtual monitor unavailable: {}", doctor.message))
         };
@@ -1822,7 +1875,15 @@ fn device_disconnect(serial: String, stream_port: u16) -> Result<String, String>
         }
     }
     if res.is_ok() {
-        let _ = adb_cmd(&["-s", &serial, "shell", "am", "start", "-n", "com.wbeam/.MainActivity"]);
+        let _ = adb_cmd(&[
+            "-s",
+            &serial,
+            "shell",
+            "am",
+            "start",
+            "-n",
+            "com.wbeam/.MainActivity",
+        ]);
     }
     match &res {
         Ok(_) => ui_service_log(
@@ -1952,7 +2013,10 @@ fn apply_systemctl_user_env(cmd: &mut Command) {
     if let Some(uid) = uid {
         let runtime = format!("/run/user/{uid}");
         cmd.env("XDG_RUNTIME_DIR", &runtime);
-        cmd.env("DBUS_SESSION_BUS_ADDRESS", format!("unix:path={runtime}/bus"));
+        cmd.env(
+            "DBUS_SESSION_BUS_ADDRESS",
+            format!("unix:path={runtime}/bus"),
+        );
     } else {
         cmd.env_remove("XDG_RUNTIME_DIR");
         cmd.env_remove("DBUS_SESSION_BUS_ADDRESS");

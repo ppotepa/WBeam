@@ -1,11 +1,9 @@
-// SONAR-DISABLE-NEXT-MODULE: S3776 -- cognitive complexity is essential
 //! Adaptive-quality policy: pressure detection and config degradation logic.
 //!
 //! All functions are pure — they depend only on the inputs supplied, never on
 //! the `Inner` lock or any async runtime state.  This makes them trivially
 //! testable without spinning up a full `DaemonCore`.
 
-// sonar-disable S3776: Cognitive complexity is essential for domain logic
 use wbeamd_api::{ActiveConfig, ClientMetricsRequest};
 
 // ── Thresholds & tuning constants ───────────────────────────────────────────
@@ -105,60 +103,68 @@ pub fn adaptation_reason(client: &ClientMetricsRequest, high: bool, low: bool) -
 
 // ── Quality degradation profile ───────────────────────────────────────────────
 
+fn scaling_for_level(level: u8, png_profile: bool) -> (u32, u32, u32) {
+    match (level, png_profile) {
+        (0, _) => (100, 100, 100),
+        (1, true) => (95, 80, 90),
+        (1, false) => (90, 90, 85),
+        (2, true) => (85, 60, 75),
+        (2, false) => (80, 80, 70),
+        (_, true) => (75, 45, 60),
+        (_, false) => (70, 70, 55),
+    }
+}
+
+fn scaled_even_dimension(value: u32, scale_pct: u32, min: u32, max: u32) -> u32 {
+    let scaled = (value.saturating_mul(scale_pct) / 100).clamp(min, max);
+    if scaled % 2 == 0 {
+        scaled
+    } else {
+        scaled.saturating_sub(1)
+    }
+}
+
+fn scaled_size(size: &str, scale_pct: u32) -> Option<String> {
+    let (width, height) = parse_size(size)?;
+    let scaled_width = scaled_even_dimension(width, scale_pct, 640, 3840);
+    let scaled_height = scaled_even_dimension(height, scale_pct, 360, 2160);
+    Some(format!("{scaled_width}x{scaled_height}"))
+}
+
+fn scaled_fps(base_fps: u32, fps_pct: u32, png_profile: bool) -> u32 {
+    let scaled = base_fps.saturating_mul(fps_pct) / 100;
+    if png_profile {
+        scaled.clamp(5, 20)
+    } else {
+        scaled.clamp(30, 120)
+    }
+}
+
+fn bitrate_limit(encoder: &str) -> u32 {
+    if encoder == "h265" {
+        100_000
+    } else {
+        120_000
+    }
+}
+
 /// Derive a reduced-quality `ActiveConfig` from `base` according to
 /// `level` (0 = full quality, 1–3 = progressively degraded).
-#[allow(clippy::cognitive_complexity)]
-pub fn config_for_level(base: &ActiveConfig, level: u8) -> ActiveConfig { // NOSONAR: S3776
+pub fn config_for_level(base: &ActiveConfig, level: u8) -> ActiveConfig {
     let mut cfg = base.clone();
     let png_profile = base.encoder == "rawpng";
+    let (scale_pct, fps_pct, bitrate_pct) = scaling_for_level(level, png_profile);
 
-    let (scale_pct, fps_pct, bitrate_pct): (u32, u32, u32) = match level {
-        0 => (100, 100, 100),
-        1 => {
-            if png_profile {
-                (95, 80, 90)
-            } else {
-                (90, 90, 85)
-            }
-        }
-        2 => {
-            if png_profile {
-                (85, 60, 75)
-            } else {
-                (80, 80, 70)
-            }
-        }
-        _ => {
-            if png_profile {
-                (75, 45, 60)
-            } else {
-                (70, 70, 55)
-            }
-        }
-    };
-
-    if let Some((w, h)) = parse_size(&cfg.size) {
-        let mut scaled_w = (w.saturating_mul(scale_pct) / 100).clamp(640, 3840);
-        let mut scaled_h = (h.saturating_mul(scale_pct) / 100).clamp(360, 2160);
-        if scaled_w % 2 == 1 {
-            scaled_w = scaled_w.saturating_sub(1);
-        }
-        if scaled_h % 2 == 1 {
-            scaled_h = scaled_h.saturating_sub(1);
-        }
-        cfg.size = format!("{scaled_w}x{scaled_h}");
+    if let Some(size) = scaled_size(&cfg.size, scale_pct) {
+        cfg.size = size;
     }
 
-    cfg.fps = if png_profile {
-        (base.fps.saturating_mul(fps_pct as u32) / 100).clamp(5, 20)
-    } else {
-        (base.fps.saturating_mul(fps_pct as u32) / 100).clamp(30, 120)
-    };
-    let bitrate_max = if cfg.encoder == "h265" { 100_000 } else { 120_000 };
+    cfg.fps = scaled_fps(base.fps, fps_pct, png_profile);
     cfg.bitrate_kbps = if png_profile {
         (base.bitrate_kbps.saturating_mul(bitrate_pct) / 100).clamp(4_000, 80_000)
     } else {
-        (base.bitrate_kbps.saturating_mul(bitrate_pct) / 100).clamp(4_000, bitrate_max)
+        (base.bitrate_kbps.saturating_mul(bitrate_pct) / 100)
+            .clamp(4_000, bitrate_limit(&cfg.encoder))
     };
     cfg
 }

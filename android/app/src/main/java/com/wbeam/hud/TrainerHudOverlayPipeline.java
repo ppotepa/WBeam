@@ -18,7 +18,6 @@ public final class TrainerHudOverlayPipeline {
     private TrainerHudOverlayPipeline() {
     }
 
-    @SuppressWarnings("java:java:S107")
     public static void renderFromText(
             String rawHudText,
             double latestTargetFps,
@@ -55,7 +54,6 @@ public final class TrainerHudOverlayPipeline {
                 refreshAction
         );
     }
- @SuppressWarnings("java:java:S107")
 
     public static void renderFromJson(
             JSONObject hudJson,
@@ -89,7 +87,6 @@ public final class TrainerHudOverlayPipeline {
                 compactLineSink,
                 refreshAction
         );
-    @SuppressWarnings("java:java:S107")
     }
 
     public static void renderPlaceholder(
@@ -130,7 +127,6 @@ public final class TrainerHudOverlayPipeline {
         return (targetFps, renderP95Ms) -> {
             resourceUsageTracker.sample(targetFps, renderP95Ms);
             return resourceUsageTracker.buildRowsHtml();
-        @SuppressWarnings("java:java:S107")
         };
     }
 

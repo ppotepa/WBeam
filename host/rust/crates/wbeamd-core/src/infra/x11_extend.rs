@@ -25,7 +25,11 @@ fn unsupported_missing(reason: impl Into<String>, missing_dep: &str) -> X11Exten
     }
 }
 
-fn run_xrandr(args: &[&str], display: &str, xauth: Option<&PathBuf>) -> Result<std::process::Output, String> {
+fn run_xrandr(
+    args: &[&str],
+    display: &str,
+    xauth: Option<&PathBuf>,
+) -> Result<std::process::Output, String> {
     let mut cmd = Command::new("xrandr");
     cmd.args(args).env("DISPLAY", display);
     if let Some(path) = xauth {
@@ -36,10 +40,11 @@ fn run_xrandr(args: &[&str], display: &str, xauth: Option<&PathBuf>) -> Result<s
 }
 
 fn check_version_support(display: &str, xauth: Option<&PathBuf>) -> Result<(), X11ExtendProbe> {
-    let version_out = run_xrandr(&["--version"], display, xauth)
-        .map_err(unsupported)?;
+    let version_out = run_xrandr(&["--version"], display, xauth).map_err(unsupported)?;
     if !version_out.status.success() {
-        let stderr = String::from_utf8_lossy(&version_out.stderr).trim().to_string();
+        let stderr = String::from_utf8_lossy(&version_out.stderr)
+            .trim()
+            .to_string();
         let mut reason = "xrandr --version returned non-zero status".to_string();
         if !stderr.is_empty() {
             reason = format!("{reason}: {stderr}");
@@ -51,16 +56,19 @@ fn check_version_support(display: &str, xauth: Option<&PathBuf>) -> Result<(), X
     }
     let version_text = String::from_utf8_lossy(&version_out.stdout).to_string();
     if !detect_randr_15_or_newer(&version_text) {
-        return Err(unsupported("RandR >= 1.5 is required for monitor extension APIs"));
+        return Err(unsupported(
+            "RandR >= 1.5 is required for monitor extension APIs",
+        ));
     }
     Ok(())
 }
 
 fn query_outputs(display: &str, xauth: Option<&PathBuf>) -> Result<String, X11ExtendProbe> {
-    let query_out = run_xrandr(&["--query"], display, xauth)
-        .map_err(unsupported)?;
+    let query_out = run_xrandr(&["--query"], display, xauth).map_err(unsupported)?;
     if !query_out.status.success() {
-        let stderr = String::from_utf8_lossy(&query_out.stderr).trim().to_string();
+        let stderr = String::from_utf8_lossy(&query_out.stderr)
+            .trim()
+            .to_string();
         let reason = if stderr.is_empty() {
             "xrandr --query failed".to_string()
         } else {

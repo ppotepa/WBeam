@@ -61,7 +61,8 @@ struct EvdiModuleStatus {
 }
 
 #[allow(clippy::cognitive_complexity)]
-pub fn probe(is_remote: bool) -> X11RealOutputProbe { // NOSONAR: S3776
+pub fn probe(is_remote: bool) -> X11RealOutputProbe {
+    // NOSONAR: S3776
     if policy_flag_enabled("DISABLE_REAL_OUTPUT_BACKEND") {
         return probe_unsupported_missing(
             format!(
@@ -72,7 +73,9 @@ pub fn probe(is_remote: bool) -> X11RealOutputProbe { // NOSONAR: S3776
         );
     }
     if is_remote {
-        return probe_unsupported("remote X11 sessions typically cannot expose real virtual outputs");
+        return probe_unsupported(
+            "remote X11 sessions typically cannot expose real virtual outputs",
+        );
     }
 
     let display = detect_x11_display().unwrap_or_default();
@@ -153,10 +156,15 @@ pub fn probe(is_remote: bool) -> X11RealOutputProbe { // NOSONAR: S3776
             warn!(
                 "x11 real-output probe: no disconnected output pre-link, but sink-only provider exists; deferring output detection to activation"
             );
-            return probe_supported("providers detected; output candidate will be resolved during activation");
+            return probe_supported(
+                "providers detected; output candidate will be resolved during activation",
+            );
         }
         warn!("x11 real-output probe: no disconnected virtual-capable output candidate");
-        return probe_unsupported_missing("no disconnected virtual-capable output found", "evdi-output");
+        return probe_unsupported_missing(
+            "no disconnected virtual-capable output found",
+            "evdi-output",
+        );
     }
 
     probe_supported("X11 virtual output candidates detected")
@@ -178,11 +186,17 @@ fn probe_unsupported(reason: impl Into<String>) -> X11RealOutputProbe {
     }
 }
 
-fn probe_unsupported_missing(reason: impl Into<String>, dep: impl Into<String>) -> X11RealOutputProbe {
+fn probe_unsupported_missing(
+    reason: impl Into<String>,
+    dep: impl Into<String>,
+) -> X11RealOutputProbe {
     probe_unsupported_with_missing(reason, vec![dep.into()])
 }
 
-fn probe_unsupported_with_missing(reason: impl Into<String>, missing_deps: Vec<String>) -> X11RealOutputProbe {
+fn probe_unsupported_with_missing(
+    reason: impl Into<String>,
+    missing_deps: Vec<String>,
+) -> X11RealOutputProbe {
     X11RealOutputProbe {
         supported: false,
         reason: reason.into(),
@@ -647,7 +661,8 @@ fn restore_previous_fb(handle: &X11RealOutputHandle, display: &str, xauth: Optio
 }
 
 #[allow(clippy::cognitive_complexity)]
-fn parse_outputs(raw: &str) -> Vec<OutputInfo> { // NOSONAR: S3776
+fn parse_outputs(raw: &str) -> Vec<OutputInfo> {
+    // NOSONAR: S3776
     let mut out = Vec::new();
     let mut current: Option<OutputInfo> = None;
 

@@ -15,7 +15,9 @@ use crate::server::trainer_models::{TrainerRun, TrainerStartRequest, TrainerStar
 use crate::server::trainer_process::{
     configure_trainer_command, normalize_start_request, TrainerStartConfig,
 };
-use crate::server::trainer_support::{now_unix_ms, persist_trainer_run_artifacts, sanitize_profile_name, trainer_profile_root};
+use crate::server::trainer_support::{
+    now_unix_ms, persist_trainer_run_artifacts, sanitize_profile_name, trainer_profile_root,
+};
 
 pub(crate) async fn post_trainer_start(
     State(state): State<AppState>,
@@ -24,10 +26,11 @@ pub(crate) async fn post_trainer_start(
     let req = body.map(|Json(v)| v).unwrap_or_default();
 
     let profile_name = sanitize_profile_name(&req.profile_name);
-    let config = match normalize_start_request(req, state.sessions.base_stream_port + 2, profile_name) {
-        Ok(cfg) => cfg,
-        Err(msg) => return bad_request_json(msg),
-    };
+    let config =
+        match normalize_start_request(req, state.sessions.base_stream_port + 2, profile_name) {
+            Ok(cfg) => cfg,
+            Err(msg) => return bad_request_json(msg),
+        };
 
     let engine = "trainer_v2".to_string();
     let log_dir = state.trainer.root.join("logs").join("trainer");

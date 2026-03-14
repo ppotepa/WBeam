@@ -31,7 +31,6 @@ public final class TrainerHudPayloadBuilder {
         String safeHudText = hudText == null ? "" : hudText;
         StringBuilder details = new StringBuilder();
         String[] lines = safeHudText.split("\n");
-        @SuppressWarnings("java:java:S135")
         for (String raw : lines) {
             String line = raw == null ? "" : raw.trim();
             if (line.isEmpty()) {

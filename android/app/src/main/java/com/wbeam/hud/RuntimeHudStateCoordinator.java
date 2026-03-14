@@ -9,37 +9,35 @@ public final class RuntimeHudStateCoordinator {
     /**
      * Plain data carrier for HUD state coordinator input.
      */
-    @SuppressWarnings("java:S1104")
-    public static final class Input {
-        public JSONObject metrics;
-        public int selectedFps;
-        public int transportQueueMaxFrames;
-        public int decodeQueueMaxFrames;
-        public int renderQueueMaxFrames;
-        public long nowMs;
-        public double stablePresentFps;
-        public long stablePresentFpsAtMs;
-        public long presentFpsStaleGraceMs;
-        public long dropPrevCount;
-        public long dropPrevAtMs;
-        public String daemonState;
-        public long latestStreamUptimeSec;
-        public long latestFrameOutHost;
-        public long daemonRunId;
-        public long daemonUptimeSec;
-        public String daemonLastError;
+    static final class Input {
+        JSONObject metrics;
+        int selectedFps;
+        int transportQueueMaxFrames;
+        int decodeQueueMaxFrames;
+        int renderQueueMaxFrames;
+        long nowMs;
+        double stablePresentFps;
+        long stablePresentFpsAtMs;
+        long presentFpsStaleGraceMs;
+        long dropPrevCount;
+        long dropPrevAtMs;
+        String daemonState;
+        long latestStreamUptimeSec;
+        long latestFrameOutHost;
+        long daemonRunId;
+        long daemonUptimeSec;
+        String daemonLastError;
     }
 
     /**
      * Plain data carrier for HUD state coordinator output.
      */
-    @SuppressWarnings("java:S1104")
-    public static final class Output {
-        public RuntimeHudUpdateState state;
-        public String daemonStateUi;
-        public String compactLine;
-        public String pressureLog;
-        public String debugSnapshot;
+    static final class Output {
+        RuntimeHudUpdateState state;
+        String daemonStateUi;
+        String compactLine;
+        String pressureLog;
+        String debugSnapshot;
     }
 
     private RuntimeHudStateCoordinator() {

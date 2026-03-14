@@ -30,8 +30,8 @@ public final class HostApiClient {
     private static final Random RANDOM = new Random();
     private static final String LOOPBACK_HOST = "127.0.0.1";
     private static final String LOCAL_STATE_STREAMING = "STREAMING";
-    private static final String LOCAL_STATE_STARTING = LOCAL_STATE_STARTING;
-    private static final String LOCAL_STATE_RECONNECTING = LOCAL_STATE_RECONNECTING;
+    private static final String LOCAL_STATE_STARTING = "STARTING";
+    private static final String LOCAL_STATE_RECONNECTING = "RECONNECTING";
 
     private static final String API_IMPL = BuildConfig.WBEAM_API_IMPL == null
             ? "host"

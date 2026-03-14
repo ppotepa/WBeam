@@ -8,32 +8,31 @@ public final class RuntimeHudRenderCoordinator {
     /**
      * Plain data carrier for HUD render coordinator input.
      */
-    @SuppressWarnings("java:S1104")
-    public static final class Input {
-        public MetricSeriesBuffer runtimePresentSeries;
-        public MetricSeriesBuffer runtimeMbpsSeries;
-        public MetricSeriesBuffer runtimeDropSeries;
-        public MetricSeriesBuffer runtimeLatencySeries;
-        public MetricSeriesBuffer runtimeQueueSeries;
-        public RuntimeHudUpdateState state;
-        public double fpsLowAnchor;
+    static final class Input {
+        MetricSeriesBuffer runtimePresentSeries;
+        MetricSeriesBuffer runtimeMbpsSeries;
+        MetricSeriesBuffer runtimeDropSeries;
+        MetricSeriesBuffer runtimeLatencySeries;
+        MetricSeriesBuffer runtimeQueueSeries;
+        RuntimeHudUpdateState state;
+        double fpsLowAnchor;
 
-        public boolean daemonReachable;
-        public String selectedProfile;
-        public String selectedEncoder;
-        public int streamWidth;
-        public int streamHeight;
-        public String daemonHostName;
-        public String daemonStateUi;
-        public String daemonBuildRevision;
-        public String appBuildRevision;
-        public String daemonLastError;
-        public ResourceUsageTracker resourceUsageTracker;
-        public WebView perfHudWebView;
-        public TextView perfHudText;
-        public View perfHudPanel;
-        public HudOverlayDisplay.State hudOverlayState;
-        public int hudTextColorLive;
+        boolean daemonReachable;
+        String selectedProfile;
+        String selectedEncoder;
+        int streamWidth;
+        int streamHeight;
+        String daemonHostName;
+        String daemonStateUi;
+        String daemonBuildRevision;
+        String appBuildRevision;
+        String daemonLastError;
+        ResourceUsageTracker resourceUsageTracker;
+        WebView perfHudWebView;
+        TextView perfHudText;
+        View perfHudPanel;
+        HudOverlayDisplay.State hudOverlayState;
+        int hudTextColorLive;
     }
 
     private RuntimeHudRenderCoordinator() {

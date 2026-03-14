@@ -266,7 +266,6 @@ public final class HudRenderSupport {
             return new double[]{};
         }
         double last = Double.NaN;
-        @SuppressWarnings("java:java:S135")
         double lo = Double.POSITIVE_INFINITY;
         double hi = Double.NEGATIVE_INFINITY;
         for (int i = 0; i < series.length(); i++) {

@@ -14,7 +14,6 @@ public final class MainUiControlsCoordinator {
     private MainUiControlsCoordinator() {
     }
 
-    @SuppressWarnings("java:java:S107")
     public static void loadSavedSettings(
             Spinner profileSpinner,
             Spinner encoderSpinner,
@@ -60,7 +59,6 @@ public final class MainUiControlsCoordinator {
                 )
         );
     }
- @SuppressWarnings("java:java:S107")
 
     public static void updateSettingValueLabels(
             TextView resValueText,
@@ -90,7 +88,6 @@ public final class MainUiControlsCoordinator {
             boolean previousEnabled
     ) {
         return IntraOnlyButtonController.apply(intraOnlyButton, selectedEncoder, previousEnabled);
-    @SuppressWarnings("java:java:S107")
     }
 
     public static void updateHostHint(
@@ -237,7 +234,6 @@ public final class MainUiControlsCoordinator {
                 uiHandler,
                 simpleMenuAutoHideTask,
                 simpleMenuState
-        @SuppressWarnings("java:java:S107")
         );
     }
 
@@ -295,7 +291,6 @@ public final class MainUiControlsCoordinator {
                 encoderOptions,
                 preferredVideo,
                 mode,
-                @SuppressWarnings("java:java:S107")
                 fps
         );
     }

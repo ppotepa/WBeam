@@ -1,4 +1,3 @@
-// sonar-disable S3776: Cognitive complexity is essential for domain logic
 use crate::cli::StreamMode;
 
 pub(super) struct BufferProfile {
@@ -11,49 +10,37 @@ pub(super) struct BufferProfile {
     pub(super) queue_time_ns: u64,
 }
 
-#[allow(clippy::cognitive_complexity)]
-#[allow(clippy::cognitive_complexity)]
-pub(super) fn buffer_profile(mode: StreamMode, fps: u32, mode_png: bool) -> BufferProfile { // NOSONAR: S3776
-    let frame_ns = (1_000_000_000u64 / fps.max(1) as u64).max(1);
+fn buffer_counts(mode: StreamMode, mode_png: bool) -> (u32, u32) {
     match mode {
-        StreamMode::Ultra => {
-            let queue_buffers = if mode_png { 4 } else { 3 };
-            let appsink_buffers = if mode_png { 2 } else { 1 };
-            BufferProfile {
-                queue_buffers,
-                appsink_buffers,
-                queue_leaky: "downstream",
-                appsink_drop: true,
-                appsink_sync: false,
-                use_videorate: !mode_png,
-                queue_time_ns: frame_ns.saturating_mul(queue_buffers as u64),
-            }
-        }
-        StreamMode::Stable => {
-            let queue_buffers = if mode_png { 12 } else { 10 };
-            let appsink_buffers = if mode_png { 10 } else { 8 };
-            BufferProfile {
-                queue_buffers,
-                appsink_buffers,
-                queue_leaky: "no",
-                appsink_drop: false,
-                appsink_sync: false,
-                use_videorate: false,
-                queue_time_ns: frame_ns.saturating_mul(queue_buffers as u64),
-            }
-        }
-        StreamMode::Quality => {
-            let queue_buffers = if mode_png { 20 } else { 24 };
-            let appsink_buffers = if mode_png { 16 } else { 20 };
-            BufferProfile {
-                queue_buffers,
-                appsink_buffers,
-                queue_leaky: "no",
-                appsink_drop: false,
-                appsink_sync: true,
-                use_videorate: false,
-                queue_time_ns: frame_ns.saturating_mul(queue_buffers as u64),
-            }
-        }
+        StreamMode::Ultra if mode_png => (4, 2),
+        StreamMode::Ultra => (3, 1),
+        StreamMode::Stable if mode_png => (12, 10),
+        StreamMode::Stable => (10, 8),
+        StreamMode::Quality if mode_png => (20, 16),
+        StreamMode::Quality => (24, 20),
+    }
+}
+
+fn mode_settings(mode: StreamMode, mode_png: bool) -> (&'static str, bool, bool, bool) {
+    match mode {
+        StreamMode::Ultra => ("downstream", true, false, !mode_png),
+        StreamMode::Stable => ("no", false, false, false),
+        StreamMode::Quality => ("no", false, true, false),
+    }
+}
+
+pub(super) fn buffer_profile(mode: StreamMode, fps: u32, mode_png: bool) -> BufferProfile {
+    let frame_ns = (1_000_000_000u64 / fps.max(1) as u64).max(1);
+    let (queue_buffers, appsink_buffers) = buffer_counts(mode, mode_png);
+    let (queue_leaky, appsink_drop, appsink_sync, use_videorate) = mode_settings(mode, mode_png);
+
+    BufferProfile {
+        queue_buffers,
+        appsink_buffers,
+        queue_leaky,
+        appsink_drop,
+        appsink_sync,
+        use_videorate,
+        queue_time_ns: frame_ns.saturating_mul(queue_buffers as u64),
     }
 }
