@@ -74,72 +74,93 @@ final class StreamReconnectLoop {
         while (runtimeState.isRunning()) {
             final MediaCodec[] codecHolder = {null};
             try {
-                statusListener.onStatus(stateConnecting, "connecting to " + host + ":" + port, 0);
-                statusListener.onStats(
-                        "fps in/out: - | drops: " + runtimeState.getDroppedTotal()
-                                + " | late: " + runtimeState.getTooLateTotal()
-                                + " | reconnects: " + runtimeState.getReconnects()
-                );
-
-                Socket socket = new Socket();
-                socket.connect(new InetSocketAddress(host, port), 2000);
-                socket.setTcpNoDelay(true);
-                socket.setReceiveBufferSize(socketRecvBufferSize);
-                socket.setSoTimeout(5_000);
-                runtimeState.setSocket(socket);
-                runtimeState.incrementSessionConnectId();
-                runtimeState.resetSampleSeq();
-
-                statusListener.onStatus(stateStreaming, "connected [framed]", 0);
-                streamWorker.run(new BufferedInputStream(socket.getInputStream(), 256 * 1024), codecHolder);
-
+                connectAndStream(codecHolder);
             } catch (Exception e) {
-                if (runtimeState.isRunning()) {
-                    long reconnects = runtimeState.incrementReconnects();
-                    long reconnectDelayMs = Math.min(5000L, runtimeState.getReconnectDelayMs() + 400L);
-                    runtimeState.setReconnectDelayMs(reconnectDelayMs);
-                    String reason = e.getClass().getSimpleName() + ": " + e.getMessage();
-                    boolean isException = (e instanceof Exception);
-                    if (isException && H264TcpPlayer.isExpectedStreamClose((Exception) e)) {
-                        Log.w(tag, "stream worker reconnect #" + reconnects
-                                + " delay_ms=" + reconnectDelayMs + " reason=" + reason);
-                        statusListener.onStatus(stateConnecting, "stream reconnecting: " + reason, 0);
-                    } else {
-                        Log.e(tag, "stream worker failed", e);
-                        statusListener.onStatus(stateError, "stream error: " + e.getClass().getSimpleName(), 0);
-                    }
-                    statusListener.onStats(
-                            "fps in/out: - | drops: " + runtimeState.getDroppedTotal()
-                                    + " | late: " + runtimeState.getTooLateTotal()
-                                    + " | reconnects: " + runtimeState.getReconnects()
-                    );
-                }
+                handleStreamException(e);
             } catch (Error err) {
                 // Preserve previous behaviour of surfacing fatal errors to Android runtime.
                 throw err;
             } finally {
                 runtimeState.closeSocket();
-                MediaCodec codec = codecHolder[0];
-                if (codec != null) {
-                    try {
-                        codec.stop();
-                    } catch (Exception ignored) {
-                        // Best-effort shutdown; codec might already be stopped.
-                    }
-                    try {
-                        codec.release();
-                    } catch (Exception ignored) {
-                        // Release is best-effort as codec may already be torn down.
-                    }
-                }
+                cleanupCodec(codecHolder[0]);
             }
 
-            if (runtimeState.isRunning()) {
-                long reconnectDelayMs = runtimeState.getReconnectDelayMs();
-                long jitterBound = Math.max(1L, reconnectDelayMs / 4L + 1L);
-                long jitterMs = (long) (Math.random() * jitterBound);
-                SystemClock.sleep(reconnectDelayMs + jitterMs);
-            }
+            delayBeforeReconnect();
         }
+    }
+
+    private void connectAndStream(MediaCodec[] codecHolder) throws Exception {
+        reportConnecting();
+
+        Socket socket = new Socket();
+        socket.connect(new InetSocketAddress(host, port), 2000);
+        socket.setTcpNoDelay(true);
+        socket.setReceiveBufferSize(socketRecvBufferSize);
+        socket.setSoTimeout(5_000);
+        runtimeState.setSocket(socket);
+        runtimeState.incrementSessionConnectId();
+        runtimeState.resetSampleSeq();
+
+        statusListener.onStatus(stateStreaming, "connected [framed]", 0);
+        streamWorker.run(new BufferedInputStream(socket.getInputStream(), 256 * 1024), codecHolder);
+    }
+
+    private void reportConnecting() {
+        statusListener.onStatus(stateConnecting, "connecting to " + host + ":" + port, 0);
+        reportStats();
+    }
+
+    private void handleStreamException(Exception e) {
+        if (!runtimeState.isRunning()) {
+            return;
+        }
+        long reconnects = runtimeState.incrementReconnects();
+        long reconnectDelayMs = Math.min(5000L, runtimeState.getReconnectDelayMs() + 400L);
+        runtimeState.setReconnectDelayMs(reconnectDelayMs);
+        String reason = e.getClass().getSimpleName() + ": " + e.getMessage();
+
+        if (H264TcpPlayer.isExpectedStreamClose(e)) {
+            Log.w(tag, "stream worker reconnect #" + reconnects
+                    + " delay_ms=" + reconnectDelayMs + " reason=" + reason);
+            statusListener.onStatus(stateConnecting, "stream reconnecting: " + reason, 0);
+        } else {
+            Log.e(tag, "stream worker failed", e);
+            statusListener.onStatus(stateError, "stream error: " + e.getClass().getSimpleName(), 0);
+        }
+        reportStats();
+    }
+
+    private void cleanupCodec(MediaCodec codec) {
+        if (codec == null) {
+            return;
+        }
+        try {
+            codec.stop();
+        } catch (Exception ignored) {
+            // Best-effort shutdown; codec might already be stopped.
+        }
+        try {
+            codec.release();
+        } catch (Exception ignored) {
+            // Release is best-effort as codec may already be torn down.
+        }
+    }
+
+    private void delayBeforeReconnect() {
+        if (!runtimeState.isRunning()) {
+            return;
+        }
+        long reconnectDelayMs = runtimeState.getReconnectDelayMs();
+        long jitterBound = Math.max(1L, reconnectDelayMs / 4L + 1L);
+        long jitterMs = (long) (Math.random() * jitterBound);
+        SystemClock.sleep(reconnectDelayMs + jitterMs);
+    }
+
+    private void reportStats() {
+        statusListener.onStats(
+                "fps in/out: - | drops: " + runtimeState.getDroppedTotal()
+                        + " | late: " + runtimeState.getTooLateTotal()
+                        + " | reconnects: " + runtimeState.getReconnects()
+        );
     }
 }
