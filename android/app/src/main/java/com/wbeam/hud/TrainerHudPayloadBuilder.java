@@ -11,6 +11,9 @@ import java.util.Locale;
 public final class TrainerHudPayloadBuilder {
     private static final String FONT_PROFILE_ARCADE = "arcade";
     private static final String LAYOUT_MODE_KEY = "layout_mode";
+    private static final String RUN_ID_KEY = "run_id";
+    private static final String PROFILE_NAME_KEY = "profile_name";
+    private static final String TRIAL_ID_KEY = "trial_id";
     private static final String PENDING = "PENDING";
     private static final String PENDING_LOWERCASE = "pending";
 
@@ -32,21 +35,7 @@ public final class TrainerHudPayloadBuilder {
         StringBuilder details = new StringBuilder();
         String[] lines = safeHudText.split("\n");
         for (String raw : lines) {
-            String line = raw == null ? "" : raw.trim();
-            if (line.isEmpty()) {
-                continue;
-            }
-            if (line.startsWith("+") && line.endsWith("+")) {
-                details.append(HudRenderSupport.hudDetailRow(" ", " "));
-                continue;
-            }
-            if (line.startsWith("|") && line.endsWith("|") && line.length() > 2) {
-                String content = line.substring(1, line.length() - 1).trim();
-                String[] parts = splitHudColumns(content);
-                details.append(HudRenderSupport.hudDetailRow(parts[0], parts[1]));
-            } else {
-                details.append(HudRenderSupport.hudDetailRow(line, "-"));
-            }
+            appendHudLineDetails(details, raw);
         }
         String resourceRows = sampleAndBuildResourceRows(
                 resourceRowsProvider,
@@ -134,13 +123,9 @@ public final class TrainerHudPayloadBuilder {
         TrendData trendData = extractTrendData(trends);
         StatusData statusData = extractStatusData(status);
 
-        // Fallback KPI values from trends if missing
         kpiData = applyFallbacksFromTrends(kpiData, trendData);
 
-        double targetForSample = configData.fps > 1 
-                ? configData.fps 
-                : (fallbackTargetFps > 1.0 ? fallbackTargetFps : 60.0);
-        
+        double targetForSample = resolveTargetForSample(configData.fps, fallbackTargetFps);
         String resourceRows = sampleAndBuildResourceRows(
                 resourceRowsProvider,
                 targetForSample,
@@ -200,15 +185,9 @@ public final class TrainerHudPayloadBuilder {
 
     private static HeaderData extractHeaderData(JSONObject hud, JSONObject header) {
         HeaderData data = new HeaderData();
-        data.runId = header != null 
-                ? header.optString("run_id", hud.optString("run_id", "-")) 
-                : hud.optString("run_id", "-");
-        data.profile = header != null 
-                ? header.optString("profile_name", hud.optString("profile_name", "-")) 
-                : hud.optString("profile_name", "-");
-        data.trialId = header != null 
-                ? header.optString("trial_id", hud.optString("trial_id", "-")) 
-                : hud.optString("trial_id", "-");
+        data.runId = readHeaderValue(header, hud, RUN_ID_KEY);
+        data.profile = readHeaderValue(header, hud, PROFILE_NAME_KEY);
+        data.trialId = readHeaderValue(header, hud, TRIAL_ID_KEY);
         data.gIdx = header != null ? header.optInt("generation_index", 0) : hud.optInt("generation_index", 0);
         data.gTotal = header != null ? header.optInt("generation_total", 0) : hud.optInt("generation_total", 0);
         data.tIdx = header != null ? header.optInt("trial_index", 0) : hud.optInt("trial_index", 0);
@@ -304,30 +283,14 @@ public final class TrainerHudPayloadBuilder {
     }
 
     private static KpiData applyFallbacksFromTrends(KpiData kpi, TrendData trends) {
-        if (Double.isNaN(kpi.liveMbps) || kpi.liveMbps <= 0.0) {
-            kpi.liveMbps = HudRenderSupport.latestFiniteFromSeries(trends.trendMbpsArr);
-        }
-        if (Double.isNaN(kpi.present) || kpi.present <= 0.0) {
-            kpi.present = HudRenderSupport.latestFiniteFromSeries(trends.trendFpsArr);
-        }
-        if (Double.isNaN(kpi.recv) || kpi.recv <= 0.0) {
-            kpi.recv = HudRenderSupport.latestFiniteFromSeries(trends.trendRecvArr);
-        }
-        if (Double.isNaN(kpi.decode) || kpi.decode <= 0.0) {
-            kpi.decode = HudRenderSupport.latestFiniteFromSeries(trends.trendDecodeArr);
-        }
-        if (Double.isNaN(kpi.drops) || kpi.drops < 0.0) {
-            kpi.drops = HudRenderSupport.latestFiniteFromSeries(trends.trendDropArr);
-        }
-        if (Double.isNaN(kpi.latency) || kpi.latency < 0.0) {
-            kpi.latency = HudRenderSupport.latestFiniteFromSeries(trends.trendLatencyArr);
-        }
-        if (Double.isNaN(kpi.queue) || kpi.queue < 0.0) {
-            kpi.queue = HudRenderSupport.latestFiniteFromSeries(trends.trendQueueArr);
-        }
-        if (Double.isNaN(kpi.late) || kpi.late < 0.0) {
-            kpi.late = HudRenderSupport.latestFiniteFromSeries(trends.trendLateArr);
-        }
+        kpi.liveMbps = fallbackTrendValue(kpi.liveMbps, trends.trendMbpsArr, true);
+        kpi.present = fallbackTrendValue(kpi.present, trends.trendFpsArr, true);
+        kpi.recv = fallbackTrendValue(kpi.recv, trends.trendRecvArr, true);
+        kpi.decode = fallbackTrendValue(kpi.decode, trends.trendDecodeArr, true);
+        kpi.drops = fallbackTrendValue(kpi.drops, trends.trendDropArr, false);
+        kpi.latency = fallbackTrendValue(kpi.latency, trends.trendLatencyArr, false);
+        kpi.queue = fallbackTrendValue(kpi.queue, trends.trendQueueArr, false);
+        kpi.late = fallbackTrendValue(kpi.late, trends.trendLateArr, false);
         return kpi;
     }
 
@@ -392,7 +355,7 @@ public final class TrainerHudPayloadBuilder {
     }
 
     private static String lowerState(JSONObject states, String key) {
-        String value = states != null ? states.optString(key, "PENDING") : "PENDING";
+        String value = states != null ? states.optString(key, PENDING) : PENDING;
         return value.toLowerCase(Locale.US);
     }
 
@@ -425,5 +388,51 @@ public final class TrainerHudPayloadBuilder {
         String left = content.substring(0, pivot).trim();
         String right = content.substring(pivot).trim();
         return new String[]{left, right};
+    }
+
+    private static void appendHudLineDetails(StringBuilder details, String rawLine) {
+        String line = rawLine == null ? "" : rawLine.trim();
+        if (line.isEmpty()) {
+            return;
+        }
+        if (line.startsWith("+") && line.endsWith("+")) {
+            details.append(HudRenderSupport.hudDetailRow(" ", " "));
+            return;
+        }
+        if (line.startsWith("|") && line.endsWith("|") && line.length() > 2) {
+            String content = line.substring(1, line.length() - 1).trim();
+            String[] parts = splitHudColumns(content);
+            details.append(HudRenderSupport.hudDetailRow(parts[0], parts[1]));
+            return;
+        }
+        details.append(HudRenderSupport.hudDetailRow(line, "-"));
+    }
+
+    private static String readHeaderValue(JSONObject header, JSONObject hud, String key) {
+        if (header != null) {
+            return header.optString(key, hud.optString(key, "-"));
+        }
+        return hud.optString(key, "-");
+    }
+
+    private static double resolveTargetForSample(int configFps, double fallbackTargetFps) {
+        if (configFps > 1) {
+            return configFps;
+        }
+        return fallbackTargetFps > 1.0 ? fallbackTargetFps : 60.0;
+    }
+
+    private static double fallbackTrendValue(double currentValue, JSONArray trendSeries, boolean requirePositive) {
+        if (!needsTrendFallback(currentValue, requirePositive)) {
+            return currentValue;
+        }
+        return HudRenderSupport.latestFiniteFromSeries(trendSeries);
+    }
+
+    private static boolean needsTrendFallback(double currentValue, boolean requirePositive) {
+        if (Double.isNaN(currentValue)) {
+            return true;
+        }
+        return requirePositive ? currentValue <= 0.0 : currentValue < 0.0;
     }
 }

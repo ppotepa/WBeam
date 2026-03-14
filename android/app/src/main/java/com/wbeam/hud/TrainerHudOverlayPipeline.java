@@ -47,18 +47,18 @@ public final class TrainerHudOverlayPipeline {
             CompactLineSink compactLineSink,
             RefreshAction refreshAction
     ) {
-        renderFromText(rawHudText, createContext(
-                latestTargetFps,
-                fpsLowAnchor,
-                resourceUsageTracker,
-                perfHudWebView,
-                perfHudText,
-                perfHudPanel,
-                hudOverlayState,
-                fallbackTextColor,
-                compactLineSink,
-                refreshAction
-        ));
+        Context context = new Context();
+        context.latestTargetFps = latestTargetFps;
+        context.fpsLowAnchor = fpsLowAnchor;
+        context.resourceUsageTracker = resourceUsageTracker;
+        context.perfHudWebView = perfHudWebView;
+        context.perfHudText = perfHudText;
+        context.perfHudPanel = perfHudPanel;
+        context.hudOverlayState = hudOverlayState;
+        context.fallbackTextColor = fallbackTextColor;
+        context.compactLineSink = compactLineSink;
+        context.refreshAction = refreshAction;
+        renderFromText(rawHudText, context);
     }
 
     public static void renderFromText(String rawHudText, Context context) {
@@ -91,18 +91,18 @@ public final class TrainerHudOverlayPipeline {
             CompactLineSink compactLineSink,
             RefreshAction refreshAction
     ) {
-        renderFromJson(hudJson, createContext(
-                latestTargetFps,
-                fpsLowAnchor,
-                resourceUsageTracker,
-                perfHudWebView,
-                perfHudText,
-                perfHudPanel,
-                hudOverlayState,
-                fallbackTextColor,
-                compactLineSink,
-                refreshAction
-        ));
+        Context context = new Context();
+        context.latestTargetFps = latestTargetFps;
+        context.fpsLowAnchor = fpsLowAnchor;
+        context.resourceUsageTracker = resourceUsageTracker;
+        context.perfHudWebView = perfHudWebView;
+        context.perfHudText = perfHudText;
+        context.perfHudPanel = perfHudPanel;
+        context.hudOverlayState = hudOverlayState;
+        context.fallbackTextColor = fallbackTextColor;
+        context.compactLineSink = compactLineSink;
+        context.refreshAction = refreshAction;
+        renderFromJson(hudJson, context);
     }
 
     public static void renderFromJson(JSONObject hudJson, Context context) {
@@ -131,18 +131,18 @@ public final class TrainerHudOverlayPipeline {
             CompactLineSink compactLineSink,
             RefreshAction refreshAction
     ) {
-        renderPlaceholder(createContext(
-                latestTargetFps,
-                fpsLowAnchor,
-                resourceUsageTracker,
-                perfHudWebView,
-                perfHudText,
-                perfHudPanel,
-                hudOverlayState,
-                fallbackTextColor,
-                compactLineSink,
-                refreshAction
-        ));
+        Context context = new Context();
+        context.latestTargetFps = latestTargetFps;
+        context.fpsLowAnchor = fpsLowAnchor;
+        context.resourceUsageTracker = resourceUsageTracker;
+        context.perfHudWebView = perfHudWebView;
+        context.perfHudText = perfHudText;
+        context.perfHudPanel = perfHudPanel;
+        context.hudOverlayState = hudOverlayState;
+        context.fallbackTextColor = fallbackTextColor;
+        context.compactLineSink = compactLineSink;
+        context.refreshAction = refreshAction;
+        renderPlaceholder(context);
     }
 
     public static void renderPlaceholder(Context context) {
@@ -201,29 +201,4 @@ public final class TrainerHudOverlayPipeline {
         }
     }
 
-    private static Context createContext(
-            double latestTargetFps,
-            double fpsLowAnchor,
-            ResourceUsageTracker resourceUsageTracker,
-            WebView perfHudWebView,
-            TextView perfHudText,
-            View perfHudPanel,
-            HudOverlayDisplay.State hudOverlayState,
-            int fallbackTextColor,
-            CompactLineSink compactLineSink,
-            RefreshAction refreshAction
-    ) {
-        Context context = new Context();
-        context.latestTargetFps = latestTargetFps;
-        context.fpsLowAnchor = fpsLowAnchor;
-        context.resourceUsageTracker = resourceUsageTracker;
-        context.perfHudWebView = perfHudWebView;
-        context.perfHudText = perfHudText;
-        context.perfHudPanel = perfHudPanel;
-        context.hudOverlayState = hudOverlayState;
-        context.fallbackTextColor = fallbackTextColor;
-        context.compactLineSink = compactLineSink;
-        context.refreshAction = refreshAction;
-        return context;
-    }
 }

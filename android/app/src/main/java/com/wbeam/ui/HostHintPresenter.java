@@ -24,19 +24,20 @@ public final class HostHintPresenter {
             return;
         }
         hostHintText.setText(MainActivitySettingsPresenter.buildHostHint(
-                daemonReachable,
-                apiBase,
-                daemonHostName,
-                daemonStateUi,
-                daemonService,
-                selectedProfile,
-                cfg.width,
-                cfg.height,
-                cfg.fps,
-                cfg.bitrateMbps,
-                selectedEncoder,
-                intraOnlyEnabled,
-                selectedCursorMode
+                new MainActivitySettingsPresenter.HostHintInput()
+                        .setDaemonReachable(daemonReachable)
+                        .setApiBase(apiBase)
+                        .setDaemonHostName(daemonHostName)
+                        .setDaemonStateUi(daemonStateUi)
+                        .setDaemonService(daemonService)
+                        .setSelectedProfile(selectedProfile)
+                        .setWidth(cfg.width)
+                        .setHeight(cfg.height)
+                        .setFps(cfg.fps)
+                        .setBitrateMbps(cfg.bitrateMbps)
+                        .setSelectedEncoder(selectedEncoder)
+                        .setIntraOnlyEnabled(intraOnlyEnabled)
+                        .setCursorMode(selectedCursorMode)
         ));
     }
 }

@@ -421,32 +421,23 @@ public class MainActivity extends AppCompatActivity {
 
     private void handleDaemonStatusUpdate(StatusPoller.DaemonStatusSnapshot snapshot) {
         MainDaemonRuntimeCoordinator.StatusInput input =
-                MainDaemonRuntimeInputFactory.createStatusInput(
-                        snapshot.isReachable(),
-                        snapshot.wasReachable(),
-                        snapshot.getHostName(),
-                        snapshot.getDaemonState(),
-                        snapshot.getRunId(),
-                        snapshot.getLastError(),
-                        snapshot.isErrorChanged(),
-                        snapshot.getUptimeSec(),
-                        snapshot.getService(),
-                        snapshot.getBuildRevision(),
-                        snapshot.getMetrics()
-                );
+                MainDaemonRuntimeInputFactory.createStatusInput(snapshot);
 
         MainDaemonRuntimeCoordinator.StatusContext context =
                 MainDaemonRuntimeInputFactory.createStatusContext(
-                        daemon,
-                        uiState,
-                        this::requiresTransportProbeNow,
-                        this::maybeStartTransportProbeNow,
-                        this::notifyConnectedHost,
-                        this::appendLiveLog,
-                        this::stopLiveView,
-                        this::refreshUiAfterDaemonStateChange,
-                        this::updateStatsLine,
-                        this::updatePerfHud
+                        new MainDaemonRuntimeInputFactory.StatusContextArgs()
+                                .setDaemon(daemon)
+                                .setUiState(uiState)
+                                .setRequiresTransportProbeNowProvider(
+                                        this::requiresTransportProbeNow
+                                )
+                                .setProbeStarter(this::maybeStartTransportProbeNow)
+                                .setHostConnectedNotifier(this::notifyConnectedHost)
+                                .setLineLogger(this::appendLiveLog)
+                                .setStopLiveViewTask(this::stopLiveView)
+                                .setRefreshUiTask(this::refreshUiAfterDaemonStateChange)
+                                .setStatsSink(this::updateStatsLine)
+                                .setPerfHudSink(this::updatePerfHud)
                 );
 
         MainDaemonRuntimeCoordinator.onStatusUpdate(input, context);
@@ -455,23 +446,24 @@ public class MainActivity extends AppCompatActivity {
     private void handleDaemonOffline(boolean wasReachable, Exception e) {
         MainDaemonRuntimeCoordinator.OfflineContext context =
                 MainDaemonRuntimeInputFactory.createOfflineContext(
-                        daemon,
-                        uiState,
-                        transportProbe,
-                        STATE_ERROR,
-                        this::stopLiveView,
-                        this::updateActionButtonsEnabled,
-                        this::updateHostHint,
-                        this::updatePerfHudUnavailable,
-                        this::refreshStatusText,
-                        this::updatePreflightOverlay,
-                        this::updateStatus,
-                        this::appendLiveLog,
-                        message -> Toast.makeText(
-                                MainActivity.this,
-                                message,
-                                Toast.LENGTH_LONG
-                        ).show()
+                        new MainDaemonRuntimeInputFactory.OfflineContextArgs()
+                                .setDaemon(daemon)
+                                .setUiState(uiState)
+                                .setTransportProbe(transportProbe)
+                                .setStateError(STATE_ERROR)
+                                .setStopLiveViewTask(this::stopLiveView)
+                                .setUpdateActionButtonsTask(this::updateActionButtonsEnabled)
+                                .setUpdateHostHintTask(this::updateHostHint)
+                                .setUpdatePerfHudUnavailableTask(this::updatePerfHudUnavailable)
+                                .setRefreshStatusTextTask(this::refreshStatusText)
+                                .setUpdatePreflightOverlayTask(this::updatePreflightOverlay)
+                                .setUiStatusSink(this::updateStatus)
+                                .setLineLogger(this::appendLiveLog)
+                                .setToastSink(message -> Toast.makeText(
+                                        MainActivity.this,
+                                        message,
+                                        Toast.LENGTH_LONG
+                                ).show())
                 );
 
         MainDaemonRuntimeCoordinator.onOffline(wasReachable, e, context);
@@ -792,25 +784,26 @@ public class MainActivity extends AppCompatActivity {
 
     private void loadSavedSettings() {
         MainUiControlsCoordinator.loadSavedSettings(
-                profileSpinner,
-                encoderSpinner,
-                cursorSpinner,
-                resolutionSeek,
-                fpsSeek,
-                bitrateSeek,
-                PROFILE_OPTIONS,
-                ENCODER_OPTIONS,
-                CURSOR_OPTIONS,
-                DEFAULT_PROFILE,
-                PREFERRED_VIDEO,
-                DEFAULT_CURSOR_MODE,
-                DEFAULT_RES_SCALE,
-                DEFAULT_FPS,
-                DEFAULT_BITRATE_MBPS,
-                cursorOverlayController,
-                simpleMenuState,
-                () -> enforceCursorOverlayPolicy(false),
-                this::refreshSettingsUi
+                new MainUiControlsCoordinator.LoadSavedSettingsRequest()
+                        .setProfileSpinner(profileSpinner)
+                        .setEncoderSpinner(encoderSpinner)
+                        .setCursorSpinner(cursorSpinner)
+                        .setResolutionSeek(resolutionSeek)
+                        .setFpsSeek(fpsSeek)
+                        .setBitrateSeek(bitrateSeek)
+                        .setProfileOptions(PROFILE_OPTIONS)
+                        .setEncoderOptions(ENCODER_OPTIONS)
+                        .setCursorOptions(CURSOR_OPTIONS)
+                        .setDefaultProfile(DEFAULT_PROFILE)
+                        .setPreferredVideo(PREFERRED_VIDEO)
+                        .setDefaultCursorMode(DEFAULT_CURSOR_MODE)
+                        .setDefaultResScale(DEFAULT_RES_SCALE)
+                        .setDefaultFps(DEFAULT_FPS)
+                        .setDefaultBitrateMbps(DEFAULT_BITRATE_MBPS)
+                        .setCursorOverlayController(cursorOverlayController)
+                        .setSimpleMenuState(simpleMenuState)
+                        .setEnforceCursorPolicy(() -> enforceCursorOverlayPolicy(false))
+                        .setRefreshHandler(this::refreshSettingsUi)
         );
         intraOnlyEnabled = false;
     }
@@ -821,14 +814,15 @@ public class MainActivity extends AppCompatActivity {
         int bitrate = getSelectedBitrateMbps();
         int[] sz = computeScaledSize();
         MainUiControlsCoordinator.updateSettingValueLabels(
-                resValueText,
-                fpsValueText,
-                bitrateValueText,
-                scale,
-                fps,
-                bitrate,
-                sz[0],
-                sz[1]
+                new MainUiControlsCoordinator.SettingValueLabelsRequest()
+                        .setResValueText(resValueText)
+                        .setFpsValueText(fpsValueText)
+                        .setBitrateValueText(bitrateValueText)
+                        .setScale(scale)
+                        .setFps(fps)
+                        .setBitrate(bitrate)
+                        .setWidth(sz[0])
+                        .setHeight(sz[1])
         );
     }
 
@@ -843,17 +837,18 @@ public class MainActivity extends AppCompatActivity {
     private void updateHostHint() {
         StreamConfigResolver.Resolved cfg = effectiveStreamConfig();
         MainUiControlsCoordinator.updateHostHint(
-                hostHintText,
-                daemon.isReachable(),
-                HostApiClient.API_BASE,
-                daemon.getHostName(),
-                effectiveDaemonStateUi(),
-                daemon.getService(),
-                getSelectedProfile(),
-                cfg,
-                getSelectedEncoder(),
-                intraOnlyEnabled,
-                getSelectedCursorMode()
+                new MainUiControlsCoordinator.HostHintRequest()
+                        .setHostHintText(hostHintText)
+                        .setDaemonReachable(daemon.isReachable())
+                        .setApiBase(HostApiClient.API_BASE)
+                        .setDaemonHostName(daemon.getHostName())
+                        .setDaemonStateUi(effectiveDaemonStateUi())
+                        .setDaemonService(daemon.getService())
+                        .setSelectedProfile(getSelectedProfile())
+                        .setCfg(cfg)
+                        .setSelectedEncoder(getSelectedEncoder())
+                        .setIntraOnlyEnabled(intraOnlyEnabled)
+                        .setSelectedCursorMode(getSelectedCursorMode())
         );
     }
 
@@ -1027,18 +1022,19 @@ public class MainActivity extends AppCompatActivity {
 
     private void refreshSimpleMenuButtons() {
         MainUiControlsCoordinator.refreshSimpleMenuButtons(
-                simpleMenuPanel,
-                simpleModeH265Button,
-                simpleModeRawButton,
-                PREFERRED_VIDEO,
-                simpleMenuState.getMode(),
-                simpleFps30Button,
-                simpleFps45Button,
-                simpleFps60Button,
-                simpleFps90Button,
-                simpleFps120Button,
-                simpleFps144Button,
-                simpleMenuState.getFps()
+                new MainUiControlsCoordinator.SimpleMenuButtonsRequest()
+                        .setSimpleMenuPanel(simpleMenuPanel)
+                        .setSimpleModeH265Button(simpleModeH265Button)
+                        .setSimpleModeRawButton(simpleModeRawButton)
+                        .setPreferredVideo(PREFERRED_VIDEO)
+                        .setMode(simpleMenuState.getMode())
+                        .setSimpleFps30Button(simpleFps30Button)
+                        .setSimpleFps45Button(simpleFps45Button)
+                        .setSimpleFps60Button(simpleFps60Button)
+                        .setSimpleFps90Button(simpleFps90Button)
+                        .setSimpleFps120Button(simpleFps120Button)
+                        .setSimpleFps144Button(simpleFps144Button)
+                        .setFps(simpleMenuState.getFps())
         );
     }
 

@@ -36,21 +36,22 @@ public final class MainActivitySettingsInitializer {
             Hooks hooks
     ) {
         MainActivitySettingsPresenter.applyDefaultSettings(
-                profileSpinner,
-                encoderSpinner,
-                cursorSpinner,
-                resolutionSeek,
-                fpsSeek,
-                bitrateSeek,
-                profileOptions,
-                encoderOptions,
-                cursorOptions,
-                defaultProfile,
-                preferredVideo,
-                defaultCursorMode,
-                defaultResScale,
-                defaultFps,
-                defaultBitrateMbps
+                new MainActivitySettingsPresenter.DefaultSettingsInput()
+                        .setProfileSpinner(profileSpinner)
+                        .setEncoderSpinner(encoderSpinner)
+                        .setCursorSpinner(cursorSpinner)
+                        .setResolutionSeek(resolutionSeek)
+                        .setFpsSeek(fpsSeek)
+                        .setBitrateSeek(bitrateSeek)
+                        .setProfileOptions(profileOptions)
+                        .setEncoderOptions(encoderOptions)
+                        .setCursorOptions(cursorOptions)
+                        .setDefaultProfile(defaultProfile)
+                        .setPreferredVideo(preferredVideo)
+                        .setDefaultCursorMode(defaultCursorMode)
+                        .setDefaultResScale(defaultResScale)
+                        .setDefaultFps(defaultFps)
+                        .setDefaultBitrateMbps(defaultBitrateMbps)
         );
         if (cursorOverlayController != null) {
             cursorOverlayController.resetEnabledDefault();

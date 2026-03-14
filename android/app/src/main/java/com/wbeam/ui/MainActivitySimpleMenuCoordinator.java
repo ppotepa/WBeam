@@ -166,17 +166,18 @@ public final class MainActivitySimpleMenuCoordinator {
             return;
         }
         MainActivitySettingsPresenter.applySimpleMenuButtons(
-                simpleModeH265Button,
-                simpleModeRawButton,
-                preferredVideo,
-                mode,
-                simpleFps30Button,
-                simpleFps45Button,
-                simpleFps60Button,
-                simpleFps90Button,
-                simpleFps120Button,
-                simpleFps144Button,
-                fps
+                new MainActivitySettingsPresenter.SimpleMenuButtonsInput()
+                        .setSimpleModePreferredButton(simpleModeH265Button)
+                        .setSimpleModeRawButton(simpleModeRawButton)
+                        .setPreferredVideo(preferredVideo)
+                        .setSimpleMode(mode)
+                        .setSimpleFps30Button(simpleFps30Button)
+                        .setSimpleFps45Button(simpleFps45Button)
+                        .setSimpleFps60Button(simpleFps60Button)
+                        .setSimpleFps90Button(simpleFps90Button)
+                        .setSimpleFps120Button(simpleFps120Button)
+                        .setSimpleFps144Button(simpleFps144Button)
+                        .setSimpleFps(fps)
         );
     }
 }

@@ -11,16 +11,66 @@ public final class MainActivityDaemonStatusCoordinator {
      * Plain data carrier for daemon status coordinator input.
      */
     public static final class Input {
-        boolean reachable;
-        boolean wasReachable;
-        String hostName;
-        String state;
-        String lastError;
-        boolean errorChanged;
-        String service;
-        JSONObject metrics;
-        boolean handshakeResolved;
-        boolean requiresTransportProbeNow;
+        private boolean reachable;
+        private boolean wasReachable;
+        private String hostName;
+        private String state;
+        private String lastError;
+        private boolean errorChanged;
+        private String service;
+        private JSONObject metrics;
+        private boolean handshakeResolved;
+        private boolean requiresTransportProbeNow;
+
+        Input setReachable(boolean reachable) {
+            this.reachable = reachable;
+            return this;
+        }
+
+        Input setWasReachable(boolean wasReachable) {
+            this.wasReachable = wasReachable;
+            return this;
+        }
+
+        Input setHostName(String hostName) {
+            this.hostName = hostName;
+            return this;
+        }
+
+        Input setState(String state) {
+            this.state = state;
+            return this;
+        }
+
+        Input setLastError(String lastError) {
+            this.lastError = lastError;
+            return this;
+        }
+
+        Input setErrorChanged(boolean errorChanged) {
+            this.errorChanged = errorChanged;
+            return this;
+        }
+
+        Input setService(String service) {
+            this.service = service;
+            return this;
+        }
+
+        Input setMetrics(JSONObject metrics) {
+            this.metrics = metrics;
+            return this;
+        }
+
+        Input setHandshakeResolved(boolean handshakeResolved) {
+            this.handshakeResolved = handshakeResolved;
+            return this;
+        }
+
+        Input setRequiresTransportProbeNow(boolean requiresTransportProbeNow) {
+            this.requiresTransportProbeNow = requiresTransportProbeNow;
+            return this;
+        }
     }
 
     /**
