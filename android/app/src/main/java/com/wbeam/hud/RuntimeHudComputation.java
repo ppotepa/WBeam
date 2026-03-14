@@ -83,7 +83,6 @@ public final class RuntimeHudComputation {
     }
 
     @SuppressWarnings("java:java:S107")
-    @SuppressWarnings("java:java:S3776")
     public static PressureState evaluatePressure(
             double targetFps,
             double presentFps,
@@ -99,54 +98,122 @@ public final class RuntimeHudComputation {
             long streamUptimeSec
     ) {
         boolean warmingUp = presentFps < 1.0 && streamUptimeSec < 5;
-        StringBuilder pressureReasonBuilder = new StringBuilder();
+        
+        String pressureReason = buildPressureReason(
+            warmingUp, targetFps, presentFps, 
+            decodeP95, renderP95, 
+            qT, qD, qR, qTMax, qDMax, qRMax
+        );
+        
+        boolean highPressure = evaluateHighPressure(
+            warmingUp, targetFps, presentFps,
+            decodeP95, renderP95,
+            qT, qD, qR, qTMax, qDMax, qRMax
+        );
+        
+        String runtimeTone = determineRuntimeTone(
+            warmingUp, highPressure, adaptiveAction,
+            targetFps, presentFps, decodeP95, renderP95,
+            qT, qD, qR, qTMax, qDMax, qRMax
+        );
+        
+        return new PressureState(warmingUp, highPressure, pressureReason, runtimeTone);
+    }
+
+    private static String buildPressureReason(
+            boolean warmingUp,
+            double targetFps,
+            double presentFps,
+            double decodeP95,
+            double renderP95,
+            int qT, int qD, int qR,
+            int qTMax, int qDMax, int qRMax
+    ) {
+        if (warmingUp) {
+            return "warmup";
+        }
+
+        StringBuilder reason = new StringBuilder();
+        double fpsFloor = targetFps * 0.90;
+        
+        if (presentFps > 0.0 && presentFps < fpsFloor) {
+            reason.append("fps<").append(String.format(Locale.US, "%.1f", fpsFloor));
+        }
+        if (decodeP95 > 12.0) {
+            appendPressureSegment(
+                    reason,
+                    "dec>12(" + String.format(Locale.US, "%.1f", decodeP95) + ")"
+            );
+        }
+        if (renderP95 > 7.0) {
+            appendPressureSegment(
+                    reason,
+                    "ren>7(" + String.format(Locale.US, "%.1f", renderP95) + ")"
+            );
+        }
+        if (qT >= qTMax) {
+            appendPressureSegment(reason, "qT=" + qT + "/" + qTMax);
+        }
+        if (qD >= qDMax) {
+            appendPressureSegment(reason, "qD=" + qD + "/" + qDMax);
+        }
+        if (qR >= qRMax) {
+            appendPressureSegment(reason, "qR=" + qR + "/" + qRMax);
+        }
+        
+        return reason.length() > 0 ? reason.toString() : "ok";
+    }
+
+    private static boolean evaluateHighPressure(
+            boolean warmingUp,
+            double targetFps,
+            double presentFps,
+            double decodeP95,
+            double renderP95,
+            int qT, int qD, int qR,
+            int qTMax, int qDMax, int qRMax
+    ) {
+        if (warmingUp) {
+            return false;
+        }
+        
         double fpsFloor = targetFps * 0.90;
         boolean fpsUnderPressure = presentFps > 0.0 && presentFps < fpsFloor;
         boolean timingPressure = decodeP95 > 12.0 || renderP95 > 7.0;
         boolean queuePressure = qT >= qTMax || qD >= qDMax || qR >= qRMax;
-        if (!warmingUp) {
-            if (fpsUnderPressure) {
-                pressureReasonBuilder.append("fps<").append(String.format(Locale.US, "%.1f", fpsFloor));
-            }
-            if (decodeP95 > 12.0) {
-                appendPressureSegment(
-                        pressureReasonBuilder,
-                        "dec>12(" + String.format(Locale.US, "%.1f", decodeP95) + ")"
-                );
-            }
-            if (renderP95 > 7.0) {
-                appendPressureSegment(
-                        pressureReasonBuilder,
-                        "ren>7(" + String.format(Locale.US, "%.1f", renderP95) + ")"
-                );
-            }
-            if (qT >= qTMax) {
-                appendPressureSegment(pressureReasonBuilder, "qT=" + qT + "/" + qTMax);
-            }
-            if (qD >= qDMax) {
-                appendPressureSegment(pressureReasonBuilder, "qD=" + qD + "/" + qDMax);
-            }
-            if (qR >= qRMax) {
-                appendPressureSegment(pressureReasonBuilder, "qR=" + qR + "/" + qRMax);
-            }
-        }
-        String pressureReason = pressureReasonBuilder.length() > 0
-                ? pressureReasonBuilder.toString()
-                : (warmingUp ? "warmup" : "ok");
+        
+        return fpsUnderPressure && (timingPressure || queuePressure);
+    }
 
-        boolean highPressure = !warmingUp && fpsUnderPressure && (timingPressure || queuePressure);
-        boolean mediumPressure = !warmingUp
-                && (adaptiveAction.startsWith("degrade")
+    private static String determineRuntimeTone(
+            boolean warmingUp,
+            boolean highPressure,
+            String adaptiveAction,
+            double targetFps,
+            double presentFps,
+            double decodeP95,
+            double renderP95,
+            int qT, int qD, int qR,
+            int qTMax, int qDMax, int qRMax
+    ) {
+        if (highPressure) {
+            return "risk";
+        }
+        
+        if (warmingUp) {
+            return "warn";
+        }
+        
+        double fpsFloor = targetFps * 0.90;
+        boolean fpsUnderPressure = presentFps > 0.0 && presentFps < fpsFloor;
+        boolean timingPressure = decodeP95 > 12.0 || renderP95 > 7.0;
+        boolean queuePressure = qT >= qTMax || qD >= qDMax || qR >= qRMax;
+        boolean mediumPressure = adaptiveAction.startsWith("degrade")
                 || fpsUnderPressure
                 || timingPressure
-                || queuePressure);
-        String runtimeTone = "ok";
-        if (highPressure) {
-            runtimeTone = "risk";
-        } else if (warmingUp || mediumPressure) {
-            runtimeTone = "warn";
-        }
-        return new PressureState(warmingUp, highPressure, pressureReason, runtimeTone);
+                || queuePressure;
+        
+        return mediumPressure ? "warn" : "ok";
     }
 
     public static DropRateResult computeDropRatePerSec(
