@@ -431,7 +431,6 @@ public class MainActivity extends AppCompatActivity {
                                 .setRequiresTransportProbeNowProvider(
                                         this::requiresTransportProbeNow
                                 )
-                                .setProbeStarter(this::maybeStartTransportProbeNow)
                                 .setHostConnectedNotifier(this::notifyConnectedHost)
                                 .setLineLogger(this::appendLiveLog)
                                 .setStopLiveViewTask(this::stopLiveView)
@@ -440,7 +439,7 @@ public class MainActivity extends AppCompatActivity {
                                 .setPerfHudSink(this::updatePerfHud)
                 );
 
-        MainDaemonRuntimeCoordinator.onStatusUpdate(input, context);
+        MainDaemonRuntimeCoordinator.onStatusUpdate(input, context, this::maybeStartTransportProbeNow);
     }
 
     private void handleDaemonOffline(boolean wasReachable, Exception e) {
@@ -802,8 +801,8 @@ public class MainActivity extends AppCompatActivity {
                         .setDefaultBitrateMbps(DEFAULT_BITRATE_MBPS)
                         .setCursorOverlayController(cursorOverlayController)
                         .setSimpleMenuState(simpleMenuState)
-                        .setEnforceCursorPolicy(() -> enforceCursorOverlayPolicy(false))
-                        .setRefreshHandler(this::refreshSettingsUi)
+                        .setRefreshHandler(this::refreshSettingsUi),
+                () -> enforceCursorOverlayPolicy(false)
         );
         intraOnlyEnabled = false;
     }

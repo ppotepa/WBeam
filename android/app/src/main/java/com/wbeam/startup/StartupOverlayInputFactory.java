@@ -111,7 +111,6 @@ public final class StartupOverlayInputFactory {
         input.setProbeInfo(state.probeInfo);
         input.setApiImpl(state.apiImpl);
         input.setApiBase(state.apiBase);
-        input.setApiHost(state.apiHost);
         input.setStreamHost(state.streamHost);
         input.setStreamPort(state.streamPort);
         input.setAppBuildRevision(state.appBuildRevision);

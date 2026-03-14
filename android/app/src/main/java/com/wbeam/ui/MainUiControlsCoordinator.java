@@ -29,7 +29,6 @@ public final class MainUiControlsCoordinator {
         private int defaultBitrateMbps;
         private CursorOverlayController cursorOverlayController;
         private MainActivitySimpleMenuCoordinator.State simpleMenuState;
-        private Runnable enforceCursorPolicy;
         private MainActivitySettingsInitializerHooksFactory.SettingsRefreshHandler refreshHandler;
 
         public LoadSavedSettingsRequest setProfileSpinner(Spinner profileSpinner) {
@@ -118,11 +117,6 @@ public final class MainUiControlsCoordinator {
                 MainActivitySimpleMenuCoordinator.State simpleMenuState
         ) {
             this.simpleMenuState = simpleMenuState;
-            return this;
-        }
-
-        public LoadSavedSettingsRequest setEnforceCursorPolicy(Runnable enforceCursorPolicy) {
-            this.enforceCursorPolicy = enforceCursorPolicy;
             return this;
         }
 
@@ -395,7 +389,10 @@ public final class MainUiControlsCoordinator {
     private MainUiControlsCoordinator() {
     }
 
-    public static void loadSavedSettings(LoadSavedSettingsRequest request) {
+    public static void loadSavedSettings(
+            LoadSavedSettingsRequest request,
+            Runnable enforceCursorPolicy
+    ) {
         MainActivitySettingsInitializer.loadDefaults(
                 request.profileSpinner,
                 request.encoderSpinner,
@@ -415,7 +412,7 @@ public final class MainUiControlsCoordinator {
                 request.cursorOverlayController,
                 request.simpleMenuState,
                 MainActivitySettingsInitializerHooksFactory.create(
-                        persist -> request.enforceCursorPolicy.run(),
+                        persist -> enforceCursorPolicy.run(),
                         request.refreshHandler
                 )
         );

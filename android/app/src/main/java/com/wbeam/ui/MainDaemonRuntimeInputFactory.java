@@ -11,7 +11,6 @@ public final class MainDaemonRuntimeInputFactory {
         private MainDaemonState daemon;
         private MainUiState uiState;
         private MainDaemonRuntimeCoordinator.BoolProvider requiresTransportProbeNowProvider;
-        private MainDaemonRuntimeCoordinator.ProbeStarter probeStarter;
         private MainDaemonRuntimeCoordinator.HostConnectedNotifier hostConnectedNotifier;
         private MainDaemonRuntimeCoordinator.LineLogger lineLogger;
         private MainDaemonRuntimeCoordinator.UiTask stopLiveViewTask;
@@ -33,13 +32,6 @@ public final class MainDaemonRuntimeInputFactory {
                 MainDaemonRuntimeCoordinator.BoolProvider requiresTransportProbeNowProvider
         ) {
             this.requiresTransportProbeNowProvider = requiresTransportProbeNowProvider;
-            return this;
-        }
-
-        public StatusContextArgs setProbeStarter(
-                MainDaemonRuntimeCoordinator.ProbeStarter probeStarter
-        ) {
-            this.probeStarter = probeStarter;
             return this;
         }
 
@@ -210,7 +202,6 @@ public final class MainDaemonRuntimeInputFactory {
                 .setDaemon(args.daemon)
                 .setUiState(args.uiState)
                 .setRequiresTransportProbeNowProvider(args.requiresTransportProbeNowProvider)
-                .setProbeStarter(args.probeStarter)
                 .setHostConnectedNotifier(args.hostConnectedNotifier)
                 .setLineLogger(args.lineLogger)
                 .setStopLiveViewTask(args.stopLiveViewTask)

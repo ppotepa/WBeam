@@ -121,7 +121,6 @@ public final class MainDaemonRuntimeCoordinator {
         private MainDaemonState daemon;
         private MainUiState uiState;
         private BoolProvider requiresTransportProbeNowProvider;
-        private ProbeStarter probeStarter;
         private HostConnectedNotifier hostConnectedNotifier;
         private LineLogger lineLogger;
         private UiTask stopLiveViewTask;
@@ -143,11 +142,6 @@ public final class MainDaemonRuntimeCoordinator {
                 BoolProvider requiresTransportProbeNowProvider
         ) {
             this.requiresTransportProbeNowProvider = requiresTransportProbeNowProvider;
-            return this;
-        }
-
-        StatusContext setProbeStarter(ProbeStarter probeStarter) {
-            this.probeStarter = probeStarter;
             return this;
         }
 
@@ -272,7 +266,11 @@ public final class MainDaemonRuntimeCoordinator {
     private MainDaemonRuntimeCoordinator() {
     }
 
-    public static void onStatusUpdate(StatusInput input, StatusContext context) {
+    public static void onStatusUpdate(
+            StatusInput input,
+            StatusContext context,
+            ProbeStarter probeStarter
+    ) {
         context.daemon.applySnapshot(
                 input.reachable,
                 input.hostName,
@@ -285,7 +283,6 @@ public final class MainDaemonRuntimeCoordinator {
         );
         MainActivityDaemonStatusCoordinator.Input daemonInput =
                 new MainActivityDaemonStatusCoordinator.Input()
-                        .setReachable(input.reachable)
                         .setWasReachable(input.wasReachable)
                         .setHostName(input.hostName)
                         .setState(input.state)
@@ -301,7 +298,7 @@ public final class MainDaemonRuntimeCoordinator {
         MainActivityDaemonStatusCoordinator.Output output =
                 MainActivityDaemonStatusCoordinator.process(
                         daemonInput,
-                        () -> context.probeStarter.start(
+                        () -> probeStarter.start(
                                 context.requiresTransportProbeNowProvider.get()
                         ),
                         StatusTransitionHooksFactory.create(

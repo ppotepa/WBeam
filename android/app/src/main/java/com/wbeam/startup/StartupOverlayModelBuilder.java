@@ -111,10 +111,6 @@ public final class StartupOverlayModelBuilder {
             return this;
         }
 
-        Input setApiHost(String ignoredApiHost) {
-            return this;
-        }
-
         Input setStreamHost(String streamHost) {
             this.streamHost = streamHost;
             return this;
@@ -414,47 +410,15 @@ public final class StartupOverlayModelBuilder {
             long elapsedMs
     ) {
         if (step2State != Model.SS_OK) {
-            return new StepInfo(
-                    Model.SS_PENDING,
-                    step2State == Model.SS_ERROR ? "blocked by build mismatch" : "waiting for handshake");
+            return pendingStep3(step2State);
         }
-        if (in.requiresTransportProbe && !in.probeOk) {
-            String detail = in.probeInFlight
-                    ? "testing transport I/O\u2026 " + safe(in.probeInfo)
-                    : "transport test retrying\u2026 " + safe(in.probeInfo);
-            return new StepInfo(Model.SS_ACTIVE, detail);
+        if (isProbePending(in)) {
+            return probePendingStep3(in);
         }
         if (diagnostics.streamFlowing) {
-            return new StepInfo(Model.SS_OK,
-                    "live" + BULLET + "fps=" + String.format(Locale.US, "%.0f", in.latestPresentFps)
-                            + BULLET + safe(in.effectiveDaemonState).toLowerCase(Locale.US));
+            return liveStep3(in);
         }
-        boolean hasWaited = elapsedMs > 5_000L;
-        if (diagnostics.daemonStartFailure && hasWaited) {
-            return new StepInfo(Model.SS_ERROR,
-                    "host stream start failed" + BULLET + safe(in.daemonErrCompact));
-        }
-        if (diagnostics.streamReconnects > 0) {
-            if (hasWaited) {
-                return new StepInfo(Model.SS_ACTIVE,
-                        ATTEMPT_PREFIX + diagnostics.streamReconnects
-                                + BULLET + diagnostics.streamAddr + ":" + in.streamPort
-                                + " unreachable" + BULLET + diagnostics.streamFixHint
-                                + (safe(in.daemonErrCompact).isEmpty() ? "" : BULLET + "host error: "
-                                        + safe(in.daemonErrCompact)));
-            }
-            return new StepInfo(Model.SS_ACTIVE,
-                    "reconnecting" + BULLET + ATTEMPT_PREFIX + diagnostics.streamReconnects
-                            + BULLET + "awaiting frames\u2026");
-        }
-        if (hasWaited) {
-            return new StepInfo(Model.SS_ACTIVE,
-                    "connecting to " + diagnostics.streamAddr + ":" + in.streamPort
-                            + BULLET + diagnostics.streamFixHint
-                            + (safe(in.daemonErrCompact).isEmpty() ? "" : BULLET + "host error: "
-                                    + safe(in.daemonErrCompact)));
-        }
-        return new StepInfo(Model.SS_ACTIVE, "decoder started" + BULLET + "awaiting frames\u2026");
+        return connectingStep3(in, diagnostics, elapsedMs);
     }
 
     private static String buildSubtitle(
@@ -469,33 +433,120 @@ public final class StartupOverlayModelBuilder {
         int step2 = step2Info.state;
         int step3 = step3Info.state;
         if (step1 != Model.SS_OK) {
-            if (progress.elapsedMs < 2000L && progress.updatedControlRetryCount == 0) {
-                return "starting up\u2026";
-            }
-            if (progress.updatedControlRetryCount == 0) {
-                return "awaiting control link" + BULLET + "start desktop service if needed\u2026";
-            }
-            return "retrying control link" + BULLET + ATTEMPT_PREFIX + progress.updatedControlRetryCount
-                    + BULLET + "check desktop service\u2026";
+            return buildControlSubtitle(progress);
         }
         if (step2 != Model.SS_OK) {
-            return (step2 == Model.SS_ERROR && buildMismatch)
-                    ? "build mismatch" + BULLET + "redeploy APK or rebuild host"
-                    : "handshake in progress\u2026";
+            return buildHandshakeSubtitle(step2, buildMismatch);
         }
         if (step3 != Model.SS_OK) {
-            if (step3 == Model.SS_ERROR && diagnostics.daemonStartFailure) {
-                return "host stream start failed" + BULLET + "check host logs";
-            }
-            if (diagnostics.streamReconnects > 0) {
-                return "stream reconnecting" + BULLET + ATTEMPT_PREFIX + diagnostics.streamReconnects + "\u2026";
-            }
-            if (progress.elapsedMs > 5_000L) {
-                return "stream unreachable" + BULLET + "retrying\u2026";
-            }
-            return "waiting for video frames\u2026";
+            return buildStreamSubtitle(step3, diagnostics, progress);
         }
         return "all systems ready";
+    }
+
+    private static StepInfo pendingStep3(int step2State) {
+        return new StepInfo(
+                Model.SS_PENDING,
+                step2State == Model.SS_ERROR ? "blocked by build mismatch" : "waiting for handshake"
+        );
+    }
+
+    private static boolean isProbePending(Input in) {
+        return in.requiresTransportProbe && !in.probeOk;
+    }
+
+    private static StepInfo probePendingStep3(Input in) {
+        String detail = in.probeInFlight
+                ? "testing transport I/O\u2026 " + safe(in.probeInfo)
+                : "transport test retrying\u2026 " + safe(in.probeInfo);
+        return new StepInfo(Model.SS_ACTIVE, detail);
+    }
+
+    private static StepInfo liveStep3(Input in) {
+        return new StepInfo(
+                Model.SS_OK,
+                "live" + BULLET + "fps=" + String.format(Locale.US, "%.0f", in.latestPresentFps)
+                        + BULLET + safe(in.effectiveDaemonState).toLowerCase(Locale.US)
+        );
+    }
+
+    private static StepInfo connectingStep3(Input in, StreamDiagnostics diagnostics, long elapsedMs) {
+        boolean hasWaited = elapsedMs > 5_000L;
+        if (diagnostics.daemonStartFailure && hasWaited) {
+            return new StepInfo(Model.SS_ERROR, "host stream start failed" + BULLET + safe(in.daemonErrCompact));
+        }
+        if (diagnostics.streamReconnects > 0) {
+            return reconnectingStep3(in, diagnostics, hasWaited);
+        }
+        if (hasWaited) {
+            return new StepInfo(
+                    Model.SS_ACTIVE,
+                    "connecting to " + diagnostics.streamAddr + ":" + in.streamPort
+                            + BULLET + diagnostics.streamFixHint
+                            + hostErrorSuffix(in.daemonErrCompact)
+            );
+        }
+        return new StepInfo(Model.SS_ACTIVE, "decoder started" + BULLET + "awaiting frames\u2026");
+    }
+
+    private static StepInfo reconnectingStep3(
+            Input in,
+            StreamDiagnostics diagnostics,
+            boolean hasWaited
+    ) {
+        if (hasWaited) {
+            return new StepInfo(
+                    Model.SS_ACTIVE,
+                    ATTEMPT_PREFIX + diagnostics.streamReconnects
+                            + BULLET + diagnostics.streamAddr + ":" + in.streamPort
+                            + " unreachable" + BULLET + diagnostics.streamFixHint
+                            + hostErrorSuffix(in.daemonErrCompact)
+            );
+        }
+        return new StepInfo(
+                Model.SS_ACTIVE,
+                "reconnecting" + BULLET + ATTEMPT_PREFIX + diagnostics.streamReconnects
+                        + BULLET + "awaiting frames\u2026"
+        );
+    }
+
+    private static String hostErrorSuffix(String daemonErrCompact) {
+        String error = safe(daemonErrCompact);
+        return error.isEmpty() ? "" : BULLET + "host error: " + error;
+    }
+
+    private static String buildControlSubtitle(StartupProgress progress) {
+        if (progress.elapsedMs < 2000L && progress.updatedControlRetryCount == 0) {
+            return "starting up\u2026";
+        }
+        if (progress.updatedControlRetryCount == 0) {
+            return "awaiting control link" + BULLET + "start desktop service if needed\u2026";
+        }
+        return "retrying control link" + BULLET + ATTEMPT_PREFIX + progress.updatedControlRetryCount
+                + BULLET + "check desktop service\u2026";
+    }
+
+    private static String buildHandshakeSubtitle(int step2State, boolean buildMismatch) {
+        return (step2State == Model.SS_ERROR && buildMismatch)
+                ? "build mismatch" + BULLET + "redeploy APK or rebuild host"
+                : "handshake in progress\u2026";
+    }
+
+    private static String buildStreamSubtitle(
+            int step3State,
+            StreamDiagnostics diagnostics,
+            StartupProgress progress
+    ) {
+        if (step3State == Model.SS_ERROR && diagnostics.daemonStartFailure) {
+            return "host stream start failed" + BULLET + "check host logs";
+        }
+        if (diagnostics.streamReconnects > 0) {
+            return "stream reconnecting" + BULLET + ATTEMPT_PREFIX + diagnostics.streamReconnects + "\u2026";
+        }
+        if (progress.elapsedMs > 5_000L) {
+            return "stream unreachable" + BULLET + "retrying\u2026";
+        }
+        return "waiting for video frames\u2026";
     }
 
     private static final class StepInfo {

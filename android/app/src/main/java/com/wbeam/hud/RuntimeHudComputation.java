@@ -168,72 +168,131 @@ public final class RuntimeHudComputation {
     }
 
     public static final class RuntimeDebugSnapshotInput {
-        public final String daemonStateUi;
-        public final long daemonRunId;
-        public final long daemonUptimeSec;
-        public final long streamUptimeSec;
-        public final long frameInHost;
-        public final long frameOutHost;
-        public final double targetFps;
-        public final double presentFps;
-        public final double frametimeP95;
-        public final double decodeP95;
-        public final double renderP95;
-        public final double e2eP95;
-        public final QueueSnapshot queues;
-        public final int adaptiveLevel;
-        public final String adaptiveAction;
-        public final long drops;
-        public final long bpHigh;
-        public final long bpRecover;
-        public final PressureState pressureState;
-        public final String reason;
-        public final String daemonLastError;
+        public String daemonStateUi;
+        public long daemonRunId;
+        public long daemonUptimeSec;
+        public long streamUptimeSec;
+        public long frameInHost;
+        public long frameOutHost;
+        public double targetFps;
+        public double presentFps;
+        public double frametimeP95;
+        public double decodeP95;
+        public double renderP95;
+        public double e2eP95;
+        public QueueSnapshot queues;
+        public int adaptiveLevel;
+        public String adaptiveAction;
+        public long drops;
+        public long bpHigh;
+        public long bpRecover;
+        public PressureState pressureState;
+        public String reason;
+        public String daemonLastError;
 
-        RuntimeDebugSnapshotInput(
-                String daemonStateUi,
-                long daemonRunId,
-                long daemonUptimeSec,
-                long streamUptimeSec,
-                long frameInHost,
-                long frameOutHost,
-                double targetFps,
-                double presentFps,
-                double frametimeP95,
-                double decodeP95,
-                double renderP95,
-                double e2eP95,
-                QueueSnapshot queues,
-                int adaptiveLevel,
-                String adaptiveAction,
-                long drops,
-                long bpHigh,
-                long bpRecover,
-                PressureState pressureState,
-                String reason,
-                String daemonLastError
-        ) {
+        RuntimeDebugSnapshotInput setDaemonStateUi(String daemonStateUi) {
             this.daemonStateUi = daemonStateUi;
+            return this;
+        }
+
+        RuntimeDebugSnapshotInput setDaemonRunId(long daemonRunId) {
             this.daemonRunId = daemonRunId;
+            return this;
+        }
+
+        RuntimeDebugSnapshotInput setDaemonUptimeSec(long daemonUptimeSec) {
             this.daemonUptimeSec = daemonUptimeSec;
+            return this;
+        }
+
+        RuntimeDebugSnapshotInput setStreamUptimeSec(long streamUptimeSec) {
             this.streamUptimeSec = streamUptimeSec;
+            return this;
+        }
+
+        RuntimeDebugSnapshotInput setFrameInHost(long frameInHost) {
             this.frameInHost = frameInHost;
+            return this;
+        }
+
+        RuntimeDebugSnapshotInput setFrameOutHost(long frameOutHost) {
             this.frameOutHost = frameOutHost;
+            return this;
+        }
+
+        RuntimeDebugSnapshotInput setTargetFps(double targetFps) {
             this.targetFps = targetFps;
+            return this;
+        }
+
+        RuntimeDebugSnapshotInput setPresentFps(double presentFps) {
             this.presentFps = presentFps;
+            return this;
+        }
+
+        RuntimeDebugSnapshotInput setFrametimeP95(double frametimeP95) {
             this.frametimeP95 = frametimeP95;
+            return this;
+        }
+
+        RuntimeDebugSnapshotInput setDecodeP95(double decodeP95) {
             this.decodeP95 = decodeP95;
+            return this;
+        }
+
+        RuntimeDebugSnapshotInput setRenderP95(double renderP95) {
             this.renderP95 = renderP95;
+            return this;
+        }
+
+        RuntimeDebugSnapshotInput setE2eP95(double e2eP95) {
             this.e2eP95 = e2eP95;
+            return this;
+        }
+
+        RuntimeDebugSnapshotInput setQueues(QueueSnapshot queues) {
             this.queues = queues;
+            return this;
+        }
+
+        RuntimeDebugSnapshotInput setAdaptiveLevel(int adaptiveLevel) {
             this.adaptiveLevel = adaptiveLevel;
+            return this;
+        }
+
+        RuntimeDebugSnapshotInput setAdaptiveAction(String adaptiveAction) {
             this.adaptiveAction = adaptiveAction;
+            return this;
+        }
+
+        RuntimeDebugSnapshotInput setDrops(long drops) {
             this.drops = drops;
+            return this;
+        }
+
+        RuntimeDebugSnapshotInput setBpHigh(long bpHigh) {
             this.bpHigh = bpHigh;
+            return this;
+        }
+
+        RuntimeDebugSnapshotInput setBpRecover(long bpRecover) {
             this.bpRecover = bpRecover;
+            return this;
+        }
+
+        RuntimeDebugSnapshotInput setPressureState(PressureState pressureState) {
             this.pressureState = pressureState;
+            return this;
+        }
+
+        RuntimeDebugSnapshotInput setReason(String reason) {
             this.reason = reason;
+            return this;
+        }
+
+        RuntimeDebugSnapshotInput setDaemonLastError(String daemonLastError) {
             this.daemonLastError = daemonLastError;
+            return this;
         }
     }
 
@@ -504,29 +563,30 @@ public final class RuntimeHudComputation {
             String reason,
             String daemonLastError
     ) {
-        return buildRuntimeDebugSnapshot(new RuntimeDebugSnapshotInput(
-                daemonStateUi,
-                daemonRunId,
-                daemonUptimeSec,
-                streamUptimeSec,
-                frameInHost,
-                frameOutHost,
-                targetFps,
-                presentFps,
-                frametimeP95,
-                decodeP95,
-                renderP95,
-                e2eP95,
-                queueSnapshot(qT, qD, qR, qTMax, qDMax, qRMax),
-                adaptiveLevel,
-                adaptiveAction,
-                drops,
-                bpHigh,
-                bpRecover,
-                pressureState,
-                reason,
-                daemonLastError
-        ));
+        return buildRuntimeDebugSnapshot(
+                new RuntimeDebugSnapshotInput()
+                        .setDaemonStateUi(daemonStateUi)
+                        .setDaemonRunId(daemonRunId)
+                        .setDaemonUptimeSec(daemonUptimeSec)
+                        .setStreamUptimeSec(streamUptimeSec)
+                        .setFrameInHost(frameInHost)
+                        .setFrameOutHost(frameOutHost)
+                        .setTargetFps(targetFps)
+                        .setPresentFps(presentFps)
+                        .setFrametimeP95(frametimeP95)
+                        .setDecodeP95(decodeP95)
+                        .setRenderP95(renderP95)
+                        .setE2eP95(e2eP95)
+                        .setQueues(queueSnapshot(qT, qD, qR, qTMax, qDMax, qRMax))
+                        .setAdaptiveLevel(adaptiveLevel)
+                        .setAdaptiveAction(adaptiveAction)
+                        .setDrops(drops)
+                        .setBpHigh(bpHigh)
+                        .setBpRecover(bpRecover)
+                        .setPressureState(pressureState)
+                        .setReason(reason)
+                        .setDaemonLastError(daemonLastError)
+        );
     }
 
     public static String buildRuntimeDebugSnapshot(RuntimeDebugSnapshotInput input) {
