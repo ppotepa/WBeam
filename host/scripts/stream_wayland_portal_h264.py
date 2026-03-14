@@ -64,6 +64,7 @@ FRAME_STRUCT = struct.Struct(">4sBBIQI")  # magic(4s) ver flags seq ts_us len = 
 HELLO_MAGIC = b"WBS1"
 HELLO_VERSION = 0x01
 HELLO_STRUCT = struct.Struct(">4sBBHQ")  # magic ver flags len session_id = 16 bytes
+OVERLAY_SECTION_KEYS = ("MAIN", "TL", "TR", "BL", "BR")
 
 STATE = {
     "main_loop": None,
@@ -1036,7 +1037,7 @@ def main():
 def _parse_overlay_sections(raw_text: str) -> dict[str, str]:
     """Parse overlay text into sections (MAIN, TL, TR, BL, BR)."""
     text = raw_text.replace("\r\n", "\n").replace("\r", "\n").strip()
-    out = {"MAIN": ""}
+    out = dict.fromkeys(OVERLAY_SECTION_KEYS, "")
     if not text:
         return out
 
@@ -1065,7 +1066,7 @@ def _parse_overlay_sections(raw_text: str) -> dict[str, str]:
 
 def _build_sectioned_output(buckets: dict) -> dict[str, str]:
     """Build output from parsed sections, preferring MAIN block."""
-    out = {"MAIN": ""}
+    out = dict.fromkeys(OVERLAY_SECTION_KEYS, "")
     main = "\n".join(buckets["MAIN"]).strip()
     if main:
         out["MAIN"] = main

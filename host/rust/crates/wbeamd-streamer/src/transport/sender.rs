@@ -212,6 +212,52 @@ fn cache_keyframe(last_keyframe: &Arc<Mutex<Option<CachedKeyframe>>>, frame: &En
     }
 }
 
+fn enqueue_ultra_frame(
+    tx: &mpsc::SyncSender<EncodedFrame>,
+    frame: EncodedFrame,
+    producer_depth: &Arc<AtomicU64>,
+    producer_peak: &Arc<AtomicU64>,
+    producer_drops: &Arc<AtomicU64>,
+) -> bool {
+    match tx.try_send(frame) {
+        Ok(()) => {
+            update_queue_depth(producer_depth, producer_peak);
+            true
+        }
+        Err(TrySendError::Full(_)) => {
+            producer_drops.fetch_add(1, Ordering::Relaxed);
+            true
+        }
+        Err(TrySendError::Disconnected(_)) => false,
+    }
+}
+
+fn enqueue_blocking_frame(
+    tx: &mpsc::SyncSender<EncodedFrame>,
+    frame: EncodedFrame,
+    producer_stop: &Arc<AtomicBool>,
+    producer_depth: &Arc<AtomicU64>,
+    producer_peak: &Arc<AtomicU64>,
+) -> bool {
+    match tx.try_send(frame) {
+        Ok(()) => {
+            update_queue_depth(producer_depth, producer_peak);
+            true
+        }
+        Err(TrySendError::Full(back)) => {
+            if producer_stop.load(Ordering::Acquire) {
+                return true;
+            }
+            if tx.send(back).is_err() {
+                return false;
+            }
+            update_queue_depth(producer_depth, producer_peak);
+            true
+        }
+        Err(TrySendError::Disconnected(_)) => false,
+    }
+}
+
 fn enqueue_frame(
     tx: &mpsc::SyncSender<EncodedFrame>,
     frame: EncodedFrame,
@@ -222,40 +268,20 @@ fn enqueue_frame(
     producer_drops: &Arc<AtomicU64>,
 ) -> bool {
     match stream_mode {
-        StreamMode::Ultra => match tx.try_send(frame) {
-            Ok(()) => {
-                update_queue_depth(producer_depth, producer_peak);
-                true
-            }
-            Err(TrySendError::Full(_)) => {
-                producer_drops.fetch_add(1, Ordering::Relaxed);
-                true
-            }
-            Err(TrySendError::Disconnected(_)) => false,
-        },
-        StreamMode::Stable | StreamMode::Quality => {
-            let mut pending = Some(frame);
-            while let Some(to_send) = pending.take() {
-                match tx.try_send(to_send) {
-                    Ok(()) => {
-                        update_queue_depth(producer_depth, producer_peak);
-                        return true;
-                    }
-                    Err(TrySendError::Full(back)) => {
-                        if producer_stop.load(Ordering::Acquire) {
-                            return true;
-                        }
-                        if tx.send(back).is_err() {
-                            return false;
-                        }
-                        update_queue_depth(producer_depth, producer_peak);
-                        return true;
-                    }
-                    Err(TrySendError::Disconnected(_)) => return false,
-                }
-            }
-            true
-        }
+        StreamMode::Ultra => enqueue_ultra_frame(
+            tx,
+            frame,
+            producer_depth,
+            producer_peak,
+            producer_drops,
+        ),
+        StreamMode::Stable | StreamMode::Quality => enqueue_blocking_frame(
+            tx,
+            frame,
+            producer_stop,
+            producer_depth,
+            producer_peak,
+        ),
     }
 }
 
@@ -459,6 +485,157 @@ fn send_frame(
 
 // ── Sender thread ─────────────────────────────────────────────────────────────
 
+fn log_ultra_reconnect_drops(
+    stream_mode: StreamMode,
+    rx: &mpsc::Receiver<EncodedFrame>,
+    queue_depth: &Arc<AtomicU64>,
+) {
+    if !matches!(stream_mode, StreamMode::Ultra) {
+        return;
+    }
+    let drained = drain_stale_frames(rx, queue_depth);
+    if drained > 0 {
+        println!("[wbeam-framed] ultra reconnect: dropped stale queued frames={drained}");
+    }
+}
+
+fn run_client_session(
+    conn: &mut TcpStream,
+    rx: &mpsc::Receiver<EncodedFrame>,
+    pull_timeout_ms: u64,
+    last_keyframe: &Arc<Mutex<Option<CachedKeyframe>>>,
+    stop: &Arc<AtomicBool>,
+    fps_counter: &Arc<AtomicU64>,
+    queue_drops: &Arc<AtomicU64>,
+    queue_depth: &Arc<AtomicU64>,
+    queue_peak: &Arc<AtomicU64>,
+    stream_mode: StreamMode,
+    disconnect_on_timeout: bool,
+    codec_flags: u8,
+    seq: &mut u32,
+) {
+    let session_id: u64 = rand::thread_rng().gen();
+    let hello = build_hello(session_id, codec_flags);
+    let _ = conn.write_all(&hello);
+    println!("[wbeam-framed] session_id=0x{session_id:016x}");
+
+    log_ultra_reconnect_drops(stream_mode, rx, queue_depth);
+    send_cached_keyframe(conn, last_keyframe, seq);
+    let mut stats = SenderStats::new();
+
+    loop {
+        if stop.load(Ordering::Acquire) {
+            break;
+        }
+
+        let frame = match next_frame(
+            rx,
+            pull_timeout_ms,
+            queue_depth,
+            &mut stats,
+            fps_counter,
+            queue_drops,
+            queue_peak,
+            *seq,
+        ) {
+            NextFrame::Frame(frame) => frame,
+            NextFrame::Continue => continue,
+            NextFrame::Break => break,
+        };
+
+        match send_frame(
+            conn,
+            &frame,
+            seq,
+            stream_mode,
+            disconnect_on_timeout,
+            &mut stats,
+        ) {
+            SendOutcome::Reconnect => break,
+            SendOutcome::Continue | SendOutcome::Dropped | SendOutcome::Sent => {
+                stats.report_if_due(
+                    fps_counter,
+                    queue_drops,
+                    queue_depth,
+                    queue_peak,
+                    *seq,
+                );
+            }
+        }
+    }
+}
+
+fn run_sender(
+    appsink: gst_app::AppSink,
+    port: u16,
+    fps: u32,
+    cfg: ResolvedConfig,
+    stream_mode: StreamMode,
+    stop: Arc<AtomicBool>,
+    fps_counter: Arc<AtomicU64>,
+    codec_flags: u8,
+) {
+    let queue_capacity = sender_queue_capacity(stream_mode);
+    let (tx, rx) = mpsc::sync_channel::<EncodedFrame>(queue_capacity);
+    let last_keyframe = Arc::new(Mutex::new(None::<CachedKeyframe>));
+    let queue_drops = Arc::new(AtomicU64::new(0));
+    let queue_depth = Arc::new(AtomicU64::new(0));
+    let queue_peak = Arc::new(AtomicU64::new(0));
+
+    let listener =
+        TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port))).expect("bind tcp listener");
+    listener.set_nonblocking(true).ok();
+    println!("[wbeam-framed] listening on :{port}");
+
+    let fps = fps.max(1);
+    let is_png_stream = (codec_flags & HELLO_CODEC_PNG) != 0;
+    let frame_budget_ms = ((1_000u64 + (fps as u64 - 1)) / fps as u64).max(1);
+    let pull_timeout_ms = pull_timeout_ms(&cfg, stream_mode, frame_budget_ms, is_png_stream);
+    let pull_timeout = Some(gst::ClockTime::from_mseconds(pull_timeout_ms));
+    let disconnect_on_timeout = cfg.disconnect_on_timeout;
+    let producer_handle = spawn_frame_producer(
+        appsink,
+        pull_timeout,
+        codec_flags,
+        stream_mode,
+        stop.clone(),
+        tx,
+        last_keyframe.clone(),
+        queue_drops.clone(),
+        queue_depth.clone(),
+        queue_peak.clone(),
+    );
+
+    let mut seq: u32 = 0;
+    while !stop.load(Ordering::Acquire) {
+        let mut conn =
+            match accept_client(&listener, &cfg, stream_mode, frame_budget_ms, is_png_stream) {
+                AcceptOutcome::Connected(conn) => conn,
+                AcceptOutcome::Retry => continue,
+                AcceptOutcome::Exit => break,
+            };
+
+        run_client_session(
+            &mut conn,
+            &rx,
+            pull_timeout_ms,
+            &last_keyframe,
+            &stop,
+            &fps_counter,
+            &queue_drops,
+            &queue_depth,
+            &queue_peak,
+            stream_mode,
+            disconnect_on_timeout,
+            codec_flags,
+            &mut seq,
+        );
+    }
+
+    stop.store(true, Ordering::Release);
+    let _ = producer_handle.join();
+}
+
 /// Spawn the sender thread that:
 /// 1. Listens on `port` for a single Android client.
 /// 2. Sends HELLO on connection.
@@ -475,107 +652,5 @@ pub fn spawn_sender(
     fps_counter: Arc<AtomicU64>,
     codec_flags: u8,
 ) -> thread::JoinHandle<()> {
-    thread::spawn(move || {
-        let queue_capacity = sender_queue_capacity(stream_mode);
-        let (tx, rx) = mpsc::sync_channel::<EncodedFrame>(queue_capacity);
-        let last_keyframe = Arc::new(Mutex::new(None::<CachedKeyframe>));
-        let queue_drops = Arc::new(AtomicU64::new(0));
-        let queue_depth = Arc::new(AtomicU64::new(0));
-        let queue_peak = Arc::new(AtomicU64::new(0));
-
-        let listener =
-            TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port))).expect("bind tcp listener");
-        listener.set_nonblocking(true).ok();
-        println!("[wbeam-framed] listening on :{port}");
-
-        let fps = fps.max(1);
-        let is_png_stream = (codec_flags & HELLO_CODEC_PNG) != 0;
-        let frame_budget_ms = ((1_000u64 + (fps as u64 - 1)) / fps as u64).max(1);
-        let pull_timeout_ms = pull_timeout_ms(&cfg, stream_mode, frame_budget_ms, is_png_stream);
-        let pull_timeout = Some(gst::ClockTime::from_mseconds(pull_timeout_ms));
-        let disconnect_on_timeout = cfg.disconnect_on_timeout;
-        let producer_handle = spawn_frame_producer(
-            appsink,
-            pull_timeout,
-            codec_flags,
-            stream_mode,
-            stop.clone(),
-            tx,
-            last_keyframe.clone(),
-            queue_drops.clone(),
-            queue_depth.clone(),
-            queue_peak.clone(),
-        );
-
-        let mut seq: u32 = 0;
-        while !stop.load(Ordering::Acquire) {
-            let mut conn =
-                match accept_client(&listener, &cfg, stream_mode, frame_budget_ms, is_png_stream) {
-                    AcceptOutcome::Connected(conn) => conn,
-                    AcceptOutcome::Retry => continue,
-                    AcceptOutcome::Exit => break,
-                };
-
-            let session_id: u64 = rand::thread_rng().gen();
-            let hello = build_hello(session_id, codec_flags);
-            let _ = conn.write_all(&hello);
-            println!("[wbeam-framed] session_id=0x{session_id:016x}");
-
-            if matches!(stream_mode, StreamMode::Ultra) {
-                let drained = drain_stale_frames(&rx, &queue_depth);
-                if drained > 0 {
-                    println!(
-                        "[wbeam-framed] ultra reconnect: dropped stale queued frames={drained}"
-                    );
-                }
-            }
-
-            send_cached_keyframe(&mut conn, &last_keyframe, &mut seq);
-            let mut stats = SenderStats::new();
-
-            loop {
-                if stop.load(Ordering::Acquire) {
-                    break;
-                }
-
-                let frame = match next_frame(
-                    &rx,
-                    pull_timeout_ms,
-                    &queue_depth,
-                    &mut stats,
-                    &fps_counter,
-                    &queue_drops,
-                    &queue_peak,
-                    seq,
-                ) {
-                    NextFrame::Frame(frame) => frame,
-                    NextFrame::Continue => continue,
-                    NextFrame::Break => break,
-                };
-
-                match send_frame(
-                    &mut conn,
-                    &frame,
-                    &mut seq,
-                    stream_mode,
-                    disconnect_on_timeout,
-                    &mut stats,
-                ) {
-                    SendOutcome::Reconnect => break,
-                    SendOutcome::Continue | SendOutcome::Dropped | SendOutcome::Sent => {
-                        stats.report_if_due(
-                            &fps_counter,
-                            &queue_drops,
-                            &queue_depth,
-                            &queue_peak,
-                            seq,
-                        );
-                    }
-                }
-            }
-        }
-
-        stop.store(true, Ordering::Release);
-        let _ = producer_handle.join();
-    })
+    thread::spawn(move || run_sender(appsink, port, fps, cfg, stream_mode, stop, fps_counter, codec_flags))
 }

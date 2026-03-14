@@ -80,7 +80,7 @@ public final class RuntimeHudWebPayloadBuilder {
         cards.append(HudRenderSupport.hudCard("RECV FPS", String.format(Locale.US, "%.1f", in.recvFps), ""));
         cards.append(HudRenderSupport.hudCard("DECODE FPS", String.format(Locale.US, "%.1f", in.decodeFps), ""));
         cards.append(HudRenderSupport.hudCard("LIVE MBPS", HudRenderSupport.fmtDoubleOrPlaceholder(in.liveMbps, "%.2f", "PENDING"), HudRenderSupport.hudToneClass(in.tone)));
-        cards.append(HudRenderSupport.hudCard("E2E p95", String.format(Locale.US, "%.1f ms", in.e2eP95), HudRenderSupport.hudToneClass(in.tone)));
+        cards.append(HudRenderSupport.hudCard("E2E p95", String.format(Locale.US, FMT_MS_P95, in.e2eP95), HudRenderSupport.hudToneClass(in.tone)));
         cards.append(HudRenderSupport.hudCard("Decode p95", String.format(Locale.US, FMT_MS_P95, in.decodeP95), ""));
         cards.append(HudRenderSupport.hudCard("Render p95", String.format(Locale.US, FMT_MS_P95, in.renderP95), ""));
         cards.append(HudRenderSupport.hudCard("Frame p95", String.format(Locale.US, FMT_MS_P95, in.frametimeP95), ""));

@@ -29,7 +29,6 @@ public final class StartupOverlayModelBuilder {
         private String probeInfo;
         private String apiImpl;
         private String apiBase;
-        private String apiHost;
         private String streamHost;
         private int streamPort;
         private String appBuildRevision;
@@ -112,8 +111,7 @@ public final class StartupOverlayModelBuilder {
             return this;
         }
 
-        Input setApiHost(String apiHost) {
-            this.apiHost = apiHost;
+        Input setApiHost(String ignoredApiHost) {
             return this;
         }
 
@@ -256,24 +254,13 @@ public final class StartupOverlayModelBuilder {
 
         StepInfo step1Info = determineStep1(in, progress.elapsedMs, progress.updatedControlRetryCount);
         StepInfo step2Info = determineStep2(in, step1Info.state);
-        StepInfo step3Info = determineStep3(
-                in,
-                step2Info.state,
-                diagnostics.streamFlowing,
-                diagnostics.daemonStartFailure,
-                diagnostics.streamAddr,
-                diagnostics.streamFixHint,
-                diagnostics.streamReconnects,
-                progress.elapsedMs
-        );
+        StepInfo step3Info = determineStep3(in, step2Info.state, diagnostics, progress.elapsedMs);
         String subtitle = buildSubtitle(
-                step1Info.state,
-                step2Info.state,
-                step3Info.state,
-                progress.elapsedMs,
-                progress.updatedControlRetryCount,
-                diagnostics.daemonStartFailure,
-                diagnostics.streamReconnects,
+                step1Info,
+                step2Info,
+                step3Info,
+                progress,
+                diagnostics,
                 in.buildMismatch
         );
 
@@ -423,11 +410,7 @@ public final class StartupOverlayModelBuilder {
     private static StepInfo determineStep3(
             Input in,
             int step2State,
-            boolean streamFlowing,
-            boolean daemonStartFailure,
-            String streamAddr,
-            String streamFixHint,
-            int streamReconnects,
+            StreamDiagnostics diagnostics,
             long elapsedMs
     ) {
         if (step2State != Model.SS_OK) {
@@ -441,32 +424,33 @@ public final class StartupOverlayModelBuilder {
                     : "transport test retrying\u2026 " + safe(in.probeInfo);
             return new StepInfo(Model.SS_ACTIVE, detail);
         }
-        if (streamFlowing) {
+        if (diagnostics.streamFlowing) {
             return new StepInfo(Model.SS_OK,
                     "live" + BULLET + "fps=" + String.format(Locale.US, "%.0f", in.latestPresentFps)
                             + BULLET + safe(in.effectiveDaemonState).toLowerCase(Locale.US));
         }
         boolean hasWaited = elapsedMs > 5_000L;
-        if (daemonStartFailure && hasWaited) {
+        if (diagnostics.daemonStartFailure && hasWaited) {
             return new StepInfo(Model.SS_ERROR,
                     "host stream start failed" + BULLET + safe(in.daemonErrCompact));
         }
-        if (streamReconnects > 0) {
+        if (diagnostics.streamReconnects > 0) {
             if (hasWaited) {
                 return new StepInfo(Model.SS_ACTIVE,
-                        ATTEMPT_PREFIX + streamReconnects
-                                + BULLET + streamAddr + ":" + in.streamPort
-                                + " unreachable" + BULLET + streamFixHint
+                        ATTEMPT_PREFIX + diagnostics.streamReconnects
+                                + BULLET + diagnostics.streamAddr + ":" + in.streamPort
+                                + " unreachable" + BULLET + diagnostics.streamFixHint
                                 + (safe(in.daemonErrCompact).isEmpty() ? "" : BULLET + "host error: "
                                         + safe(in.daemonErrCompact)));
             }
             return new StepInfo(Model.SS_ACTIVE,
-                    "reconnecting" + BULLET + ATTEMPT_PREFIX + streamReconnects + BULLET + "awaiting frames\u2026");
+                    "reconnecting" + BULLET + ATTEMPT_PREFIX + diagnostics.streamReconnects
+                            + BULLET + "awaiting frames\u2026");
         }
         if (hasWaited) {
             return new StepInfo(Model.SS_ACTIVE,
-                    "connecting to " + streamAddr + ":" + in.streamPort
-                            + BULLET + streamFixHint
+                    "connecting to " + diagnostics.streamAddr + ":" + in.streamPort
+                            + BULLET + diagnostics.streamFixHint
                             + (safe(in.daemonErrCompact).isEmpty() ? "" : BULLET + "host error: "
                                     + safe(in.daemonErrCompact)));
         }
@@ -474,23 +458,24 @@ public final class StartupOverlayModelBuilder {
     }
 
     private static String buildSubtitle(
-            int step1,
-            int step2,
-            int step3,
-            long elapsedMs,
-            int updatedControlRetryCount,
-            boolean daemonStartFailure,
-            int streamReconnects,
+            StepInfo step1Info,
+            StepInfo step2Info,
+            StepInfo step3Info,
+            StartupProgress progress,
+            StreamDiagnostics diagnostics,
             boolean buildMismatch
     ) {
+        int step1 = step1Info.state;
+        int step2 = step2Info.state;
+        int step3 = step3Info.state;
         if (step1 != Model.SS_OK) {
-            if (elapsedMs < 2000L && updatedControlRetryCount == 0) {
+            if (progress.elapsedMs < 2000L && progress.updatedControlRetryCount == 0) {
                 return "starting up\u2026";
             }
-            if (updatedControlRetryCount == 0) {
+            if (progress.updatedControlRetryCount == 0) {
                 return "awaiting control link" + BULLET + "start desktop service if needed\u2026";
             }
-            return "retrying control link" + BULLET + ATTEMPT_PREFIX + updatedControlRetryCount
+            return "retrying control link" + BULLET + ATTEMPT_PREFIX + progress.updatedControlRetryCount
                     + BULLET + "check desktop service\u2026";
         }
         if (step2 != Model.SS_OK) {
@@ -499,13 +484,13 @@ public final class StartupOverlayModelBuilder {
                     : "handshake in progress\u2026";
         }
         if (step3 != Model.SS_OK) {
-            if (step3 == Model.SS_ERROR && daemonStartFailure) {
+            if (step3 == Model.SS_ERROR && diagnostics.daemonStartFailure) {
                 return "host stream start failed" + BULLET + "check host logs";
             }
-            if (streamReconnects > 0) {
-                return "stream reconnecting" + BULLET + ATTEMPT_PREFIX + streamReconnects + "\u2026";
+            if (diagnostics.streamReconnects > 0) {
+                return "stream reconnecting" + BULLET + ATTEMPT_PREFIX + diagnostics.streamReconnects + "\u2026";
             }
-            if (elapsedMs > 5_000L) {
+            if (progress.elapsedMs > 5_000L) {
                 return "stream unreachable" + BULLET + "retrying\u2026";
             }
             return "waiting for video frames\u2026";

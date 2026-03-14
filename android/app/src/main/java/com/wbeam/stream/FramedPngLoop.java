@@ -164,7 +164,7 @@ final class FramedPngLoop {
         }
         state.trackMaxPayload(payloadLen);
         WbtpFrameIo.readFully(input, resized, payloadLen);
-        state.recordBytes(config.frameHeaderSize + payloadLen);
+        state.recordBytes((long) config.frameHeaderSize + payloadLen);
         return resized;
     }
 
@@ -369,7 +369,6 @@ final class FramedPngLoop {
     }
 
     private static final class LoopState {
-        private final Config config;
         private final boolean dropBacklogFrames;
         private final int seqGapBudget;
 
@@ -391,7 +390,6 @@ final class FramedPngLoop {
         private int backlogFramesEstimate = 0;
 
         LoopState(Config config, boolean dropBacklogFrames) {
-            this.config = config;
             this.dropBacklogFrames = dropBacklogFrames;
             this.seqGapBudget = StreamBufferMath.computeSeqGapBudget(config.frameUs, dropBacklogFrames);
         }

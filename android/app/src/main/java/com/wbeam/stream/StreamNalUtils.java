@@ -25,7 +25,7 @@ final class StreamNalUtils {
         int limit = Math.min(size, scanLimit);
         int i = 0;
         while (i < limit - 3) {
-            boolean advancedToNextNal = false;
+            int nextIndex = i + 1;
             if (data[i] == 0 && data[i + 1] == 0) {
                 final int nalByte = findNalHeaderOffset(data, i, limit);
                 if (nalByte >= limit) {
@@ -36,13 +36,10 @@ final class StreamNalUtils {
                     if (isRecoveryType(type, isHevc)) {
                         return true;
                     }
-                    i = nalByte + 1;
-                    advancedToNextNal = true;
+                    nextIndex = nalByte + 1;
                 }
             }
-            if (!advancedToNextNal) {
-                i++;
-            }
+            i = nextIndex;
         }
         return false;
     }

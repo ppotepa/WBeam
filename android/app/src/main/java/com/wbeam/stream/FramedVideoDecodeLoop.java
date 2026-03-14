@@ -132,46 +132,25 @@ final class FramedVideoDecodeLoop {
         while (runtimeState.isRunning()) {
             FrameContext frame = readFrame(input, hdrBuf, currentPayloadBuf, state, profile.modeLabel);
             currentPayloadBuf = frame.buffer;
-            if (!state.shouldProcessFrame(frame.seqU32, frame.ptsUs, profile.seqGapBudget)) {
-                continue;
+            if (state.shouldProcessFrame(frame.seqU32, frame.ptsUs, profile.seqGapBudget)) {
+                session.codec = bootstrapLegacyDecoderIfNeeded(session, frame, codecRef);
+                if (session.codec != null) {
+                    processFrame(session, state, frame);
+                    WatchdogAction action = evaluateWatchdog(state);
+                    if (action != WatchdogAction.NONE) {
+                        executeWatchdogAction(session.codec, session.recoveryGate, state, action);
+                    }
+                    emitPeriodicStats(state, session);
+                } else {
+                    state.onRejectedFrame(frame.seqU32);
+                }
             }
-
-            session.codec = bootstrapLegacyDecoderIfNeeded(session, frame, codecRef);
-            if (session.codec == null) {
-                state.onRejectedFrame(frame.seqU32);
-                continue;
-            }
-
-            drainCodec(session, state);
-            boolean isRecoveryFrame = isRecoveryFrame(frame, profile.isHevc);
-            session.recoveryGate.unlockIfNeeded(frame, isRecoveryFrame, state.getPendingDecodeQueue(), tag);
-            if (session.recoveryGate.canQueueFrame(isRecoveryFrame, state.getPendingDecodeQueue(), decodeQueueMaxFrames)) {
-                queueFrame(session.codec, frame, state, session.drainContext.drainTimeMs);
-            } else {
-                state.onRejectedFrame(frame.seqU32);
-                session.recoveryGate.recordBlockedFrame(frame, isRecoveryFrame, state.getPendingDecodeQueue(), tag);
-            }
-
-            WatchdogAction action = evaluateWatchdog(state);
-            if (action != WatchdogAction.NONE) {
-                executeWatchdogAction(session.codec, session.recoveryGate, state, action);
-            }
-            emitPeriodicStats(state, session);
         }
     }
 
     private StreamProfile readHello(InputStream input, byte[] helloBuf) throws IOException {
         WbtpProtocol.Hello hello = WbtpProtocol.readHello(input, helloBuf, 0x57425331, (byte) 0x01, 16);
-        StreamProfile profile = new StreamProfile(
-                hello.flags,
-                hello.sessionId,
-                helloCodecHevc,
-                helloCodecPng,
-                helloModeMask,
-                helloModeUltra,
-                helloModeQuality,
-                frameUs
-        );
+        StreamProfile profile = new StreamProfile(hello);
         Log.i(tag, String.format(Locale.US, "WBTP hello session=0x%016x codec=%s mode=%s",
                 profile.streamSessionId, profile.codecLabel, profile.modeLabel));
 
@@ -186,6 +165,23 @@ final class FramedVideoDecodeLoop {
             );
         }
         return profile;
+    }
+
+    private void processFrame(
+            DecoderSession session,
+            DecodeLoopState state,
+            FrameContext frame
+    ) {
+        drainCodec(session, state);
+        boolean isRecoveryFrame = isRecoveryFrame(frame, session.profile.isHevc);
+        session.recoveryGate.unlockIfNeeded(frame, isRecoveryFrame, state.getPendingDecodeQueue(), tag);
+        if (!session.recoveryGate.canQueueFrame(isRecoveryFrame, state.getPendingDecodeQueue(), decodeQueueMaxFrames)) {
+            state.onRejectedFrame(frame.seqU32);
+            session.recoveryGate.recordBlockedFrame(frame, isRecoveryFrame, state.getPendingDecodeQueue(), tag);
+            return;
+        }
+
+        queueFrame(session.codec, frame, state, session.drainContext.drainTimeMs);
     }
 
     private DecoderSession initializeDecoderSession(StreamProfile profile, MediaCodec[] codecRef) throws IOException {
@@ -241,7 +237,7 @@ final class FramedVideoDecodeLoop {
         state.recordPayloadGrowth(grownPayloadBuf != payloadBuf);
         state.trackMaxPayload(frameHeader.payloadLen);
         WbtpFrameIo.readFully(input, grownPayloadBuf, frameHeader.payloadLen);
-        state.recordBytes(frameHeaderSize + frameHeader.payloadLen);
+        state.recordBytes((long) frameHeaderSize + frameHeader.payloadLen);
         return new FrameContext(
                 frameHeader.frameIsKey,
                 frameHeader.seqU32,
@@ -412,16 +408,6 @@ final class FramedVideoDecodeLoop {
         state.resetInterval(nowMs);
     }
 
-    private static String determineCodecLabel(boolean isPng, boolean isHevc) {
-        if (isPng) {
-            return "PNG";
-        }
-        if (isHevc) {
-            return "HEVC";
-        }
-        return "AVC";
-    }
-
     private enum WatchdogAction {
         NONE,
         FLUSH,
@@ -430,7 +416,7 @@ final class FramedVideoDecodeLoop {
         ABSOLUTE_RECONNECT
     }
 
-    private static final class StreamProfile {
+    private final class StreamProfile {
         final boolean isPng;
         final boolean isHevc;
         final boolean isUltraMode;
@@ -442,16 +428,8 @@ final class FramedVideoDecodeLoop {
         final String codecLabel;
         final long streamSessionId;
 
-        StreamProfile(
-                int helloFlags,
-                long streamSessionId,
-                int helloCodecHevc,
-                int helloCodecPng,
-                int helloModeMask,
-                int helloModeUltra,
-                int helloModeQuality,
-                long frameUs
-        ) {
+        StreamProfile(WbtpProtocol.Hello hello) {
+            int helloFlags = hello.flags;
             this.isPng = (helloFlags & helloCodecPng) != 0;
             this.isHevc = !isPng && (helloFlags & helloCodecHevc) != 0;
             int streamMode = helloFlags & helloModeMask;
@@ -459,14 +437,24 @@ final class FramedVideoDecodeLoop {
             this.dropLateOutput = isUltraMode;
             this.videoMime = determineVideoMime(isPng, isHevc);
             this.modeLabel = determineModeLabel(streamMode, helloModeUltra, helloModeQuality);
-            this.codecLabel = determineCodecLabel(isPng, isHevc);
-            this.streamSessionId = streamSessionId;
+            this.codecLabel = determineCodecLabel();
+            this.streamSessionId = hello.sessionId;
             this.seqGapBudget = StreamBufferMath.computeSeqGapBudget(frameUs, isUltraMode);
             this.legacyAvcBootstrap = !isHevc
                     && Build.VERSION.SDK_INT <= Build.VERSION_CODES.JELLY_BEAN_MR1;
         }
 
-        private static String determineVideoMime(boolean isPng, boolean isHevc) {
+        private String determineCodecLabel() {
+            if (isPng) {
+                return "PNG";
+            }
+            if (isHevc) {
+                return "HEVC";
+            }
+            return "AVC";
+        }
+
+        private String determineVideoMime(boolean isPng, boolean isHevc) {
             if (isPng) {
                 return MIME_PNG;
             }
@@ -476,7 +464,7 @@ final class FramedVideoDecodeLoop {
             return MIME_AVC;
         }
 
-        private static String determineModeLabel(int streamMode, int helloModeUltra, int helloModeQuality) {
+        private String determineModeLabel(int streamMode, int helloModeUltra, int helloModeQuality) {
             if (streamMode == helloModeUltra) {
                 return "ultra";
             }

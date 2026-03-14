@@ -14,109 +14,39 @@ public final class MainActivityControlViewsBinder {
      * Plain data carrier for control views binding.
      */
     public static final class Views {
-        private final TextView liveLogText;
-        private final TextView resValueText;
-        private final TextView fpsValueText;
-        private final TextView bitrateValueText;
-        private final TextView hostHintText;
-        private final Spinner profileSpinner;
-        private final Spinner encoderSpinner;
-        private final Spinner cursorSpinner;
-        private final SeekBar resolutionSeek;
-        private final SeekBar fpsSeek;
-        private final SeekBar bitrateSeek;
-        private final Button settingsButton;
-        private final Button logButton;
-        private final Button settingsCloseButton;
-        private final Button applySettingsButton;
-        private final Button quickStartButton;
-        private final Button quickStopButton;
-        private final Button quickTestButton;
-        private final Button startButton;
-        private final Button stopButton;
-        private final Button testButton;
-        private final Button fullscreenButton;
-        private final Button cursorOverlayButton;
-        private final Button intraOnlyButton;
-        private final Button simpleModeH265Button;
-        private final Button simpleModeRawButton;
-        private final Button simpleFps30Button;
-        private final Button simpleFps45Button;
-        private final Button simpleFps60Button;
-        private final Button simpleFps90Button;
-        private final Button simpleFps120Button;
-        private final Button simpleFps144Button;
-        private final Button simpleApplyButton;
-
-        private Views(
-                TextView liveLogText,
-                TextView resValueText,
-                TextView fpsValueText,
-                TextView bitrateValueText,
-                TextView hostHintText,
-                Spinner profileSpinner,
-                Spinner encoderSpinner,
-                Spinner cursorSpinner,
-                SeekBar resolutionSeek,
-                SeekBar fpsSeek,
-                SeekBar bitrateSeek,
-                Button settingsButton,
-                Button logButton,
-                Button settingsCloseButton,
-                Button applySettingsButton,
-                Button quickStartButton,
-                Button quickStopButton,
-                Button quickTestButton,
-                Button startButton,
-                Button stopButton,
-                Button testButton,
-                Button fullscreenButton,
-                Button cursorOverlayButton,
-                Button intraOnlyButton,
-                Button simpleModeH265Button,
-                Button simpleModeRawButton,
-                Button simpleFps30Button,
-                Button simpleFps45Button,
-                Button simpleFps60Button,
-                Button simpleFps90Button,
-                Button simpleFps120Button,
-                Button simpleFps144Button,
-                Button simpleApplyButton
-        ) {
-            this.liveLogText = liveLogText;
-            this.resValueText = resValueText;
-            this.fpsValueText = fpsValueText;
-            this.bitrateValueText = bitrateValueText;
-            this.hostHintText = hostHintText;
-            this.profileSpinner = profileSpinner;
-            this.encoderSpinner = encoderSpinner;
-            this.cursorSpinner = cursorSpinner;
-            this.resolutionSeek = resolutionSeek;
-            this.fpsSeek = fpsSeek;
-            this.bitrateSeek = bitrateSeek;
-            this.settingsButton = settingsButton;
-            this.logButton = logButton;
-            this.settingsCloseButton = settingsCloseButton;
-            this.applySettingsButton = applySettingsButton;
-            this.quickStartButton = quickStartButton;
-            this.quickStopButton = quickStopButton;
-            this.quickTestButton = quickTestButton;
-            this.startButton = startButton;
-            this.stopButton = stopButton;
-            this.testButton = testButton;
-            this.fullscreenButton = fullscreenButton;
-            this.cursorOverlayButton = cursorOverlayButton;
-            this.intraOnlyButton = intraOnlyButton;
-            this.simpleModeH265Button = simpleModeH265Button;
-            this.simpleModeRawButton = simpleModeRawButton;
-            this.simpleFps30Button = simpleFps30Button;
-            this.simpleFps45Button = simpleFps45Button;
-            this.simpleFps60Button = simpleFps60Button;
-            this.simpleFps90Button = simpleFps90Button;
-            this.simpleFps120Button = simpleFps120Button;
-            this.simpleFps144Button = simpleFps144Button;
-            this.simpleApplyButton = simpleApplyButton;
-        }
+        private TextView liveLogText;
+        private TextView resValueText;
+        private TextView fpsValueText;
+        private TextView bitrateValueText;
+        private TextView hostHintText;
+        private Spinner profileSpinner;
+        private Spinner encoderSpinner;
+        private Spinner cursorSpinner;
+        private SeekBar resolutionSeek;
+        private SeekBar fpsSeek;
+        private SeekBar bitrateSeek;
+        private Button settingsButton;
+        private Button logButton;
+        private Button settingsCloseButton;
+        private Button applySettingsButton;
+        private Button quickStartButton;
+        private Button quickStopButton;
+        private Button quickTestButton;
+        private Button startButton;
+        private Button stopButton;
+        private Button testButton;
+        private Button fullscreenButton;
+        private Button cursorOverlayButton;
+        private Button intraOnlyButton;
+        private Button simpleModeH265Button;
+        private Button simpleModeRawButton;
+        private Button simpleFps30Button;
+        private Button simpleFps45Button;
+        private Button simpleFps60Button;
+        private Button simpleFps90Button;
+        private Button simpleFps120Button;
+        private Button simpleFps144Button;
+        private Button simpleApplyButton;
 
         public TextView getLiveLogText() { return liveLogText; }
         public TextView getResValueText() { return resValueText; }
@@ -157,40 +87,40 @@ public final class MainActivityControlViewsBinder {
     }
 
     public static Views bind(AppCompatActivity activity) {
-        return new Views(
-                activity.findViewById(R.id.liveLogText),
-                activity.findViewById(R.id.resValueText),
-                activity.findViewById(R.id.fpsValueText),
-                activity.findViewById(R.id.bitrateValueText),
-                activity.findViewById(R.id.hostHintText),
-                activity.findViewById(R.id.profileSpinner),
-                activity.findViewById(R.id.encoderSpinner),
-                activity.findViewById(R.id.cursorSpinner),
-                activity.findViewById(R.id.resolutionSeek),
-                activity.findViewById(R.id.fpsSeek),
-                activity.findViewById(R.id.bitrateSeek),
-                activity.findViewById(R.id.settingsButton),
-                activity.findViewById(R.id.logButton),
-                activity.findViewById(R.id.settingsCloseButton),
-                activity.findViewById(R.id.applySettingsButton),
-                activity.findViewById(R.id.quickStartButton),
-                activity.findViewById(R.id.quickStopButton),
-                activity.findViewById(R.id.quickTestButton),
-                activity.findViewById(R.id.startButton),
-                activity.findViewById(R.id.stopButton),
-                activity.findViewById(R.id.testButton),
-                activity.findViewById(R.id.fullscreenButton),
-                activity.findViewById(R.id.cursorOverlayButton),
-                activity.findViewById(R.id.intraOnlyButton),
-                activity.findViewById(R.id.simpleModeH265Button),
-                activity.findViewById(R.id.simpleModeRawButton),
-                activity.findViewById(R.id.simpleFps30Button),
-                activity.findViewById(R.id.simpleFps45Button),
-                activity.findViewById(R.id.simpleFps60Button),
-                activity.findViewById(R.id.simpleFps90Button),
-                activity.findViewById(R.id.simpleFps120Button),
-                activity.findViewById(R.id.simpleFps144Button),
-                activity.findViewById(R.id.simpleApplyButton)
-        );
+        Views views = new Views();
+        views.liveLogText = activity.findViewById(R.id.liveLogText);
+        views.resValueText = activity.findViewById(R.id.resValueText);
+        views.fpsValueText = activity.findViewById(R.id.fpsValueText);
+        views.bitrateValueText = activity.findViewById(R.id.bitrateValueText);
+        views.hostHintText = activity.findViewById(R.id.hostHintText);
+        views.profileSpinner = activity.findViewById(R.id.profileSpinner);
+        views.encoderSpinner = activity.findViewById(R.id.encoderSpinner);
+        views.cursorSpinner = activity.findViewById(R.id.cursorSpinner);
+        views.resolutionSeek = activity.findViewById(R.id.resolutionSeek);
+        views.fpsSeek = activity.findViewById(R.id.fpsSeek);
+        views.bitrateSeek = activity.findViewById(R.id.bitrateSeek);
+        views.settingsButton = activity.findViewById(R.id.settingsButton);
+        views.logButton = activity.findViewById(R.id.logButton);
+        views.settingsCloseButton = activity.findViewById(R.id.settingsCloseButton);
+        views.applySettingsButton = activity.findViewById(R.id.applySettingsButton);
+        views.quickStartButton = activity.findViewById(R.id.quickStartButton);
+        views.quickStopButton = activity.findViewById(R.id.quickStopButton);
+        views.quickTestButton = activity.findViewById(R.id.quickTestButton);
+        views.startButton = activity.findViewById(R.id.startButton);
+        views.stopButton = activity.findViewById(R.id.stopButton);
+        views.testButton = activity.findViewById(R.id.testButton);
+        views.fullscreenButton = activity.findViewById(R.id.fullscreenButton);
+        views.cursorOverlayButton = activity.findViewById(R.id.cursorOverlayButton);
+        views.intraOnlyButton = activity.findViewById(R.id.intraOnlyButton);
+        views.simpleModeH265Button = activity.findViewById(R.id.simpleModeH265Button);
+        views.simpleModeRawButton = activity.findViewById(R.id.simpleModeRawButton);
+        views.simpleFps30Button = activity.findViewById(R.id.simpleFps30Button);
+        views.simpleFps45Button = activity.findViewById(R.id.simpleFps45Button);
+        views.simpleFps60Button = activity.findViewById(R.id.simpleFps60Button);
+        views.simpleFps90Button = activity.findViewById(R.id.simpleFps90Button);
+        views.simpleFps120Button = activity.findViewById(R.id.simpleFps120Button);
+        views.simpleFps144Button = activity.findViewById(R.id.simpleFps144Button);
+        views.simpleApplyButton = activity.findViewById(R.id.simpleApplyButton);
+        return views;
     }
 }

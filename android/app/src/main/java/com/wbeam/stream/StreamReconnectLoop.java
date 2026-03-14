@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.util.Locale;
+import java.util.Random;
 
 final class StreamReconnectLoop {
 
@@ -42,6 +43,7 @@ final class StreamReconnectLoop {
     private final String stateConnecting;
     private final String stateStreaming;
     private final String stateError;
+    private final Random reconnectRandom = new Random();
 
     @SuppressWarnings("java:S107")
     StreamReconnectLoop(
@@ -152,7 +154,7 @@ final class StreamReconnectLoop {
         }
         long reconnectDelayMs = runtimeState.getReconnectDelayMs();
         long jitterBound = Math.max(1L, reconnectDelayMs / 4L + 1L);
-        long jitterMs = (long) (Math.random() * jitterBound);
+        long jitterMs = Math.floorMod(reconnectRandom.nextLong(), jitterBound);
         SystemClock.sleep(reconnectDelayMs + jitterMs);
     }
 

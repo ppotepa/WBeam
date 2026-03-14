@@ -15,7 +15,6 @@ import java.util.concurrent.ExecutorService;
  * Polls the WBeam daemon's /status, /health, and /metrics endpoints every STATUS_POLL_MS.
  * Holds all daemon state fields so MainActivity can query them without coupling to the poll logic.
  */
-@SuppressWarnings("java:S3398")
 public final class StatusPoller {
 
     private static final String TAG = "WBeamStatusPoller";
@@ -57,38 +56,7 @@ public final class StatusPoller {
     private final ExecutorService ioExecutor;
     private final Callbacks       callbacks;
 
-    private final Runnable pollTask = new Runnable() {
-        @Override
-        public void run() {
-            if (statusPollInFlight) {
-                uiHandler.postDelayed(this, STATUS_POLL_MS);
-                return;
-            }
-            statusPollInFlight = true;
-            long pollTick = ++statusPollTick;
-            boolean fetchHealth = (pollTick % HEALTH_POLL_EVERY) == 1;
-
-            ioExecutor.execute(() -> {
-                try {
-                    JSONObject status = HostApiClient.apiRequestWithRetry(
-                            "GET", "/status", null, HostApiClient.API_RETRY_ATTEMPTS);
-                    JSONObject health = fetchHealth
-                            ? HostApiClient.apiRequestWithRetry(
-                                    "GET", "/health", null, HostApiClient.API_RETRY_ATTEMPTS)
-                            : null;
-                    JSONObject metricsPayload = HostApiClient.apiRequestWithRetry(
-                            "GET", "/metrics", null, HostApiClient.API_RETRY_ATTEMPTS);
-                    JSONObject metrics = mergeMetricsPayload(metricsPayload);
-                    uiHandler.post(() -> processStatusResult(status, health, metrics));
-                } catch (Exception e) {
-                    uiHandler.post(() -> processOfflineResult(e));
-                } finally {
-                    statusPollInFlight = false;
-                }
-            });
-            uiHandler.postDelayed(this, STATUS_POLL_MS);
-        }
-    };
+    private final Runnable pollTask = this::runPollTask;
 
     @SuppressWarnings("java:S107")
     public interface Callbacks {
@@ -161,6 +129,36 @@ public final class StatusPoller {
     public String  getDaemonBuildRevision() { return daemonBuildRevision; }
 
     // ── Poll logic ────────────────────────────────────────────────────────────
+
+    private void runPollTask() {
+        if (statusPollInFlight) {
+            uiHandler.postDelayed(pollTask, STATUS_POLL_MS);
+            return;
+        }
+        statusPollInFlight = true;
+        long pollTick = ++statusPollTick;
+        boolean fetchHealth = (pollTick % HEALTH_POLL_EVERY) == 1;
+
+        ioExecutor.execute(() -> {
+            try {
+                JSONObject status = HostApiClient.apiRequestWithRetry(
+                        "GET", "/status", null, HostApiClient.API_RETRY_ATTEMPTS);
+                JSONObject health = fetchHealth
+                        ? HostApiClient.apiRequestWithRetry(
+                                "GET", "/health", null, HostApiClient.API_RETRY_ATTEMPTS)
+                        : null;
+                JSONObject metricsPayload = HostApiClient.apiRequestWithRetry(
+                        "GET", "/metrics", null, HostApiClient.API_RETRY_ATTEMPTS);
+                JSONObject metrics = mergeMetricsPayload(metricsPayload);
+                uiHandler.post(() -> processStatusResult(status, health, metrics));
+            } catch (Exception e) {
+                uiHandler.post(() -> processOfflineResult(e));
+            } finally {
+                statusPollInFlight = false;
+            }
+        });
+        uiHandler.postDelayed(pollTask, STATUS_POLL_MS);
+    }
 
     private void processStatusResult(JSONObject status, JSONObject health, JSONObject metrics) {
         boolean wasReachable = daemonReachable;

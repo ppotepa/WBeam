@@ -106,30 +106,21 @@ final class MediaCodecBridge {
         while (true) {
             int outputIndex = codec.dequeueOutputBuffer(info, timeoutUs);
             timeoutUs = 0;
-            
-            if (outputIndex >= 0) {
-                stats.releasedCount++;
-                boolean renderable = (info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0;
-                
-                if (!renderable) {
-                    codec.releaseOutputBuffer(outputIndex, false);
-                    continue;
-                }
-                
+
+            if (outputIndex < 0) {
+                break;
+            }
+            stats.releasedCount++;
+            if ((info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0) {
                 if (dropLateOutput) {
-                    latestRenderableIndex = handleDropLateMode(
-                            codec, stats, latestRenderableIndex, outputIndex, info.presentationTimeUs);
+                    latestRenderableIndex = handleDropLateMode(codec, stats, latestRenderableIndex, outputIndex);
                     latestRenderablePtsUs = info.presentationTimeUs;
                 } else {
                     renderOutputBuffer(codec, stats, outputIndex, info.presentationTimeUs);
                 }
-                continue;
+            } else {
+                codec.releaseOutputBuffer(outputIndex, false);
             }
-            
-            if (shouldStopDraining(outputIndex)) {
-                break;
-            }
-            break;
         }
 
         // Render the last frame in drop-late mode
@@ -142,8 +133,7 @@ final class MediaCodecBridge {
             MediaCodec codec,
             DrainStats stats,
             int previousIndex,
-            int currentIndex,
-            long presentationTimeUs
+            int currentIndex
     ) {
         if (previousIndex >= 0) {
             codec.releaseOutputBuffer(previousIndex, false);
@@ -180,12 +170,6 @@ final class MediaCodecBridge {
         stats.lastRenderedPtsUs = presentationTimeUs;
         stats.renderNsMax = SystemClock.elapsedRealtimeNanos() - renderStartNs;
     }
-
-    private static boolean shouldStopDraining(int outputIndex) {
-        return outputIndex == MediaCodec.INFO_TRY_AGAIN_LATER
-                || outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED;
-    }
-
     private static ByteBuffer getInputBuffer(MediaCodec codec, int inputIndex) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             return codec.getInputBuffer(inputIndex);

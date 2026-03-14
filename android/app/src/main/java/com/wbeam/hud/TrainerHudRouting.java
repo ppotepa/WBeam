@@ -22,6 +22,19 @@ public final class TrainerHudRouting {
         String logMessage;
     }
 
+    static final class Input {
+        String connectionMode;
+        boolean trainerHudFlag;
+        boolean trainerHudFromJson;
+        boolean trainerHudFromText;
+        long nowMs;
+        long lastTrainerHudPayloadAtMs;
+        boolean trainerHudSessionActive;
+        long payloadGraceMs;
+        boolean debugBuild;
+        boolean debugOverlayVisible;
+    }
+
     private TrainerHudRouting() {
     }
 
@@ -38,79 +51,67 @@ public final class TrainerHudRouting {
             boolean debugBuild,
             boolean debugOverlayVisible
     ) {
+        Input input = new Input();
+        input.connectionMode = connectionMode;
+        input.trainerHudFlag = trainerHudFlag;
+        input.trainerHudFromJson = trainerHudFromJson;
+        input.trainerHudFromText = trainerHudFromText;
+        input.nowMs = nowMs;
+        input.lastTrainerHudPayloadAtMs = lastTrainerHudPayloadAtMs;
+        input.trainerHudSessionActive = trainerHudSessionActive;
+        input.payloadGraceMs = payloadGraceMs;
+        input.debugBuild = debugBuild;
+        input.debugOverlayVisible = debugOverlayVisible;
+        return decide(input);
+    }
+
+    public static Decision decide(Input input) {
         Decision decision = new Decision();
-        boolean isTrainingConnection = "training".equals(connectionMode);
+        boolean isTrainingConnection = "training".equals(input.connectionMode);
 
-        updateTimestamps(decision, isTrainingConnection, trainerHudFromJson, trainerHudFromText,
-                nowMs, lastTrainerHudPayloadAtMs);
-        
-        updateSessionState(decision, isTrainingConnection, trainerHudFlag, trainerHudFromJson,
-                trainerHudFromText, trainerHudSessionActive, debugBuild, debugOverlayVisible,
-                connectionMode);
+        updateTimestamps(decision, input, isTrainingConnection);
+        updateSessionState(decision, input, isTrainingConnection);
 
-        // Early return for direct payload rendering
-        if (isTrainingConnection && trainerHudFromJson) {
+        if (isTrainingConnection && input.trainerHudFromJson) {
             return createDecision(decision, Action.RENDER_JSON);
         }
-        if (isTrainingConnection && trainerHudFromText) {
+        if (isTrainingConnection && input.trainerHudFromText) {
             return createDecision(decision, Action.RENDER_TEXT);
         }
 
-        boolean trainerHudActive =
-                isTrainingConnection && (trainerHudFlag || trainerHudFromJson || trainerHudFromText);
+        boolean trainerHudActive = isTrainerHudActive(input, isTrainingConnection);
 
-        // Handle active training session
         if (isTrainingConnection && trainerHudActive) {
-            return handleActiveTraining(decision, nowMs, payloadGraceMs);
+            return handleActiveTraining(decision, input);
         }
 
-        // Handle recently ended training session (grace period)
         if (isTrainingConnection && decision.updatedSessionActive) {
-            return handleEndedTraining(decision, nowMs, payloadGraceMs);
+            return handleEndedTraining(decision, input);
         }
 
         decision.handled = isTrainingConnection;
         return decision;
     }
 
-    private static void updateTimestamps(
-            Decision decision,
-            boolean isTrainingConnection,
-            boolean trainerHudFromJson,
-            boolean trainerHudFromText,
-            long nowMs,
-            long lastTrainerHudPayloadAtMs
-    ) {
-        decision.updatedLastPayloadAtMs = lastTrainerHudPayloadAtMs;
-        if (isTrainingConnection && (trainerHudFromJson || trainerHudFromText)) {
-            decision.updatedLastPayloadAtMs = nowMs;
+    private static void updateTimestamps(Decision decision, Input input, boolean isTrainingConnection) {
+        decision.updatedLastPayloadAtMs = input.lastTrainerHudPayloadAtMs;
+        if (isTrainingConnection && (input.trainerHudFromJson || input.trainerHudFromText)) {
+            decision.updatedLastPayloadAtMs = input.nowMs;
         }
     }
 
-    private static void updateSessionState(
-            Decision decision,
-            boolean isTrainingConnection,
-            boolean trainerHudFlag,
-            boolean trainerHudFromJson,
-            boolean trainerHudFromText,
-            boolean trainerHudSessionActive,
-            boolean debugBuild,
-            boolean debugOverlayVisible,
-            String connectionMode
-    ) {
-        decision.updatedSessionActive = trainerHudSessionActive;
+    private static void updateSessionState(Decision decision, Input input, boolean isTrainingConnection) {
+        decision.updatedSessionActive = input.trainerHudSessionActive;
+        boolean trainerHudActive = isTrainerHudActive(input, isTrainingConnection);
 
-        boolean trainerHudActive =
-                isTrainingConnection && (trainerHudFlag || trainerHudFromJson || trainerHudFromText);
-
-        if (!isTrainingConnection && (trainerHudFlag || trainerHudFromJson || trainerHudFromText)) {
-            decision.logMessage = "trainer_payload_ignored connection_mode=" + connectionMode;
+        if (!isTrainingConnection && hasTrainerPayload(input)) {
+            decision.logMessage = "trainer_payload_ignored connection_mode=" + input.connectionMode;
         }
 
-        if (trainerHudActive && !trainerHudSessionActive) {
+        if (trainerHudActive && !input.trainerHudSessionActive) {
             decision.updatedSessionActive = true;
-            decision.enableDebugOverlay = debugBuild && !debugOverlayVisible;
-        } else if (!trainerHudActive && trainerHudSessionActive) {
+            decision.enableDebugOverlay = input.debugBuild && !input.debugOverlayVisible;
+        } else if (!trainerHudActive && input.trainerHudSessionActive) {
             decision.updatedSessionActive = false;
         }
     }
@@ -121,8 +122,8 @@ public final class TrainerHudRouting {
         return decision;
     }
 
-    private static Decision handleActiveTraining(Decision decision, long nowMs, long payloadGraceMs) {
-        if (isWithinGracePeriod(decision.updatedLastPayloadAtMs, nowMs, payloadGraceMs)) {
+    private static Decision handleActiveTraining(Decision decision, Input input) {
+        if (isWithinGracePeriod(decision.updatedLastPayloadAtMs, input.nowMs, input.payloadGraceMs)) {
             decision.handled = true;
             decision.action = Action.KEEP_LAST;
             decision.logMessage = "trainer_payload_gap grace=1 keep_last=1";
@@ -131,8 +132,8 @@ public final class TrainerHudRouting {
         return createDecision(decision, Action.RENDER_PLACEHOLDER);
     }
 
-    private static Decision handleEndedTraining(Decision decision, long nowMs, long payloadGraceMs) {
-        if (isWithinGracePeriod(decision.updatedLastPayloadAtMs, nowMs, payloadGraceMs)) {
+    private static Decision handleEndedTraining(Decision decision, Input input) {
+        if (isWithinGracePeriod(decision.updatedLastPayloadAtMs, input.nowMs, input.payloadGraceMs)) {
             decision.handled = true;
             decision.action = Action.KEEP_LAST;
             decision.logMessage = "trainer_payload_missing grace=1 keep_last=1";
@@ -143,5 +144,13 @@ public final class TrainerHudRouting {
 
     private static boolean isWithinGracePeriod(long lastPayloadAtMs, long nowMs, long graceMs) {
         return lastPayloadAtMs > 0L && (nowMs - lastPayloadAtMs) <= graceMs;
+    }
+
+    private static boolean isTrainerHudActive(Input input, boolean isTrainingConnection) {
+        return isTrainingConnection && hasTrainerPayload(input);
+    }
+
+    private static boolean hasTrainerPayload(Input input) {
+        return input.trainerHudFlag || input.trainerHudFromJson || input.trainerHudFromText;
     }
 }

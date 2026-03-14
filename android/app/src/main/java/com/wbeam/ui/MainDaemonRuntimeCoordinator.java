@@ -49,129 +49,47 @@ public final class MainDaemonRuntimeCoordinator {
      * Plain data carrier for daemon runtime coordinator status input.
      */
     public static final class StatusInput {
-        final boolean reachable;
-        final boolean wasReachable;
-        final String hostName;
-        final String state;
-        final long runId;
-        final String lastError;
-        final boolean errorChanged;
-        final long uptimeSec;
-        final String service;
-        final String buildRevision;
-        final JSONObject metrics;
-
-        StatusInput(
-                boolean reachable,
-                boolean wasReachable,
-                String hostName,
-                String state,
-                long runId,
-                String lastError,
-                boolean errorChanged,
-                long uptimeSec,
-                String service,
-                String buildRevision,
-                JSONObject metrics
-        ) {
-            this.reachable = reachable;
-            this.wasReachable = wasReachable;
-            this.hostName = hostName;
-            this.state = state;
-            this.runId = runId;
-            this.lastError = lastError;
-            this.errorChanged = errorChanged;
-            this.uptimeSec = uptimeSec;
-            this.service = service;
-            this.buildRevision = buildRevision;
-            this.metrics = metrics;
-        }
+        boolean reachable;
+        boolean wasReachable;
+        String hostName;
+        String state;
+        long runId;
+        String lastError;
+        boolean errorChanged;
+        long uptimeSec;
+        String service;
+        String buildRevision;
+        JSONObject metrics;
     }
 
     public static final class StatusContext {
-        final MainDaemonState daemon;
-        final MainUiState uiState;
-        final BoolProvider requiresTransportProbeNowProvider;
-        final ProbeStarter probeStarter;
-        final HostConnectedNotifier hostConnectedNotifier;
-        final LineLogger lineLogger;
-        final UiTask stopLiveViewTask;
-        final UiTask refreshUiTask;
-        final StatsSink statsSink;
-        final PerfHudSink perfHudSink;
-
-        StatusContext(
-                MainDaemonState daemon,
-                MainUiState uiState,
-                BoolProvider requiresTransportProbeNowProvider,
-                ProbeStarter probeStarter,
-                HostConnectedNotifier hostConnectedNotifier,
-                LineLogger lineLogger,
-                UiTask stopLiveViewTask,
-                UiTask refreshUiTask,
-                StatsSink statsSink,
-                PerfHudSink perfHudSink
-        ) {
-            this.daemon = daemon;
-            this.uiState = uiState;
-            this.requiresTransportProbeNowProvider = requiresTransportProbeNowProvider;
-            this.probeStarter = probeStarter;
-            this.hostConnectedNotifier = hostConnectedNotifier;
-            this.lineLogger = lineLogger;
-            this.stopLiveViewTask = stopLiveViewTask;
-            this.refreshUiTask = refreshUiTask;
-            this.statsSink = statsSink;
-            this.perfHudSink = perfHudSink;
-        }
+        MainDaemonState daemon;
+        MainUiState uiState;
+        BoolProvider requiresTransportProbeNowProvider;
+        ProbeStarter probeStarter;
+        HostConnectedNotifier hostConnectedNotifier;
+        LineLogger lineLogger;
+        UiTask stopLiveViewTask;
+        UiTask refreshUiTask;
+        StatsSink statsSink;
+        PerfHudSink perfHudSink;
     }
 
     public static final class OfflineContext {
-        final MainDaemonState daemon;
-        final MainUiState uiState;
-        final TransportProbeCoordinator transportProbe;
-        final String stateError;
-        final String apiBase;
-        final UiTask stopLiveViewTask;
-        final UiTask updateActionButtonsTask;
-        final UiTask updateHostHintTask;
-        final UiTask updatePerfHudUnavailableTask;
-        final UiTask refreshStatusTextTask;
-        final UiTask updatePreflightOverlayTask;
-        final UiStatusSink uiStatusSink;
-        final LineLogger lineLogger;
-        final UiMessageSink toastSink;
-
-        OfflineContext(
-                MainDaemonState daemon,
-                MainUiState uiState,
-                TransportProbeCoordinator transportProbe,
-                String stateError,
-                String apiBase,
-                UiTask stopLiveViewTask,
-                UiTask updateActionButtonsTask,
-                UiTask updateHostHintTask,
-                UiTask updatePerfHudUnavailableTask,
-                UiTask refreshStatusTextTask,
-                UiTask updatePreflightOverlayTask,
-                UiStatusSink uiStatusSink,
-                LineLogger lineLogger,
-                UiMessageSink toastSink
-        ) {
-            this.daemon = daemon;
-            this.uiState = uiState;
-            this.transportProbe = transportProbe;
-            this.stateError = stateError;
-            this.apiBase = apiBase;
-            this.stopLiveViewTask = stopLiveViewTask;
-            this.updateActionButtonsTask = updateActionButtonsTask;
-            this.updateHostHintTask = updateHostHintTask;
-            this.updatePerfHudUnavailableTask = updatePerfHudUnavailableTask;
-            this.refreshStatusTextTask = refreshStatusTextTask;
-            this.updatePreflightOverlayTask = updatePreflightOverlayTask;
-            this.uiStatusSink = uiStatusSink;
-            this.lineLogger = lineLogger;
-            this.toastSink = toastSink;
-        }
+        MainDaemonState daemon;
+        MainUiState uiState;
+        TransportProbeCoordinator transportProbe;
+        String stateError;
+        String apiBase;
+        UiTask stopLiveViewTask;
+        UiTask updateActionButtonsTask;
+        UiTask updateHostHintTask;
+        UiTask updatePerfHudUnavailableTask;
+        UiTask refreshStatusTextTask;
+        UiTask updatePreflightOverlayTask;
+        UiStatusSink uiStatusSink;
+        LineLogger lineLogger;
+        UiMessageSink toastSink;
     }
 
     private MainDaemonRuntimeCoordinator() {
@@ -189,18 +107,17 @@ public final class MainDaemonRuntimeCoordinator {
                 input.buildRevision
         );
         MainActivityDaemonStatusCoordinator.Input daemonInput =
-                new MainActivityDaemonStatusCoordinator.Input(
-                        input.reachable,
-                        input.wasReachable,
-                        input.hostName,
-                        input.state,
-                        input.lastError,
-                        input.errorChanged,
-                        input.service,
-                        input.metrics,
-                        context.uiState.isHandshakeResolved(),
-                        context.requiresTransportProbeNowProvider.get()
-                );
+                new MainActivityDaemonStatusCoordinator.Input();
+        daemonInput.reachable = input.reachable;
+        daemonInput.wasReachable = input.wasReachable;
+        daemonInput.hostName = input.hostName;
+        daemonInput.state = input.state;
+        daemonInput.lastError = input.lastError;
+        daemonInput.errorChanged = input.errorChanged;
+        daemonInput.service = input.service;
+        daemonInput.metrics = input.metrics;
+        daemonInput.handshakeResolved = context.uiState.isHandshakeResolved();
+        daemonInput.requiresTransportProbeNow = context.requiresTransportProbeNowProvider.get();
 
         MainActivityDaemonStatusCoordinator.Output output =
                 MainActivityDaemonStatusCoordinator.process(

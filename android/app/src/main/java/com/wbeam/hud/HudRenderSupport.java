@@ -58,17 +58,14 @@ public final class HudRenderSupport {
             return data;
         }
         for (int i = 0; i < series.length(); i++) {
-            if (series.isNull(i)) {
-                continue;
+            Double value = finiteSeriesValue(series, i);
+            if (value != null) {
+                double v = value;
+                data.values.addLast(v);
+                data.lo = Math.min(data.lo, v);
+                data.hi = Math.max(data.hi, v);
+                data.count++;
             }
-            double v = series.optDouble(i, Double.NaN);
-            if (!Double.isFinite(v)) {
-                continue;
-            }
-            data.values.addLast(v);
-            data.lo = Math.min(data.lo, v);
-            data.hi = Math.max(data.hi, v);
-            data.count++;
         }
         return data;
     }
@@ -149,13 +146,13 @@ public final class HudRenderSupport {
 
     private static String toneFillColor(String toneClass) {
         String tone = toneClass == null ? "" : toneClass.trim().toLowerCase(Locale.US);
-        if ("state-risk".equals(tone)) {
+        if (STATE_RISK.equals(tone)) {
             return "rgba(248,113,113,0.20)";
         }
-        if ("state-warn".equals(tone)) {
+        if (STATE_WARN.equals(tone)) {
             return "rgba(251,191,36,0.22)";
         }
-        if ("state-ok".equals(tone)) {
+        if (STATE_OK.equals(tone)) {
             return "rgba(110,231,183,0.20)";
         }
         return "rgba(141,217,255,0.20)";
@@ -163,13 +160,13 @@ public final class HudRenderSupport {
 
     private static String toneDotColor(String toneClass) {
         String tone = toneClass == null ? "" : toneClass.trim().toLowerCase(Locale.US);
-        if ("state-risk".equals(tone)) {
+        if (STATE_RISK.equals(tone)) {
             return "#fecaca";
         }
-        if ("state-warn".equals(tone)) {
+        if (STATE_WARN.equals(tone)) {
             return "#fde68a";
         }
-        if ("state-ok".equals(tone)) {
+        if (STATE_OK.equals(tone)) {
             return "#bbf7d0";
         }
         return "#dbeafe";
@@ -205,16 +202,13 @@ public final class HudRenderSupport {
         double lo = Double.POSITIVE_INFINITY;
         double hi = Double.NEGATIVE_INFINITY;
         for (int i = 0; i < series.length(); i++) {
-            if (series.isNull(i)) {
-                continue;
+            Double value = finiteSeriesValue(series, i);
+            if (value != null) {
+                double v = value;
+                last = v;
+                lo = Math.min(lo, v);
+                hi = Math.max(hi, v);
             }
-            double v = series.optDouble(i, Double.NaN);
-            if (!Double.isFinite(v)) {
-                continue;
-            }
-            last = v;
-            lo = Math.min(lo, v);
-            hi = Math.max(hi, v);
         }
         if (!Double.isFinite(last) || !Double.isFinite(lo) || !Double.isFinite(hi)) {
             return PENDING;
@@ -269,16 +263,13 @@ public final class HudRenderSupport {
         double lo = Double.POSITIVE_INFINITY;
         double hi = Double.NEGATIVE_INFINITY;
         for (int i = 0; i < series.length(); i++) {
-            if (series.isNull(i)) {
-                continue;
+            Double value = finiteSeriesValue(series, i);
+            if (value != null) {
+                double v = value;
+                last = v;
+                lo = Math.min(lo, v);
+                hi = Math.max(hi, v);
             }
-            double v = series.optDouble(i, Double.NaN);
-            if (!Double.isFinite(v)) {
-                continue;
-            }
-            last = v;
-            lo = Math.min(lo, v);
-            hi = Math.max(hi, v);
         }
         if (!Double.isFinite(last) || !Double.isFinite(lo) || !Double.isFinite(hi)) {
             return new double[]{};
@@ -354,7 +345,7 @@ public final class HudRenderSupport {
         if (!Double.isNaN(targetMbps) && !Double.isInfinite(targetMbps) && targetMbps > 0.0) {
             return String.format(Locale.US, "%.2f (target)", targetMbps);
         }
-        return "PENDING";
+        return PENDING;
     }
 
     public static String safeText(String value) {
@@ -367,15 +358,15 @@ public final class HudRenderSupport {
     public static String hudToneClass(String tone) {
         String t = tone == null ? "" : tone.trim().toLowerCase(Locale.US);
         if ("risk".equals(t) || "bad".equals(t) || "red".equals(t)) {
-            return "state-risk";
+            return STATE_RISK;
         }
         if ("warn".equals(t) || "orange".equals(t) || "yellow".equals(t)) {
-            return "state-warn";
+            return STATE_WARN;
         }
         if ("ok".equals(t) || "good".equals(t) || "green".equals(t)) {
-            return "state-ok";
+            return STATE_OK;
         }
-        return "state-pending";
+        return "state-" + PENDING.toLowerCase(Locale.US);
     }
 
     public static String hudChip(String key, String value, String toneClass) {
@@ -408,6 +399,14 @@ public final class HudRenderSupport {
                 .replace(">", "&gt;")
                 .replace("\"", "&quot;")
                 .replace("'", "&#39;");
+    }
+
+    private static Double finiteSeriesValue(JSONArray series, int index) {
+        if (series == null || series.isNull(index)) {
+            return null;
+        }
+        double value = series.optDouble(index, Double.NaN);
+        return Double.isFinite(value) ? value : null;
     }
 
     private static double clampDouble(double value, double min, double max) {

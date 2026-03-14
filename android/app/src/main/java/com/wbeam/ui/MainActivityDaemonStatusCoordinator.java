@@ -11,40 +11,16 @@ public final class MainActivityDaemonStatusCoordinator {
      * Plain data carrier for daemon status coordinator input.
      */
     public static final class Input {
-        final boolean reachable;
-        final boolean wasReachable;
-        final String hostName;
-        final String state;
-        final String lastError;
-        final boolean errorChanged;
-        final String service;
-        final JSONObject metrics;
-        final boolean handshakeResolved;
-        final boolean requiresTransportProbeNow;
-
-        Input(
-                boolean reachable,
-                boolean wasReachable,
-                String hostName,
-                String state,
-                String lastError,
-                boolean errorChanged,
-                String service,
-                JSONObject metrics,
-                boolean handshakeResolved,
-                boolean requiresTransportProbeNow
-        ) {
-            this.reachable = reachable;
-            this.wasReachable = wasReachable;
-            this.hostName = hostName;
-            this.state = state;
-            this.lastError = lastError;
-            this.errorChanged = errorChanged;
-            this.service = service;
-            this.metrics = metrics;
-            this.handshakeResolved = handshakeResolved;
-            this.requiresTransportProbeNow = requiresTransportProbeNow;
-        }
+        boolean reachable;
+        boolean wasReachable;
+        String hostName;
+        String state;
+        String lastError;
+        boolean errorChanged;
+        String service;
+        JSONObject metrics;
+        boolean handshakeResolved;
+        boolean requiresTransportProbeNow;
     }
 
     /**

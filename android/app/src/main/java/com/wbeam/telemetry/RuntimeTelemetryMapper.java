@@ -177,27 +177,38 @@ public final class RuntimeTelemetryMapper {
     }
 
     private static void populateKpiMetrics(Snapshot out, JSONObject kpi, int selectedFps) {
-        out.targetFps = kpi != null ? kpi.optDouble("target_fps", selectedFps) : selectedFps;
-        if (!Double.isFinite(out.targetFps) || out.targetFps <= 0.0) {
-            out.targetFps = selectedFps;
+        out.targetFps = readPositiveMetric(kpi, "target_fps", selectedFps);
+        out.recvFps = readNonNegativeMetric(kpi, "recv_fps");
+        out.decodeFps = readNonNegativeMetric(kpi, "decode_fps");
+        out.presentFps = resolvePresentFps(kpi, out.decodeFps, out.recvFps);
+        out.frametimeP95 = readNonNegativeMetric(kpi, "frametime_ms_p95");
+        out.decodeP95 = readNonNegativeMetric(kpi, "decode_time_ms_p95");
+        out.renderP95 = readNonNegativeMetric(kpi, "render_time_ms_p95");
+        out.e2eP95 = readNonNegativeMetric(kpi, "e2e_latency_ms_p95");
+    }
+
+    private static double resolvePresentFps(JSONObject kpi, double decodeFps, double recvFps) {
+        double presentFps = readNonNegativeMetric(kpi, "present_fps");
+        if (presentFps >= 1.0) {
+            return presentFps;
         }
-        out.presentFps = kpi != null ? kpi.optDouble("present_fps", 0.0) : 0.0;
-        out.recvFps = kpi != null ? kpi.optDouble("recv_fps", 0.0) : 0.0;
-        out.decodeFps = kpi != null ? kpi.optDouble("decode_fps", 0.0) : 0.0;
-        if (!Double.isFinite(out.presentFps) || out.presentFps < 0.0) {
-            out.presentFps = 0.0;
+        if (decodeFps >= 1.0) {
+            return decodeFps;
         }
-        if (out.presentFps < 1.0) {
-            if (Double.isFinite(out.decodeFps) && out.decodeFps >= 1.0) {
-                out.presentFps = out.decodeFps;
-            } else if (Double.isFinite(out.recvFps) && out.recvFps >= 1.0) {
-                out.presentFps = out.recvFps;
-            }
+        if (recvFps >= 1.0) {
+            return recvFps;
         }
-        out.frametimeP95 = kpi != null ? kpi.optDouble("frametime_ms_p95", 0.0) : 0.0;
-        out.decodeP95 = kpi != null ? kpi.optDouble("decode_time_ms_p95", 0.0) : 0.0;
-        out.renderP95 = kpi != null ? kpi.optDouble("render_time_ms_p95", 0.0) : 0.0;
-        out.e2eP95 = kpi != null ? kpi.optDouble("e2e_latency_ms_p95", 0.0) : 0.0;
+        return presentFps;
+    }
+
+    private static double readPositiveMetric(JSONObject json, String key, double fallback) {
+        double value = json != null ? json.optDouble(key, fallback) : fallback;
+        return (Double.isFinite(value) && value > 0.0) ? value : fallback;
+    }
+
+    private static double readNonNegativeMetric(JSONObject json, String key) {
+        double value = json != null ? json.optDouble(key, 0.0) : 0.0;
+        return (Double.isFinite(value) && value >= 0.0) ? value : 0.0;
     }
 
     private static void populateQueueMeasurements(

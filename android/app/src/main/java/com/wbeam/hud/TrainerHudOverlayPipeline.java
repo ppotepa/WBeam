@@ -7,6 +7,8 @@ import android.widget.TextView;
 import org.json.JSONObject;
 
 public final class TrainerHudOverlayPipeline {
+    private static final String TRAINER_CHANNEL = "trainer";
+
     public interface CompactLineSink {
         void setCompactLine(String compactLine);
     }
@@ -18,6 +20,20 @@ public final class TrainerHudOverlayPipeline {
     private TrainerHudOverlayPipeline() {
     }
 
+    static final class Context {
+        double latestTargetFps;
+        double fpsLowAnchor;
+        ResourceUsageTracker resourceUsageTracker;
+        WebView perfHudWebView;
+        TextView perfHudText;
+        View perfHudPanel;
+        HudOverlayDisplay.State hudOverlayState;
+        int fallbackTextColor;
+        CompactLineSink compactLineSink;
+        RefreshAction refreshAction;
+    }
+
+    @SuppressWarnings("java:S107")
     public static void renderFromText(
             String rawHudText,
             double latestTargetFps,
@@ -31,20 +47,10 @@ public final class TrainerHudOverlayPipeline {
             CompactLineSink compactLineSink,
             RefreshAction refreshAction
     ) {
-        if (perfHudText == null) {
-            return;
-        }
-        TrainerHudOverlayRenderer.Rendered rendered = TrainerHudOverlayRenderer.fromText(
-                rawHudText,
+        renderFromText(rawHudText, createContext(
                 latestTargetFps,
                 fpsLowAnchor,
-                trainerResourceRowsProvider(resourceUsageTracker)
-        );
-        if (rendered.html.isEmpty() && rendered.textFallback.isEmpty()) {
-            return;
-        }
-        applyRendered(
-                rendered,
+                resourceUsageTracker,
                 perfHudWebView,
                 perfHudText,
                 perfHudPanel,
@@ -52,9 +58,26 @@ public final class TrainerHudOverlayPipeline {
                 fallbackTextColor,
                 compactLineSink,
                 refreshAction
-        );
+        ));
     }
 
+    public static void renderFromText(String rawHudText, Context context) {
+        if (context.perfHudText == null) {
+            return;
+        }
+        TrainerHudOverlayRenderer.Rendered rendered = TrainerHudOverlayRenderer.fromText(
+                rawHudText,
+                context.latestTargetFps,
+                context.fpsLowAnchor,
+                trainerResourceRowsProvider(context.resourceUsageTracker)
+        );
+        if (rendered.html.isEmpty() && rendered.textFallback.isEmpty()) {
+            return;
+        }
+        applyRendered(rendered, context);
+    }
+
+    @SuppressWarnings("java:S107")
     public static void renderFromJson(
             JSONObject hudJson,
             double latestTargetFps,
@@ -68,17 +91,10 @@ public final class TrainerHudOverlayPipeline {
             CompactLineSink compactLineSink,
             RefreshAction refreshAction
     ) {
-        if (perfHudText == null || hudJson == null) {
-            return;
-        }
-        TrainerHudOverlayRenderer.Rendered rendered = TrainerHudOverlayRenderer.fromJson(
-                hudJson,
+        renderFromJson(hudJson, createContext(
                 latestTargetFps,
                 fpsLowAnchor,
-                trainerResourceRowsProvider(resourceUsageTracker)
-        );
-        applyRendered(
-                rendered,
+                resourceUsageTracker,
                 perfHudWebView,
                 perfHudText,
                 perfHudPanel,
@@ -86,9 +102,23 @@ public final class TrainerHudOverlayPipeline {
                 fallbackTextColor,
                 compactLineSink,
                 refreshAction
-        );
+        ));
     }
 
+    public static void renderFromJson(JSONObject hudJson, Context context) {
+        if (context.perfHudText == null || hudJson == null) {
+            return;
+        }
+        TrainerHudOverlayRenderer.Rendered rendered = TrainerHudOverlayRenderer.fromJson(
+                hudJson,
+                context.latestTargetFps,
+                context.fpsLowAnchor,
+                trainerResourceRowsProvider(context.resourceUsageTracker)
+        );
+        applyRendered(rendered, context);
+    }
+
+    @SuppressWarnings("java:S107")
     public static void renderPlaceholder(
             double latestTargetFps,
             double fpsLowAnchor,
@@ -101,16 +131,10 @@ public final class TrainerHudOverlayPipeline {
             CompactLineSink compactLineSink,
             RefreshAction refreshAction
     ) {
-        if (perfHudText == null) {
-            return;
-        }
-        TrainerHudOverlayRenderer.Rendered rendered = TrainerHudOverlayRenderer.placeholder(
+        renderPlaceholder(createContext(
                 latestTargetFps,
                 fpsLowAnchor,
-                trainerResourceRowsProvider(resourceUsageTracker)
-        );
-        applyRendered(
-                rendered,
+                resourceUsageTracker,
                 perfHudWebView,
                 perfHudText,
                 perfHudPanel,
@@ -118,7 +142,19 @@ public final class TrainerHudOverlayPipeline {
                 fallbackTextColor,
                 compactLineSink,
                 refreshAction
+        ));
+    }
+
+    public static void renderPlaceholder(Context context) {
+        if (context.perfHudText == null) {
+            return;
+        }
+        TrainerHudOverlayRenderer.Rendered rendered = TrainerHudOverlayRenderer.placeholder(
+                context.latestTargetFps,
+                context.fpsLowAnchor,
+                trainerResourceRowsProvider(context.resourceUsageTracker)
         );
+        applyRendered(rendered, context);
     }
 
     private static TrainerHudOverlayRenderer.ResourceRowsProvider trainerResourceRowsProvider(
@@ -130,8 +166,45 @@ public final class TrainerHudOverlayPipeline {
         };
     }
 
-    private static void applyRendered(
-            TrainerHudOverlayRenderer.Rendered rendered,
+    private static void applyRendered(TrainerHudOverlayRenderer.Rendered rendered, Context context) {
+        if (context.perfHudWebView != null) {
+            if (!HudOverlayDisplay.showWebHtml(
+                    context.perfHudWebView,
+                    context.perfHudText,
+                    TRAINER_CHANNEL,
+                    rendered.html,
+                    context.hudOverlayState
+            )) {
+                HudOverlayDisplay.showTextOnly(
+                        context.perfHudWebView,
+                        context.perfHudText,
+                        TRAINER_CHANNEL,
+                        rendered.textFallback,
+                        context.fallbackTextColor,
+                        context.hudOverlayState
+                );
+            }
+        } else {
+            HudOverlayDisplay.showTextOnly(
+                    context.perfHudWebView,
+                    context.perfHudText,
+                    TRAINER_CHANNEL,
+                    rendered.textFallback,
+                    context.fallbackTextColor,
+                    context.hudOverlayState
+            );
+        }
+        context.compactLineSink.setCompactLine(rendered.compactLine);
+        context.refreshAction.refresh();
+        if (context.perfHudPanel != null) {
+            context.perfHudPanel.setAlpha(0.96f);
+        }
+    }
+
+    private static Context createContext(
+            double latestTargetFps,
+            double fpsLowAnchor,
+            ResourceUsageTracker resourceUsageTracker,
             WebView perfHudWebView,
             TextView perfHudText,
             View perfHudPanel,
@@ -140,37 +213,17 @@ public final class TrainerHudOverlayPipeline {
             CompactLineSink compactLineSink,
             RefreshAction refreshAction
     ) {
-        if (perfHudWebView != null) {
-            if (!HudOverlayDisplay.showWebHtml(
-                    perfHudWebView,
-                    perfHudText,
-                    "trainer",
-                    rendered.html,
-                    hudOverlayState
-            )) {
-                HudOverlayDisplay.showTextOnly(
-                        perfHudWebView,
-                        perfHudText,
-                        "trainer",
-                        rendered.textFallback,
-                        fallbackTextColor,
-                        hudOverlayState
-                );
-            }
-        } else {
-            HudOverlayDisplay.showTextOnly(
-                    perfHudWebView,
-                    perfHudText,
-                    "trainer",
-                    rendered.textFallback,
-                    fallbackTextColor,
-                    hudOverlayState
-            );
-        }
-        compactLineSink.setCompactLine(rendered.compactLine);
-        refreshAction.refresh();
-        if (perfHudPanel != null) {
-            perfHudPanel.setAlpha(0.96f);
-        }
+        Context context = new Context();
+        context.latestTargetFps = latestTargetFps;
+        context.fpsLowAnchor = fpsLowAnchor;
+        context.resourceUsageTracker = resourceUsageTracker;
+        context.perfHudWebView = perfHudWebView;
+        context.perfHudText = perfHudText;
+        context.perfHudPanel = perfHudPanel;
+        context.hudOverlayState = hudOverlayState;
+        context.fallbackTextColor = fallbackTextColor;
+        context.compactLineSink = compactLineSink;
+        context.refreshAction = refreshAction;
+        return context;
     }
 }

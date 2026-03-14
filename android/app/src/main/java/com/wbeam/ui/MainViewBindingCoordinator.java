@@ -22,34 +22,14 @@ public final class MainViewBindingCoordinator {
      * Plain data carrier for bound views.
      */
     public static final class BoundViews {
-        private final MainActivityPrimaryViewsBinder.Views primaryViews;
-        private final MainActivityControlViewsBinder.Views controlViews;
-        private final SurfaceView previewSurface;
-        private final ImmersiveModeController immersiveModeController;
-        private final SettingsPanelController settingsPanelController;
-        private final TextView startupBuildVersionText;
-        private final StartupOverlayController startupOverlayController;
-        private final CursorOverlayController cursorOverlayController;
-
-        private BoundViews(
-                MainActivityPrimaryViewsBinder.Views primaryViews,
-                MainActivityControlViewsBinder.Views controlViews,
-                SurfaceView previewSurface,
-                ImmersiveModeController immersiveModeController,
-                SettingsPanelController settingsPanelController,
-                TextView startupBuildVersionText,
-                StartupOverlayController startupOverlayController,
-                CursorOverlayController cursorOverlayController
-        ) {
-            this.primaryViews = primaryViews;
-            this.controlViews = controlViews;
-            this.previewSurface = previewSurface;
-            this.immersiveModeController = immersiveModeController;
-            this.settingsPanelController = settingsPanelController;
-            this.startupBuildVersionText = startupBuildVersionText;
-            this.startupOverlayController = startupOverlayController;
-            this.cursorOverlayController = cursorOverlayController;
-        }
+        private MainActivityPrimaryViewsBinder.Views primaryViews;
+        private MainActivityControlViewsBinder.Views controlViews;
+        private SurfaceView previewSurface;
+        private ImmersiveModeController immersiveModeController;
+        private SettingsPanelController settingsPanelController;
+        private TextView startupBuildVersionText;
+        private StartupOverlayController startupOverlayController;
+        private CursorOverlayController cursorOverlayController;
 
         public MainActivityPrimaryViewsBinder.Views getPrimaryViews() { return primaryViews; }
         public MainActivityControlViewsBinder.Views getControlViews() { return controlViews; }
@@ -86,15 +66,15 @@ public final class MainViewBindingCoordinator {
                 controlViews.getCursorOverlayButton()
         );
         MainActivityUiBinder.setupTrainerHudWebView(primaryViews.getPerfHudWebView());
-        return new BoundViews(
-                primaryViews,
-                controlViews,
-                previewSurface,
-                immersiveModeController,
-                settingsPanelController,
-                startupBuildVersionText,
-                startupOverlayController,
-                cursorOverlayController
-        );
+        BoundViews boundViews = new BoundViews();
+        boundViews.primaryViews = primaryViews;
+        boundViews.controlViews = controlViews;
+        boundViews.previewSurface = previewSurface;
+        boundViews.immersiveModeController = immersiveModeController;
+        boundViews.settingsPanelController = settingsPanelController;
+        boundViews.startupBuildVersionText = startupBuildVersionText;
+        boundViews.startupOverlayController = startupOverlayController;
+        boundViews.cursorOverlayController = cursorOverlayController;
+        return boundViews;
     }
 }
