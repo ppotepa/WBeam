@@ -15,17 +15,7 @@ public final class DecoderCapabilityInspector {
             return "h264";
         }
         try {
-            MediaCodecInfo[] infos;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                infos = new MediaCodecList(MediaCodecList.ALL_CODECS).getCodecInfos();
-            } else {
-                int count = MediaCodecList.getCodecCount();
-                infos = new MediaCodecInfo[count];
-                for (int i = 0; i < count; i++) {
-                    infos[i] = MediaCodecList.getCodecInfoAt(i);
-                }
-            }
-            for (MediaCodecInfo info : infos) {
+            for (MediaCodecInfo info : gatherCodecInfos()) {
                 if (info.isEncoder()) {
                     continue;
                 }
@@ -41,43 +31,46 @@ public final class DecoderCapabilityInspector {
         return "h264";
     }
 
-    @SuppressWarnings("java:S3776")
     public static boolean hasHardwareAvcDecoder(String logTag) {
         try {
-            MediaCodecInfo[] infos;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                infos = new MediaCodecList(MediaCodecList.ALL_CODECS).getCodecInfos();
-            } else {
-                int count = MediaCodecList.getCodecCount();
-                infos = new MediaCodecInfo[count];
-                for (int i = 0; i < count; i++) {
-                    infos[i] = MediaCodecList.getCodecInfoAt(i);
-                }
-            }
-
-            for (MediaCodecInfo info : infos) {
-                if (info == null || info.isEncoder()) {
-                    continue;
-                }
-                for (String type : info.getSupportedTypes()) {
-                    if ("video/avc".equalsIgnoreCase(type)) {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            if (info.isHardwareAccelerated()) {
-                                return true;
-                            }
-                        } else {
-                            String name = info.getName().toLowerCase(Locale.US);
-                            if (!name.startsWith("omx.google.")
-                                    && !name.startsWith("c2.android.")
-                                    && !name.contains("sw")) {
-                                return true;
-                            }
-                        }
-                    }
+            for (MediaCodecInfo info : gatherCodecInfos()) {
+                if (isHardwareAvcDecoder(info)) {
+                    return true;
                 }
             }
         } catch (Exception e) {
             Log.w(logTag, "failed to inspect codecs", e);
+        }
+        return false;
+    }
+
+    private static MediaCodecInfo[] gatherCodecInfos() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            return new MediaCodecList(MediaCodecList.ALL_CODECS).getCodecInfos();
+        }
+        int count = MediaCodecList.getCodecCount();
+        MediaCodecInfo[] infos = new MediaCodecInfo[count];
+        for (int i = 0; i < count; i++) {
+            infos[i] = MediaCodecList.getCodecInfoAt(i);
+        }
+        return infos;
+    }
+
+    private static boolean isHardwareAvcDecoder(MediaCodecInfo info) {
+        if (info == null || info.isEncoder()) {
+            return false;
+        }
+        for (String type : info.getSupportedTypes()) {
+            if (!"video/avc".equalsIgnoreCase(type)) {
+                continue;
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                return info.isHardwareAccelerated();
+            }
+            String name = info.getName().toLowerCase(Locale.US);
+            return !name.startsWith("omx.google.")
+                    && !name.startsWith("c2.android.")
+                    && !name.contains("sw");
         }
         return false;
     }
