@@ -6,22 +6,32 @@ public final class MainActivityInteractionPolicy {
     /**
      * Plain data carrier for toggle state.
      */
-    @SuppressWarnings("java:S1104")
     public static final class ToggleState {
-        public boolean volumeUpHeld;
-        public boolean volumeDownHeld;
-        public boolean debugOverlayToggleArmed;
+        private boolean volumeUpHeld;
+        private boolean volumeDownHeld;
+        private boolean debugOverlayToggleArmed;
+
+        public boolean isVolumeUpHeld() { return volumeUpHeld; }
+        public boolean isVolumeDownHeld() { return volumeDownHeld; }
+        public boolean isDebugOverlayToggleArmed() { return debugOverlayToggleArmed; }
+        public void setDebugOverlayToggleArmed(boolean debugOverlayToggleArmed) {
+            this.debugOverlayToggleArmed = debugOverlayToggleArmed;
+        }
     }
 
     /**
      * Plain data carrier for toggle action result.
      */
-    @SuppressWarnings("java:S1104")
     public static final class ToggleAction {
-        public boolean handled;
-        public boolean scheduleToggle;
-        public boolean cancelScheduledToggle;
-        public boolean resetArmed;
+        private boolean handled;
+        private boolean scheduleToggle;
+        private boolean cancelScheduledToggle;
+        private boolean resetArmed;
+
+        public boolean isHandled() { return handled; }
+        public boolean shouldScheduleToggle() { return scheduleToggle; }
+        public boolean shouldCancelScheduledToggle() { return cancelScheduledToggle; }
+        public boolean shouldResetArmed() { return resetArmed; }
     }
 
     private MainActivityInteractionPolicy() {

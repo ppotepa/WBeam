@@ -2,11 +2,6 @@ package com.wbeam.ui;
 
 import android.os.Handler;
 import android.view.SurfaceView;
-import android.view.View;
-import android.webkit.WebView;
-import android.widget.Button;
-import android.widget.SeekBar;
-import android.widget.Spinner;
 import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
@@ -26,16 +21,44 @@ public final class MainViewBindingCoordinator {
     /**
      * Plain data carrier for bound views.
      */
-    @SuppressWarnings("java:S1104")
     public static final class BoundViews {
-        public MainActivityPrimaryViewsBinder.Views primaryViews;
-        public MainActivityControlViewsBinder.Views controlViews;
-        public SurfaceView previewSurface;
-        public ImmersiveModeController immersiveModeController;
-        public SettingsPanelController settingsPanelController;
-        public TextView startupBuildVersionText;
-        public StartupOverlayController startupOverlayController;
-        public CursorOverlayController cursorOverlayController;
+        private final MainActivityPrimaryViewsBinder.Views primaryViews;
+        private final MainActivityControlViewsBinder.Views controlViews;
+        private final SurfaceView previewSurface;
+        private final ImmersiveModeController immersiveModeController;
+        private final SettingsPanelController settingsPanelController;
+        private final TextView startupBuildVersionText;
+        private final StartupOverlayController startupOverlayController;
+        private final CursorOverlayController cursorOverlayController;
+
+        private BoundViews(
+                MainActivityPrimaryViewsBinder.Views primaryViews,
+                MainActivityControlViewsBinder.Views controlViews,
+                SurfaceView previewSurface,
+                ImmersiveModeController immersiveModeController,
+                SettingsPanelController settingsPanelController,
+                TextView startupBuildVersionText,
+                StartupOverlayController startupOverlayController,
+                CursorOverlayController cursorOverlayController
+        ) {
+            this.primaryViews = primaryViews;
+            this.controlViews = controlViews;
+            this.previewSurface = previewSurface;
+            this.immersiveModeController = immersiveModeController;
+            this.settingsPanelController = settingsPanelController;
+            this.startupBuildVersionText = startupBuildVersionText;
+            this.startupOverlayController = startupOverlayController;
+            this.cursorOverlayController = cursorOverlayController;
+        }
+
+        public MainActivityPrimaryViewsBinder.Views getPrimaryViews() { return primaryViews; }
+        public MainActivityControlViewsBinder.Views getControlViews() { return controlViews; }
+        public SurfaceView getPreviewSurface() { return previewSurface; }
+        public ImmersiveModeController getImmersiveModeController() { return immersiveModeController; }
+        public SettingsPanelController getSettingsPanelController() { return settingsPanelController; }
+        public TextView getStartupBuildVersionText() { return startupBuildVersionText; }
+        public StartupOverlayController getStartupOverlayController() { return startupOverlayController; }
+        public CursorOverlayController getCursorOverlayController() { return cursorOverlayController; }
     }
 
     private MainViewBindingCoordinator() {
@@ -47,22 +70,31 @@ public final class MainViewBindingCoordinator {
             StartupOverlayViewRenderer.Views startupOverlayViews,
             TickListener tickListener
     ) {
-        BoundViews out = new BoundViews();
-        out.primaryViews = MainActivityPrimaryViewsBinder.bind(activity);
-        out.controlViews = MainActivityControlViewsBinder.bind(activity);
-        out.previewSurface = activity.findViewById(R.id.previewSurface);
-        out.immersiveModeController =
-                new ImmersiveModeController(activity, out.primaryViews.rootLayout);
-        out.settingsPanelController = new SettingsPanelController(out.primaryViews.settingsPanel);
-        out.startupBuildVersionText = StartupOverlayViewsBinder.bind(activity, startupOverlayViews);
-        out.startupOverlayController =
-                new StartupOverlayController(uiHandler, out.primaryViews.preflightOverlay);
-        out.startupOverlayController.setTickListener(tickListener::onTick);
-        out.cursorOverlayController = new CursorOverlayController(
-                out.primaryViews.cursorOverlay,
-                out.controlViews.cursorOverlayButton
+        MainActivityPrimaryViewsBinder.Views primaryViews = MainActivityPrimaryViewsBinder.bind(activity);
+        MainActivityControlViewsBinder.Views controlViews = MainActivityControlViewsBinder.bind(activity);
+        SurfaceView previewSurface = activity.findViewById(R.id.previewSurface);
+        ImmersiveModeController immersiveModeController =
+                new ImmersiveModeController(activity, primaryViews.getRootLayout());
+        SettingsPanelController settingsPanelController =
+                new SettingsPanelController(primaryViews.getSettingsPanel());
+        TextView startupBuildVersionText = StartupOverlayViewsBinder.bind(activity, startupOverlayViews);
+        StartupOverlayController startupOverlayController =
+                new StartupOverlayController(uiHandler, primaryViews.getPreflightOverlay());
+        startupOverlayController.setTickListener(tickListener::onTick);
+        CursorOverlayController cursorOverlayController = new CursorOverlayController(
+                primaryViews.getCursorOverlay(),
+                controlViews.getCursorOverlayButton()
         );
-        MainActivityUiBinder.setupTrainerHudWebView(out.primaryViews.perfHudWebView);
-        return out;
+        MainActivityUiBinder.setupTrainerHudWebView(primaryViews.getPerfHudWebView());
+        return new BoundViews(
+                primaryViews,
+                controlViews,
+                previewSurface,
+                immersiveModeController,
+                settingsPanelController,
+                startupBuildVersionText,
+                startupOverlayController,
+                cursorOverlayController
+        );
     }
 }

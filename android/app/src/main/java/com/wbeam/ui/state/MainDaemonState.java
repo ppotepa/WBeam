@@ -3,16 +3,24 @@ package com.wbeam.ui.state;
 /**
  * Plain data carrier for daemon state.
  */
-@SuppressWarnings("java:S1104")
 public final class MainDaemonState {
-    public boolean reachable = false;
-    public String hostName = "-";
-    public String service = "-";
-    public String buildRevision = "-";
-    public String state = "IDLE";
-    public String lastError = "";
-    public long runId = 0L;
-    public long uptimeSec = 0L;
+    private boolean reachable = false;
+    private String hostName = "-";
+    private String service = "-";
+    private String buildRevision = "-";
+    private String state = "IDLE";
+    private String lastError = "";
+    private long runId = 0L;
+    private long uptimeSec = 0L;
+
+    public boolean isReachable() { return reachable; }
+    public String getHostName() { return hostName; }
+    public String getService() { return service; }
+    public String getBuildRevision() { return buildRevision; }
+    public String getState() { return state; }
+    public String getLastError() { return lastError; }
+    public long getRunId() { return runId; }
+    public long getUptimeSec() { return uptimeSec; }
 
     @SuppressWarnings("java:S107")
     public void applySnapshot(

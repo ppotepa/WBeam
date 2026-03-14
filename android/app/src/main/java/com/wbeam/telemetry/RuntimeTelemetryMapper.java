@@ -11,38 +11,141 @@ public final class RuntimeTelemetryMapper {
     /**
      * Plain data carrier for telemetry snapshot.
      */
-    @SuppressWarnings("java:S1104")
     public static final class Snapshot {
-        public long frameInHost;
-        public long frameOutHost;
-        public long streamUptimeSec;
+        private long frameInHost;
+        private long frameOutHost;
+        private long streamUptimeSec;
 
-        public double targetFps;
-        public double presentFps;
-        public double recvFps;
-        public double decodeFps;
-        public double frametimeP95;
-        public double decodeP95;
-        public double renderP95;
-        public double e2eP95;
+        private double targetFps;
+        private double presentFps;
+        private double recvFps;
+        private double decodeFps;
+        private double frametimeP95;
+        private double decodeP95;
+        private double renderP95;
+        private double e2eP95;
 
-        public int qT;
-        public int qD;
-        public int qR;
-        public int qTMax;
-        public int qDMax;
-        public int qRMax;
+        private int qT;
+        private int qD;
+        private int qR;
+        private int qTMax;
+        private int qDMax;
+        private int qRMax;
 
-        public int adaptiveLevel;
-        public String adaptiveAction;
-        public long drops;
-        public long bpHigh;
-        public long bpRecover;
-        public String reason;
+        private int adaptiveLevel;
+        private String adaptiveAction;
+        private long drops;
+        private long bpHigh;
+        private long bpRecover;
+        private String reason;
 
-        public long latestDroppedFrames;
-        public long latestTooLateFrames;
-        public double bitrateMbps;
+        private long latestDroppedFrames;
+        private long latestTooLateFrames;
+        private double bitrateMbps;
+
+        public long getFrameInHost() {
+            return frameInHost;
+        }
+
+        public long getFrameOutHost() {
+            return frameOutHost;
+        }
+
+        public long getStreamUptimeSec() {
+            return streamUptimeSec;
+        }
+
+        public double getTargetFps() {
+            return targetFps;
+        }
+
+        public double getPresentFps() {
+            return presentFps;
+        }
+
+        public double getRecvFps() {
+            return recvFps;
+        }
+
+        public double getDecodeFps() {
+            return decodeFps;
+        }
+
+        public double getFrametimeP95() {
+            return frametimeP95;
+        }
+
+        public double getDecodeP95() {
+            return decodeP95;
+        }
+
+        public double getRenderP95() {
+            return renderP95;
+        }
+
+        public double getE2eP95() {
+            return e2eP95;
+        }
+
+        public int getQT() {
+            return qT;
+        }
+
+        public int getQD() {
+            return qD;
+        }
+
+        public int getQR() {
+            return qR;
+        }
+
+        public int getQTMax() {
+            return qTMax;
+        }
+
+        public int getQDMax() {
+            return qDMax;
+        }
+
+        public int getQRMax() {
+            return qRMax;
+        }
+
+        public int getAdaptiveLevel() {
+            return adaptiveLevel;
+        }
+
+        public String getAdaptiveAction() {
+            return adaptiveAction;
+        }
+
+        public long getDrops() {
+            return drops;
+        }
+
+        public long getBpHigh() {
+            return bpHigh;
+        }
+
+        public long getBpRecover() {
+            return bpRecover;
+        }
+
+        public String getReason() {
+            return reason;
+        }
+
+        public long getLatestDroppedFrames() {
+            return latestDroppedFrames;
+        }
+
+        public long getLatestTooLateFrames() {
+            return latestTooLateFrames;
+        }
+
+        public double getBitrateMbps() {
+            return bitrateMbps;
+        }
     }
 
     public static Snapshot map(

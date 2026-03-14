@@ -1,10 +1,4 @@
-/* eslint-disable 
-  @typescript-eslint/no-unnecessary-type-assertion,
-  @typescript-eslint/no-unused-expressions
-  -- S6551: valueAt() patterns safe, S3358: nested ternaries in rendering, S4624/S7764: Solid.js patterns
-*/
-// NOSONAR: S6551 (unnecessary string conversions), S3358 (nested ternaries), S4624 (incomplete properties), S7764 (symbol issues) are framework patterns
-// NOSONAR: S6551, S3358, S4624, S7764, S3776 (Solid.js framework patterns)
+/* eslint-disable @typescript-eslint/no-unused-expressions -- Solid.js control-flow callbacks use expression-oriented JSX patterns. */
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type {
   DatasetDetail,
@@ -39,6 +33,7 @@ import {
   safeName,
   seriesSummary,
   toBars,
+  toDisplayString,
   valueAt,
 } from "./app-utils";
 export default function App() {
@@ -182,7 +177,7 @@ export default function App() {
     return 5000;
   });
   const liveRunning = createMemo(() => {
-    const state = String(valueAt(liveStatus(), ["base", "state"]) || "").toUpperCase();
+    const state = toDisplayString(valueAt(liveStatus(), ["base", "state"])).toUpperCase();
     return state === "STREAMING" || state === "STARTING" || state === "RECONNECTING";
   });
   const liveHudFallbackKpi = createMemo(() => {
@@ -230,7 +225,7 @@ export default function App() {
   function sessionPath(path: string): string {
     const params = new URLSearchParams();
     if (serial().trim()) params.set("serial", serial().trim());
-    params.set("stream_port", String(currentStreamPort()));
+    params.set("stream_port", `${currentStreamPort()}`);
     return `${path}?${params.toString()}`;
   }
 
@@ -243,7 +238,7 @@ export default function App() {
   }
 
   function resolvedLiveProfile(): string {
-    const active = String(valueAt(liveStatus(), ["base", "active_config", "profile"]) || "").trim();
+    const active = toDisplayString(valueAt(liveStatus(), ["base", "active_config", "profile"])).trim();
     const requested = profileName().trim();
     if (requested.toLowerCase() === "baseline") return "baseline";
     if (active) return active;
@@ -323,8 +318,8 @@ export default function App() {
     restart: boolean,
   ): LivePatchChange | null {
     const prev = active ? active[key] : undefined;
-    const prevNorm = prev === undefined || prev === null ? "" : String(prev);
-    const nextNorm = nextValue === undefined || nextValue === null ? "" : String(nextValue);
+    const prevNorm = toDisplayString(prev);
+    const nextNorm = toDisplayString(nextValue);
     if (prevNorm === nextNorm) return null;
     return { key, label, from: prevNorm || "-", to: nextNorm || "-", restart };
   }
@@ -470,9 +465,9 @@ export default function App() {
       });
       const body = (await resp.json()) as Record<string, unknown>;
       if (!resp.ok) {
-        throw new Error(String(body.error || "find-optimal failed"));
+        throw new Error(toDisplayString(body.error, "find-optimal failed"));
       }
-      const bestTrial = safeDisplay(body.best_trial, "unknown");
+      const bestTrial = toDisplayString(body.best_trial, "unknown");
       const bestScore = Number(body.best_score || 0);
       setDatasetActionText(`recompute done: best=${bestTrial} score=${bestScore.toFixed(2)}`);
       await refreshDatasets();
@@ -485,7 +480,6 @@ export default function App() {
     if (!run) {
       setTail(null);
       return;
-    // sonar-disable-next-line S3776
     }
     const data = await fetchJson<RunTail>(
       `/v1/trainer/runs/${encodeURIComponent(run.run_id)}/tail?lines=280`,
@@ -503,7 +497,7 @@ export default function App() {
       status = isRecord(data.status) ? data.status : null;
       metrics = isRecord(data.metrics) ? data.metrics : null;
     } catch (err) {
-      primaryErr = String(err);
+      primaryErr = toDisplayString(err, "unknown error");
     }
 
     if (!status) {
@@ -565,7 +559,7 @@ export default function App() {
         body: JSON.stringify(buildLivePatchPayload()),
       });
       const body = (await resp.json()) as Record<string, unknown>;
-      if (!resp.ok) throw new Error(String(body.error || "live start failed"));
+      if (!resp.ok) throw new Error(toDisplayString(body.error, "live start failed"));
       setLiveActionText("Live session started.");
       await refreshLiveSession();
       setTab("live_stats");
@@ -586,7 +580,7 @@ export default function App() {
         body: JSON.stringify(plan.patch),
       });
       const body = (await resp.json()) as Record<string, unknown>;
-      if (!resp.ok) throw new Error(safeDisplay(body.error, "live apply failed"));
+      if (!resp.ok) throw new Error(toDisplayString(body.error, "live apply failed"));
       setLiveActionText(
         `Live config applied (${plan.changes.length} field${plan.changes.length === 1 ? "" : "s"}${plan.restartRequired ? ", restart required" : ", hot"}).`,
       );
@@ -611,9 +605,10 @@ export default function App() {
         }),
       });
       const body = (await resp.json()) as Record<string, unknown>;
-      if (!resp.ok) throw new Error(String(body.error || "save profile failed"));
-      setLiveActionText(`Profile saved: ${String(body.profile_name || name)}`);
-      setProfileName(String(body.profile_name || name));
+      if (!resp.ok) throw new Error(toDisplayString(body.error, "save profile failed"));
+      const savedProfileName = toDisplayString(body.profile_name, name);
+      setLiveActionText(`Profile saved: ${savedProfileName}`);
+      setProfileName(savedProfileName);
       await refreshProfiles();
     });
   }
@@ -638,10 +633,33 @@ export default function App() {
       await fn();
       setLastError("");
     } catch (err) {
-      setLastError(String(err));
+      setLastError(toDisplayString(err, "unknown error"));
     } finally {
       setBusyAction("");
     }
+  }
+
+  function buildEncoderParams(): Record<string, unknown> {
+    const encoder = selectedEncoder();
+    if (encoder === "mjpeg") {
+      return { quality: Number(manualMjpegQuality()) };
+    }
+    if (encoder === "rawpng") {
+      return { compression_level: Number(manualPngCompression()) };
+    }
+    return {
+      preset: manualH26xPreset(),
+      gop: Number(manualH26xGop()),
+      bframes: Number(manualH26xBframes()),
+    };
+  }
+
+  function startPolling(intervalMs: number): number {
+    return window.setInterval(() => {
+      void runPollingTick().catch((err) => {
+        setLastError(toDisplayString(err, "unknown error"));
+      });
+    }, intervalMs);
   }
 
   async function runPollingTick() {
@@ -671,11 +689,10 @@ export default function App() {
         }),
       });
       const body = (await resp.json()) as Record<string, unknown>;
-      if (!resp.ok) throw new Error(String(body.error || "preflight failed"));
+      if (!resp.ok) throw new Error(toDisplayString(body.error, "preflight failed"));
       const push = Number(valueAt(body, ["adb_push", "throughput_mb_s"]) || 0);
       const rtt = Number(valueAt(body, ["adb_shell_rtt", "rtt_p95_ms"]) || 0);
       setPreflightText(`push=${push.toFixed(2)}MB/s, shell_rtt_p95=${rtt.toFixed(2)}ms`);
-      // sonar-disable-next-line S3358
       await refreshDiagnostics();
     });
   }
@@ -686,17 +703,7 @@ export default function App() {
       setTail(null);
       setSelectedRunId("");
       const encoders = [selectedEncoder()];
-      const encoderParams: Record<string, unknown> =
-        // @ts-ignore S3358: Encoder selection uses nested ternary for clear dispatch logic
-        selectedEncoder() === "mjpeg"
-          ? { quality: Number(manualMjpegQuality()) }
-          : selectedEncoder() === "rawpng"
-            ? { compression_level: Number(manualPngCompression()) }
-            : {
-                preset: manualH26xPreset(),
-                gop: Number(manualH26xGop()),
-                bframes: Number(manualH26xBframes()),
-              };
+      const encoderParams = buildEncoderParams();
       const resp = await fetch("/v1/trainer/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -725,8 +732,8 @@ export default function App() {
         }),
       });
       const body = (await resp.json()) as Record<string, unknown>;
-      if (!resp.ok) throw new Error(String(body.error || "start failed"));
-      const newRunId = safeDisplay(body.run_id, "").trim();
+      if (!resp.ok) throw new Error(toDisplayString(body.error, "start failed"));
+      const newRunId = toDisplayString(body.run_id).trim();
       await refreshRuns();
       if (newRunId) {
         setSelectedRunId(newRunId);
@@ -745,13 +752,13 @@ export default function App() {
         body: JSON.stringify({ run_id: runId }),
       });
       const body = (await resp.json()) as Record<string, unknown>;
-      if (!resp.ok) throw new Error(safeDisplay(body.error, "stop failed"));
+      if (!resp.ok) throw new Error(toDisplayString(body.error, "stop failed"));
       await refreshRuns();
       await refreshTail();
     });
   }
 
-  onMount(async () => {
+  async function loadInitialTrainer(): Promise<void> {
     await withUiGuard("Loading trainer", async () => {
       await refreshHealth();
       await refreshRuns();
@@ -761,30 +768,20 @@ export default function App() {
       await refreshDatasets();
       await refreshTail();
       await refreshLiveSession();
-      // sonar-disable-next-line S7764
       setLastRefreshAt(Date.now());
     });
-    pollId = globalThis.setInterval(async () => {
-      try {
-        await runPollingTick();
-      } catch (err) {
-        setLastError(String(err));
-      }
-    }, settings().pollingMs);
-  // sonar-disable-next-line S7764
+  }
+
+  onMount(() => {
+    void loadInitialTrainer();
+    pollId = startPolling(settings().pollingMs);
   });
 
   createEffect(() => {
     const intervalMs = settings().pollingMs;
     if (!pollId) return;
     globalThis.clearInterval(pollId);
-    pollId = window.setInterval(async () => {
-      try {
-        await runPollingTick();
-      } catch (err) {
-        setLastError(String(err));
-      }
-    }, intervalMs);
+    pollId = startPolling(intervalMs);
   });
 
   onCleanup(() => {
@@ -1184,10 +1181,10 @@ export default function App() {
               <article class="panel card">
                 <h2>Live Run</h2>
                 <div class="meta-grid">
-                  <div class="meta-item"><strong>Session state</strong><span>{safeDisplay(valueAt(liveStatus(), ["base", "state"]), "idle")}</span></div>
+                  <div class="meta-item"><strong>Session state</strong><span>{toDisplayString(valueAt(liveStatus(), ["base", "state"]), "idle")}</span></div>
                   <div class="meta-item"><strong>Device</strong><span>{serial() || "-"}</span></div>
                   <div class="meta-item"><strong>Stream port</strong><span>{currentStreamPort()}</span></div>
-                  <div class="meta-item"><strong>Active encoder</strong><span>{String(valueAt(liveStatus(), ["base", "active_config", "encoder"]) || selectedEncoder())}</span></div>
+                  <div class="meta-item"><strong>Active encoder</strong><span>{toDisplayString(valueAt(liveStatus(), ["base", "active_config", "encoder"]), selectedEncoder())}</span></div>
                   <div class="meta-item">
                     <strong>Apply mode</strong>
                     <span class={`live-pill ${livePatchPlan().restartRequired ? "warn" : "ok"}`}>
@@ -1363,7 +1360,7 @@ export default function App() {
               <article class="panel card">
                 <h2>Live Snapshot</h2>
                 <div class="meta-grid">
-                  <div class="meta-item"><strong>State</strong><span>{safeDisplay(valueAt(liveStatus(), ["base", "state"]), "idle")}</span></div>
+                  <div class="meta-item"><strong>State</strong><span>{toDisplayString(valueAt(liveStatus(), ["base", "state"]), "idle")}</span></div>
                   <div class="meta-item"><strong>Present FPS</strong><span>{liveKpi().present.toFixed(1)}</span></div>
                   <div class="meta-item"><strong>Pipeline FPS</strong><span>{liveKpi().recv.toFixed(1)}</span></div>
                   <div class="meta-item"><strong>Live Mbps</strong><span>{liveKpi().mbps.toFixed(2)}</span></div>
@@ -1385,14 +1382,14 @@ export default function App() {
               <article class="panel card fixed-left">
                 <h2>Live Stats Context</h2>
                 <div class="meta-grid">
-                  <div class="meta-item"><strong>Session state</strong><span>{String(valueAt(liveStatus(), ["base", "state"]) || "idle")}</span></div>
+                  <div class="meta-item"><strong>Session state</strong><span>{toDisplayString(valueAt(liveStatus(), ["base", "state"]), "idle")}</span></div>
                   <div class="meta-item"><strong>Device</strong><span>{serial() || "-"}</span></div>
                   <div class="meta-item"><strong>Stream port</strong><span>{currentStreamPort()}</span></div>
-                  <div class="meta-item"><strong>Profile</strong><span>{String(valueAt(liveStatus(), ["base", "active_config", "profile"]) || profileName())}</span></div>
-                  <div class="meta-item"><strong>Encoder</strong><span>{String(valueAt(liveStatus(), ["base", "active_config", "encoder"]) || selectedEncoder())}</span></div>
-                  <div class="meta-item"><strong>Size</strong><span>{String(valueAt(liveStatus(), ["base", "active_config", "size"]) || resolvedLiveSize() || "native")}</span></div>
-                  <div class="meta-item"><strong>FPS</strong><span>{String(valueAt(liveStatus(), ["base", "active_config", "fps"]) || liveFps())}</span></div>
-                  <div class="meta-item"><strong>Bitrate</strong><span>{String(valueAt(liveStatus(), ["base", "active_config", "bitrate_kbps"]) || mbpsToKbps(liveTargetMbps()))} kbps</span></div>
+                  <div class="meta-item"><strong>Profile</strong><span>{toDisplayString(valueAt(liveStatus(), ["base", "active_config", "profile"]), profileName())}</span></div>
+                  <div class="meta-item"><strong>Encoder</strong><span>{toDisplayString(valueAt(liveStatus(), ["base", "active_config", "encoder"]), selectedEncoder())}</span></div>
+                  <div class="meta-item"><strong>Size</strong><span>{toDisplayString(valueAt(liveStatus(), ["base", "active_config", "size"]), resolvedLiveSize() || "native")}</span></div>
+                  <div class="meta-item"><strong>FPS</strong><span>{toDisplayString(valueAt(liveStatus(), ["base", "active_config", "fps"]), `${liveFps()}`)}</span></div>
+                  <div class="meta-item"><strong>Bitrate</strong><span>{toDisplayString(valueAt(liveStatus(), ["base", "active_config", "bitrate_kbps"]), `${mbpsToKbps(liveTargetMbps())}`)} kbps</span></div>
                   <div class="meta-item">
                     <strong>Live health</strong>
                     <span class={`live-pill ${liveRunning() ? "ok" : "warn"}`}>{liveRunning() ? "running" : "idle"}</span>
@@ -1416,7 +1413,7 @@ export default function App() {
                 <div class="kpi-grid">
                   <div class="kpi-card">
                     <span>State</span>
-                    <strong>{String(valueAt(liveStatus(), ["base", "state"]) || "idle")}</strong>
+                    <strong>{toDisplayString(valueAt(liveStatus(), ["base", "state"]), "idle")}</strong>
                   </div>
                   <div class="kpi-card">
                     <span>Live score</span>
@@ -1539,12 +1536,12 @@ export default function App() {
                   <h3>Current Child Preset</h3>
                   <div class="meta-grid">
                     <div class="meta-item"><strong>Trial</strong><span>{currentChildPreset()?.trialId || hud().trialId || "-"}</span></div>
-                    <div class="meta-item"><strong>Encoder</strong><span>{currentChildPreset()?.encoder || String(valueAt(liveStatus(), ["base", "active_config", "encoder"]) || selectedEncoder())}</span></div>
-                    <div class="meta-item"><strong>Size</strong><span>{currentChildPreset()?.size || String(valueAt(liveStatus(), ["base", "active_config", "size"]) || resolvedLiveSize() || "native")}</span></div>
-                    <div class="meta-item"><strong>FPS</strong><span>{currentChildPreset()?.fps || String(valueAt(liveStatus(), ["base", "active_config", "fps"]) || liveFps())}</span></div>
-                    <div class="meta-item"><strong>Bitrate</strong><span>{currentChildPreset()?.bitrateKbps || String(valueAt(liveStatus(), ["base", "active_config", "bitrate_kbps"]) || mbpsToKbps(liveTargetMbps()))} kbps</span></div>
-                    <div class="meta-item"><strong>Cursor</strong><span>{String(valueAt(liveStatus(), ["base", "active_config", "cursor_mode"]) || liveCursorMode())}</span></div>
-                    <div class="meta-item"><strong>Intra-only</strong><span>{String(valueAt(liveStatus(), ["base", "active_config", "intra_only"]) ?? liveIntraOnly())}</span></div>
+                    <div class="meta-item"><strong>Encoder</strong><span>{currentChildPreset()?.encoder || toDisplayString(valueAt(liveStatus(), ["base", "active_config", "encoder"]), selectedEncoder())}</span></div>
+                    <div class="meta-item"><strong>Size</strong><span>{currentChildPreset()?.size || toDisplayString(valueAt(liveStatus(), ["base", "active_config", "size"]), resolvedLiveSize() || "native")}</span></div>
+                    <div class="meta-item"><strong>FPS</strong><span>{currentChildPreset()?.fps || toDisplayString(valueAt(liveStatus(), ["base", "active_config", "fps"]), `${liveFps()}`)}</span></div>
+                    <div class="meta-item"><strong>Bitrate</strong><span>{currentChildPreset()?.bitrateKbps || toDisplayString(valueAt(liveStatus(), ["base", "active_config", "bitrate_kbps"]), `${mbpsToKbps(liveTargetMbps())}`)} kbps</span></div>
+                    <div class="meta-item"><strong>Cursor</strong><span>{toDisplayString(valueAt(liveStatus(), ["base", "active_config", "cursor_mode"]), liveCursorMode())}</span></div>
+                    <div class="meta-item"><strong>Intra-only</strong><span>{toDisplayString(valueAt(liveStatus(), ["base", "active_config", "intra_only"]), `${liveIntraOnly()}`)}</span></div>
                     <div class="meta-item"><strong>Progress</strong><span>{hud().progress || "-"}</span></div>
                   </div>
                 </section>
@@ -1642,7 +1639,6 @@ export default function App() {
                                   await loadPreviewProfile(p.profile_name);
                                 })
                               }
-                            // sonar-disable-next-line S4624
                             >
                               Preview
                             </button>
@@ -1658,7 +1654,6 @@ export default function App() {
               <Show when={previewProfileDetail()}>
                 <section class="dataset-analytics">
                   <h3>Profile Preview: {previewProfileName()}</h3>
-                  // sonar-disable-next-line S4624
                   <div class="meta-grid">
                     <div class="meta-item"><strong>Encoder</strong><span>{pickRuntimeValue(previewProfileDetail()!.profile, "encoder")}</span></div>
                     <div class="meta-item"><strong>Size</strong><span>{pickRuntimeValue(previewProfileDetail()!.profile, "size")}</span></div>
@@ -1674,7 +1669,6 @@ export default function App() {
                           <For each={previewScoreBars()}>
                             {(bar, idx) => (
                               <span
-                                // sonar-disable-next-line S4624
                                 class={`bar ${bar.cls}`}
                                 style={{ height: `${bar.pct}%` }}
                                 title={`${previewTrials()[idx()]?.trial_id || `t${idx() + 1}`}: ${bar.value.toFixed(2)}`}
@@ -1802,15 +1796,15 @@ export default function App() {
                   </div>
                   <div class="meta-item">
                     <strong>Best encoder</strong>
-                    <span>{safeDisplay(valueAt(datasetDetail()!.parameters, ["best", "config", "encoder"]), "-")}</span>
+                    <span>{toDisplayString(valueAt(datasetDetail()!.parameters, ["best", "config", "encoder"]), "-")}</span>
                   </div>
                   <div class="meta-item">
                     <strong>Best size</strong>
-                    <span>{String(valueAt(datasetDetail()!.parameters, ["best", "config", "size"]) || "-")}</span>
+                    <span>{toDisplayString(valueAt(datasetDetail()!.parameters, ["best", "config", "size"]), "-")}</span>
                   </div>
                   <div class="meta-item">
                     <strong>Best fps</strong>
-                    <span>{String(valueAt(datasetDetail()!.parameters, ["best", "config", "fps"]) || "-")}</span>
+                    <span>{toDisplayString(valueAt(datasetDetail()!.parameters, ["best", "config", "fps"]), "-")}</span>
                   </div>
                   <div class="meta-item">
                     <strong>Best bitrate</strong>
@@ -1829,7 +1823,6 @@ export default function App() {
                   <div class="actions-row">
                     <button
                       class="primary"
-                      // sonar-disable-next-line S4624
                       onClick={() =>
                         downloadJson(
                           `${safeName(datasetDetail()!.dataset.run_id)}.dataset.json`,
@@ -1848,7 +1841,6 @@ export default function App() {
                         )
                       }
                     >
-                      // sonar-disable-next-line S4624
                       Export Profile JSON
                     </button>
                   </div>
@@ -1867,7 +1859,6 @@ export default function App() {
                                 style={{ height: `${bar.pct}%` }}
                                 title={`${datasetTrials()[idx()]?.trial_id || `t${idx() + 1}`}: ${bar.value.toFixed(2)}`}
                               />
-                            // sonar-disable-next-line S4624
                             )}
                           </For>
                         </div>
@@ -1886,7 +1877,6 @@ export default function App() {
                                 style={{ height: `${bar.pct}%` }}
                                 title={`${datasetTrials()[idx()]?.trial_id || `t${idx() + 1}`}: ${bar.value.toFixed(2)} fps`}
                               />
-                            // sonar-disable-next-line S4624
                             )}
                           </For>
                         </div>
@@ -2118,7 +2108,7 @@ export default function App() {
               <label title="Refresh interval for trainer polling.">
                 <span>Polling (ms)</span>
                 <select
-                  value={String(settings().pollingMs)}
+                  value={`${settings().pollingMs}`}
                   onInput={(e) => {
                     const val = Number(e.currentTarget.value || "2000");
                     setSettings((prev) => ({ ...prev, pollingMs: val }));

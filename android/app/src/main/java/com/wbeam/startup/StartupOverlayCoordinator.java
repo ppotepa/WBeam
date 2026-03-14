@@ -1,6 +1,5 @@
 package com.wbeam.startup;
 
-@SuppressWarnings("java:S1104")
 public final class StartupOverlayCoordinator {
     public interface Hooks {
         boolean hasOverlayContainer();
@@ -15,10 +14,19 @@ public final class StartupOverlayCoordinator {
     }
 
     public static final class State {
-        public long startupBeganAtMs;
-        public int controlRetryCount;
-        public boolean startupDismissed;
-        public boolean preflightComplete;
+        long startupBeganAtMs;
+        int controlRetryCount;
+        boolean startupDismissed;
+        boolean preflightComplete;
+
+        long getStartupBeganAtMs() { return startupBeganAtMs; }
+        void setStartupBeganAtMs(long startupBeganAtMs) { this.startupBeganAtMs = startupBeganAtMs; }
+        int getControlRetryCount() { return controlRetryCount; }
+        void setControlRetryCount(int controlRetryCount) { this.controlRetryCount = controlRetryCount; }
+        boolean isStartupDismissed() { return startupDismissed; }
+        void setStartupDismissed(boolean startupDismissed) { this.startupDismissed = startupDismissed; }
+        boolean isPreflightComplete() { return preflightComplete; }
+        void setPreflightComplete(boolean preflightComplete) { this.preflightComplete = preflightComplete; }
     }
 
     private StartupOverlayCoordinator() {
@@ -43,21 +51,21 @@ public final class StartupOverlayCoordinator {
         hooks.applyModel(model);
 
         State next = new State();
-        next.startupBeganAtMs = model.getUpdatedStartupBeganAtMs();
-        next.controlRetryCount = model.getUpdatedControlRetryCount();
-        next.startupDismissed = state.startupDismissed;
-        next.preflightComplete = state.preflightComplete;
+        next.setStartupBeganAtMs(model.getUpdatedStartupBeganAtMs());
+        next.setControlRetryCount(model.getUpdatedControlRetryCount());
+        next.setStartupDismissed(state.isStartupDismissed());
+        next.setPreflightComplete(state.isPreflightComplete());
 
         PreflightStateMachine.Transition transition =
-                PreflightStateMachine.next(model.isAllOk(), state.startupDismissed, 800L);
-        next.startupDismissed = transition.startupDismissed;
-        next.preflightComplete = transition.preflightComplete;
+                PreflightStateMachine.next(model.isAllOk(), state.isStartupDismissed(), 800L);
+        next.setStartupDismissed(transition.startupDismissed);
+        next.setPreflightComplete(transition.preflightComplete);
         if (transition.showOverlayNow) {
             hooks.setOverlayVisible(true);
         }
         if (transition.scheduleHide) {
             hooks.scheduleHide(transition.hideDelayMs, () -> {
-                if (next.startupDismissed) {
+                if (next.isStartupDismissed()) {
                     hooks.setOverlayVisible(false);
                 }
             });

@@ -105,8 +105,8 @@ public final class MainInitializationCoordinator {
         );
         return hwAvcDecodeAvailable;
     }
- @SuppressWarnings("java:S107")
 
+    @SuppressWarnings("java:S107")
     public static void initializeStartupState(
             MainUiState uiState,
             StartupOverlayController startupOverlayController,
@@ -124,9 +124,9 @@ public final class MainInitializationCoordinator {
         applyBuildVariantUiTask.run();
         setDefaultStatsLineTask.run();
         updatePerfHudUnavailableTask.run();
-        uiState.startupBeganAtMs = SystemClock.elapsedRealtime();
-        uiState.handshakeResolved = false;
-        uiState.startupDismissed = false;
+        uiState.setStartupBeganAtMs(SystemClock.elapsedRealtime());
+        uiState.setHandshakeResolved(false);
+        uiState.setStartupDismissed(false);
         StartupOverlayControllerGuard.startPulse(startupOverlayController);
         updatePreflightOverlayTask.run();
         setIdleWaitingStatusTask.run();

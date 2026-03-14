@@ -1,4 +1,3 @@
-// sonar-disable S3776: Cognitive complexity is essential for domain logic
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -60,114 +59,29 @@ struct EvdiModuleStatus {
     loaded: bool,
 }
 
-#[allow(clippy::cognitive_complexity)]
+struct ProbeContext {
+    display: String,
+    xauth: Option<PathBuf>,
+    evdi: EvdiModuleStatus,
+}
+
 pub fn probe(is_remote: bool) -> X11RealOutputProbe {
-    // NOSONAR: S3776
-    if policy_flag_enabled("DISABLE_REAL_OUTPUT_BACKEND") {
-        return probe_unsupported_missing(
-            format!(
-                "real-output backend disabled by policy file ({})",
-                policy_file_location_hint()
-            ),
-            "real-output-disabled",
-        );
-    }
-    if is_remote {
-        return probe_unsupported(
-            "remote X11 sessions typically cannot expose real virtual outputs",
-        );
-    }
-
-    let display = detect_x11_display().unwrap_or_default();
-    if display.trim().is_empty() {
-        return probe_unsupported("DISPLAY is not set for daemon process");
-    }
-    if !command_exists("xrandr") {
-        return probe_unsupported_missing("xrandr is not installed", "xrandr");
-    }
-
-    let xauth = resolve_xauthority_for_display(&display);
-    let evdi = detect_evdi_module_status();
-
-    let providers = match xrandr_output(&["--listproviders"], &display, xauth.as_deref()) {
-        Ok(v) => parse_providers(&v),
-        Err(e) => return probe_unsupported(format!("xrandr --listproviders failed: {e}")),
+    let context = match build_probe_context(is_remote) {
+        Ok(context) => context,
+        Err(probe) => return probe,
     };
-    let disp = display.clone();
-    debug!(x_display = %disp, providers = providers.len(), "x11 real-output probe: providers");
-    if let Some(reason) = reject_unsafe_provider_topology(&providers) {
-        warn!("{reason}");
-        return probe_unsupported_with_missing(reason, vec!["xrandr-safe-topology".to_string()]);
-    }
-
-    let source_provider = choose_source_provider(&providers);
-    if source_provider.is_none() {
-        if evdi.available && !evdi.loaded {
-            warn!("x11 real-output probe: evdi installed but module not loaded");
-            return probe_unsupported_missing(
-                "evdi module is installed but not loaded (run: sudo modprobe evdi initial_device_count=1)",
-                "evdi-module-loaded",
-            );
-        }
-        warn!("x11 real-output probe: no source provider with virtual output capability");
-        return probe_unsupported_missing(
-            "no source provider with virtual output capability found",
-            "evdi-provider",
-        );
-    }
-
-    let source_provider = source_provider.unwrap();
-    if let Some(reason) = reject_unsafe_source_provider(source_provider) {
-        warn!(
-            source_provider_id = %source_provider.id,
-            source_provider_name = %source_provider.name,
-            "{reason}"
-        );
-        return probe_unsupported_missing(reason, "xrandr-virtual-source-provider");
-    }
-    let sink_provider = choose_sink_provider(&providers, source_provider);
-    if sink_provider.is_none() {
-        warn!("x11 real-output probe: no Intel/AMD (non-NVIDIA) sink provider for provider link");
-        return probe_unsupported_missing(
-            "no Intel/AMD (non-NVIDIA) sink provider found for provider link",
-            "xrandr-igpu-sink-provider",
-        );
-    }
-    let sink_provider = sink_provider.unwrap();
-    if should_block_real_output_on_nvidia_evdi(sink_provider) {
-        return probe_unsupported(format!(
-            "real-output backend auto-disabled on NVIDIA+EVDI with NVIDIA sink provider ({})",
-            sink_provider.name
-        ));
-    }
-
-    let query = match xrandr_output(&["--query"], &display, xauth.as_deref()) {
-        Ok(v) => v,
-        Err(e) => return probe_unsupported(format!("xrandr --query failed: {e}")),
+    let providers = match probe_providers(&context) {
+        Ok(providers) => providers,
+        Err(probe) => return probe,
     };
-    let outputs = parse_outputs(&query);
-    debug!(outputs = outputs.len(), "x11 real-output probe: outputs");
-    if outputs.is_empty() {
-        return probe_unsupported("xrandr reported no outputs in this session");
+    if let Err(probe) = validate_provider_selection(&providers, context.evdi) {
+        return probe;
     }
-
-    if choose_candidate_output(&outputs).is_none() {
-        if has_aux_sink_only_provider(&providers) {
-            warn!(
-                "x11 real-output probe: no disconnected output pre-link, but sink-only provider exists; deferring output detection to activation"
-            );
-            return probe_supported(
-                "providers detected; output candidate will be resolved during activation",
-            );
-        }
-        warn!("x11 real-output probe: no disconnected virtual-capable output candidate");
-        return probe_unsupported_missing(
-            "no disconnected virtual-capable output found",
-            "evdi-output",
-        );
-    }
-
-    probe_supported("X11 virtual output candidates detected")
+    let outputs = match probe_outputs(&context) {
+        Ok(outputs) => outputs,
+        Err(probe) => return probe,
+    };
+    evaluate_probe_outputs(&providers, &outputs)
 }
 
 fn probe_supported(reason: impl Into<String>) -> X11RealOutputProbe {
@@ -660,9 +574,7 @@ fn restore_previous_fb(handle: &X11RealOutputHandle, display: &str, xauth: Optio
     let _ = xrandr(&["--fb", &format!("{w}x{h}")], display, xauth);
 }
 
-#[allow(clippy::cognitive_complexity)]
 fn parse_outputs(raw: &str) -> Vec<OutputInfo> {
-    // NOSONAR: S3776
     let mut out = Vec::new();
     let mut current: Option<OutputInfo> = None;
 
@@ -671,38 +583,187 @@ fn parse_outputs(raw: &str) -> Vec<OutputInfo> {
             continue;
         }
         if !line.starts_with(' ') && !line.starts_with('\t') {
-            if let Some(prev) = current.take() {
-                out.push(prev);
-            }
-            let parts = line.split_whitespace().collect::<Vec<_>>();
-            if parts.len() >= 2 && (parts[1] == "connected" || parts[1] == "disconnected") {
-                let name = parts[0].to_string();
-                let connected = parts[1] == "connected";
-                let geometry = parse_connected_geometry(line);
-                current = Some(OutputInfo {
-                    name,
-                    connected,
-                    modes: Vec::new(),
-                    geometry,
-                });
-            }
+            flush_current_output(&mut out, &mut current);
+            current = parse_output_header(line);
             continue;
         }
-        if let Some(cur) = current.as_mut() {
-            let t = line.trim();
-            if let Some(mode) = t.split_whitespace().next() {
-                if looks_mode(mode) {
-                    cur.modes.push(mode.to_string());
-                }
-            }
-        }
+        append_output_mode(&mut current, line);
     }
 
-    if let Some(prev) = current.take() {
-        out.push(prev);
-    }
+    flush_current_output(&mut out, &mut current);
 
     out
+}
+
+fn build_probe_context(is_remote: bool) -> Result<ProbeContext, X11RealOutputProbe> {
+    if policy_flag_enabled("DISABLE_REAL_OUTPUT_BACKEND") {
+        return Err(probe_unsupported_missing(
+            format!(
+                "real-output backend disabled by policy file ({})",
+                policy_file_location_hint()
+            ),
+            "real-output-disabled",
+        ));
+    }
+    if is_remote {
+        return Err(probe_unsupported(
+            "remote X11 sessions typically cannot expose real virtual outputs",
+        ));
+    }
+
+    let display = detect_x11_display().unwrap_or_default();
+    if display.trim().is_empty() {
+        return Err(probe_unsupported("DISPLAY is not set for daemon process"));
+    }
+    if !command_exists("xrandr") {
+        return Err(probe_unsupported_missing(
+            "xrandr is not installed",
+            "xrandr",
+        ));
+    }
+
+    Ok(ProbeContext {
+        xauth: resolve_xauthority_for_display(&display),
+        display,
+        evdi: detect_evdi_module_status(),
+    })
+}
+
+fn probe_providers(context: &ProbeContext) -> Result<Vec<ProviderInfo>, X11RealOutputProbe> {
+    let providers = xrandr_output(
+        &["--listproviders"],
+        &context.display,
+        context.xauth.as_deref(),
+    )
+    .map(|raw| parse_providers(&raw))
+    .map_err(|err| probe_unsupported(format!("xrandr --listproviders failed: {err}")))?;
+    debug!(
+        x_display = %context.display,
+        providers = providers.len(),
+        "x11 real-output probe: providers"
+    );
+    if let Some(reason) = reject_unsafe_provider_topology(&providers) {
+        warn!("{reason}");
+        return Err(probe_unsupported_with_missing(
+            reason,
+            vec!["xrandr-safe-topology".to_string()],
+        ));
+    }
+    Ok(providers)
+}
+
+fn validate_provider_selection(
+    providers: &[ProviderInfo],
+    evdi: EvdiModuleStatus,
+) -> Result<(), X11RealOutputProbe> {
+    let Some(source_provider) = choose_source_provider(providers) else {
+        if evdi.available && !evdi.loaded {
+            warn!("x11 real-output probe: evdi installed but module not loaded");
+            return Err(probe_unsupported_missing(
+                "evdi module is installed but not loaded (run: sudo modprobe evdi initial_device_count=1)",
+                "evdi-module-loaded",
+            ));
+        }
+        warn!("x11 real-output probe: no source provider with virtual output capability");
+        return Err(probe_unsupported_missing(
+            "no source provider with virtual output capability found",
+            "evdi-provider",
+        ));
+    };
+
+    if let Some(reason) = reject_unsafe_source_provider(source_provider) {
+        warn!(
+            source_provider_id = %source_provider.id,
+            source_provider_name = %source_provider.name,
+            "{reason}"
+        );
+        return Err(probe_unsupported_missing(
+            reason,
+            "xrandr-virtual-source-provider",
+        ));
+    }
+
+    let Some(sink_provider) = choose_sink_provider(providers, source_provider) else {
+        warn!("x11 real-output probe: no Intel/AMD (non-NVIDIA) sink provider for provider link");
+        return Err(probe_unsupported_missing(
+            "no Intel/AMD (non-NVIDIA) sink provider found for provider link",
+            "xrandr-igpu-sink-provider",
+        ));
+    };
+    if should_block_real_output_on_nvidia_evdi(sink_provider) {
+        return Err(probe_unsupported(format!(
+            "real-output backend auto-disabled on NVIDIA+EVDI with NVIDIA sink provider ({})",
+            sink_provider.name
+        )));
+    }
+
+    Ok(())
+}
+
+fn probe_outputs(context: &ProbeContext) -> Result<Vec<OutputInfo>, X11RealOutputProbe> {
+    let outputs = xrandr_output(&["--query"], &context.display, context.xauth.as_deref())
+        .map(|raw| parse_outputs(&raw))
+        .map_err(|err| probe_unsupported(format!("xrandr --query failed: {err}")))?;
+    debug!(outputs = outputs.len(), "x11 real-output probe: outputs");
+    if outputs.is_empty() {
+        return Err(probe_unsupported(
+            "xrandr reported no outputs in this session",
+        ));
+    }
+    Ok(outputs)
+}
+
+fn evaluate_probe_outputs(
+    providers: &[ProviderInfo],
+    outputs: &[OutputInfo],
+) -> X11RealOutputProbe {
+    if choose_candidate_output(outputs).is_some() {
+        return probe_supported("X11 virtual output candidates detected");
+    }
+    if has_aux_sink_only_provider(providers) {
+        warn!(
+            "x11 real-output probe: no disconnected output pre-link, but sink-only provider exists; deferring output detection to activation"
+        );
+        return probe_supported(
+            "providers detected; output candidate will be resolved during activation",
+        );
+    }
+    warn!("x11 real-output probe: no disconnected virtual-capable output candidate");
+    probe_unsupported_missing(
+        "no disconnected virtual-capable output found",
+        "evdi-output",
+    )
+}
+
+fn flush_current_output(outputs: &mut Vec<OutputInfo>, current: &mut Option<OutputInfo>) {
+    if let Some(previous) = current.take() {
+        outputs.push(previous);
+    }
+}
+
+fn parse_output_header(line: &str) -> Option<OutputInfo> {
+    let parts = line.split_whitespace().collect::<Vec<_>>();
+    if parts.len() < 2 || (parts[1] != "connected" && parts[1] != "disconnected") {
+        return None;
+    }
+    Some(OutputInfo {
+        name: parts[0].to_string(),
+        connected: parts[1] == "connected",
+        modes: Vec::new(),
+        geometry: parse_connected_geometry(line),
+    })
+}
+
+fn append_output_mode(current: &mut Option<OutputInfo>, line: &str) {
+    let Some(output) = current.as_mut() else {
+        return;
+    };
+    let Some(mode) = line.trim().split_whitespace().next() else {
+        return;
+    };
+    if looks_mode(mode) {
+        output.modes.push(mode.to_string());
+    }
 }
 
 fn parse_connected_geometry(line: &str) -> Option<(i32, i32, u32, u32)> {
@@ -1453,6 +1514,25 @@ Provider 1: id: 0x48 cap: 0xf, Source Output, Sink Output, Source Offload, Sink 
 
         let query = "Screen 0: minimum 8 x 8, current 3280 x 1080, maximum 32767 x 32767";
         assert_eq!(parse_current_fb(query), Some((3280, 1080)));
+    }
+
+    #[test]
+    fn parse_outputs_collects_modes_for_each_output() {
+        let raw = r#"
+eDP-1 connected primary 1920x1080+0+0 (normal left inverted right x axis y axis)
+   1920x1080     60.01*+  59.93
+HDMI-1 disconnected (normal left inverted right x axis y axis)
+   1280x720      60.00
+"#;
+
+        let outputs = parse_outputs(raw);
+        assert_eq!(outputs.len(), 2);
+        assert_eq!(outputs[0].name, "eDP-1");
+        assert_eq!(outputs[0].geometry, Some((0, 0, 1920, 1080)));
+        assert_eq!(outputs[0].modes, vec!["1920x1080".to_string()]);
+        assert_eq!(outputs[1].name, "HDMI-1");
+        assert!(!outputs[1].connected);
+        assert_eq!(outputs[1].modes, vec!["1280x720".to_string()]);
     }
 }
 

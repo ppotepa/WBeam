@@ -10,27 +10,62 @@ public final class MainActivityDaemonStatusCoordinator {
     /**
      * Plain data carrier for daemon status coordinator input.
      */
-    @SuppressWarnings("java:S1104")
     public static final class Input {
-        public boolean reachable;
-        public boolean wasReachable;
-        public String hostName;
-        public String state;
-        public String lastError;
-        public boolean errorChanged;
-        public String service;
-        public JSONObject metrics;
-        public boolean handshakeResolved;
-        public boolean requiresTransportProbeNow;
+        final boolean reachable;
+        final boolean wasReachable;
+        final String hostName;
+        final String state;
+        final String lastError;
+        final boolean errorChanged;
+        final String service;
+        final JSONObject metrics;
+        final boolean handshakeResolved;
+        final boolean requiresTransportProbeNow;
+
+        Input(
+                boolean reachable,
+                boolean wasReachable,
+                String hostName,
+                String state,
+                String lastError,
+                boolean errorChanged,
+                String service,
+                JSONObject metrics,
+                boolean handshakeResolved,
+                boolean requiresTransportProbeNow
+        ) {
+            this.reachable = reachable;
+            this.wasReachable = wasReachable;
+            this.hostName = hostName;
+            this.state = state;
+            this.lastError = lastError;
+            this.errorChanged = errorChanged;
+            this.service = service;
+            this.metrics = metrics;
+            this.handshakeResolved = handshakeResolved;
+            this.requiresTransportProbeNow = requiresTransportProbeNow;
+        }
     }
 
     /**
      * Plain data carrier for daemon status coordinator output.
      */
-    @SuppressWarnings("java:S1104")
     public static final class Output {
-        public boolean handshakeResolved;
-        public String hostStatsLine;
+        private final boolean handshakeResolved;
+        private final String hostStatsLine;
+
+        Output(boolean handshakeResolved, String hostStatsLine) {
+            this.handshakeResolved = handshakeResolved;
+            this.hostStatsLine = hostStatsLine;
+        }
+
+        public boolean isHandshakeResolved() {
+            return handshakeResolved;
+        }
+
+        public String getHostStatsLine() {
+            return hostStatsLine;
+        }
     }
 
     private MainActivityDaemonStatusCoordinator() {
@@ -41,8 +76,7 @@ public final class MainActivityDaemonStatusCoordinator {
             TransportProbeStarter transportProbeStarter,
             StatusPollerUiUpdateCoordinator.TransitionHooks statusTransitionHooks
     ) {
-        Output output = new Output();
-        output.handshakeResolved = StatusPollerUiUpdateCoordinator.resolveHandshake(
+        boolean handshakeResolved = StatusPollerUiUpdateCoordinator.resolveHandshake(
                 input.handshakeResolved,
                 input.service
         );
@@ -58,10 +92,10 @@ public final class MainActivityDaemonStatusCoordinator {
                 StatusPollerUiUpdateCoordinator.shouldStopLiveViewForDaemonState(input.state),
                 statusTransitionHooks
         );
-        output.hostStatsLine = StatusPollerUiUpdateCoordinator.buildStatsLine(
+        String hostStatsLine = StatusPollerUiUpdateCoordinator.buildStatsLine(
                 input.metrics,
                 input.lastError
         );
-        return output;
+        return new Output(handshakeResolved, hostStatsLine);
     }
 }

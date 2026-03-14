@@ -3,7 +3,6 @@ package com.wbeam.ui;
 import android.view.Surface;
 import android.view.SurfaceView;
 
-@SuppressWarnings("java:S1104")
 public final class MainActivitySurfaceSetup {
     @FunctionalInterface
     public interface SurfaceStateHandler {
@@ -25,27 +24,50 @@ public final class MainActivitySurfaceSetup {
         void onMotion(float x, float y, int actionMasked);
     }
 
-    public static final class Input {
-        public SurfaceView preview;
-        public SurfaceStateHandler onSurfaceCreated;
-        public SurfaceStateHandler onSurfaceChanged;
-        public Action onSurfaceDestroyed;
-        public CursorEnabledSupplier isCursorOverlayEnabled;
-        public CursorMotionHandler onCursorOverlayMotion;
+    static final class Input {
+        private final SurfaceView preview;
+        private final SurfaceStateHandler onSurfaceCreated;
+        private final SurfaceStateHandler onSurfaceChanged;
+        private final Action onSurfaceDestroyed;
+        private final CursorEnabledSupplier isCursorOverlayEnabled;
+        private final CursorMotionHandler onCursorOverlayMotion;
+
+        Input(
+                SurfaceView preview,
+                SurfaceStateHandler onSurfaceCreated,
+                SurfaceStateHandler onSurfaceChanged,
+                Action onSurfaceDestroyed,
+                CursorEnabledSupplier isCursorOverlayEnabled,
+                CursorMotionHandler onCursorOverlayMotion
+        ) {
+            this.preview = preview;
+            this.onSurfaceCreated = onSurfaceCreated;
+            this.onSurfaceChanged = onSurfaceChanged;
+            this.onSurfaceDestroyed = onSurfaceDestroyed;
+            this.isCursorOverlayEnabled = isCursorOverlayEnabled;
+            this.onCursorOverlayMotion = onCursorOverlayMotion;
+        }
+
+        SurfaceView getPreview() { return preview; }
+        SurfaceStateHandler getOnSurfaceCreated() { return onSurfaceCreated; }
+        SurfaceStateHandler getOnSurfaceChanged() { return onSurfaceChanged; }
+        Action getOnSurfaceDestroyed() { return onSurfaceDestroyed; }
+        CursorEnabledSupplier getIsCursorOverlayEnabled() { return isCursorOverlayEnabled; }
+        CursorMotionHandler getOnCursorOverlayMotion() { return onCursorOverlayMotion; }
     }
 
     private MainActivitySurfaceSetup() {
     }
 
-    public static void setup(Input input) {
+    static void setup(Input input) {
         MainActivityUiBinder.setupSurfaceCallbacks(
-                input.preview,
+                input.getPreview(),
                 MainActivitySurfaceCallbacksFactory.create(
-                        input.onSurfaceCreated::onState,
-                        input.onSurfaceChanged::onState,
-                        input.onSurfaceDestroyed::run,
-                        input.isCursorOverlayEnabled::get,
-                        input.onCursorOverlayMotion::onMotion
+                        input.getOnSurfaceCreated()::onState,
+                        input.getOnSurfaceChanged()::onState,
+                        input.getOnSurfaceDestroyed()::run,
+                        input.getIsCursorOverlayEnabled()::get,
+                        input.getOnCursorOverlayMotion()::onMotion
                 )
         );
     }

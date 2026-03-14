@@ -152,7 +152,7 @@ export function parseCurrentChildPreset(lines: string[]): CurrentChildPreset | n
   const applyRe = /^\[(t\d+)\]\s+apply\s+encoder=([^\s]+)\s+size=([^\s]+)\s+fps=(\d+)\s+bitrate=(\d+)/;
   for (let i = lines.length - 1; i >= 0; i -= 1) {
     const line = lines[i];
-    const match = line.exec(applyRe);
+    const match = applyRe.exec(line);
     if (!match) continue;
     return {
       trialId: match[1],

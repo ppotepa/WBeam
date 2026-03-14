@@ -10,9 +10,7 @@ import type {
 } from "../types";
 
 function normalizeApiError(err: unknown): string {
-  // NOSONAR: S6551 String() safely converts error objects to string
-  // sonar-disable-next-line S6551
-  const text = String(err ?? "unknown error");
+  const text = errorText(err);
   if (text.toLowerCase().includes("timeout")) {
     return "Host API timeout. Check service state and USB connectivity.";
   }
@@ -20,6 +18,13 @@ function normalizeApiError(err: unknown): string {
     return "Host API unreachable. Verify desktop service is running.";
   }
   return text;
+}
+
+function errorText(value: unknown): string {
+  if (value instanceof Error && value.message) return value.message;
+  if (typeof value === "string") return value;
+  if (value === undefined || value === null) return "unknown error";
+  return `${value}`;
 }
 
 async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {

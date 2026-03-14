@@ -131,12 +131,8 @@ public class MainActivity extends AppCompatActivity {
     private static final long TRAINER_HUD_PAYLOAD_GRACE_MS = 2000L;
 
     // ── Views ──────────────────────────────────────────────────────────────────
-    @SuppressWarnings("java:S1450")
-    private View rootLayout;
     private View topBar;
     private View quickActionRow;
-    @SuppressWarnings("java:S1450")
-    private View settingsPanel;
     private View simpleMenuPanel;
     private View statusPanel;
     private View perfHudPanel;
@@ -145,8 +141,6 @@ public class MainActivity extends AppCompatActivity {
     private View preflightOverlay;
     private View debugControlsRow;
     private View statusLed;
-    @SuppressWarnings("java:S1450")
-    private View cursorOverlay;
     private SurfaceView previewSurface;
     private TextView statusText;
     private TextView detailText;
@@ -174,8 +168,6 @@ public class MainActivity extends AppCompatActivity {
     private Button settingsButton;
     private Button logButton;
     private Button settingsCloseButton;
-    @SuppressWarnings("java:S1068")
-    private Button applySettingsButton;
     private Button quickStartButton;
     private Button quickStopButton;
     private Button quickTestButton;
@@ -183,8 +175,6 @@ public class MainActivity extends AppCompatActivity {
     private Button stopButton;
     private Button testButton;
     private Button fullscreenButton;
-    @SuppressWarnings("java:S1450")
-    private Button cursorOverlayButton;
     private Button intraOnlyButton;
     private Button simpleModeH265Button;
     private Button simpleModeRawButton;
@@ -206,8 +196,6 @@ public class MainActivity extends AppCompatActivity {
     private final MainActivityInteractionPolicy.ToggleState debugToggleState =
             new MainActivityInteractionPolicy.ToggleState();
     private final HudDebugLogLimiter hudDebugLogLimiter = new HudDebugLogLimiter(HUD_ADB_LOG_INTERVAL_MS);
-    @SuppressWarnings("java:S1068")
-    private boolean hwAvcDecodeAvailable = false;
     private final MainStatusState statusState =
             new MainStatusState(STATE_IDLE, "tap Settings -> Start Live");
     private final HudOverlayDisplay.State hudOverlayState = new HudOverlayDisplay.State();
@@ -255,11 +243,11 @@ public class MainActivity extends AppCompatActivity {
         if (!BuildConfig.DEBUG) {
             return;
         }
-        if (debugToggleState.volumeUpHeld
-                && debugToggleState.volumeDownHeld
-                && !debugToggleState.debugOverlayToggleArmed) {
-            debugToggleState.debugOverlayToggleArmed = true;
-            boolean nextVisible = !uiState.debugOverlayVisible;
+        if (debugToggleState.isVolumeUpHeld()
+                && debugToggleState.isVolumeDownHeld()
+                && !debugToggleState.isDebugOverlayToggleArmed()) {
+            debugToggleState.setDebugOverlayToggleArmed(true);
+            boolean nextVisible = !uiState.isDebugOverlayVisible();
             setDebugOverlayVisible(nextVisible);
             Toast.makeText(
                     this,
@@ -285,7 +273,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void initializeUiBindings() {
-        hwAvcDecodeAvailable = MainInitializationCoordinator.initializeUiBindings(
+        MainInitializationCoordinator.initializeUiBindings(
                 TAG,
                 this,
                 startupBuildVersionText,
@@ -377,8 +365,8 @@ public class MainActivity extends AppCompatActivity {
                                 streamCoordinator.stopPlaybackOnly();
                             }
                         },
-                        () -> daemon.state,
-                        () -> daemon.reachable,
+                        daemon::getState,
+                        daemon::isReachable,
                         this::updateStatus,
                         this::updateStatsLine,
                         msg -> appendLiveLog("I", msg),
@@ -386,7 +374,7 @@ public class MainActivity extends AppCompatActivity {
                         msg -> appendLiveLog("E", msg),
                         this::updatePreflightOverlay,
                         visible -> {
-                            uiState.liveLogVisible = visible;
+                            uiState.setLiveLogVisible(visible);
                             if (liveLogText != null) {
                                 liveLogText.setVisibility(visible ? View.VISIBLE : View.GONE);
                             }
@@ -567,11 +555,11 @@ public class MainActivity extends AppCompatActivity {
                         keyCode,
                         event.getRepeatCount()
                 );
-        if (action.handled) {
-            if (action.cancelScheduledToggle) {
+        if (action.isHandled()) {
+            if (action.shouldCancelScheduledToggle()) {
                 uiHandler.removeCallbacks(debugOverlayToggleTask);
             }
-            if (action.scheduleToggle) {
+            if (action.shouldScheduleToggle()) {
                 uiHandler.postDelayed(debugOverlayToggleTask, DEBUG_OVERLAY_TOGGLE_HOLD_MS);
             }
             return true;
@@ -587,12 +575,12 @@ public class MainActivity extends AppCompatActivity {
                         BuildConfig.DEBUG,
                         keyCode
                 );
-        if (action.handled) {
-            if (action.cancelScheduledToggle) {
+        if (action.isHandled()) {
+            if (action.shouldCancelScheduledToggle()) {
                 uiHandler.removeCallbacks(debugOverlayToggleTask);
             }
-            if (action.resetArmed) {
-                debugToggleState.debugOverlayToggleArmed = false;
+            if (action.shouldResetArmed()) {
+                debugToggleState.setDebugOverlayToggleArmed(false);
             }
             return true;
         }
@@ -609,75 +597,70 @@ public class MainActivity extends AppCompatActivity {
                 uiHandler,
                 startupOverlayViews,
                 animTick -> {
-                    uiState.preflightAnimTick = animTick;
+                    uiState.setPreflightAnimTick(animTick);
                     updatePreflightOverlay();
                 }
         );
-        MainActivityPrimaryViewsBinder.Views primaryViews = bound.primaryViews;
-        rootLayout = primaryViews.rootLayout;
-        topBar = primaryViews.topBar;
-        quickActionRow = primaryViews.quickActionRow;
-        settingsPanel = primaryViews.settingsPanel;
-        simpleMenuPanel = primaryViews.simpleMenuPanel;
-        statusPanel = primaryViews.statusPanel;
-        perfHudPanel = primaryViews.perfHudPanel;
-        debugInfoPanel = primaryViews.debugInfoPanel;
-        debugFpsGraphView = primaryViews.debugFpsGraphView;
-        preflightOverlay = primaryViews.preflightOverlay;
-        debugControlsRow = primaryViews.debugControlsRow;
-        statusLed = primaryViews.statusLed;
-        cursorOverlay = primaryViews.cursorOverlay;
-        statusText = primaryViews.statusText;
-        detailText = primaryViews.detailText;
-        bpsText = primaryViews.bpsText;
-        statsText = primaryViews.statsText;
-        perfHudText = primaryViews.perfHudText;
-        perfHudWebView = primaryViews.perfHudWebView;
-        debugInfoText = primaryViews.debugInfoText;
-        previewSurface = bound.previewSurface;
+        MainActivityPrimaryViewsBinder.Views primaryViews = bound.getPrimaryViews();
+        topBar = primaryViews.getTopBar();
+        quickActionRow = primaryViews.getQuickActionRow();
+        simpleMenuPanel = primaryViews.getSimpleMenuPanel();
+        statusPanel = primaryViews.getStatusPanel();
+        perfHudPanel = primaryViews.getPerfHudPanel();
+        debugInfoPanel = primaryViews.getDebugInfoPanel();
+        debugFpsGraphView = primaryViews.getDebugFpsGraphView();
+        preflightOverlay = primaryViews.getPreflightOverlay();
+        debugControlsRow = primaryViews.getDebugControlsRow();
+        statusLed = primaryViews.getStatusLed();
+        statusText = primaryViews.getStatusText();
+        detailText = primaryViews.getDetailText();
+        bpsText = primaryViews.getBpsText();
+        statsText = primaryViews.getStatsText();
+        perfHudText = primaryViews.getPerfHudText();
+        perfHudWebView = primaryViews.getPerfHudWebView();
+        debugInfoText = primaryViews.getDebugInfoText();
+        previewSurface = bound.getPreviewSurface();
 
-        immersiveModeController = bound.immersiveModeController;
-        settingsPanelController = bound.settingsPanelController;
-        startupBuildVersionText = bound.startupBuildVersionText;
-        startupOverlayController = bound.startupOverlayController;
-        MainActivityControlViewsBinder.Views controlViews = bound.controlViews;
-        liveLogText = controlViews.liveLogText;
-        resValueText = controlViews.resValueText;
-        fpsValueText = controlViews.fpsValueText;
-        bitrateValueText = controlViews.bitrateValueText;
-        hostHintText = controlViews.hostHintText;
+        immersiveModeController = bound.getImmersiveModeController();
+        settingsPanelController = bound.getSettingsPanelController();
+        startupBuildVersionText = bound.getStartupBuildVersionText();
+        startupOverlayController = bound.getStartupOverlayController();
+        MainActivityControlViewsBinder.Views controlViews = bound.getControlViews();
+        liveLogText = controlViews.getLiveLogText();
+        resValueText = controlViews.getResValueText();
+        fpsValueText = controlViews.getFpsValueText();
+        bitrateValueText = controlViews.getBitrateValueText();
+        hostHintText = controlViews.getHostHintText();
 
-        profileSpinner = controlViews.profileSpinner;
-        encoderSpinner = controlViews.encoderSpinner;
-        cursorSpinner = controlViews.cursorSpinner;
+        profileSpinner = controlViews.getProfileSpinner();
+        encoderSpinner = controlViews.getEncoderSpinner();
+        cursorSpinner = controlViews.getCursorSpinner();
 
-        resolutionSeek = controlViews.resolutionSeek;
-        fpsSeek = controlViews.fpsSeek;
-        bitrateSeek = controlViews.bitrateSeek;
+        resolutionSeek = controlViews.getResolutionSeek();
+        fpsSeek = controlViews.getFpsSeek();
+        bitrateSeek = controlViews.getBitrateSeek();
 
-        settingsButton = controlViews.settingsButton;
-        logButton = controlViews.logButton;
-        settingsCloseButton = controlViews.settingsCloseButton;
-        applySettingsButton = controlViews.applySettingsButton;
-        quickStartButton = controlViews.quickStartButton;
-        quickStopButton = controlViews.quickStopButton;
-        quickTestButton = controlViews.quickTestButton;
-        startButton = controlViews.startButton;
-        stopButton = controlViews.stopButton;
-        testButton = controlViews.testButton;
-        fullscreenButton = controlViews.fullscreenButton;
-        cursorOverlayButton = controlViews.cursorOverlayButton;
-        intraOnlyButton = controlViews.intraOnlyButton;
-        simpleModeH265Button = controlViews.simpleModeH265Button;
-        simpleModeRawButton = controlViews.simpleModeRawButton;
-        simpleFps30Button = controlViews.simpleFps30Button;
-        simpleFps45Button = controlViews.simpleFps45Button;
-        simpleFps60Button = controlViews.simpleFps60Button;
-        simpleFps90Button = controlViews.simpleFps90Button;
-        simpleFps120Button = controlViews.simpleFps120Button;
-        simpleFps144Button = controlViews.simpleFps144Button;
-        simpleApplyButton = controlViews.simpleApplyButton;
-        cursorOverlayController = bound.cursorOverlayController;
+        settingsButton = controlViews.getSettingsButton();
+        logButton = controlViews.getLogButton();
+        settingsCloseButton = controlViews.getSettingsCloseButton();
+        quickStartButton = controlViews.getQuickStartButton();
+        quickStopButton = controlViews.getQuickStopButton();
+        quickTestButton = controlViews.getQuickTestButton();
+        startButton = controlViews.getStartButton();
+        stopButton = controlViews.getStopButton();
+        testButton = controlViews.getTestButton();
+        fullscreenButton = controlViews.getFullscreenButton();
+        intraOnlyButton = controlViews.getIntraOnlyButton();
+        simpleModeH265Button = controlViews.getSimpleModeH265Button();
+        simpleModeRawButton = controlViews.getSimpleModeRawButton();
+        simpleFps30Button = controlViews.getSimpleFps30Button();
+        simpleFps45Button = controlViews.getSimpleFps45Button();
+        simpleFps60Button = controlViews.getSimpleFps60Button();
+        simpleFps90Button = controlViews.getSimpleFps90Button();
+        simpleFps120Button = controlViews.getSimpleFps120Button();
+        simpleFps144Button = controlViews.getSimpleFps144Button();
+        simpleApplyButton = controlViews.getSimpleApplyButton();
+        cursorOverlayController = bound.getCursorOverlayController();
     }
 
     private void applyBuildVariantUi() {
@@ -714,20 +697,20 @@ public class MainActivity extends AppCompatActivity {
                 cursorOverlayController,
                 (nextSurface, ready) -> {
                     surface = nextSurface;
-                    uiState.surfaceReady = ready;
+                    uiState.setSurfaceReady(ready);
                     updatePreflightOverlay();
                     updateStatus(STATE_IDLE, "surface ready", 0);
                 },
                 (nextSurface, ready) -> {
                     surface = nextSurface;
-                    uiState.surfaceReady = ready;
+                    uiState.setSurfaceReady(ready);
                     updatePreflightOverlay();
                 },
                 () -> {
                     stopLiveView();
                     surface = null;
-                    uiState.surfaceReady = false;
-                    uiState.preflightComplete = false;
+                    uiState.setSurfaceReady(false);
+                    uiState.setPreflightComplete(false);
                     updatePreflightOverlay();
                     hideCursorOverlay();
                     updateStatus(STATE_IDLE, "surface destroyed", 0);
@@ -784,7 +767,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void updateActionButtonsEnabled() {
         MainViewBehaviorCoordinator.updateActionButtonsEnabled(
-                daemon.reachable,
+                daemon.isReachable(),
                 quickStartButton,
                 quickStopButton,
                 quickTestButton,
@@ -861,11 +844,11 @@ public class MainActivity extends AppCompatActivity {
         StreamConfigResolver.Resolved cfg = effectiveStreamConfig();
         MainUiControlsCoordinator.updateHostHint(
                 hostHintText,
-                daemon.reachable,
+                daemon.isReachable(),
                 HostApiClient.API_BASE,
-                daemon.hostName,
+                daemon.getHostName(),
                 effectiveDaemonStateUi(),
-                daemon.service,
+                daemon.getService(),
                 getSelectedProfile(),
                 cfg,
                 getSelectedEncoder(),
@@ -895,13 +878,13 @@ public class MainActivity extends AppCompatActivity {
                     }
                     daemon.applySnapshot(
                             true,
-                            status.optString("host_name", daemon.hostName),
+                            status.optString("host_name", daemon.getHostName()),
                             status.optString("state", "IDLE").toUpperCase(Locale.US),
-                            status.optString("last_error", daemon.lastError),
-                            status.optLong("run_id", daemon.runId),
-                            status.optLong("uptime", daemon.uptimeSec),
-                            daemon.service,
-                            daemon.buildRevision
+                            status.optString("last_error", daemon.getLastError()),
+                            status.optLong("run_id", daemon.getRunId()),
+                            status.optLong("uptime", daemon.getUptimeSec()),
+                            daemon.getService(),
+                            daemon.getBuildRevision()
                     );
                     refreshUiAfterDaemonStateChange();
                 },
@@ -935,9 +918,9 @@ public class MainActivity extends AppCompatActivity {
 
     private boolean isBuildMismatch() {
         return MainSessionControlCoordinator.isBuildMismatch(
-                daemon.reachable,
-                uiState.handshakeResolved,
-                daemon.buildRevision
+                daemon.isReachable(),
+                uiState.isHandshakeResolved(),
+                daemon.getBuildRevision()
         );
     }
 
@@ -946,9 +929,9 @@ public class MainActivity extends AppCompatActivity {
                 this,
                 userAction,
                 ensureViewer,
-                daemon.reachable,
-                uiState.handshakeResolved,
-                daemon.buildRevision,
+                daemon.isReachable(),
+                uiState.isHandshakeResolved(),
+                daemon.getBuildRevision(),
                 this::updateStatus,
                 this::appendLiveLog,
                 sessionController::requestStart
@@ -1116,7 +1099,7 @@ public class MainActivity extends AppCompatActivity {
         LiveLogUiAppender.append(
                 liveLogText,
                 liveLogBuffer,
-                uiState.liveLogVisible,
+                uiState.isLiveLogVisible(),
                 level,
                 line,
                 this::runOnUiThread
@@ -1130,8 +1113,8 @@ public class MainActivity extends AppCompatActivity {
                 bpsText,
                 statusLed,
                 statusState,
-                daemon.reachable,
-                daemon.hostName,
+                daemon.isReachable(),
+                daemon.getHostName(),
                 effectiveDaemonStateUi(),
                 STATE_STREAMING,
                 STATE_CONNECTING
@@ -1203,15 +1186,15 @@ public class MainActivity extends AppCompatActivity {
                 this::getSelectedProfile,
                 this::getSelectedEncoder,
                 this::computeScaledSize,
-                () -> daemon.reachable,
-                () -> daemon.state,
-                () -> daemon.hostName,
-                () -> daemon.buildRevision,
-                () -> daemon.lastError,
-                () -> daemon.runId,
-                () -> daemon.uptimeSec,
+                daemon::isReachable,
+                daemon::getState,
+                daemon::getHostName,
+                daemon::getBuildRevision,
+                daemon::getLastError,
+                daemon::getRunId,
+                daemon::getUptimeSec,
                 this::effectiveDaemonStateUi,
-                () -> uiState.debugOverlayVisible,
+                uiState::isDebugOverlayVisible,
                 BuildConfig.DEBUG,
                 this::setDebugOverlayVisible,
                 this::showHudTextOnly,
@@ -1225,13 +1208,13 @@ public class MainActivity extends AppCompatActivity {
                 BuildConfig.DEBUG,
                 debugInfoText,
                 debugInfoPanel,
-                statusState.uiState,
-                daemon.hostName,
+                statusState.getUiState(),
+                daemon.getHostName(),
                 effectiveDaemonStateUi(),
                 hudState.getLatestTargetFps(),
                 hudState.getLatestPresentFps(),
                 getSelectedFps(),
-                statusState.statsLine,
+                statusState.getStatsLine(),
                 hudState.getCompactLine()
         );
     }
@@ -1250,28 +1233,28 @@ public class MainActivity extends AppCompatActivity {
                 transportProbe,
                 ioExecutor,
                 uiHandler,
-                daemon.reachable,
-                daemon.hostName,
-                daemon.service,
-                daemon.buildRevision,
-                daemon.state,
-                daemon.lastError,
-                uiState.handshakeResolved,
+                daemon.isReachable(),
+                daemon.getHostName(),
+                daemon.getService(),
+                daemon.getBuildRevision(),
+                daemon.getState(),
+                daemon.getLastError(),
+                uiState.isHandshakeResolved(),
                 BuildConfig.WBEAM_API_IMPL,
                 HostApiClient.API_BASE,
                 BuildConfig.WBEAM_API_HOST,
                 BuildConfig.WBEAM_STREAM_HOST,
                 BuildConfig.WBEAM_STREAM_PORT,
                 BuildConfig.WBEAM_BUILD_REV,
-                statusState.uiInfo,
+                statusState.getUiInfo(),
                 hudState.getLatestPresentFps(),
-                statusState.statsLine,
-                ErrorTextUtil.compactDaemonErrorForUi(daemon.lastError),
-                uiState.preflightAnimTick,
-                uiState.startupBeganAtMs,
-                uiState.controlRetryCount,
-                uiState.startupDismissed,
-                uiState.preflightComplete,
+                statusState.getStatsLine(),
+                ErrorTextUtil.compactDaemonErrorForUi(daemon.getLastError()),
+                uiState.getPreflightAnimTick(),
+                uiState.getStartupBeganAtMs(),
+                uiState.getControlRetryCount(),
+                uiState.isStartupDismissed(),
+                uiState.isPreflightComplete(),
                 this::isBuildMismatch,
                 this::effectiveDaemonStateUi,
                 this::updatePreflightOverlay,
@@ -1281,15 +1264,15 @@ public class MainActivity extends AppCompatActivity {
 
         com.wbeam.startup.StartupOverlayStateSync.StateValues synced =
                 MainStartupCoordinator.updatePreflightOverlay(input);
-        uiState.startupBeganAtMs = synced.startupBeganAtMs;
-        uiState.controlRetryCount = synced.controlRetryCount;
-        uiState.startupDismissed = synced.startupDismissed;
-        uiState.preflightComplete = synced.preflightComplete;
+        uiState.setStartupBeganAtMs(synced.getStartupBeganAtMs());
+        uiState.setControlRetryCount(synced.getControlRetryCount());
+        uiState.setStartupDismissed(synced.isStartupDismissed());
+        uiState.setPreflightComplete(synced.isPreflightComplete());
     }
 
     private String effectiveDaemonStateUi() {
         return MainActivityRuntimeStateView.effectiveDaemonState(
-                daemon.state,
+                daemon.getState(),
                 hudState.getLatestPresentFps(),
                 hudState.getLatestStreamUptimeSec(),
                 hudState.getLatestFrameOutHost()
@@ -1299,8 +1282,8 @@ public class MainActivity extends AppCompatActivity {
     private boolean requiresTransportProbeNow() {
         return MainStartupCoordinator.requiresTransportProbeNow(
                 transportProbe,
-                daemon.reachable,
-                uiState.handshakeResolved,
+                daemon.isReachable(),
+                uiState.isHandshakeResolved(),
                 BuildConfig.WBEAM_API_IMPL,
                 BuildConfig.WBEAM_API_HOST
         );

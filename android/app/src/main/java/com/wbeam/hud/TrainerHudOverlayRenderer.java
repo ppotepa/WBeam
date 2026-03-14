@@ -30,7 +30,6 @@ public final class TrainerHudOverlayRenderer {
 
     private TrainerHudOverlayRenderer() {}
 
-    @SuppressWarnings("java:S1612")
     public static Rendered fromText(
             String rawHudText,
             double latestTargetFps,

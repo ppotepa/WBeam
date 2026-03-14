@@ -24,20 +24,19 @@ public final class MainDaemonRuntimeInputFactory {
             String buildRevision,
             JSONObject metrics
     ) {
-        MainDaemonRuntimeCoordinator.StatusInput input =
-                new MainDaemonRuntimeCoordinator.StatusInput();
-        input.reachable = reachable;
-        input.wasReachable = wasReachable;
-        input.hostName = hostName;
-        input.state = state;
-        input.runId = runId;
-        input.lastError = lastError;
-        input.errorChanged = errorChanged;
-        input.uptimeSec = uptimeSec;
-        input.service = service;
-        input.buildRevision = buildRevision;
-        input.metrics = metrics;
-        return input;
+        return new MainDaemonRuntimeCoordinator.StatusInput(
+                reachable,
+                wasReachable,
+                hostName,
+                state,
+                runId,
+                lastError,
+                errorChanged,
+                uptimeSec,
+                service,
+                buildRevision,
+                metrics
+        );
     }
 
     public static MainDaemonRuntimeCoordinator.StatusContext createStatusContext(
@@ -52,19 +51,18 @@ public final class MainDaemonRuntimeInputFactory {
             MainDaemonRuntimeCoordinator.StatsSink statsSink,
             MainDaemonRuntimeCoordinator.PerfHudSink perfHudSink
     ) {
-        MainDaemonRuntimeCoordinator.StatusContext context =
-                new MainDaemonRuntimeCoordinator.StatusContext();
-        context.daemon = daemon;
-        context.uiState = uiState;
-        context.requiresTransportProbeNowProvider = requiresTransportProbeNowProvider;
-        context.probeStarter = probeStarter;
-        context.hostConnectedNotifier = hostConnectedNotifier;
-        context.lineLogger = lineLogger;
-        context.stopLiveViewTask = stopLiveViewTask;
-        context.refreshUiTask = refreshUiTask;
-        context.statsSink = statsSink;
-        context.perfHudSink = perfHudSink;
-        return context;
+        return new MainDaemonRuntimeCoordinator.StatusContext(
+                daemon,
+                uiState,
+                requiresTransportProbeNowProvider,
+                probeStarter,
+                hostConnectedNotifier,
+                lineLogger,
+                stopLiveViewTask,
+                refreshUiTask,
+                statsSink,
+                perfHudSink
+        );
     }
 
     public static MainDaemonRuntimeCoordinator.OfflineContext createOfflineContext(
@@ -82,22 +80,21 @@ public final class MainDaemonRuntimeInputFactory {
             MainDaemonRuntimeCoordinator.LineLogger lineLogger,
             MainDaemonRuntimeCoordinator.UiMessageSink toastSink
     ) {
-        MainDaemonRuntimeCoordinator.OfflineContext context =
-                new MainDaemonRuntimeCoordinator.OfflineContext();
-        context.daemon = daemon;
-        context.uiState = uiState;
-        context.transportProbe = transportProbe;
-        context.stateError = stateError;
-        context.apiBase = HostApiClient.API_BASE;
-        context.stopLiveViewTask = stopLiveViewTask;
-        context.updateActionButtonsTask = updateActionButtonsTask;
-        context.updateHostHintTask = updateHostHintTask;
-        context.updatePerfHudUnavailableTask = updatePerfHudUnavailableTask;
-        context.refreshStatusTextTask = refreshStatusTextTask;
-        context.updatePreflightOverlayTask = updatePreflightOverlayTask;
-        context.uiStatusSink = uiStatusSink;
-        context.lineLogger = lineLogger;
-        context.toastSink = toastSink;
-        return context;
+        return new MainDaemonRuntimeCoordinator.OfflineContext(
+                daemon,
+                uiState,
+                transportProbe,
+                stateError,
+                HostApiClient.API_BASE,
+                stopLiveViewTask,
+                updateActionButtonsTask,
+                updateHostHintTask,
+                updatePerfHudUnavailableTask,
+                refreshStatusTextTask,
+                updatePreflightOverlayTask,
+                uiStatusSink,
+                lineLogger,
+                toastSink
+        );
     }
 }

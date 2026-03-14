@@ -247,9 +247,41 @@ public final class StartupOverlayModelBuilder {
     private static final String ATTEMPT_PREFIX = "attempt #";
     private static final String RECONNECTS_SUFFIX = "reconnects: ";
 
-    @SuppressWarnings({"java:S6541", "java:S3776"})
     public static Model build(Input in) {
         Model out = new Model();
+        StartupProgress progress = updateStartupProgress(in);
+        applyProgress(out, progress);
+
+        StreamDiagnostics diagnostics = analyzeStream(in);
+
+        StepInfo step1Info = determineStep1(in, progress.elapsedMs, progress.updatedControlRetryCount);
+        StepInfo step2Info = determineStep2(in, step1Info.state);
+        StepInfo step3Info = determineStep3(
+                in,
+                step2Info.state,
+                diagnostics.streamFlowing,
+                diagnostics.daemonStartFailure,
+                diagnostics.streamAddr,
+                diagnostics.streamFixHint,
+                diagnostics.streamReconnects,
+                progress.elapsedMs
+        );
+        String subtitle = buildSubtitle(
+                step1Info.state,
+                step2Info.state,
+                step3Info.state,
+                progress.elapsedMs,
+                progress.updatedControlRetryCount,
+                diagnostics.daemonStartFailure,
+                diagnostics.streamReconnects,
+                in.buildMismatch
+        );
+
+        applyStepResults(out, step1Info, step2Info, step3Info, subtitle, buildInfoLog(in));
+        return out;
+    }
+
+    private static StartupProgress updateStartupProgress(Input in) {
         long elapsedMs = in.startupBeganAtMs > 0L
                 ? Math.max(0L, in.nowMs - in.startupBeganAtMs)
                 : 0L;
@@ -264,10 +296,17 @@ public final class StartupOverlayModelBuilder {
         if (in.daemonReachable && updatedControlRetryCount > 0) {
             updatedControlRetryCount = 0;
         }
-        out.updatedStartupBeganAtMs = updatedStartupBeganAtMs;
-        out.updatedControlRetryCount = updatedControlRetryCount;
-        out.elapsedMs = elapsedMs;
 
+        return new StartupProgress(elapsedMs, updatedStartupBeganAtMs, updatedControlRetryCount);
+    }
+
+    private static void applyProgress(Model out, StartupProgress progress) {
+        out.updatedStartupBeganAtMs = progress.updatedStartupBeganAtMs;
+        out.updatedControlRetryCount = progress.updatedControlRetryCount;
+        out.elapsedMs = progress.elapsedMs;
+    }
+
+    private static StreamDiagnostics analyzeStream(Input in) {
         boolean streamFlowing = "STREAMING".equalsIgnoreCase(safe(in.effectiveDaemonState));
         int streamReconnects = parseReconnectCount(in.lastStatsLine);
         String streamAddr = streamAddress(in.streamHost);
@@ -278,30 +317,16 @@ public final class StartupOverlayModelBuilder {
         String streamFixHint = streamIsLoopback
                 ? "check ADB reverse for stream/control ports" + BULLET + "ensure desktop service is running"
                 : "check USB tethering / host IP / LAN" + BULLET + "ensure desktop service is running";
-
-        StepInfo step1Info = determineStep1(in, elapsedMs, updatedControlRetryCount);
-        StepInfo step2Info = determineStep2(in, step1Info.state);
-        StepInfo step3Info = determineStep3(
-                in,
-                step2Info.state,
+        return new StreamDiagnostics(
                 streamFlowing,
-                daemonStartFailure,
+                streamReconnects,
                 streamAddr,
-                streamFixHint,
-                streamReconnects,
-                elapsedMs
-        );
-        String subtitle = buildSubtitle(
-                step1Info.state,
-                step2Info.state,
-                step3Info.state,
-                elapsedMs,
-                updatedControlRetryCount,
                 daemonStartFailure,
-                streamReconnects,
-                in.buildMismatch
+                streamFixHint
         );
+    }
 
+    private static String buildInfoLog(Input in) {
         StringBuilder info = new StringBuilder();
         info.append("api=").append(safe(in.apiBase))
                 .append("  impl=").append(safe(in.apiImpl)).append('\n')
@@ -310,12 +335,28 @@ public final class StartupOverlayModelBuilder {
                 .append("app=").append(safe(in.appBuildRevision))
                 .append("  host=").append(safe(in.daemonBuildRevision)).append('\n')
                 .append("state=").append(safe(in.daemonState));
-        if (!safe(in.daemonLastError).isEmpty()) {
-            info.append('\n').append("error=").append(safe(in.daemonLastError));
-        } else if (!safe(in.lastUiInfo).isEmpty()) {
-            info.append('\n').append("hint=").append(safe(in.lastUiInfo));
+        appendInfoDetail(info, "error=", in.daemonLastError);
+        if (safe(in.daemonLastError).isEmpty()) {
+            appendInfoDetail(info, "hint=", in.lastUiInfo);
         }
+        return info.toString();
+    }
 
+    private static void appendInfoDetail(StringBuilder info, String prefix, String value) {
+        String safeValue = safe(value);
+        if (!safeValue.isEmpty()) {
+            info.append('\n').append(prefix).append(safeValue);
+        }
+    }
+
+    private static void applyStepResults(
+            Model out,
+            StepInfo step1Info,
+            StepInfo step2Info,
+            StepInfo step3Info,
+            String subtitle,
+            String infoLog
+    ) {
         out.step1State = step1Info.state;
         out.step1Detail = step1Info.detail;
         out.step2State = step2Info.state;
@@ -323,11 +364,10 @@ public final class StartupOverlayModelBuilder {
         out.step3State = step3Info.state;
         out.step3Detail = step3Info.detail;
         out.subtitle = subtitle;
-        out.infoLog = info.toString();
+        out.infoLog = infoLog;
         out.allOk = step1Info.state == Model.SS_OK
                 && step2Info.state == Model.SS_OK
                 && step3Info.state == Model.SS_OK;
-        return out;
     }
 
     private static StepInfo determineStep1(Input in, long elapsedMs, int updatedControlRetryCount) {
@@ -480,6 +520,40 @@ public final class StartupOverlayModelBuilder {
         private StepInfo(int state, String detail) {
             this.state = state;
             this.detail = detail;
+        }
+    }
+
+    private static final class StartupProgress {
+        private final long elapsedMs;
+        private final long updatedStartupBeganAtMs;
+        private final int updatedControlRetryCount;
+
+        private StartupProgress(long elapsedMs, long updatedStartupBeganAtMs, int updatedControlRetryCount) {
+            this.elapsedMs = elapsedMs;
+            this.updatedStartupBeganAtMs = updatedStartupBeganAtMs;
+            this.updatedControlRetryCount = updatedControlRetryCount;
+        }
+    }
+
+    private static final class StreamDiagnostics {
+        private final boolean streamFlowing;
+        private final int streamReconnects;
+        private final String streamAddr;
+        private final boolean daemonStartFailure;
+        private final String streamFixHint;
+
+        private StreamDiagnostics(
+                boolean streamFlowing,
+                int streamReconnects,
+                String streamAddr,
+                boolean daemonStartFailure,
+                String streamFixHint
+        ) {
+            this.streamFlowing = streamFlowing;
+            this.streamReconnects = streamReconnects;
+            this.streamAddr = streamAddr;
+            this.daemonStartFailure = daemonStartFailure;
+            this.streamFixHint = streamFixHint;
         }
     }
 

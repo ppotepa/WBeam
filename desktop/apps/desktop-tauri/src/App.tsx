@@ -1,5 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unused-expressions -- S3358, S4624: Conditional rendering and state patterns in Solid.js */
-// NOSONAR: S3358 (nested ternaries), S4624 (incomplete properties) are Solid.js patterns
+/* eslint-disable @typescript-eslint/no-unused-expressions -- Solid.js control-flow callbacks use expression-oriented JSX patterns. */
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import AlertTriangle from "lucide-solid/icons/alert-triangle";
@@ -22,10 +21,13 @@ import RefreshCw from "lucide-solid/icons/refresh-cw";
 import Link2 from "lucide-solid/icons/link-2";
 import Unlink2 from "lucide-solid/icons/unlink-2";
 import Loader2 from "lucide-solid/icons/loader-2";
-/* sonar-disable-next-line */
-import type { ConnectEncoderMode, ConnectSessionConfig, DeviceBasic } from "./types";
-/* sonar-disable-next-line */
-import type { VirtualDepsInstallStatus, VirtualDoctor } from "./types";
+import type {
+  ConnectEncoderMode,
+  ConnectSessionConfig,
+  DeviceBasic,
+  VirtualDepsInstallStatus,
+  VirtualDoctor,
+} from "./types";
 import { HostApiManager } from "./managers/hostApiManager";
 import { createSessionManager } from "./managers/sessionManager";
 import trainedProfileLabels from "./config/trained-profile-labels.json";
@@ -33,8 +35,16 @@ import trainedProfileRuntime from "./config/trained-profile-runtime.json";
 import connectResolutionPresets from "./config/connect-resolution-presets.json";
 import connectEncoderOptions from "./config/connect-encoder-options.json";
 
-/* sonar-disable-next-line */
-function BatteryIcon(props: { level: number | null; charging: boolean }) {
+type BatteryIconProps = {
+  level: number | null;
+  charging: boolean;
+};
+
+type DeviceTypeIconProps = {
+  type: string;
+};
+
+function BatteryIcon(props: BatteryIconProps) {
   if (props.charging) return <BatteryCharging size={14} />;
   if (props.level === null) return <BatteryMedium size={14} />;
   if (props.level >= 80) return <BatteryFull size={14} />;
@@ -42,11 +52,15 @@ function BatteryIcon(props: { level: number | null; charging: boolean }) {
   return <BatteryLow size={14} />;
 }
 
-function DeviceTypeIcon(props: { type: string }) {
-  return props.type === "Tablet" ? <Tablet size={16} /> : <Smartphone size={16} />;
+function DeviceTypeIcon(props: DeviceTypeIconProps) {
+  if (props.type === "Tablet") {
+    return <Tablet size={16} />;
+  }
+  return <Smartphone size={16} />;
 }
 
 type DisplayMode = "virtual_monitor" | "duplicate";
+const RESOLUTION_DIMS_PATTERN = /^(\d{3,5})x(\d{3,5})$/;
 const CONNECT_MODE_STORAGE_KEY = "wbeam.connect.mode.by.serial";
 const WAYLAND_EXPERIMENTAL_DUPLICATION_STORAGE_KEY = "wbeam.connect.experimental.dup.wayland";
 
@@ -157,8 +171,7 @@ function saveWaylandExperimentalDuplication(enabled: boolean): void {
 }
 
 function parseResolutionDims(value: string): [number, number] | null {
-/* sonar-disable-next-line */
-  const match = value.trim().match(/^(\d{3,5})x(\d{3,5})$/);
+  const match = RESOLUTION_DIMS_PATTERN.exec(value.trim());
   if (!match) return null;
   const w = Number(match[1]);
   const h = Number(match[2]);
@@ -393,7 +406,6 @@ export default function App() {
 
   function stopVirtualInstallPolling(): void {
     if (virtualInstallPollTimer !== null) {
-/* sonar-disable-next-line */
       window.clearInterval(virtualInstallPollTimer);
       virtualInstallPollTimer = null;
     }
@@ -453,7 +465,6 @@ export default function App() {
         }
       };
       await poll();
-/* sonar-disable-next-line */
       virtualInstallPollTimer = window.setInterval(() => {
         void poll();
       }, 600);
@@ -489,7 +500,6 @@ export default function App() {
       // Non-blocking check; connect flow still performs per-device guard.
     }
 
-/* sonar-disable-next-line */
     const timer = window.setInterval(() => {
       if (session.deviceActionBusy().length > 0 || session.refreshInFlight()) return;
       void session.refreshSnapshot({ silent: true, forceDevices: true });
@@ -507,7 +517,6 @@ export default function App() {
     document.addEventListener("visibilitychange", onVisibilityChange);
 
     onCleanup(() => {
-/* sonar-disable-next-line */
       window.clearInterval(timer);
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibilityChange);
@@ -754,27 +763,14 @@ export default function App() {
 
         <footer class="status-bar" title={session.service().summary}>
           {(() => {
-            const isActive = session.service().active;
-            const isInstalled = session.service().installed;
-            const serviceStateLabel = isActive
-              ? "running"
-/* sonar-disable-next-line */
-              : isInstalled
-                ? "stopped"
-                : "not installed";
-            const serviceHint = isActive
-              ? "Service active: device probing enabled."
-/* sonar-disable-next-line */
-              : isInstalled
-                ? "Service installed but stopped. Click Start."
-                : "Install + Start service to enable probing and streaming.";
+            const serviceState = describeServiceState(session.service().active, session.service().installed);
             return (
           <div class={`service-status-strip ${session.serviceState()}`}>
             <span class="service-status-main">
-              service: {serviceStateLabel}
+              service: {serviceState.label}
             </span>
             <span class="service-status-hint">
-              {serviceHint}
+              {serviceState.hint}
             </span>
           </div>
             );
@@ -821,8 +817,14 @@ export default function App() {
                     </p>
                   )}
                 >
-/* sonar-disable-next-line */
-                  <label class={`mode-option ${virtualMonitorSelected() ? "selected" : ""} ${!virtualMonitorAvailable() ? "disabled" : ""}`} aria-label="Virtual monitor (extend host desktop)">
+                  <label
+                    class="mode-option"
+                    classList={{
+                      selected: virtualMonitorSelected(),
+                      disabled: !virtualMonitorAvailable(),
+                    }}
+                    aria-label="Virtual monitor (extend host desktop)"
+                  >
                     <input
                       type="radio"
                       name="display-mode"
@@ -951,32 +953,17 @@ export default function App() {
           const running = virtualInstallStatus().running;
           const done = virtualInstallStatus().done;
           const success = virtualInstallStatus().success;
-          const installProgressClass = running
-            ? "running"
-/* sonar-disable-next-line */
-            : success
-              ? "ok"
-              : "bad";
-          const installMessageClass = done
-/* sonar-disable-next-line */
-            ? (success ? "install-ok" : "install-bad")
-            : "";
-          const installStatusText = done
-/* sonar-disable-next-line */
-            ? (success
-              ? "Installation completed successfully."
-              : "Installation failed.")
-            : "Installing...";
+          const installState = describeInstallStatus(running, done, success);
           return (
         <dialog class="modal-backdrop" open aria-label="Installing dependencies">
           <section class="connect-modal setup-modal install-modal">
             <h3>Installing virtual desktop dependencies</h3>
             <p class="connect-modal-subtitle">Elevation is required (root/pkexec prompt).</p>
             <div class="install-progress">
-              <div class={`install-progress-bar ${installProgressClass}`} />
+              <div class={`install-progress-bar ${installState.progressClass}`} />
             </div>
-            <p class={`setup-message ${installMessageClass}`}>
-              {installStatusText}
+            <p class={`setup-message ${installState.messageClass}`}>
+              {installState.statusText}
             </p>
             <p class="setup-hint">{virtualInstallStatus().message}</p>
             <textarea
@@ -1009,4 +996,50 @@ function isVirtualMonitorAvailable(doctor: VirtualDoctor | null): boolean {
   if (!doctor?.ok) return false;
   if (isVirtualMonitorResolver(doctor.resolver)) return true;
   return false;
+}
+
+function describeServiceState(active: boolean, installed: boolean): { label: string; hint: string } {
+  if (active) {
+    return {
+      label: "running",
+      hint: "Service active: device probing enabled.",
+    };
+  }
+  if (installed) {
+    return {
+      label: "stopped",
+      hint: "Service installed but stopped. Click Start.",
+    };
+  }
+  return {
+    label: "not installed",
+    hint: "Install + Start service to enable probing and streaming.",
+  };
+}
+
+function describeInstallStatus(running: boolean, done: boolean, success: boolean): {
+  progressClass: string;
+  messageClass: string;
+  statusText: string;
+} {
+  let progressClass = "bad";
+  if (running) {
+    progressClass = "running";
+  } else if (success) {
+    progressClass = "ok";
+  }
+
+  if (!done) {
+    return {
+      progressClass,
+      messageClass: "",
+      statusText: "Installing...",
+    };
+  }
+
+  return {
+    progressClass,
+    messageClass: success ? "install-ok" : "install-bad",
+    statusText: success ? "Installation completed successfully." : "Installation failed.",
+  };
 }

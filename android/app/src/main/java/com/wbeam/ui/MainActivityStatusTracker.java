@@ -4,27 +4,39 @@ public final class MainActivityStatusTracker {
     /**
      * Plain data carrier for status tracker state.
      */
-    @SuppressWarnings("java:S1104")
     public static final class State {
-        public String lastUiState;
-        public String lastUiInfo;
-        public long lastUiBps;
-        public String lastCriticalErrorInfo;
-        public long lastCriticalErrorLogAtMs;
+        private String lastUiState;
+        private String lastUiInfo;
+        private long lastUiBps;
+        private String lastCriticalErrorInfo;
+        private long lastCriticalErrorLogAtMs;
+
+        public String getLastUiState() { return lastUiState; }
+        public String getLastUiInfo() { return lastUiInfo; }
+        public long getLastUiBps() { return lastUiBps; }
+        public String getLastCriticalErrorInfo() { return lastCriticalErrorInfo; }
+        public long getLastCriticalErrorLogAtMs() { return lastCriticalErrorLogAtMs; }
     }
 
     /**
      * Plain data carrier for status update result.
      */
-    @SuppressWarnings("java:S1104")
     public static final class UpdateResult {
-        public String state;
-        public String info;
-        public long bps;
-        public String criticalErrorInfo;
-        public long criticalErrorLogAtMs;
-        public boolean shouldLogCritical;
-        public String criticalLogLine;
+        private String state;
+        private String info;
+        private long bps;
+        private String criticalErrorInfo;
+        private long criticalErrorLogAtMs;
+        private boolean shouldLogCritical;
+        private String criticalLogLine;
+
+        public String getState() { return state; }
+        public String getInfo() { return info; }
+        public long getBps() { return bps; }
+        public String getCriticalErrorInfo() { return criticalErrorInfo; }
+        public long getCriticalErrorLogAtMs() { return criticalErrorLogAtMs; }
+        public boolean shouldLogCritical() { return shouldLogCritical; }
+        public String getCriticalLogLine() { return criticalLogLine; }
     }
 
     private MainActivityStatusTracker() {

@@ -57,12 +57,12 @@ public final class RuntimeHudComputation {
             long latestStablePresentFpsAtMs,
             long staleGraceMs
     ) {
-        double presentFps = runtime.presentFps;
+        double presentFps = runtime.getPresentFps();
         boolean hasFlowSignals =
-                runtime.streamUptimeSec > 0
-                        || runtime.frameOutHost > 0
-                        || runtime.recvFps >= 1.0
-                        || runtime.decodeFps >= 1.0;
+                runtime.getStreamUptimeSec() > 0
+                        || runtime.getFrameOutHost() > 0
+                        || runtime.getRecvFps() >= 1.0
+                        || runtime.getDecodeFps() >= 1.0;
         if (presentFps >= 1.0) {
             return new FpsStabilizationResult(presentFps, presentFps, nowMs);
         }
@@ -97,25 +97,25 @@ public final class RuntimeHudComputation {
             long streamUptimeSec
     ) {
         boolean warmingUp = presentFps < 1.0 && streamUptimeSec < 5;
-        
+
         String pressureReason = buildPressureReason(
-            warmingUp, targetFps, presentFps, 
-            decodeP95, renderP95, 
-            qT, qD, qR, qTMax, qDMax, qRMax
+                warmingUp, targetFps, presentFps,
+                decodeP95, renderP95,
+                qT, qD, qR, qTMax, qDMax, qRMax
         );
-        
+
         boolean highPressure = evaluateHighPressure(
-            warmingUp, targetFps, presentFps,
-            decodeP95, renderP95,
-            qT, qD, qR, qTMax, qDMax, qRMax
+                warmingUp, targetFps, presentFps,
+                decodeP95, renderP95,
+                qT, qD, qR, qTMax, qDMax, qRMax
         );
-        
+
         String runtimeTone = determineRuntimeTone(
-            warmingUp, highPressure, adaptiveAction,
-            targetFps, presentFps, decodeP95, renderP95,
-            qT, qD, qR, qTMax, qDMax, qRMax
+                warmingUp, highPressure, adaptiveAction,
+                targetFps, presentFps, decodeP95, renderP95,
+                qT, qD, qR, qTMax, qDMax, qRMax
         );
-        
+
         return new PressureState(warmingUp, highPressure, pressureReason, runtimeTone);
     }
 
@@ -134,7 +134,7 @@ public final class RuntimeHudComputation {
 
         StringBuilder reason = new StringBuilder();
         double fpsFloor = targetFps * 0.90;
-        
+
         if (presentFps > 0.0 && presentFps < fpsFloor) {
             reason.append("fps<").append(String.format(Locale.US, "%.1f", fpsFloor));
         }
@@ -159,7 +159,7 @@ public final class RuntimeHudComputation {
         if (qR >= qRMax) {
             appendPressureSegment(reason, "qR=" + qR + "/" + qRMax);
         }
-        
+
         return reason.length() > 0 ? reason.toString() : "ok";
     }
 
@@ -175,12 +175,12 @@ public final class RuntimeHudComputation {
         if (warmingUp) {
             return false;
         }
-        
+
         double fpsFloor = targetFps * 0.90;
         boolean fpsUnderPressure = presentFps > 0.0 && presentFps < fpsFloor;
         boolean timingPressure = decodeP95 > 12.0 || renderP95 > 7.0;
         boolean queuePressure = qT >= qTMax || qD >= qDMax || qR >= qRMax;
-        
+
         return fpsUnderPressure && (timingPressure || queuePressure);
     }
 
@@ -198,11 +198,11 @@ public final class RuntimeHudComputation {
         if (highPressure) {
             return "risk";
         }
-        
+
         if (warmingUp) {
             return "warn";
         }
-        
+
         double fpsFloor = targetFps * 0.90;
         boolean fpsUnderPressure = presentFps > 0.0 && presentFps < fpsFloor;
         boolean timingPressure = decodeP95 > 12.0 || renderP95 > 7.0;
@@ -211,7 +211,7 @@ public final class RuntimeHudComputation {
                 || fpsUnderPressure
                 || timingPressure
                 || queuePressure;
-        
+
         return mediumPressure ? "warn" : "ok";
     }
 

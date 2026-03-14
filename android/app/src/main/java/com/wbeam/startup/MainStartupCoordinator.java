@@ -28,49 +28,48 @@ public final class MainStartupCoordinator {
     /**
      * Plain data carrier for startup coordinator input.
      */
-    @SuppressWarnings("java:S1104")
     public static final class Input {
-        public View preflightOverlay;
-        public StartupOverlayController startupOverlayController;
-        public StartupOverlayViewRenderer.Views startupOverlayViews;
-        public VideoTestController videoTestController;
-        public int startupVideoTestHintColor;
+        View preflightOverlay;
+        StartupOverlayController startupOverlayController;
+        StartupOverlayViewRenderer.Views startupOverlayViews;
+        VideoTestController videoTestController;
+        int startupVideoTestHintColor;
 
-        public TransportProbeCoordinator transportProbe;
-        public ExecutorService ioExecutor;
-        public Handler uiHandler;
+        TransportProbeCoordinator transportProbe;
+        ExecutorService ioExecutor;
+        Handler uiHandler;
 
-        public boolean daemonReachable;
-        public String daemonHostName;
-        public String daemonService;
-        public String daemonBuildRevision;
-        public String daemonState;
-        public String daemonLastError;
-        public boolean handshakeResolved;
+        boolean daemonReachable;
+        String daemonHostName;
+        String daemonService;
+        String daemonBuildRevision;
+        String daemonState;
+        String daemonLastError;
+        boolean handshakeResolved;
 
-        public String apiImpl;
-        public String apiBase;
-        public String apiHost;
-        public String streamHost;
-        public int streamPort;
-        public String appBuildRevision;
+        String apiImpl;
+        String apiBase;
+        String apiHost;
+        String streamHost;
+        int streamPort;
+        String appBuildRevision;
 
-        public String lastUiInfo;
-        public double latestPresentFps;
-        public String lastStatsLine;
-        public String daemonErrorCompact;
-        public int preflightAnimTick;
+        String lastUiInfo;
+        double latestPresentFps;
+        String lastStatsLine;
+        String daemonErrorCompact;
+        int preflightAnimTick;
 
-        public long startupBeganAtMs;
-        public int controlRetryCount;
-        public boolean startupDismissed;
-        public boolean preflightComplete;
+        long startupBeganAtMs;
+        int controlRetryCount;
+        boolean startupDismissed;
+        boolean preflightComplete;
 
-        public BuildMismatchProvider buildMismatchProvider;
-        public EffectiveDaemonStateProvider effectiveDaemonStateProvider;
-        public OverlayChangedHandler overlayChangedHandler;
-        public LineHandler infoLogHandler;
-        public LineHandler warnLogHandler;
+        BuildMismatchProvider buildMismatchProvider;
+        EffectiveDaemonStateProvider effectiveDaemonStateProvider;
+        OverlayChangedHandler overlayChangedHandler;
+        LineHandler infoLogHandler;
+        LineHandler warnLogHandler;
     }
 
     private MainStartupCoordinator() {
@@ -116,10 +115,10 @@ public final class MainStartupCoordinator {
 
     public static StartupOverlayStateSync.StateValues updatePreflightOverlay(Input input) {
         StartupOverlayStateSync.StateValues current = new StartupOverlayStateSync.StateValues();
-        current.startupBeganAtMs = input.startupBeganAtMs;
-        current.controlRetryCount = input.controlRetryCount;
-        current.startupDismissed = input.startupDismissed;
-        current.preflightComplete = input.preflightComplete;
+        current.setStartupBeganAtMs(input.startupBeganAtMs);
+        current.setControlRetryCount(input.controlRetryCount);
+        current.setStartupDismissed(input.startupDismissed);
+        current.setPreflightComplete(input.preflightComplete);
 
         StartupOverlayCoordinator.State next = StartupOverlayCoordinator.update(
                 StartupOverlayHookBuilder.create(

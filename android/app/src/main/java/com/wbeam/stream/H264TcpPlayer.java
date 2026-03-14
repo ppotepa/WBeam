@@ -164,20 +164,6 @@ public final class H264TcpPlayer {
 
     // ── Legacy AnnexB / AVCC decode loop ──────────────────────────────────────
 
-    @SuppressWarnings("unused")
-    private void decodeLoop(InputStream input, MediaCodec codec) throws IOException {
-        PlayerRuntimeState runtimeState = new PlayerRuntimeState();
-        new LegacyAnnexBDecodeLoop(
-                TAG,
-                statusListener,
-                runtimeState,
-                frameUs,
-                DECODE_QUEUE_MAX_FRAMES,
-                RENDER_QUEUE_MAX_FRAMES,
-                STATE_STREAMING
-        ).run(input, codec);
-    }
-
     private void framedDecodeLoop(InputStream input, MediaCodec[] codecRef) throws IOException {
         byte[] helloBuf = new byte[HELLO_HEADER_SIZE];
         byte[] hdrBuf = new byte[FRAME_HEADER_SIZE];

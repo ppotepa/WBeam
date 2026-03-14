@@ -60,7 +60,7 @@ export function seriesSummary(values: number[]): { min: string; max: string; las
 }
 
 export function safeName(input: string): string {
-  return input.replaceAll(/[^a-zA-Z0-9._-]+/g, "_");
+  return input.replace(/[^a-zA-Z0-9._-]+/g, "_");
 }
 
 export function downloadJson(filename: string, payload: unknown): void {
@@ -99,7 +99,7 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function parseHudMetric(value: string): number | null {
   if (!value) return null;
-  const cleaned = value.replaceAll(/[^0-9.+-]/g, "");
+  const cleaned = value.replace(/[^0-9.+-]/g, "");
   const num = Number(cleaned);
   return Number.isFinite(num) ? num : null;
 }
@@ -108,12 +108,14 @@ export function clampNum(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
+export function toDisplayString(value: unknown, fallback = ""): string {
+  if (value === undefined || value === null) return fallback;
+  return typeof value === "string" ? value : `${value}`;
+}
+
 export function pickRuntimeValue(profile: Record<string, unknown>, key: string): string {
   const value = valueAt(profile, ["profile", "runtime", key]);
-  if (value === undefined || value === null) return "-";
-  // NOSONAR: S6551 String() intentionally converts to string representation
-  // sonar-disable-next-line S6551
-  return String(value);
+  return toDisplayString(value, "-");
 }
 
 export function pickRuntimeBitrateMbps(profile: Record<string, unknown>): string {
@@ -122,7 +124,6 @@ export function pickRuntimeBitrateMbps(profile: Record<string, unknown>): string
   if (!Number.isFinite(kbps) || kbps <= 0) return "-";
   return `${kbpsToMbps(kbps).toFixed(1)} Mbps`;
 }
- // sonar-disable-next-line S3776
 
 export function parseDatasetTrials(parameters: Record<string, unknown>): DatasetTrialPoint[] {
   const raw = valueAt(parameters, ["results"]);
@@ -131,18 +132,14 @@ export function parseDatasetTrials(parameters: Record<string, unknown>): Dataset
   for (const item of raw) {
     if (!item || typeof item !== "object") continue;
     const row = item as Record<string, unknown>;
-    // NOSONAR: S6551 String() intentionally converts trial_id to string
-    // sonar-disable-next-line S6551
-    const trial_id = String(row.trial_id || "").trim();
+    const trial_id = toDisplayString(row.trial_id).trim();
     if (!trial_id) continue;
     const score = Number(row.score || 0);
     const present_fps_mean = Number(row.present_fps_mean || 0);
     const recv_fps_mean = Number(row.recv_fps_mean || 0);
     const bitrate_mbps_mean = Number(row.bitrate_mbps_mean || 0);
     const drop_rate_per_sec = Number(row.drop_rate_per_sec || 0);
-    // NOSONAR: S6551 String() intentionally converts notes to string
-    // sonar-disable-next-line S6551
-    const notes = String(row.notes || "-");
+    const notes = toDisplayString(row.notes, "-");
     rows.push({
       trial_id,
       score: Number.isFinite(score) ? score : 0,

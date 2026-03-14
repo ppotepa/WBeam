@@ -50,14 +50,14 @@ public final class MainViewBehaviorCoordinator {
             SurfaceDestroyedHandler onSurfaceDestroyed,
             CursorMotionHandler onCursorOverlayMotion
     ) {
-        MainActivitySurfaceSetup.Input input = new MainActivitySurfaceSetup.Input();
-        input.preview = previewSurface;
-        input.onSurfaceCreated = onSurfaceCreated::onChanged;
-        input.onSurfaceChanged = onSurfaceChanged::onChanged;
-        input.onSurfaceDestroyed = onSurfaceDestroyed::onDestroyed;
-        input.isCursorOverlayEnabled =
-                () -> cursorOverlayController != null && cursorOverlayController.isOverlayEnabled();
-        input.onCursorOverlayMotion = onCursorOverlayMotion::onMotion;
+        MainActivitySurfaceSetup.Input input = new MainActivitySurfaceSetup.Input(
+                previewSurface,
+                onSurfaceCreated::onChanged,
+                onSurfaceChanged::onChanged,
+                onSurfaceDestroyed::onDestroyed,
+                () -> cursorOverlayController != null && cursorOverlayController.isOverlayEnabled(),
+                onCursorOverlayMotion::onMotion
+        );
         MainActivitySurfaceSetup.setup(input);
     }
 
@@ -127,7 +127,7 @@ public final class MainViewBehaviorCoordinator {
     ) {
         BuildVariantUiCoordinator.apply(
                 buildDebug,
-                uiState.debugOverlayVisible,
+                uiState.isDebugOverlayVisible(),
                 debugFpsGraphView,
                 debugFpsGraphPoints,
                 debugInfoPanel,
@@ -146,7 +146,7 @@ public final class MainViewBehaviorCoordinator {
             View debugInfoPanel,
             View perfHudPanel
     ) {
-        uiState.debugOverlayVisible = visible;
+        uiState.setDebugOverlayVisible(visible);
         MainActivityRuntimeStateView.applyDebugOverlayVisibility(
                 buildDebug,
                 visible,
@@ -181,7 +181,7 @@ public final class MainViewBehaviorCoordinator {
             View debugControlsRow,
             Button testButton
     ) {
-        uiState.debugControlsVisible = visible;
+        uiState.setDebugControlsVisible(visible);
         MainActivityUiBinder.applyDebugControlsVisible(visible, debugControlsRow, testButton);
     }
 }

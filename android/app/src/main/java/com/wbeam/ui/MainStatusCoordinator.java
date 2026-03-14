@@ -34,17 +34,17 @@ public final class MainStatusCoordinator {
                 stateError,
                 SystemClock.elapsedRealtime(),
                 30_000L,
-                statusState.criticalErrorInfo,
-                statusState.criticalErrorLogAtMs
+                statusState.getCriticalErrorInfo(),
+                statusState.getCriticalErrorLogAtMs()
         );
-        statusState.uiState = next.state;
-        statusState.uiInfo = next.info;
-        statusState.uiBps = next.bps;
-        statusState.criticalErrorInfo = next.criticalErrorInfo;
-        statusState.criticalErrorLogAtMs = next.criticalErrorLogAtMs;
-        if (next.shouldLogCritical) {
-            criticalLogHandler.onCritical(next.criticalLogLine);
-            Log.e(logTag, next.criticalLogLine);
+        statusState.setUiState(next.getState());
+        statusState.setUiInfo(next.getInfo());
+        statusState.setUiBps(next.getBps());
+        statusState.setCriticalErrorInfo(next.getCriticalErrorInfo());
+        statusState.setCriticalErrorLogAtMs(next.getCriticalErrorLogAtMs());
+        if (next.shouldLogCritical()) {
+            criticalLogHandler.onCritical(next.getCriticalLogLine());
+            Log.e(logTag, next.getCriticalLogLine());
         }
     }
 
@@ -66,9 +66,9 @@ public final class MainStatusCoordinator {
                 detailText,
                 bpsText,
                 statusLed,
-                statusState.uiState,
-                statusState.uiInfo,
-                statusState.uiBps,
+                statusState.getUiState(),
+                statusState.getUiInfo(),
+                statusState.getUiBps(),
                 daemonReachable,
                 daemonHostName,
                 effectiveDaemonStateUi,
@@ -82,7 +82,7 @@ public final class MainStatusCoordinator {
             TextView statsText,
             String line
     ) {
-        statusState.statsLine = MainActivityStatusPresenter.normalizeStatsLine(line);
-        statsText.setText(statusState.statsLine);
+        statusState.setStatsLine(MainActivityStatusPresenter.normalizeStatsLine(line));
+        statsText.setText(statusState.getStatsLine());
     }
 }

@@ -1,4 +1,3 @@
-// sonar-disable S3776: Cognitive complexity is essential for domain logic
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -47,6 +46,54 @@ const NO_PRESENT_RESTART_COOLDOWN: Duration = Duration::from_secs(15);
 const NO_PRESENT_MIN_RECV_FPS: f64 = 10.0;
 const NO_PRESENT_MAX_PRESENT_FPS: f64 = 1.0;
 const REVERSE_REFRESH_BACKSTOP: Duration = Duration::from_secs(120);
+
+struct ClientMetricsOutcome {
+    action: String,
+    restart_cfg: Option<ActiveConfig>,
+}
+
+enum AdaptationStep {
+    Degrade,
+    Recover,
+    DegradeClamped,
+    RecoverClamped,
+    Hold,
+}
+
+enum ChildExitAction {
+    Ignore,
+    NoRestart,
+    Restart(ActiveConfig),
+}
+
+impl AdaptationStep {
+    fn action_name(&self) -> &'static str {
+        match self {
+            Self::Degrade => "degrade",
+            Self::Recover => "recover",
+            Self::DegradeClamped => "degrade-clamped",
+            Self::RecoverClamped => "recover-clamped",
+            Self::Hold => "hold",
+        }
+    }
+}
+
+struct LaunchArtifacts {
+    session_suffix: String,
+    restore_token_file: String,
+    trainer_active_marker: String,
+    trainer_overlay_file: String,
+    trainer_run_active: bool,
+    trainer_overlay_active: bool,
+    trainer_hud_burnin: bool,
+}
+
+struct ActivatedDisplay {
+    capture_backend: String,
+    display_override: Option<String>,
+    capture_region: Option<(i32, i32, u32, u32)>,
+    using_virtual_x11: bool,
+}
 
 fn now_unix_ms() -> u128 {
     match SystemTime::now().duration_since(UNIX_EPOCH) {
@@ -545,6 +592,16 @@ pub struct DaemonCore {
 }
 
 impl DaemonCore {
+    fn reset_runtime_state(inner: &mut Inner) {
+        inner.current_pid = None;
+        inner.run_started_at = None;
+        inner.stream_started_at = None;
+        inner.last_output_at = None;
+        inner.last_streaming_line_at = None;
+        inner.telemetry_file = None;
+        inner.no_present_streak = 0;
+    }
+
     fn normalize_display_mode(mode: Option<&str>) -> &'static str {
         display_backends::normalize_requested_mode(mode).as_str()
     }
@@ -953,7 +1010,6 @@ impl DaemonCore {
     }
 
     pub async fn ingest_client_metrics(
-        // NOSONAR: S3776
         &self,
         mut client: ClientMetricsRequest,
     ) -> Result<ClientMetricsResponse, CoreError> {
@@ -965,204 +1021,17 @@ impl DaemonCore {
                 .unwrap_or(0);
         }
 
-        let mut restart_cfg: Option<ActiveConfig> = None;
         let action;
+        let restart_cfg;
         let trainer_run_active = self.trainer_run_active();
 
         {
             let mut inner = self.inner.lock().await;
             let now = Instant::now();
-            let can_adapt = inner.state == STATE_STREAMING
-                && inner.current_pid.is_some()
-                && inner
-                    .stream_started_at
-                    .map(|started| started.elapsed() >= Duration::from_secs(8))
-                    .unwrap_or(false);
-
-            inner.metrics.latest_client_metrics = Some(client.clone());
-            inner.metrics.kpi = KpiSnapshot {
-                target_fps: inner.active_config.fps,
-                recv_fps: client.recv_fps,
-                decode_fps: client.decode_fps,
-                present_fps: client.present_fps,
-                frametime_ms_p95: if client.present_fps > 0.0 {
-                    1000.0 / client.present_fps.max(0.1)
-                } else {
-                    0.0
-                },
-                e2e_latency_ms_p50: client.e2e_latency_ms_p50,
-                e2e_latency_ms_p95: client.e2e_latency_ms_p95,
-                decode_time_ms_p95: client.decode_time_ms_p95,
-                render_time_ms_p95: client.render_time_ms_p95,
-            };
-            if let Some(started) = inner.stream_started_at {
-                let elapsed = started.elapsed().as_secs_f64().max(1.0);
-                inner.metrics.frame_in = (client.recv_fps * elapsed) as u64;
-                inner.metrics.frame_out = (client.present_fps * elapsed) as u64;
-                inner.metrics.drops = client.dropped_frames.saturating_add(client.too_late_frames);
-            }
-
-            if client.recv_bps > 0 {
-                inner.metrics.bitrate_actual_bps = client.recv_bps;
-            }
-
-            // P2.3: append JSONL telemetry record
-            let telemetry_run_id = inner.run_id; // capture before mutable borrow
-            if let Some(ref mut f) = inner.telemetry_file {
-                let mut rec = serde_json::to_value(&client).unwrap_or_default();
-                if let serde_json::Value::Object(ref mut m) = rec {
-                    m.insert(
-                        "run_id".to_string(),
-                        serde_json::Value::from(telemetry_run_id),
-                    );
-                }
-                let _ = writeln!(f, "{rec}");
-            }
-
-            let forced_no_present_restart =
-                Self::update_no_present_streak_and_check_restart(&mut inner, &client, now);
-
-            if forced_no_present_restart && !trainer_run_active {
-                inner.no_present_streak = 0;
-                inner.last_no_present_recovery_at = Some(now);
-                inner.metrics.restart_count = inner.metrics.restart_count.saturating_add(1);
-                inner.metrics.adaptive_level = inner.adaptation_level;
-                inner.metrics.adaptive_action = "recover-restart".to_string();
-                inner.metrics.adaptive_reason = format!(
-                    "present_fps={:.1} recv_fps={:.1} q={}/{}/{}",
-                    client.present_fps,
-                    client.recv_fps,
-                    client.transport_queue_depth,
-                    client.decode_queue_depth,
-                    client.render_queue_depth
-                );
-                inner.last_error = format!(
-                    "no-present recovery restart (present_fps={:.1}, recv_fps={:.1})",
-                    client.present_fps, client.recv_fps
-                );
-                warn!(
-                    "triggering no-present recovery restart run_id={} reason={}",
-                    inner.run_id, inner.metrics.adaptive_reason
-                );
-                restart_cfg = Some(inner.active_config.clone());
-            } else if forced_no_present_restart && trainer_run_active {
-                inner.no_present_streak = 0;
-                inner.metrics.adaptive_level = inner.adaptation_level;
-                inner.metrics.adaptive_action = "recover-hold-training".to_string();
-                inner.metrics.adaptive_reason = format!(
-                    "training run active; suppress no-present restart present_fps={:.1} recv_fps={:.1}",
-                    client.present_fps, client.recv_fps
-                );
-                inner.last_error =
-                    "training run active: no-present recovery restart suppressed".to_string();
-            } else if !can_adapt {
-                inner.high_pressure_streak = 0;
-                inner.low_pressure_streak = 0;
-                inner.metrics.adaptive_level = inner.adaptation_level;
-                inner.metrics.adaptive_action = "hold-warmup".to_string();
-                inner.metrics.adaptive_reason = "waiting for stable STREAMING warmup".to_string();
-            } else {
-                let high = is_high_pressure(inner.active_config.fps, &client);
-                let low = is_low_pressure(inner.active_config.fps, &client);
-
-                if high {
-                    inner.high_pressure_streak = inner.high_pressure_streak.saturating_add(1);
-                    inner.low_pressure_streak = 0;
-                    inner.metrics.backpressure_high_events =
-                        inner.metrics.backpressure_high_events.saturating_add(1);
-                } else if low {
-                    inner.low_pressure_streak = inner.low_pressure_streak.saturating_add(1);
-                    inner.high_pressure_streak = 0;
-                    inner.metrics.backpressure_recover_events =
-                        inner.metrics.backpressure_recover_events.saturating_add(1);
-                } else {
-                    inner.high_pressure_streak = 0;
-                    inner.low_pressure_streak = 0;
-                }
-
-                let cooldown_ready = inner
-                    .last_adaptation_at
-                    .map(|t| now.duration_since(t) >= ADAPTATION_COOLDOWN)
-                    .unwrap_or(true);
-
-                let mut adapted = false;
-                if cooldown_ready && inner.high_pressure_streak >= HIGH_PRESSURE_STREAK_REQUIRED {
-                    if inner.adaptation_level < MAX_ADAPTATION_LEVEL {
-                        inner.adaptation_level = inner.adaptation_level.saturating_add(1);
-                        adapted = true;
-                        inner.metrics.adaptive_action = "degrade".to_string();
-                    } else {
-                        inner.metrics.adaptive_action = "degrade-clamped".to_string();
-                    }
-                    inner.high_pressure_streak = 0;
-                } else if cooldown_ready
-                    && inner.low_pressure_streak >= LOW_PRESSURE_STREAK_REQUIRED
-                {
-                    if inner.adaptation_level > 0 {
-                        inner.adaptation_level = inner.adaptation_level.saturating_sub(1);
-                        adapted = true;
-                        inner.metrics.adaptive_action = "recover".to_string();
-                    } else {
-                        inner.metrics.adaptive_action = "recover-clamped".to_string();
-                    }
-                    inner.low_pressure_streak = 0;
-                } else {
-                    inner.metrics.adaptive_action = "hold".to_string();
-                }
-
-                if adapted {
-                    inner.last_adaptation_at = Some(now);
-                    inner.metrics.adaptive_events = inner.metrics.adaptive_events.saturating_add(1);
-                    inner.metrics.adaptive_level = inner.adaptation_level;
-
-                    let reason = adaptation_reason(&client, high, low);
-                    inner.metrics.adaptive_reason = reason.clone();
-                    inner.last_error = format!(
-                        "adaptive {} L{} ({})",
-                        inner.metrics.adaptive_action, inner.adaptation_level, reason
-                    );
-
-                    let target_cfg =
-                        config_for_level(&inner.baseline_config, inner.adaptation_level);
-                    if target_cfg != inner.active_config && inner.current_pid.is_some() {
-                        if self.allow_live_adaptive_restart && !trainer_run_active {
-                            inner.active_config = target_cfg.clone();
-                            inner.metrics.restart_count =
-                                inner.metrics.restart_count.saturating_add(1);
-                            restart_cfg = Some(target_cfg);
-                        } else if trainer_run_active {
-                            inner.metrics.adaptive_action =
-                                format!("{}-hold-training", inner.metrics.adaptive_action);
-                            inner.metrics.adaptive_reason = format!(
-                                "{} | training run active; suppress restart size={} fps={} bitrate={}",
-                                reason, target_cfg.size, target_cfg.fps, target_cfg.bitrate_kbps
-                            );
-                            inner.last_error = format!(
-                                "adaptive hold during training L{}",
-                                inner.adaptation_level
-                            );
-                        } else {
-                            inner.metrics.adaptive_action =
-                                format!("{}-pending", inner.metrics.adaptive_action);
-                            inner.metrics.adaptive_reason = format!(
-                                "{} | pending size={} fps={} bitrate={}",
-                                reason, target_cfg.size, target_cfg.fps, target_cfg.bitrate_kbps
-                            );
-                            inner.last_error = format!(
-                                "adaptive pending L{} (live restart disabled)",
-                                inner.adaptation_level
-                            );
-                        }
-                    }
-                } else {
-                    inner.metrics.adaptive_level = inner.adaptation_level;
-                }
-            }
-
-            action = format!(
-                "{}:L{}",
-                inner.metrics.adaptive_action, inner.metrics.adaptive_level
-            );
+            let outcome =
+                self.apply_client_metrics_sample(&mut inner, &client, now, trainer_run_active);
+            action = outcome.action;
+            restart_cfg = outcome.restart_cfg;
         }
 
         if let Some(cfg) = restart_cfg {
@@ -1209,6 +1078,269 @@ impl DaemonCore {
             .map(|t| now.duration_since(t) >= NO_PRESENT_RESTART_COOLDOWN)
             .unwrap_or(true);
         no_present_restart_ready && inner.no_present_streak >= NO_PRESENT_RESTART_STREAK_REQUIRED
+    }
+
+    fn update_client_metrics_snapshot(inner: &mut Inner, client: &ClientMetricsRequest) {
+        inner.metrics.latest_client_metrics = Some(client.clone());
+        inner.metrics.kpi = KpiSnapshot {
+            target_fps: inner.active_config.fps,
+            recv_fps: client.recv_fps,
+            decode_fps: client.decode_fps,
+            present_fps: client.present_fps,
+            frametime_ms_p95: if client.present_fps > 0.0 {
+                1000.0 / client.present_fps.max(0.1)
+            } else {
+                0.0
+            },
+            e2e_latency_ms_p50: client.e2e_latency_ms_p50,
+            e2e_latency_ms_p95: client.e2e_latency_ms_p95,
+            decode_time_ms_p95: client.decode_time_ms_p95,
+            render_time_ms_p95: client.render_time_ms_p95,
+        };
+        if let Some(started) = inner.stream_started_at {
+            let elapsed = started.elapsed().as_secs_f64().max(1.0);
+            inner.metrics.frame_in = (client.recv_fps * elapsed) as u64;
+            inner.metrics.frame_out = (client.present_fps * elapsed) as u64;
+            inner.metrics.drops = client.dropped_frames.saturating_add(client.too_late_frames);
+        }
+        if client.recv_bps > 0 {
+            inner.metrics.bitrate_actual_bps = client.recv_bps;
+        }
+    }
+
+    fn append_client_telemetry(inner: &mut Inner, client: &ClientMetricsRequest) {
+        let telemetry_run_id = inner.run_id;
+        if let Some(ref mut file) = inner.telemetry_file {
+            let mut rec = serde_json::to_value(client).unwrap_or_default();
+            if let serde_json::Value::Object(ref mut map) = rec {
+                map.insert(
+                    "run_id".to_string(),
+                    serde_json::Value::from(telemetry_run_id),
+                );
+            }
+            let _ = writeln!(file, "{rec}");
+        }
+    }
+
+    fn can_adapt(inner: &Inner) -> bool {
+        inner.state == STATE_STREAMING
+            && inner.current_pid.is_some()
+            && inner
+                .stream_started_at
+                .map(|started| started.elapsed() >= Duration::from_secs(8))
+                .unwrap_or(false)
+    }
+
+    fn handle_no_present_restart(
+        inner: &mut Inner,
+        client: &ClientMetricsRequest,
+        now: Instant,
+        trainer_run_active: bool,
+    ) -> Option<ClientMetricsOutcome> {
+        if !Self::update_no_present_streak_and_check_restart(inner, client, now) {
+            return None;
+        }
+
+        inner.no_present_streak = 0;
+        inner.metrics.adaptive_level = inner.adaptation_level;
+        if trainer_run_active {
+            inner.metrics.adaptive_action = "recover-hold-training".to_string();
+            inner.metrics.adaptive_reason = format!(
+                "training run active; suppress no-present restart present_fps={:.1} recv_fps={:.1}",
+                client.present_fps, client.recv_fps
+            );
+            inner.last_error =
+                "training run active: no-present recovery restart suppressed".to_string();
+            return Some(Self::client_metrics_outcome(inner, None));
+        }
+
+        inner.last_no_present_recovery_at = Some(now);
+        inner.metrics.restart_count = inner.metrics.restart_count.saturating_add(1);
+        inner.metrics.adaptive_action = "recover-restart".to_string();
+        inner.metrics.adaptive_reason = format!(
+            "present_fps={:.1} recv_fps={:.1} q={}/{}/{}",
+            client.present_fps,
+            client.recv_fps,
+            client.transport_queue_depth,
+            client.decode_queue_depth,
+            client.render_queue_depth
+        );
+        inner.last_error = format!(
+            "no-present recovery restart (present_fps={:.1}, recv_fps={:.1})",
+            client.present_fps, client.recv_fps
+        );
+        warn!(
+            "triggering no-present recovery restart run_id={} reason={}",
+            inner.run_id, inner.metrics.adaptive_reason
+        );
+        Some(Self::client_metrics_outcome(
+            inner,
+            Some(inner.active_config.clone()),
+        ))
+    }
+
+    fn hold_metrics_for_warmup(inner: &mut Inner) -> ClientMetricsOutcome {
+        inner.high_pressure_streak = 0;
+        inner.low_pressure_streak = 0;
+        inner.metrics.adaptive_level = inner.adaptation_level;
+        inner.metrics.adaptive_action = "hold-warmup".to_string();
+        inner.metrics.adaptive_reason = "waiting for stable STREAMING warmup".to_string();
+        Self::client_metrics_outcome(inner, None)
+    }
+
+    fn update_pressure_streaks(inner: &mut Inner, high: bool, low: bool) {
+        if high {
+            inner.high_pressure_streak = inner.high_pressure_streak.saturating_add(1);
+            inner.low_pressure_streak = 0;
+            inner.metrics.backpressure_high_events =
+                inner.metrics.backpressure_high_events.saturating_add(1);
+            return;
+        }
+        if low {
+            inner.low_pressure_streak = inner.low_pressure_streak.saturating_add(1);
+            inner.high_pressure_streak = 0;
+            inner.metrics.backpressure_recover_events =
+                inner.metrics.backpressure_recover_events.saturating_add(1);
+            return;
+        }
+        inner.high_pressure_streak = 0;
+        inner.low_pressure_streak = 0;
+    }
+
+    fn select_adaptation_step(inner: &mut Inner, now: Instant) -> AdaptationStep {
+        let cooldown_ready = inner
+            .last_adaptation_at
+            .map(|t| now.duration_since(t) >= ADAPTATION_COOLDOWN)
+            .unwrap_or(true);
+
+        if cooldown_ready && inner.high_pressure_streak >= HIGH_PRESSURE_STREAK_REQUIRED {
+            inner.high_pressure_streak = 0;
+            if inner.adaptation_level < MAX_ADAPTATION_LEVEL {
+                inner.adaptation_level = inner.adaptation_level.saturating_add(1);
+                return AdaptationStep::Degrade;
+            }
+            return AdaptationStep::DegradeClamped;
+        }
+
+        if cooldown_ready && inner.low_pressure_streak >= LOW_PRESSURE_STREAK_REQUIRED {
+            inner.low_pressure_streak = 0;
+            if inner.adaptation_level > 0 {
+                inner.adaptation_level = inner.adaptation_level.saturating_sub(1);
+                return AdaptationStep::Recover;
+            }
+            return AdaptationStep::RecoverClamped;
+        }
+
+        AdaptationStep::Hold
+    }
+
+    fn apply_adaptation_target(
+        &self,
+        inner: &mut Inner,
+        step: AdaptationStep,
+        reason: &str,
+        trainer_run_active: bool,
+    ) -> ClientMetricsOutcome {
+        inner.last_adaptation_at = Some(Instant::now());
+        inner.metrics.adaptive_events = inner.metrics.adaptive_events.saturating_add(1);
+        inner.metrics.adaptive_level = inner.adaptation_level;
+        inner.metrics.adaptive_action = step.action_name().to_string();
+        inner.metrics.adaptive_reason = reason.to_string();
+        inner.last_error = format!(
+            "adaptive {} L{} ({})",
+            inner.metrics.adaptive_action, inner.adaptation_level, reason
+        );
+
+        let target_cfg = config_for_level(&inner.baseline_config, inner.adaptation_level);
+        if target_cfg == inner.active_config || inner.current_pid.is_none() {
+            return Self::client_metrics_outcome(inner, None);
+        }
+
+        if self.allow_live_adaptive_restart && !trainer_run_active {
+            inner.active_config = target_cfg.clone();
+            inner.metrics.restart_count = inner.metrics.restart_count.saturating_add(1);
+            return Self::client_metrics_outcome(inner, Some(target_cfg));
+        }
+
+        if trainer_run_active {
+            inner.metrics.adaptive_action =
+                format!("{}-hold-training", inner.metrics.adaptive_action);
+            inner.metrics.adaptive_reason = format!(
+                "{} | training run active; suppress restart size={} fps={} bitrate={}",
+                reason, target_cfg.size, target_cfg.fps, target_cfg.bitrate_kbps
+            );
+            inner.last_error = format!("adaptive hold during training L{}", inner.adaptation_level);
+            return Self::client_metrics_outcome(inner, None);
+        }
+
+        inner.metrics.adaptive_action = format!("{}-pending", inner.metrics.adaptive_action);
+        inner.metrics.adaptive_reason = format!(
+            "{} | pending size={} fps={} bitrate={}",
+            reason, target_cfg.size, target_cfg.fps, target_cfg.bitrate_kbps
+        );
+        inner.last_error = format!(
+            "adaptive pending L{} (live restart disabled)",
+            inner.adaptation_level
+        );
+        Self::client_metrics_outcome(inner, None)
+    }
+
+    fn handle_adaptation(
+        &self,
+        inner: &mut Inner,
+        client: &ClientMetricsRequest,
+        now: Instant,
+        trainer_run_active: bool,
+    ) -> ClientMetricsOutcome {
+        let high = is_high_pressure(inner.active_config.fps, client);
+        let low = is_low_pressure(inner.active_config.fps, client);
+        Self::update_pressure_streaks(inner, high, low);
+
+        match Self::select_adaptation_step(inner, now) {
+            step @ (AdaptationStep::Degrade | AdaptationStep::Recover) => {
+                let reason = adaptation_reason(client, high, low);
+                self.apply_adaptation_target(inner, step, &reason, trainer_run_active)
+            }
+            step => {
+                inner.metrics.adaptive_action = step.action_name().to_string();
+                inner.metrics.adaptive_level = inner.adaptation_level;
+                Self::client_metrics_outcome(inner, None)
+            }
+        }
+    }
+
+    fn client_metrics_outcome(
+        inner: &Inner,
+        restart_cfg: Option<ActiveConfig>,
+    ) -> ClientMetricsOutcome {
+        ClientMetricsOutcome {
+            action: format!(
+                "{}:L{}",
+                inner.metrics.adaptive_action, inner.metrics.adaptive_level
+            ),
+            restart_cfg,
+        }
+    }
+
+    fn apply_client_metrics_sample(
+        &self,
+        inner: &mut Inner,
+        client: &ClientMetricsRequest,
+        now: Instant,
+        trainer_run_active: bool,
+    ) -> ClientMetricsOutcome {
+        Self::update_client_metrics_snapshot(inner, client);
+        Self::append_client_telemetry(inner, client);
+
+        if let Some(outcome) =
+            Self::handle_no_present_restart(inner, client, now, trainer_run_active)
+        {
+            return outcome;
+        }
+        if !Self::can_adapt(inner) {
+            return Self::hold_metrics_for_warmup(inner);
+        }
+        self.handle_adaptation(inner, client, now, trainer_run_active)
     }
 
     pub async fn stop(&self) -> Result<StatusResponse, CoreError> {
@@ -1259,15 +1391,9 @@ impl DaemonCore {
 
     async fn mark_start_failed(&self, message: String) {
         let mut inner = self.inner.lock().await;
-        inner.current_pid = None;
         inner.state = STATE_IDLE.to_string();
         inner.last_error = message;
-        inner.run_started_at = None;
-        inner.stream_started_at = None;
-        inner.last_output_at = None;
-        inner.last_streaming_line_at = None;
-        inner.telemetry_file = None;
-        inner.no_present_streak = 0;
+        Self::reset_runtime_state(&mut inner);
     }
 
     fn spawn_reverse_task(&self) {
@@ -1362,45 +1488,59 @@ impl DaemonCore {
         (run_id, existing_pid, provisional_effective)
     }
 
-    async fn start_with_config(&self, cfg: ActiveConfig, reason: &str) -> Result<(), CoreError> {
-        // NOSONAR: S3776
+    async fn resolve_start_request(
+        &self,
+        cfg: &ActiveConfig,
+    ) -> Result<(display_backends::DisplayMode, String), CoreError> {
         let requested_display_mode = {
             let inner = self.inner.lock().await;
             inner.requested_display_mode.clone()
         };
         let requested_mode =
             display_backends::normalize_requested_mode(Some(&requested_display_mode));
-        let mut launch_size = cfg.size.clone();
         if !self.host_probe.supports_streaming() {
             let reason = self.host_probe.unsupported_reason();
-            {
-                let mut inner = self.inner.lock().await;
-                inner.state = STATE_IDLE.to_string();
-                inner.last_error = reason.clone();
-            }
+            let mut inner = self.inner.lock().await;
+            inner.state = STATE_IDLE.to_string();
+            inner.last_error = reason.clone();
             return Err(CoreError::UnsupportedHost(reason));
         }
+        let launch_size = self.resolve_launch_size(cfg, requested_mode).await;
+        Ok((requested_mode, launch_size))
+    }
 
-        if requested_mode.is_virtual() {
-            if let Some(target_size) = adb::device_resolution(self.target_serial.as_deref()).await {
-                if launch_size != target_size {
-                    info!(
-                        serial = self.target_serial.as_deref().unwrap_or("auto"),
-                        from = %launch_size,
-                        to = %target_size,
-                        "virtual mode: overriding stream size to target device resolution"
-                    );
-                    launch_size = target_size;
-                }
-            } else {
-                warn!(
-                    serial = self.target_serial.as_deref().unwrap_or("auto"),
-                    configured = %launch_size,
-                    "virtual mode: could not detect target device resolution; using configured size"
-                );
-            }
+    async fn resolve_launch_size(
+        &self,
+        cfg: &ActiveConfig,
+        requested_mode: display_backends::DisplayMode,
+    ) -> String {
+        let mut launch_size = cfg.size.clone();
+        if !requested_mode.is_virtual() {
+            return launch_size;
         }
 
+        if let Some(target_size) = adb::device_resolution(self.target_serial.as_deref()).await {
+            if launch_size != target_size {
+                info!(
+                    serial = self.target_serial.as_deref().unwrap_or("auto"),
+                    from = %launch_size,
+                    to = %target_size,
+                    "virtual mode: overriding stream size to target device resolution"
+                );
+                launch_size = target_size;
+            }
+        } else {
+            warn!(
+                serial = self.target_serial.as_deref().unwrap_or("auto"),
+                configured = %launch_size,
+                "virtual mode: could not detect target device resolution; using configured size"
+            );
+        }
+
+        launch_size
+    }
+
+    async fn refresh_reverse_mapping(&self) {
         {
             let mut inner = self.inner.lock().await;
             inner.last_reverse_refresh_at = Some(Instant::now());
@@ -1408,62 +1548,34 @@ impl DaemonCore {
         // Do not block /start HTTP response on adb reverse, because Android API17
         // client timeout is short (~1.5s) and reverse may fail/lag on tethered links.
         self.spawn_reverse_task();
+    }
 
-        if self.should_suppress_duplicate_start(&cfg).await {
-            return Ok(());
-        }
-
-        let (run_id, existing_pid, provisional_effective) =
-            self.record_start_metadata(&cfg, reason, &launch_size).await;
-        self.persist_effective_runtime_snapshot(run_id, &provisional_effective);
-
-        {
-            let cfg = { self.inner.lock().await.baseline_config.clone() };
-            let _ = config_store::persist_config(&self.runtime_config_path, &cfg)
-                .map_err(|e| tracing::warn!("persist config: {e}"));
-        }
-
-        if let Some(pid) = existing_pid {
-            proc::terminate_pid(pid).await;
-        }
-        if adb::ensure_stream_port_available(self.stream_port).is_err() {
-            let err = CoreError::PortBusy(self.stream_port);
-            self.mark_start_failed(err.to_string()).await;
-            return Err(err);
-        }
-
-        let mut use_rust_streamer =
-            wbeam_setting_bool(&self.settings, "WBEAM_USE_RUST_STREAMER", true);
-        let rust_streamer_bin = wbeam_setting(&self.settings, "WBEAM_RUST_STREAMER_BIN")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| self.root.join("host/rust/target/release/wbeamd-streamer"));
-
-        let mut cmd;
-        let capture_backend = self.host_probe.capture_mode_name();
+    async fn activate_display_backend(
+        &self,
+        requested_mode: display_backends::DisplayMode,
+        launch_size: &str,
+    ) -> Result<ActivatedDisplay, CoreError> {
         self.stop_virtual_display_if_any().await;
-        let serial_hint = self.target_serial.as_deref().unwrap_or("default");
-        let activation = match display_backends::activate_start(
+        let serial_hint = self
+            .target_serial
+            .as_deref()
+            .unwrap_or("default")
+            .to_string();
+        let capture_backend = self.host_probe.capture_mode_name().to_string();
+        let activation = display_backends::activate_start(
             &self.host_probe,
             requested_mode,
-            serial_hint,
-            &launch_size,
-        ) {
-            Ok(v) => v,
-            Err(e) => {
-                let err = match e {
-                    display_backends::ActivationError::Unsupported(msg) => {
-                        CoreError::UnsupportedHost(msg)
-                    }
-                    display_backends::ActivationError::Failed(msg) => CoreError::Spawn(msg),
-                };
-                self.mark_start_failed(err.to_string()).await;
-                return Err(err);
-            }
-        };
+            &serial_hint,
+            launch_size,
+        )
+        .map_err(|err| match err {
+            display_backends::ActivationError::Unsupported(msg) => CoreError::UnsupportedHost(msg),
+            display_backends::ActivationError::Failed(msg) => CoreError::Spawn(msg),
+        })?;
         info!(
-            serial = serial_hint,
+            serial = %serial_hint,
             requested_mode = requested_mode.as_str(),
-            capture_backend = capture_backend,
+            capture_backend = %capture_backend,
             x11_display = activation.display_override.as_deref().unwrap_or("-"),
             x11_region = activation
                 .capture_region
@@ -1473,14 +1585,19 @@ impl DaemonCore {
             runtime_handle = activation.runtime_handle.is_some(),
             "display backend activation"
         );
-        let x11_display_override = activation.display_override;
-        let x11_capture_region = activation.capture_region;
-        let using_virtual_x11 = activation.using_virtual_x11;
         if let Some(runtime_handle) = activation.runtime_handle {
             let mut inner = self.inner.lock().await;
             inner.display_runtime = Some(runtime_handle);
         }
+        Ok(ActivatedDisplay {
+            capture_backend,
+            display_override: activation.display_override,
+            capture_region: activation.capture_region,
+            using_virtual_x11: activation.using_virtual_x11,
+        })
+    }
 
+    fn launch_artifacts(&self) -> LaunchArtifacts {
         let session_suffix = self
             .target_serial
             .as_deref()
@@ -1506,165 +1623,204 @@ impl DaemonCore {
             "/tmp/wbeam-trainer-overlay-{}-{}.txt",
             session_suffix, self.stream_port
         );
-        let trainer_run_active = Path::new(&trainer_active_marker).exists();
-        let trainer_overlay_active = Path::new(&trainer_overlay_file).exists();
-        let trainer_hud_burnin =
-            wbeam_setting_bool(&self.settings, "WBEAM_TRAINER_HUD_BURNIN", false);
+        LaunchArtifacts {
+            session_suffix,
+            restore_token_file,
+            trainer_run_active: Path::new(&trainer_active_marker).exists(),
+            trainer_overlay_active: Path::new(&trainer_overlay_file).exists(),
+            trainer_hud_burnin: wbeam_setting_bool(
+                &self.settings,
+                "WBEAM_TRAINER_HUD_BURNIN",
+                false,
+            ),
+            trainer_active_marker,
+            trainer_overlay_file,
+        }
+    }
 
-        if capture_backend == "wayland_portal" && trainer_run_active {
+    fn build_stream_command(
+        &self,
+        cfg: &ActiveConfig,
+        launch_size: &str,
+        display: &ActivatedDisplay,
+        artifacts: &LaunchArtifacts,
+    ) -> Result<Command, CoreError> {
+        let use_rust_streamer = self.use_rust_streamer(display, artifacts);
+        let mut cmd = if use_rust_streamer {
+            self.build_rust_streamer_command(cfg, launch_size, display, artifacts)?
+        } else {
+            self.build_python_streamer_command(cfg, launch_size, display, artifacts)?
+        };
+        Self::finalize_stream_command(&mut cmd);
+        Ok(cmd)
+    }
+
+    fn use_rust_streamer(&self, display: &ActivatedDisplay, artifacts: &LaunchArtifacts) -> bool {
+        let mut use_rust_streamer =
+            wbeam_setting_bool(&self.settings, "WBEAM_USE_RUST_STREAMER", true);
+        if display.capture_backend == "wayland_portal" && artifacts.trainer_run_active {
             if use_rust_streamer {
                 warn!(
-                    serial = session_suffix,
-                    marker = %trainer_active_marker,
+                    serial = %artifacts.session_suffix,
+                    marker = %artifacts.trainer_active_marker,
                     "trainer run marker detected; forcing python streamer to keep one portal consent"
                 );
             }
             use_rust_streamer = false;
         }
+        use_rust_streamer
+    }
 
-        if use_rust_streamer {
-            if !rust_streamer_bin.exists() {
-                error!(
-                    path = %rust_streamer_bin.display(),
-                    "rust streamer binary not found – run `./devtool host build` to build it \
-                     (set WBEAM_USE_RUST_STREAMER=false to force legacy python streamer)"
-                );
-                let err = CoreError::Spawn(format!(
-                    "rust streamer binary not found: {} \
-                     (run `./devtool host build`; or set WBEAM_USE_RUST_STREAMER=false to use python fallback)",
-                    rust_streamer_bin.display()
-                ));
-                self.mark_start_failed(err.to_string()).await;
-                return Err(err);
-            }
-            cmd = Command::new(rust_streamer_bin);
-            cmd.arg("--profile")
-                .arg(&cfg.profile)
-                .arg("--capture-backend")
-                .arg(match capture_backend {
-                    "x11_gst" => "x11",
-                    "wayland_portal" => "wayland-portal",
-                    _ => "auto",
-                })
-                .arg("--port")
-                .arg(self.stream_port.to_string())
-                .arg("--encoder")
-                .arg(&cfg.encoder)
-                .arg("--cursor-mode")
-                .arg(&cfg.cursor_mode)
-                .arg("--size")
-                .arg(&launch_size)
-                .arg("--fps")
-                .arg(cfg.fps.to_string())
-                .arg("--bitrate-kbps")
-                .arg(cfg.bitrate_kbps.to_string())
-                .arg("--restore-token-file")
-                .arg(&restore_token_file)
-                .arg("--portal-persist-mode")
-                .arg("2")
-                .arg("--debug-dir")
-                .arg("/tmp/wbeam-frames")
-                .arg("--debug-fps")
-                .arg(cfg.debug_fps.to_string());
-            if trainer_overlay_active && trainer_hud_burnin {
-                cmd.env("WBEAM_OVERLAY_TEXT_FILE", &trainer_overlay_file);
-            } else {
-                cmd.env_remove("WBEAM_OVERLAY_TEXT_FILE");
-            }
-            if cfg.intra_only {
-                cmd.arg("--intra-only");
-            }
-            if capture_backend == "x11_gst" {
-                if let Some(display) = x11_display_override.as_deref() {
-                    cmd.env("DISPLAY", display);
-                }
-                if let Some((x, y, w, h)) = x11_capture_region {
-                    cmd.env("WBEAM_X11_CAPTURE_X", x.to_string());
-                    cmd.env("WBEAM_X11_CAPTURE_Y", y.to_string());
-                    cmd.env("WBEAM_X11_CAPTURE_W", w.to_string());
-                    cmd.env("WBEAM_X11_CAPTURE_H", h.to_string());
-                } else {
-                    cmd.env_remove("WBEAM_X11_CAPTURE_X");
-                    cmd.env_remove("WBEAM_X11_CAPTURE_Y");
-                    cmd.env_remove("WBEAM_X11_CAPTURE_W");
-                    cmd.env_remove("WBEAM_X11_CAPTURE_H");
-                }
-                if !using_virtual_x11 {
-                    if let Some(xauth) = resolve_xauthority_for_capture() {
-                        cmd.env("XAUTHORITY", xauth);
-                    }
-                } else {
-                    cmd.env_remove("XAUTHORITY");
-                }
-            }
-        } else {
-            if capture_backend == "x11_gst" {
-                let err = CoreError::Spawn(
-                    "x11 backend requires Rust streamer (set WBEAM_USE_RUST_STREAMER=true)"
-                        .to_string(),
-                );
-                self.mark_start_failed(err.to_string()).await;
-                return Err(err);
-            }
-            warn!("WBEAM_USE_RUST_STREAMER=false – using legacy python streamer");
-            let stream_script = self.root.join("host/scripts/stream_wayland_portal_h264.py");
-            cmd = Command::new("python3");
-            cmd.arg("-u")
-                .arg(stream_script)
-                .arg("--profile")
-                .arg(&cfg.profile)
-                .arg("--port")
-                .arg(self.stream_port.to_string())
-                .arg("--encoder")
-                .arg(&cfg.encoder)
-                .arg("--cursor-mode")
-                .arg(&cfg.cursor_mode)
-                .arg("--size")
-                .arg(&launch_size)
-                .arg("--fps")
-                .arg(cfg.fps.to_string())
-                .arg("--bitrate-kbps")
-                .arg(cfg.bitrate_kbps.to_string())
-                .arg("--debug-dir")
-                .arg("/tmp/wbeam-frames")
-                .arg("--debug-fps")
-                .arg(cfg.debug_fps.to_string())
-                .arg("--restore-token-file")
-                .arg(restore_token_file)
-                .env("PYTHONUNBUFFERED", "1")
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-            if trainer_overlay_active && trainer_hud_burnin {
-                cmd.env("WBEAM_OVERLAY_TEXT_FILE", &trainer_overlay_file);
-            } else {
-                cmd.env_remove("WBEAM_OVERLAY_TEXT_FILE");
-            }
-            // C3: framed-only transport (legacy parser disabled on Android path).
-            cmd.arg("--framed");
+    fn build_rust_streamer_command(
+        &self,
+        cfg: &ActiveConfig,
+        launch_size: &str,
+        display: &ActivatedDisplay,
+        artifacts: &LaunchArtifacts,
+    ) -> Result<Command, CoreError> {
+        let rust_streamer_bin = wbeam_setting(&self.settings, "WBEAM_RUST_STREAMER_BIN")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| self.root.join("host/rust/target/release/wbeamd-streamer"));
+        if !rust_streamer_bin.exists() {
+            error!(
+                path = %rust_streamer_bin.display(),
+                "rust streamer binary not found – run `./devtool host build` to build it \
+                 (set WBEAM_USE_RUST_STREAMER=false to force legacy python streamer)"
+            );
+            return Err(CoreError::Spawn(format!(
+                "rust streamer binary not found: {} \
+                 (run `./devtool host build`; or set WBEAM_USE_RUST_STREAMER=false to use python fallback)",
+                rust_streamer_bin.display()
+            )));
         }
 
+        let mut cmd = Command::new(rust_streamer_bin);
+        cmd.arg("--profile")
+            .arg(&cfg.profile)
+            .arg("--capture-backend")
+            .arg(match display.capture_backend.as_str() {
+                "x11_gst" => "x11",
+                "wayland_portal" => "wayland-portal",
+                _ => "auto",
+            })
+            .arg("--port")
+            .arg(self.stream_port.to_string())
+            .arg("--encoder")
+            .arg(&cfg.encoder)
+            .arg("--cursor-mode")
+            .arg(&cfg.cursor_mode)
+            .arg("--size")
+            .arg(launch_size)
+            .arg("--fps")
+            .arg(cfg.fps.to_string())
+            .arg("--bitrate-kbps")
+            .arg(cfg.bitrate_kbps.to_string())
+            .arg("--restore-token-file")
+            .arg(&artifacts.restore_token_file)
+            .arg("--portal-persist-mode")
+            .arg("2")
+            .arg("--debug-dir")
+            .arg("/tmp/wbeam-frames")
+            .arg("--debug-fps")
+            .arg(cfg.debug_fps.to_string());
+        Self::configure_overlay_env(&mut cmd, artifacts);
+        if cfg.intra_only {
+            cmd.arg("--intra-only");
+        }
+        self.configure_x11_capture_env(&mut cmd, display);
+        Ok(cmd)
+    }
+
+    fn build_python_streamer_command(
+        &self,
+        cfg: &ActiveConfig,
+        launch_size: &str,
+        display: &ActivatedDisplay,
+        artifacts: &LaunchArtifacts,
+    ) -> Result<Command, CoreError> {
+        if display.capture_backend == "x11_gst" {
+            return Err(CoreError::Spawn(
+                "x11 backend requires Rust streamer (set WBEAM_USE_RUST_STREAMER=true)".to_string(),
+            ));
+        }
+        warn!("WBEAM_USE_RUST_STREAMER=false – using legacy python streamer");
+        let stream_script = self.root.join("host/scripts/stream_wayland_portal_h264.py");
+        let mut cmd = Command::new("python3");
+        cmd.arg("-u")
+            .arg(stream_script)
+            .arg("--profile")
+            .arg(&cfg.profile)
+            .arg("--port")
+            .arg(self.stream_port.to_string())
+            .arg("--encoder")
+            .arg(&cfg.encoder)
+            .arg("--cursor-mode")
+            .arg(&cfg.cursor_mode)
+            .arg("--size")
+            .arg(launch_size)
+            .arg("--fps")
+            .arg(cfg.fps.to_string())
+            .arg("--bitrate-kbps")
+            .arg(cfg.bitrate_kbps.to_string())
+            .arg("--debug-dir")
+            .arg("/tmp/wbeam-frames")
+            .arg("--debug-fps")
+            .arg(cfg.debug_fps.to_string())
+            .arg("--restore-token-file")
+            .arg(&artifacts.restore_token_file)
+            .arg("--framed")
+            .env("PYTHONUNBUFFERED", "1");
+        Self::configure_overlay_env(&mut cmd, artifacts);
+        Ok(cmd)
+    }
+
+    fn configure_overlay_env(cmd: &mut Command, artifacts: &LaunchArtifacts) {
+        if artifacts.trainer_overlay_active && artifacts.trainer_hud_burnin {
+            cmd.env("WBEAM_OVERLAY_TEXT_FILE", &artifacts.trainer_overlay_file);
+        } else {
+            cmd.env_remove("WBEAM_OVERLAY_TEXT_FILE");
+        }
+    }
+
+    fn configure_x11_capture_env(&self, cmd: &mut Command, display: &ActivatedDisplay) {
+        if display.capture_backend != "x11_gst" {
+            return;
+        }
+
+        if let Some(display_name) = display.display_override.as_deref() {
+            cmd.env("DISPLAY", display_name);
+        }
+        if let Some((x, y, w, h)) = display.capture_region {
+            cmd.env("WBEAM_X11_CAPTURE_X", x.to_string());
+            cmd.env("WBEAM_X11_CAPTURE_Y", y.to_string());
+            cmd.env("WBEAM_X11_CAPTURE_W", w.to_string());
+            cmd.env("WBEAM_X11_CAPTURE_H", h.to_string());
+        } else {
+            cmd.env_remove("WBEAM_X11_CAPTURE_X");
+            cmd.env_remove("WBEAM_X11_CAPTURE_Y");
+            cmd.env_remove("WBEAM_X11_CAPTURE_W");
+            cmd.env_remove("WBEAM_X11_CAPTURE_H");
+        }
+        if display.using_virtual_x11 {
+            cmd.env_remove("XAUTHORITY");
+        } else if let Some(xauth) = resolve_xauthority_for_capture() {
+            cmd.env("XAUTHORITY", xauth);
+        }
+    }
+
+    fn finalize_stream_command(cmd: &mut Command) {
         cmd.stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+    }
 
-        let mut child = match cmd.spawn() {
-            Ok(c) => c,
-            Err(e) => {
-                let err = CoreError::Spawn(e.to_string());
-                self.mark_start_failed(err.to_string()).await;
-                return Err(err);
-            }
-        };
-
-        let pid = if let Some(pid) = child.id() {
-            pid
-        } else {
-            let err = CoreError::Spawn("child process has no pid".to_string());
-            self.mark_start_failed(err.to_string()).await;
-            return Err(err);
-        };
-
+    async fn spawn_stream_process(&self, run_id: u64, mut cmd: Command) -> Result<(), CoreError> {
+        let mut child = cmd
+            .spawn()
+            .map_err(|err| CoreError::Spawn(err.to_string()))?;
+        let pid = child
+            .id()
+            .ok_or_else(|| CoreError::Spawn("child process has no pid".to_string()))?;
         info!(run_id, pid, "stream process started");
 
         if let Some(stdout) = child.stdout.take() {
@@ -1704,6 +1860,60 @@ impl DaemonCore {
                 .unwrap_or(-1);
             let _ = exit_tx.send((run_id, exit_code));
         });
+
+        Ok(())
+    }
+
+    async fn start_with_config(&self, cfg: ActiveConfig, reason: &str) -> Result<(), CoreError> {
+        let (requested_mode, launch_size) = self.resolve_start_request(&cfg).await?;
+        self.refresh_reverse_mapping().await;
+
+        if self.should_suppress_duplicate_start(&cfg).await {
+            return Ok(());
+        }
+
+        let (run_id, existing_pid, provisional_effective) =
+            self.record_start_metadata(&cfg, reason, &launch_size).await;
+        self.persist_effective_runtime_snapshot(run_id, &provisional_effective);
+
+        {
+            let cfg = { self.inner.lock().await.baseline_config.clone() };
+            let _ = config_store::persist_config(&self.runtime_config_path, &cfg)
+                .map_err(|e| tracing::warn!("persist config: {e}"));
+        }
+
+        if let Some(pid) = existing_pid {
+            proc::terminate_pid(pid).await;
+        }
+        if adb::ensure_stream_port_available(self.stream_port).is_err() {
+            let err = CoreError::PortBusy(self.stream_port);
+            self.mark_start_failed(err.to_string()).await;
+            return Err(err);
+        }
+
+        let display = match self
+            .activate_display_backend(requested_mode, &launch_size)
+            .await
+        {
+            Ok(display) => display,
+            Err(err) => {
+                self.mark_start_failed(err.to_string()).await;
+                return Err(err);
+            }
+        };
+        let artifacts = self.launch_artifacts();
+        let cmd = match self.build_stream_command(&cfg, &launch_size, &display, &artifacts) {
+            Ok(cmd) => cmd,
+            Err(err) => {
+                self.mark_start_failed(err.to_string()).await;
+                return Err(err);
+            }
+        };
+
+        if let Err(err) = self.spawn_stream_process(run_id, cmd).await {
+            self.mark_start_failed(err.to_string()).await;
+            return Err(err);
+        }
 
         Ok(())
     }
@@ -1762,84 +1972,90 @@ impl DaemonCore {
     }
 
     async fn handle_child_exit(&self, run_id: u64, exit_code: i32) {
-        // NOSONAR: S3776
         info!(run_id, exit_code, "stream process exited");
-        let (should_restart, cfg_for_restart) = {
+        let restart_cfg = {
             let mut inner = self.inner.lock().await;
-            if inner.run_id != run_id {
-                return;
-            }
-
-            let had_streaming_session = inner.stream_started_at.is_some();
-            let exited_while_starting = inner.state == STATE_STARTING;
-
-            inner.current_pid = None;
-            inner.run_started_at = None;
-            inner.stream_started_at = None;
-            inner.last_output_at = None;
-            inner.last_streaming_line_at = None;
-            inner.telemetry_file = None; // P2.3: flush+close
-            inner.no_present_streak = 0;
-
-            if inner.state == STATE_STOPPING || inner.state == STATE_IDLE {
-                inner.state = STATE_IDLE.to_string();
-                info!(run_id, "stream exit ignored in stopping/idle state");
-                return;
-            }
-
-            let preserved_stream_error = inner.last_error.clone();
-            inner.last_error = format!("stream exited with code={exit_code}");
-            inner.state = STATE_ERROR.to_string();
-            inner.metrics.reconnects = inner.metrics.reconnects.saturating_add(1);
-
-            if !had_streaming_session {
-                inner.state = STATE_IDLE.to_string();
-                inner.last_error = if preserved_stream_error.is_empty() {
-                    format!("stream start aborted (code={exit_code}); waiting for explicit /start")
-                } else {
-                    format!("stream start aborted (code={exit_code}): {preserved_stream_error}")
-                };
-                info!(
-                    run_id,
-                    exit_code,
-                    exited_while_starting,
-                    "stream exited before STREAMING; auto-restart suppressed"
-                );
-                return;
-            }
-
-            if self.auto_start
-                && Self::auto_restart_cooldown_expired(inner.suppress_auto_start_until)
-            {
-                inner.state = STATE_RECONNECTING.to_string();
-                inner.metrics.restart_count = inner.metrics.restart_count.saturating_add(1);
-                (true, Some(inner.active_config.clone()))
-            } else {
-                (false, None)
+            match self.process_child_exit(&mut inner, run_id, exit_code) {
+                ChildExitAction::Ignore => return,
+                ChildExitAction::NoRestart => None,
+                ChildExitAction::Restart(cfg) => Some(cfg),
             }
         };
 
-        if should_restart {
-            let core = self.clone();
-            tokio::spawn(async move {
-                sleep(core.reconnect_backoff).await;
-                let state_is_reconnecting = {
-                    let inner = core.inner.lock().await;
-                    inner.state == STATE_RECONNECTING
-                };
-                if !state_is_reconnecting {
-                    return;
-                }
-
-                if let Some(cfg) = cfg_for_restart {
-                    if let Err(err) = core.start_with_config(cfg, "auto_reconnect").await {
-                        let mut inner = core.inner.lock().await;
-                        inner.state = STATE_ERROR.to_string();
-                        inner.last_error = err.to_string();
-                    }
-                }
-            });
+        if let Some(cfg) = restart_cfg {
+            self.spawn_auto_restart(cfg);
         }
+    }
+
+    fn process_child_exit(
+        &self,
+        inner: &mut Inner,
+        run_id: u64,
+        exit_code: i32,
+    ) -> ChildExitAction {
+        if inner.run_id != run_id {
+            return ChildExitAction::Ignore;
+        }
+
+        let had_streaming_session = inner.stream_started_at.is_some();
+        let exited_while_starting = inner.state == STATE_STARTING;
+        let stopping_or_idle = matches!(inner.state.as_str(), STATE_STOPPING | STATE_IDLE);
+        let preserved_stream_error = inner.last_error.clone();
+        Self::reset_runtime_state(inner);
+
+        if stopping_or_idle {
+            inner.state = STATE_IDLE.to_string();
+            info!(run_id, "stream exit ignored in stopping/idle state");
+            return ChildExitAction::Ignore;
+        }
+
+        inner.last_error = format!("stream exited with code={exit_code}");
+        inner.state = STATE_ERROR.to_string();
+        inner.metrics.reconnects = inner.metrics.reconnects.saturating_add(1);
+
+        if !had_streaming_session {
+            inner.state = STATE_IDLE.to_string();
+            inner.last_error = if preserved_stream_error.is_empty() {
+                format!("stream start aborted (code={exit_code}); waiting for explicit /start")
+            } else {
+                format!("stream start aborted (code={exit_code}): {preserved_stream_error}")
+            };
+            info!(
+                run_id,
+                exit_code,
+                exited_while_starting,
+                "stream exited before STREAMING; auto-restart suppressed"
+            );
+            return ChildExitAction::NoRestart;
+        }
+
+        if self.auto_start && Self::auto_restart_cooldown_expired(inner.suppress_auto_start_until) {
+            inner.state = STATE_RECONNECTING.to_string();
+            inner.metrics.restart_count = inner.metrics.restart_count.saturating_add(1);
+            return ChildExitAction::Restart(inner.active_config.clone());
+        }
+
+        ChildExitAction::NoRestart
+    }
+
+    fn spawn_auto_restart(&self, cfg: ActiveConfig) {
+        let core = self.clone();
+        tokio::spawn(async move {
+            sleep(core.reconnect_backoff).await;
+            let state_is_reconnecting = {
+                let inner = core.inner.lock().await;
+                inner.state == STATE_RECONNECTING
+            };
+            if !state_is_reconnecting {
+                return;
+            }
+
+            if let Err(err) = core.start_with_config(cfg, "auto_reconnect").await {
+                let mut inner = core.inner.lock().await;
+                inner.state = STATE_ERROR.to_string();
+                inner.last_error = err.to_string();
+            }
+        });
     }
 
     fn auto_restart_cooldown_expired(until: Option<Instant>) -> bool {

@@ -67,8 +67,6 @@ final class StreamReconnectLoop {
         this.stateStreaming = stateStreaming;
         this.stateError = stateError;
     }
-    @SuppressWarnings({"java:S3776","java:S2093","java:S1181","java:S2140"})
-
     void run() {
         android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO);
 
