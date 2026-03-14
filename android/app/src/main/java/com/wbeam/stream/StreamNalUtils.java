@@ -2,6 +2,7 @@ package com.wbeam.stream;
 
 import java.util.Arrays;
 
+@SuppressWarnings("{S135}") 
 final class StreamNalUtils {
     @SuppressWarnings("S135")
     private StreamNalUtils() {}

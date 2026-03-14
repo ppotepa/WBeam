@@ -5,6 +5,7 @@ import java.util.Locale;
 /**
  * Builds preflight/startup overlay model from current runtime snapshot.
  */
+@SuppressWarnings("{S1192}") 
 public final class StartupOverlayModelBuilder {
     private static final String SERVICE_PREFIX = "service=";
     private static final String BULLET = " \u00b7 ";

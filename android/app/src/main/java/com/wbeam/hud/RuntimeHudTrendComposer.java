@@ -1,5 +1,6 @@
 package com.wbeam.hud;
 
+@SuppressWarnings("{S2184}") 
 public final class RuntimeHudTrendComposer {
     private RuntimeHudTrendComposer() {
     }

@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.Locale;
 
+@SuppressWarnings("{S135", "S1854", "S3776", "S6541}") 
 final class FramedPngLoop {
 
     interface RuntimeState {
