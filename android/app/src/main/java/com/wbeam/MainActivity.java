@@ -92,16 +92,9 @@ public class MainActivity extends AppCompatActivity {
     private static final String STATE_ERROR = "error";
 
     private static final long HUD_ADB_LOG_INTERVAL_MS = 1000;
-    @SuppressWarnings("java:S1068")
-    private static final long LIVE_TEST_START_TIMEOUT_MS = 12000;
     private static final int TRANSPORT_QUEUE_MAX_FRAMES = 3;
     private static final int DECODE_QUEUE_MAX_FRAMES = 2;
     private static final int RENDER_QUEUE_MAX_FRAMES = 1;
-    @SuppressWarnings("java:S1068")
-    private static final int BANDWIDTH_TEST_MB = 64;
-    @SuppressWarnings("java:S1068")
-    private static final String TEST_VIDEO_URL =
-            "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4";
     private static final String DEFAULT_PROFILE = "baseline";
 
     private static final String[] PROFILE_OPTIONS = {
@@ -113,12 +106,6 @@ public class MainActivity extends AppCompatActivity {
     static final String PREFERRED_VIDEO = DecoderCapabilityInspector.preferredVideoEncoder();
     private static final String[] ENCODER_OPTIONS = {PREFERRED_VIDEO, "raw-png"};
     private static final String CURSOR_EMBEDDED = "embedded";
-    @SuppressWarnings("java:S1068")
-    private static final String METRIC_KEY_TRAINER_HUD_ACTIVE = "trainer_hud_active";
-    @SuppressWarnings("java:S1068")
-    private static final String METRIC_KEY_TRAINER_HUD_TEXT = "trainer_hud_text";
-    @SuppressWarnings("java:S1068")
-    private static final String METRIC_KEY_TRAINER_HUD_JSON = "trainer_hud_json";
     private static final String[] CURSOR_OPTIONS = {CURSOR_EMBEDDED, "hidden", "metadata"};
     private static final String DEFAULT_CURSOR_MODE = CURSOR_EMBEDDED;
     private static final int DEFAULT_RES_SCALE = 100;
