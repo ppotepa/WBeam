@@ -1095,37 +1095,24 @@ def _update_overlay_element(elem, new_text: str, key: str) -> bool:
         return False
 
 
-def setup_overlay_refresh(pipeline) -> None:  # noqa: C901, S3776
+def setup_overlay_refresh(pipeline) -> None:  # noqa: C901
     """Setup periodic refresh of overlay text from file."""
     overlay_file = os.getenv("WBEAM_OVERLAY_TEXT_FILE", "").strip()
     if not overlay_file:
         return
-    
+
     overlay_elements = {"MAIN": pipeline.get_by_name("hud_main")}
     if not any(v is not None for v in overlay_elements.values()):
         return
 
     print(f"[wbeam] Overlay text source: {overlay_file}", flush=True)
-    overlay_state = {"MAIN": ""}
+    overlay_state = {key: "" for key in overlay_elements}
 
     def _refresh_overlay_text():
-        try:
-            text = Path(overlay_file).read_text(encoding="utf-8", errors="replace")
-        except FileNotFoundError:
+        sections = _load_overlay_sections(overlay_file)
+        if sections is None:
             return
-        except Exception as exc:
-            print(f"[warn] failed to read overlay text {overlay_file}: {exc}", file=sys.stderr)
-            return
-
-        sections = _parse_overlay_sections(text)
-        for key, elem in overlay_elements.items():
-            if elem is None:
-                continue
-            new_text = sections.get(key, "")
-            if new_text == overlay_state[key]:
-                continue
-            if _update_overlay_element(elem, new_text, key):
-                overlay_state[key] = new_text
+        _apply_overlay_sections(overlay_elements, overlay_state, sections)
 
     def _refresh_overlay_tick():
         _refresh_overlay_text()
@@ -1133,6 +1120,33 @@ def setup_overlay_refresh(pipeline) -> None:  # noqa: C901, S3776
 
     _refresh_overlay_text()
     GLib.timeout_add(250, _refresh_overlay_tick)
+
+
+def _load_overlay_sections(overlay_file: str) -> dict[str, str] | None:
+    try:
+        text = Path(overlay_file).read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        return None
+    except Exception as exc:
+        print(f"[warn] failed to read overlay text {overlay_file}: {exc}", file=sys.stderr)
+        return None
+    return _parse_overlay_sections(text)
+
+
+def _apply_overlay_sections(
+        overlay_elements: dict[str, object],
+        overlay_state: dict[str, str],
+        sections: dict[str, str]
+) -> None:
+    for key in overlay_state:
+        elem = overlay_elements.get(key)
+        if elem is None:
+            continue
+        new_text = sections.get(key, "")
+        if new_text == overlay_state[key]:
+            continue
+        if _update_overlay_element(elem, new_text, key):
+            overlay_state[key] = new_text
 
 
 if __name__ == "__main__":

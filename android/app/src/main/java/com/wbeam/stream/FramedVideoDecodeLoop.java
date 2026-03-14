@@ -341,7 +341,7 @@ final class FramedVideoDecodeLoop {
                 waitForKeyframe = false;
                 recoveryUnlockSec++;
                 Log.w(tag, "recovery-unlock: seq=" + seqU32 + " key=" + frameIsKey
-                        + " payload=" + payloadLen + " qDecode=" + pendingDecodeQueue);
+                        + PAYLOAD_LABEL + payloadLen + " qDecode=" + pendingDecodeQueue);
             }
             boolean canQueue = !waitForKeyframe
                     && (pendingDecodeQueue < decodeQueueMaxFrames || isRecovery);

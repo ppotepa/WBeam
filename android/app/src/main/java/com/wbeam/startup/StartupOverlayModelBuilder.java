@@ -96,54 +96,6 @@ public final class StartupOverlayModelBuilder {
         out.updatedControlRetryCount = updatedControlRetryCount;
         out.elapsedMs = elapsedMs;
 
-        int step1 = in.daemonReachable ? Model.SS_OK : Model.SS_ACTIVE;
-        String step1Detail;
-        if (step1 == Model.SS_OK) {
-            boolean isLocalImpl = "local".equalsIgnoreCase(in.apiImpl);
-            if (isLocalImpl) {
-                step1Detail = "on-device (local api) \u00b7 no host connection needed";
-            } else {
-                step1Detail = "reachable" + BULLET + "api_impl=" + safe(in.apiImpl)
-                        + BULLET + safe(in.daemonHostName);
-            }
-        } else if (updatedControlRetryCount == 0) {
-            step1Detail = "polling " + safe(in.apiBase)
-                    + " \u2026 (" + (elapsedMs / 1000L) + "s)"
-                    + BULLET + "install/start desktop service if this does not recover";
-        } else {
-            step1Detail = "no response" + BULLET + "retry #" + updatedControlRetryCount
-                    + BULLET + "polling " + safe(in.apiBase)
-                    + " (" + (elapsedMs / 1000L) + "s)"
-                    + BULLET + "check desktop service status";
-        }
-
-        int step2;
-        String step2Detail;
-        if (step1 != Model.SS_OK) {
-            step2 = Model.SS_PENDING;
-            step2Detail = "waiting for control link";
-        } else if (!in.handshakeResolved) {
-            step2 = Model.SS_ACTIVE;
-            step2Detail = "resolving service / api version\u2026";
-        } else if (in.buildMismatch) {
-            step2 = Model.SS_ERROR;
-            step2Detail = "build mismatch · app=" + safe(in.appBuildRevision)
-                    + " · host=" + safe(in.daemonBuildRevision);
-        } else {
-            step2 = Model.SS_OK;
-            if (in.requiresTransportProbe) {
-                if (in.probeOk) {
-                    step2Detail = SERVICE_PREFIX + safe(in.daemonService) + BULLET + "transport test OK";
-                } else if (in.probeInFlight) {
-                    step2Detail = SERVICE_PREFIX + safe(in.daemonService) + BULLET + "transport test in progress\u2026";
-                } else {
-                    step2Detail = SERVICE_PREFIX + safe(in.daemonService) + BULLET + "transport test pending";
-                }
-            } else {
-                step2Detail = SERVICE_PREFIX + safe(in.daemonService) + BULLET + safe(in.apiImpl);
-            }
-        }
-
         boolean streamFlowing = "STREAMING".equalsIgnoreCase(safe(in.effectiveDaemonState));
         int streamReconnects = parseReconnectCount(in.lastStatsLine);
         String streamAddr = streamAddress(in.streamHost);
@@ -155,75 +107,28 @@ public final class StartupOverlayModelBuilder {
                 ? "check ADB reverse for stream/control ports" + BULLET + "ensure desktop service is running"
                 : "check USB tethering / host IP / LAN" + BULLET + "ensure desktop service is running";
 
-        int step3;
-        String step3Detail;
-        if (step2 != Model.SS_OK) {
-            step3 = Model.SS_PENDING;
-            step3Detail = (step2 == Model.SS_ERROR && in.buildMismatch)
-                    ? "blocked by build mismatch"
-                    : "waiting for handshake";
-        } else if (in.requiresTransportProbe && !in.probeOk) {
-            step3 = Model.SS_ACTIVE;
-            if (in.probeInFlight) {
-                step3Detail = "testing transport I/O\u2026 " + safe(in.probeInfo);
-            } else {
-                step3Detail = "transport test retrying\u2026 " + safe(in.probeInfo);
-            }
-        } else if (streamFlowing) {
-            step3 = Model.SS_OK;
-            step3Detail = "live" + BULLET + "fps=" + String.format(Locale.US, "%.0f", in.latestPresentFps)
-                    + BULLET + safe(in.effectiveDaemonState).toLowerCase(Locale.US);
-        } else {
-            boolean hasWaited = elapsedMs > 5_000L;
-            if (daemonStartFailure && hasWaited) {
-                step3 = Model.SS_ERROR;
-                step3Detail = "host stream start failed" + BULLET + safe(in.daemonErrCompact);
-            } else {
-                step3 = Model.SS_ACTIVE;
-                if (streamReconnects > 0 && hasWaited) {
-                    step3Detail = "retry #" + streamReconnects
-                            + BULLET + streamAddr + ":" + in.streamPort
-                            + " unreachable" + BULLET + streamFixHint
-                            + (safe(in.daemonErrCompact).isEmpty() ? "" : BULLET + "host error: " + safe(in.daemonErrCompact));
-                } else if (streamReconnects > 0) {
-                    step3Detail = "reconnecting" + BULLET + ATTEMPT_PREFIX + streamReconnects + BULLET + "awaiting frames\u2026";
-                } else if (hasWaited) {
-                    step3Detail = "connecting to " + streamAddr + ":" + in.streamPort
-                            + BULLET + streamFixHint
-                            + (safe(in.daemonErrCompact).isEmpty() ? "" : BULLET + "host error: " + safe(in.daemonErrCompact));
-                } else {
-                    step3Detail = "decoder started" + BULLET + "awaiting frames\u2026";
-                }
-            }
-        }
-
-        String subtitle;
-        if (step1 != Model.SS_OK) {
-            if (elapsedMs < 2000L && updatedControlRetryCount == 0) {
-                subtitle = "starting up\u2026";
-            } else if (updatedControlRetryCount == 0) {
-                subtitle = "awaiting control link" + BULLET + "start desktop service if needed\u2026";
-            } else {
-                subtitle = "retrying control link" + BULLET + ATTEMPT_PREFIX + updatedControlRetryCount
-                        + BULLET + "check desktop service\u2026";
-            }
-        } else if (step2 != Model.SS_OK) {
-            subtitle = (step2 == Model.SS_ERROR && in.buildMismatch)
-                    ? "build mismatch" + BULLET + "redeploy APK or rebuild host"
-                    : "handshake in progress\u2026";
-        } else if (step3 != Model.SS_OK) {
-            if (step3 == Model.SS_ERROR && daemonStartFailure) {
-                subtitle = "host stream start failed" + BULLET + "check host logs";
-            } else if (streamReconnects > 0) {
-                subtitle = "stream reconnecting" + BULLET + ATTEMPT_PREFIX + streamReconnects + "\u2026";
-            } else if (elapsedMs > 5_000L) {
-                subtitle = "stream unreachable" + BULLET + "retrying\u2026";
-            } else {
-                subtitle = "waiting for video frames\u2026";
-            }
-        } else {
-            subtitle = "all systems ready";
-        }
+        StepInfo step1Info = determineStep1(in, elapsedMs, updatedControlRetryCount);
+        StepInfo step2Info = determineStep2(in, step1Info.state);
+        StepInfo step3Info = determineStep3(
+                in,
+                step2Info.state,
+                streamFlowing,
+                daemonStartFailure,
+                streamAddr,
+                streamFixHint,
+                streamReconnects,
+                elapsedMs
+        );
+        String subtitle = buildSubtitle(
+                step1Info.state,
+                step2Info.state,
+                step3Info.state,
+                elapsedMs,
+                updatedControlRetryCount,
+                daemonStartFailure,
+                streamReconnects,
+                in.buildMismatch
+        );
 
         StringBuilder info = new StringBuilder();
         info.append("api=").append(safe(in.apiBase))
@@ -239,16 +144,171 @@ public final class StartupOverlayModelBuilder {
             info.append('\n').append("hint=").append(safe(in.lastUiInfo));
         }
 
-        out.step1State = step1;
-        out.step1Detail = step1Detail;
-        out.step2State = step2;
-        out.step2Detail = step2Detail;
-        out.step3State = step3;
-        out.step3Detail = step3Detail;
+        out.step1State = step1Info.state;
+        out.step1Detail = step1Info.detail;
+        out.step2State = step2Info.state;
+        out.step2Detail = step2Info.detail;
+        out.step3State = step3Info.state;
+        out.step3Detail = step3Info.detail;
         out.subtitle = subtitle;
         out.infoLog = info.toString();
-        out.allOk = step1 == Model.SS_OK && step2 == Model.SS_OK && step3 == Model.SS_OK;
+        out.allOk = step1Info.state == Model.SS_OK
+                && step2Info.state == Model.SS_OK
+                && step3Info.state == Model.SS_OK;
         return out;
+    }
+
+    private static StepInfo determineStep1(Input in, long elapsedMs, int updatedControlRetryCount) {
+        if (in.daemonReachable) {
+            if ("local".equalsIgnoreCase(in.apiImpl)) {
+                return new StepInfo(Model.SS_OK, "on-device (local api) \u00b7 no host connection needed");
+            }
+            return new StepInfo(Model.SS_OK,
+                    "reachable" + BULLET + "api_impl=" + safe(in.apiImpl)
+                            + BULLET + safe(in.daemonHostName));
+        }
+        if (updatedControlRetryCount == 0) {
+            return new StepInfo(Model.SS_ACTIVE,
+                    "polling " + safe(in.apiBase)
+                            + " \u2026 (" + (elapsedMs / 1000L) + "s)"
+                            + BULLET + "install/start desktop service if this does not recover");
+        }
+        return new StepInfo(Model.SS_ACTIVE,
+                "no response" + BULLET + "retry #" + updatedControlRetryCount
+                        + BULLET + "polling " + safe(in.apiBase)
+                        + " (" + (elapsedMs / 1000L) + "s)"
+                        + BULLET + "check desktop service status");
+    }
+
+    private static StepInfo determineStep2(Input in, int step1State) {
+        if (step1State != Model.SS_OK) {
+            return new StepInfo(Model.SS_PENDING, "waiting for control link");
+        }
+        if (!in.handshakeResolved) {
+            return new StepInfo(Model.SS_ACTIVE, "resolving service / api version\u2026");
+        }
+        if (in.buildMismatch) {
+            return new StepInfo(Model.SS_ERROR,
+                    "build mismatch · app=" + safe(in.appBuildRevision)
+                            + " · host=" + safe(in.daemonBuildRevision));
+        }
+        if (in.requiresTransportProbe) {
+            if (in.probeOk) {
+                return new StepInfo(Model.SS_OK,
+                        SERVICE_PREFIX + safe(in.daemonService) + BULLET + "transport test OK");
+            }
+            if (in.probeInFlight) {
+                return new StepInfo(Model.SS_OK,
+                        SERVICE_PREFIX + safe(in.daemonService) + BULLET + "transport test in progress\u2026");
+            }
+            return new StepInfo(Model.SS_OK,
+                    SERVICE_PREFIX + safe(in.daemonService) + BULLET + "transport test pending");
+        }
+        return new StepInfo(Model.SS_OK,
+                SERVICE_PREFIX + safe(in.daemonService) + BULLET + safe(in.apiImpl));
+    }
+
+    private static StepInfo determineStep3(
+            Input in,
+            int step2State,
+            boolean streamFlowing,
+            boolean daemonStartFailure,
+            String streamAddr,
+            String streamFixHint,
+            int streamReconnects,
+            long elapsedMs
+    ) {
+        if (step2State != Model.SS_OK) {
+            return new StepInfo(
+                    Model.SS_PENDING,
+                    step2State == Model.SS_ERROR ? "blocked by build mismatch" : "waiting for handshake");
+        }
+        if (in.requiresTransportProbe && !in.probeOk) {
+            String detail = in.probeInFlight
+                    ? "testing transport I/O\u2026 " + safe(in.probeInfo)
+                    : "transport test retrying\u2026 " + safe(in.probeInfo);
+            return new StepInfo(Model.SS_ACTIVE, detail);
+        }
+        if (streamFlowing) {
+            return new StepInfo(Model.SS_OK,
+                    "live" + BULLET + "fps=" + String.format(Locale.US, "%.0f", in.latestPresentFps)
+                            + BULLET + safe(in.effectiveDaemonState).toLowerCase(Locale.US));
+        }
+        boolean hasWaited = elapsedMs > 5_000L;
+        if (daemonStartFailure && hasWaited) {
+            return new StepInfo(Model.SS_ERROR,
+                    "host stream start failed" + BULLET + safe(in.daemonErrCompact));
+        }
+        if (streamReconnects > 0) {
+            if (hasWaited) {
+                return new StepInfo(Model.SS_ACTIVE,
+                        "retry #" + streamReconnects
+                                + BULLET + streamAddr + ":" + in.streamPort
+                                + " unreachable" + BULLET + streamFixHint
+                                + (safe(in.daemonErrCompact).isEmpty() ? "" : BULLET + "host error: "
+                                        + safe(in.daemonErrCompact)));
+            }
+            return new StepInfo(Model.SS_ACTIVE,
+                    "reconnecting" + BULLET + ATTEMPT_PREFIX + streamReconnects + BULLET + "awaiting frames\u2026");
+        }
+        if (hasWaited) {
+            return new StepInfo(Model.SS_ACTIVE,
+                    "connecting to " + streamAddr + ":" + in.streamPort
+                            + BULLET + streamFixHint
+                            + (safe(in.daemonErrCompact).isEmpty() ? "" : BULLET + "host error: "
+                                    + safe(in.daemonErrCompact)));
+        }
+        return new StepInfo(Model.SS_ACTIVE, "decoder started" + BULLET + "awaiting frames\u2026");
+    }
+
+    private static String buildSubtitle(
+            int step1,
+            int step2,
+            int step3,
+            long elapsedMs,
+            int updatedControlRetryCount,
+            boolean daemonStartFailure,
+            int streamReconnects,
+            boolean buildMismatch
+    ) {
+        if (step1 != Model.SS_OK) {
+            if (elapsedMs < 2000L && updatedControlRetryCount == 0) {
+                return "starting up\u2026";
+            }
+            if (updatedControlRetryCount == 0) {
+                return "awaiting control link" + BULLET + "start desktop service if needed\u2026";
+            }
+            return "retrying control link" + BULLET + ATTEMPT_PREFIX + updatedControlRetryCount
+                    + BULLET + "check desktop service\u2026";
+        }
+        if (step2 != Model.SS_OK) {
+            return (step2 == Model.SS_ERROR && buildMismatch)
+                    ? "build mismatch" + BULLET + "redeploy APK or rebuild host"
+                    : "handshake in progress\u2026";
+        }
+        if (step3 != Model.SS_OK) {
+            if (step3 == Model.SS_ERROR && daemonStartFailure) {
+                return "host stream start failed" + BULLET + "check host logs";
+            }
+            if (streamReconnects > 0) {
+                return "stream reconnecting" + BULLET + ATTEMPT_PREFIX + streamReconnects + "\u2026";
+            }
+            if (elapsedMs > 5_000L) {
+                return "stream unreachable" + BULLET + "retrying\u2026";
+            }
+            return "waiting for video frames\u2026";
+        }
+        return "all systems ready";
+    }
+
+    private static final class StepInfo {
+        private final int state;
+        private final String detail;
+
+        private StepInfo(int state, String detail) {
+            this.state = state;
+            this.detail = detail;
+        }
     }
 
     private static int parseReconnectCount(String statsLine) {

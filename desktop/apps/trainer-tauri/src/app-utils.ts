@@ -22,12 +22,22 @@ export function toBars(values: number[], dangerAbove = false): { value: number; 
     let cls: string;
     if (dangerAbove) {
       const warnThresh = maxValue * 0.4;
-      // NOSONAR: S3358 nested ternary is readable given threshold conditions
-      cls = item > maxValue * 0.65 ? "risk" : item > warnThresh ? "warn" : "good";
+      if (item > maxValue * 0.65) {
+        cls = "risk";
+      } else if (item > warnThresh) {
+        cls = "warn";
+      } else {
+        cls = "good";
+      }
     } else {
       const warnThresh = maxValue * 0.6;
-      // NOSONAR: S3358 nested ternary is readable given threshold conditions
-      cls = item < maxValue * 0.35 ? "risk" : item < warnThresh ? "warn" : "good";
+      if (item < maxValue * 0.35) {
+        cls = "risk";
+      } else if (item < warnThresh) {
+        cls = "warn";
+      } else {
+        cls = "good";
+      }
     }
     return { value: item, pct, cls };
   });

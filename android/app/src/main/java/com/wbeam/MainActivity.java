@@ -561,7 +561,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public void onBackPressed() {
         if (MainActivityInteractionPolicy.handleBackNavigation(
-                simpleMenuState.visible,
+                simpleMenuState.isVisible(),
                 settingsPanelController != null && settingsPanelController.isVisible(),
                 this::hideSimpleMenu,
                 this::hideSettingsPanel
@@ -762,7 +762,7 @@ public class MainActivity extends AppCompatActivity {
                 simpleModeRawButton,
                 PREFERRED_VIDEO,
                 mode -> {
-                    simpleMenuState.mode = mode;
+                    simpleMenuState.setMode(mode);
                     refreshSimpleMenuButtons();
                     scheduleSimpleMenuAutoHide();
                 },
@@ -1038,7 +1038,7 @@ public class MainActivity extends AppCompatActivity {
                 simpleMenuPanel,
                 uiHandler,
                 simpleMenuAutoHideTask,
-                simpleMenuState.visible,
+                simpleMenuState.isVisible(),
                 SIMPLE_MENU_AUTO_HIDE_MS
         );
     }
@@ -1049,8 +1049,8 @@ public class MainActivity extends AppCompatActivity {
                 fpsSeek,
                 ENCODER_OPTIONS,
                 PREFERRED_VIDEO,
-                simpleMenuState.mode,
-                simpleMenuState.fps
+                simpleMenuState.getMode(),
+                simpleMenuState.getFps()
         );
         refreshSettingsUi(false);
     }
@@ -1061,14 +1061,14 @@ public class MainActivity extends AppCompatActivity {
                 simpleModeH265Button,
                 simpleModeRawButton,
                 PREFERRED_VIDEO,
-                simpleMenuState.mode,
+                simpleMenuState.getMode(),
                 simpleFps30Button,
                 simpleFps45Button,
                 simpleFps60Button,
                 simpleFps90Button,
                 simpleFps120Button,
                 simpleFps144Button,
-                simpleMenuState.fps
+                simpleMenuState.getFps()
         );
     }
 

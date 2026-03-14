@@ -287,19 +287,32 @@ public final class StatusPoller {
             merged = new JSONObject();
         }
 
-        if (payload.has(TRAINER_HUD_ACTIVE)) {
-            putQuietly(merged, TRAINER_HUD_ACTIVE, payload.optBoolean(TRAINER_HUD_ACTIVE, false));
-        }
-        if (payload.has(TRAINER_HUD_TEXT)) {
-            putQuietly(merged, TRAINER_HUD_TEXT, payload.optString(TRAINER_HUD_TEXT, ""));
-        }
-        if (payload.has(TRAINER_HUD_JSON)) {
-            putQuietly(merged, TRAINER_HUD_JSON, payload.opt(TRAINER_HUD_JSON));
-        }
-        if (payload.has(CONNECTION_MODE)) {
-            putQuietly(merged, CONNECTION_MODE, payload.optString(CONNECTION_MODE, "live"));
-        }
+        copyBooleanIfPresent(payload, merged, TRAINER_HUD_ACTIVE);
+        copyStringIfPresent(payload, merged, TRAINER_HUD_TEXT, "");
+        copyValueIfPresent(payload, merged, TRAINER_HUD_JSON);
+        copyStringIfPresent(payload, merged, CONNECTION_MODE, "live");
         return merged;
+    }
+
+    private static void copyBooleanIfPresent(JSONObject source, JSONObject target, String key) {
+        if (!source.has(key)) {
+            return;
+        }
+        putQuietly(target, key, source.optBoolean(key, false));
+    }
+
+    private static void copyStringIfPresent(JSONObject source, JSONObject target, String key, String fallback) {
+        if (!source.has(key)) {
+            return;
+        }
+        putQuietly(target, key, source.optString(key, fallback));
+    }
+
+    private static void copyValueIfPresent(JSONObject source, JSONObject target, String key) {
+        if (!source.has(key)) {
+            return;
+        }
+        putQuietly(target, key, source.opt(key));
     }
 
     private static void putQuietly(JSONObject obj, String key, Object value) {

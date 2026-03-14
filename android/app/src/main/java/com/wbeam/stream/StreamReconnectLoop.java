@@ -77,9 +77,6 @@ final class StreamReconnectLoop {
                 connectAndStream(codecHolder);
             } catch (Exception e) {
                 handleStreamException(e);
-            } catch (Error err) {
-                // Preserve previous behaviour of surfacing fatal errors to Android runtime.
-                throw err;
             } finally {
                 runtimeState.closeSocket();
                 cleanupCodec(codecHolder[0]);

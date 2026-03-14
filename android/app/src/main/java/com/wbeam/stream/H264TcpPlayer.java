@@ -256,21 +256,24 @@ public final class H264TcpPlayer {
 
     private void framedDecodeLoopPng(InputStream input, byte[] hdrBuf, byte[] payloadBuf, boolean isUltraMode) throws IOException {
         PlayerRuntimeState runtimeState = new PlayerRuntimeState();
+        FramedPngLoop.Config pngConfig = FramedPngLoop.Config.builder()
+                .frameUs(frameUs)
+                .frameHeaderSize(FRAME_HEADER_SIZE)
+                .frameMagic(FRAME_MAGIC)
+                .frameResyncScanLimit(FRAME_RESYNC_SCAN_LIMIT)
+                .frameFlagKeyframe(FRAME_FLAG_KEYFRAME)
+                .framePayloadHardCap(FRAME_PAYLOAD_HARD_CAP)
+                .noPresentHardResetMs(NO_PRESENT_HARD_RESET_MS)
+                .stateConnecting(STATE_CONNECTING)
+                .stateStreaming(STATE_STREAMING)
+                .frameBufferBudgetFrames(frameBufferBudgetFrames)
+                .build();
         new FramedPngLoop(
                 TAG,
                 surface,
                 statusListener,
                 runtimeState,
-                frameUs,
-                FRAME_HEADER_SIZE,
-                FRAME_MAGIC,
-                FRAME_RESYNC_SCAN_LIMIT,
-                FRAME_FLAG_KEYFRAME,
-                FRAME_PAYLOAD_HARD_CAP,
-                NO_PRESENT_HARD_RESET_MS,
-                STATE_CONNECTING,
-                STATE_STREAMING,
-                frameBufferBudgetFrames
+                pngConfig
         ).run(input, hdrBuf, payloadBuf, isUltraMode);
     }
 
