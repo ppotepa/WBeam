@@ -8,7 +8,6 @@ import android.content.SharedPreferences;
  * All PREF_* keys and load/save operations are isolated here.
  * UI binding (spinners, seekbars) remains in MainActivity.
  */
-@SuppressWarnings("java:S107") 
 public final class SettingsRepository {
 
     private static final String PREFS = "wbeam_settings";
@@ -66,11 +65,16 @@ public final class SettingsRepository {
         boolean localCursor = prefs.getBoolean(PREF_LOCAL_CURSOR, true);
         boolean intraOnly   = prefs.getBoolean(PREF_INTRA_ONLY, false);
 
-        return new SettingsSnapshot(
-                profile, encoder, cursor,
-                resScale, fps, bitrateMbps,
-                localCursor, intraOnly
-        );
+        return SettingsSnapshot.builder()
+                .profile(profile)
+                .encoder(encoder)
+                .cursor(cursor)
+                .resScale(resScale)
+                .fps(fps)
+                .bitrateMbps(bitrateMbps)
+                .localCursor(localCursor)
+                .intraOnly(intraOnly)
+                .build();
     }
 
     /** Persist the current settings snapshot. */
@@ -99,20 +103,76 @@ public final class SettingsRepository {
         public final boolean localCursor;
         public final boolean intraOnly;
 
-        @SuppressWarnings("java:S107")
-        public SettingsSnapshot(
-                String profile, String encoder, String cursor,
-                int resScale, int fps, int bitrateMbps,
-                boolean localCursor, boolean intraOnly
-        ) {
-            this.profile     = profile;
-            this.encoder     = encoder;
-            this.cursor      = cursor;
-            this.resScale    = resScale;
-            this.fps         = fps;
-            this.bitrateMbps = bitrateMbps;
-            this.localCursor = localCursor;
-            this.intraOnly   = intraOnly;
+        private SettingsSnapshot(Builder builder) {
+            this.profile = builder.profile;
+            this.encoder = builder.encoder;
+            this.cursor = builder.cursor;
+            this.resScale = builder.resScale;
+            this.fps = builder.fps;
+            this.bitrateMbps = builder.bitrateMbps;
+            this.localCursor = builder.localCursor;
+            this.intraOnly = builder.intraOnly;
+        }
+
+        public static Builder builder() {
+            return new Builder();
+        }
+
+        public static final class Builder {
+            private String profile;
+            private String encoder;
+            private String cursor;
+            private int resScale;
+            private int fps;
+            private int bitrateMbps;
+            private boolean localCursor;
+            private boolean intraOnly;
+
+            private Builder() {}
+
+            public Builder profile(String profile) {
+                this.profile = profile;
+                return this;
+            }
+
+            public Builder encoder(String encoder) {
+                this.encoder = encoder;
+                return this;
+            }
+
+            public Builder cursor(String cursor) {
+                this.cursor = cursor;
+                return this;
+            }
+
+            public Builder resScale(int resScale) {
+                this.resScale = resScale;
+                return this;
+            }
+
+            public Builder fps(int fps) {
+                this.fps = fps;
+                return this;
+            }
+
+            public Builder bitrateMbps(int bitrateMbps) {
+                this.bitrateMbps = bitrateMbps;
+                return this;
+            }
+
+            public Builder localCursor(boolean localCursor) {
+                this.localCursor = localCursor;
+                return this;
+            }
+
+            public Builder intraOnly(boolean intraOnly) {
+                this.intraOnly = intraOnly;
+                return this;
+            }
+
+            public SettingsSnapshot build() {
+                return new SettingsSnapshot(this);
+            }
         }
     }
 }

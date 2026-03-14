@@ -242,7 +242,7 @@ public final class StartupOverlayModelBuilder {
         if (streamReconnects > 0) {
             if (hasWaited) {
                 return new StepInfo(Model.SS_ACTIVE,
-                        "retry #" + streamReconnects
+                        ATTEMPT_PREFIX + streamReconnects
                                 + BULLET + streamAddr + ":" + in.streamPort
                                 + " unreachable" + BULLET + streamFixHint
                                 + (safe(in.daemonErrCompact).isEmpty() ? "" : BULLET + "host error: "

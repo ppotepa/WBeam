@@ -51,16 +51,24 @@ final class FramedPngLoop {
 
         while (runtimeState.isRunning()) {
             FrameContext frame = readNextFrame(input, hdrBuf, currentPayloadBuf, state);
-            if (frame == null) {
-                continue;
+            if (frame != null) {
+                currentPayloadBuf = handleFrame(input, hdrBuf, pngRenderer, state, frame).buffer;
             }
-            currentPayloadBuf = frame.buffer;
-            frame = dropBacklogIfNeeded(input, hdrBuf, frame, state);
-            currentPayloadBuf = frame.buffer;
-            renderFrame(pngRenderer, frame, state);
-            enforceNoPresentGuard(state);
-            emitPeriodicStats(state);
         }
+    }
+
+    private FrameContext handleFrame(
+            InputStream input,
+            byte[] hdrBuf,
+            PngSurfaceRenderer renderer,
+            LoopState state,
+            FrameContext frame
+    ) throws IOException {
+        FrameContext processed = dropBacklogIfNeeded(input, hdrBuf, frame, state);
+        renderFrame(renderer, processed, state);
+        enforceNoPresentGuard(state);
+        emitPeriodicStats(state);
+        return processed;
     }
 
     private FrameContext readNextFrame(
@@ -69,15 +77,7 @@ final class FramedPngLoop {
             byte[] payloadBuf,
             LoopState state
     ) throws IOException {
-        WbtpProtocol.FrameHeader header = WbtpProtocol.readFrameHeader(
-                input,
-                hdrBuf,
-                config.frameHeaderSize,
-                config.frameMagic,
-                config.frameResyncScanLimit,
-                config.frameFlagKeyframe
-        );
-        state.recordResync(header.resynced);
+        WbtpProtocol.FrameHeader header = readTrackedHeader(input, hdrBuf, state);
         if (!state.shouldProcessFrame(header.seqU32, header.ptsUs)) {
             return null;
         }
@@ -92,33 +92,53 @@ final class FramedPngLoop {
             LoopState state
     ) throws IOException {
         if (!state.shouldDropBacklog()) {
-            state.updateBacklogEstimate(estimateBacklogFrames(input, state));
+            refreshBacklogEstimate(input, state);
             return frame;
         }
-        int backlogEstimate = estimateBacklogFrames(input, state);
-        while (backlogEstimate > config.frameBufferBudgetFrames && runtimeState.isRunning()) {
-            WbtpProtocol.FrameHeader skippedHeader = WbtpProtocol.readFrameHeader(
-                    input,
-                    hdrBuf,
-                    config.frameHeaderSize,
-                    config.frameMagic,
-                    config.frameResyncScanLimit,
-                    config.frameFlagKeyframe
-            );
-            state.recordResync(skippedHeader.resynced);
-            byte[] buffer = readPayload(input, frame.buffer, skippedHeader.payloadLen, state);
-            state.recordDrop(1);
-            frame.update(skippedHeader.seqU32, skippedHeader.ptsUs, skippedHeader.payloadLen, buffer);
-            backlogEstimate = estimateBacklogFrames(input, state);
+        return dropBacklogUntilHealthy(input, hdrBuf, frame, state);
+    }
+
+    private FrameContext dropBacklogUntilHealthy(
+            InputStream input,
+            byte[] hdrBuf,
+            FrameContext frame,
+            LoopState state
+    ) throws IOException {
+        int backlogEstimate = refreshBacklogEstimate(input, state);
+        while (shouldDropMore(backlogEstimate)) {
+            frame = skipFrame(input, hdrBuf, frame, state);
+            backlogEstimate = refreshBacklogEstimate(input, state);
         }
-        state.updateBacklogEstimate(backlogEstimate);
         return frame;
+    }
+
+    private boolean shouldDropMore(int backlogEstimate) {
+        return backlogEstimate > config.frameBufferBudgetFrames && runtimeState.isRunning();
+    }
+
+    private FrameContext skipFrame(
+            InputStream input,
+            byte[] hdrBuf,
+            FrameContext reusable,
+            LoopState state
+    ) throws IOException {
+        WbtpProtocol.FrameHeader skippedHeader = readTrackedHeader(input, hdrBuf, state);
+        byte[] buffer = readPayload(input, reusable.buffer, skippedHeader.payloadLen, state);
+        state.recordDrop(1);
+        reusable.update(skippedHeader.seqU32, skippedHeader.ptsUs, skippedHeader.payloadLen, buffer);
+        return reusable;
     }
 
     private int estimateBacklogFrames(InputStream input, LoopState state) throws IOException {
         int payloadEstimate = Math.max(8 * 1024, state.maxPayloadSeen + config.frameHeaderSize);
         int backlogBytes = Math.max(0, input.available());
         return payloadEstimate > 0 ? backlogBytes / payloadEstimate : 0;
+    }
+
+    private int refreshBacklogEstimate(InputStream input, LoopState state) throws IOException {
+        int backlogEstimate = estimateBacklogFrames(input, state);
+        state.updateBacklogEstimate(backlogEstimate);
+        return backlogEstimate;
     }
 
     private void renderFrame(PngSurfaceRenderer renderer, FrameContext frame, LoopState state) throws IOException {
@@ -148,6 +168,23 @@ final class FramedPngLoop {
         WbtpFrameIo.readFully(input, resized, payloadLen);
         state.recordBytes(config.frameHeaderSize + payloadLen);
         return resized;
+    }
+
+    private WbtpProtocol.FrameHeader readTrackedHeader(
+            InputStream input,
+            byte[] hdrBuf,
+            LoopState state
+    ) throws IOException {
+        WbtpProtocol.FrameHeader header = WbtpProtocol.readFrameHeader(
+                input,
+                hdrBuf,
+                config.frameHeaderSize,
+                config.frameMagic,
+                config.frameResyncScanLimit,
+                config.frameFlagKeyframe
+        );
+        state.recordResync(header.resynced);
+        return header;
     }
 
     private void enforceNoPresentGuard(LoopState state) throws IOException {
@@ -361,22 +398,37 @@ final class FramedPngLoop {
         }
 
         boolean shouldProcessFrame(long seq, long pts) {
+            initializeExpectedSeq(seq);
+            if (seq < expectedSeq) {
+                return dropFrame(expectedSeq);
+            }
+            alignExpectedSeq(seq);
+            if (isPtsRewind(pts)) {
+                return dropFrame(seq + 1);
+            }
+            return true;
+        }
+
+        private void initializeExpectedSeq(long seq) {
             if (expectedSeq < 0) {
                 expectedSeq = seq;
             }
-            if (seq < expectedSeq) {
-                recordDrop(1);
-                return false;
-            }
+        }
+
+        private void alignExpectedSeq(long seq) {
             if (seq > expectedSeq + seqGapBudget) {
                 expectedSeq = seq;
             }
-            if (lastQueuedPtsUs > 0 && pts + 1_000 < lastQueuedPtsUs) {
-                recordDrop(1);
-                expectedSeq = seq + 1;
-                return false;
-            }
-            return true;
+        }
+
+        private boolean isPtsRewind(long pts) {
+            return lastQueuedPtsUs > 0 && pts + 1_000 < lastQueuedPtsUs;
+        }
+
+        private boolean dropFrame(long nextExpectedSeq) {
+            recordDrop(1);
+            expectedSeq = nextExpectedSeq;
+            return false;
         }
 
         void recordBytes(long delta) {

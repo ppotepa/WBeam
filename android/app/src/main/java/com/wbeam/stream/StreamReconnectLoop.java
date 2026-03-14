@@ -7,6 +7,7 @@ import android.util.Log;
 import com.wbeam.api.StatusListener;
 
 import java.io.BufferedInputStream;
+import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.util.Locale;
@@ -66,7 +67,7 @@ final class StreamReconnectLoop {
         this.stateStreaming = stateStreaming;
         this.stateError = stateError;
     }
- @SuppressWarnings({"java:S3776","java:S2093","java:S112","java:S1181","java:S2140"})
+    @SuppressWarnings({"java:S3776","java:S2093","java:S1181","java:S2140"})
 
     void run() {
         android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO);
@@ -75,7 +76,7 @@ final class StreamReconnectLoop {
             final MediaCodec[] codecHolder = {null};
             try {
                 connectAndStream(codecHolder);
-            } catch (Exception e) {
+            } catch (StreamException | RuntimeException e) {
                 handleStreamException(e);
             } finally {
                 runtimeState.closeSocket();
@@ -86,20 +87,24 @@ final class StreamReconnectLoop {
         }
     }
 
-    private void connectAndStream(MediaCodec[] codecHolder) throws Exception {
+    private void connectAndStream(MediaCodec[] codecHolder) throws StreamException {
         reportConnecting();
 
-        Socket socket = new Socket();
-        socket.connect(new InetSocketAddress(host, port), 2000);
-        socket.setTcpNoDelay(true);
-        socket.setReceiveBufferSize(socketRecvBufferSize);
-        socket.setSoTimeout(5_000);
-        runtimeState.setSocket(socket);
-        runtimeState.incrementSessionConnectId();
-        runtimeState.resetSampleSeq();
+        try {
+            Socket socket = new Socket();
+            socket.connect(new InetSocketAddress(host, port), 2000);
+            socket.setTcpNoDelay(true);
+            socket.setReceiveBufferSize(socketRecvBufferSize);
+            socket.setSoTimeout(5_000);
+            runtimeState.setSocket(socket);
+            runtimeState.incrementSessionConnectId();
+            runtimeState.resetSampleSeq();
 
-        statusListener.onStatus(stateStreaming, "connected [framed]", 0);
-        streamWorker.run(new BufferedInputStream(socket.getInputStream(), 256 * 1024), codecHolder);
+            statusListener.onStatus(stateStreaming, "connected [framed]", 0);
+            streamWorker.run(new BufferedInputStream(socket.getInputStream(), 256 * 1024), codecHolder);
+        } catch (IOException ioException) {
+            throw new StreamException("stream socket connect failed", ioException);
+        }
     }
 
     private void reportConnecting() {

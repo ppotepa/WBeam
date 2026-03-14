@@ -105,7 +105,6 @@ public final class HostApiClient {
     /**
      * Execute an HTTP request against the control API with exponential-backoff retry.
      */
-    @SuppressWarnings("java:S2140")
     public static JSONObject apiRequestWithRetry(
             String method,
             String path,
@@ -129,7 +128,7 @@ public final class HostApiClient {
                 }
                 long baseDelay = Math.min(5000L, API_RETRY_BASE_DELAY_MS * (1L << i));
                 long jitterBound = Math.max(1L, baseDelay / 4L + 1L);
-                long jitter = RANDOM.nextLong(jitterBound);
+                long jitter = boundedJitter(jitterBound);
                 SystemClock.sleep(baseDelay + jitter);
             }
         }
@@ -167,6 +166,15 @@ public final class HostApiClient {
             }
             return text.isEmpty() ? new JSONObject() : new JSONObject(text);
         }
+    }
+
+    private static long boundedJitter(long upperExclusive) {
+        if (upperExclusive <= 0L) {
+            return 0L;
+        }
+        long candidate = RANDOM.nextLong();
+        long nonNegative = candidate == Long.MIN_VALUE ? 0L : Math.abs(candidate);
+        return nonNegative % upperExclusive;
     }
 
     /**

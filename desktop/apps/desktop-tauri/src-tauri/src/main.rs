@@ -801,6 +801,67 @@ fn normalize_size_name(value: Option<String>) -> Option<String> {
     Some(format!("{width}x{height}"))
 }
 
+fn normalize_display_mode_param(mode: &str) -> Option<&'static str> {
+    match mode.trim().to_lowercase().as_str() {
+        "duplicate" => Some("duplicate"),
+        "virtual" | "virtual_monitor" => Some("virtual_monitor"),
+        "virtual_mirror" | "virtual-duplicate" | "virtual_duplicate" => Some("virtual_mirror"),
+        _ => None,
+    }
+}
+
+fn append_display_mode_param(
+    url: &mut String,
+    action: &str,
+    display_mode: Option<&str>,
+) {
+    if action != "start" {
+        return;
+    }
+    if let Some(param) = display_mode.and_then(normalize_display_mode_param) {
+        url.push_str("&display_mode=");
+        url.push_str(param);
+    }
+}
+
+fn serialize_start_body(
+    action: &str,
+    start_patch: Option<&StartConfigPatch>,
+) -> Result<Option<String>, String> {
+    if action != "start" {
+        return Ok(None);
+    }
+    let Some(patch) = start_patch else {
+        return Ok(None);
+    };
+    if patch.is_empty() {
+        return Ok(None);
+    }
+    serde_json::to_string(patch)
+        .map(Some)
+        .map_err(|e| format!("serialize start patch failed: {e}"))
+}
+
+fn build_daemon_curl_args(url: &str, body_json: Option<&str>) -> Vec<String> {
+    let mut curl_args = vec![
+        "-sS".to_string(),
+        "--max-time".to_string(),
+        "3".to_string(),
+        "-X".to_string(),
+        "POST".to_string(),
+    ];
+    if let Some(body) = body_json {
+        curl_args.push("-H".to_string());
+        curl_args.push("Content-Type: application/json".to_string());
+        curl_args.push("--data".to_string());
+        curl_args.push(body.to_string());
+    }
+    curl_args.push("-w".to_string());
+    curl_args.push("\nHTTP_STATUS:%{http_code}".to_string());
+    curl_args.push(url.to_string());
+    curl_args
+}
+
 fn daemon_post_action(
     action: &str,
     serial: &str,
@@ -812,51 +873,9 @@ fn daemon_post_action(
     let mut url = format!(
         "http://127.0.0.1:{control_port}/v1/{action}?serial={serial}&stream_port={stream_port}"
     );
-    if action == "start" {
-        if let Some(mode) = display_mode {
-            let normalized = mode.trim().to_lowercase();
-            let mode_param = match normalized.as_str() {
-                "duplicate" => Some("duplicate"),
-                "virtual" | "virtual_monitor" => Some("virtual_monitor"),
-                "virtual_mirror" | "virtual-duplicate" | "virtual_duplicate" => Some("virtual_mirror"),
-                _ => None,
-            };
-            if let Some(mode_param) = mode_param {
-                url.push_str("&display_mode=");
-                url.push_str(mode_param);
-            }
-        }
-    }
-    let body_json = if action == "start" {
-        if let Some(patch) = start_patch {
-            if patch.is_empty() {
-                None
-            } else {
-                Some(serde_json::to_string(patch).map_err(|e| format!("serialize start patch failed: {e}"))?)
-            }
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    let mut curl_args: Vec<String> = vec![
-        "-sS".to_string(),
-        "--max-time".to_string(),
-        "3".to_string(),
-        "-X".to_string(),
-        "POST".to_string(),
-    ];
-    if let Some(ref body) = body_json {
-        curl_args.push("-H".to_string());
-        curl_args.push("Content-Type: application/json".to_string());
-        curl_args.push("--data".to_string());
-        curl_args.push(body.clone());
-    }
-    curl_args.push("-w".to_string());
-    curl_args.push("\nHTTP_STATUS:%{http_code}".to_string());
-    curl_args.push(url.clone());
+    append_display_mode_param(&mut url, action, display_mode);
+    let body_json = serialize_start_body(action, start_patch)?;
+    let curl_args = build_daemon_curl_args(&url, body_json.as_deref());
 
     let output = Command::new("curl")
         .args(&curl_args)
@@ -1216,37 +1235,47 @@ fn daemon_lock_hint() -> Option<String> {
 
 fn stop_conflicting_lock_holder() {
     for lock in ["/tmp/wbeamd.lock", "/tmp/wbeamd-service-5001.lock"] {
-        let lock_path = PathBuf::from(lock);
-        let Ok(pid_text) = fs::read_to_string(&lock_path) else {
-            continue;
-        };
-        let Ok(pid) = pid_text.trim().parse::<u32>() else {
-            continue;
-        };
-        if !process_name_matches(pid, "wbeamd-server") {
-            continue;
-        }
-
-        let pid_s = pid.to_string();
-        let _ = Command::new("kill").args(["-TERM", &pid_s]).status();
-        for _ in 0..10 {
-            if !process_exists(pid) {
-                let _ = fs::remove_file(&lock_path);
-                break;
-            }
-            thread::sleep(Duration::from_millis(100));
-        }
-        if process_exists(pid) {
-            let _ = Command::new("kill").args(["-KILL", &pid_s]).status();
-            for _ in 0..10 {
-                if !process_exists(pid) {
-                    let _ = fs::remove_file(&lock_path);
-                    break;
-                }
-                thread::sleep(Duration::from_millis(100));
-            }
-        }
+        handle_lock_file(Path::new(lock));
     }
+}
+
+fn handle_lock_file(lock_path: &Path) {
+    let Some(pid) = lock_holder_pid(lock_path) else {
+        return;
+    };
+    terminate_lock_holder_process(pid, lock_path);
+}
+
+fn lock_holder_pid(lock_path: &Path) -> Option<u32> {
+    let pid_text = fs::read_to_string(lock_path).ok()?;
+    let pid = pid_text.trim().parse::<u32>().ok()?;
+    if process_name_matches(pid, "wbeamd-server") {
+        Some(pid)
+    } else {
+        None
+    }
+}
+
+fn terminate_lock_holder_process(pid: u32, lock_path: &Path) {
+    if send_signal_and_wait(pid, "-TERM", 10) {
+        let _ = fs::remove_file(lock_path);
+        return;
+    }
+    if send_signal_and_wait(pid, "-KILL", 10) {
+        let _ = fs::remove_file(lock_path);
+    }
+}
+
+fn send_signal_and_wait(pid: u32, signal: &str, attempts: usize) -> bool {
+    let pid_s = pid.to_string();
+    let _ = Command::new("kill").args([signal, &pid_s]).status();
+    for _ in 0..attempts {
+        if !process_exists(pid) {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    !process_exists(pid)
 }
 
 fn stop_conflicting_port_holder(control_port: u16) {
@@ -1578,8 +1607,9 @@ fn device_connect(
     connect_size: Option<String>,
 ) -> Result<String, String> {
     service_ready_for_device_actions()?;
-    let mut effective_stream_port = resolve_stream_port_for_serial(&serial, stream_port);
-    if effective_stream_port != stream_port {
+    let (mut effective_stream_port, remapped_port) =
+        determine_effective_stream_port(&serial, stream_port);
+    if remapped_port {
         ui_service_log(
             "device_connect",
             "port_remap",
@@ -1589,34 +1619,29 @@ fn device_connect(
             ),
         );
     }
-    if effective_stream_port == 0 {
-        effective_stream_port = 5000;
-    }
     let start_patch = StartConfigPatch {
         profile: normalize_profile_name(connect_profile),
         encoder: normalize_encoder_name(connect_encoder),
         size: normalize_size_name(connect_size),
     };
-    let chosen_mode = display_mode.unwrap_or_else(|| "duplicate".to_string());
-    let normalized_mode = chosen_mode.trim().to_lowercase();
-    if normalized_mode != "duplicate"
-        && normalized_mode != "virtual"
-        && normalized_mode != "virtual_monitor"
-        && normalized_mode != "virtual_mirror"
-        && normalized_mode != "virtual-duplicate"
-        && normalized_mode != "virtual_duplicate"
-    {
-        let msg = format!("Unsupported display mode: {normalized_mode}");
-        ui_service_log(
-            "device_connect",
-            "error",
-            &format!(
-                "serial={} requested_port={} effective_port={} mode={} err={}",
-                serial, stream_port, effective_stream_port, normalized_mode, msg
-            ),
-        );
-        return Err(msg);
-    }
+    let requested_mode_display = display_mode
+        .as_deref()
+        .unwrap_or("duplicate")
+        .trim()
+        .to_lowercase();
+    let normalized_mode = match normalize_connect_mode(display_mode) {
+        Ok(mode) => mode,
+        Err(msg) => {
+            log_device_connect_error(
+                &serial,
+                stream_port,
+                effective_stream_port,
+                &requested_mode_display,
+                &msg,
+            );
+            return Err(msg);
+        }
+    };
     ui_service_log(
         "device_connect",
         "begin",
@@ -1633,77 +1658,17 @@ fn device_connect(
     );
     connect_log(&serial, effective_stream_port, "device_connect begin");
     let host_probe = host_probe_brief();
-    let is_wayland_portal = host_probe.capture_mode == "wayland_portal";
-    let is_virtual_mode = normalized_mode == "virtual"
-        || normalized_mode == "virtual_monitor"
-        || normalized_mode == "virtual_mirror"
-        || normalized_mode == "virtual-duplicate"
-        || normalized_mode == "virtual_duplicate";
-    let skip_virtual_doctor = is_wayland_portal
-        && (normalized_mode == "virtual_monitor"
-            || normalized_mode == "virtual_mirror"
-            || normalized_mode == "virtual-duplicate"
-            || normalized_mode == "virtual_duplicate"
-            || normalized_mode == "virtual");
-    if is_virtual_mode && !skip_virtual_doctor {
-        let doctor = virtual_doctor(Some(serial.clone()), Some(effective_stream_port))?;
-        if !doctor.ok {
-            let msg = if !doctor.install_hint.trim().is_empty() {
-                format!("Virtual monitor unavailable: {}", doctor.install_hint)
-            } else {
-                format!("Virtual monitor unavailable: {}", doctor.message)
-            };
-            ui_service_log(
-                "device_connect",
-                "error",
-                &format!(
-                    "serial={} requested_port={} effective_port={} mode={} err={}",
-                    serial, stream_port, effective_stream_port, normalized_mode, msg
-                ),
-            );
-            connect_log(&serial, effective_stream_port, &msg);
-            return Err(msg);
-        }
-        let resolver = doctor.resolver.as_str();
-        let is_real_output = resolver == "linux_x11_real_output";
-        let is_monitor_object = resolver == "linux_x11_monitor_object_experimental";
-        if !is_real_output && !is_monitor_object {
-            let msg = format!(
-                "Virtual monitor backend is unsupported for connect. Active resolver={}. {}",
-                doctor.resolver, doctor.install_hint
-            );
-            ui_service_log(
-                "device_connect",
-                "error",
-                &format!(
-                    "serial={} requested_port={} effective_port={} mode={} err={}",
-                    serial, stream_port, effective_stream_port, normalized_mode, msg
-                ),
-            );
-            connect_log(&serial, effective_stream_port, &msg);
-            return Err(msg);
-        }
-        if is_monitor_object {
-            let allow_monitor_object = wbeam_config_bool("WBEAM_X11_ALLOW_MONITOR_OBJECT", false);
-            if !allow_monitor_object {
-                let msg = "Virtual monitor fallback (xrandr --setmonitor) is experimental and disabled by default. Use a real RandR output backend (EVDI) or explicitly set WBEAM_X11_ALLOW_MONITOR_OBJECT=1.".to_string();
-                ui_service_log(
-                    "device_connect",
-                    "error",
-                    &format!(
-                        "serial={} requested_port={} effective_port={} mode={} err={}",
-                        serial, stream_port, effective_stream_port, normalized_mode, msg
-                    ),
-                );
-                connect_log(&serial, effective_stream_port, &msg);
-                return Err(msg);
-            }
-            connect_log(
-                &serial,
-                effective_stream_port,
-                "virtual monitor fallback active: xrandr --setmonitor (simulated monitor)",
-            );
-        }
+    if let Err(msg) =
+        ensure_virtual_mode_ready(&serial, effective_stream_port, &normalized_mode, &host_probe)
+    {
+        log_device_connect_error(
+            &serial,
+            stream_port,
+            effective_stream_port,
+            &normalized_mode,
+            &msg,
+        );
+        return Err(msg);
     }
     adb_prepare_connect(&serial, effective_stream_port)?;
     connect_log(
@@ -1720,13 +1685,12 @@ fn device_connect(
     ) {
         Ok(v) => v,
         Err(err) => {
-            ui_service_log(
-                "device_connect",
-                "error",
-                &format!(
-                    "serial={} requested_port={} effective_port={} err={}",
-                    serial, stream_port, effective_stream_port, err
-                ),
+            log_device_connect_error(
+                &serial,
+                stream_port,
+                effective_stream_port,
+                &normalized_mode,
+                &err,
             );
             connect_log(
                 &serial,
@@ -1750,6 +1714,86 @@ fn device_connect(
         &format!("device_connect ok response='{}'", resp),
     );
     Ok(resp)
+}
+
+fn determine_effective_stream_port(serial: &str, requested_port: u16) -> (u16, bool) {
+    let mut resolved = resolve_stream_port_for_serial(serial, requested_port);
+    if resolved == 0 {
+        resolved = 5000;
+    }
+    (resolved, resolved != requested_port)
+}
+
+fn normalize_connect_mode(display_mode: Option<String>) -> Result<String, String> {
+    let requested = display_mode.unwrap_or_else(|| "duplicate".to_string());
+    let lowered = requested.trim().to_lowercase();
+    normalize_display_mode_param(&requested)
+        .map(|mode| mode.to_string())
+        .ok_or_else(|| format!("Unsupported display mode: {}", lowered))
+}
+
+fn ensure_virtual_mode_ready(
+    serial: &str,
+    stream_port: u16,
+    normalized_mode: &str,
+    host_probe: &HostProbeBrief,
+) -> Result<(), String> {
+    let is_virtual_mode = matches!(normalized_mode, "virtual_monitor" | "virtual_mirror");
+    let skip_virtual_doctor = host_probe.capture_mode == "wayland_portal" && is_virtual_mode;
+    if !is_virtual_mode || skip_virtual_doctor {
+        return Ok(());
+    }
+
+    let doctor = virtual_doctor(Some(serial.to_string()), Some(stream_port))?;
+    if !doctor.ok {
+        return if !doctor.install_hint.trim().is_empty() {
+            Err(format!("Virtual monitor unavailable: {}", doctor.install_hint))
+        } else {
+            Err(format!("Virtual monitor unavailable: {}", doctor.message))
+        };
+    }
+
+    let resolver = doctor.resolver.as_str();
+    let is_real_output = resolver == "linux_x11_real_output";
+    let is_monitor_object = resolver == "linux_x11_monitor_object_experimental";
+    if !is_real_output && !is_monitor_object {
+        return Err(format!(
+            "Virtual monitor backend is unsupported for connect. Active resolver={}. {}",
+            doctor.resolver, doctor.install_hint
+        ));
+    }
+
+    if is_monitor_object {
+        let allow_monitor_object = wbeam_config_bool("WBEAM_X11_ALLOW_MONITOR_OBJECT", false);
+        if !allow_monitor_object {
+            return Err("Virtual monitor fallback (xrandr --setmonitor) is experimental and disabled by default. Use a real RandR output backend (EVDI) or explicitly set WBEAM_X11_ALLOW_MONITOR_OBJECT=1."
+                .to_string());
+        }
+        connect_log(
+            serial,
+            stream_port,
+            "virtual monitor fallback active: xrandr --setmonitor (simulated monitor)",
+        );
+    }
+    Ok(())
+}
+
+fn log_device_connect_error(
+    serial: &str,
+    requested_port: u16,
+    effective_port: u16,
+    mode: &str,
+    message: &str,
+) {
+    ui_service_log(
+        "device_connect",
+        "error",
+        &format!(
+            "serial={} requested_port={} effective_port={} mode={} err={}",
+            serial, requested_port, effective_port, mode, message
+        ),
+    );
+    connect_log(serial, effective_port, message);
 }
 
 #[tauri::command]

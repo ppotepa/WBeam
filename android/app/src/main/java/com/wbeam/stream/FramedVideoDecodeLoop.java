@@ -307,12 +307,13 @@ final class FramedVideoDecodeLoop {
                 continue;
             }
 
+            int drainTimeoutUs = pendingDecodeQueue >= decodeQueueMaxFrames ? 16_000 : 5_000;
             MediaCodecBridge.drainLatestFrame(
                     codec,
                     bufferInfo,
                     drainStats,
                     dropLateOutput,
-                    pendingDecodeQueue >= decodeQueueMaxFrames ? 16_000 : 5_000
+                    drainTimeoutUs
             );
             long nowAfterDrain = SystemClock.elapsedRealtime();
             pendingDecodeQueue = Math.max(0, pendingDecodeQueue - drainStats.releasedCount);
@@ -367,7 +368,7 @@ final class FramedVideoDecodeLoop {
                     waitGateDropsSec++;
                     if ((waitGateDropsSec & 31) == 1) {
                         Log.w(tag, "waitForKeyframe drop: seq=" + seqU32
-                                + " payload=" + payloadLen
+                                + PAYLOAD_LABEL + payloadLen
                                 + " dropped=" + waitGateDropsSec
                                 + " qDecode=" + pendingDecodeQueue);
                     }

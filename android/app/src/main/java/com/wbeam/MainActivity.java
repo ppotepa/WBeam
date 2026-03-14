@@ -431,33 +431,20 @@ public class MainActivity extends AppCompatActivity {
         );
     }
 
-    @SuppressWarnings("java:S107")
-    private void handleDaemonStatusUpdate(
-            boolean reachable,
-            boolean wasReachable,
-            String hostName,
-            String state,
-            long runId,
-            String lastError,
-            boolean errorChanged,
-            long uptimeSec,
-            String service,
-            String buildRevision,
-            JSONObject metrics
-    ) {
+    private void handleDaemonStatusUpdate(StatusPoller.DaemonStatusSnapshot snapshot) {
         MainDaemonRuntimeCoordinator.StatusInput input =
                 MainDaemonRuntimeInputFactory.createStatusInput(
-                        reachable,
-                        wasReachable,
-                        hostName,
-                        state,
-                        runId,
-                        lastError,
-                        errorChanged,
-                        uptimeSec,
-                        service,
-                        buildRevision,
-                        metrics
+                        snapshot.isReachable(),
+                        snapshot.wasReachable(),
+                        snapshot.getHostName(),
+                        snapshot.getDaemonState(),
+                        snapshot.getRunId(),
+                        snapshot.getLastError(),
+                        snapshot.isErrorChanged(),
+                        snapshot.getUptimeSec(),
+                        snapshot.getService(),
+                        snapshot.getBuildRevision(),
+                        snapshot.getMetrics()
                 );
 
         MainDaemonRuntimeCoordinator.StatusContext context =

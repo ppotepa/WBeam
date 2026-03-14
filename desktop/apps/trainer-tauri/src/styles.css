@@ -238,9 +238,7 @@ select {
 
 .error-banner {
   background: rgba(255, 108, 92, 0.16);
-  /* sonar-disable-next-line S7924 -- Intentional light text for visual hierarchy */
-  /* stylelint-disable-next-line -- S7924 */
-  color: #ffd9d4;
+  color: #7b1c13;
   border-color: rgba(255, 108, 92, 0.45);
 }
 

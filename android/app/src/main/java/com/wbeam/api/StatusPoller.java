@@ -60,7 +60,32 @@ public final class StatusPoller {
     private final Runnable pollTask = new Runnable() {
         @Override
         public void run() {
-            pollAsync();
+            if (statusPollInFlight) {
+                uiHandler.postDelayed(this, STATUS_POLL_MS);
+                return;
+            }
+            statusPollInFlight = true;
+            long pollTick = ++statusPollTick;
+            boolean fetchHealth = (pollTick % HEALTH_POLL_EVERY) == 1;
+
+            ioExecutor.execute(() -> {
+                try {
+                    JSONObject status = HostApiClient.apiRequestWithRetry(
+                            "GET", "/status", null, HostApiClient.API_RETRY_ATTEMPTS);
+                    JSONObject health = fetchHealth
+                            ? HostApiClient.apiRequestWithRetry(
+                                    "GET", "/health", null, HostApiClient.API_RETRY_ATTEMPTS)
+                            : null;
+                    JSONObject metricsPayload = HostApiClient.apiRequestWithRetry(
+                            "GET", "/metrics", null, HostApiClient.API_RETRY_ATTEMPTS);
+                    JSONObject metrics = mergeMetricsPayload(metricsPayload);
+                    uiHandler.post(() -> processStatusResult(status, health, metrics));
+                } catch (Exception e) {
+                    uiHandler.post(() -> processOfflineResult(e));
+                } finally {
+                    statusPollInFlight = false;
+                }
+            });
             uiHandler.postDelayed(this, STATUS_POLL_MS);
         }
     };
@@ -68,19 +93,7 @@ public final class StatusPoller {
     @SuppressWarnings("java:S107")
     public interface Callbacks {
         /** Called on UI thread after a successful poll. */
-        void onDaemonStatusUpdate(
-                boolean reachable,
-                boolean wasReachable,
-                String  hostName,
-                String  daemonState,
-                long    runId,
-                String  lastError,
-                boolean errorChanged,
-                long    uptimeSec,
-                String  service,
-                String  buildRevision,
-                JSONObject metrics
-        );
+        void onDaemonStatusUpdate(DaemonStatusSnapshot snapshot);
 
         /** Called on UI thread when the daemon is unreachable. */
         void onDaemonOffline(boolean wasReachableBeforeThisPoll, Exception e);
@@ -149,35 +162,6 @@ public final class StatusPoller {
 
     // ── Poll logic ────────────────────────────────────────────────────────────
 
-    @SuppressWarnings("java:S3398")
-    private void pollAsync() {
-        if (statusPollInFlight) {
-            return;
-        }
-        statusPollInFlight = true;
-        long pollTick = ++statusPollTick;
-        boolean fetchHealth = (pollTick % HEALTH_POLL_EVERY) == 1;
-
-        ioExecutor.execute(() -> {
-            try {
-                JSONObject status = HostApiClient.apiRequestWithRetry(
-                        "GET", "/status", null, HostApiClient.API_RETRY_ATTEMPTS);
-                JSONObject health = fetchHealth
-                        ? HostApiClient.apiRequestWithRetry(
-                                "GET", "/health", null, HostApiClient.API_RETRY_ATTEMPTS)
-                        : null;
-                JSONObject metricsPayload = HostApiClient.apiRequestWithRetry(
-                        "GET", "/metrics", null, HostApiClient.API_RETRY_ATTEMPTS);
-                JSONObject metrics = mergeMetricsPayload(metricsPayload);
-                uiHandler.post(() -> processStatusResult(status, health, metrics));
-            } catch (Exception e) {
-                uiHandler.post(() -> processOfflineResult(e));
-            } finally {
-                statusPollInFlight = false;
-            }
-        });
-    }
-
     private void processStatusResult(JSONObject status, JSONObject health, JSONObject metrics) {
         boolean wasReachable = daemonReachable;
         daemonReachable  = true;
@@ -203,11 +187,20 @@ public final class StatusPoller {
                     + (daemonLastError.isEmpty() ? "" : " last_error=" + daemonLastError));
         }
 
-        callbacks.onDaemonStatusUpdate(
-                true, wasReachable,
-                daemonHostName, daemonState, daemonRunId, daemonLastError, errorChanged,
-            daemonUptimeSec, daemonService, daemonBuildRevision, metrics
-        );
+        DaemonStatusSnapshot snapshot = DaemonStatusSnapshot.builder()
+                .reachable(true)
+                .wasReachable(wasReachable)
+                .hostName(daemonHostName)
+                .daemonState(daemonState)
+                .runId(daemonRunId)
+                .lastError(daemonLastError)
+                .errorChanged(errorChanged)
+                .uptimeSec(daemonUptimeSec)
+                .service(daemonService)
+                .buildRevision(daemonBuildRevision)
+                .metrics(metrics)
+                .build();
+        callbacks.onDaemonStatusUpdate(snapshot);
 
         if ("STREAMING".equals(daemonState)) {
             autoStartPending = false;
@@ -323,6 +316,157 @@ public final class StatusPoller {
             obj.put(key, value);
         } catch (Exception ignored) {
             // ignore malformed payload fragments; keep polling alive
+        }
+    }
+
+    public static final class DaemonStatusSnapshot {
+        private final boolean reachable;
+        private final boolean wasReachable;
+        private final String hostName;
+        private final String daemonState;
+        private final long runId;
+        private final String lastError;
+        private final boolean errorChanged;
+        private final long uptimeSec;
+        private final String service;
+        private final String buildRevision;
+        private final JSONObject metrics;
+
+        private DaemonStatusSnapshot(Builder builder) {
+            this.reachable = builder.reachable;
+            this.wasReachable = builder.wasReachable;
+            this.hostName = builder.hostName;
+            this.daemonState = builder.daemonState;
+            this.runId = builder.runId;
+            this.lastError = builder.lastError;
+            this.errorChanged = builder.errorChanged;
+            this.uptimeSec = builder.uptimeSec;
+            this.service = builder.service;
+            this.buildRevision = builder.buildRevision;
+            this.metrics = builder.metrics;
+        }
+
+        public boolean isReachable() {
+            return reachable;
+        }
+
+        public boolean wasReachable() {
+            return wasReachable;
+        }
+
+        public String getHostName() {
+            return hostName;
+        }
+
+        public String getDaemonState() {
+            return daemonState;
+        }
+
+        public long getRunId() {
+            return runId;
+        }
+
+        public String getLastError() {
+            return lastError;
+        }
+
+        public boolean isErrorChanged() {
+            return errorChanged;
+        }
+
+        public long getUptimeSec() {
+            return uptimeSec;
+        }
+
+        public String getService() {
+            return service;
+        }
+
+        public String getBuildRevision() {
+            return buildRevision;
+        }
+
+        public JSONObject getMetrics() {
+            return metrics;
+        }
+
+        public static Builder builder() {
+            return new Builder();
+        }
+
+        public static final class Builder {
+            private boolean reachable;
+            private boolean wasReachable;
+            private String hostName = "-";
+            private String daemonState = "IDLE";
+            private long runId;
+            private String lastError = "";
+            private boolean errorChanged;
+            private long uptimeSec;
+            private String service = "-";
+            private String buildRevision = "-";
+            private JSONObject metrics = new JSONObject();
+
+            private Builder() {}
+
+            public Builder reachable(boolean reachable) {
+                this.reachable = reachable;
+                return this;
+            }
+
+            public Builder wasReachable(boolean wasReachable) {
+                this.wasReachable = wasReachable;
+                return this;
+            }
+
+            public Builder hostName(String hostName) {
+                this.hostName = hostName;
+                return this;
+            }
+
+            public Builder daemonState(String daemonState) {
+                this.daemonState = daemonState;
+                return this;
+            }
+
+            public Builder runId(long runId) {
+                this.runId = runId;
+                return this;
+            }
+
+            public Builder lastError(String lastError) {
+                this.lastError = lastError;
+                return this;
+            }
+
+            public Builder errorChanged(boolean errorChanged) {
+                this.errorChanged = errorChanged;
+                return this;
+            }
+
+            public Builder uptimeSec(long uptimeSec) {
+                this.uptimeSec = uptimeSec;
+                return this;
+            }
+
+            public Builder service(String service) {
+                this.service = service;
+                return this;
+            }
+
+            public Builder buildRevision(String buildRevision) {
+                this.buildRevision = buildRevision;
+                return this;
+            }
+
+            public Builder metrics(JSONObject metrics) {
+                this.metrics = metrics != null ? metrics : new JSONObject();
+                return this;
+            }
+
+            public DaemonStatusSnapshot build() {
+                return new DaemonStatusSnapshot(this);
+            }
         }
     }
 }

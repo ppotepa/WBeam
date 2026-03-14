@@ -2,9 +2,7 @@ package com.wbeam.stream;
 
 import java.util.Arrays;
 
-@SuppressWarnings("java:S135") 
 final class StreamNalUtils {
-    @SuppressWarnings("java:S135")
     private StreamNalUtils() {}
 
     static int findStartCode(byte[] data, int from, int toExclusive) {
@@ -27,14 +25,24 @@ final class StreamNalUtils {
         int limit = Math.min(size, scanLimit);
         int i = 0;
         while (i < limit - 3) {
-            if (data[i] != 0 || data[i + 1] != 0) { i++; continue; }
-            final int nalByte = findNalHeaderOffset(data, i, limit);
-            if (nalByte < 0) { i++; continue; }
-            if (nalByte >= limit) break;
-            final int type = nalType(data[nalByte], isHevc);
-            if (isRecoveryType(type, isHevc))
-                return true;
-            i = nalByte + 1;
+            boolean advancedToNextNal = false;
+            if (data[i] == 0 && data[i + 1] == 0) {
+                final int nalByte = findNalHeaderOffset(data, i, limit);
+                if (nalByte >= limit) {
+                    break;
+                }
+                if (nalByte >= 0) {
+                    final int type = nalType(data[nalByte], isHevc);
+                    if (isRecoveryType(type, isHevc)) {
+                        return true;
+                    }
+                    i = nalByte + 1;
+                    advancedToNextNal = true;
+                }
+            }
+            if (!advancedToNextNal) {
+                i++;
+            }
         }
         return false;
     }

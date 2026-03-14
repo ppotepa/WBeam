@@ -93,7 +93,7 @@ public final class TrainerHudShellRenderer {
                 + buildSotTrendCellHtml("RECV FPS TREND", trendRecv, HudRenderSupport.hudToneClass(fpsState), "", fpsLowAnchor)
                 + buildSotTrendCellHtml("DECODE FPS TREND", trendDecode, HudRenderSupport.hudToneClass(fpsState), "", fpsLowAnchor);
 
-        String hudShellClass = "sot shell " + trainerScaleClass(fontProfile);
+        String hudShellClass = "sot shell " + TRAINER_SCALE_CLASS;
         return "<!doctype html><html><head><meta charset='utf-8'/>"
                 + "<meta name='viewport' content='width=device-width,height=device-height,initial-scale=1,maximum-scale=1,viewport-fit=cover'/>"
                 + "<style>"
@@ -198,10 +198,7 @@ public final class TrainerHudShellRenderer {
                 + "</div>";
     }
 
-    private static String trainerScaleClass(String fontProfile) {
-        // Always returns scale-2x regardless of profile (legacy logic preserved)
-        return SCALE_2X;
-    }
+    private static final String TRAINER_SCALE_CLASS = SCALE_2X;
 
     private static int clampPercent(int progressPercent) {
         if (progressPercent < 0) {
