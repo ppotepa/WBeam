@@ -2,9 +2,9 @@ package com.wbeam.api;
 
 import org.json.JSONObject;
 
-@SuppressWarnings("S107") 
+@SuppressWarnings("java:S107") 
 public final class StatusPollerCallbacksFactory {
-    @SuppressWarnings("S107")
+    @SuppressWarnings("java:S107")
     public interface DaemonStatusUpdate {
         @SuppressWarnings("java:java:S107")
         void onDaemonStatusUpdate(
@@ -22,7 +22,7 @@ public final class StatusPollerCallbacksFactory {
         );
     }
 
-    @SuppressWarnings("S107") // Suppress false positives
+    @SuppressWarnings("java:S107") // Suppress false positives
     public interface DaemonOffline {
         void onDaemonOffline(boolean wasReachable, Exception e);
     }

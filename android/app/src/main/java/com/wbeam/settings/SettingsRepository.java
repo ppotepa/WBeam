@@ -8,7 +8,7 @@ import android.content.SharedPreferences;
  * All PREF_* keys and load/save operations are isolated here.
  * UI binding (spinners, seekbars) remains in MainActivity.
  */
-@SuppressWarnings("S107") 
+@SuppressWarnings("java:S107") 
 public final class SettingsRepository {
 
     private static final String PREFS = "wbeam_settings";
@@ -99,7 +99,7 @@ public final class SettingsRepository {
         public final boolean localCursor;
         public final boolean intraOnly;
 
-        @SuppressWarnings("S107")
+        @SuppressWarnings("java:S107")
         public SettingsSnapshot(
                 String profile, String encoder, String cursor,
                 int resScale, int fps, int bitrateMbps,

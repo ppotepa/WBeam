@@ -5,7 +5,7 @@ import java.util.Locale;
 /**
  * Builds preflight/startup overlay model from current runtime snapshot.
  */
-@SuppressWarnings("S1192") 
+@SuppressWarnings("java:S1192") 
 public final class StartupOverlayModelBuilder {
     private static final String SERVICE_PREFIX = "service=";
     private static final String BULLET = " \u00b7 ";
@@ -77,7 +77,7 @@ public final class StartupOverlayModelBuilder {
     private static final String RECONNECTS_SUFFIX = "reconnects: ";
 
     @SuppressWarnings({"java:S6541", "java:S3776"})
-    @SuppressWarnings("S1192")
+    @SuppressWarnings("java:S1192")
     public static Model build(Input in) {
         Model out = new Model();
         long elapsedMs = in.startupBeganAtMs > 0L

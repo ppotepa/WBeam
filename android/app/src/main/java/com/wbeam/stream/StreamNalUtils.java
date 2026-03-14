@@ -2,9 +2,9 @@ package com.wbeam.stream;
 
 import java.util.Arrays;
 
-@SuppressWarnings("S135") 
+@SuppressWarnings("java:S135") 
 final class StreamNalUtils {
-    @SuppressWarnings("S135")
+    @SuppressWarnings("java:S135")
     private StreamNalUtils() {}
 
     static int findStartCode(byte[] data, int from, int toExclusive) {
