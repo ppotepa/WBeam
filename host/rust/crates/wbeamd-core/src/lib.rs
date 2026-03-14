@@ -15,7 +15,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{mpsc, Mutex};
 use tokio::time::sleep;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 use wbeamd_api::{
     valid_values, validate_config_with_presets, ActiveConfig, BaseResponse, ClientMetricsRequest,
     ClientMetricsResponse, ConfigPatch, EffectiveRuntimeConfig, ErrorResponse, HealthResponse,
@@ -547,21 +547,6 @@ impl DaemonCore {
         })
     }
 
-    fn session_suffix(&self) -> String {
-        self.target_serial
-            .as_deref()
-            .unwrap_or("default")
-            .chars()
-            .map(|ch| {
-                if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
-                    ch
-                } else {
-                    '_'
-                }
-            })
-            .collect::<String>()
-    }
-
     pub fn new(root: PathBuf, stream_port: u16, control_port: u16) -> Self {
         Self::new_for_session(root, stream_port, control_port, None, None)
     }
@@ -580,7 +565,7 @@ impl DaemonCore {
             .unwrap_or_else(|| "unknown-host".to_string());
 
         let runtime_config_path = runtime_config_path_for_session(&root, session_label.as_deref());
-        let mut presets = wbeamd_api::presets();
+        let presets = wbeamd_api::presets();
         let restored_config =
             config_store::load_runtime_config_with_presets(&runtime_config_path, &presets);
         let active_config = restored_config
@@ -1298,8 +1283,7 @@ impl DaemonCore {
             return Err(err);
         }
 
-        let mut use_rust_streamer =
-            wbeam_setting_bool(&self.settings, "WBEAM_USE_RUST_STREAMER", true);
+        let use_rust_streamer = wbeam_setting_bool(&self.settings, "WBEAM_USE_RUST_STREAMER", true);
         let rust_streamer_bin = wbeam_setting(&self.settings, "WBEAM_RUST_STREAMER_BIN")
             .map(PathBuf::from)
             .unwrap_or_else(|| {

@@ -5,7 +5,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
-use serde_json::json;
 use wbeamd_api::ErrorResponse;
 use wbeamd_core::{CoreError, DaemonCore};
 
@@ -38,30 +37,6 @@ pub(crate) async fn shutdown_signal() {
     {
         let _ = tokio::signal::ctrl_c().await;
     }
-}
-
-pub(crate) fn bad_request_json(message: impl AsRef<str>) -> axum::response::Response {
-    (
-        StatusCode::BAD_REQUEST,
-        Json(json!({"ok": false, "error": message.as_ref()})),
-    )
-        .into_response()
-}
-
-pub(crate) fn not_found_json(message: impl AsRef<str>) -> axum::response::Response {
-    (
-        StatusCode::NOT_FOUND,
-        Json(json!({"ok": false, "error": message.as_ref()})),
-    )
-        .into_response()
-}
-
-pub(crate) fn internal_json(message: impl AsRef<str>) -> axum::response::Response {
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({"ok": false, "error": message.as_ref()})),
-    )
-        .into_response()
 }
 
 pub(crate) fn workspace_root_from_manifest(manifest_dir: &str) -> PathBuf {
