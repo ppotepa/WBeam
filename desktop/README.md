@@ -7,7 +7,6 @@ Canonical desktop domain boundary.
 `desktop/` owns desktop UX clients:
 
 - main desktop control app,
-- trainer desktop app,
 - desktop-side service wrappers/integration glue.
 
 Desktop remains a client of host daemon API.
@@ -17,7 +16,6 @@ Desktop remains a client of host daemon API.
 Active implementation lives in:
 
 - `desktop/apps/desktop-tauri`
-- `desktop/apps/trainer-tauri`
 
 ## Contract
 

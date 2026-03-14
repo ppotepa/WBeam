@@ -60,10 +60,9 @@ export type VirtualDepsInstallStatus = {
   logs: string[];
 };
 
-export type ConnectEncoderMode = "profile_default" | "h264" | "h265" | "rawpng";
+export type ConnectEncoderMode = "h264" | "h265" | "rawpng";
 
 export type ConnectSessionConfig = {
-  profile?: string;
   encoder?: "h264" | "h265" | "rawpng";
   size?: string;
 };

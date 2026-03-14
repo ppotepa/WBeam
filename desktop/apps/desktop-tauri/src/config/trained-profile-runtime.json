@@ -1,8 +1,0 @@
-{
-  "defaultsByProfileId": {
-    "baseline": {
-      "encoder": "h264",
-      "cursorMode": "embedded"
-    }
-  }
-}

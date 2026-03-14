@@ -248,12 +248,7 @@ public final class StatusPoller {
     }
 
     /**
-     * /metrics payload has mixed shape:
-     *  - canonical runtime metrics under "metrics"
-     *  - trainer HUD envelope fields at top-level (trainer_hud_*)
-     *
-     * UI expects one object, so we flatten top-level trainer fields into
-     * the nested metrics object.
+     * /metrics payload is normalized here so UI can consume one metrics object.
      */
     private static JSONObject mergeMetricsPayload(JSONObject payload) {
         if (payload == null) {
@@ -265,15 +260,6 @@ public final class StatusPoller {
             merged = new JSONObject();
         }
 
-        if (payload.has("trainer_hud_active")) {
-            putQuietly(merged, "trainer_hud_active", payload.optBoolean("trainer_hud_active", false));
-        }
-        if (payload.has("trainer_hud_text")) {
-            putQuietly(merged, "trainer_hud_text", payload.optString("trainer_hud_text", ""));
-        }
-        if (payload.has("trainer_hud_json")) {
-            putQuietly(merged, "trainer_hud_json", payload.opt("trainer_hud_json"));
-        }
         if (payload.has("connection_mode")) {
             putQuietly(merged, "connection_mode", payload.optString("connection_mode", "live"));
         }

@@ -22,7 +22,6 @@ public final class MainHudInputFactory {
             int renderQueueMaxFrames,
             long presentFpsStaleGraceMs,
             long metricsStaleGraceMs,
-            long trainerHudPayloadGraceMs,
             double fpsLowAnchor,
             int hudTextColorOffline,
             int hudTextColorLive,
@@ -64,7 +63,6 @@ public final class MainHudInputFactory {
         input.renderQueueMaxFrames = renderQueueMaxFrames;
         input.presentFpsStaleGraceMs = presentFpsStaleGraceMs;
         input.metricsStaleGraceMs = metricsStaleGraceMs;
-        input.trainerHudPayloadGraceMs = trainerHudPayloadGraceMs;
         input.fpsLowAnchor = fpsLowAnchor;
         input.hudTextColorOffline = hudTextColorOffline;
         input.hudTextColorLive = hudTextColorLive;

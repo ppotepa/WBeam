@@ -1,26 +1,8 @@
-[lowlatency]
-profile = "lowlatency"
-encoder = "auto"
-cursor_mode = "hidden"
-size = "1920x1080"
+[default]
+profile = "default"
+encoder = "h264"
+cursor_mode = "embedded"
+size = "1280x800"
 fps = 60
-bitrate_kbps = 18000
-debug_fps = 0
-
-[balanced]
-profile = "balanced"
-encoder = "auto"
-cursor_mode = "hidden"
-size = "1920x1080"
-fps = 60
-bitrate_kbps = 25000
-debug_fps = 0
-
-[ultra]
-profile = "ultra"
-encoder = "auto"
-cursor_mode = "hidden"
-size = "2560x1440"
-fps = 60
-bitrate_kbps = 38000
+bitrate_kbps = 10000
 debug_fps = 0

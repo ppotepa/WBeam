@@ -1,9 +1,7 @@
 package com.wbeam.hud;
 
 public final class MainHudState {
-    public boolean trainerSessionActive = false;
     public String compactLine = "hud: waiting for metrics";
-    public long lastTrainerPayloadAtMs = 0L;
     public double latestTargetFps = 60.0;
     public double latestPresentFps = 0.0;
     public long latestStreamUptimeSec = 0L;

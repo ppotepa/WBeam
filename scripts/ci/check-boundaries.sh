@@ -10,7 +10,6 @@ echo "[boundaries] root=${ROOT_DIR}"
 
 targets=(
   "wbeam"
-  "trainer.sh"
   "desktop.sh"
   "devtool"
   "start-remote"

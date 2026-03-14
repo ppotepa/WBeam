@@ -41,8 +41,6 @@ archive/legacy/proto/front/**/.externalNativeBuild/
 .build/
 desktop/apps/desktop-tauri/node_modules/
 desktop/apps/desktop-tauri/dist/
-desktop/apps/trainer-tauri/node_modules/
-desktop/apps/trainer-tauri/dist/
 
 # .NET
 archive/legacy/proto/host-cs/bin/

@@ -5,38 +5,18 @@ use thiserror::Error;
 
 pub const VALID_ENCODERS: &[&str] = &["h264", "h265", "rawpng"];
 pub const VALID_CURSOR_MODES: &[&str] = &["hidden", "embedded", "metadata"];
-pub const BASELINE_PROFILE: &str = "baseline";
-pub const VALID_PROFILES: &[&str] = &[BASELINE_PROFILE];
-pub const LEGACY_PROFILE_ALIASES: &[&str] = &[
-    "lowlatency",
-    "balanced",
-    "ultra",
-    "safe_60",
-    "aggressive_60",
-    "quality_60",
-    "debug_60",
-    "fast60",
-    "balanced60",
-    "quality60",
-    "fast60_2",
-    "fast60_3",
-];
+pub const DEFAULT_PROFILE: &str = "default";
+pub const VALID_PROFILES: &[&str] = &[DEFAULT_PROFILE];
 
 pub fn canonical_profile_name(raw: &str) -> String {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return BASELINE_PROFILE.to_string();
+        return DEFAULT_PROFILE.to_string();
     }
-    if trimmed.eq_ignore_ascii_case(BASELINE_PROFILE) {
-        return BASELINE_PROFILE.to_string();
+    if trimmed.eq_ignore_ascii_case(DEFAULT_PROFILE) || trimmed.eq_ignore_ascii_case("baseline") {
+        return DEFAULT_PROFILE.to_string();
     }
-    if LEGACY_PROFILE_ALIASES
-        .iter()
-        .any(|alias| alias.eq_ignore_ascii_case(trimmed))
-    {
-        return BASELINE_PROFILE.to_string();
-    }
-    trimmed.to_string()
+    DEFAULT_PROFILE.to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -57,8 +37,8 @@ pub struct ActiveConfig {
 impl ActiveConfig {
     pub fn balanced_default() -> Self {
         presets()
-            .remove(BASELINE_PROFILE)
-            .expect("baseline preset must exist")
+            .remove(DEFAULT_PROFILE)
+            .expect("default preset must exist")
     }
 }
 
@@ -112,26 +92,6 @@ pub struct ClientMetricsRequest {
     /// low 32 bits = per-session sample counter.  Missing/null is silently OK.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace_id: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ClientHelloRequest {
-    pub sdk_int: u32,
-    pub device_model: String,
-    pub device_manufacturer: String,
-    pub abi: String,
-    pub policy: String,
-    pub preferred_fps: u32,
-    pub preferred_codec: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResolverDecisionResponse {
-    pub selected_profile: String,
-    pub selected_backend: String,
-    pub selected_codec: String,
-    pub reason: String,
-    pub sdk_tier: String,
 }
 
 impl Default for ClientMetricsRequest {
@@ -447,8 +407,8 @@ pub fn presets() -> BTreeMap<String, ActiveConfig> {
 
     let mut map = BTreeMap::new();
     map.insert(
-        BASELINE_PROFILE.to_string(),
-        cfg(BASELINE_PROFILE, "1280x800", 60, 10_000, "h264"),
+        DEFAULT_PROFILE.to_string(),
+        cfg(DEFAULT_PROFILE, "1280x800", 60, 10_000, "h264"),
     );
     map
 }
@@ -597,7 +557,7 @@ mod tests {
 
     fn base_config(encoder: &str, bitrate_kbps: u32) -> ActiveConfig {
         ActiveConfig {
-            profile: BASELINE_PROFILE.to_string(),
+            profile: DEFAULT_PROFILE.to_string(),
             encoder: encoder.to_string(),
             cursor_mode: "embedded".to_string(),
             size: "1280x800".to_string(),

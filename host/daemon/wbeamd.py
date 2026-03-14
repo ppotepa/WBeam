@@ -21,8 +21,8 @@ from typing import Any, Dict, Optional, Tuple
 STATES = {"IDLE", "STARTING", "STREAMING", "RECONNECTING", "ERROR", "STOPPING"}
 
 PRESETS: Dict[str, Dict[str, Any]] = {
-    "baseline": {
-        "profile": "baseline",
+    "default": {
+        "profile": "default",
         "encoder": "h264",
         "cursor_mode": "embedded",
         "size": "1280x800",
@@ -30,21 +30,6 @@ PRESETS: Dict[str, Dict[str, Any]] = {
         "bitrate_kbps": 10000,
         "debug_fps": 0,
     },
-}
-
-LEGACY_PROFILE_ALIASES = {
-    "lowlatency",
-    "balanced",
-    "ultra",
-    "safe_60",
-    "aggressive_60",
-    "quality_60",
-    "debug_60",
-    "fast60",
-    "balanced60",
-    "quality60",
-    "fast60_2",
-    "fast60_3",
 }
 
 VALID_ENCODERS = {"h264", "h265", "rawpng", "auto", "nvenc", "openh264"}
@@ -69,7 +54,7 @@ class Metrics:
 @dataclass
 class RuntimeState:
     state: str = "IDLE"
-    active_config: Dict[str, Any] = field(default_factory=lambda: PRESETS["baseline"].copy())
+    active_config: Dict[str, Any] = field(default_factory=lambda: PRESETS["default"].copy())
     last_error: str = ""
     host_name: str = socket.gethostname()
     uptime_start: float = field(default_factory=time.time)
@@ -154,8 +139,6 @@ class StreamProcess:
         cmd = [
             sys.executable,
             str(self.script_path),
-            "--profile",
-            str(config["profile"]),
             "--port",
             str(self.port),
             "--encoder",
@@ -277,27 +260,10 @@ class WBeamDaemon:
         else:
             self.metrics.stream_uptime_sec = 0
 
-    @staticmethod
-    def canonical_profile(raw_profile: Any) -> str:
-        profile = str(raw_profile or "").strip()
-        if not profile:
-            return "baseline"
-        if profile == "baseline":
-            return "baseline"
-        if profile in LEGACY_PROFILE_ALIASES:
-            return "baseline"
-        return profile
-
     def validate_config(self, incoming: Dict[str, Any]) -> Dict[str, Any]:
-        base_profile = self.canonical_profile(
-            incoming.get("profile") or self.runtime.active_config.get("profile") or "baseline"
-        )
-        if base_profile not in PRESETS:
-            raise ConfigError("invalid profile")
-
-        cfg = dict(PRESETS[base_profile])
-        cfg.update({k: v for k, v in incoming.items() if v is not None})
-        cfg["profile"] = base_profile
+        cfg = dict(PRESETS["default"])
+        cfg.update({k: v for k, v in incoming.items() if v is not None and k != "profile"})
+        cfg["profile"] = "default"
 
         if cfg.get("encoder") not in VALID_ENCODERS:
             raise ConfigError("invalid encoder")

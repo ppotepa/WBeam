@@ -25,7 +25,6 @@ use wbeamd_api::{
 
 pub mod domain;
 pub mod infra;
-pub mod resolver;
 
 use domain::policy::{
     adaptation_reason, config_for_level, is_high_pressure, is_low_pressure,
@@ -346,74 +345,8 @@ fn runtime_config_path_for_session(root: &Path, session_label: Option<&str>) -> 
     config_dir.join("runtime_state.json")
 }
 
-fn load_presets_from_training_files(root: &Path) -> Option<BTreeMap<String, ActiveConfig>> {
-    let path = root.join("config/training/profiles.json");
-
-    let raw = match std::fs::read_to_string(&path) {
-        Ok(v) => v,
-        Err(e) => {
-            debug!("presets: cannot read {}: {e}", path.display());
-            return None;
-        }
-    };
-    let value: serde_json::Value = match serde_json::from_str(&raw) {
-        Ok(v) => v,
-        Err(e) => {
-            warn!("presets: invalid JSON in {}: {e}", path.display());
-            return None;
-        }
-    };
-    let Some(profiles) = value.get("profiles").and_then(|v| v.as_object()) else {
-        warn!("presets: missing .profiles object in {}", path.display());
-        return None;
-    };
-
-    let mut out = BTreeMap::new();
-    for (name, node) in profiles {
-        let values = node.get("values").and_then(|v| v.as_object());
-        let size = values
-            .and_then(|v| v.get("PROTO_CAPTURE_SIZE"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("1280x720")
-            .to_string();
-        let fps = values
-            .and_then(|v| v.get("PROTO_CAPTURE_FPS"))
-            .and_then(|v| v.as_u64())
-            .unwrap_or(60) as u32;
-        let bitrate_kbps = values
-            .and_then(|v| v.get("PROTO_CAPTURE_BITRATE_KBPS"))
-            .and_then(|v| v.as_u64())
-            .unwrap_or(10_000) as u32;
-
-        out.insert(
-            name.clone(),
-            ActiveConfig {
-                profile: name.clone(),
-                encoder: "h264".to_string(),
-                cursor_mode: "embedded".to_string(),
-                size,
-                fps,
-                bitrate_kbps,
-                debug_fps: 0,
-                intra_only: false,
-            },
-        );
-    }
-
-    if out.is_empty() {
-        warn!("presets: no profiles loaded from {}", path.display());
-        return None;
-    }
-    info!(
-        "presets: loaded {} profile(s) from {}",
-        out.len(),
-        path.display()
-    );
-    Some(out)
-}
-
 fn default_config_from_presets(presets: &BTreeMap<String, ActiveConfig>) -> ActiveConfig {
-    for key in ["baseline"] {
+    for key in ["default", "baseline"] {
         if let Some(cfg) = presets.get(key) {
             return cfg.clone();
         }
@@ -629,18 +562,6 @@ impl DaemonCore {
             .collect::<String>()
     }
 
-    fn trainer_active_marker_path(&self) -> PathBuf {
-        PathBuf::from(format!(
-            "/tmp/wbeam-trainer-active-{}-{}.flag",
-            self.session_suffix(),
-            self.stream_port
-        ))
-    }
-
-    fn trainer_run_active(&self) -> bool {
-        self.trainer_active_marker_path().exists()
-    }
-
     pub fn new(root: PathBuf, stream_port: u16, control_port: u16) -> Self {
         Self::new_for_session(root, stream_port, control_port, None, None)
     }
@@ -659,15 +580,7 @@ impl DaemonCore {
             .unwrap_or_else(|| "unknown-host".to_string());
 
         let runtime_config_path = runtime_config_path_for_session(&root, session_label.as_deref());
-        // Merge built-in presets with training-domain presets (training profiles can override).
-        // Canonical runtime profile is now "baseline"; legacy profile names are
-        // canonicalized in API validation to preserve backward compatibility.
         let mut presets = wbeamd_api::presets();
-        if let Some(training_presets) = load_presets_from_training_files(&root) {
-            for (k, v) in training_presets {
-                presets.insert(k, v);
-            }
-        }
         let restored_config =
             config_store::load_runtime_config_with_presets(&runtime_config_path, &presets);
         let active_config = restored_config
@@ -874,7 +787,7 @@ impl DaemonCore {
         let cfg = match validate_config_with_presets(patch, &current_cfg, &presets) {
             Ok(cfg) => cfg,
             Err(ValidationError::InvalidProfile) => {
-                // Runtime config can be stale (e.g. old pre-baseline profile names).
+                // Runtime config can be stale (e.g. old pre-default profile names).
                 // Auto-heal to a valid preset so /start does not hard-fail.
                 let fallback = default_config_from_presets(&presets);
                 warn!(
@@ -982,8 +895,6 @@ impl DaemonCore {
 
         let mut restart_cfg: Option<ActiveConfig> = None;
         let action;
-        let trainer_run_active = self.trainer_run_active();
-
         {
             let mut inner = self.inner.lock().await;
             let now = Instant::now();
@@ -1050,7 +961,7 @@ impl DaemonCore {
             let forced_no_present_restart = no_present_restart_ready
                 && inner.no_present_streak >= NO_PRESENT_RESTART_STREAK_REQUIRED;
 
-            if forced_no_present_restart && !trainer_run_active {
+            if forced_no_present_restart {
                 inner.no_present_streak = 0;
                 inner.last_no_present_recovery_at = Some(now);
                 inner.metrics.restart_count = inner.metrics.restart_count.saturating_add(1);
@@ -1073,16 +984,6 @@ impl DaemonCore {
                     inner.run_id, inner.metrics.adaptive_reason
                 );
                 restart_cfg = Some(inner.active_config.clone());
-            } else if forced_no_present_restart && trainer_run_active {
-                inner.no_present_streak = 0;
-                inner.metrics.adaptive_level = inner.adaptation_level;
-                inner.metrics.adaptive_action = "recover-hold-training".to_string();
-                inner.metrics.adaptive_reason = format!(
-                    "training run active; suppress no-present restart present_fps={:.1} recv_fps={:.1}",
-                    client.present_fps, client.recv_fps
-                );
-                inner.last_error =
-                    "training run active: no-present recovery restart suppressed".to_string();
             } else if !can_adapt {
                 inner.high_pressure_streak = 0;
                 inner.low_pressure_streak = 0;
@@ -1153,22 +1054,11 @@ impl DaemonCore {
                     let target_cfg =
                         config_for_level(&inner.baseline_config, inner.adaptation_level);
                     if target_cfg != inner.active_config && inner.current_pid.is_some() {
-                        if self.allow_live_adaptive_restart && !trainer_run_active {
+                        if self.allow_live_adaptive_restart {
                             inner.active_config = target_cfg.clone();
                             inner.metrics.restart_count =
                                 inner.metrics.restart_count.saturating_add(1);
                             restart_cfg = Some(target_cfg);
-                        } else if trainer_run_active {
-                            inner.metrics.adaptive_action =
-                                format!("{}-hold-training", inner.metrics.adaptive_action);
-                            inner.metrics.adaptive_reason = format!(
-                                "{} | training run active; suppress restart size={} fps={} bitrate={}",
-                                reason, target_cfg.size, target_cfg.fps, target_cfg.bitrate_kbps
-                            );
-                            inner.last_error = format!(
-                                "adaptive hold during training L{}",
-                                inner.adaptation_level
-                            );
                         } else {
                             inner.metrics.adaptive_action =
                                 format!("{}-pending", inner.metrics.adaptive_action);
@@ -1475,25 +1365,6 @@ impl DaemonCore {
             .collect::<String>();
         let restore_token_file =
             format!("/tmp/wbeam-portal-restore-token-{}-{}", session_suffix, self.stream_port);
-        let trainer_active_marker =
-            format!("/tmp/wbeam-trainer-active-{}-{}.flag", session_suffix, self.stream_port);
-        let trainer_overlay_file =
-            format!("/tmp/wbeam-trainer-overlay-{}-{}.txt", session_suffix, self.stream_port);
-        let trainer_run_active = Path::new(&trainer_active_marker).exists();
-        let trainer_overlay_active = Path::new(&trainer_overlay_file).exists();
-        let trainer_hud_burnin =
-            wbeam_setting_bool(&self.settings, "WBEAM_TRAINER_HUD_BURNIN", false);
-
-        if capture_backend == "wayland_portal" && trainer_run_active {
-            if use_rust_streamer {
-                warn!(
-                    serial = session_suffix,
-                    marker = %trainer_active_marker,
-                    "trainer run marker detected; forcing python streamer to keep one portal consent"
-                );
-            }
-            use_rust_streamer = false;
-        }
 
         if use_rust_streamer {
             if !rust_streamer_bin.exists() {
@@ -1511,9 +1382,7 @@ impl DaemonCore {
                 return Err(err);
             }
             cmd = Command::new(rust_streamer_bin);
-            cmd.arg("--profile")
-                .arg(&cfg.profile)
-                .arg("--capture-backend")
+            cmd.arg("--capture-backend")
                 .arg(match capture_backend {
                     "x11_gst" => "x11",
                     "wayland_portal" => "wayland-portal",
@@ -1539,11 +1408,7 @@ impl DaemonCore {
                 .arg("/tmp/wbeam-frames")
                 .arg("--debug-fps")
                 .arg(cfg.debug_fps.to_string());
-            if trainer_overlay_active && trainer_hud_burnin {
-                cmd.env("WBEAM_OVERLAY_TEXT_FILE", &trainer_overlay_file);
-            } else {
-                cmd.env_remove("WBEAM_OVERLAY_TEXT_FILE");
-            }
+            cmd.env_remove("WBEAM_OVERLAY_TEXT_FILE");
             if cfg.intra_only {
                 cmd.arg("--intra-only");
             }
@@ -1586,8 +1451,6 @@ impl DaemonCore {
             cmd = Command::new("python3");
             cmd.arg("-u")
                 .arg(stream_script)
-                .arg("--profile")
-                .arg(&cfg.profile)
                 .arg("--port")
                 .arg(self.stream_port.to_string())
                 .arg("--encoder")
@@ -1610,11 +1473,7 @@ impl DaemonCore {
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
-            if trainer_overlay_active && trainer_hud_burnin {
-                cmd.env("WBEAM_OVERLAY_TEXT_FILE", &trainer_overlay_file);
-            } else {
-                cmd.env_remove("WBEAM_OVERLAY_TEXT_FILE");
-            }
+            cmd.env_remove("WBEAM_OVERLAY_TEXT_FILE");
             // C3: framed-only transport (legacy parser disabled on Android path).
             cmd.arg("--framed");
         }

@@ -36,9 +36,7 @@ pub fn build_streamer_command(
 
     let mut cmd = if use_rust {
         let mut c = Command::new(&rust_bin);
-        c.arg("--profile")
-            .arg(&cfg.profile)
-            .arg("--port")
+        c.arg("--port")
             .arg(stream_port.to_string())
             .arg("--encoder")
             .arg(&cfg.encoder)
@@ -67,8 +65,6 @@ pub fn build_streamer_command(
         };
         c.arg("-u")
             .arg(script)
-            .arg("--profile")
-            .arg(&cfg.profile)
             .arg("--port")
             .arg(stream_port.to_string())
             .arg("--encoder")

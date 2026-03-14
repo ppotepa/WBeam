@@ -101,7 +101,7 @@ public class MainActivity extends AppCompatActivity {
             "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4";
 
     private static final String[] PROFILE_OPTIONS = {
-            "baseline"
+            "default"
     };
     /**
      * Preferred video encoder for this device.
@@ -109,7 +109,7 @@ public class MainActivity extends AppCompatActivity {
     static final String PREFERRED_VIDEO = DecoderCapabilityInspector.preferredVideoEncoder();
     private static final String[] ENCODER_OPTIONS = {PREFERRED_VIDEO, "raw-png"};
     private static final String[] CURSOR_OPTIONS = {"embedded", "hidden", "metadata"};
-    private static final String DEFAULT_PROFILE = "baseline";
+    private static final String DEFAULT_PROFILE = "default";
     private static final String DEFAULT_CURSOR_MODE = "embedded";
     private static final int DEFAULT_RES_SCALE = 100;
     private static final int DEFAULT_FPS = 60;
@@ -131,7 +131,6 @@ public class MainActivity extends AppCompatActivity {
     // Denser chart history so adjacent samples are visually closer at 4 Hz.
     private static final int HUD_RESOURCE_SERIES_MAX = 120;
     private static final double FPS_LOW_ANCHOR = 10.0;
-    private static final long TRAINER_HUD_PAYLOAD_GRACE_MS = 2000L;
 
     // ── Views ──────────────────────────────────────────────────────────────────
     private View rootLayout;
@@ -1203,7 +1202,6 @@ public class MainActivity extends AppCompatActivity {
                 RENDER_QUEUE_MAX_FRAMES,
                 PRESENT_FPS_STALE_GRACE_MS,
                 METRICS_STALE_GRACE_MS,
-                TRAINER_HUD_PAYLOAD_GRACE_MS,
                 FPS_LOW_ANCHOR,
                 HUD_TEXT_COLOR_OFFLINE,
                 HUD_TEXT_COLOR_LIVE,

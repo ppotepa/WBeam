@@ -24,8 +24,6 @@ import type { ConnectEncoderMode, ConnectSessionConfig, DeviceBasic } from "./ty
 import type { VirtualDepsInstallStatus, VirtualDoctor } from "./types";
 import { HostApiManager } from "./managers/hostApiManager";
 import { createSessionManager } from "./managers/sessionManager";
-import trainedProfileLabels from "./config/trained-profile-labels.json";
-import trainedProfileRuntime from "./config/trained-profile-runtime.json";
 import connectResolutionPresets from "./config/connect-resolution-presets.json";
 import connectEncoderOptions from "./config/connect-encoder-options.json";
 
@@ -45,31 +43,11 @@ type DisplayMode = "virtual_monitor" | "duplicate";
 const CONNECT_MODE_STORAGE_KEY = "wbeam.connect.mode.by.serial";
 const WAYLAND_EXPERIMENTAL_DUPLICATION_STORAGE_KEY = "wbeam.connect.experimental.dup.wayland";
 
-type TrainedProfileLabelEntry = {
-  id: string;
-  label: string;
-  description: string;
-};
-
-type TrainedProfileRuntimeEntry = {
-  encoder?: "h264" | "h265" | "rawpng";
-  cursorMode?: "embedded" | "hidden" | "metadata";
-};
-
 type ResolutionPresetEntry = {
   id: string;
   label: string;
   kind: "device_max" | "device_current" | "fixed";
   size?: string;
-};
-
-const TRAINED_PROFILE_DATA = trainedProfileLabels as {
-  defaultProfileId?: string;
-  profiles?: TrainedProfileLabelEntry[];
-};
-
-const TRAINED_PROFILE_RUNTIME_DATA = trainedProfileRuntime as {
-  defaultsByProfileId?: Record<string, TrainedProfileRuntimeEntry>;
 };
 
 const RESOLUTION_PRESET_DATA = connectResolutionPresets as {
@@ -82,14 +60,6 @@ const ENCODER_OPTION_DATA = connectEncoderOptions as {
   options?: { id: ConnectEncoderMode; label: string }[];
 };
 
-const TRAINED_PROFILE_OPTIONS: TrainedProfileLabelEntry[] = TRAINED_PROFILE_DATA.profiles ?? [];
-const TRAINED_PROFILE_IDS = new Set(TRAINED_PROFILE_OPTIONS.map((item) => item.id));
-const TRAINED_PROFILE_DEFAULT_ID =
-  (TRAINED_PROFILE_DATA.defaultProfileId && TRAINED_PROFILE_IDS.has(TRAINED_PROFILE_DATA.defaultProfileId))
-    ? TRAINED_PROFILE_DATA.defaultProfileId
-    : (TRAINED_PROFILE_OPTIONS[0]?.id ?? "baseline");
-
-const TRAINED_PROFILE_RUNTIME = TRAINED_PROFILE_RUNTIME_DATA.defaultsByProfileId ?? {};
 const RESOLUTION_PRESET_OPTIONS: ResolutionPresetEntry[] = RESOLUTION_PRESET_DATA.presets ?? [];
 const RESOLUTION_PRESET_IDS = new Set(RESOLUTION_PRESET_OPTIONS.map((item) => item.id));
 const RESOLUTION_PRESET_DEFAULT_ID =
@@ -98,15 +68,14 @@ const RESOLUTION_PRESET_DEFAULT_ID =
     : (RESOLUTION_PRESET_OPTIONS[0]?.id ?? "device_max");
 
 const ENCODER_OPTIONS = ENCODER_OPTION_DATA.options ?? [
-  { id: "profile_default" as const, label: "From trained profile" },
   { id: "h264" as const, label: "H.264" },
   { id: "h265" as const, label: "H.265 / HEVC" },
   { id: "rawpng" as const, label: "RAW PNG (experimental)" },
 ];
 const ENCODER_OPTION_IDS = new Set(ENCODER_OPTIONS.map((item) => item.id));
-const ENCODER_DEFAULT_MODE = ENCODER_OPTION_IDS.has(ENCODER_OPTION_DATA.defaultEncoderMode ?? "profile_default")
+const ENCODER_DEFAULT_MODE = ENCODER_OPTION_IDS.has(ENCODER_OPTION_DATA.defaultEncoderMode ?? "h264")
   ? (ENCODER_OPTION_DATA.defaultEncoderMode as ConnectEncoderMode)
-  : "profile_default";
+  : "h264";
 
 function loadSavedDisplayMode(serial: string): DisplayMode | null {
   try {
@@ -184,20 +153,6 @@ function resolveSessionSizeForPreset(device: DeviceBasic, presetId: string): str
   return normalizeLandscapeSize(preset.size ?? "");
 }
 
-function resolveProfileId(profileId: string): string {
-  if (TRAINED_PROFILE_IDS.has(profileId)) return profileId;
-  return TRAINED_PROFILE_DEFAULT_ID;
-}
-
-function resolveEncoderForProfile(profileId: string, mode: ConnectEncoderMode): "h264" | "h265" | "rawpng" {
-  if (mode !== "profile_default") return mode;
-  const byProfile = TRAINED_PROFILE_RUNTIME[profileId];
-  if (byProfile?.encoder === "h264" || byProfile?.encoder === "h265" || byProfile?.encoder === "rawpng") {
-    return byProfile.encoder;
-  }
-  return "h264";
-}
-
 export default function App() {
   const api = new HostApiManager();
   const session = createSessionManager(api);
@@ -205,7 +160,6 @@ export default function App() {
   const [hostName, setHostName] = createSignal("unknown-host");
   const [connectDialogDevice, setConnectDialogDevice] = createSignal<DeviceBasic | null>(null);
   const [connectDialogMode, setConnectDialogMode] = createSignal<DisplayMode>("virtual_monitor");
-  const [connectDialogProfileId, setConnectDialogProfileId] = createSignal<string>(TRAINED_PROFILE_DEFAULT_ID);
   const [connectDialogResolutionPresetId, setConnectDialogResolutionPresetId] = createSignal<string>(RESOLUTION_PRESET_DEFAULT_ID);
   const [connectDialogEncoderMode, setConnectDialogEncoderMode] = createSignal<ConnectEncoderMode>(ENCODER_DEFAULT_MODE);
   const [connectDialogDoctor, setConnectDialogDoctor] = createSignal<VirtualDoctor | null>(null);
@@ -294,7 +248,6 @@ export default function App() {
     const isWaylandHost = isWaylandPortalHost();
     const saved = isWaylandHost ? "virtual_monitor" : (loadSavedDisplayMode(device.serial) ?? "virtual_monitor");
     setConnectDialogMode(saved);
-    setConnectDialogProfileId(TRAINED_PROFILE_DEFAULT_ID);
     setConnectDialogResolutionPresetId(RESOLUTION_PRESET_DEFAULT_ID);
     setConnectDialogEncoderMode(ENCODER_DEFAULT_MODE);
     setConnectDialogDoctor(null);
@@ -353,11 +306,9 @@ export default function App() {
         saveDisplayMode(device.serial, chosenMode);
       }
 
-      const resolvedProfileId = resolveProfileId(connectDialogProfileId());
       const resolvedSize = resolveSessionSizeForPreset(device, connectDialogResolutionPresetId());
-      const resolvedEncoder = resolveEncoderForProfile(resolvedProfileId, connectDialogEncoderMode());
+      const resolvedEncoder = connectDialogEncoderMode();
       const connectConfig: ConnectSessionConfig = {
-        profile: resolvedProfileId,
         encoder: resolvedEncoder,
         size: resolvedSize,
       };
@@ -746,14 +697,8 @@ export default function App() {
             }
             return "Creates real additional monitor space on host desktop.";
           };
-          const selectedProfile = () =>
-            TRAINED_PROFILE_OPTIONS.find((item) => item.id === connectDialogProfileId())
-            ?? TRAINED_PROFILE_OPTIONS[0];
           const selectedSize = () => resolveSessionSizeForPreset(device, connectDialogResolutionPresetId()) ?? "auto";
-          const selectedEncoder = () => resolveEncoderForProfile(
-            resolveProfileId(connectDialogProfileId()),
-            connectDialogEncoderMode(),
-          );
+          const selectedEncoder = () => connectDialogEncoderMode();
           return (
             <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Select display mode">
               <section class="connect-modal">
@@ -797,21 +742,6 @@ export default function App() {
                 </Show>
 
                 <div class="connect-config-grid">
-                  <label class="connect-config-field">
-                    <span>Trained profile</span>
-                    <select
-                      value={connectDialogProfileId()}
-                      onChange={(event) => setConnectDialogProfileId(event.currentTarget.value)}
-                    >
-                      <For each={TRAINED_PROFILE_OPTIONS}>
-                        {(profile) => (
-                          <option value={profile.id}>{profile.label}</option>
-                        )}
-                      </For>
-                    </select>
-                    <small>{selectedProfile()?.description ?? "Session profile"}</small>
-                  </label>
-
                   <label class="connect-config-field">
                     <span>Resolution preset</span>
                     <select

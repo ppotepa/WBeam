@@ -37,13 +37,6 @@ if [[ -f "${ROOT_DIR}/desktop/apps/desktop-tauri/package.json" ]]; then
   )
 fi
 
-if [[ -f "${ROOT_DIR}/desktop/apps/trainer-tauri/package.json" ]]; then
-  (
-    cd "${ROOT_DIR}/desktop/apps/trainer-tauri"
-    run_if_present npm npm exec tsc --noEmit -p tsconfig.json
-  )
-fi
-
 if command -v python >/dev/null 2>&1 || command -v python3 >/dev/null 2>&1; then
   PYTHON_BIN="$(command -v python || command -v python3)"
   if "${PYTHON_BIN}" -m ruff --version >/dev/null 2>&1; then

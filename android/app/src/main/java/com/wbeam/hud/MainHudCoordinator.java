@@ -62,7 +62,6 @@ public final class MainHudCoordinator {
         public int renderQueueMaxFrames;
         public long presentFpsStaleGraceMs;
         public long metricsStaleGraceMs;
-        public long trainerHudPayloadGraceMs;
         public double fpsLowAnchor;
         public int hudTextColorOffline;
         public int hudTextColorLive;
@@ -134,9 +133,6 @@ public final class MainHudCoordinator {
             return;
         }
         input.state.lastPerfMetricsAtMs = nowMs;
-        if (handleTrainerHudPath(input, metrics, nowMs)) {
-            return;
-        }
         input.overlayState.mode = "runtime";
         updateRuntimeHud(input, metrics, nowMs);
     }
@@ -157,75 +153,6 @@ public final class MainHudCoordinator {
         }
         updateUnavailable(input);
         return true;
-    }
-
-    private static boolean handleTrainerHudPath(Input input, JSONObject metrics, long nowMs) {
-        TrainerHudModeCoordinator.State trainerState = new TrainerHudModeCoordinator.State();
-        trainerState.lastPayloadAtMs = input.state.lastTrainerPayloadAtMs;
-        trainerState.sessionActive = input.state.trainerSessionActive;
-        boolean handled = TrainerHudModeCoordinator.handle(
-                metrics,
-                nowMs,
-                trainerState,
-                input.trainerHudPayloadGraceMs,
-                input.buildDebug,
-                input.debugOverlayVisibleProvider.get(),
-                TrainerHudModeHooksFactory.create(
-                        () -> input.debugOverlayHandler.setDebugOverlayVisible(true),
-                        input.snapshotLogHandler::onSnapshot,
-                        hudJson -> TrainerHudOverlayPipeline.renderFromJson(
-                                hudJson,
-                                input.state.latestTargetFps,
-                                input.fpsLowAnchor,
-                                input.resourceUsageTracker,
-                                input.perfHudWebView,
-                                input.perfHudText,
-                                input.perfHudPanel,
-                                input.overlayState,
-                                input.hudTextColorLive,
-                                compactLine -> input.state.compactLine = compactLine,
-                                input.refreshDebugOverlayHandler::refresh
-                        ),
-                        rawHudText -> TrainerHudOverlayPipeline.renderFromText(
-                                rawHudText,
-                                input.state.latestTargetFps,
-                                input.fpsLowAnchor,
-                                input.resourceUsageTracker,
-                                input.perfHudWebView,
-                                input.perfHudText,
-                                input.perfHudPanel,
-                                input.overlayState,
-                                input.hudTextColorLive,
-                                compactLine -> input.state.compactLine = compactLine,
-                                input.refreshDebugOverlayHandler::refresh
-                        ),
-                        () -> { },
-                        () -> TrainerHudOverlayPipeline.renderPlaceholder(
-                                input.state.latestTargetFps,
-                                input.fpsLowAnchor,
-                                input.resourceUsageTracker,
-                                input.perfHudWebView,
-                                input.perfHudText,
-                                input.perfHudPanel,
-                                input.overlayState,
-                                input.hudTextColorLive,
-                                compactLine -> input.state.compactLine = compactLine,
-                                input.refreshDebugOverlayHandler::refresh
-                        ),
-                        () -> {
-                            input.hudTextOnlyHandler.show(
-                                    "trainer",
-                                    "TRAINING HUD\nwaiting for trainer metrics...",
-                                    input.hudTextColorLive
-                            );
-                            input.state.compactLine = "trainer hud waiting metrics";
-                            input.refreshDebugOverlayHandler.refresh();
-                        }
-                )
-        );
-        input.state.lastTrainerPayloadAtMs = trainerState.lastPayloadAtMs;
-        input.state.trainerSessionActive = trainerState.sessionActive;
-        return handled;
     }
 
     private static void updateRuntimeHud(Input input, JSONObject metrics, long nowMs) {

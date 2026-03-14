@@ -1,5 +1,5 @@
 {
-  "profile": "lowlatency",
+  "profile": "default",
   "encoder": "h265",
   "cursor_mode": "embedded",
   "size": "1920x1080",

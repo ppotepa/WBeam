@@ -6,7 +6,7 @@ import java.util.ArrayDeque;
 import java.util.Locale;
 
 /**
- * Pure HUD rendering/formatting helpers used by runtime and trainer overlays.
+ * Pure HUD rendering/formatting helpers used by runtime overlays.
  */
 public final class HudRenderSupport {
     private HudRenderSupport() {}

@@ -46,7 +46,6 @@ Groups:
   host      build | run | debug | status | down | probe
   daemon    up | down | status   (alias for host)
   android   build | install | launch | deploy | deploy-all | build-release | install-release | deploy-release
-  train     wizard
   deps      virtual check [--json] | virtual install [--dry-run] [--yes]
   version   new | current | doctor
   watch     devices | connections | streaming | service | logs | status | health | doctor | tui
@@ -67,13 +66,12 @@ Examples:
   ./wbeam android build-release  # ./gradlew assembleRelease
   ./wbeam android install-release
   ./wbeam android deploy-release
-  ./wbeam train wizard
   ./wbeam deps virtual check --json
   ./wbeam deps virtual install --dry-run
   ./wbeam version doctor         # diagnose host/APK version mismatch
   ./wbeam watch devices          # refresh adb/device status every 1s
   ./wbeam watch connections      # refresh host/ports/reverse map every 1s
-  ./wbeam watch streaming        # per-device stream state + fps/profile
+  ./wbeam watch streaming        # per-device stream state + fps/config
   ./wbeam watch service          # service state + host probe + activity
   ./wbeam watch logs             # current host/adb/service logs snapshot
   ./wbeam watch tui              # interactive screens (1..5, r, q)
@@ -1811,15 +1809,15 @@ watch_logs_once() {
 watch_streaming_once() {
   require_cmd adb
   local serial stream_port status_json metrics_json
-  local state profile encoder target_fps recv_fps present_fps decode_fps bitrate reverse_ok
+  local state encoder target_fps recv_fps present_fps decode_fps bitrate reverse_ok
   local idx
   local -a serials
 
   mapfile -t serials < <(android_connected_serials)
-  printf '%-18s %-6s %-10s %-12s %-6s %-6s %-7s %-7s %-7s %-8s %-7s\n' \
-    "serial" "port" "state" "profile" "t_fps" "r_fps" "p_fps" "d_fps" "kbps" "encoder" "reverse"
-  printf '%-18s %-6s %-10s %-12s %-6s %-6s %-7s %-7s %-7s %-8s %-7s\n' \
-    "------" "----" "-----" "-------" "-----" "-----" "-----" "-----" "----" "-------" "-------"
+  printf '%-18s %-6s %-10s %-6s %-6s %-7s %-7s %-7s %-8s %-7s\n' \
+    "serial" "port" "state" "t_fps" "r_fps" "p_fps" "d_fps" "kbps" "encoder" "reverse"
+  printf '%-18s %-6s %-10s %-6s %-6s %-7s %-7s %-7s %-8s %-7s\n' \
+    "------" "----" "-----" "-----" "-----" "-----" "-----" "----" "-------" "-------"
 
   if [[ "${#serials[@]}" -eq 0 ]]; then
     echo "no adb devices in state=device"
@@ -1833,7 +1831,6 @@ watch_streaming_once() {
     metrics_json="$(watch_session_metrics_json "$serial" "$stream_port")"
 
     state="$(json_string_field "$status_json" "state")"
-    profile="$(json_string_field "$status_json" "profile")"
     encoder="$(json_string_field "$status_json" "encoder")"
     target_fps="$(json_scalar_field "$status_json" "fps")"
     recv_fps="$(json_scalar_field "$metrics_json" "recv_fps")"
@@ -1842,11 +1839,10 @@ watch_streaming_once() {
     bitrate="$(json_scalar_field "$status_json" "bitrate_kbps")"
     reverse_ok="$(watch_adb_reverse_has_port "$serial" "$stream_port")"
 
-    printf '%-18s %-6s %-10s %-12s %-6s %-6s %-7s %-7s %-7s %-8s %-7s\n' \
+    printf '%-18s %-6s %-10s %-6s %-6s %-7s %-7s %-7s %-8s %-7s\n' \
       "$serial" \
       "${stream_port}" \
       "$(watch_status_label "${state:-unknown}")" \
-      "${profile:-unknown}" \
       "${target_fps:-?}" \
       "${recv_fps:-0}" \
       "${present_fps:-0}" \
@@ -2036,11 +2032,6 @@ deps_virtual_install() {
   "$ROOT_DIR/scripts/virtual-deps-install.sh" "$@"
 }
 
-train_wizard() {
-  require_cmd python3
-  "$ROOT_DIR/host/training/wizard.py" "$@"
-}
-
 group="${1:-}"
 cmd="${2:-}"
 
@@ -2089,12 +2080,6 @@ case "$group" in
       install-release|release-install) android_install_release ;;
       deploy-release|release-deploy)   android_deploy_release ;;
       *)              print_help; exit 1 ;;
-    esac
-    ;;
-  train)
-    case "$cmd" in
-      wizard|tui|run) shift 2; train_wizard "$@" ;;
-      *) print_help; exit 1 ;;
     esac
     ;;
   deps)

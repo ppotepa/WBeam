@@ -21,11 +21,16 @@ check_endpoint /presets
 check_endpoint /metrics
 
 
-echo "[wbeam-test] apply presets"
-for profile in lowlatency balanced ultra; do
-  curl -sSf -X POST "$BASE/apply" -H 'Content-Type: application/json' -d "{\"profile\":\"$profile\"}" >/tmp/wbeam_apply.json
-  jq -e --arg p "$profile" '.active_config.profile == $p' /tmp/wbeam_apply.json >/dev/null
-  echo "  ok: $profile"
+echo "[wbeam-test] apply generic configs"
+for mode in h264 h265 rawpng; do
+  case "$mode" in
+    h264) payload='{"encoder":"h264","size":"1280x800","fps":60,"bitrate_kbps":10000}' ;;
+    h265) payload='{"encoder":"h265","size":"1920x1080","fps":60,"bitrate_kbps":25000}' ;;
+    rawpng) payload='{"encoder":"rawpng","size":"1280x720","fps":20,"bitrate_kbps":12000}' ;;
+  esac
+  curl -sSf -X POST "$BASE/apply" -H 'Content-Type: application/json' -d "$payload" >/tmp/wbeam_apply.json
+  jq -e --arg e "$mode" '.active_config.profile == "default" and .active_config.encoder == $e' /tmp/wbeam_apply.json >/dev/null
+  echo "  ok: $mode"
 done
 
 echo "[wbeam-test] idempotent stop"
@@ -40,9 +45,9 @@ fi
 echo "[wbeam-test] PASS"
 cat <<MANUAL
 Manual matrix still required:
-1. 1080p60 lowlatency stream
-2. 1080p60 balanced stream
-3. 1440p60 ultra stream
+1. 1280x800 h264 stream
+2. 1080p60 h265 stream
+3. 720p20 rawpng stream
 4. USB reconnect while streaming
 5. host daemon restart while app is open
 6. revoke/restore screen-share permission in KDE portal

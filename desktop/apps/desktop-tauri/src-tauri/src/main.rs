@@ -94,8 +94,6 @@ struct VirtualDepsInstallStatus {
 #[serde(rename_all = "snake_case")]
 struct StartConfigPatch {
     #[serde(skip_serializing_if = "Option::is_none")]
-    profile: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     encoder: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     size: Option<String>,
@@ -103,7 +101,7 @@ struct StartConfigPatch {
 
 impl StartConfigPatch {
     fn is_empty(&self) -> bool {
-        self.profile.is_none() && self.encoder.is_none() && self.size.is_none()
+        self.encoder.is_none() && self.size.is_none()
     }
 }
 
@@ -675,11 +673,6 @@ fn daemon_stream_state_and_port(serial: &str, stream_port: Option<u16>) -> Optio
         .or(stream_port)
         .unwrap_or(0);
     Some((state.to_string(), resolved_port))
-}
-
-fn normalize_profile_name(value: Option<String>) -> Option<String> {
-    let trimmed = value.as_deref().map(str::trim).filter(|v| !v.is_empty())?;
-    Some(trimmed.to_string())
 }
 
 fn normalize_encoder_name(value: Option<String>) -> Option<String> {
@@ -1485,7 +1478,6 @@ fn device_connect(
     serial: String,
     stream_port: u16,
     display_mode: Option<String>,
-    connect_profile: Option<String>,
     connect_encoder: Option<String>,
     connect_size: Option<String>,
 ) -> Result<String, String> {
@@ -1505,7 +1497,6 @@ fn device_connect(
         effective_stream_port = 5000;
     }
     let start_patch = StartConfigPatch {
-        profile: normalize_profile_name(connect_profile),
         encoder: normalize_encoder_name(connect_encoder),
         size: normalize_size_name(connect_size),
     };
@@ -1533,12 +1524,11 @@ fn device_connect(
         "device_connect",
         "begin",
         &format!(
-            "serial={} requested_port={} effective_port={} requested_mode={} profile={} encoder={} size={}",
+            "serial={} requested_port={} effective_port={} requested_mode={} encoder={} size={}",
             serial,
             stream_port,
             effective_stream_port,
             normalized_mode,
-            start_patch.profile.as_deref().unwrap_or("-"),
             start_patch.encoder.as_deref().unwrap_or("-"),
             start_patch.size.as_deref().unwrap_or("-")
         ),

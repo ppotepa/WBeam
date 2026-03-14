@@ -80,7 +80,6 @@ export class HostApiManager {
           serial: device.serial,
           streamPort: device.streamPort,
           displayMode,
-          connectProfile: connectConfig?.profile,
           connectEncoder: connectConfig?.encoder,
           connectSize: connectConfig?.size,
         }),

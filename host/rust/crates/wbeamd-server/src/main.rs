@@ -9,10 +9,9 @@ use axum::response::IntoResponse;
 use axum::Json;
 use clap::Parser;
 use serde::Deserialize;
-use serde_json::Value;
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
-use wbeamd_api::{ClientHelloRequest, ClientMetricsRequest, ConfigPatch};
+use wbeamd_api::{ClientMetricsRequest, ConfigPatch};
 use wbeamd_core::DaemonCore;
 
 mod server;
@@ -22,10 +21,6 @@ use server::runtime_utils::{
     core_error_response, fill_pseudorandom, shutdown_signal, workspace_root_from_manifest,
 };
 use server::session_registry::{SessionQuery, SessionRegistry};
-use server::trainer_models::*;
-use server::trainer_support::{
-    resolve_connection_mode, resolve_trainer_overlay_payload,
-};
 
 #[derive(Debug, Parser)]
 #[command(name = "wbeamd-rust", about = "WBeam host daemon in Rust")]
@@ -45,7 +40,6 @@ struct Args {
 #[derive(Clone)]
 struct AppState {
     sessions: Arc<SessionRegistry>,
-    trainer: Arc<TrainerState>,
 }
 
 #[tokio::main]
@@ -98,8 +92,7 @@ async fn main() {
         args.control_port,
         core.clone(),
     ));
-    let trainer = Arc::new(TrainerState::new(root.clone(), args.control_port));
-    let app_state = AppState { sessions, trainer };
+    let app_state = AppState { sessions };
 
     let app = build_router(app_state.clone());
 
@@ -188,34 +181,12 @@ async fn get_metrics(
     Query(query): Query<SessionQuery>,
 ) -> impl IntoResponse {
     let serial = query.serial.as_deref();
-    let stream_port = query.stream_port.unwrap_or(state.sessions.base_stream_port);
-    let connection_mode = resolve_connection_mode(
-        state.trainer.as_ref(),
-        serial.map(str::trim).filter(|s| !s.is_empty()),
-        stream_port,
-    )
-    .await;
     let core = state
         .sessions
         .resolve_core_readonly(serial, query.stream_port)
         .await
         .unwrap_or_else(|| state.sessions.default_core());
-    let mut payload = serde_json::to_value(core.metrics().await)
-        .unwrap_or_else(|_| serde_json::json!({}));
-    if let Value::Object(ref mut obj) = payload {
-        let serial_opt = query.serial.as_deref().map(str::trim).filter(|s| !s.is_empty());
-        let (hud_active, hud_text, hud_json) = resolve_trainer_overlay_payload(serial_opt, stream_port);
-        obj.insert(
-            "connection_mode".to_string(),
-            Value::String(connection_mode.to_string()),
-        );
-        obj.insert("trainer_hud_active".to_string(), Value::Bool(hud_active));
-        obj.insert(
-            "trainer_hud_text".to_string(),
-            Value::String(hud_text.unwrap_or_default()),
-        );
-        obj.insert("trainer_hud_json".to_string(), hud_json.unwrap_or(Value::Null));
-    }
+    let payload = serde_json::to_value(core.metrics().await).unwrap_or_else(|_| serde_json::json!({}));
     Json(payload)
 }
 
@@ -367,19 +338,10 @@ async fn post_client_metrics(
     }
 }
 
-async fn post_client_hello(
-    State(_state): State<AppState>,
-    body: Option<Json<ClientHelloRequest>>,
-) -> impl IntoResponse {
-    let payload = body.map(|Json(v)| v).unwrap_or_default();
-    let resp = wbeamd_core::resolver::resolve_profile_for_client(&payload);
-    (StatusCode::OK, Json(resp)).into_response()
-}
-
 async fn auto_layout_wayland_portal_outputs(
     sessions: Arc<SessionRegistry>,
     serial: Option<&str>,
-    pre_enabled_outputs: Option<&HashSet<String>>,
+    pre_enabled_outputs: Option<&std::collections::HashSet<String>>,
 ) -> Result<(), String> {
     if !wayland_portal_auto_layout_enabled() {
         return Ok(());
