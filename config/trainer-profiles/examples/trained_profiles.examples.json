@@ -4,6 +4,7 @@
     {
       "key": "example-1-h264",
       "name": "example_1.h264",
+      "backend": "wayland_portal",
       "codec": "h264",
       "objective": "balanced",
       "workload": "motion/game:synthetic-120-12s",
@@ -16,6 +17,7 @@
     {
       "key": "example-2-h264",
       "name": "example_2.h264",
+      "backend": "wayland_portal",
       "codec": "h264",
       "objective": "latency-first",
       "workload": "desktop/text",
@@ -28,6 +30,7 @@
     {
       "key": "example-3-h265",
       "name": "example_3.h265",
+      "backend": "wayland_portal",
       "codec": "h265",
       "objective": "quality-first",
       "workload": "mixed",
@@ -40,6 +43,7 @@
     {
       "key": "example-4-rawpng",
       "name": "example_4.rawpng",
+      "backend": "wayland_portal",
       "codec": "rawpng",
       "objective": "quality-first",
       "workload": "desktop/text",

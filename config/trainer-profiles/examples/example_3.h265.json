@@ -1,6 +1,7 @@
 {
   "key": "example-3-h265",
   "name": "example_3.h265",
+  "backend": "wayland_portal",
   "codec": "h265",
   "objective": "quality-first",
   "workload": "mixed",

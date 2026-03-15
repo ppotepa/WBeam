@@ -1,6 +1,7 @@
 {
   "key": "example-4-rawpng",
   "name": "example_4.rawpng",
+  "backend": "wayland_portal",
   "codec": "rawpng",
   "objective": "quality-first",
   "workload": "desktop/text",

@@ -111,3 +111,9 @@ delivery.md
 agents.md
 docs/24fps.mp4
 src/
+
+# Runtime per-device state (written by daemon, not source)
+host/rust/config/runtime_state*.json
+
+# Source export zip
+code.zip

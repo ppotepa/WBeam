@@ -1,6 +1,7 @@
 {
   "key": "example-2-h264",
   "name": "example_2.h264",
+  "backend": "wayland_portal",
   "codec": "h264",
   "objective": "latency-first",
   "workload": "desktop/text",
