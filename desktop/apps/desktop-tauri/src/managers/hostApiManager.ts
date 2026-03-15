@@ -84,6 +84,7 @@ export class HostApiManager {
           connectEncoder: connectConfig?.encoder,
           connectSize: connectConfig?.size,
           connectProfileName: connectConfig?.profileName,
+          connectCaptureBackend: connectConfig?.captureBackend,
         }),
         10000,
         "device_connect",

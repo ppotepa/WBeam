@@ -843,6 +843,7 @@ fn daemon_post_action(
     stream_port: u16,
     display_mode: Option<&str>,
     start_patch: Option<&StartConfigPatch>,
+    capture_backend: Option<&str>,
 ) -> Result<String, String> {
     let control_port = wbeam_control_port();
     let mut url = format!(
@@ -860,6 +861,13 @@ fn daemon_post_action(
             if let Some(mode_param) = mode_param {
                 url.push_str("&display_mode=");
                 url.push_str(mode_param);
+            }
+        }
+        if let Some(backend) = capture_backend {
+            let b = backend.trim().to_lowercase();
+            if !b.is_empty() && b != "auto" {
+                url.push_str("&capture_backend=");
+                url.push_str(&b);
             }
         }
     }
@@ -1635,6 +1643,7 @@ fn device_connect(
     connect_encoder: Option<String>,
     connect_size: Option<String>,
     connect_profile_name: Option<String>,
+    connect_capture_backend: Option<String>,
 ) -> Result<String, String> {
     service_ready_for_device_actions()?;
     let mut effective_stream_port = resolve_stream_port_for_serial(&serial, stream_port);
@@ -1794,6 +1803,7 @@ fn device_connect(
         effective_stream_port,
         Some(&normalized_mode),
         Some(&start_patch),
+        connect_capture_backend.as_deref(),
     ) {
         Ok(v) => v,
         Err(err) => {
@@ -1841,7 +1851,7 @@ fn device_disconnect(serial: String, stream_port: u16) -> Result<String, String>
             serial, stream_port, effective_stream_port
         ),
     );
-    let mut res = daemon_post_action("stop", &serial, effective_stream_port, None, None);
+    let mut res = daemon_post_action("stop", &serial, effective_stream_port, None, None, None);
     if res.is_err() {
         // Fallback: stream port may have drifted from stale UI mapping.
         let control_port = wbeam_control_port();

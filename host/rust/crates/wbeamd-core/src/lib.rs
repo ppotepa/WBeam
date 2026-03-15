@@ -401,6 +401,7 @@ struct Inner {
     last_no_present_recovery_at: Option<Instant>,
     presets: BTreeMap<String, ActiveConfig>,
     requested_display_mode: String,
+    capture_backend_override: Option<String>,
     display_runtime: Option<display_backends::RuntimeHandle>,
     pending_runtime_snapshot_reason: String,
 }
@@ -437,6 +438,7 @@ impl Inner {
             last_no_present_recovery_at: None,
             presets,
             requested_display_mode: "duplicate".to_string(),
+            capture_backend_override: None,
             display_runtime: None,
             pending_runtime_snapshot_reason: "init".to_string(),
         }
@@ -503,6 +505,11 @@ impl DaemonCore {
         let normalized = Self::normalize_display_mode(mode);
         let mut inner = self.inner.lock().await;
         inner.requested_display_mode = normalized.to_string();
+    }
+
+    pub async fn set_capture_backend(&self, backend: Option<&str>) {
+        let mut inner = self.inner.lock().await;
+        inner.capture_backend_override = backend.map(|s| s.trim().to_lowercase());
     }
 
     async fn stop_virtual_display_if_any(&self) {
@@ -1234,7 +1241,13 @@ impl DaemonCore {
     }
 
     async fn start_with_config(&self, cfg: ActiveConfig, reason: &str) -> Result<(), CoreError> {
-        let requested_display_mode = { self.inner.lock().await.requested_display_mode.clone() };
+        let (requested_display_mode, capture_backend_override) = {
+            let inner = self.inner.lock().await;
+            (
+                inner.requested_display_mode.clone(),
+                inner.capture_backend_override.clone(),
+            )
+        };
         let benchmark_mode = requested_display_mode.eq_ignore_ascii_case("benchmark_game");
         let requested_mode = if benchmark_mode {
             display_backends::DisplayMode::Duplicate
@@ -1393,7 +1406,12 @@ impl DaemonCore {
             .unwrap_or_else(|| self.root.join("host/rust/target/release/wbeamd-streamer"));
 
         let mut cmd;
-        let capture_backend = self.host_probe.capture_mode_name();
+        // Priority: per-session override > WBEAM_CAPTURE_BACKEND env/config > auto-detected probe
+        let probed_backend = self.host_probe.capture_mode_name();
+        let capture_backend = capture_backend_override
+            .or_else(|| wbeam_setting(&self.settings, "WBEAM_CAPTURE_BACKEND"))
+            .unwrap_or_else(|| probed_backend.to_string());
+        let capture_backend = capture_backend.as_str();
         let wayland_virtual_source =
             !benchmark_mode && capture_backend == "wayland_portal" && requested_mode.is_virtual();
         self.stop_virtual_display_if_any().await;
@@ -1476,6 +1494,7 @@ impl DaemonCore {
                 .arg(match capture_backend {
                     "x11_gst" => "x11",
                     "wayland_portal" => "wayland-portal",
+                    "evdi" => "evdi",
                     _ => "auto",
                 })
                 .arg("--port")

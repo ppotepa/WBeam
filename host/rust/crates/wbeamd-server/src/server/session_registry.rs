@@ -18,6 +18,7 @@ pub(crate) struct SessionQuery {
     pub(crate) serial: Option<String>,
     pub(crate) stream_port: Option<u16>,
     pub(crate) display_mode: Option<String>,
+    pub(crate) capture_backend: Option<String>,
 }
 
 pub(crate) struct SessionRegistry {
