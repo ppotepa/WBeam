@@ -110,7 +110,7 @@ delivery.md
 # Local/session artifacts (not part of repository sources)
 agents.md
 docs/24fps.mp4
-src/
+/src/
 
 # Runtime per-device state (written by daemon, not source)
 host/rust/config/runtime_state*.json
