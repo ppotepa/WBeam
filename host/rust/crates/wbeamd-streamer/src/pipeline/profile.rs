@@ -32,7 +32,7 @@ pub(super) fn buffer_profile(mode: StreamMode, fps: u32, mode_png: bool) -> Buff
             BufferProfile {
                 queue_buffers,
                 appsink_buffers,
-                queue_leaky: "no",
+                queue_leaky: "upstream",
                 appsink_drop: false,
                 appsink_sync: false,
                 use_videorate: false,
@@ -45,7 +45,7 @@ pub(super) fn buffer_profile(mode: StreamMode, fps: u32, mode_png: bool) -> Buff
             BufferProfile {
                 queue_buffers,
                 appsink_buffers,
-                queue_leaky: "no",
+                queue_leaky: "upstream",
                 appsink_drop: false,
                 appsink_sync: true,
                 use_videorate: false,

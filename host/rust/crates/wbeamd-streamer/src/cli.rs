@@ -43,7 +43,7 @@ pub struct Args {
     #[arg(long, default_value = "h265",
             value_parser = ["h264", "h265", "rawpng"])]
     pub encoder: String,
-    #[arg(long, default_value = "embedded", value_parser = ["hidden", "embedded", "metadata"])]
+    #[arg(long, default_value = "hidden", value_parser = ["hidden", "embedded", "metadata"])]
     pub cursor_mode: String,
     #[arg(long, default_value = "/tmp/wbeam-frames")]
     pub debug_dir: String,

@@ -59,13 +59,13 @@ In **Run Config**:
 - choose **Use prerendered scenes for training**
   - enabled: trains on deterministic synthetic scenes (`display_mode=benchmark_game`)
   - disabled: trains on virtual desktop (`display_mode=virtual_monitor`)
-- set timing intervals (defaults are preserved unless you change them):
-  - warmup window
-  - sample interval
-  - sample window
+  - **Note:** Wayland virtual monitor capture is capped at ~60 fps by the compositor (KDE/GNOME ScreenCast limitation). For training at higher frame rates use prerendered scenes.
+- set **Child train time** (seconds)
+  - this is the full time budget per child
+  - default is 5s (e.g. set 10 => each child runs for 10s)
 - provide a profile name and start evolution
 
-When a run completes, the tuner shows a **Final profile settings** summary box with score and winner details (bitrate/fps/intra, source mode, intervals, reason). Saved profiles are written to:
+When a run completes, the tuner shows a **Final profile settings** summary box with score and winner details (bitrate/fps/intra, source mode, child train time, reason). Saved profiles are written to:
 
 `~/.config/wbeam/trained_profiles.json`
 

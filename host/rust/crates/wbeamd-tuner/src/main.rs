@@ -103,16 +103,10 @@ impl Step {
 const WORKLOAD_DESKTOP_TEXT: &str = "desktop/text";
 const WORKLOAD_GAME_BENCHMARK: &str = "motion/game:synthetic-120-12s";
 const WORKLOAD_MIXED: &str = "mixed";
+const CHILD_TRAIN_TIME_DEFAULT_SEC: u64 = 5;
+const CHILD_TRAIN_TIME_MIN_SEC: u64 = 1;
+const CHILD_TRAIN_TIME_MAX_SEC: u64 = 120;
 const SAMPLE_INTERVAL_MS: u64 = 300;
-const SAMPLE_WINDOW_DEFAULT_MS: u64 = 1_800;
-const SAMPLE_WINDOW_BENCHMARK_MS: u64 = 12_000;
-const WARMUP_WINDOW_DEFAULT_MS: u64 = 5_000;
-const WARMUP_WINDOW_MIN_MS: u64 = 1_000;
-const WARMUP_WINDOW_MAX_MS: u64 = 20_000;
-const SAMPLE_INTERVAL_MIN_MS: u64 = 100;
-const SAMPLE_INTERVAL_MAX_MS: u64 = 2_000;
-const SAMPLE_WINDOW_MIN_MS: u64 = 800;
-const SAMPLE_WINDOW_MAX_MS: u64 = 30_000;
 
 fn nudge_index(index: &mut usize, len: usize, delta: i32) {
     if len == 0 || delta == 0 {
@@ -241,9 +235,7 @@ struct EvolutionConfig {
     objective: String,
     workload: String,
     use_prerendered_scenes: bool,
-    warmup_window_ms: u64,
-    sample_interval_ms: u64,
-    sample_window_ms: u64,
+    child_train_time_sec: u64,
     seed: CandidateParams,
 }
 
@@ -399,9 +391,7 @@ struct RunMetadata {
     workload: String,
     display_mode: String,
     source_label: String,
-    warmup_window_ms: u64,
-    sample_interval_ms: u64,
-    sample_window_ms: u64,
+    child_train_time_sec: u64,
 }
 
 #[derive(Debug)]
@@ -415,10 +405,7 @@ struct App {
     selected_objective: usize,
     selected_workload: usize,
     use_prerendered_scenes: bool,
-    warmup_window_ms: u64,
-    sample_interval_ms: u64,
-    sample_window_ms: u64,
-    sample_window_customized: bool,
+    child_train_time_sec: u64,
     target_focus: usize,
     probe_focus: usize,
     run_focus: usize,
@@ -429,6 +416,7 @@ struct App {
     probe: ProbeState,
     probe_ran: bool,
     logs: VecDeque<String>,
+    run_log_lines: Vec<String>,
     engine: Option<EvolutionHandle>,
     evolution_running: bool,
     evolution_done: bool,
@@ -462,10 +450,7 @@ impl App {
             selected_objective: 0,
             selected_workload: 1,
             use_prerendered_scenes: true,
-            warmup_window_ms: WARMUP_WINDOW_DEFAULT_MS,
-            sample_interval_ms: SAMPLE_INTERVAL_MS,
-            sample_window_ms: SAMPLE_WINDOW_BENCHMARK_MS,
-            sample_window_customized: false,
+            child_train_time_sec: CHILD_TRAIN_TIME_DEFAULT_SEC,
             target_focus: 0,
             probe_focus: 0,
             run_focus: 0,
@@ -476,6 +461,7 @@ impl App {
             probe: ProbeState::default(),
             probe_ran: false,
             logs: VecDeque::new(),
+            run_log_lines: Vec::new(),
             engine: None,
             evolution_running: false,
             evolution_done: false,
@@ -495,10 +481,12 @@ impl App {
     }
 
     fn log(&mut self, msg: impl Into<String>) {
+        let line = msg.into();
         while self.logs.len() > 120 {
             self.logs.pop_front();
         }
-        self.logs.push_back(msg.into());
+        self.logs.push_back(line.clone());
+        self.run_log_lines.push(line);
     }
 
     fn selected_codec_name(&self) -> &'static str {
@@ -511,14 +499,6 @@ impl App {
 
     fn selected_workload_name(&self) -> &'static str {
         self.workloads[self.selected_workload]
-    }
-
-    fn default_sample_window_ms_for_source(use_prerendered_scenes: bool) -> u64 {
-        if use_prerendered_scenes {
-            SAMPLE_WINDOW_BENCHMARK_MS
-        } else {
-            SAMPLE_WINDOW_DEFAULT_MS
-        }
     }
 
     fn source_label(&self) -> &'static str {
@@ -539,9 +519,6 @@ impl App {
 
     fn set_use_prerendered_scenes(&mut self, enabled: bool) {
         self.use_prerendered_scenes = enabled;
-        if !self.sample_window_customized {
-            self.sample_window_ms = Self::default_sample_window_ms_for_source(enabled);
-        }
     }
 
     fn toggle_use_prerendered_scenes(&mut self) {
@@ -553,35 +530,11 @@ impl App {
         match self.run_focus {
             3 => {
                 nudge_u64(
-                    &mut self.warmup_window_ms,
-                    WARMUP_WINDOW_MIN_MS,
-                    WARMUP_WINDOW_MAX_MS,
-                    i64::from(delta) * 250,
+                    &mut self.child_train_time_sec,
+                    CHILD_TRAIN_TIME_MIN_SEC,
+                    CHILD_TRAIN_TIME_MAX_SEC,
+                    i64::from(delta),
                 );
-            }
-            4 => {
-                nudge_u64(
-                    &mut self.sample_interval_ms,
-                    SAMPLE_INTERVAL_MIN_MS,
-                    SAMPLE_INTERVAL_MAX_MS,
-                    i64::from(delta) * 50,
-                );
-                if self.sample_window_ms < self.sample_interval_ms {
-                    self.sample_window_ms = self.sample_interval_ms;
-                    self.sample_window_customized = true;
-                }
-            }
-            5 => {
-                nudge_u64(
-                    &mut self.sample_window_ms,
-                    SAMPLE_WINDOW_MIN_MS,
-                    SAMPLE_WINDOW_MAX_MS,
-                    i64::from(delta) * 250,
-                );
-                if self.sample_window_ms < self.sample_interval_ms {
-                    self.sample_window_ms = self.sample_interval_ms;
-                }
-                self.sample_window_customized = true;
             }
             _ => {}
         }
@@ -754,6 +707,7 @@ impl App {
         self.evolution_done = false;
         self.winner_applied = false;
         self.last_saved_profile = None;
+        self.run_log_lines.clear();
 
         let cfg = EvolutionConfig {
             codec: self.selected_codec_name().to_string(),
@@ -762,9 +716,7 @@ impl App {
             objective: self.selected_objective_name().to_string(),
             workload: self.selected_workload_name().to_string(),
             use_prerendered_scenes: self.use_prerendered_scenes,
-            warmup_window_ms: self.warmup_window_ms,
-            sample_interval_ms: self.sample_interval_ms,
-            sample_window_ms: self.sample_window_ms,
+            child_train_time_sec: self.child_train_time_sec,
             seed: self.seed_params(),
         };
 
@@ -860,6 +812,45 @@ impl App {
         }
     }
 
+    fn autosave_run_artifacts(&mut self) {
+        let ts = now_unix_ms();
+        let mut out_dir = PathBuf::from("logs");
+        if fs::create_dir_all(&out_dir).is_err() {
+            out_dir = std::env::temp_dir();
+        }
+
+        // JSON — full results export (same payload as manual 'e')
+        let payload = ExportPayload {
+            codec: self.selected_codec_name().to_string(),
+            objective: self.selected_objective_name().to_string(),
+            workload: self.selected_workload_name().to_string(),
+            generations: self.generations,
+            children: self.children,
+            best: self.best.clone(),
+            results: self.results.clone(),
+            exported_unix_ms: ts,
+        };
+        let json_file = out_dir.join(format!("tuner-{ts}.json"));
+        match serde_json::to_string_pretty(&payload)
+            .ok()
+            .and_then(|c| fs::write(&json_file, c).ok())
+        {
+            Some(_) => {
+                self.exported_file = Some(json_file.display().to_string());
+                self.log(format!("autosave: {}", json_file.display()));
+            }
+            None => self.log("autosave: JSON write failed"),
+        }
+
+        // TXT — full run log (all lines, no 120-line cap)
+        let txt_file = out_dir.join(format!("tuner-{ts}.txt"));
+        let log_content = self.run_log_lines.join("\n");
+        match fs::write(&txt_file, log_content) {
+            Ok(_) => self.log(format!("autosave: {}", txt_file.display())),
+            Err(_) => self.log("autosave: TXT write failed"),
+        }
+    }
+
     fn clear_remote_tuning(&mut self) {
         let _ = self.api.post_json("tuning", &json!({"clear": true}));
     }
@@ -930,9 +921,9 @@ impl App {
             2 => {
                 self.toggle_use_prerendered_scenes();
             }
-            3..=5 => self.adjust_run_timing_value(1),
-            6 => {}
-            7 => {
+            3 => self.adjust_run_timing_value(1),
+            4 => {}
+            5 => {
                 let Some(profile_name) = self.normalized_profile_name() else {
                     self.log("run config: profile name is required");
                     return;
@@ -945,9 +936,7 @@ impl App {
                     workload: self.selected_workload_name().to_string(),
                     display_mode: self.training_display_mode().to_string(),
                     source_label: self.source_label().to_string(),
-                    warmup_window_ms: self.warmup_window_ms,
-                    sample_interval_ms: self.sample_interval_ms,
-                    sample_window_ms: self.sample_window_ms,
+                    child_train_time_sec: self.child_train_time_sec,
                 });
                 self.start_evolution();
                 self.evolution_focus = 0;
@@ -1019,46 +1008,46 @@ impl App {
                 _ => {}
             },
             Step::RunConfig => match code {
-                KeyCode::Up => nudge_index(&mut self.run_focus, 8, -1),
-                KeyCode::Down => nudge_index(&mut self.run_focus, 8, 1),
+                KeyCode::Up => nudge_index(&mut self.run_focus, 6, -1),
+                KeyCode::Down => nudge_index(&mut self.run_focus, 6, 1),
                 KeyCode::Left => {
                     if self.run_focus <= 1 {
                         self.adjust_run_value(-1);
-                    } else if (3..=5).contains(&self.run_focus) {
+                    } else if self.run_focus == 3 {
                         self.adjust_run_timing_value(-1);
                     }
                 }
                 KeyCode::Right => {
                     if self.run_focus <= 1 {
                         self.adjust_run_value(1);
-                    } else if (3..=5).contains(&self.run_focus) {
+                    } else if self.run_focus == 3 {
                         self.adjust_run_timing_value(1);
                     }
                 }
                 KeyCode::Char('+') | KeyCode::Char('=') => {
-                    if (3..=5).contains(&self.run_focus) {
+                    if self.run_focus == 3 {
                         self.adjust_run_timing_value(1);
                     }
                 }
                 KeyCode::Char('-') => {
-                    if (3..=5).contains(&self.run_focus) {
+                    if self.run_focus == 3 {
                         self.adjust_run_timing_value(-1);
                     }
                 }
                 KeyCode::Backspace => {
-                    if self.run_focus == 6 {
+                    if self.run_focus == 4 {
                         self.edit_profile_name(code);
                     }
                 }
                 KeyCode::Char(' ') => {
                     if self.run_focus == 2 {
                         self.toggle_use_prerendered_scenes();
-                    } else if self.run_focus == 6 {
+                    } else if self.run_focus == 4 {
                         self.edit_profile_name(code);
                     }
                 }
                 KeyCode::Char(_) => {
-                    if self.run_focus == 6 {
+                    if self.run_focus == 4 {
                         self.edit_profile_name(code);
                     }
                 }
@@ -1134,6 +1123,7 @@ impl App {
                         self.best = Some(best);
                     }
                     self.persist_best_profile();
+                    self.autosave_run_artifacts();
                     self.log("evolution: completed");
                     self.results_focus = 0;
                     self.step = Step::Results;
@@ -1142,6 +1132,7 @@ impl App {
                     self.evolution_running = false;
                     self.evolution_done = true;
                     self.log(format!("evolution failed: {err}"));
+                    self.autosave_run_artifacts();
                     self.results_focus = 0;
                     self.step = Step::Results;
                 }
@@ -1485,16 +1476,10 @@ fn run_evolution_worker(
     let mut parent_pool = vec![cfg.seed.clone()];
     let mut best: Option<CandidateResult> = None;
     let encoder = map_codec_to_encoder(&codec);
-    let warmup_window_ms = cfg
-        .warmup_window_ms
-        .clamp(WARMUP_WINDOW_MIN_MS, WARMUP_WINDOW_MAX_MS);
-    let sample_interval_ms = cfg
-        .sample_interval_ms
-        .clamp(SAMPLE_INTERVAL_MIN_MS, SAMPLE_INTERVAL_MAX_MS);
-    let sample_window_floor = SAMPLE_WINDOW_MIN_MS.max(sample_interval_ms);
-    let sample_window_ms = cfg
-        .sample_window_ms
-        .clamp(sample_window_floor, SAMPLE_WINDOW_MAX_MS);
+    let child_train_time_sec = cfg
+        .child_train_time_sec
+        .clamp(CHILD_TRAIN_TIME_MIN_SEC, CHILD_TRAIN_TIME_MAX_SEC);
+    let child_train_window_ms = child_train_time_sec.saturating_mul(1000);
     let display_mode = if cfg.use_prerendered_scenes {
         "benchmark_game"
     } else {
@@ -1512,15 +1497,14 @@ fn run_evolution_worker(
         ));
     }
     let _ = tx.send(EngineEvent::Log(format!(
-        "run: codec={} objective={} workload={} source={} display_mode={} warmup={}ms sample_interval={}ms sample_window={}ms",
+        "run: codec={} objective={} workload={} source={} display_mode={} child_train={}s sample_interval={}ms",
         cfg.codec,
         cfg.objective,
         cfg.workload,
         source_name,
         display_mode,
-        warmup_window_ms,
-        sample_interval_ms,
-        sample_window_ms
+        child_train_time_sec,
+        SAMPLE_INTERVAL_MS
     )));
 
     let start_body = json!({
@@ -1671,70 +1655,9 @@ fn run_evolution_worker(
                 }),
             );
 
-            let mut warmup_ok = false;
-            let warmup_window = Duration::from_millis(warmup_window_ms);
-            let warmup_poll_interval = Duration::from_millis(250);
-            let warmup_started_at = Instant::now();
-            let mut warmup_poll: u32 = 0;
-            let mut warmup_next_tick = warmup_started_at;
-            loop {
-                if stop.load(Ordering::SeqCst) {
-                    break 'gens;
-                }
-                warmup_poll = warmup_poll.saturating_add(1);
-                if let Ok(payload) = api.get_json("metrics") {
-                    let snap = parse_connection_snapshot(&payload);
-                    let _ = tx.send(EngineEvent::Connection(snap.clone()));
-                    if let Some(sample) = parse_metric_sample(&payload) {
-                        if warmup_poll == 1
-                            || warmup_poll % 5 == 0
-                            || sample.recv_fps > 1.0
-                            || sample.present_fps > 1.0
-                        {
-                            let elapsed_ms = warmup_started_at.elapsed().as_millis() as u64;
-                            let _ = tx.send(EngineEvent::Log(format!(
-                                "warmup: g{generation}/c{child} poll={} t={}/{}ms state={} run={} recv={:.1} present={:.1}/{:.1} restarts={} reconnects={} err={}",
-                                warmup_poll,
-                                elapsed_ms,
-                                warmup_window_ms,
-                                snap.state,
-                                snap.run_id,
-                                sample.recv_fps,
-                                sample.present_fps,
-                                sample.target_fps,
-                                snap.restart_count,
-                                snap.reconnects,
-                                if snap.last_error.trim().is_empty() {
-                                    "-"
-                                } else {
-                                    snap.last_error.trim()
-                                }
-                            )));
-                        }
-                        if sample.state.eq_ignore_ascii_case("streaming") && sample.recv_fps > 1.0 {
-                            warmup_ok = true;
-                            break;
-                        }
-                    }
-                }
-                if warmup_started_at.elapsed() >= warmup_window {
-                    break;
-                }
-                warmup_next_tick = warmup_next_tick
-                    .checked_add(warmup_poll_interval)
-                    .unwrap_or_else(Instant::now);
-                let now = Instant::now();
-                let sleep_for = warmup_next_tick
-                    .saturating_duration_since(now)
-                    .min(warmup_window.saturating_sub(warmup_started_at.elapsed()));
-                if !sleep_for.is_zero() {
-                    thread::sleep(sleep_for);
-                }
-            }
-
             let mut samples = Vec::new();
-            let sample_window = Duration::from_millis(sample_window_ms);
-            let sample_interval = Duration::from_millis(sample_interval_ms);
+            let sample_window = Duration::from_millis(child_train_window_ms);
+            let sample_interval = Duration::from_millis(SAMPLE_INTERVAL_MS);
             let sample_started_at = Instant::now();
             let mut sample_idx: u32 = 0;
             let mut next_tick = sample_started_at;
@@ -1749,7 +1672,7 @@ fn run_evolution_worker(
                     if let Some(sample) = parse_metric_sample(&payload) {
                         let elapsed_ms = sample_started_at.elapsed().as_millis() as u64;
                         let _ = tx.send(EngineEvent::Log(format!(
-                            "sample: g{generation}/c{child} idx={sample_idx} t={elapsed_ms}/{sample_window_ms}ms state={} run={} recv={:.1} present={:.1}/{:.1} restarts={} reconnects={}",
+                            "train: g{generation}/c{child} idx={sample_idx} t={elapsed_ms}/{child_train_window_ms}ms state={} run={} recv={:.1} present={:.1}/{:.1} restarts={} reconnects={}",
                             snap.state,
                             snap.run_id,
                             sample.recv_fps,
@@ -1774,12 +1697,6 @@ fn run_evolution_worker(
                 if !sleep_for.is_zero() {
                     thread::sleep(sleep_for);
                 }
-            }
-            if !warmup_ok {
-                let _ = tx.send(EngineEvent::Log(format!(
-                    "warmup: g{generation}/c{child} did not reach STREAMING+recv before sampling (warmup={}ms)",
-                    warmup_window_ms
-                )));
             }
             let _ = tx.send(EngineEvent::Log(format!(
                 "metrics: g{generation}/c{child} {}",
@@ -2376,11 +2293,9 @@ fn draw_run_config(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app:
         app.profile_name_input.clone()
     };
     let source_tip = if app.use_prerendered_scenes {
-        "Benchmark source: synthetic in-memory 2D game (12s loop, 4 scenes). Defaults keep existing timing until changed."
-            .to_string()
+        "Benchmark source: synthetic in-memory 2D game (12s loop, 4 scenes).".to_string()
     } else {
-        "Training source: virtual desktop capture (display_mode=virtual_monitor). Defaults keep existing timing until changed."
-            .to_string()
+        "Training source: virtual desktop capture (display_mode=virtual_monitor).".to_string()
     };
     let lines = vec![
         focus_line(
@@ -2404,27 +2319,19 @@ fn draw_run_config(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app:
         ),
         focus_line(
             app.run_focus == 3,
-            format!("Warmup window: {} ms   (←/→, +/-)", app.warmup_window_ms),
-        ),
-        focus_line(
-            app.run_focus == 4,
             format!(
-                "Sample interval: {} ms   (←/→, +/-)",
-                app.sample_interval_ms
+                "Child train time: {} s   (←/→, +/-)",
+                app.child_train_time_sec
             ),
         ),
         focus_line(
-            app.run_focus == 5,
-            format!("Sample window: {} ms   (←/→, +/-)", app.sample_window_ms),
-        ),
-        focus_line(
-            app.run_focus == 6,
+            app.run_focus == 4,
             format!("Profile name: {}   (type + Backspace)", profile_name),
         ),
         Line::from(format!("Display mode: {}", app.training_display_mode())),
         Line::from(format!("Seed cfg:  {:?}", app.seed_params())),
         Line::from(""),
-        action_line(app.run_focus == 7, "Start evolution"),
+        action_line(app.run_focus == 5, "Start evolution"),
         Line::from(""),
         Line::from(source_tip),
     ];
@@ -2580,8 +2487,8 @@ fn final_profile_summary_lines(app: &App) -> Vec<Line<'static>> {
             run.source_label, run.display_mode
         )));
         lines.push(Line::from(format!(
-            "Intervals: warmup={}ms sample={}ms window={}ms",
-            run.warmup_window_ms, run.sample_interval_ms, run.sample_window_ms
+            "Child train time: {}s   Sample interval: {}ms",
+            run.child_train_time_sec, SAMPLE_INTERVAL_MS
         )));
     }
     lines.push(Line::from(format!(

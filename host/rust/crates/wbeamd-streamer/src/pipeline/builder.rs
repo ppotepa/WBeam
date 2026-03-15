@@ -36,10 +36,26 @@ pub fn make_pipeline(
     let mode_png = is_png(&cfg.encoder);
     let encoder_name = pick_encoder(&cfg.encoder)?;
     let hevc = is_hevc(&cfg.encoder);
+    let is_portal = matches!(capture, PreparedCapture::Wayland(_));
     let mut profile = buffer_profile(cfg.stream_mode, cfg.fps, mode_png);
     profile.queue_buffers = cfg.queue_max_buffers.max(1);
     profile.appsink_buffers = cfg.appsink_max_buffers.max(1);
     profile.queue_time_ns = (cfg.queue_max_time_ms.max(1) as u64) * 1_000_000u64;
+
+    // Portal (Wayland PipeWire) delivers frames irregularly — compositor caps
+    // at ~60 Hz and PipeWire scheduling adds jitter.  Tune the pipeline to
+    // absorb that jitter without blocking pipewiresrc:
+    //   leaky=upstream : queue drops oldest frames when full, so pipewiresrc
+    //                    never stalls waiting for the encoder to catch up.
+    //   queue_buffers≥4: smooth out bursts from irregular PipeWire delivery.
+    //   queue_time_ns=0: remove time-based cap; only buffer count governs.
+    if is_portal {
+        profile.queue_leaky = "upstream";
+        if profile.queue_buffers < 4 {
+            profile.queue_buffers = 4;
+        }
+        profile.queue_time_ns = 0;
+    }
     let capture_backend_name = match capture {
         PreparedCapture::Wayland(_) => "wayland_portal",
         PreparedCapture::X11 => "x11",
@@ -184,11 +200,16 @@ pub fn make_pipeline(
         );
     }
     if let Some(rate) = &rate {
-        // drop-only=true: videorate only drops frames to hit target fps; it never
-        // duplicates a frame to pad up to rate.  Duplicated frames waste encoded
-        // bits (CBR rate control still charges them) and cause micro-stutter on
-        // the Android side.
-        let _ = rate.set_property("drop-only", cfg.videorate_drop_only);
+        // For portal sources the compositor caps delivery at ~60 Hz regardless of
+        // the requested fps.  Never let videorate duplicate frames to pad up to a
+        // target rate the compositor cannot supply — duplicates waste CBR budget
+        // and cause micro-stutter on the Android decoder.
+        let effective_drop_only = if is_portal {
+            true
+        } else {
+            cfg.videorate_drop_only
+        };
+        let _ = rate.set_property("drop-only", effective_drop_only);
         let _ = rate.set_property("max-rate", cfg.fps as i32);
         let _ = rate.set_property("average-period", 1_000_000_000u64 / cfg.fps as u64);
     }
@@ -239,7 +260,7 @@ pub fn make_pipeline(
         "h264_nal"
     };
     println!(
-        "[wbeam-effective] requested_encoder={} resolved_backend={} raw_format={} size={}x{} fps={} bitrate_kbps={} cursor_mode={:?} gop={} intra_only={} stream_mode={:?} queue_max_buffers={} queue_max_time_ms={} appsink_max_buffers={} appsink_drop={} appsink_sync={} capture_backend={} parse_mode={} timeout_pull_ms={} timeout_write_ms={} timeout_disconnect={} videorate_drop_only={} pipewire_keepalive_ms={}",
+        "[wbeam-effective] requested_encoder={} resolved_backend={} raw_format={} size={}x{} fps={} bitrate_kbps={} cursor_mode={:?} gop={} intra_only={} stream_mode={:?} queue_max_buffers={} queue_max_time_ms={} appsink_max_buffers={} appsink_drop={} appsink_sync={} capture_backend={} parse_mode={} timeout_pull_ms={} timeout_write_ms={} timeout_disconnect={} videorate_drop_only={} pipewire_keepalive_ms={} portal_queue_leaky={} portal_queue_time_ns={}",
         cfg.encoder,
         encoder_name,
         raw_format,
@@ -251,7 +272,7 @@ pub fn make_pipeline(
         effective_gop,
         cfg.intra_only,
         cfg.stream_mode,
-        cfg.queue_max_buffers.max(1),
+        profile.queue_buffers,
         cfg.queue_max_time_ms.max(1),
         cfg.appsink_max_buffers.max(1),
         profile.appsink_drop,
@@ -261,8 +282,10 @@ pub fn make_pipeline(
         cfg.pull_timeout_ms,
         cfg.write_timeout_ms,
         cfg.disconnect_on_timeout,
-        cfg.videorate_drop_only,
-        cfg.pipewire_keepalive_ms
+        if is_portal { true } else { cfg.videorate_drop_only },
+        cfg.pipewire_keepalive_ms,
+        profile.queue_leaky,
+        profile.queue_time_ns
     );
     if let Some(parse) = &parse {
         // Force h264parse/h265parse out of passthrough mode so it actively
