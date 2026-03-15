@@ -1,6 +1,7 @@
 use std::f32::consts::PI;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use gstreamer as gst;
@@ -448,10 +449,22 @@ pub fn build_source(cfg: &ResolvedConfig) -> Result<gst::Element> {
 
     let frame_counter = Arc::new(AtomicU64::new(0));
     let callback_counter = frame_counter.clone();
+    // Wall-clock start time used to pace frame delivery to the target fps.
+    // Without this, nvenc drains the appsrc buffer in microseconds and
+    // need_data fires thousands of times per second (2000+ fps observed).
+    let start_time = Instant::now();
     src.set_callbacks(
         gst_app::AppSrcCallbacks::builder()
             .need_data(move |appsrc, _| {
                 let frame_idx = callback_counter.fetch_add(1, Ordering::Relaxed);
+
+                // Pace: sleep until this frame is due on wall clock.
+                let due = start_time + Duration::from_nanos(frame_idx.saturating_mul(frame_duration_ns));
+                let now = Instant::now();
+                if due > now {
+                    std::thread::sleep(due - now);
+                }
+
                 let mut buffer = match gst::Buffer::with_size(frame_size) {
                     Ok(b) => b,
                     Err(_) => return,
