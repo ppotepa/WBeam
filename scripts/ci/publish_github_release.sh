@@ -96,6 +96,10 @@ if [[ -n "${CI_COMMIT_TAG:-}" ]]; then
   RELEASE_TAG="${CI_COMMIT_TAG}"
   RELEASE_NAME="${CI_COMMIT_TAG}"
   PRERELEASE_JSON="false"
+elif [[ "${CI_COMMIT_BRANCH:-}" == "release" ]]; then
+  RELEASE_TAG="release-latest"
+  RELEASE_NAME="${RELEASE_TAG} (${WBEAM_VERSION})"
+  PRERELEASE_JSON="false"
 elif [[ "${CI_COMMIT_BRANCH:-}" == "${CI_DEFAULT_BRANCH:-}" ]]; then
   RELEASE_TAG="${CI_DEFAULT_BRANCH:-default}-latest"
   RELEASE_NAME="${RELEASE_TAG} (${WBEAM_VERSION})"
