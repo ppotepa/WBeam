@@ -39,6 +39,8 @@ public final class RuntimeHudOverlayRenderer {
         public long bpHigh;
         public long bpRecover;
         public String reason;
+        public boolean tuningActive;
+        public String tuningLine;
         public String metricChartsHtml;
     }
 
@@ -88,6 +90,8 @@ public final class RuntimeHudOverlayRenderer {
         payload.bpHigh = input.bpHigh;
         payload.bpRecover = input.bpRecover;
         payload.reason = input.reason;
+        payload.tuningActive = input.tuningActive;
+        payload.tuningLine = input.tuningLine;
         payload.metricChartsHtml = input.metricChartsHtml;
         payload.resourceRowsHtml = resourceRowsProvider.buildRows(input.targetFps, input.renderP95);
 

@@ -47,7 +47,7 @@ public final class H264TcpPlayer {
     private static final int  PNG_BUFFER_MAX_FRAMES   = 12;
     private static final int  HELLO_MAGIC             = 0x57425331; // "WBS1"
     private static final int  HELLO_HEADER_SIZE       = 16;
-    private static final byte HELLO_VERSION           = 0x01;
+    private static final byte HELLO_VERSION           = 0x02;
     /** HELLO byte[5] codec flag set by host when stream is HEVC/H.265. */
     private static final byte HELLO_CODEC_HEVC        = 0x01;
     /** HELLO byte[5] codec flag set by host when stream payload is PNG frames. */
@@ -136,7 +136,17 @@ public final class H264TcpPlayer {
     public void stop() {
         running = false;
         closeSocket();
-        if (thread != null) thread.interrupt();
+        if (thread != null) {
+            thread.interrupt();
+            try {
+                // Wait up to 2 s for the decode thread to finish.
+                // This prevents the executor from being torn down while
+                // MediaCodec callbacks are still dispatching.
+                thread.join(2_000);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 
     public boolean isRunning() {
@@ -179,7 +189,7 @@ public final class H264TcpPlayer {
     }
 
     private void framedDecodeLoop(InputStream input, MediaCodec[] codecRef) throws IOException {
-        byte[] helloBuf = new byte[HELLO_HEADER_SIZE];
+        byte[] helloBuf = new byte[WbtpProtocol.HELLO_BUF_SIZE];
         byte[] hdrBuf = new byte[FRAME_HEADER_SIZE];
         byte[] payloadBuf = new byte[FRAME_PAYLOAD_INITIAL_CAP];
 
@@ -198,8 +208,14 @@ public final class H264TcpPlayer {
                 ? "ultra"
                 : (((helloFlags & HELLO_MODE_MASK) == HELLO_MODE_QUALITY) ? "quality" : "stable");
         boolean isHevc = !isPng && (helloFlags & HELLO_CODEC_HEVC) != 0;
-        Log.i(TAG, String.format(Locale.US, "WBTP hello session=0x%016x codec=%s mode=%s",
-                streamSessionId, isPng ? "PNG" : (isHevc ? "HEVC" : "AVC"), modeLabel));
+        // Use authoritative geometry from Hello v2; fall back to UI-side config for v1 servers.
+        int resolvedWidth  = (hello.width  > 0) ? hello.width  : decodeWidth;
+        int resolvedHeight = (hello.height > 0) ? hello.height : decodeHeight;
+        Log.i(TAG, String.format(Locale.US,
+                "WBTP hello session=0x%016x codec=%s mode=%s geometry=%dx%d%s",
+                streamSessionId, isPng ? "PNG" : (isHevc ? "HEVC" : "AVC"), modeLabel,
+                resolvedWidth, resolvedHeight,
+                (hello.width > 0) ? "" : " (fallback)"));
 
         if (isPng) {
             framedDecodeLoopPng(input, hdrBuf, payloadBuf, isUltraMode);
@@ -214,8 +230,8 @@ public final class H264TcpPlayer {
                 statusListener,
                 runtimeState,
                 frameUs,
-                decodeWidth,
-                decodeHeight,
+                resolvedWidth,
+                resolvedHeight,
                 HELLO_CODEC_HEVC,
                 HELLO_CODEC_PNG,
                 HELLO_MODE_MASK,
@@ -237,7 +253,7 @@ public final class H264TcpPlayer {
                 NO_PRESENT_MIN_IN_FRAMES_HARD,
                 STATE_CONNECTING,
                 STATE_STREAMING
-        ).run(input, codecRef, helloBuf, hdrBuf, payloadBuf);
+        ).run(input, codecRef, helloFlags, streamSessionId, hdrBuf, payloadBuf);
     }
 
     private void framedDecodeLoopPng(InputStream input, byte[] hdrBuf, byte[] payloadBuf, boolean isUltraMode) throws IOException {

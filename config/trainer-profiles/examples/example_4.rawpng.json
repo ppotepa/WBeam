@@ -1,0 +1,13 @@
+{
+  "key": "example-4-rawpng",
+  "name": "example_4.rawpng",
+  "backend": "wayland_portal",
+  "codec": "rawpng",
+  "objective": "quality-first",
+  "workload": "desktop/text",
+  "encoder": "rawpng",
+  "bitrate_kbps": 0,
+  "fps": 30,
+  "intra_only": true,
+  "created_unix_ms": 1741000003000
+}

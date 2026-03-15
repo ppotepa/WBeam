@@ -110,3 +110,36 @@ wbeam_apply_tauri_stability_env() {
     fi
   fi
 }
+
+# ─── Canonical loginctl GUI session resolver ────────────────────────────────
+#
+# Outputs the username of the first active GUI session that matches
+# the given remote filter ("any" | "yes" | "no").
+# Returns 0 + user on success, 1 + no output when none found.
+#
+# Usage: user="$(wbeam_resolve_active_gui_user any)"
+#
+wbeam_resolve_active_gui_user() {
+  local remote_filter="${1:-any}"
+  local sid name type state active remote
+
+  while read -r sid _; do
+    [[ -n "${sid:-}" ]] || continue
+    name="$(loginctl show-session "$sid" -p Name --value 2>/dev/null || true)"
+    type="$(loginctl show-session "$sid" -p Type --value 2>/dev/null || true)"
+    state="$(loginctl show-session "$sid" -p State --value 2>/dev/null || true)"
+    active="$(loginctl show-session "$sid" -p Active --value 2>/dev/null || true)"
+    remote="$(loginctl show-session "$sid" -p Remote --value 2>/dev/null || true)"
+    [[ -n "$name" && "$name" != "root" ]] || continue
+    [[ "$active" == "yes" && "$state" == "active" ]] || continue
+    [[ "$type" == "x11" || "$type" == "wayland" ]] || continue
+    case "$remote_filter" in
+      yes) [[ "${remote,,}" == "yes" ]] || continue ;;
+      no)  [[ "${remote,,}" == "no"  ]] || continue ;;
+      *)   ;;  # any: no remote filter
+    esac
+    echo "$name"
+    return 0
+  done < <(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1" "$2}')
+  return 1
+}

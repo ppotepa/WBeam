@@ -151,7 +151,11 @@ pub fn config_for_level(base: &ActiveConfig, level: u8) -> ActiveConfig {
     } else {
         (base.fps.saturating_mul(fps_pct as u32) / 100).clamp(30, 120)
     };
-    let bitrate_max = if cfg.encoder == "h265" { 100_000 } else { 120_000 };
+    let bitrate_max = if cfg.encoder == "h265" {
+        100_000
+    } else {
+        120_000
+    };
     cfg.bitrate_kbps = if png_profile {
         (base.bitrate_kbps.saturating_mul(bitrate_pct) / 100).clamp(4_000, 80_000)
     } else {

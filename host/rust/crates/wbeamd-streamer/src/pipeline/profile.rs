@@ -32,7 +32,7 @@ pub(super) fn buffer_profile(mode: StreamMode, fps: u32, mode_png: bool) -> Buff
             BufferProfile {
                 queue_buffers,
                 appsink_buffers,
-                queue_leaky: "no",
+                queue_leaky: "upstream",
                 appsink_drop: false,
                 appsink_sync: false,
                 use_videorate: false,
@@ -45,9 +45,16 @@ pub(super) fn buffer_profile(mode: StreamMode, fps: u32, mode_png: bool) -> Buff
             BufferProfile {
                 queue_buffers,
                 appsink_buffers,
-                queue_leaky: "no",
-                appsink_drop: false,
-                appsink_sync: true,
+                queue_leaky: "upstream",
+                // drop=true: allow bounded frame loss under backpressure rather
+                // than blocking the whole GStreamer pipeline.  Quality mode still
+                // uses the deepest queues, so in normal operation nothing is
+                // dropped; the setting only fires when the network or sender
+                // cannot keep pace — exactly when stalling would be worse.
+                appsink_drop: true,
+                // sync=false: appsink must not block waiting for the clock when
+                // drop is enabled (sync+no-drop would stall on a full queue).
+                appsink_sync: false,
                 use_videorate: false,
                 queue_time_ns: frame_ns.saturating_mul(queue_buffers as u64),
             }

@@ -11,7 +11,7 @@ use clap::Parser;
 use serde::Deserialize;
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
-use wbeamd_api::{ClientMetricsRequest, ConfigPatch};
+use wbeamd_api::{ClientMetricsRequest, ConfigPatch, TuningStatusPatch};
 use wbeamd_core::DaemonCore;
 
 mod server;
@@ -186,7 +186,8 @@ async fn get_metrics(
         .resolve_core_readonly(serial, query.stream_port)
         .await
         .unwrap_or_else(|| state.sessions.default_core());
-    let payload = serde_json::to_value(core.metrics().await).unwrap_or_else(|_| serde_json::json!({}));
+    let payload =
+        serde_json::to_value(core.metrics().await).unwrap_or_else(|_| serde_json::json!({}));
     Json(payload)
 }
 
@@ -254,10 +255,28 @@ async fn post_start(
         );
         core.set_display_mode(query.display_mode.as_deref()).await;
     }
+    // Capture backend is treated as a per-start selection.
+    // Missing query param resets to automatic host-probe routing.
+    if let Some(ref backend) = query.capture_backend {
+        tracing::info!(
+            serial = serial.unwrap_or("default"),
+            capture_backend = backend.as_str(),
+            "start: capture_backend override"
+        );
+        core.set_capture_backend(Some(backend.as_str())).await;
+    } else {
+        core.set_capture_backend(None).await;
+    }
     let patch = body.map(|Json(v)| v).unwrap_or_default();
     let host_probe = core.host_probe().await;
-    let is_wayland_portal = host_probe.capture_mode == "wayland_portal";
-    let pre_enabled_outputs = if is_wayland_portal {
+    let selected_backend = query
+        .capture_backend
+        .as_deref()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or(host_probe.capture_mode.as_str());
+    let is_wayland_portal = selected_backend == "wayland_portal";
+    let is_evdi = selected_backend == "evdi";
+    let pre_enabled_outputs = if is_wayland_portal || is_evdi {
         kscreen_layout::kscreen_enabled_output_names().ok()
     } else {
         None
@@ -279,6 +298,10 @@ async fn post_start(
                 .await
                 {
                     warn!(error = %err, "wayland portal output auto-layout failed");
+                }
+            } else if is_evdi {
+                if let Err(err) = auto_mirror_evdi_outputs(pre_enabled_outputs.as_ref()).await {
+                    warn!(error = %err, "evdi output auto-mirror failed");
                 }
             }
             (StatusCode::OK, Json(resp)).into_response()
@@ -322,6 +345,18 @@ async fn post_apply(
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(err) => core_error_response(core, err).await,
     }
+}
+
+async fn post_tuning(
+    State(state): State<AppState>,
+    Query(query): Query<SessionQuery>,
+    body: Option<Json<TuningStatusPatch>>,
+) -> impl IntoResponse {
+    let serial = query.serial.as_deref();
+    let core = state.sessions.resolve_core(serial, query.stream_port).await;
+    let patch = body.map(|Json(v)| v).unwrap_or_default();
+    let resp = core.update_tuning_status(patch).await;
+    (StatusCode::OK, Json(resp)).into_response()
 }
 
 async fn post_client_metrics(
@@ -382,7 +417,8 @@ async fn auto_layout_wayland_portal_outputs(
     }
 
     let mapped = sessions.mapped_wayland_output_names().await;
-    let mut commands = kscreen_layout::build_non_overlapping_layout_commands(&outputs, Some(&mapped));
+    let mut commands =
+        kscreen_layout::build_non_overlapping_layout_commands(&outputs, Some(&mapped));
     if commands.is_empty() {
         commands = kscreen_layout::build_non_overlapping_layout_commands(&outputs, None);
     }
@@ -395,8 +431,61 @@ async fn auto_layout_wayland_portal_outputs(
     Ok(())
 }
 
+async fn auto_mirror_evdi_outputs(
+    pre_enabled_outputs: Option<&std::collections::HashSet<String>>,
+) -> Result<(), String> {
+    if !evdi_auto_mirror_enabled() {
+        return Ok(());
+    }
+    if !kscreen_layout::command_exists("kscreen-doctor") {
+        return Ok(());
+    }
+
+    let outputs = kscreen_layout::kscreen_query_outputs()?;
+    let enabled_now: HashSet<String> = outputs
+        .iter()
+        .filter(|o| kscreen_layout::output_ready_for_layout(o))
+        .map(|o| o.name.clone())
+        .collect();
+
+    let mut preferred_targets = HashSet::new();
+    if let Some(before) = pre_enabled_outputs {
+        let mut new_names: Vec<String> = enabled_now.difference(before).cloned().collect();
+        new_names.sort();
+        preferred_targets.extend(
+            new_names
+                .into_iter()
+                .filter(|name| kscreen_layout::output_name_looks_virtual(name)),
+        );
+    }
+
+    let commands = kscreen_layout::build_virtual_replication_commands(
+        &outputs,
+        if preferred_targets.is_empty() {
+            None
+        } else {
+            Some(&preferred_targets)
+        },
+    );
+    if commands.is_empty() {
+        return Ok(());
+    }
+
+    kscreen_layout::apply_kscreen_layout(&commands)?;
+    info!(commands = ?commands, "applied evdi auto-mirror layout");
+    Ok(())
+}
+
 fn wayland_portal_auto_layout_enabled() -> bool {
     let raw = std::env::var("WBEAM_WAYLAND_PORTAL_AUTO_LAYOUT").unwrap_or_else(|_| "1".to_string());
+    !matches!(
+        raw.trim().to_ascii_lowercase().as_str(),
+        "0" | "false" | "no" | "off"
+    )
+}
+
+fn evdi_auto_mirror_enabled() -> bool {
+    let raw = std::env::var("WBEAM_EVDI_AUTO_MIRROR").unwrap_or_else(|_| "1".to_string());
     !matches!(
         raw.trim().to_ascii_lowercase().as_str(),
         "0" | "false" | "no" | "off"

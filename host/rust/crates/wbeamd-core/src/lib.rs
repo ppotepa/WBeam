@@ -19,8 +19,9 @@ use tracing::{error, info, warn};
 use wbeamd_api::{
     valid_values, validate_config_with_presets, ActiveConfig, BaseResponse, ClientMetricsRequest,
     ClientMetricsResponse, ConfigPatch, EffectiveRuntimeConfig, ErrorResponse, HealthResponse,
-    HostProbeResponse, KpiSnapshot, MetricsResponse, MetricsSnapshot, PresetsResponse, StatusResponse,
-    ValidationError, VirtualDisplayDoctorResponse, VirtualDisplayProbeResponse,
+    HostProbeResponse, KpiSnapshot, MetricsResponse, MetricsSnapshot, PresetsResponse,
+    StatusResponse, TuningStatusPatch, ValidationError, VirtualDisplayDoctorResponse,
+    VirtualDisplayProbeResponse,
 };
 
 pub mod domain;
@@ -388,6 +389,7 @@ struct Inner {
     last_streaming_line_at: Option<Instant>,
     metrics: MetricsSnapshot,
     current_pid: Option<u32>,
+    pipe_reader_handles: Vec<tokio::task::JoinHandle<()>>,
     run_id: u64,
     telemetry_file: Option<File>, // P2.3: JSONL export
     suppress_auto_start_until: Option<Instant>,
@@ -400,6 +402,7 @@ struct Inner {
     last_no_present_recovery_at: Option<Instant>,
     presets: BTreeMap<String, ActiveConfig>,
     requested_display_mode: String,
+    capture_backend_override: Option<String>,
     display_runtime: Option<display_backends::RuntimeHandle>,
     pending_runtime_snapshot_reason: String,
 }
@@ -424,6 +427,7 @@ impl Inner {
             last_streaming_line_at: None,
             metrics: MetricsSnapshot::default(),
             current_pid: None,
+            pipe_reader_handles: Vec::new(),
             run_id: 0,
             telemetry_file: None, // P2.3
             suppress_auto_start_until: None,
@@ -436,6 +440,7 @@ impl Inner {
             last_no_present_recovery_at: None,
             presets,
             requested_display_mode: "duplicate".to_string(),
+            capture_backend_override: None,
             display_runtime: None,
             pending_runtime_snapshot_reason: "init".to_string(),
         }
@@ -485,13 +490,50 @@ pub struct DaemonCore {
 
 impl DaemonCore {
     fn normalize_display_mode(mode: Option<&str>) -> &'static str {
+        if mode
+            .map(|v| {
+                let normalized = v.trim();
+                normalized.eq_ignore_ascii_case("benchmark_game")
+                    || normalized.eq_ignore_ascii_case("benchmark")
+            })
+            .unwrap_or(false)
+        {
+            return "benchmark_game";
+        }
         display_backends::normalize_requested_mode(mode).as_str()
+    }
+
+    fn normalize_capture_backend(backend: Option<&str>) -> Option<&'static str> {
+        let normalized = backend
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_lowercase)?;
+        match normalized.as_str() {
+            "auto" => None,
+            "wayland" | "wayland_portal" | "wayland-portal" => Some("wayland_portal"),
+            "x11" | "x11_gst" | "x11-gst" => Some("x11_gst"),
+            "evdi" => Some("evdi"),
+            _ => None,
+        }
     }
 
     pub async fn set_display_mode(&self, mode: Option<&str>) {
         let normalized = Self::normalize_display_mode(mode);
         let mut inner = self.inner.lock().await;
         inner.requested_display_mode = normalized.to_string();
+    }
+
+    pub async fn set_capture_backend(&self, backend: Option<&str>) {
+        let normalized = Self::normalize_capture_backend(backend);
+        if normalized.is_none() {
+            if let Some(raw) = backend.map(str::trim).filter(|v| !v.is_empty()) {
+                if !raw.eq_ignore_ascii_case("auto") {
+                    warn!(capture_backend = raw, "ignoring unsupported capture backend override");
+                }
+            }
+        }
+        let mut inner = self.inner.lock().await;
+        inner.capture_backend_override = normalized.map(str::to_string);
     }
 
     async fn stop_virtual_display_if_any(&self) {
@@ -653,6 +695,7 @@ impl DaemonCore {
 
     pub async fn host_probe(&self) -> HostProbeResponse {
         let inner = self.inner.lock().await;
+        let evdi_available = crate::infra::host_probe::HostProbe::evdi_device_available();
         HostProbeResponse {
             base: self.base_from_inner(&inner),
             ok: true,
@@ -664,6 +707,8 @@ impl DaemonCore {
             display: self.host_probe.display.clone(),
             wayland_display: self.host_probe.wayland_display.clone(),
             supported: self.host_probe.supports_streaming(),
+            available_backends: self.host_probe.available_backends().iter().map(|s| s.to_string()).collect(),
+            evdi_available,
         }
     }
 
@@ -811,6 +856,7 @@ impl DaemonCore {
             inner.last_adaptation_at = None;
             inner.no_present_streak = 0;
             inner.last_no_present_recovery_at = None;
+            inner.metrics.tuning = None;
         }
         self.start_with_config(cfg, "start_request").await?;
         Ok(self.status().await)
@@ -856,18 +902,72 @@ impl DaemonCore {
         Ok(self.status().await)
     }
 
+    pub async fn update_tuning_status(&self, patch: TuningStatusPatch) -> StatusResponse {
+        let mut inner = self.inner.lock().await;
+
+        if patch.clear.unwrap_or(false) {
+            inner.metrics.tuning = None;
+            return StatusResponse {
+                base: self.base_from_inner(&inner),
+                ok: true,
+            };
+        }
+
+        let mut tuning = inner.metrics.tuning.clone().unwrap_or_default();
+        if let Some(active) = patch.active {
+            tuning.active = active;
+        }
+        if let Some(codec) = patch.codec {
+            tuning.codec = codec.trim().to_string();
+        }
+        if let Some(phase) = patch.phase {
+            tuning.phase = phase.trim().to_string();
+        }
+        if let Some(generation) = patch.generation {
+            tuning.generation = generation;
+        }
+        if let Some(total_generations) = patch.total_generations {
+            tuning.total_generations = total_generations;
+        }
+        if let Some(child) = patch.child {
+            tuning.child = child;
+        }
+        if let Some(children_per_generation) = patch.children_per_generation {
+            tuning.children_per_generation = children_per_generation;
+        }
+        if let Some(score) = patch.score {
+            tuning.score = score;
+        }
+        if let Some(best_score) = patch.best_score {
+            tuning.best_score = best_score;
+        }
+        if let Some(note) = patch.note {
+            tuning.note = note.trim().to_string();
+        }
+        tuning.updated_unix_ms = now_unix_ms().min(u128::from(u64::MAX)) as u64;
+        inner.metrics.tuning = Some(tuning);
+
+        StatusResponse {
+            base: self.base_from_inner(&inner),
+            ok: true,
+        }
+    }
+
     pub async fn ingest_client_metrics(
         &self,
         mut client: ClientMetricsRequest,
     ) -> Result<ClientMetricsResponse, CoreError> {
         // P2.2: log trace_id so host logs can be correlated with Android logcat
         info!(
-            "client-metrics trace_id={} present={:.1}fps decode_p95={:.1}ms e2e_p95={:.1}ms",
+            "client-metrics trace_id={} recv={:.1}fps decode={:.1}fps present={:.1}fps recv≈{:.2}Mb/s decode_p95={:.1}ms e2e_p95={:.1}ms",
             client
                 .trace_id
                 .map(|t| format!("{:#018x}", t))
                 .unwrap_or_else(|| "-".to_string()),
+            client.recv_fps,
+            client.decode_fps,
             client.present_fps,
+            client.recv_bps as f64 / 1_000_000.0,
             client.decode_time_ms_p95,
             client.e2e_latency_ms_p95,
         );
@@ -890,6 +990,7 @@ impl DaemonCore {
                     .map(|started| started.elapsed() >= Duration::from_secs(8))
                     .unwrap_or(false);
 
+            let previous_client = inner.metrics.latest_client_metrics.clone();
             inner.metrics.latest_client_metrics = Some(client.clone());
             inner.metrics.kpi = KpiSnapshot {
                 target_fps: inner.active_config.fps,
@@ -915,6 +1016,33 @@ impl DaemonCore {
 
             if client.recv_bps > 0 {
                 inner.metrics.bitrate_actual_bps = client.recv_bps;
+            }
+            let decode_starved_with_traffic = inner.state == STATE_STREAMING
+                && client.recv_bps > 150_000
+                && client.recv_fps <= 0.5
+                && client.present_fps <= 0.5;
+            let prev_decode_starved = previous_client
+                .as_ref()
+                .map(|prev| {
+                    prev.recv_bps > 150_000 && prev.recv_fps <= 0.5 && prev.present_fps <= 0.5
+                })
+                .unwrap_or(false);
+            if decode_starved_with_traffic && !prev_decode_starved {
+                inner.last_error = format!(
+                    "decode starvation: recv≈{:.2}Mb/s recv_fps={:.1} decode_fps={:.1} present_fps={:.1}",
+                    client.recv_bps as f64 / 1_000_000.0,
+                    client.recv_fps,
+                    client.decode_fps,
+                    client.present_fps
+                );
+                warn!(
+                    run_id = inner.run_id,
+                    recv_bps = client.recv_bps,
+                    recv_fps = client.recv_fps,
+                    decode_fps = client.decode_fps,
+                    present_fps = client.present_fps,
+                    "client has transport traffic but decoder/presenter output is stalled"
+                );
             }
 
             // P2.3: append JSONL telemetry record
@@ -1102,6 +1230,11 @@ impl DaemonCore {
 
         let mut inner = self.inner.lock().await;
         inner.current_pid = None;
+        // Cancel pipe-reader tasks — the child process is gone so further reads
+        // would only delay cleanup or hold DaemonCore refs unnecessarily.
+        for h in inner.pipe_reader_handles.drain(..) {
+            h.abort();
+        }
         inner.state = STATE_IDLE.to_string();
         inner.run_started_at = None;
         inner.stream_started_at = None;
@@ -1109,6 +1242,7 @@ impl DaemonCore {
         inner.last_streaming_line_at = None;
         inner.telemetry_file = None; // P2.3: flush+close
         inner.no_present_streak = 0;
+        inner.metrics.tuning = None;
 
         Ok(StatusResponse {
             base: self.base_from_inner(&inner),
@@ -1128,6 +1262,9 @@ impl DaemonCore {
     async fn mark_start_failed(&self, message: String) {
         let mut inner = self.inner.lock().await;
         inner.current_pid = None;
+        for h in inner.pipe_reader_handles.drain(..) {
+            h.abort();
+        }
         inner.state = STATE_IDLE.to_string();
         inner.last_error = message;
         inner.run_started_at = None;
@@ -1139,12 +1276,19 @@ impl DaemonCore {
     }
 
     async fn start_with_config(&self, cfg: ActiveConfig, reason: &str) -> Result<(), CoreError> {
-        let requested_display_mode = {
+        let (requested_display_mode, capture_backend_override) = {
             let inner = self.inner.lock().await;
-            inner.requested_display_mode.clone()
+            (
+                inner.requested_display_mode.clone(),
+                inner.capture_backend_override.clone(),
+            )
         };
-        let requested_mode =
-            display_backends::normalize_requested_mode(Some(&requested_display_mode));
+        let benchmark_mode = requested_display_mode.eq_ignore_ascii_case("benchmark_game");
+        let requested_mode = if benchmark_mode {
+            display_backends::DisplayMode::Duplicate
+        } else {
+            display_backends::normalize_requested_mode(Some(&requested_display_mode))
+        };
         let mut launch_size = cfg.size.clone();
         if !self.host_probe.supports_streaming() {
             let reason = self.host_probe.unsupported_reason();
@@ -1246,7 +1390,11 @@ impl DaemonCore {
                 fps: cfg.fps,
                 bitrate_kbps: cfg.bitrate_kbps,
                 cursor_mode: cfg.cursor_mode.clone(),
-                gop: if cfg.intra_only { 1 } else { (cfg.fps / 8).max(6) },
+                gop: if cfg.intra_only {
+                    1
+                } else {
+                    (cfg.fps / 8).max(6)
+                },
                 intra_only: cfg.intra_only,
                 stream_mode: "unknown".to_string(),
                 queue_max_buffers: 0,
@@ -1254,7 +1402,12 @@ impl DaemonCore {
                 appsink_max_buffers: 0,
                 appsink_drop: false,
                 appsink_sync: false,
-                capture_backend: self.host_probe.capture_mode_name().to_string(),
+                capture_backend: if benchmark_mode {
+                    "benchmark_game".to_string()
+                } else {
+                    inner.capture_backend_override.clone()
+                        .unwrap_or_else(|| self.host_probe.capture_mode_name().to_string())
+                },
                 parse_mode: "unknown".to_string(),
                 timeout_pull_ms: 0,
                 timeout_write_ms: 0,
@@ -1286,13 +1439,19 @@ impl DaemonCore {
         let use_rust_streamer = wbeam_setting_bool(&self.settings, "WBEAM_USE_RUST_STREAMER", true);
         let rust_streamer_bin = wbeam_setting(&self.settings, "WBEAM_RUST_STREAMER_BIN")
             .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                self.root
-                    .join("host/rust/target/release/wbeamd-streamer")
-            });
+            .unwrap_or_else(|| self.root.join("host/rust/target/release/wbeamd-streamer"));
 
         let mut cmd;
-        let capture_backend = self.host_probe.capture_mode_name();
+        // Priority: per-session override > WBEAM_CAPTURE_BACKEND env/config > auto-detected probe
+        let probed_backend = self.host_probe.capture_mode_name();
+        let env_capture_backend = wbeam_setting(&self.settings, "WBEAM_CAPTURE_BACKEND");
+        let capture_backend = Self::normalize_capture_backend(capture_backend_override.as_deref())
+            .or_else(|| Self::normalize_capture_backend(env_capture_backend.as_deref()))
+            .unwrap_or(probed_backend)
+            .to_string();
+        let capture_backend = capture_backend.as_str();
+        let wayland_virtual_source =
+            !benchmark_mode && capture_backend == "wayland_portal" && requested_mode.is_virtual();
         self.stop_virtual_display_if_any().await;
         let serial_hint = self.target_serial.as_deref().unwrap_or("default");
         let activation = match display_backends::activate_start(
@@ -1316,6 +1475,7 @@ impl DaemonCore {
         info!(
             serial = serial_hint,
             requested_mode = requested_mode.as_str(),
+            benchmark_mode,
             capture_backend = capture_backend,
             x11_display = activation.display_override.as_deref().unwrap_or("-"),
             x11_region = activation
@@ -1347,8 +1507,10 @@ impl DaemonCore {
                 }
             })
             .collect::<String>();
-        let restore_token_file =
-            format!("/tmp/wbeam-portal-restore-token-{}-{}", session_suffix, self.stream_port);
+        let restore_token_file = format!(
+            "/tmp/wbeam-portal-restore-token-{}-{}",
+            session_suffix, self.stream_port
+        );
 
         if use_rust_streamer {
             if !rust_streamer_bin.exists() {
@@ -1370,6 +1532,7 @@ impl DaemonCore {
                 .arg(match capture_backend {
                     "x11_gst" => "x11",
                     "wayland_portal" => "wayland-portal",
+                    "evdi" => "evdi",
                     _ => "auto",
                 })
                 .arg("--port")
@@ -1388,15 +1551,24 @@ impl DaemonCore {
                 .arg(&restore_token_file)
                 .arg("--portal-persist-mode")
                 .arg("2")
+                .arg("--wayland-source-type")
+                .arg(if wayland_virtual_source {
+                    "virtual"
+                } else {
+                    "monitor"
+                })
                 .arg("--debug-dir")
                 .arg("/tmp/wbeam-frames")
                 .arg("--debug-fps")
                 .arg(cfg.debug_fps.to_string());
+            if benchmark_mode {
+                cmd.arg("--benchmark-game");
+            }
             cmd.env_remove("WBEAM_OVERLAY_TEXT_FILE");
             if cfg.intra_only {
                 cmd.arg("--intra-only");
             }
-            if capture_backend == "x11_gst" {
+            if !benchmark_mode && capture_backend == "x11_gst" {
                 if let Some(display) = x11_display_override.as_deref() {
                     cmd.env("DISPLAY", display);
                 }
@@ -1420,6 +1592,14 @@ impl DaemonCore {
                 }
             }
         } else {
+            if benchmark_mode {
+                let err = CoreError::Spawn(
+                    "benchmark_game mode requires Rust streamer (set WBEAM_USE_RUST_STREAMER=true)"
+                        .to_string(),
+                );
+                self.mark_start_failed(err.to_string()).await;
+                return Err(err);
+            }
             if capture_backend == "x11_gst" {
                 let err = CoreError::Spawn(
                     "x11 backend requires Rust streamer (set WBEAM_USE_RUST_STREAMER=true)"
@@ -1428,10 +1608,16 @@ impl DaemonCore {
                 self.mark_start_failed(err.to_string()).await;
                 return Err(err);
             }
+            if wayland_virtual_source {
+                let err = CoreError::Spawn(
+                    "wayland virtual_monitor mode requires Rust streamer (set WBEAM_USE_RUST_STREAMER=true)"
+                        .to_string(),
+                );
+                self.mark_start_failed(err.to_string()).await;
+                return Err(err);
+            }
             warn!("WBEAM_USE_RUST_STREAMER=false – using legacy python streamer");
-            let stream_script = self
-                .root
-                .join("host/scripts/stream_wayland_portal_h264.py");
+            let stream_script = self.root.join("host/scripts/stream_wayland_portal_h264.py");
             cmd = Command::new("python3");
             cmd.arg("-u")
                 .arg(stream_script)
@@ -1485,31 +1671,35 @@ impl DaemonCore {
 
         info!(run_id, pid, "stream process started");
 
+        let mut pipe_handles: Vec<tokio::task::JoinHandle<()>> = Vec::with_capacity(2);
+
         if let Some(stdout) = child.stdout.take() {
             let core = self.clone();
-            tokio::spawn(async move {
+            pipe_handles.push(tokio::spawn(async move {
                 let mut lines = BufReader::new(stdout).lines();
                 while let Ok(Some(line)) = lines.next_line().await {
                     info!(run_id, "stream: {line}");
                     core.on_stream_output(run_id, &line).await;
                 }
-            });
+            }));
         }
 
         if let Some(stderr) = child.stderr.take() {
             let core = self.clone();
-            tokio::spawn(async move {
+            pipe_handles.push(tokio::spawn(async move {
                 let mut lines = BufReader::new(stderr).lines();
                 while let Ok(Some(line)) = lines.next_line().await {
                     warn!(run_id, "stream: {line}");
                     core.on_stream_output(run_id, &line).await;
                 }
-            });
+            }));
         }
 
         {
             let mut inner = self.inner.lock().await;
             inner.current_pid = Some(pid);
+            // Track pipe-reader tasks so they can be cancelled on stop/restart.
+            inner.pipe_reader_handles = pipe_handles;
         }
 
         let exit_tx = self.exit_tx.clone();
@@ -1535,8 +1725,43 @@ impl DaemonCore {
 
         inner.last_output_at = Some(Instant::now());
 
+        // ── Structured event dispatch (preferred) ────────────────────────────
+        // Lines from the streamer prefixed `WBEAM_EVENT:` carry JSON payloads.
+        // Handling these here keeps human-readable log parsing as a fallback only.
+        if let Some(json) = line.strip_prefix("WBEAM_EVENT:") {
+            match json.trim() {
+                j if j.contains("\"streaming_started\"") => {
+                    inner.state = STATE_STREAMING.to_string();
+                    inner.last_error.clear();
+                    inner.stream_started_at = Some(Instant::now());
+                    inner.last_streaming_line_at = Some(Instant::now());
+                    inner.metrics.bitrate_actual_bps =
+                        u64::from(inner.active_config.bitrate_kbps) * 1000;
+                    inner.no_present_streak = 0;
+                    info!(run_id, stream_event = "streaming-started");
+                }
+                j if j.contains("\"client_connected\"") => {
+                    info!(run_id, stream_event = "client-connected");
+                    inner.last_error.clear();
+                }
+                j if j.contains("\"client_disconnected\"") => {
+                    warn!(run_id, stream_event = "client-disconnected", detail = j);
+                    inner.last_error = j.to_string();
+                }
+                j if j.contains("\"transport_stats\"") => {
+                    if let Some(transport) = proc::parse_transport_event(j) {
+                        inner.metrics.transport_runtime = transport;
+                    }
+                }
+                _ => {}
+            }
+            // Do not fall through to the legacy string-match block for event lines.
+        } else {
+        // ── Legacy string-match fallback (kept for compat) ────────────────────
         if line.contains("Streaming Wayland screencast")
             || line.contains("Streaming X11 screencast")
+            || line.contains("Streaming EVDI capture")
+            || line.contains("Streaming benchmark game source")
         {
             inner.state = STATE_STREAMING.to_string();
             inner.last_error.clear();
@@ -1549,6 +1774,9 @@ impl DaemonCore {
         if let Some(bps) = proc::parse_kbps_line_to_bps(line) {
             inner.metrics.bitrate_actual_bps = bps;
         }
+        // Transport stats are now primarily delivered via structured WBEAM_EVENT;
+        // this call is retained as a belt-and-suspenders fallback for streamer
+        // builds that predate the structured event emission.
         if let Some(transport) = proc::parse_transport_runtime_line(line) {
             inner.metrics.transport_runtime = transport;
         }
@@ -1573,6 +1801,7 @@ impl DaemonCore {
                 inner.last_error = trimmed.to_string();
             }
         }
+        } // end legacy fallback block
         drop(inner);
         if let Some(snapshot) = effective_snapshot {
             self.persist_effective_runtime_snapshot(run_id, &snapshot);

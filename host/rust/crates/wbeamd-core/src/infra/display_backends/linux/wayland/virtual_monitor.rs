@@ -2,11 +2,11 @@ use super::super::super::VirtualMonitorProbe;
 
 pub fn probe() -> VirtualMonitorProbe {
     VirtualMonitorProbe {
-        supported: false,
-        resolver: "linux_wayland_backend".to_string(),
-        missing_deps: vec!["wayland-virtual-monitor-backend".to_string()],
+        supported: true,
+        resolver: "linux_wayland_portal_virtual".to_string(),
+        missing_deps: Vec::new(),
         hint:
-            "Wayland virtual monitor backend is not implemented yet. Duplicate mode is available."
+            "Wayland virtual monitor uses XDG ScreenCast portal virtual source requests. Runtime support depends on compositor/portal implementation."
                 .to_string(),
     }
 }

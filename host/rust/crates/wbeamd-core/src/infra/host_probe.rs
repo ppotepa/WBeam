@@ -43,6 +43,8 @@ pub enum DesktopFlavor {
 pub enum CaptureMode {
     WaylandPortal,
     X11Gst,
+    /// Kernel-level EVDI virtual display (user-requested override, not auto-detected).
+    Evdi,
     UnsupportedHost,
 }
 
@@ -116,7 +118,7 @@ impl HostProbe {
     pub fn supports_streaming(&self) -> bool {
         matches!(
             self.capture_mode,
-            CaptureMode::WaylandPortal | CaptureMode::X11Gst
+            CaptureMode::WaylandPortal | CaptureMode::X11Gst | CaptureMode::Evdi
         )
     }
 
@@ -124,6 +126,7 @@ impl HostProbe {
         match self.capture_mode {
             CaptureMode::WaylandPortal => "streaming is supported".to_string(),
             CaptureMode::X11Gst => "streaming is supported".to_string(),
+            CaptureMode::Evdi => "streaming is supported".to_string(),
             CaptureMode::UnsupportedHost => format!(
                 "unsupported host environment: os={} session={} desktop={}",
                 self.os_name(),
@@ -170,8 +173,39 @@ impl HostProbe {
         match self.capture_mode {
             CaptureMode::WaylandPortal => "wayland_portal",
             CaptureMode::X11Gst => "x11_gst",
+            CaptureMode::Evdi => "evdi",
             CaptureMode::UnsupportedHost => "unsupported_host",
         }
+    }
+
+    /// Returns backends available on this host beyond the default probe mode.
+    /// `wayland_portal` / `x11_gst` come from session type; `evdi` requires the
+    /// kernel module to have allocated at least one device node.
+    pub fn available_backends(&self) -> Vec<&'static str> {
+        let mut backends = Vec::new();
+        if matches!(
+            self.capture_mode,
+            CaptureMode::WaylandPortal | CaptureMode::X11Gst
+        ) {
+            backends.push(self.capture_mode_name());
+        }
+        if Self::evdi_device_available() {
+            backends.push("evdi");
+        }
+        backends
+    }
+
+    /// Returns true when at least one EVDI device node is accessible.
+    pub fn evdi_device_available() -> bool {
+        // evdi devices appear as /dev/dri/evdi* after `modprobe evdi`.
+        if let Ok(entries) = std::fs::read_dir("/dev/dri") {
+            for entry in entries.flatten() {
+                if entry.file_name().to_string_lossy().starts_with("evdi") {
+                    return true;
+                }
+            }
+        }
+        false
     }
 }
 

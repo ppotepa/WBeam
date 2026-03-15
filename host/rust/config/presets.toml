@@ -1,8 +1,0 @@
-[default]
-profile = "default"
-encoder = "h264"
-cursor_mode = "embedded"
-size = "1280x800"
-fps = 60
-bitrate_kbps = 10000
-debug_fps = 0

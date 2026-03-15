@@ -213,6 +213,8 @@ public final class MainHudCoordinator {
         renderInput.daemonBuildRevision = input.daemonBuildRevisionProvider.get();
         renderInput.appBuildRevision = input.appBuildRevision;
         renderInput.daemonLastError = input.daemonLastErrorProvider.get();
+        renderInput.tuningActive = state.tuningActive;
+        renderInput.tuningLine = state.tuningLine;
         renderInput.resourceUsageTracker = input.resourceUsageTracker;
         renderInput.perfHudWebView = input.perfHudWebView;
         renderInput.perfHudText = input.perfHudText;

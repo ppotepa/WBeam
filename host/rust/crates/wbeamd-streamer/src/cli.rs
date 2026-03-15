@@ -16,6 +16,13 @@ pub enum CaptureBackend {
     Auto,
     WaylandPortal,
     X11,
+    Evdi,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum WaylandSourceType {
+    Monitor,
+    Virtual,
 }
 
 #[derive(Debug, Parser, Clone)]
@@ -37,7 +44,7 @@ pub struct Args {
     #[arg(long, default_value = "h265",
             value_parser = ["h264", "h265", "rawpng"])]
     pub encoder: String,
-    #[arg(long, default_value = "embedded", value_parser = ["hidden", "embedded", "metadata"])]
+    #[arg(long, default_value = "hidden", value_parser = ["hidden", "embedded", "metadata"])]
     pub cursor_mode: String,
     #[arg(long, default_value = "/tmp/wbeam-frames")]
     pub debug_dir: String,
@@ -49,6 +56,9 @@ pub struct Args {
     pub skip_videoscale: bool,
     #[arg(long, value_enum, default_value_t = CaptureBackend::Auto)]
     pub capture_backend: CaptureBackend,
+    /// Use built-in synthetic benchmark scene instead of desktop capture.
+    #[arg(long, default_value_t = false)]
+    pub benchmark_game: bool,
     /// All-Intra mode: every frame is a full keyframe (gop-size=1).
     /// Mathematically eliminates P-frame reference artifacts at the cost of
     /// ~3-4x higher bitrate vs. P-frame HEVC — well within 300 Mbps USB.
@@ -58,6 +68,8 @@ pub struct Args {
     pub restore_token_file: Option<String>,
     #[arg(long, default_value_t = 2)]
     pub portal_persist_mode: u32,
+    #[arg(long, value_enum, default_value_t = WaylandSourceType::Monitor)]
+    pub wayland_source_type: WaylandSourceType,
 }
 
 /// Fully-resolved configuration after applying default settings.
@@ -73,6 +85,7 @@ pub struct ResolvedConfig {
     pub stream_mode: StreamMode,
     pub skip_videoscale: bool,
     pub capture_backend: CaptureBackend,
+    pub benchmark_game: bool,
     /// When true, gop-size is forced to 1 — every frame is an IDR.
     pub intra_only: bool,
     pub queue_max_buffers: u32,
@@ -86,6 +99,7 @@ pub struct ResolvedConfig {
     pub h264_gop: u32,
     pub restore_token_file: Option<String>,
     pub portal_persist_mode: u32,
+    pub wayland_source_type: WaylandSourceType,
 }
 
 #[derive(Clone, Copy)]
@@ -177,6 +191,7 @@ pub fn resolve_profile(args: &Args) -> Result<ResolvedConfig> {
             }
             v => v,
         },
+        benchmark_game: args.benchmark_game,
         intra_only: args.intra_only,
         queue_max_buffers: defaults.queue_max_buffers,
         queue_max_time_ms: defaults.queue_max_time_ms,
@@ -193,5 +208,6 @@ pub fn resolve_profile(args: &Args) -> Result<ResolvedConfig> {
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty()),
         portal_persist_mode: args.portal_persist_mode.min(2),
+        wayland_source_type: args.wayland_source_type,
     })
 }

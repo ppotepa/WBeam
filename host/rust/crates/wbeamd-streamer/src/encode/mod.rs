@@ -55,8 +55,12 @@ pub fn configure_encoder(
     }
 
     match encoder {
-        "nvenc264" | "x264" => h264::configure(enc, encoder, bitrate_kbps, nv_preset, intra_only, gop),
-        "nvenc265" | "x265" => h265::configure(enc, encoder, bitrate_kbps, nv_preset, intra_only, gop),
+        "nvenc264" | "x264" => {
+            h264::configure(enc, encoder, bitrate_kbps, nv_preset, intra_only, gop)
+        }
+        "nvenc265" | "x265" => {
+            h265::configure(enc, encoder, bitrate_kbps, nv_preset, intra_only, gop)
+        }
         "rawpng" => rawpng::configure(enc),
         _ => {}
     }

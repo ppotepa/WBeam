@@ -53,4 +53,3 @@ pub(super) fn configure(
     };
     let _ = enc.set_property("option-string", option_str);
 }
-

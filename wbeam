@@ -29,7 +29,7 @@ ADB_LOGCAT_PID_FILE="$LOG_DIR/adb-logcat.pid"
 BUILD_VERSION_FILE="$ROOT_DIR/.wbeam_build_version"
 BUILD_NUMBER_FILE="$ROOT_DIR/.wbeam_buildno"
 DEVICE_PORTS_FILE="$ROOT_DIR/.wbeam_device_ports"
-VERSION_BASE="${WBEAM_VERSION_BASE:-0.1.0}"
+VERSION_BASE="${WBEAM_VERSION_BASE:-0.1.2}"
 
 
 
@@ -43,7 +43,7 @@ Usage:
 
 Groups:
   ip        up | down | status
-  host      build | run | debug | status | down | probe
+  host      build | run | debug | status | down | probe | tuner
   daemon    up | down | status   (alias for host)
   android   build | install | launch | deploy | deploy-all | build-release | install-release | deploy-release
   deps      virtual check [--json] | virtual install [--dry-run] [--yes]
@@ -58,6 +58,7 @@ Examples:
   ./wbeam host run               # release binary, foreground
   ./wbeam host debug             # debug build + coloured logs + ADB sidecar
   ./wbeam host probe             # host fingerprint JSON (os/session/display/providers/tools)
+  ./wbeam host tuner             # interactive Rust TUI autotuner wizard
   ./wbeam android deploy         # build + install + launch in one step
   ./wbeam android deploy-all     # build once, install + launch on all connected devices
   ./wbeam android build          # ./gradlew assembleDebug only
@@ -618,12 +619,18 @@ android_device_has_ipv4() {
 android_try_reverse_setup() {
   local stream_port="${1:-$STREAM_PORT}"
   local control_port="${2:-$CONTROL_PORT}"
+  local legacy_stream_port=5002
   # Canonical device-side ports expected by Android app.
   adb_device_cmd reverse "tcp:5000" "tcp:${stream_port}" >/dev/null 2>&1 || return 1
   adb_device_cmd reverse "tcp:5001" "tcp:${control_port}" >/dev/null 2>&1 || return 1
   # Compatibility mapping for APKs built with per-device stream port.
   if [[ "$stream_port" != "5000" ]]; then
     adb_device_cmd reverse "tcp:${stream_port}" "tcp:${stream_port}" >/dev/null 2>&1 || true
+  fi
+  # Legacy compatibility: some builds are pinned to 5002 while host sessions may
+  # currently run on 5000 (or another selected stream_port).
+  if [[ "$stream_port" != "$legacy_stream_port" ]]; then
+    adb_device_cmd reverse "tcp:${legacy_stream_port}" "tcp:${stream_port}" >/dev/null 2>&1 || true
   fi
   return 0
 }
@@ -969,6 +976,29 @@ host_probe() {
   fi
   echo "Missing required command: python3 (or python)" >&2
   exit 1
+}
+
+host_tuner() {
+  require_cmd cargo
+  android_select_serial_if_needed || true
+  local rust_dir="$ROOT_DIR/host/rust"
+  local tuner_stream_port="${WBEAM_STREAM_PORT:-$STREAM_PORT}"
+  local tuner_control_port="${WBEAM_CONTROL_PORT:-$CONTROL_PORT}"
+  local tuner_args=("--host-url" "http://127.0.0.1:${tuner_control_port}")
+  if [[ -n "$ANDROID_SERIAL" ]]; then
+    echo "[host] tuner using serial=$ANDROID_SERIAL" >&2
+    if android_try_reverse_setup "$tuner_stream_port" "$tuner_control_port"; then
+      echo "[host] tuner adb reverse OK (control:${tuner_control_port} stream:${tuner_stream_port})" >&2
+    else
+      echo "[host] WARN: tuner could not configure adb reverse (control:${tuner_control_port} stream:${tuner_stream_port})" >&2
+    fi
+    tuner_args+=("--serial" "$ANDROID_SERIAL")
+    tuner_args+=("--stream-port" "$tuner_stream_port")
+  else
+    echo "[host] tuner using default session (no serial selected)" >&2
+  fi
+  tuner_args+=("$@")
+  cd "$rust_dir" && cargo run --release -p wbeamd-tuner -- "${tuner_args[@]}"
 }
 
 android_build() {
@@ -2057,6 +2087,7 @@ case "$group" in
       status)         daemon_status ;;
       down|stop)      daemon_down ;;
       probe)          shift 2; host_probe "$@" ;;
+      tuner|tune)     shift 2; host_tuner "$@" ;;
       *)              print_help; exit 1 ;;
     esac
     ;;

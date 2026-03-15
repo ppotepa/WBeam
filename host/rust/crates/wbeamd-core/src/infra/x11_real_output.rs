@@ -308,7 +308,8 @@ fn policy_file_path() -> Option<PathBuf> {
         let trimmed = user.trim();
         if !trimmed.is_empty() {
             return Some(
-                PathBuf::from(format!("/home/{trimmed}")).join(".config/wbeam/x11-virtual-policy.conf"),
+                PathBuf::from(format!("/home/{trimmed}"))
+                    .join(".config/wbeam/x11-virtual-policy.conf"),
             );
         }
     }
@@ -349,7 +350,11 @@ fn is_evdi_loaded() -> bool {
         .unwrap_or(false)
 }
 
-pub fn create(_serial: &str, size: &str, mirror_to_primary: bool) -> Result<X11RealOutputHandle, String> {
+pub fn create(
+    _serial: &str,
+    size: &str,
+    mirror_to_primary: bool,
+) -> Result<X11RealOutputHandle, String> {
     let display = detect_x11_display().unwrap_or_default();
     if display.trim().is_empty() {
         return Err("DISPLAY is not set for daemon process".to_string());
@@ -359,7 +364,10 @@ pub fn create(_serial: &str, size: &str, mirror_to_primary: bool) -> Result<X11R
     let providers_raw = xrandr_output(&["--listproviders"], &display, xauth.as_deref())
         .map_err(|e| format!("xrandr --listproviders failed: {e}"))?;
     let providers = parse_providers(&providers_raw);
-    debug!(providers = providers.len(), "x11 real-output create: parsed providers");
+    debug!(
+        providers = providers.len(),
+        "x11 real-output create: parsed providers"
+    );
     if let Some(reason) = reject_unsafe_provider_topology(&providers) {
         return Err(reason);
     }
@@ -368,8 +376,9 @@ pub fn create(_serial: &str, size: &str, mirror_to_primary: bool) -> Result<X11R
     if let Some(reason) = reject_unsafe_source_provider(source) {
         return Err(reason);
     }
-    let sink = choose_sink_provider(&providers, source)
-        .ok_or_else(|| "no Intel/AMD (non-NVIDIA) sink provider found for source provider".to_string())?;
+    let sink = choose_sink_provider(&providers, source).ok_or_else(|| {
+        "no Intel/AMD (non-NVIDIA) sink provider found for source provider".to_string()
+    })?;
     if should_block_real_output_on_nvidia_evdi(sink) {
         return Err(format!(
             "refusing provider-link on NVIDIA+EVDI with NVIDIA sink provider ({})",
@@ -395,7 +404,10 @@ pub fn create(_serial: &str, size: &str, mirror_to_primary: bool) -> Result<X11R
     let query = xrandr_output(&["--query"], &display, xauth.as_deref())
         .map_err(|e| format!("xrandr --query failed: {e}"))?;
     let outputs = parse_outputs(&query);
-    debug!(outputs = outputs.len(), "x11 real-output create: parsed outputs");
+    debug!(
+        outputs = outputs.len(),
+        "x11 real-output create: parsed outputs"
+    );
 
     let output = choose_candidate_output(&outputs)
         .ok_or_else(|| "no disconnected output available for virtual monitor".to_string())?;
@@ -1365,7 +1377,8 @@ Provider 1: id: 0x48 cap: 0xf, Source Output, Sink Output, Source Offload, Sink 
 
     #[test]
     fn parse_connected_geometry_and_fb() {
-        let line = "eDP-1 connected primary 1920x1080+0+0 (normal left inverted right x axis y axis)";
+        let line =
+            "eDP-1 connected primary 1920x1080+0+0 (normal left inverted right x axis y axis)";
         assert_eq!(parse_connected_geometry(line), Some((0, 0, 1920, 1080)));
 
         let query = "Screen 0: minimum 8 x 8, current 3280 x 1080, maximum 32767 x 32767";

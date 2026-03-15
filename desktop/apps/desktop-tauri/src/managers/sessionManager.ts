@@ -199,7 +199,9 @@ export function createSessionManager(api: HostApiManager) {
     setError("");
     try {
       await api.connectDevice(device, displayMode, connectConfig);
-      await refreshSnapshot();
+      // Devices haven't changed — just refresh service + probe state.
+      await Promise.all([loadServiceStatus(), loadHostProbe()]);
+      setUpdatedAt(new Date().toLocaleTimeString());
     } catch (err) {
       setError(String(err));
     } finally {
@@ -213,7 +215,9 @@ export function createSessionManager(api: HostApiManager) {
     setError("");
     try {
       await api.disconnectDevice(device);
-      await refreshSnapshot();
+      // Devices haven't changed — just refresh service + probe state.
+      await Promise.all([loadServiceStatus(), loadHostProbe()]);
+      setUpdatedAt(new Date().toLocaleTimeString());
     } catch (err) {
       setError(String(err));
     } finally {
