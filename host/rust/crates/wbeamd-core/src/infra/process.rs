@@ -156,7 +156,45 @@ pub fn parse_transport_runtime_line(line: &str) -> Option<TransportRuntimeSnapsh
     Some(out)
 }
 
-/// Return a build revision string (injected via `WBEAM_BUILD_REV` env var at
+/// Parse a `transport_stats` structured WBEAM_EVENT JSON payload.
+///
+/// The payload is the JSON object stripped of the `WBEAM_EVENT:` prefix, e.g.
+/// `{"event":"transport_stats","pipeline_fps":30,"sender_fps":30.0,...}`.
+/// Uses simple key-value extraction (no serde dependency in this crate) for
+/// performance — the payload has a flat, known schema.
+pub fn parse_transport_event(json: &str) -> Option<TransportRuntimeSnapshot> {
+    if !json.contains("\"transport_stats\"") {
+        return None;
+    }
+    let mut out = TransportRuntimeSnapshot::default();
+    // Walk key:"value" and key:number pairs.
+    for chunk in json.split(',') {
+        let chunk = chunk.trim_matches(|c| matches!(c, '{' | '}' | ' '));
+        let Some((raw_key, raw_val)) = chunk.split_once(':') else {
+            continue;
+        };
+        let key = raw_key.trim().trim_matches('"');
+        let val = raw_val.trim().trim_matches('"');
+        match key {
+            "pipeline_fps" => out.pipeline_fps = val.parse().ok()?,
+            "sender_fps" => out.sender_fps = val.parse().ok()?,
+            "timeout_misses" => out.timeout_misses = val.parse().ok()?,
+            "send_timeouts" => out.send_timeouts = val.parse().ok()?,
+            "timeout_key" => out.timeout_key = val.parse().ok()?,
+            "timeout_delta" => out.timeout_delta = val.parse().ok()?,
+            "key_retry_ok" => out.key_retry_ok = val.parse().ok()?,
+            "key_retry_fail" => out.key_retry_fail = val.parse().ok()?,
+            "queue_depth" => out.queue_depth = val.parse().ok()?,
+            "queue_peak" => out.queue_peak = val.parse().ok()?,
+            "queue_drops" => out.queue_drops = val.parse().ok()?,
+            "seq" => out.seq = val.parse().ok()?,
+            _ => {}
+        }
+    }
+    Some(out)
+}
+
+
 /// compile time, or a default placeholder).
 pub fn build_revision() -> String {
     if let Ok(runtime) = std::env::var("WBEAM_BUILD_REV") {

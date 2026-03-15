@@ -23,16 +23,19 @@ use crate::packetize::{build_header, build_hello, send_all_vectored};
 
 use super::HELLO_CODEC_PNG;
 
+// Arc<[u8]> shares the encoded payload between producer (keyframe cache) and
+// sender without a second heap allocation. Cloning the Arc is an atomic
+// increment, replacing the previous data.clone() on every keyframe.
 #[derive(Clone)]
 struct CachedKeyframe {
     pts_us: u64,
-    data: Vec<u8>,
+    data: Arc<[u8]>,
 }
 
 struct EncodedFrame {
     pts_us: u64,
     is_key: bool,
-    data: Vec<u8>,
+    data: Arc<[u8]>,
 }
 
 fn sender_queue_capacity(mode: StreamMode) -> usize {
@@ -122,17 +125,21 @@ pub fn spawn_sender(
                 });
                 let is_key = (codec_flags & HELLO_CODEC_PNG) != 0
                     || !buf.flags().contains(gst::BufferFlags::DELTA_UNIT);
+                // Single allocation: Arc<[u8]> shares ownership between the
+                // encoded-frame channel and the keyframe reconnect cache.
+                let data_arc: Arc<[u8]> = Arc::from(data);
                 let frame = EncodedFrame {
                     pts_us,
                     is_key,
-                    data: data.to_vec(),
+                    data: data_arc.clone(),
                 };
 
                 if is_key {
                     if let Ok(mut guard) = producer_keyframe.lock() {
+                        // Clone is a cheap atomic refcount increment — no copy.
                         *guard = Some(CachedKeyframe {
                             pts_us,
-                            data: frame.data.clone(),
+                            data: data_arc,
                         });
                     }
                 }
@@ -278,6 +285,9 @@ pub fn spawn_sender(
                             println!(
                                 "[wbeam-framed] pipeline_fps={pipe_fps} sender_fps={sent_fps:.1} timeout_misses={dropped} send_timeouts={send_timeouts} timeout_key={soft_timeout_key} timeout_delta={soft_timeout_delta} key_retry_ok={key_retry_ok} key_retry_fail={key_retry_fail} queue_depth={qdepth} queue_peak={qpeak} queue_drops={qdrop} seq={seq}"
                             );
+                            println!(
+                                "WBEAM_EVENT:{{\"event\":\"transport_stats\",\"pipeline_fps\":{pipe_fps},\"sender_fps\":{sent_fps:.1},\"timeout_misses\":{dropped},\"send_timeouts\":{send_timeouts},\"timeout_key\":{soft_timeout_key},\"timeout_delta\":{soft_timeout_delta},\"key_retry_ok\":{key_retry_ok},\"key_retry_fail\":{key_retry_fail},\"queue_depth\":{qdepth},\"queue_peak\":{qpeak},\"queue_drops\":{qdrop},\"seq\":{seq}}}"
+                            );
                             frames = 0;
                             dropped = 0;
                             send_timeouts = 0;
@@ -363,6 +373,9 @@ pub fn spawn_sender(
                     let qpeak = queue_peak.swap(qdepth, Ordering::Relaxed);
                     println!(
                         "[wbeam-framed] pipeline_fps={pipe_fps} sender_fps={sent_fps:.1} timeout_misses={dropped} send_timeouts={send_timeouts} timeout_key={soft_timeout_key} timeout_delta={soft_timeout_delta} key_retry_ok={key_retry_ok} key_retry_fail={key_retry_fail} queue_depth={qdepth} queue_peak={qpeak} queue_drops={qdrop} seq={seq}"
+                    );
+                    println!(
+                        "WBEAM_EVENT:{{\"event\":\"transport_stats\",\"pipeline_fps\":{pipe_fps},\"sender_fps\":{sent_fps:.1},\"timeout_misses\":{dropped},\"send_timeouts\":{send_timeouts},\"timeout_key\":{soft_timeout_key},\"timeout_delta\":{soft_timeout_delta},\"key_retry_ok\":{key_retry_ok},\"key_retry_fail\":{key_retry_fail},\"queue_depth\":{qdepth},\"queue_peak\":{qpeak},\"queue_drops\":{qdrop},\"seq\":{seq}}}"
                     );
                     frames = 0;
                     dropped = 0;

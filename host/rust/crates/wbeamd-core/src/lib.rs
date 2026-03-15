@@ -1748,6 +1748,11 @@ impl DaemonCore {
                     warn!(run_id, stream_event = "client-disconnected", detail = j);
                     inner.last_error = j.to_string();
                 }
+                j if j.contains("\"transport_stats\"") => {
+                    if let Some(transport) = proc::parse_transport_event(j) {
+                        inner.metrics.transport_runtime = transport;
+                    }
+                }
                 _ => {}
             }
             // Do not fall through to the legacy string-match block for event lines.
@@ -1769,6 +1774,9 @@ impl DaemonCore {
         if let Some(bps) = proc::parse_kbps_line_to_bps(line) {
             inner.metrics.bitrate_actual_bps = bps;
         }
+        // Transport stats are now primarily delivered via structured WBEAM_EVENT;
+        // this call is retained as a belt-and-suspenders fallback for streamer
+        // builds that predate the structured event emission.
         if let Some(transport) = proc::parse_transport_runtime_line(line) {
             inner.metrics.transport_runtime = transport;
         }
@@ -1784,19 +1792,6 @@ impl DaemonCore {
         let trimmed = line.trim();
         if !trimmed.is_empty() {
             let lower = trimmed.to_ascii_lowercase();
-            if lower.contains("client connected") {
-                info!(run_id, stream_event = "client-connected", detail = trimmed);
-                inner.last_error.clear();
-            } else if lower.contains("client disconnected")
-                || lower.contains("timeout -> reconnect client")
-            {
-                warn!(
-                    run_id,
-                    stream_event = "client-disconnected",
-                    detail = trimmed
-                );
-                inner.last_error = trimmed.to_string();
-            }
             if lower.contains("panic")
                 || lower.contains("error")
                 || lower.contains("failed")

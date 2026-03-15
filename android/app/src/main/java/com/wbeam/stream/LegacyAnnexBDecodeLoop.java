@@ -53,9 +53,27 @@ final class LegacyAnnexBDecodeLoop {
 
     void run(InputStream input, MediaCodec codec) throws IOException {
         byte[] readBuf = new byte[64 * 1024];
-        byte[] streamBuf = new byte[512 * 1024];
+
+        // ── Buffers ──────────────────────────────────────────────────────────
+        // Mode 0 (Annex-B start-code framing) uses a standard compacting linear
+        // buffer (sHead/sTail).  Mode 1 (length-prefixed AVCC framing, the hot
+        // path from our streamer) uses a ring buffer backed by the same array:
+        // rHead/rTail are unbounded counters; the array index is (counter & RB_MASK).
+        // Ring buffer eliminates compacting arraycopy under backpressure — the only
+        // copy is a one-time linearisation when a NAL payload crosses the buffer end
+        // (~5% of NALs at full 512 KB utilisation).
+        byte[] streamBuf = new byte[512 * 1024];   // shared backing store, power-of-2
+        final int RB_MASK = streamBuf.length - 1;
+
+        // Mode 0 linear pointers
         int sHead = 0;
         int sTail = 0;
+        // Mode 1 ring-buffer counters (unbounded; use & RB_MASK for array index)
+        int rHead = 0;
+        int rTail = 0;
+        // Scratch buffer for ring wrap-around linearisation (allocated on first wrap)
+        byte[] nalLinBuf = null;
+
         int streamMode = -1;
         int avgNalSize = 1200;
         int pendingDecodeQueue = 0;
@@ -89,63 +107,98 @@ final class LegacyAnnexBDecodeLoop {
                 continue;
             }
 
-            int avail = sTail - sHead;
-            if (sTail + count > streamBuf.length) {
-                if (avail + count > streamBuf.length) {
-                    int keep = streamBuf.length - count;
-                    if (keep <= 0) {
-                        sHead = 0;
-                        sTail = 0;
-                        avail = 0;
-                    } else {
-                        int newHead = sHead + (avail - keep);
-                        System.arraycopy(streamBuf, newHead, streamBuf, 0, keep);
-                        sHead = 0;
-                        sTail = keep;
-                        avail = keep;
-                    }
-                    droppedSec++;
-                } else {
-                    if (avail > 0) {
-                        System.arraycopy(streamBuf, sHead, streamBuf, 0, avail);
-                    }
-                    sHead = 0;
-                    sTail = avail;
-                }
-            }
-            System.arraycopy(readBuf, 0, streamBuf, sTail, count);
-            sTail += count;
-            bytes += count;
-
-            avail = sTail - sHead;
-            if (streamMode < 0 && avail >= 8) {
-                int probe = StreamNalUtils.findStartCode(streamBuf, sHead, Math.min(sHead + 128, sTail));
-                streamMode = (probe >= 0) ? 0 : 1;
-            }
-
-            if (streamMode == 1) {
-                while ((sTail - sHead) >= 4) {
-                    int nalSize = ((streamBuf[sHead] & 0xFF) << 24)
-                            | ((streamBuf[sHead + 1] & 0xFF) << 16)
-                            | ((streamBuf[sHead + 2] & 0xFF) << 8)
-                            | ((streamBuf[sHead + 3] & 0xFF));
-                    if (nalSize <= 0 || nalSize > streamBuf.length) {
-                        sHead += 1;
+            // ── Write ─────────────────────────────────────────────────────────
+            if (streamMode != 1) {
+                // Linear write for mode 0 / mode-detection phase
+                int avail = sTail - sHead;
+                if (sTail + count > streamBuf.length) {
+                    if (avail + count > streamBuf.length) {
+                        int keep = streamBuf.length - count;
+                        if (keep <= 0) {
+                            sHead = 0; sTail = 0; avail = 0;
+                        } else {
+                            int newHead = sHead + (avail - keep);
+                            System.arraycopy(streamBuf, newHead, streamBuf, 0, keep);
+                            sHead = 0; sTail = keep; avail = keep;
+                        }
                         droppedSec++;
-                        continue;
+                    } else {
+                        if (avail > 0) System.arraycopy(streamBuf, sHead, streamBuf, 0, avail);
+                        sHead = 0; sTail = avail;
                     }
-                    if ((sTail - sHead) < 4 + nalSize) {
-                        break;
+                }
+                System.arraycopy(readBuf, 0, streamBuf, sTail, count);
+                sTail += count;
+                bytes += count;
+
+                // Mode detection
+                int availNow = sTail - sHead;
+                if (streamMode < 0 && availNow >= 8) {
+                    int probe = StreamNalUtils.findStartCode(streamBuf, sHead, Math.min(sHead + 128, sTail));
+                    streamMode = (probe >= 0) ? 0 : 1;
+                    if (streamMode == 1) {
+                        // Seed ring buffer from the small linearly-buffered bootstrap bytes.
+                        System.arraycopy(streamBuf, sHead, streamBuf, 0, availNow);
+                        rHead = 0;
+                        rTail = availNow;
+                        continue; // process ring buffer on next iteration
+                    }
+                }
+                if (streamMode != 0) continue; // still undetermined
+            } else {
+                // Ring-buffer write for mode 1
+                int avail = rTail - rHead;
+                if (avail + count > streamBuf.length) {
+                    // Buffer full: drop oldest data (should be very rare at 512 KB)
+                    int excess = avail + count - streamBuf.length;
+                    rHead += excess;
+                    droppedSec++;
+                }
+                int wp = rTail & RB_MASK;
+                int c1 = Math.min(count, streamBuf.length - wp);
+                System.arraycopy(readBuf, 0, streamBuf, wp, c1);
+                if (c1 < count) System.arraycopy(readBuf, c1, streamBuf, 0, count - c1);
+                rTail += count;
+                bytes += count;
+            }
+
+            // ── Parse ─────────────────────────────────────────────────────────
+            if (streamMode == 1) {
+                int avail = rTail - rHead;
+                while (avail >= 4) {
+                    // Ring-aware 4-byte big-endian NAL size read
+                    int nalSize = ((streamBuf[(rHead    ) & RB_MASK] & 0xFF) << 24)
+                                | ((streamBuf[(rHead + 1) & RB_MASK] & 0xFF) << 16)
+                                | ((streamBuf[(rHead + 2) & RB_MASK] & 0xFF) << 8)
+                                |  (streamBuf[(rHead + 3) & RB_MASK] & 0xFF);
+                    if (nalSize <= 0 || nalSize > streamBuf.length) {
+                        rHead++; avail--; droppedSec++; continue;
+                    }
+                    if (avail < 4 + nalSize) break;
+
+                    // Serve NAL payload — zero-copy if contiguous, one-time
+                    // linearisation if it crosses the ring-buffer end.
+                    int nalStart = (rHead + 4) & RB_MASK;
+                    byte[] nalData;
+                    int nalOff;
+                    if (nalStart + nalSize <= streamBuf.length) {
+                        nalData = streamBuf;
+                        nalOff  = nalStart;
+                    } else {
+                        if (nalLinBuf == null || nalLinBuf.length < nalSize) {
+                            nalLinBuf = new byte[Math.max(nalSize, 65536)];
+                        }
+                        int c1 = streamBuf.length - nalStart;
+                        System.arraycopy(streamBuf, nalStart, nalLinBuf, 0, c1);
+                        System.arraycopy(streamBuf, 0,         nalLinBuf, c1, nalSize - c1);
+                        nalData = nalLinBuf;
+                        nalOff  = 0;
                     }
 
                     frames++;
                     MediaCodecBridge.drainLatestFrame(
-                            codec,
-                            bufferInfo,
-                            drainStats,
-                            true,
-                            pendingDecodeQueue >= decodeQueueMaxFrames ? 16_000 : 5_000
-                    );
+                            codec, bufferInfo, drainStats, true,
+                            pendingDecodeQueue >= decodeQueueMaxFrames ? 16_000 : 5_000);
                     pendingDecodeQueue = Math.max(0, pendingDecodeQueue - drainStats.releasedCount);
                     if (drainStats.releasedCount > 0) {
                         lastDecodeProgressMs = SystemClock.elapsedRealtime();
@@ -159,9 +212,9 @@ final class LegacyAnnexBDecodeLoop {
                     renderQueueDepth = drainStats.renderedCount > 0 ? 1 : 0;
 
                     if (pendingDecodeQueue >= decodeQueueMaxFrames) {
-                        if (StreamNalUtils.isRecoveryNal(streamBuf, sHead + 4, nalSize)) {
+                        if (StreamNalUtils.isRecoveryNal(nalData, nalOff, nalSize)) {
                             long t0 = SystemClock.elapsedRealtimeNanos();
-                            if (MediaCodecBridge.queueNal(codec, streamBuf, sHead + 4, nalSize, frames * frameUs, 1_000)) {
+                            if (MediaCodecBridge.queueNal(codec, nalData, nalOff, nalSize, frames * frameUs, 1_000)) {
                                 long dn = SystemClock.elapsedRealtimeNanos() - t0;
                                 decodeNsTotal += dn;
                                 decodeNsBuf[(decodeNsBufN++) & 127] = dn;
@@ -177,7 +230,7 @@ final class LegacyAnnexBDecodeLoop {
                         }
                     } else {
                         long t0 = SystemClock.elapsedRealtimeNanos();
-                        if (MediaCodecBridge.queueNal(codec, streamBuf, sHead + 4, nalSize, frames * frameUs, 1_000)) {
+                        if (MediaCodecBridge.queueNal(codec, nalData, nalOff, nalSize, frames * frameUs, 1_000)) {
                             long dn = SystemClock.elapsedRealtimeNanos() - t0;
                             decodeNsTotal += dn;
                             decodeNsBuf[(decodeNsBufN++) & 127] = dn;
@@ -189,9 +242,12 @@ final class LegacyAnnexBDecodeLoop {
                             droppedSec++;
                         }
                     }
-                    sHead += 4 + nalSize;
+                    rHead += 4 + nalSize;
+                    avail  = rTail - rHead;
                 }
             } else {
+                // Mode 0: Annex-B start-code parsing (unchanged linear path)
+                int avail = sTail - sHead;
                 int nalStart = StreamNalUtils.findStartCode(streamBuf, sHead, sTail);
                 if (nalStart < 0) {
                     sHead = Math.max(sHead, sTail - 3);
@@ -199,19 +255,13 @@ final class LegacyAnnexBDecodeLoop {
                     sHead = nalStart;
                     while (true) {
                         int next = StreamNalUtils.findStartCode(streamBuf, sHead + 3, sTail);
-                        if (next < 0) {
-                            break;
-                        }
+                        if (next < 0) break;
                         int nalSize = next - sHead;
                         if (nalSize > 0) {
                             frames++;
                             MediaCodecBridge.drainLatestFrame(
-                                    codec,
-                                    bufferInfo,
-                                    drainStats,
-                                    true,
-                                    pendingDecodeQueue >= decodeQueueMaxFrames ? 16_000 : 5_000
-                            );
+                                    codec, bufferInfo, drainStats, true,
+                                    pendingDecodeQueue >= decodeQueueMaxFrames ? 16_000 : 5_000);
                             pendingDecodeQueue = Math.max(0, pendingDecodeQueue - drainStats.releasedCount);
                             if (drainStats.releasedCount > 0) {
                                 lastDecodeProgressMs = SystemClock.elapsedRealtime();
@@ -281,12 +331,14 @@ final class LegacyAnnexBDecodeLoop {
                 runtimeState.addTooLateTotal(tooLateSec);
                 runtimeState.resetReconnectDelayMs();
                 statusListener.onStatus(stateStreaming, "rendering live desktop", bytes);
+                // bufAvail is the number of unprocessed bytes in the active buffer.
+                int bufAvail = (streamMode == 1) ? (rTail - rHead) : (sTail - sHead);
                 statusListener.onStats(
                         "fps in/out: " + inFrames + "/" + outFrames
                                 + " | drops: " + runtimeState.getDroppedTotal()
                                 + " | late: " + runtimeState.getTooLateTotal()
                                 + " | q(t/d/r): "
-                                + StreamBufferMath.estimateTransportDepthFrames(sTail - sHead, avgNalSize) + "/"
+                                + StreamBufferMath.estimateTransportDepthFrames(bufAvail, avgNalSize) + "/"
                                 + Math.min(decodeQueueMaxFrames, pendingDecodeQueue) + "/"
                                 + renderQueueDepth
                                 + " | reconnects: " + runtimeState.getReconnects()
@@ -298,7 +350,7 @@ final class LegacyAnnexBDecodeLoop {
                 statusListener.onClientMetrics(new ClientMetricsSample(
                         inFrames, inFrames, outFrames, bytes,
                         decodeMsP50, decodeMsP95, renderMsP95, e2eMs, e2eMs,
-                        StreamBufferMath.estimateTransportDepthFrames(sTail - sHead, avgNalSize),
+                        StreamBufferMath.estimateTransportDepthFrames(bufAvail, avgNalSize),
                         Math.min(decodeQueueMaxFrames, pendingDecodeQueue),
                         Math.min(renderQueueMaxFrames, renderQueueDepth),
                         0, runtimeState.getDroppedTotal(), runtimeState.getTooLateTotal(),
