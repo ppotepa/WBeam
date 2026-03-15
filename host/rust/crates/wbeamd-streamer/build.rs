@@ -1,6 +1,6 @@
 fn main() {
-    // Link against libevdi for the EVDI direct-capture backend (Linux only).
-    // libevdi.so must be installed (e.g. via evdi-dkms package).
-    #[cfg(target_os = "linux")]
-    println!("cargo:rustc-link-lib=evdi");
+    // Only link libevdi when the optional `evdi` feature is enabled.
+    if cfg!(target_os = "linux") && std::env::var_os("CARGO_FEATURE_EVDI").is_some() {
+        println!("cargo:rustc-link-lib=evdi");
+    }
 }

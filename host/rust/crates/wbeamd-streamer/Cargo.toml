@@ -21,3 +21,4 @@ wbtp-core = { path = "../../../../shared/protocol/rust/crates/wbtp-core" }
 
 [features]
 default = []
+evdi = []
