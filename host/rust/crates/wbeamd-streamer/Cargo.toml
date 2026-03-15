@@ -16,6 +16,7 @@ tracing = { workspace = true, optional = true }
 byteorder = "1"
 rand = "0.8"
 bytes = "1"
+libc = "0.2"
 wbtp-core = { path = "../../../../shared/protocol/rust/crates/wbtp-core" }
 
 [features]

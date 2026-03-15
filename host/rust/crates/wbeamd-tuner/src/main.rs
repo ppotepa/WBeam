@@ -46,6 +46,7 @@ struct Args {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Step {
+    Backend,
     Target,
     Probe,
     RunConfig,
@@ -57,17 +58,19 @@ enum Step {
 impl Step {
     fn title(self) -> &'static str {
         match self {
-            Step::Target => "1/6 Target",
-            Step::Probe => "2/6 Probe & Guardrails",
-            Step::RunConfig => "3/6 Run Config",
-            Step::Evolution => "4/6 Evolution",
-            Step::Results => "5/6 Results",
-            Step::Finish => "6/6 Finish",
+            Step::Backend => "1/7 Backend",
+            Step::Target => "2/7 Target",
+            Step::Probe => "3/7 Probe & Guardrails",
+            Step::RunConfig => "4/7 Run Config",
+            Step::Evolution => "5/7 Evolution",
+            Step::Results => "6/7 Results",
+            Step::Finish => "7/7 Finish",
         }
     }
 
     fn all() -> &'static [Step] {
         &[
+            Step::Backend,
             Step::Target,
             Step::Probe,
             Step::RunConfig,
@@ -79,6 +82,7 @@ impl Step {
 
     fn next(self) -> Self {
         match self {
+            Step::Backend => Step::Target,
             Step::Target => Step::Probe,
             Step::Probe => Step::RunConfig,
             Step::RunConfig => Step::Evolution,
@@ -90,7 +94,8 @@ impl Step {
 
     fn prev(self) -> Self {
         match self {
-            Step::Target => Step::Target,
+            Step::Backend => Step::Backend,
+            Step::Target => Step::Backend,
             Step::Probe => Step::Target,
             Step::RunConfig => Step::Probe,
             Step::Evolution => Step::RunConfig,
@@ -230,6 +235,7 @@ struct CandidateResult {
 #[derive(Debug, Clone)]
 struct EvolutionConfig {
     codec: String,
+    backend: String,
     generations: u32,
     children: u32,
     objective: String,
@@ -352,6 +358,8 @@ const TRAINED_PROFILES_VERSION: u32 = 1;
 struct StoredTrainedProfile {
     key: String,
     name: String,
+    #[serde(default = "default_profile_backend")]
+    backend: String,
     codec: String,
     objective: String,
     workload: String,
@@ -374,6 +382,10 @@ fn trained_profiles_version() -> u32 {
     TRAINED_PROFILES_VERSION
 }
 
+fn default_profile_backend() -> String {
+    "wayland_portal".to_string()
+}
+
 impl Default for StoredTrainedProfiles {
     fn default() -> Self {
         Self {
@@ -386,6 +398,7 @@ impl Default for StoredTrainedProfiles {
 #[derive(Debug, Clone)]
 struct RunMetadata {
     profile_name: String,
+    backend: String,
     codec: String,
     objective: String,
     workload: String,
@@ -398,6 +411,9 @@ struct RunMetadata {
 struct App {
     api: ApiClient,
     step: Step,
+    backends: Vec<&'static str>,
+    selected_backend: usize,
+    backend_focus: usize,
     codecs: Vec<&'static str>,
     objectives: Vec<&'static str>,
     workloads: Vec<&'static str>,
@@ -438,7 +454,10 @@ impl App {
     fn new(args: Args) -> Result<Self> {
         Ok(Self {
             api: ApiClient::new(args.host_url, args.serial, args.stream_port)?,
-            step: Step::Target,
+            step: Step::Backend,
+            backends: vec!["wayland_portal", "evdi"],
+            selected_backend: 0,
+            backend_focus: 0,
             codecs: vec!["h264", "h265", "rawpng", "mjpeg"],
             objectives: vec!["balanced", "latency-first", "quality-first"],
             workloads: vec![
@@ -491,6 +510,10 @@ impl App {
 
     fn selected_codec_name(&self) -> &'static str {
         self.codecs[self.selected_codec]
+    }
+
+    fn selected_backend_name(&self) -> &'static str {
+        self.backends[self.selected_backend]
     }
 
     fn selected_objective_name(&self) -> &'static str {
@@ -711,6 +734,7 @@ impl App {
 
         let cfg = EvolutionConfig {
             codec: self.selected_codec_name().to_string(),
+            backend: self.selected_backend_name().to_string(),
             generations: self.generations,
             children: self.children,
             objective: self.selected_objective_name().to_string(),
@@ -931,6 +955,7 @@ impl App {
                 self.profile_name_input = profile_name.clone();
                 self.current_run = Some(RunMetadata {
                     profile_name,
+                    backend: self.selected_backend_name().to_string(),
                     codec: self.selected_codec_name().to_string(),
                     objective: self.selected_objective_name().to_string(),
                     workload: self.selected_workload_name().to_string(),
@@ -986,6 +1011,23 @@ impl App {
         }
 
         match self.step {
+            Step::Backend => match code {
+                KeyCode::Up => {
+                    if self.backend_focus > 0 {
+                        self.backend_focus -= 1;
+                    }
+                }
+                KeyCode::Down => {
+                    if self.backend_focus + 1 < self.backends.len() {
+                        self.backend_focus += 1;
+                    }
+                }
+                KeyCode::Enter => {
+                    self.selected_backend = self.backend_focus;
+                    self.step = Step::Target;
+                }
+                _ => {}
+            },
             Step::Target => match code {
                 KeyCode::Up => nudge_index(&mut self.target_focus, 4, -1),
                 KeyCode::Down => nudge_index(&mut self.target_focus, 4, 1),
@@ -1523,7 +1565,7 @@ fn run_evolution_worker(
         ));
     }
     let start_response =
-        match api.post_json(&format!("start?display_mode={display_mode}"), &start_body) {
+        match api.post_json(&format!("start?display_mode={display_mode}&capture_backend={}", cfg.backend), &start_body) {
             Ok(v) => v,
             Err(err) => {
                 let _ = tx.send(EngineEvent::Failed(format!(
@@ -1868,10 +1910,19 @@ fn user_wbeam_config_dir() -> Result<PathBuf> {
     Ok(base.join("wbeam"))
 }
 
-fn trained_profiles_path() -> Result<PathBuf> {
-    let dir = user_wbeam_config_dir()?;
-    fs::create_dir_all(&dir).context("failed to create ~/.config/wbeam")?;
+fn trained_profiles_path(backend: &str) -> Result<PathBuf> {
+    let dir = user_wbeam_config_dir()?.join("profiles").join(backend);
+    fs::create_dir_all(&dir).context("failed to create profile dir")?;
     Ok(dir.join("trained_profiles.json"))
+}
+
+fn migrate_legacy_profiles_once() {
+    let Ok(base) = user_wbeam_config_dir() else { return };
+    let legacy = base.join("trained_profiles.json");
+    let archive = base.join("trained_profiles.legacy.json");
+    if legacy.exists() && !archive.exists() {
+        let _ = fs::rename(&legacy, &archive);
+    }
 }
 
 fn load_trained_profiles(path: &PathBuf) -> Result<StoredTrainedProfiles> {
@@ -1897,7 +1948,7 @@ fn append_trained_profile(
     run: &RunMetadata,
     params: &CandidateParams,
 ) -> Result<StoredTrainedProfile> {
-    let path = trained_profiles_path()?;
+    let path = trained_profiles_path(&run.backend)?;
     let mut store = load_trained_profiles(&path)?;
     store.version = TRAINED_PROFILES_VERSION;
 
@@ -1906,6 +1957,7 @@ fn append_trained_profile(
     let entry = StoredTrainedProfile {
         key,
         name: run.profile_name.clone(),
+        backend: run.backend.clone(),
         codec: run.codec.clone(),
         objective: run.objective.clone(),
         workload: run.workload.clone(),
@@ -2127,6 +2179,7 @@ fn ui(frame: &mut ratatui::Frame, app: &App) {
     draw_status_bar(frame, root[1], app);
 
     match app.step {
+        Step::Backend => draw_backend(frame, root[2], app),
         Step::Target => draw_target(frame, root[2], app),
         Step::Probe => draw_probe(frame, root[2], app),
         Step::RunConfig => draw_run_config(frame, root[2], app),
@@ -2150,6 +2203,38 @@ fn ui(frame: &mut ratatui::Frame, app: &App) {
             "Log  (↑↓ focus, ←→ change, Enter action, Tab/Shift+Tab step, q quit)",
         ));
     frame.render_widget(footer, root[3]);
+}
+
+fn draw_backend(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app: &App) {
+    let items: Vec<ratatui::widgets::ListItem> = app
+        .backends
+        .iter()
+        .enumerate()
+        .map(|(i, b)| {
+            let selected = i == app.selected_backend;
+            let focused = i == app.backend_focus;
+            let prefix = if selected { "● " } else { "○ " };
+            let label = format!("{prefix}{b}");
+            let style = if focused {
+                ratatui::style::Style::default()
+                    .fg(ratatui::style::Color::Yellow)
+                    .add_modifier(ratatui::style::Modifier::BOLD)
+            } else if selected {
+                ratatui::style::Style::default().fg(ratatui::style::Color::Green)
+            } else {
+                ratatui::style::Style::default()
+            };
+            ratatui::widgets::ListItem::new(label).style(style)
+        })
+        .collect();
+
+    let list = ratatui::widgets::List::new(items)
+        .block(
+            ratatui::widgets::Block::default()
+                .borders(ratatui::widgets::Borders::ALL)
+                .title(" Capture Backend "),
+        );
+    frame.render_widget(list, area);
 }
 
 fn draw_target(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app: &App) {
@@ -2583,6 +2668,7 @@ fn draw_finish(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app: &Ap
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    migrate_legacy_profiles_once();
     let mut terminal = init_terminal()?;
     let mut app = App::new(args)?;
     let mut last_tick = Instant::now();

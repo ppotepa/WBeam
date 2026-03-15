@@ -107,10 +107,10 @@ export class HostApiManager {
     }
   }
 
-  async listTrainedProfiles(): Promise<TrainedProfile[]> {
+  async listTrainedProfiles(backend: string): Promise<TrainedProfile[]> {
     try {
       return await withTimeout(
-        invoke<TrainedProfile[]>("list_trained_profiles"),
+        invoke<TrainedProfile[]>("list_trained_profiles", { backend }),
         2500,
         "list_trained_profiles",
       );

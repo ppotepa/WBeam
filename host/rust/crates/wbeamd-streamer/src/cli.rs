@@ -16,6 +16,7 @@ pub enum CaptureBackend {
     Auto,
     WaylandPortal,
     X11,
+    Evdi,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

@@ -161,8 +161,9 @@ export default function App() {
   const [connectDialogDevice, setConnectDialogDevice] = createSignal<DeviceBasic | null>(null);
   const [connectDialogMode, setConnectDialogMode] = createSignal<DisplayMode>("virtual_monitor");
   const [connectDialogResolutionPresetId, setConnectDialogResolutionPresetId] = createSignal<string>(RESOLUTION_PRESET_DEFAULT_ID);
-  const [connectDialogEncoderMode, setConnectDialogEncoderMode] = createSignal<ConnectEncoderMode>(ENCODER_DEFAULT_MODE);
+  const [connectDialogEncoderMode, setConnectDialogEncoderMode] = createSignal<ConnectEncoderMode | "">("");
   const [connectDialogProfileKey, setConnectDialogProfileKey] = createSignal<string>("");
+  const [connectDialogCaptureBackend, setConnectDialogCaptureBackend] = createSignal<import("./types").CaptureBackend | "">("");
   const [trainedProfiles, setTrainedProfiles] = createSignal<TrainedProfile[]>([]);
   const [connectDialogDoctor, setConnectDialogDoctor] = createSignal<VirtualDoctor | null>(null);
   const [connectDialogDoctorLoading, setConnectDialogDoctorLoading] = createSignal(false);
@@ -246,28 +247,21 @@ export default function App() {
     saveWaylandExperimentalDuplication(enabled);
   }
 
-  function recommendedProfileKey(profiles: TrainedProfile[]): string {
-    const preferred = profiles.find((profile) => profile.encoder === ENCODER_DEFAULT_MODE);
-    return preferred?.key ?? "";
+  function recommendedProfileKey(_profiles: TrainedProfile[]): string {
+    return "";
   }
 
-  async function refreshTrainedProfiles(options?: { preselectRecommended?: boolean }): Promise<void> {
+  async function refreshTrainedProfiles(): Promise<void> {
+    const backend = connectDialogCaptureBackend() || "wayland_portal";
     try {
-      const profiles = await api.listTrainedProfiles();
+      const profiles = await api.listTrainedProfiles(backend);
       setTrainedProfiles(profiles);
-      if (options?.preselectRecommended) {
-        setConnectDialogProfileKey(recommendedProfileKey(profiles));
-        return;
-      }
       const selected = connectDialogProfileKey();
       if (selected.length > 0 && !profiles.some((profile) => profile.key === selected)) {
         setConnectDialogProfileKey("");
       }
     } catch {
       setTrainedProfiles([]);
-      if (options?.preselectRecommended) {
-        setConnectDialogProfileKey("");
-      }
     }
   }
 
@@ -276,9 +270,10 @@ export default function App() {
     const saved = isWaylandHost ? "virtual_monitor" : (loadSavedDisplayMode(device.serial) ?? "virtual_monitor");
     setConnectDialogMode(saved);
     setConnectDialogResolutionPresetId(RESOLUTION_PRESET_DEFAULT_ID);
-    setConnectDialogEncoderMode(ENCODER_DEFAULT_MODE);
+    setConnectDialogEncoderMode("");
     setConnectDialogProfileKey("");
-    void refreshTrainedProfiles({ preselectRecommended: true });
+    setConnectDialogCaptureBackend("");
+    void refreshTrainedProfiles();
     setConnectDialogDoctor(null);
     setConnectDialogDoctorLoading(!isWaylandHost);
     setConnectDialogBlockReason(connectDisabledReason(device));
@@ -336,12 +331,22 @@ export default function App() {
       }
 
       const resolvedSize = resolveSessionSizeForPreset(device, connectDialogResolutionPresetId());
-      const selectedProfile = trainedProfiles().find((profile) => profile.key === connectDialogProfileKey()) ?? null;
-      const resolvedEncoder = selectedProfile ? undefined : connectDialogEncoderMode();
+      const encoderValue = connectDialogEncoderMode();
+      const profilesForEncoder = trainedProfiles().filter((p) => p.encoder === encoderValue);
+      const selectedProfile = profilesForEncoder.find((p) => p.key === connectDialogProfileKey()) ?? null;
+      const resolvedEncoder: ConnectEncoderMode | undefined = selectedProfile
+        ? undefined
+        : encoderValue !== ""
+          ? (encoderValue as ConnectEncoderMode)
+          : undefined;
+      const captureBackend = connectDialogCaptureBackend();
       const connectConfig: ConnectSessionConfig = {
         profileName: selectedProfile?.key,
         encoder: resolvedEncoder,
         size: resolvedSize,
+        captureBackend: captureBackend !== "" && captureBackend !== "auto"
+          ? (captureBackend as import("./types").CaptureBackend)
+          : undefined,
       };
 
       closeConnectDialog();
@@ -730,8 +735,10 @@ export default function App() {
             return "Creates real additional monitor space on host desktop.";
           };
           const selectedSize = () => resolveSessionSizeForPreset(device, connectDialogResolutionPresetId()) ?? "auto";
-          const selectedProfile = () => trainedProfiles().find((profile) => profile.key === connectDialogProfileKey()) ?? null;
-          const selectedEncoder = () => selectedProfile()?.encoder ?? connectDialogEncoderMode();
+          const backendChosen = () => connectDialogCaptureBackend() !== "";
+          const codecChosen = () => connectDialogEncoderMode() !== "";
+          const profilesForCodec = () => trainedProfiles().filter((p) => p.encoder === connectDialogEncoderMode());
+          const selectedProfile = () => profilesForCodec().find((profile) => profile.key === connectDialogProfileKey()) ?? null;
           return (
             <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Select display mode">
               <section class="connect-modal">
@@ -776,24 +783,68 @@ export default function App() {
 
                 <div class="connect-config-grid">
                   <label class="connect-config-field">
-                    <span>Trained profile</span>
+                    <span>Capture backend</span>
+                    <select
+                      value={connectDialogCaptureBackend()}
+                      onChange={(event) => {
+                        setConnectDialogCaptureBackend(event.currentTarget.value as import("./types").CaptureBackend | "");
+                        setConnectDialogEncoderMode("");
+                        setConnectDialogProfileKey("");
+                        void refreshTrainedProfiles();
+                      }}
+                    >
+                      <option value="">— select backend —</option>
+                      <option value="auto">Auto (use host default)</option>
+                      <option value="evdi">EVDI — direct kernel capture (fastest, no 60 fps cap)</option>
+                      <option value="wayland_portal">Wayland portal (default on Wayland)</option>
+                    </select>
+                    <small>
+                      {connectDialogCaptureBackend() === "evdi"
+                        ? "Requires: sudo modprobe evdi initial_device_count=1"
+                        : `Host detected: ${session.hostProbe().captureMode}`}
+                    </small>
+                  </label>
+
+                  <label class={`connect-config-field${backendChosen() ? "" : " field-locked"}`}>
+                    <span>Codec</span>
+                    <select
+                      value={connectDialogEncoderMode()}
+                      disabled={!backendChosen()}
+                      onChange={(event) => {
+                        setConnectDialogEncoderMode(event.currentTarget.value as ConnectEncoderMode | "");
+                        setConnectDialogProfileKey("");
+                      }}
+                    >
+                      <option value="">— select codec —</option>
+                      <For each={ENCODER_OPTIONS}>
+                        {(option) => (
+                          <option value={option.id}>{option.label}</option>
+                        )}
+                      </For>
+                    </select>
+                    <small>{codecChosen() ? `Selected: ${connectDialogEncoderMode()}` : "Choose backend first"}</small>
+                  </label>
+
+                  <label class={`connect-config-field${codecChosen() ? "" : " field-locked"}`}>
+                    <span>Profile</span>
                     <select
                       value={connectDialogProfileKey()}
+                      disabled={!codecChosen()}
                       onChange={(event) => setConnectDialogProfileKey(event.currentTarget.value)}
                     >
                       <option value="">None (manual settings)</option>
-                      <For each={trainedProfiles()}>
+                      <For each={profilesForCodec()}>
                         {(profile) => (
                           <option value={profile.key}>
-                            {`${profile.name} (${profile.encoder.toUpperCase()} ${profile.workload}, ${profile.fps}fps, ${profile.bitrateKbps}kbps)`}
+                            {`${profile.name} (${profile.fps}fps, ${profile.bitrateKbps}kbps, ${profile.workload})`}
                           </option>
                         )}
                       </For>
                     </select>
                     <small>
                       {selectedProfile()
-                        ? `Using ${selectedProfile()!.codec} ${selectedProfile()!.fps}fps ${selectedProfile()!.bitrateKbps}kbps (${selectedProfile()!.objective}, ${selectedProfile()!.workload})`
-                        : "Use manual encoder and resolution settings."}
+                        ? `${selectedProfile()!.fps}fps ${selectedProfile()!.bitrateKbps}kbps — ${selectedProfile()!.objective}, ${selectedProfile()!.workload}`
+                        : codecChosen() ? "Optional: use manual settings without a profile" : "Choose codec first"}
                     </small>
                   </label>
 
@@ -811,26 +862,6 @@ export default function App() {
                     </select>
                     <small>Final stream size: {selectedSize()}</small>
                   </label>
-
-                  <label class="connect-config-field">
-                    <span>Encoder</span>
-                    <select
-                      value={connectDialogEncoderMode()}
-                      disabled={selectedProfile() !== null}
-                      onChange={(event) => setConnectDialogEncoderMode(event.currentTarget.value as ConnectEncoderMode)}
-                    >
-                      <For each={ENCODER_OPTIONS}>
-                        {(option) => (
-                          <option value={option.id}>{option.label}</option>
-                        )}
-                      </For>
-                    </select>
-                    <small>
-                      {selectedProfile()
-                        ? `Encoder locked by profile: ${selectedEncoder()}`
-                        : `Active encoder for this connect: ${selectedEncoder()}`}
-                    </small>
-                  </label>
                 </div>
 
                 <Show when={connectDialogDoctorLoading()}>
@@ -844,7 +875,7 @@ export default function App() {
                 </Show>
                 <div class="connect-modal-actions">
                   <button class="device-btn" onClick={closeConnectDialog}>Cancel</button>
-                  <button class="device-btn" onClick={() => void confirmConnect()} disabled={connectDialogBlockReason().length > 0}>
+                  <button class="device-btn" onClick={() => void confirmConnect()} disabled={connectDialogBlockReason().length > 0 || !backendChosen() || !codecChosen()}>
                     Connect
                   </button>
                 </div>

@@ -501,6 +501,20 @@ impl DaemonCore {
         display_backends::normalize_requested_mode(mode).as_str()
     }
 
+    fn normalize_capture_backend(backend: Option<&str>) -> Option<&'static str> {
+        let normalized = backend
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_lowercase)?;
+        match normalized.as_str() {
+            "auto" => None,
+            "wayland" | "wayland_portal" | "wayland-portal" => Some("wayland_portal"),
+            "x11" | "x11_gst" | "x11-gst" => Some("x11_gst"),
+            "evdi" => Some("evdi"),
+            _ => None,
+        }
+    }
+
     pub async fn set_display_mode(&self, mode: Option<&str>) {
         let normalized = Self::normalize_display_mode(mode);
         let mut inner = self.inner.lock().await;
@@ -508,8 +522,16 @@ impl DaemonCore {
     }
 
     pub async fn set_capture_backend(&self, backend: Option<&str>) {
+        let normalized = Self::normalize_capture_backend(backend);
+        if normalized.is_none() {
+            if let Some(raw) = backend.map(str::trim).filter(|v| !v.is_empty()) {
+                if !raw.eq_ignore_ascii_case("auto") {
+                    warn!(capture_backend = raw, "ignoring unsupported capture backend override");
+                }
+            }
+        }
         let mut inner = self.inner.lock().await;
-        inner.capture_backend_override = backend.map(|s| s.trim().to_lowercase());
+        inner.capture_backend_override = normalized.map(str::to_string);
     }
 
     async fn stop_virtual_display_if_any(&self) {
@@ -1370,7 +1392,8 @@ impl DaemonCore {
                 capture_backend: if benchmark_mode {
                     "benchmark_game".to_string()
                 } else {
-                    self.host_probe.capture_mode_name().to_string()
+                    inner.capture_backend_override.clone()
+                        .unwrap_or_else(|| self.host_probe.capture_mode_name().to_string())
                 },
                 parse_mode: "unknown".to_string(),
                 timeout_pull_ms: 0,
@@ -1408,9 +1431,11 @@ impl DaemonCore {
         let mut cmd;
         // Priority: per-session override > WBEAM_CAPTURE_BACKEND env/config > auto-detected probe
         let probed_backend = self.host_probe.capture_mode_name();
-        let capture_backend = capture_backend_override
-            .or_else(|| wbeam_setting(&self.settings, "WBEAM_CAPTURE_BACKEND"))
-            .unwrap_or_else(|| probed_backend.to_string());
+        let env_capture_backend = wbeam_setting(&self.settings, "WBEAM_CAPTURE_BACKEND");
+        let capture_backend = Self::normalize_capture_backend(capture_backend_override.as_deref())
+            .or_else(|| Self::normalize_capture_backend(env_capture_backend.as_deref()))
+            .unwrap_or(probed_backend)
+            .to_string();
         let capture_backend = capture_backend.as_str();
         let wayland_virtual_source =
             !benchmark_mode && capture_backend == "wayland_portal" && requested_mode.is_virtual();
@@ -1685,6 +1710,7 @@ impl DaemonCore {
 
         if line.contains("Streaming Wayland screencast")
             || line.contains("Streaming X11 screencast")
+            || line.contains("Streaming EVDI capture")
             || line.contains("Streaming benchmark game source")
         {
             inner.state = STATE_STREAMING.to_string();

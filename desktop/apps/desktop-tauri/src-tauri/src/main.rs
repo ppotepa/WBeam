@@ -124,6 +124,8 @@ const TRAINED_PROFILES_VERSION: u32 = 1;
 struct StoredTrainedProfile {
     key: String,
     name: String,
+    #[serde(default = "default_profile_backend")]
+    backend: String,
     codec: String,
     objective: String,
     workload: String,
@@ -146,6 +148,10 @@ fn trained_profiles_version() -> u32 {
     TRAINED_PROFILES_VERSION
 }
 
+fn default_profile_backend() -> String {
+    "wayland_portal".to_string()
+}
+
 impl Default for StoredTrainedProfiles {
     fn default() -> Self {
         Self {
@@ -160,6 +166,7 @@ impl Default for StoredTrainedProfiles {
 struct TrainedProfile {
     key: String,
     name: String,
+    backend: String,
     codec: String,
     objective: String,
     workload: String,
@@ -175,6 +182,7 @@ impl From<StoredTrainedProfile> for TrainedProfile {
         Self {
             key: value.key,
             name: value.name,
+            backend: value.backend,
             codec: value.codec,
             objective: value.objective,
             workload: value.workload,
@@ -333,14 +341,26 @@ fn wbeam_stream_port() -> u16 {
     wbeam_config_u16("WBEAM_STREAM_PORT", 5000)
 }
 
-fn trained_profiles_path() -> Result<PathBuf, String> {
-    let dir = wbeam_user_config_dir().ok_or_else(|| "cannot resolve user config directory".to_string())?;
+fn trained_profiles_path(backend: &str) -> Result<PathBuf, String> {
+    let dir = wbeam_user_config_dir()
+        .ok_or_else(|| "cannot resolve user config directory".to_string())?
+        .join("profiles")
+        .join(backend);
     fs::create_dir_all(&dir).map_err(|e| format!("failed to create {}: {e}", dir.display()))?;
     Ok(dir.join("trained_profiles.json"))
 }
 
-fn load_trained_profiles_store() -> Result<StoredTrainedProfiles, String> {
-    let path = trained_profiles_path()?;
+fn migrate_legacy_profiles_once() {
+    let Some(base) = wbeam_user_config_dir() else { return };
+    let legacy = base.join("trained_profiles.json");
+    let archive = base.join("trained_profiles.legacy.json");
+    if legacy.exists() && !archive.exists() {
+        let _ = fs::rename(&legacy, &archive);
+    }
+}
+
+fn load_trained_profiles_store(backend: &str) -> Result<StoredTrainedProfiles, String> {
+    let path = trained_profiles_path(backend)?;
     if !path.exists() {
         return Ok(StoredTrainedProfiles::default());
     }
@@ -350,20 +370,20 @@ fn load_trained_profiles_store() -> Result<StoredTrainedProfiles, String> {
         .map_err(|e| format!("failed to parse {}: {e}", path.display()))
 }
 
-fn find_trained_profile(selector: &str) -> Result<Option<StoredTrainedProfile>, String> {
+fn find_trained_profile(selector: &str, backend: &str) -> Result<Option<StoredTrainedProfile>, String> {
     let needle = selector.trim();
     if needle.is_empty() {
         return Ok(None);
     }
-    let store = load_trained_profiles_store()?;
+    let store = load_trained_profiles_store(backend)?;
     Ok(store.profiles.into_iter().find(|profile| {
         profile.key.eq_ignore_ascii_case(needle) || profile.name.eq_ignore_ascii_case(needle)
     }))
 }
 
 #[tauri::command]
-fn list_trained_profiles() -> Result<Vec<TrainedProfile>, String> {
-    let mut profiles = load_trained_profiles_store()?.profiles;
+fn list_trained_profiles(backend: String) -> Result<Vec<TrainedProfile>, String> {
+    let mut profiles = load_trained_profiles_store(&backend)?.profiles;
     profiles.sort_by(|a, b| b.created_unix_ms.cmp(&a.created_unix_ms));
     Ok(profiles.into_iter().map(TrainedProfile::from).collect())
 }
@@ -1670,7 +1690,8 @@ fn device_connect(
         intra_only: None,
     };
     if let Some(selector) = selected_profile.as_deref() {
-        let profile = find_trained_profile(selector)?
+        let profile_backend = connect_capture_backend.as_deref().unwrap_or("wayland_portal");
+        let profile = find_trained_profile(selector, profile_backend)?
             .ok_or_else(|| format!("trained profile not found: {selector}"))?;
         start_patch.encoder = normalize_encoder_name(Some(profile.encoder.clone()));
         if start_patch.encoder.is_none() {
@@ -2425,6 +2446,7 @@ fn show_x11_startup_notice_window(app: &tauri::AppHandle) {
 }
 
 fn main() {
+    migrate_legacy_profiles_once();
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             if let Some(window) = app.get_webview_window("main") {

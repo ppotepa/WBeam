@@ -255,6 +255,8 @@ async fn post_start(
         );
         core.set_display_mode(query.display_mode.as_deref()).await;
     }
+    // Capture backend is treated as a per-start selection.
+    // Missing query param resets to automatic host-probe routing.
     if let Some(ref backend) = query.capture_backend {
         tracing::info!(
             serial = serial.unwrap_or("default"),
@@ -262,6 +264,8 @@ async fn post_start(
             "start: capture_backend override"
         );
         core.set_capture_backend(Some(backend.as_str())).await;
+    } else {
+        core.set_capture_backend(None).await;
     }
     let patch = body.map(|Json(v)| v).unwrap_or_default();
     let host_probe = core.host_probe().await;

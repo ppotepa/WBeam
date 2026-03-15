@@ -37,6 +37,7 @@ pub fn make_pipeline(
     let encoder_name = pick_encoder(&cfg.encoder)?;
     let hevc = is_hevc(&cfg.encoder);
     let is_portal = matches!(capture, PreparedCapture::Wayland(_));
+    let is_evdi = matches!(capture, PreparedCapture::Evdi);
     let mut profile = buffer_profile(cfg.stream_mode, cfg.fps, mode_png);
     profile.queue_buffers = cfg.queue_max_buffers.max(1);
     profile.appsink_buffers = cfg.appsink_max_buffers.max(1);
@@ -59,6 +60,7 @@ pub fn make_pipeline(
     let capture_backend_name = match capture {
         PreparedCapture::Wayland(_) => "wayland_portal",
         PreparedCapture::X11 => "x11",
+        PreparedCapture::Evdi => "evdi",
         PreparedCapture::BenchmarkGame => "benchmark_game",
     };
     let source_dynamic_pad = false;
@@ -204,7 +206,7 @@ pub fn make_pipeline(
         // the requested fps.  Never let videorate duplicate frames to pad up to a
         // target rate the compositor cannot supply — duplicates waste CBR budget
         // and cause micro-stutter on the Android decoder.
-        let effective_drop_only = if is_portal {
+        let effective_drop_only = if is_portal || is_evdi {
             true
         } else {
             cfg.videorate_drop_only
@@ -282,7 +284,7 @@ pub fn make_pipeline(
         cfg.pull_timeout_ms,
         cfg.write_timeout_ms,
         cfg.disconnect_on_timeout,
-        if is_portal { true } else { cfg.videorate_drop_only },
+        if is_portal || is_evdi { true } else { cfg.videorate_drop_only },
         cfg.pipewire_keepalive_ms,
         profile.queue_leaky,
         profile.queue_time_ns
