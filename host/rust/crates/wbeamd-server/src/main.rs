@@ -269,8 +269,14 @@ async fn post_start(
     }
     let patch = body.map(|Json(v)| v).unwrap_or_default();
     let host_probe = core.host_probe().await;
-    let is_wayland_portal = host_probe.capture_mode == "wayland_portal";
-    let pre_enabled_outputs = if is_wayland_portal {
+    let selected_backend = query
+        .capture_backend
+        .as_deref()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or(host_probe.capture_mode.as_str());
+    let is_wayland_portal = selected_backend == "wayland_portal";
+    let is_evdi = selected_backend == "evdi";
+    let pre_enabled_outputs = if is_wayland_portal || is_evdi {
         kscreen_layout::kscreen_enabled_output_names().ok()
     } else {
         None
@@ -292,6 +298,10 @@ async fn post_start(
                 .await
                 {
                     warn!(error = %err, "wayland portal output auto-layout failed");
+                }
+            } else if is_evdi {
+                if let Err(err) = auto_mirror_evdi_outputs(pre_enabled_outputs.as_ref()).await {
+                    warn!(error = %err, "evdi output auto-mirror failed");
                 }
             }
             (StatusCode::OK, Json(resp)).into_response()
@@ -421,8 +431,61 @@ async fn auto_layout_wayland_portal_outputs(
     Ok(())
 }
 
+async fn auto_mirror_evdi_outputs(
+    pre_enabled_outputs: Option<&std::collections::HashSet<String>>,
+) -> Result<(), String> {
+    if !evdi_auto_mirror_enabled() {
+        return Ok(());
+    }
+    if !kscreen_layout::command_exists("kscreen-doctor") {
+        return Ok(());
+    }
+
+    let outputs = kscreen_layout::kscreen_query_outputs()?;
+    let enabled_now: HashSet<String> = outputs
+        .iter()
+        .filter(|o| kscreen_layout::output_ready_for_layout(o))
+        .map(|o| o.name.clone())
+        .collect();
+
+    let mut preferred_targets = HashSet::new();
+    if let Some(before) = pre_enabled_outputs {
+        let mut new_names: Vec<String> = enabled_now.difference(before).cloned().collect();
+        new_names.sort();
+        preferred_targets.extend(
+            new_names
+                .into_iter()
+                .filter(|name| kscreen_layout::output_name_looks_virtual(name)),
+        );
+    }
+
+    let commands = kscreen_layout::build_virtual_replication_commands(
+        &outputs,
+        if preferred_targets.is_empty() {
+            None
+        } else {
+            Some(&preferred_targets)
+        },
+    );
+    if commands.is_empty() {
+        return Ok(());
+    }
+
+    kscreen_layout::apply_kscreen_layout(&commands)?;
+    info!(commands = ?commands, "applied evdi auto-mirror layout");
+    Ok(())
+}
+
 fn wayland_portal_auto_layout_enabled() -> bool {
     let raw = std::env::var("WBEAM_WAYLAND_PORTAL_AUTO_LAYOUT").unwrap_or_else(|_| "1".to_string());
+    !matches!(
+        raw.trim().to_ascii_lowercase().as_str(),
+        "0" | "false" | "no" | "off"
+    )
+}
+
+fn evdi_auto_mirror_enabled() -> bool {
+    let raw = std::env::var("WBEAM_EVDI_AUTO_MIRROR").unwrap_or_else(|_| "1".to_string());
     !matches!(
         raw.trim().to_ascii_lowercase().as_str(),
         "0" | "false" | "no" | "off"

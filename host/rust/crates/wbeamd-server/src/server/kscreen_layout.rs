@@ -5,9 +5,11 @@ use serde_json::Value;
 
 #[derive(Debug, Clone)]
 pub(crate) struct KscreenOutput {
+    pub(crate) id: i64,
     pub(crate) name: String,
     pub(crate) enabled: bool,
     pub(crate) connected: bool,
+    pub(crate) priority: i32,
     pub(crate) replication_source: i64,
     pub(crate) x: i32,
     pub(crate) y: i32,
@@ -56,6 +58,12 @@ pub(crate) fn kscreen_query_outputs() -> Result<Vec<KscreenOutput>, String> {
         let Some(name) = item.get("name").and_then(|v| v.as_str()) else {
             continue;
         };
+        let id = item.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
+        let priority = item
+            .get("priority")
+            .and_then(|v| v.as_i64())
+            .and_then(|v| i32::try_from(v).ok())
+            .unwrap_or(i32::MAX);
         let x = item
             .get("pos")
             .and_then(|v| v.get("x"))
@@ -85,6 +93,7 @@ pub(crate) fn kscreen_query_outputs() -> Result<Vec<KscreenOutput>, String> {
             .and_then(|v| v.as_i64())
             .unwrap_or(0);
         parsed.push(KscreenOutput {
+            id,
             name: name.to_string(),
             enabled: item
                 .get("enabled")
@@ -94,6 +103,7 @@ pub(crate) fn kscreen_query_outputs() -> Result<Vec<KscreenOutput>, String> {
                 .get("connected")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
+            priority,
             replication_source,
             x,
             y,
@@ -172,6 +182,42 @@ pub(crate) fn build_non_overlapping_layout_commands(
         x = x.saturating_add(output.width.max(320));
     }
     commands
+}
+
+pub(crate) fn build_virtual_replication_commands(
+    outputs: &[KscreenOutput],
+    preferred_targets: Option<&HashSet<String>>,
+) -> Vec<String> {
+    let source = outputs
+        .iter()
+        .filter(|o| output_ready_for_layout(o))
+        .filter(|o| !output_name_looks_virtual(&o.name))
+        .filter(|o| o.replication_source == 0)
+        .min_by(|a, b| {
+            a.priority
+                .cmp(&b.priority)
+                .then_with(|| a.name.cmp(&b.name))
+        });
+    let Some(source) = source else {
+        return Vec::new();
+    };
+
+    outputs
+        .iter()
+        .filter(|o| output_ready_for_layout(o))
+        .filter(|o| output_name_looks_virtual(&o.name))
+        .filter(|o| o.id != source.id)
+        .filter(|o| o.replication_source != source.id)
+        .filter(|o| {
+            if let Some(preferred) = preferred_targets {
+                if !preferred.is_empty() {
+                    return preferred.contains(&o.name);
+                }
+            }
+            true
+        })
+        .map(|o| format!("output.{}.replicationSource.{}", o.name, source.id))
+        .collect()
 }
 
 fn has_overlap(outputs: &[KscreenOutput]) -> bool {

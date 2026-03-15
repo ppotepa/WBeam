@@ -29,7 +29,7 @@ ADB_LOGCAT_PID_FILE="$LOG_DIR/adb-logcat.pid"
 BUILD_VERSION_FILE="$ROOT_DIR/.wbeam_build_version"
 BUILD_NUMBER_FILE="$ROOT_DIR/.wbeam_buildno"
 DEVICE_PORTS_FILE="$ROOT_DIR/.wbeam_device_ports"
-VERSION_BASE="${WBEAM_VERSION_BASE:-0.1.0}"
+VERSION_BASE="${WBEAM_VERSION_BASE:-0.1.2}"
 
 
 
