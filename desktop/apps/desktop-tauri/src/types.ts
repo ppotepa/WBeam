@@ -65,4 +65,18 @@ export type ConnectEncoderMode = "h264" | "h265" | "rawpng";
 export type ConnectSessionConfig = {
   encoder?: "h264" | "h265" | "rawpng";
   size?: string;
+  profileName?: string;
+};
+
+export type TrainedProfile = {
+  key: string;
+  name: string;
+  codec: string;
+  objective: string;
+  workload: string;
+  encoder: "h264" | "h265" | "rawpng";
+  bitrateKbps: number;
+  fps: number;
+  intraOnly: boolean;
+  createdUnixMs: number;
 };

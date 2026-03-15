@@ -29,8 +29,18 @@ async fn main() -> Result<()> {
 
     let cfg = resolve_profile(&args)?;
     println!(
-        "[wbeam] preset=default mode={:?} capture={:?} size={}x{} fps={} bitrate={}kbps encoder={} cursor={} skip_videoscale={}",
-        cfg.stream_mode, cfg.capture_backend, cfg.width, cfg.height, cfg.fps, cfg.bitrate_kbps, cfg.encoder, args.cursor_mode, cfg.skip_videoscale
+        "[wbeam] preset=default mode={:?} capture={:?} wayland_source={:?} size={}x{} fps={} bitrate={}kbps encoder={} cursor={} skip_videoscale={} benchmark_game={}",
+        cfg.stream_mode,
+        cfg.capture_backend,
+        cfg.wayland_source_type,
+        cfg.width,
+        cfg.height,
+        cfg.fps,
+        cfg.bitrate_kbps,
+        cfg.encoder,
+        args.cursor_mode,
+        cfg.skip_videoscale,
+        cfg.benchmark_game
     );
     let capture = prepare_capture(&cfg).await?;
     capture.announce_startup();

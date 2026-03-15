@@ -11,7 +11,7 @@ use anyhow::{Context, Result};
 use ashpd::desktop::screencast::{PersistMode, Screencast, SourceType};
 use ashpd::WindowIdentifier;
 
-use crate::cli::ResolvedConfig;
+use crate::cli::{ResolvedConfig, WaylandSourceType};
 
 /// Holds the PipeWire transport parameters returned by the portal.
 ///
@@ -29,6 +29,10 @@ pub struct PortalStream {
 pub async fn request_portal_stream(cfg: &ResolvedConfig) -> Result<PortalStream> {
     let proxy = Screencast::new().await?;
     let session = proxy.create_session().await?;
+    let source_type = match cfg.wayland_source_type {
+        WaylandSourceType::Monitor => SourceType::Monitor,
+        WaylandSourceType::Virtual => SourceType::Virtual,
+    };
     let persist_mode = match cfg.portal_persist_mode {
         1 => PersistMode::Application,
         2 => PersistMode::ExplicitlyRevoked,
@@ -44,7 +48,7 @@ pub async fn request_portal_stream(cfg: &ResolvedConfig) -> Result<PortalStream>
             .select_sources(
                 &session,
                 cfg.cursor_mode,
-                SourceType::Monitor.into(),
+                source_type.into(),
                 false, // multiple=false: single monitor, no extra allocations
                 restore_token.as_deref(),
                 persist_mode,
@@ -54,14 +58,12 @@ pub async fn request_portal_stream(cfg: &ResolvedConfig) -> Result<PortalStream>
 
     if let Err(err) = select_with_token.await {
         if restore_token.is_some() {
-            eprintln!(
-                "[wbeam] restore-token select failed, retrying without token: {err}"
-            );
+            eprintln!("[wbeam] restore-token select failed, retrying without token: {err}");
             proxy
                 .select_sources(
                     &session,
                     cfg.cursor_mode,
-                    SourceType::Monitor.into(),
+                    source_type.into(),
                     false,
                     None,
                     persist_mode,

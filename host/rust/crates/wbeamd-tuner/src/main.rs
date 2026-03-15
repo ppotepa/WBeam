@@ -23,16 +23,21 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, Wrap};
 use ratatui::Terminal;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 #[derive(Debug, Parser)]
-#[command(name = "wbeam-tuner", about = "Interactive tuner wizard for WBeam codecs")]
+#[command(
+    name = "wbeam-tuner",
+    about = "Interactive tuner wizard for WBeam codecs"
+)]
 struct Args {
     #[arg(long, default_value = "http://127.0.0.1:5001")]
     host_url: String,
     #[arg(long)]
     serial: Option<String>,
+    #[arg(long)]
+    stream_port: Option<u16>,
     #[arg(long, default_value_t = 10)]
     generations: u32,
     #[arg(long, default_value_t = 10)]
@@ -82,17 +87,76 @@ impl Step {
             Step::Finish => Step::Finish,
         }
     }
+
+    fn prev(self) -> Self {
+        match self {
+            Step::Target => Step::Target,
+            Step::Probe => Step::Target,
+            Step::RunConfig => Step::Probe,
+            Step::Evolution => Step::RunConfig,
+            Step::Results => Step::Evolution,
+            Step::Finish => Step::Results,
+        }
+    }
+}
+
+const WORKLOAD_DESKTOP_TEXT: &str = "desktop/text";
+const WORKLOAD_GAME_BENCHMARK: &str = "motion/game:synthetic-120-12s";
+const WORKLOAD_MIXED: &str = "mixed";
+const SAMPLE_INTERVAL_MS: u64 = 300;
+const SAMPLE_WINDOW_DEFAULT_MS: u64 = 1_800;
+const SAMPLE_WINDOW_BENCHMARK_MS: u64 = 12_000;
+const WARMUP_WINDOW_DEFAULT_MS: u64 = 5_000;
+const WARMUP_WINDOW_MIN_MS: u64 = 1_000;
+const WARMUP_WINDOW_MAX_MS: u64 = 20_000;
+const SAMPLE_INTERVAL_MIN_MS: u64 = 100;
+const SAMPLE_INTERVAL_MAX_MS: u64 = 2_000;
+const SAMPLE_WINDOW_MIN_MS: u64 = 800;
+const SAMPLE_WINDOW_MAX_MS: u64 = 30_000;
+
+fn nudge_index(index: &mut usize, len: usize, delta: i32) {
+    if len == 0 || delta == 0 {
+        return;
+    }
+    if delta < 0 {
+        *index = index.saturating_sub((-delta) as usize);
+    } else {
+        *index = (*index + delta as usize).min(len - 1);
+    }
+}
+
+fn nudge_u32(value: &mut u32, min: u32, max: u32, delta: i32) {
+    if delta == 0 {
+        return;
+    }
+    if delta < 0 {
+        *value = value.saturating_sub((-delta) as u32).max(min);
+    } else {
+        *value = value.saturating_add(delta as u32).min(max);
+    }
+}
+
+fn nudge_u64(value: &mut u64, min: u64, max: u64, delta: i64) {
+    if delta == 0 {
+        return;
+    }
+    if delta < 0 {
+        *value = value.saturating_sub((-delta) as u64).max(min);
+    } else {
+        *value = value.saturating_add(delta as u64).min(max);
+    }
 }
 
 #[derive(Debug, Clone)]
 struct ApiClient {
     base_url: String,
     serial: Option<String>,
+    stream_port: Option<u16>,
     client: reqwest::blocking::Client,
 }
 
 impl ApiClient {
-    fn new(base_url: String, serial: Option<String>) -> Result<Self> {
+    fn new(base_url: String, serial: Option<String>, stream_port: Option<u16>) -> Result<Self> {
         let client = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(4))
             .build()
@@ -100,6 +164,7 @@ impl ApiClient {
         Ok(Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             serial,
+            stream_port,
             client,
         })
     }
@@ -117,6 +182,12 @@ impl ApiClient {
                 url.push_str("serial=");
                 url.push_str(serial.trim());
             }
+        }
+        if let Some(stream_port) = self.stream_port.filter(|p| *p > 0) {
+            let sep = if url.contains('?') { '&' } else { '?' };
+            url.push(sep);
+            url.push_str("stream_port=");
+            url.push_str(&stream_port.to_string());
         }
         url
     }
@@ -169,6 +240,10 @@ struct EvolutionConfig {
     children: u32,
     objective: String,
     workload: String,
+    use_prerendered_scenes: bool,
+    warmup_window_ms: u64,
+    sample_interval_ms: u64,
+    sample_window_ms: u64,
     seed: CandidateParams,
 }
 
@@ -176,6 +251,7 @@ struct EvolutionConfig {
 struct MetricSample {
     state: String,
     target_fps: f64,
+    recv_fps: f64,
     present_fps: f64,
     decode_p95: f64,
     render_p95: f64,
@@ -188,9 +264,26 @@ struct MetricSample {
     recv_bps: f64,
 }
 
+#[derive(Debug, Clone, Default)]
+struct ConnectionSnapshot {
+    state: String,
+    run_id: u64,
+    target_serial: String,
+    stream_port: u16,
+    target_fps: f64,
+    recv_fps: f64,
+    decode_fps: f64,
+    present_fps: f64,
+    recv_bps: f64,
+    restart_count: u64,
+    reconnects: u64,
+    last_error: String,
+}
+
 #[derive(Debug)]
 enum EngineEvent {
     Log(String),
+    Connection(ConnectionSnapshot),
     Progress {
         generation: u32,
         child: u32,
@@ -228,6 +321,9 @@ struct ProbeState {
     host_state: String,
     host_error: String,
     build_revision: String,
+    target_serial: String,
+    run_id: u64,
+    stream_port: u16,
 }
 
 impl Default for ProbeState {
@@ -239,6 +335,9 @@ impl Default for ProbeState {
             host_state: "-".to_string(),
             host_error: "-".to_string(),
             build_revision: "-".to_string(),
+            target_serial: "-".to_string(),
+            run_id: 0,
+            stream_port: 0,
         }
     }
 }
@@ -255,6 +354,56 @@ struct ExportPayload {
     exported_unix_ms: u64,
 }
 
+const TRAINED_PROFILES_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StoredTrainedProfile {
+    key: String,
+    name: String,
+    codec: String,
+    objective: String,
+    workload: String,
+    encoder: String,
+    bitrate_kbps: u32,
+    fps: u32,
+    intra_only: bool,
+    created_unix_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StoredTrainedProfiles {
+    #[serde(default = "trained_profiles_version")]
+    version: u32,
+    #[serde(default)]
+    profiles: Vec<StoredTrainedProfile>,
+}
+
+fn trained_profiles_version() -> u32 {
+    TRAINED_PROFILES_VERSION
+}
+
+impl Default for StoredTrainedProfiles {
+    fn default() -> Self {
+        Self {
+            version: TRAINED_PROFILES_VERSION,
+            profiles: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct RunMetadata {
+    profile_name: String,
+    codec: String,
+    objective: String,
+    workload: String,
+    display_mode: String,
+    source_label: String,
+    warmup_window_ms: u64,
+    sample_interval_ms: u64,
+    sample_window_ms: u64,
+}
+
 #[derive(Debug)]
 struct App {
     api: ApiClient,
@@ -265,6 +414,16 @@ struct App {
     selected_codec: usize,
     selected_objective: usize,
     selected_workload: usize,
+    use_prerendered_scenes: bool,
+    warmup_window_ms: u64,
+    sample_interval_ms: u64,
+    sample_window_ms: u64,
+    sample_window_customized: bool,
+    target_focus: usize,
+    probe_focus: usize,
+    run_focus: usize,
+    evolution_focus: usize,
+    results_focus: usize,
     generations: u32,
     children: u32,
     probe: ProbeState,
@@ -276,23 +435,42 @@ struct App {
     current_generation: u32,
     current_child: u32,
     current_params: Option<CandidateParams>,
+    connection: Option<ConnectionSnapshot>,
+    spinner_phase: usize,
     results: Vec<CandidateResult>,
     best: Option<CandidateResult>,
     winner_applied: bool,
     exported_file: Option<String>,
+    profile_name_input: String,
+    current_run: Option<RunMetadata>,
+    last_saved_profile: Option<String>,
 }
 
 impl App {
     fn new(args: Args) -> Result<Self> {
         Ok(Self {
-            api: ApiClient::new(args.host_url, args.serial)?,
+            api: ApiClient::new(args.host_url, args.serial, args.stream_port)?,
             step: Step::Target,
             codecs: vec!["h264", "h265", "rawpng", "mjpeg"],
             objectives: vec!["balanced", "latency-first", "quality-first"],
-            workloads: vec!["desktop/text", "motion/video", "mixed"],
+            workloads: vec![
+                WORKLOAD_DESKTOP_TEXT,
+                WORKLOAD_GAME_BENCHMARK,
+                WORKLOAD_MIXED,
+            ],
             selected_codec: 0,
             selected_objective: 0,
-            selected_workload: 0,
+            selected_workload: 1,
+            use_prerendered_scenes: true,
+            warmup_window_ms: WARMUP_WINDOW_DEFAULT_MS,
+            sample_interval_ms: SAMPLE_INTERVAL_MS,
+            sample_window_ms: SAMPLE_WINDOW_BENCHMARK_MS,
+            sample_window_customized: false,
+            target_focus: 0,
+            probe_focus: 0,
+            run_focus: 0,
+            evolution_focus: 0,
+            results_focus: 0,
             generations: args.generations.clamp(1, 30),
             children: args.children.clamp(1, 30),
             probe: ProbeState::default(),
@@ -304,10 +482,15 @@ impl App {
             current_generation: 0,
             current_child: 0,
             current_params: None,
+            connection: None,
+            spinner_phase: 0,
             results: Vec::new(),
             best: None,
             winner_applied: false,
             exported_file: None,
+            profile_name_input: String::new(),
+            current_run: None,
+            last_saved_profile: None,
         })
     }
 
@@ -328,6 +511,133 @@ impl App {
 
     fn selected_workload_name(&self) -> &'static str {
         self.workloads[self.selected_workload]
+    }
+
+    fn default_sample_window_ms_for_source(use_prerendered_scenes: bool) -> u64 {
+        if use_prerendered_scenes {
+            SAMPLE_WINDOW_BENCHMARK_MS
+        } else {
+            SAMPLE_WINDOW_DEFAULT_MS
+        }
+    }
+
+    fn source_label(&self) -> &'static str {
+        if self.use_prerendered_scenes {
+            "prerendered_scenes"
+        } else {
+            "virtual_desktop"
+        }
+    }
+
+    fn training_display_mode(&self) -> &'static str {
+        if self.use_prerendered_scenes {
+            "benchmark_game"
+        } else {
+            "virtual_monitor"
+        }
+    }
+
+    fn set_use_prerendered_scenes(&mut self, enabled: bool) {
+        self.use_prerendered_scenes = enabled;
+        if !self.sample_window_customized {
+            self.sample_window_ms = Self::default_sample_window_ms_for_source(enabled);
+        }
+    }
+
+    fn toggle_use_prerendered_scenes(&mut self) {
+        let next = !self.use_prerendered_scenes;
+        self.set_use_prerendered_scenes(next);
+    }
+
+    fn adjust_run_timing_value(&mut self, delta: i32) {
+        match self.run_focus {
+            3 => {
+                nudge_u64(
+                    &mut self.warmup_window_ms,
+                    WARMUP_WINDOW_MIN_MS,
+                    WARMUP_WINDOW_MAX_MS,
+                    i64::from(delta) * 250,
+                );
+            }
+            4 => {
+                nudge_u64(
+                    &mut self.sample_interval_ms,
+                    SAMPLE_INTERVAL_MIN_MS,
+                    SAMPLE_INTERVAL_MAX_MS,
+                    i64::from(delta) * 50,
+                );
+                if self.sample_window_ms < self.sample_interval_ms {
+                    self.sample_window_ms = self.sample_interval_ms;
+                    self.sample_window_customized = true;
+                }
+            }
+            5 => {
+                nudge_u64(
+                    &mut self.sample_window_ms,
+                    SAMPLE_WINDOW_MIN_MS,
+                    SAMPLE_WINDOW_MAX_MS,
+                    i64::from(delta) * 250,
+                );
+                if self.sample_window_ms < self.sample_interval_ms {
+                    self.sample_window_ms = self.sample_interval_ms;
+                }
+                self.sample_window_customized = true;
+            }
+            _ => {}
+        }
+    }
+
+    fn normalized_profile_name(&self) -> Option<String> {
+        let sanitized = sanitize_profile_display_name(&self.profile_name_input);
+        if sanitized.is_empty() {
+            None
+        } else {
+            Some(sanitized)
+        }
+    }
+
+    fn edit_profile_name(&mut self, code: KeyCode) {
+        const MAX_PROFILE_NAME_LEN: usize = 48;
+        match code {
+            KeyCode::Backspace => {
+                self.profile_name_input.pop();
+            }
+            KeyCode::Char(ch) => {
+                if ch.is_ascii_alphanumeric() || matches!(ch, ' ' | '-' | '_' | '.') {
+                    if self.profile_name_input.len() < MAX_PROFILE_NAME_LEN {
+                        self.profile_name_input.push(ch);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn persist_best_profile(&mut self) {
+        let Some(best) = self.best.clone() else {
+            return;
+        };
+        let Some(run) = self.current_run.clone() else {
+            self.log("profile save skipped: missing run metadata");
+            return;
+        };
+        match append_trained_profile(&run, &best.params) {
+            Ok(saved) => {
+                self.last_saved_profile = Some(saved.name.clone());
+                self.log(format!(
+                    "profile saved: {} (key={} codec={} bitrate={} fps={} intra={})",
+                    saved.name,
+                    saved.key,
+                    saved.codec,
+                    saved.bitrate_kbps,
+                    saved.fps,
+                    saved.intra_only
+                ));
+            }
+            Err(err) => {
+                self.log(format!("profile save failed: {err}"));
+            }
+        }
     }
 
     fn seed_params(&self) -> CandidateParams {
@@ -363,29 +673,68 @@ impl App {
     fn run_probe(&mut self) {
         self.log("probe: checking /v1/health /v1/status /v1/metrics");
         self.probe = ProbeState::default();
-        self.probe.ok_health = self.api.get_json("health").map(|health| {
-            self.probe.build_revision = health
-                .get("build_revision")
-                .and_then(Value::as_str)
-                .unwrap_or("-")
-                .to_string();
-        }).is_ok();
+        self.probe.ok_health = self
+            .api
+            .get_json("health")
+            .map(|health| {
+                self.probe.build_revision = health
+                    .get("build_revision")
+                    .and_then(Value::as_str)
+                    .unwrap_or("-")
+                    .to_string();
+            })
+            .is_ok();
 
-        self.probe.ok_status = self.api.get_json("status").map(|status| {
-            self.probe.host_state = status
-                .get("state")
-                .and_then(Value::as_str)
-                .unwrap_or("-")
-                .to_string();
-            self.probe.host_error = status
-                .get("last_error")
-                .and_then(Value::as_str)
-                .unwrap_or("-")
-                .to_string();
-        }).is_ok();
+        let mut status_snapshot: Option<ConnectionSnapshot> = None;
+        self.probe.ok_status = self
+            .api
+            .get_json("status")
+            .map(|status| {
+                self.probe.host_state = status
+                    .get("state")
+                    .and_then(Value::as_str)
+                    .unwrap_or("-")
+                    .to_string();
+                self.probe.host_error = status
+                    .get("last_error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("-")
+                    .to_string();
+                self.probe.target_serial = status
+                    .get("target_serial")
+                    .and_then(Value::as_str)
+                    .unwrap_or("-")
+                    .to_string();
+                self.probe.run_id = status.get("run_id").and_then(Value::as_u64).unwrap_or(0);
+                self.probe.stream_port = status
+                    .get("stream_port")
+                    .and_then(Value::as_u64)
+                    .map(|v| v as u16)
+                    .unwrap_or(0);
+                status_snapshot = Some(parse_connection_snapshot(&status));
+            })
+            .is_ok();
 
-        self.probe.ok_metrics = self.api.get_json("metrics").is_ok();
+        self.probe.ok_metrics = self
+            .api
+            .get_json("metrics")
+            .map(|metrics| {
+                self.connection = Some(parse_connection_snapshot(&metrics));
+            })
+            .is_ok();
+
+        if !self.probe.ok_metrics {
+            self.connection = status_snapshot;
+        }
         self.probe_ran = true;
+        if let Some(expected_serial) = self.api.serial.as_deref() {
+            if self.probe.target_serial != "-" && self.probe.target_serial != expected_serial {
+                self.log(format!(
+                    "probe: WARN session serial mismatch expected={} got={}",
+                    expected_serial, self.probe.target_serial
+                ));
+            }
+        }
         if self.probe.ok_health && self.probe.ok_status && self.probe.ok_metrics {
             self.log("probe: OK");
         } else {
@@ -404,6 +753,7 @@ impl App {
         self.current_params = None;
         self.evolution_done = false;
         self.winner_applied = false;
+        self.last_saved_profile = None;
 
         let cfg = EvolutionConfig {
             codec: self.selected_codec_name().to_string(),
@@ -411,6 +761,10 @@ impl App {
             children: self.children,
             objective: self.selected_objective_name().to_string(),
             workload: self.selected_workload_name().to_string(),
+            use_prerendered_scenes: self.use_prerendered_scenes,
+            warmup_window_ms: self.warmup_window_ms,
+            sample_interval_ms: self.sample_interval_ms,
+            sample_window_ms: self.sample_window_ms,
             seed: self.seed_params(),
         };
 
@@ -421,7 +775,8 @@ impl App {
         let pause_clone = pause.clone();
         let api = self.api.clone();
 
-        let join = thread::spawn(move || run_evolution_worker(api, cfg, tx, stop_clone, pause_clone));
+        let join =
+            thread::spawn(move || run_evolution_worker(api, cfg, tx, stop_clone, pause_clone));
         self.engine = Some(EvolutionHandle {
             rx,
             stop,
@@ -517,100 +872,218 @@ impl App {
         }
     }
 
+    fn adjust_target_value(&mut self, delta: i32) {
+        match self.target_focus {
+            0 => nudge_index(&mut self.selected_codec, self.codecs.len(), delta),
+            1 => nudge_u32(&mut self.generations, 1, 30, delta),
+            2 => nudge_u32(&mut self.children, 1, 30, delta),
+            _ => {}
+        }
+    }
+
+    fn adjust_run_value(&mut self, delta: i32) {
+        match self.run_focus {
+            0 => nudge_index(&mut self.selected_objective, self.objectives.len(), delta),
+            1 => nudge_index(&mut self.selected_workload, self.workloads.len(), delta),
+            _ => {}
+        }
+    }
+
+    fn toggle_pause(&mut self) {
+        if let Some(engine) = self.engine.as_ref() {
+            let paused = engine.pause.load(Ordering::SeqCst);
+            engine.pause.store(!paused, Ordering::SeqCst);
+            self.log(if paused {
+                "evolution: resumed"
+            } else {
+                "evolution: paused"
+            });
+        } else {
+            self.log("evolution: not started");
+        }
+    }
+
+    fn activate_target(&mut self) {
+        match self.target_focus {
+            0..=2 => self.adjust_target_value(1),
+            3 => {
+                self.step = Step::Probe;
+                if !self.probe_ran {
+                    self.run_probe();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn activate_probe(&mut self) {
+        match self.probe_focus {
+            0 => self.run_probe(),
+            1 => self.step = Step::RunConfig,
+            _ => {}
+        }
+    }
+
+    fn activate_run_config(&mut self) {
+        match self.run_focus {
+            0 | 1 => self.adjust_run_value(1),
+            2 => {
+                self.toggle_use_prerendered_scenes();
+            }
+            3..=5 => self.adjust_run_timing_value(1),
+            6 => {}
+            7 => {
+                let Some(profile_name) = self.normalized_profile_name() else {
+                    self.log("run config: profile name is required");
+                    return;
+                };
+                self.profile_name_input = profile_name.clone();
+                self.current_run = Some(RunMetadata {
+                    profile_name,
+                    codec: self.selected_codec_name().to_string(),
+                    objective: self.selected_objective_name().to_string(),
+                    workload: self.selected_workload_name().to_string(),
+                    display_mode: self.training_display_mode().to_string(),
+                    source_label: self.source_label().to_string(),
+                    warmup_window_ms: self.warmup_window_ms,
+                    sample_interval_ms: self.sample_interval_ms,
+                    sample_window_ms: self.sample_window_ms,
+                });
+                self.start_evolution();
+                self.evolution_focus = 0;
+                self.step = Step::Evolution;
+            }
+            _ => {}
+        }
+    }
+
+    fn activate_evolution(&mut self) {
+        match self.evolution_focus {
+            0 => self.toggle_pause(),
+            1 => self.rollback_seed(),
+            2 => self.stop_engine(),
+            3 => {
+                if self.evolution_done {
+                    self.step = Step::Results;
+                } else {
+                    self.log("results not ready (wait for done or stop evolution)");
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn activate_results(&mut self) {
+        match self.results_focus {
+            0 => self.apply_best(),
+            1 => self.export_results(),
+            2 => self.step = Step::Finish,
+            _ => {}
+        }
+    }
+
     fn handle_key(&mut self, code: KeyCode) -> bool {
         match code {
             KeyCode::Char('q') => return true,
             KeyCode::Tab => {
                 self.step = self.step.next();
+                return false;
+            }
+            KeyCode::BackTab | KeyCode::Esc => {
+                self.step = self.step.prev();
+                return false;
             }
             _ => {}
         }
 
         match self.step {
             Step::Target => match code {
-                KeyCode::Left => {
-                    if self.selected_codec > 0 {
-                        self.selected_codec -= 1;
-                    }
-                }
-                KeyCode::Right => {
-                    if self.selected_codec + 1 < self.codecs.len() {
-                        self.selected_codec += 1;
-                    }
-                }
-                KeyCode::Char('g') => self.generations = (self.generations + 1).min(30),
-                KeyCode::Char('G') => self.generations = self.generations.saturating_sub(1).max(1),
-                KeyCode::Char('c') => self.children = (self.children + 1).min(30),
-                KeyCode::Char('C') => self.children = self.children.saturating_sub(1).max(1),
-                KeyCode::Enter => {
-                    self.step = Step::Probe;
-                    if !self.probe_ran {
-                        self.run_probe();
-                    }
-                }
+                KeyCode::Up => nudge_index(&mut self.target_focus, 4, -1),
+                KeyCode::Down => nudge_index(&mut self.target_focus, 4, 1),
+                KeyCode::Left => self.adjust_target_value(-1),
+                KeyCode::Right => self.adjust_target_value(1),
+                KeyCode::Char('g') => nudge_u32(&mut self.generations, 1, 30, 1),
+                KeyCode::Char('G') => nudge_u32(&mut self.generations, 1, 30, -1),
+                KeyCode::Char('c') => nudge_u32(&mut self.children, 1, 30, 1),
+                KeyCode::Char('C') => nudge_u32(&mut self.children, 1, 30, -1),
+                KeyCode::Char('+') | KeyCode::Char('=') => self.adjust_target_value(1),
+                KeyCode::Char('-') => self.adjust_target_value(-1),
+                KeyCode::Enter => self.activate_target(),
                 _ => {}
             },
             Step::Probe => match code {
+                KeyCode::Up => nudge_index(&mut self.probe_focus, 2, -1),
+                KeyCode::Down => nudge_index(&mut self.probe_focus, 2, 1),
                 KeyCode::Char('r') => self.run_probe(),
-                KeyCode::Enter => self.step = Step::RunConfig,
+                KeyCode::Enter => self.activate_probe(),
                 _ => {}
             },
             Step::RunConfig => match code {
+                KeyCode::Up => nudge_index(&mut self.run_focus, 8, -1),
+                KeyCode::Down => nudge_index(&mut self.run_focus, 8, 1),
                 KeyCode::Left => {
-                    if self.selected_objective > 0 {
-                        self.selected_objective -= 1;
+                    if self.run_focus <= 1 {
+                        self.adjust_run_value(-1);
+                    } else if (3..=5).contains(&self.run_focus) {
+                        self.adjust_run_timing_value(-1);
                     }
                 }
                 KeyCode::Right => {
-                    if self.selected_objective + 1 < self.objectives.len() {
-                        self.selected_objective += 1;
+                    if self.run_focus <= 1 {
+                        self.adjust_run_value(1);
+                    } else if (3..=5).contains(&self.run_focus) {
+                        self.adjust_run_timing_value(1);
                     }
                 }
-                KeyCode::Up => {
-                    if self.selected_workload > 0 {
-                        self.selected_workload -= 1;
+                KeyCode::Char('+') | KeyCode::Char('=') => {
+                    if (3..=5).contains(&self.run_focus) {
+                        self.adjust_run_timing_value(1);
                     }
                 }
-                KeyCode::Down => {
-                    if self.selected_workload + 1 < self.workloads.len() {
-                        self.selected_workload += 1;
+                KeyCode::Char('-') => {
+                    if (3..=5).contains(&self.run_focus) {
+                        self.adjust_run_timing_value(-1);
                     }
                 }
-                KeyCode::Enter => {
-                    self.start_evolution();
-                    self.step = Step::Evolution;
+                KeyCode::Backspace => {
+                    if self.run_focus == 6 {
+                        self.edit_profile_name(code);
+                    }
                 }
+                KeyCode::Char(' ') => {
+                    if self.run_focus == 2 {
+                        self.toggle_use_prerendered_scenes();
+                    } else if self.run_focus == 6 {
+                        self.edit_profile_name(code);
+                    }
+                }
+                KeyCode::Char(_) => {
+                    if self.run_focus == 6 {
+                        self.edit_profile_name(code);
+                    }
+                }
+                KeyCode::Enter => self.activate_run_config(),
                 _ => {}
             },
             Step::Evolution => match code {
-                KeyCode::Char(' ') => {
-                    if let Some(engine) = self.engine.as_ref() {
-                        let paused = engine.pause.load(Ordering::SeqCst);
-                        engine.pause.store(!paused, Ordering::SeqCst);
-                        self.log(if paused {
-                            "evolution: resumed"
-                        } else {
-                            "evolution: paused"
-                        });
-                    }
-                }
+                KeyCode::Up => nudge_index(&mut self.evolution_focus, 4, -1),
+                KeyCode::Down => nudge_index(&mut self.evolution_focus, 4, 1),
+                KeyCode::Char(' ') => self.toggle_pause(),
                 KeyCode::Char('r') => self.rollback_seed(),
                 KeyCode::Char('s') => self.stop_engine(),
-                KeyCode::Enter => {
-                    if self.evolution_done {
-                        self.step = Step::Results;
-                    }
-                }
+                KeyCode::Enter => self.activate_evolution(),
                 _ => {}
             },
             Step::Results => match code {
+                KeyCode::Up => nudge_index(&mut self.results_focus, 3, -1),
+                KeyCode::Down => nudge_index(&mut self.results_focus, 3, 1),
                 KeyCode::Char('a') => self.apply_best(),
                 KeyCode::Char('e') => self.export_results(),
-                KeyCode::Enter => self.step = Step::Finish,
+                KeyCode::Enter => self.activate_results(),
                 _ => {}
             },
             Step::Finish => {
-                if matches!(code, KeyCode::Enter) {
+                if matches!(code, KeyCode::Enter | KeyCode::Esc) {
                     return true;
                 }
             }
@@ -619,6 +1092,7 @@ impl App {
     }
 
     fn on_tick(&mut self) {
+        self.spinner_phase = (self.spinner_phase + 1) % 4;
         loop {
             let Some(engine) = self.engine.as_ref() else {
                 break;
@@ -630,6 +1104,9 @@ impl App {
             };
             match ev {
                 EngineEvent::Log(line) => self.log(line),
+                EngineEvent::Connection(snapshot) => {
+                    self.connection = Some(snapshot);
+                }
                 EngineEvent::Progress {
                     generation,
                     child,
@@ -656,12 +1133,17 @@ impl App {
                     if let Some(best) = best {
                         self.best = Some(best);
                     }
+                    self.persist_best_profile();
                     self.log("evolution: completed");
+                    self.results_focus = 0;
+                    self.step = Step::Results;
                 }
                 EngineEvent::Failed(err) => {
                     self.evolution_running = false;
                     self.evolution_done = true;
                     self.log(format!("evolution failed: {err}"));
+                    self.results_focus = 0;
+                    self.step = Step::Results;
                 }
             }
         }
@@ -717,6 +1199,57 @@ fn mutate_candidate(
     }
 }
 
+fn parse_connection_snapshot(payload: &Value) -> ConnectionSnapshot {
+    let metrics = payload.get("metrics").cloned().unwrap_or(Value::Null);
+    let kpi = metrics.get("kpi").cloned().unwrap_or(Value::Null);
+    let latest = metrics
+        .get("latest_client_metrics")
+        .cloned()
+        .unwrap_or(Value::Null);
+    ConnectionSnapshot {
+        state: payload
+            .get("state")
+            .and_then(Value::as_str)
+            .unwrap_or("-")
+            .to_string(),
+        run_id: payload.get("run_id").and_then(Value::as_u64).unwrap_or(0),
+        target_serial: payload
+            .get("target_serial")
+            .and_then(Value::as_str)
+            .unwrap_or("-")
+            .to_string(),
+        stream_port: payload
+            .get("stream_port")
+            .and_then(Value::as_u64)
+            .map(|v| v as u16)
+            .unwrap_or(0),
+        target_fps: kpi.get("target_fps").and_then(Value::as_f64).unwrap_or(0.0),
+        recv_fps: kpi.get("recv_fps").and_then(Value::as_f64).unwrap_or(0.0),
+        decode_fps: kpi.get("decode_fps").and_then(Value::as_f64).unwrap_or(0.0),
+        present_fps: kpi
+            .get("present_fps")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0),
+        recv_bps: latest
+            .get("recv_bps")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0),
+        restart_count: metrics
+            .get("restart_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        reconnects: metrics
+            .get("reconnects")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        last_error: payload
+            .get("last_error")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+    }
+}
+
 fn parse_metric_sample(metrics_payload: &Value) -> Option<MetricSample> {
     let metrics = metrics_payload.get("metrics")?;
     let kpi = metrics.get("kpi").cloned().unwrap_or(Value::Null);
@@ -724,26 +1257,52 @@ fn parse_metric_sample(metrics_payload: &Value) -> Option<MetricSample> {
         .get("latest_client_metrics")
         .cloned()
         .unwrap_or(Value::Null);
+    let normalize_metric_ms = |value: f64, soft_cap_ms: f64, hard_drop_ms: f64| -> f64 {
+        if !value.is_finite() || value < 0.0 {
+            return 0.0;
+        }
+        if value > hard_drop_ms {
+            // Timestamp-like or corrupt telemetry value; ignore for scoring.
+            return 0.0;
+        }
+        value.min(soft_cap_ms)
+    };
     Some(MetricSample {
         state: metrics_payload
             .get("state")
             .and_then(Value::as_str)
             .unwrap_or("-")
             .to_string(),
-        target_fps: kpi.get("target_fps").and_then(Value::as_f64).unwrap_or(60.0),
-        present_fps: kpi.get("present_fps").and_then(Value::as_f64).unwrap_or(0.0),
-        decode_p95: kpi
-            .get("decode_time_ms_p95")
+        target_fps: kpi
+            .get("target_fps")
+            .and_then(Value::as_f64)
+            .unwrap_or(60.0),
+        recv_fps: kpi.get("recv_fps").and_then(Value::as_f64).unwrap_or(0.0),
+        present_fps: kpi
+            .get("present_fps")
             .and_then(Value::as_f64)
             .unwrap_or(0.0),
-        render_p95: kpi
-            .get("render_time_ms_p95")
-            .and_then(Value::as_f64)
-            .unwrap_or(0.0),
-        e2e_p95: kpi
-            .get("e2e_latency_ms_p95")
-            .and_then(Value::as_f64)
-            .unwrap_or(0.0),
+        decode_p95: normalize_metric_ms(
+            kpi.get("decode_time_ms_p95")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0),
+            120.0,
+            10_000.0,
+        ),
+        render_p95: normalize_metric_ms(
+            kpi.get("render_time_ms_p95")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0),
+            80.0,
+            10_000.0,
+        ),
+        e2e_p95: normalize_metric_ms(
+            kpi.get("e2e_latency_ms_p95")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0),
+            500.0,
+            10_000.0,
+        ),
         dropped_frames: latest
             .get("dropped_frames")
             .and_then(Value::as_f64)
@@ -764,7 +1323,10 @@ fn parse_metric_sample(metrics_payload: &Value) -> Option<MetricSample> {
             .get("render_queue_depth")
             .and_then(Value::as_f64)
             .unwrap_or(0.0),
-        recv_bps: latest.get("recv_bps").and_then(Value::as_f64).unwrap_or(0.0),
+        recv_bps: latest
+            .get("recv_bps")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0),
     })
 }
 
@@ -781,14 +1343,11 @@ fn score_candidate(samples: &[MetricSample]) -> (f64, bool, String) {
             .map(f)
             .fold(f64::NEG_INFINITY, |a, b| a.max(b))
     };
-    let min = |f: fn(&MetricSample) -> f64| {
-        samples
-            .iter()
-            .map(f)
-            .fold(f64::INFINITY, |a, b| a.min(b))
-    };
+    let min =
+        |f: fn(&MetricSample) -> f64| samples.iter().map(f).fold(f64::INFINITY, |a, b| a.min(b));
 
     let target = mean(|s| s.target_fps).max(1.0);
+    let recv = mean(|s| s.recv_fps).max(0.0);
     let present = mean(|s| s.present_fps).max(0.0);
     let e2e_p95 = mean(|s| s.e2e_p95).max(0.0);
     let decode_p95 = mean(|s| s.decode_p95).max(0.0);
@@ -804,9 +1363,41 @@ fn score_candidate(samples: &[MetricSample]) -> (f64, bool, String) {
         .filter(|s| s.state.eq_ignore_ascii_case("streaming"))
         .count() as f64
         / n;
+    let e2e_valid_ratio = samples.iter().filter(|s| s.e2e_p95 > 0.0).count() as f64 / n;
+    let decode_valid_ratio = samples.iter().filter(|s| s.decode_p95 > 0.0).count() as f64 / n;
+    let render_valid_ratio = samples.iter().filter(|s| s.render_p95 > 0.0).count() as f64 / n;
+    let telemetry_valid_ratio = samples
+        .iter()
+        .filter(|s| s.e2e_p95 > 0.0 && s.decode_p95 > 0.0 && s.render_p95 > 0.0)
+        .count() as f64
+        / n;
 
+    if recv < 1.0 {
+        let approx_mbps = (recv_bps / 1_000_000.0).max(0.0);
+        if recv_bps > 150_000.0 {
+            return (
+                -9_150.0,
+                true,
+                format!(
+                    "transport active (~{approx_mbps:.2} Mb/s) but decode path produced no frames (recv_fps={recv:.1})"
+                ),
+            );
+        }
+        return (
+            -9_200.0,
+            true,
+            format!("no client frames received (recv_fps={recv:.1})"),
+        );
+    }
     if streaming_ratio < 0.7 {
-        return (-9_000.0, true, "streaming state unstable".to_string());
+        return (
+            -9_000.0,
+            true,
+            format!(
+                "streaming state unstable ({:.0}% streaming)",
+                streaming_ratio * 100.0
+            ),
+        );
     }
     if present < target * 0.6 {
         return (
@@ -827,12 +1418,58 @@ fn score_candidate(samples: &[MetricSample]) -> (f64, bool, String) {
     score -= 2.0 * (q_d - 1.0).max(0.0);
     score -= 1.5 * (q_r - 1.0).max(0.0);
     score -= 0.0000015 * recv_bps;
+    if e2e_valid_ratio < 0.5 {
+        score -= 180.0;
+    }
+    if decode_valid_ratio < 0.5 {
+        score -= 120.0;
+    }
+    if render_valid_ratio < 0.5 {
+        score -= 80.0;
+    }
+    if !score.is_finite() {
+        return (
+            -9_300.0,
+            true,
+            "invalid score (non-finite telemetry)".to_string(),
+        );
+    }
+    score = score.clamp(-9_500.0, 2_000.0);
     (
         score,
         false,
         format!(
-            "p95={e2e_p95:.1}ms present={present:.1}/{target:.1} q={q_t:.0}/{q_d:.0} dropΔ={dropped_delta:.1}"
+            "p95={e2e_p95:.1}ms present={present:.1}/{target:.1} q={q_t:.0}/{q_d:.0} dropΔ={dropped_delta:.1} telemetry={:.0}%",
+            telemetry_valid_ratio * 100.0
         ),
+    )
+}
+
+fn summarize_samples(samples: &[MetricSample]) -> String {
+    if samples.is_empty() {
+        return "samples=0".to_string();
+    }
+    let n = samples.len() as f64;
+    let mean = |f: fn(&MetricSample) -> f64| samples.iter().map(f).sum::<f64>() / n;
+    let streaming = samples
+        .iter()
+        .filter(|s| s.state.eq_ignore_ascii_case("streaming"))
+        .count();
+    let states = samples
+        .iter()
+        .map(|s| s.state.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "samples={} streaming={}/{} recv={:.1} present={:.1} target={:.1} recv≈{:.2}Mb/s states=[{}]",
+        samples.len(),
+        streaming,
+        samples.len(),
+        mean(|s| s.recv_fps),
+        mean(|s| s.present_fps),
+        mean(|s| s.target_fps),
+        mean(|s| s.recv_bps) / 1_000_000.0,
+        states
     )
 }
 
@@ -845,9 +1482,29 @@ fn run_evolution_worker(
 ) {
     let mut rng = StdRng::from_entropy();
     let codec = cfg.codec.clone();
-    let mut parent = cfg.seed.clone();
+    let mut parent_pool = vec![cfg.seed.clone()];
     let mut best: Option<CandidateResult> = None;
     let encoder = map_codec_to_encoder(&codec);
+    let warmup_window_ms = cfg
+        .warmup_window_ms
+        .clamp(WARMUP_WINDOW_MIN_MS, WARMUP_WINDOW_MAX_MS);
+    let sample_interval_ms = cfg
+        .sample_interval_ms
+        .clamp(SAMPLE_INTERVAL_MIN_MS, SAMPLE_INTERVAL_MAX_MS);
+    let sample_window_floor = SAMPLE_WINDOW_MIN_MS.max(sample_interval_ms);
+    let sample_window_ms = cfg
+        .sample_window_ms
+        .clamp(sample_window_floor, SAMPLE_WINDOW_MAX_MS);
+    let display_mode = if cfg.use_prerendered_scenes {
+        "benchmark_game"
+    } else {
+        "virtual_monitor"
+    };
+    let source_name = if cfg.use_prerendered_scenes {
+        "prerendered_scenes"
+    } else {
+        "virtual_desktop"
+    };
 
     if codec == "mjpeg" {
         let _ = tx.send(EngineEvent::Log(
@@ -855,8 +1512,15 @@ fn run_evolution_worker(
         ));
     }
     let _ = tx.send(EngineEvent::Log(format!(
-        "run: codec={} objective={} workload={}",
-        cfg.codec, cfg.objective, cfg.workload
+        "run: codec={} objective={} workload={} source={} display_mode={} warmup={}ms sample_interval={}ms sample_window={}ms",
+        cfg.codec,
+        cfg.objective,
+        cfg.workload,
+        source_name,
+        display_mode,
+        warmup_window_ms,
+        sample_interval_ms,
+        sample_window_ms
     )));
 
     let start_body = json!({
@@ -865,10 +1529,39 @@ fn run_evolution_worker(
         "bitrate_kbps": cfg.seed.bitrate_kbps,
         "intra_only": cfg.seed.intra_only
     });
-    if let Err(err) = api.post_json("start", &start_body) {
-        let _ = tx.send(EngineEvent::Failed(format!("start failed: {err}")));
-        return;
+    if cfg.use_prerendered_scenes {
+        let _ = tx.send(EngineEvent::Log(
+            "start: benchmark_game source=synthetic-2d timeline=12s scenes=4".to_string(),
+        ));
+    } else {
+        let _ = tx.send(EngineEvent::Log(
+            "start: virtual_monitor source=desktop capture".to_string(),
+        ));
     }
+    let start_response =
+        match api.post_json(&format!("start?display_mode={display_mode}"), &start_body) {
+            Ok(v) => v,
+            Err(err) => {
+                let _ = tx.send(EngineEvent::Failed(format!(
+                    "start failed ({display_mode}): {err}"
+                )));
+                return;
+            }
+        };
+    let start_snapshot = parse_connection_snapshot(&start_response);
+    let _ = tx.send(EngineEvent::Connection(start_snapshot.clone()));
+    let _ = tx.send(EngineEvent::Log(format!(
+        "start: state={} run={} serial={} port={} recv={:.1} present={:.1}/{:.1} restarts={} reconnects={}",
+        start_snapshot.state,
+        start_snapshot.run_id,
+        start_snapshot.target_serial,
+        start_snapshot.stream_port,
+        start_snapshot.recv_fps,
+        start_snapshot.present_fps,
+        start_snapshot.target_fps,
+        start_snapshot.restart_count,
+        start_snapshot.reconnects
+    )));
 
     let _ = api.post_json(
         "tuning",
@@ -887,6 +1580,11 @@ fn run_evolution_worker(
     );
 
     'gens: for generation in 1..=cfg.generations {
+        let mut generation_parents = parent_pool.clone();
+        if generation_parents.is_empty() {
+            generation_parents.push(cfg.seed.clone());
+        }
+        let mut generation_results: Vec<CandidateResult> = Vec::new();
         for child in 1..=cfg.children {
             if stop.load(Ordering::SeqCst) {
                 break 'gens;
@@ -898,7 +1596,9 @@ fn run_evolution_worker(
                 thread::sleep(Duration::from_millis(150));
             }
 
-            let candidate = mutate_candidate(&parent, &codec, &mut rng, generation);
+            let parent_idx = ((child - 1) as usize) % generation_parents.len();
+            let base_parent = &generation_parents[parent_idx];
+            let candidate = mutate_candidate(base_parent, &codec, &mut rng, generation);
             let _ = tx.send(EngineEvent::Progress {
                 generation,
                 child,
@@ -912,19 +1612,50 @@ fn run_evolution_worker(
                 "intra_only": candidate.intra_only
             });
 
-            let apply_result = api.post_json("apply", &apply_body);
-            if let Err(err) = apply_result {
-                let failed = CandidateResult {
-                    generation,
-                    child,
-                    params: candidate.clone(),
-                    score: -9_500.0,
-                    fail: true,
-                    reason: format!("apply failed: {err}"),
-                };
-                let _ = tx.send(EngineEvent::Candidate(failed));
-                continue;
-            }
+            let apply_response = match api.post_json("apply", &apply_body) {
+                Ok(v) => v,
+                Err(err) => {
+                    let failed = CandidateResult {
+                        generation,
+                        child,
+                        params: candidate.clone(),
+                        score: -9_500.0,
+                        fail: true,
+                        reason: format!("apply failed: {err}"),
+                    };
+                    let _ = tx.send(EngineEvent::Candidate(failed));
+                    continue;
+                }
+            };
+            let apply_state = apply_response
+                .get("state")
+                .and_then(Value::as_str)
+                .unwrap_or("-");
+            let apply_run_id = apply_response
+                .get("run_id")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let apply_serial = apply_response
+                .get("target_serial")
+                .and_then(Value::as_str)
+                .unwrap_or("<none>");
+            let apply_stream_port = apply_response
+                .get("stream_port")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let apply_snapshot = parse_connection_snapshot(&apply_response);
+            let _ = tx.send(EngineEvent::Connection(apply_snapshot.clone()));
+            let _ = tx.send(EngineEvent::Log(format!(
+                "apply: g{generation}/c{child} run_id={apply_run_id} state={apply_state} serial={apply_serial} port={apply_stream_port} recv={:.1} present={:.1}/{:.1} restarts={} reconnects={} bitrate={} fps={} intra={}",
+                apply_snapshot.recv_fps,
+                apply_snapshot.present_fps,
+                apply_snapshot.target_fps,
+                apply_snapshot.restart_count,
+                apply_snapshot.reconnects,
+                candidate.bitrate_kbps,
+                candidate.fps,
+                candidate.intra_only
+            )));
 
             let _ = api.post_json(
                 "tuning",
@@ -940,19 +1671,120 @@ fn run_evolution_worker(
                 }),
             );
 
-            thread::sleep(Duration::from_millis(1200));
-            let mut samples = Vec::new();
-            for _ in 0..4 {
+            let mut warmup_ok = false;
+            let warmup_window = Duration::from_millis(warmup_window_ms);
+            let warmup_poll_interval = Duration::from_millis(250);
+            let warmup_started_at = Instant::now();
+            let mut warmup_poll: u32 = 0;
+            let mut warmup_next_tick = warmup_started_at;
+            loop {
                 if stop.load(Ordering::SeqCst) {
                     break 'gens;
                 }
+                warmup_poll = warmup_poll.saturating_add(1);
                 if let Ok(payload) = api.get_json("metrics") {
+                    let snap = parse_connection_snapshot(&payload);
+                    let _ = tx.send(EngineEvent::Connection(snap.clone()));
                     if let Some(sample) = parse_metric_sample(&payload) {
+                        if warmup_poll == 1
+                            || warmup_poll % 5 == 0
+                            || sample.recv_fps > 1.0
+                            || sample.present_fps > 1.0
+                        {
+                            let elapsed_ms = warmup_started_at.elapsed().as_millis() as u64;
+                            let _ = tx.send(EngineEvent::Log(format!(
+                                "warmup: g{generation}/c{child} poll={} t={}/{}ms state={} run={} recv={:.1} present={:.1}/{:.1} restarts={} reconnects={} err={}",
+                                warmup_poll,
+                                elapsed_ms,
+                                warmup_window_ms,
+                                snap.state,
+                                snap.run_id,
+                                sample.recv_fps,
+                                sample.present_fps,
+                                sample.target_fps,
+                                snap.restart_count,
+                                snap.reconnects,
+                                if snap.last_error.trim().is_empty() {
+                                    "-"
+                                } else {
+                                    snap.last_error.trim()
+                                }
+                            )));
+                        }
+                        if sample.state.eq_ignore_ascii_case("streaming") && sample.recv_fps > 1.0 {
+                            warmup_ok = true;
+                            break;
+                        }
+                    }
+                }
+                if warmup_started_at.elapsed() >= warmup_window {
+                    break;
+                }
+                warmup_next_tick = warmup_next_tick
+                    .checked_add(warmup_poll_interval)
+                    .unwrap_or_else(Instant::now);
+                let now = Instant::now();
+                let sleep_for = warmup_next_tick
+                    .saturating_duration_since(now)
+                    .min(warmup_window.saturating_sub(warmup_started_at.elapsed()));
+                if !sleep_for.is_zero() {
+                    thread::sleep(sleep_for);
+                }
+            }
+
+            let mut samples = Vec::new();
+            let sample_window = Duration::from_millis(sample_window_ms);
+            let sample_interval = Duration::from_millis(sample_interval_ms);
+            let sample_started_at = Instant::now();
+            let mut sample_idx: u32 = 0;
+            let mut next_tick = sample_started_at;
+            loop {
+                if stop.load(Ordering::SeqCst) {
+                    break 'gens;
+                }
+                sample_idx = sample_idx.saturating_add(1);
+                if let Ok(payload) = api.get_json("metrics") {
+                    let snap = parse_connection_snapshot(&payload);
+                    let _ = tx.send(EngineEvent::Connection(snap.clone()));
+                    if let Some(sample) = parse_metric_sample(&payload) {
+                        let elapsed_ms = sample_started_at.elapsed().as_millis() as u64;
+                        let _ = tx.send(EngineEvent::Log(format!(
+                            "sample: g{generation}/c{child} idx={sample_idx} t={elapsed_ms}/{sample_window_ms}ms state={} run={} recv={:.1} present={:.1}/{:.1} restarts={} reconnects={}",
+                            snap.state,
+                            snap.run_id,
+                            sample.recv_fps,
+                            sample.present_fps,
+                            sample.target_fps,
+                            snap.restart_count,
+                            snap.reconnects
+                        )));
                         samples.push(sample);
                     }
                 }
-                thread::sleep(Duration::from_millis(300));
+                if sample_started_at.elapsed() >= sample_window {
+                    break;
+                }
+                next_tick = next_tick
+                    .checked_add(sample_interval)
+                    .unwrap_or_else(Instant::now);
+                let now = Instant::now();
+                let sleep_for = next_tick
+                    .saturating_duration_since(now)
+                    .min(sample_window.saturating_sub(sample_started_at.elapsed()));
+                if !sleep_for.is_zero() {
+                    thread::sleep(sleep_for);
+                }
             }
+            if !warmup_ok {
+                let _ = tx.send(EngineEvent::Log(format!(
+                    "warmup: g{generation}/c{child} did not reach STREAMING+recv before sampling (warmup={}ms)",
+                    warmup_window_ms
+                )));
+            }
+            let _ = tx.send(EngineEvent::Log(format!(
+                "metrics: g{generation}/c{child} {}",
+                summarize_samples(&samples)
+            )));
 
             let (score, fail, reason) = score_candidate(&samples);
             let candidate_result = CandidateResult {
@@ -971,8 +1803,8 @@ fn run_evolution_worker(
                     .unwrap_or(true)
             {
                 best = Some(candidate_result.clone());
-                parent = candidate.clone();
             }
+            generation_results.push(candidate_result.clone());
 
             let _ = api.post_json(
                 "tuning",
@@ -991,6 +1823,44 @@ fn run_evolution_worker(
             );
 
             let _ = tx.send(EngineEvent::Candidate(candidate_result));
+        }
+
+        let mut generation_winners = generation_results
+            .iter()
+            .filter(|r| !r.fail)
+            .cloned()
+            .collect::<Vec<_>>();
+        generation_winners.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        generation_winners.truncate(3);
+        if generation_winners.is_empty() {
+            parent_pool = best
+                .as_ref()
+                .map(|r| vec![r.params.clone()])
+                .unwrap_or_else(|| vec![cfg.seed.clone()]);
+            let _ = tx.send(EngineEvent::Log(format!(
+                "selection: g{generation} no valid candidates, fallback parents={}",
+                parent_pool.len()
+            )));
+        } else {
+            parent_pool = generation_winners
+                .iter()
+                .map(|r| r.params.clone())
+                .collect::<Vec<_>>();
+            let summary = generation_winners
+                .iter()
+                .map(|r| format!("c{}:{:.2}", r.child, r.score))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let _ = tx.send(EngineEvent::Log(format!(
+                "selection: g{generation} top={} parents={} [{}]",
+                generation_winners.len(),
+                parent_pool.len(),
+                summary
+            )));
         }
     }
 
@@ -1018,6 +1888,121 @@ fn now_unix_ms() -> u64 {
         .unwrap_or(0)
 }
 
+fn sanitize_profile_display_name(raw: &str) -> String {
+    raw.trim()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, ' ' | '-' | '_' | '.'))
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn profile_key_from_name(name: &str) -> String {
+    let mut key = String::with_capacity(name.len());
+    let mut last_dash = false;
+    for ch in name.chars() {
+        let c = ch.to_ascii_lowercase();
+        if c.is_ascii_alphanumeric() {
+            key.push(c);
+            last_dash = false;
+            continue;
+        }
+        if !last_dash && !key.is_empty() {
+            key.push('-');
+            last_dash = true;
+        }
+    }
+    while key.ends_with('-') {
+        key.pop();
+    }
+    key
+}
+
+fn unique_profile_key(profiles: &[StoredTrainedProfile], base: &str) -> String {
+    if base.is_empty() {
+        return format!("profile-{}", now_unix_ms());
+    }
+    if !profiles.iter().any(|p| p.key == base) {
+        return base.to_string();
+    }
+    let mut idx = 2u32;
+    loop {
+        let candidate = format!("{base}-{idx}");
+        if !profiles.iter().any(|p| p.key == candidate) {
+            return candidate;
+        }
+        idx = idx.saturating_add(1);
+    }
+}
+
+fn user_wbeam_config_dir() -> Result<PathBuf> {
+    let base = std::env::var("XDG_CONFIG_HOME")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .map(|h| PathBuf::from(h).join(".config"))
+        })
+        .context("cannot resolve user config directory")?;
+    Ok(base.join("wbeam"))
+}
+
+fn trained_profiles_path() -> Result<PathBuf> {
+    let dir = user_wbeam_config_dir()?;
+    fs::create_dir_all(&dir).context("failed to create ~/.config/wbeam")?;
+    Ok(dir.join("trained_profiles.json"))
+}
+
+fn load_trained_profiles(path: &PathBuf) -> Result<StoredTrainedProfiles> {
+    if !path.exists() {
+        return Ok(StoredTrainedProfiles::default());
+    }
+    let raw = fs::read_to_string(path)
+        .with_context(|| format!("failed to read trained profiles: {}", path.display()))?;
+    let parsed = serde_json::from_str::<StoredTrainedProfiles>(&raw)
+        .with_context(|| format!("failed to parse trained profiles: {}", path.display()))?;
+    Ok(parsed)
+}
+
+fn save_trained_profiles(path: &PathBuf, store: &StoredTrainedProfiles) -> Result<()> {
+    let json =
+        serde_json::to_string_pretty(store).context("failed to serialize trained profiles")?;
+    fs::write(path, json)
+        .with_context(|| format!("failed to write trained profiles: {}", path.display()))?;
+    Ok(())
+}
+
+fn append_trained_profile(
+    run: &RunMetadata,
+    params: &CandidateParams,
+) -> Result<StoredTrainedProfile> {
+    let path = trained_profiles_path()?;
+    let mut store = load_trained_profiles(&path)?;
+    store.version = TRAINED_PROFILES_VERSION;
+
+    let base_key = profile_key_from_name(&run.profile_name);
+    let key = unique_profile_key(&store.profiles, &base_key);
+    let entry = StoredTrainedProfile {
+        key,
+        name: run.profile_name.clone(),
+        codec: run.codec.clone(),
+        objective: run.objective.clone(),
+        workload: run.workload.clone(),
+        encoder: map_codec_to_encoder(&run.codec).to_string(),
+        bitrate_kbps: params.bitrate_kbps,
+        fps: params.fps,
+        intra_only: params.intra_only,
+        created_unix_ms: now_unix_ms(),
+    };
+    store.profiles.push(entry.clone());
+    save_trained_profiles(&path, &store)?;
+    Ok(entry)
+}
+
 fn init_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
     enable_raw_mode().context("failed to enable raw mode")?;
     let mut stdout = io::stdout();
@@ -1028,20 +2013,184 @@ fn init_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
 
 fn restore_terminal(mut terminal: Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
     disable_raw_mode().context("failed to disable raw mode")?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen).context("failed to leave alternate screen")?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)
+        .context("failed to leave alternate screen")?;
     terminal.show_cursor().context("failed to show cursor")
 }
 
+const COLOR_MOCHA_BG: Color = Color::Rgb(30, 30, 46);
+const COLOR_MOCHA_SURFACE: Color = Color::Rgb(49, 50, 68);
+const COLOR_TEXT: Color = Color::Rgb(205, 214, 244);
+const COLOR_ORANGE: Color = Color::Rgb(250, 179, 135);
+const COLOR_SUCCESS: Color = Color::Rgb(166, 227, 161);
+const COLOR_DANGER: Color = Color::Rgb(243, 139, 168);
+
+fn app_body_style() -> Style {
+    Style::default().fg(COLOR_TEXT).bg(COLOR_MOCHA_BG)
+}
+
+fn app_surface_style() -> Style {
+    Style::default().fg(COLOR_TEXT).bg(COLOR_MOCHA_SURFACE)
+}
+
+fn muted_style() -> Style {
+    app_surface_style().add_modifier(Modifier::DIM)
+}
+
+fn pane_block(title: &str) -> Block<'_> {
+    Block::default()
+        .borders(Borders::ALL)
+        .style(app_surface_style())
+        .border_style(Style::default().fg(COLOR_ORANGE))
+        .title(Span::styled(
+            format!(" {title} "),
+            Style::default()
+                .fg(COLOR_ORANGE)
+                .bg(COLOR_MOCHA_SURFACE)
+                .add_modifier(Modifier::BOLD),
+        ))
+}
+
+fn focus_style(active: bool) -> Style {
+    if active {
+        Style::default()
+            .fg(COLOR_MOCHA_BG)
+            .bg(COLOR_ORANGE)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        app_surface_style()
+    }
+}
+
+fn action_style(active: bool) -> Style {
+    if active {
+        Style::default()
+            .fg(COLOR_MOCHA_BG)
+            .bg(COLOR_SUCCESS)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        app_surface_style()
+    }
+}
+
+fn focus_line(active: bool, text: impl Into<String>) -> Line<'static> {
+    let marker = if active { "▶ " } else { "  " };
+    Line::from(Span::styled(
+        format!("{marker}{}", text.into()),
+        focus_style(active),
+    ))
+}
+
+fn action_line(active: bool, text: impl Into<String>) -> Line<'static> {
+    let marker = if active { "● " } else { "○ " };
+    Line::from(Span::styled(
+        format!("{marker}{}", text.into()),
+        action_style(active),
+    ))
+}
+
+fn spinner_char(phase: usize) -> &'static str {
+    const FRAMES: [&str; 4] = ["|", "/", "-", "\\"];
+    FRAMES[phase % FRAMES.len()]
+}
+
+fn draw_status_bar(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app: &App) {
+    let spin = if app.evolution_running {
+        spinner_char(app.spinner_phase)
+    } else {
+        "."
+    };
+    let mut state_label = "IDLE".to_string();
+    let mut state_style = muted_style();
+    let mut detail = "no connection snapshot yet".to_string();
+    if let Some(conn) = app.connection.as_ref() {
+        let connecting = conn.state.eq_ignore_ascii_case("starting")
+            || conn.state.eq_ignore_ascii_case("reconnecting");
+        let connected = conn.state.eq_ignore_ascii_case("streaming") && conn.recv_fps > 1.0;
+        let bytes_no_decode = conn.state.eq_ignore_ascii_case("streaming")
+            && conn.recv_fps <= 1.0
+            && conn.recv_bps > 150_000.0;
+        state_label = if connected {
+            "CONNECTED".to_string()
+        } else if bytes_no_decode {
+            "BYTES-NO-DECODE".to_string()
+        } else if connecting {
+            "CONNECTING".to_string()
+        } else if conn.recv_fps <= 1.0 {
+            "NO-DATA".to_string()
+        } else {
+            conn.state.to_uppercase()
+        };
+        state_style = if connected {
+            Style::default()
+                .fg(COLOR_MOCHA_BG)
+                .bg(COLOR_SUCCESS)
+                .add_modifier(Modifier::BOLD)
+        } else if connecting || bytes_no_decode {
+            Style::default()
+                .fg(COLOR_MOCHA_BG)
+                .bg(COLOR_ORANGE)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+                .fg(COLOR_MOCHA_BG)
+                .bg(COLOR_DANGER)
+                .add_modifier(Modifier::BOLD)
+        };
+        detail = format!(
+            "state={} serial={} port={} run={} recv={:.1} decode={:.1} present={:.1}/{:.1} recv≈{:.2}Mb/s restart={} reconn={} err={}",
+            conn.state,
+            conn.target_serial,
+            conn.stream_port,
+            conn.run_id,
+            conn.recv_fps,
+            conn.decode_fps,
+            conn.present_fps,
+            conn.target_fps,
+            conn.recv_bps / 1_000_000.0,
+            conn.restart_count,
+            conn.reconnects,
+            if conn.last_error.trim().is_empty() {
+                "-"
+            } else {
+                conn.last_error.trim()
+            }
+        );
+    }
+    let line = Line::from(vec![
+        Span::styled(format!(" {spin} "), Style::default().fg(COLOR_ORANGE)),
+        Span::styled(format!(" {state_label} "), state_style),
+        Span::styled(format!(" {detail}"), app_surface_style()),
+    ]);
+    let widget = Paragraph::new(line)
+        .style(app_surface_style())
+        .wrap(Wrap { trim: true })
+        .block(pane_block("Connection status"));
+    frame.render_widget(widget, area);
+}
+
 fn ui(frame: &mut ratatui::Frame, app: &App) {
+    frame.render_widget(Block::default().style(app_body_style()), frame.area());
     let root = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(10), Constraint::Length(7)])
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Min(10),
+            Constraint::Length(7),
+        ])
         .split(frame.area());
 
     let header = Paragraph::new(Line::from(vec![
-        Span::styled("WBeam Tuner  ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        Span::raw(app.step.title()),
-        Span::raw("  "),
+        Span::styled(
+            "WBeam Tuner  ",
+            Style::default()
+                .fg(COLOR_ORANGE)
+                .bg(COLOR_MOCHA_SURFACE)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(app.step.title(), app_surface_style()),
+        Span::styled("  ", app_surface_style()),
         Span::styled(
             format!(
                 "codec={} gen={} child={}",
@@ -1049,19 +2198,24 @@ fn ui(frame: &mut ratatui::Frame, app: &App) {
                 app.current_generation,
                 app.current_child
             ),
-            Style::default().fg(Color::Yellow),
+            Style::default()
+                .fg(COLOR_SUCCESS)
+                .bg(COLOR_MOCHA_SURFACE)
+                .add_modifier(Modifier::BOLD),
         ),
     ]))
-    .block(Block::default().borders(Borders::ALL).title("Header"));
+    .style(app_surface_style())
+    .block(pane_block("Header"));
     frame.render_widget(header, root[0]);
+    draw_status_bar(frame, root[1], app);
 
     match app.step {
-        Step::Target => draw_target(frame, root[1], app),
-        Step::Probe => draw_probe(frame, root[1], app),
-        Step::RunConfig => draw_run_config(frame, root[1], app),
-        Step::Evolution => draw_evolution(frame, root[1], app),
-        Step::Results => draw_results(frame, root[1], app),
-        Step::Finish => draw_finish(frame, root[1], app),
+        Step::Target => draw_target(frame, root[2], app),
+        Step::Probe => draw_probe(frame, root[2], app),
+        Step::RunConfig => draw_run_config(frame, root[2], app),
+        Step::Evolution => draw_evolution(frame, root[2], app),
+        Step::Results => draw_results(frame, root[2], app),
+        Step::Finish => draw_finish(frame, root[2], app),
     }
 
     let logs = app
@@ -1073,9 +2227,12 @@ fn ui(frame: &mut ratatui::Frame, app: &App) {
         .map(|line| Line::from(line.as_str()))
         .collect::<Vec<_>>();
     let footer = Paragraph::new(logs)
+        .style(app_surface_style())
         .wrap(Wrap { trim: true })
-        .block(Block::default().borders(Borders::ALL).title("Log"));
-    frame.render_widget(footer, root[2]);
+        .block(pane_block(
+            "Log  (↑↓ focus, ←→ change, Enter action, Tab/Shift+Tab step, q quit)",
+        ));
+    frame.render_widget(footer, root[3]);
 }
 
 fn draw_target(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app: &App) {
@@ -1087,69 +2244,195 @@ fn draw_target(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app: &Ap
     let steps = Step::all()
         .iter()
         .map(|s| {
-            let marker = if *s == app.step { ">" } else { " " };
-            Line::from(format!("{marker} {}", s.title()))
+            let active = *s == app.step;
+            let marker = if active { "▶" } else { " " };
+            let style = if active {
+                Style::default()
+                    .fg(COLOR_ORANGE)
+                    .bg(COLOR_MOCHA_SURFACE)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                muted_style()
+            };
+            Line::from(Span::styled(format!("{marker} {}", s.title()), style))
         })
         .collect::<Vec<_>>();
-    let wizard = Paragraph::new(steps).block(Block::default().borders(Borders::ALL).title("Wizard"));
+    let wizard = Paragraph::new(steps)
+        .style(app_surface_style())
+        .block(pane_block("Wizard"));
     frame.render_widget(wizard, body[0]);
 
     let form = vec![
-        Line::from(format!("Host URL:      {}", app.api.base_url)),
-        Line::from(format!(
-            "Serial:        {}",
-            app.api.serial.clone().unwrap_or_else(|| "<default>".to_string())
+        Line::from(Span::styled(
+            format!("Host URL:      {}", app.api.base_url),
+            muted_style(),
         )),
-        Line::from(format!("Codec:         {}", app.selected_codec_name())),
-        Line::from(format!("Generations:   {}", app.generations)),
-        Line::from(format!("Children/gen:  {}", app.children)),
+        Line::from(Span::styled(
+            format!(
+                "Serial:        {}",
+                app.api
+                    .serial
+                    .clone()
+                    .unwrap_or_else(|| "<default>".to_string())
+            ),
+            muted_style(),
+        )),
+        Line::from(Span::styled(
+            format!(
+                "Stream port:   {}",
+                app.api
+                    .stream_port
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "<auto>".to_string())
+            ),
+            muted_style(),
+        )),
         Line::from(""),
-        Line::from("Keys: <- -> codec, g/G generations, c/C children"),
-        Line::from("Enter -> Probe"),
+        focus_line(
+            app.target_focus == 0,
+            format!("Codec:         {}   (←/→)", app.selected_codec_name()),
+        ),
+        focus_line(
+            app.target_focus == 1,
+            format!("Generations:   {}   (←/→ or +/-)", app.generations),
+        ),
+        focus_line(
+            app.target_focus == 2,
+            format!("Children/gen:  {}   (←/→ or +/-)", app.children),
+        ),
+        Line::from(""),
+        action_line(
+            app.target_focus == 3,
+            "Run probe and continue to Guardrails",
+        ),
+        Line::from(""),
+        Line::from("Shortcuts: g/G generations, c/C children"),
     ];
     frame.render_widget(
         Paragraph::new(form)
+            .style(app_surface_style())
             .wrap(Wrap { trim: true })
-            .block(Block::default().borders(Borders::ALL).title("Target")),
+            .block(pane_block("Target")),
         body[1],
     );
 }
 
 fn draw_probe(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app: &App) {
-    let check = |ok: bool| if ok { "✓" } else { "✗" };
+    let check_line = |ok: bool, label: &str| {
+        let icon = if ok { "✓" } else { "✗" };
+        let icon_style = if ok {
+            Style::default()
+                .fg(COLOR_SUCCESS)
+                .bg(COLOR_MOCHA_SURFACE)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+                .fg(COLOR_DANGER)
+                .bg(COLOR_MOCHA_SURFACE)
+                .add_modifier(Modifier::BOLD)
+        };
+        Line::from(vec![
+            Span::styled(format!("{icon} "), icon_style),
+            Span::styled(label.to_string(), app_surface_style()),
+        ])
+    };
     let lines = vec![
-        Line::from(format!("{} /v1/health", check(app.probe.ok_health))),
-        Line::from(format!("{} /v1/status", check(app.probe.ok_status))),
-        Line::from(format!("{} /v1/metrics", check(app.probe.ok_metrics))),
+        check_line(app.probe.ok_health, "/v1/health"),
+        check_line(app.probe.ok_status, "/v1/status"),
+        check_line(app.probe.ok_metrics, "/v1/metrics"),
         Line::from(""),
         Line::from(format!("Host state:     {}", app.probe.host_state)),
+        Line::from(format!("Run id:         {}", app.probe.run_id)),
+        Line::from(format!("Target serial:  {}", app.probe.target_serial)),
+        Line::from(format!(
+            "Stream port:    {}",
+            if app.probe.stream_port > 0 {
+                app.probe.stream_port.to_string()
+            } else {
+                "-".to_string()
+            }
+        )),
         Line::from(format!("Last error:     {}", app.probe.host_error)),
         Line::from(format!("Build revision: {}", app.probe.build_revision)),
         Line::from(""),
-        Line::from("r = re-probe, Enter = continue"),
+        action_line(app.probe_focus == 0, "Re-run probe"),
+        action_line(app.probe_focus == 1, "Continue to Run Config"),
+        Line::from(""),
+        Line::from("Shortcut: r = re-probe"),
     ];
     frame.render_widget(
         Paragraph::new(lines)
+            .style(app_surface_style())
             .wrap(Wrap { trim: true })
-            .block(Block::default().borders(Borders::ALL).title("Probe")),
+            .block(pane_block("Probe")),
         area,
     );
 }
 
 fn draw_run_config(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app: &App) {
+    let profile_name = if app.profile_name_input.trim().is_empty() {
+        "<required>".to_string()
+    } else {
+        app.profile_name_input.clone()
+    };
+    let source_tip = if app.use_prerendered_scenes {
+        "Benchmark source: synthetic in-memory 2D game (12s loop, 4 scenes). Defaults keep existing timing until changed."
+            .to_string()
+    } else {
+        "Training source: virtual desktop capture (display_mode=virtual_monitor). Defaults keep existing timing until changed."
+            .to_string()
+    };
     let lines = vec![
-        Line::from(format!("Objective: {}", app.selected_objective_name())),
-        Line::from(format!("Workload:  {}", app.selected_workload_name())),
+        focus_line(
+            app.run_focus == 0,
+            format!("Objective: {}   (←/→)", app.selected_objective_name()),
+        ),
+        focus_line(
+            app.run_focus == 1,
+            format!("Workload:  {}   (←/→)", app.selected_workload_name()),
+        ),
+        focus_line(
+            app.run_focus == 2,
+            format!(
+                "Use prerendered scenes for training: {}   (Enter/Space)",
+                if app.use_prerendered_scenes {
+                    "[x]"
+                } else {
+                    "[ ]"
+                }
+            ),
+        ),
+        focus_line(
+            app.run_focus == 3,
+            format!("Warmup window: {} ms   (←/→, +/-)", app.warmup_window_ms),
+        ),
+        focus_line(
+            app.run_focus == 4,
+            format!(
+                "Sample interval: {} ms   (←/→, +/-)",
+                app.sample_interval_ms
+            ),
+        ),
+        focus_line(
+            app.run_focus == 5,
+            format!("Sample window: {} ms   (←/→, +/-)", app.sample_window_ms),
+        ),
+        focus_line(
+            app.run_focus == 6,
+            format!("Profile name: {}   (type + Backspace)", profile_name),
+        ),
+        Line::from(format!("Display mode: {}", app.training_display_mode())),
         Line::from(format!("Seed cfg:  {:?}", app.seed_params())),
         Line::from(""),
-        Line::from("Left/Right -> objective"),
-        Line::from("Up/Down    -> workload"),
-        Line::from("Enter      -> start evolution"),
+        action_line(app.run_focus == 7, "Start evolution"),
+        Line::from(""),
+        Line::from(source_tip),
     ];
     frame.render_widget(
         Paragraph::new(lines)
+            .style(app_surface_style())
             .wrap(Wrap { trim: true })
-            .block(Block::default().borders(Borders::ALL).title("Run Config")),
+            .block(pane_block("Run Config")),
         area,
     );
 }
@@ -1157,7 +2440,11 @@ fn draw_run_config(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app:
 fn draw_evolution(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(4), Constraint::Min(8), Constraint::Length(3)])
+        .constraints([
+            Constraint::Length(4),
+            Constraint::Min(8),
+            Constraint::Length(7),
+        ])
         .split(area);
 
     let status = Paragraph::new(vec![
@@ -1179,11 +2466,15 @@ fn draw_evolution(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app: 
             "Current params: {}",
             app.current_params
                 .as_ref()
-                .map(|p| format!("bitrate={} fps={} intra={}", p.bitrate_kbps, p.fps, p.intra_only))
+                .map(|p| format!(
+                    "bitrate={} fps={} intra={}",
+                    p.bitrate_kbps, p.fps, p.intra_only
+                ))
                 .unwrap_or_else(|| "-".to_string())
         )),
     ])
-    .block(Block::default().borders(Borders::ALL).title("Evolution status"));
+    .style(app_surface_style())
+    .block(pane_block("Evolution status"));
     frame.render_widget(status, chunks[0]);
 
     let rows = app
@@ -1193,6 +2484,11 @@ fn draw_evolution(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app: 
         .take(10)
         .rev()
         .map(|r| {
+            let row_style = if r.fail {
+                Style::default().fg(COLOR_DANGER).bg(COLOR_MOCHA_SURFACE)
+            } else {
+                Style::default().fg(COLOR_SUCCESS).bg(COLOR_MOCHA_SURFACE)
+            };
             Row::new(vec![
                 Cell::from(format!("{}-{}", r.generation, r.child)),
                 Cell::from(r.params.bitrate_kbps.to_string()),
@@ -1202,6 +2498,7 @@ fn draw_evolution(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app: 
                 Cell::from(if r.fail { "FAIL" } else { "OK" }),
                 Cell::from(r.reason.clone()),
             ])
+            .style(row_style)
         })
         .collect::<Vec<_>>();
     let table = Table::new(
@@ -1217,32 +2514,111 @@ fn draw_evolution(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app: 
         ],
     )
     .header(
-        Row::new(vec!["id", "bitrate", "fps", "intra", "score", "state", "reason"])
-            .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Row::new(vec![
+            "id", "bitrate", "fps", "intra", "score", "state", "reason",
+        ])
+        .style(
+            Style::default()
+                .fg(COLOR_ORANGE)
+                .bg(COLOR_MOCHA_SURFACE)
+                .add_modifier(Modifier::BOLD),
+        ),
     )
-    .block(Block::default().borders(Borders::ALL).title("Candidates"));
+    .style(app_surface_style())
+    .block(pane_block("Candidates"));
     frame.render_widget(table, chunks[1]);
 
-    let control = Paragraph::new("Space pause/resume | r rollback seed | s stop | Enter results")
-        .block(Block::default().borders(Borders::ALL).title("Controls"));
+    let control_lines = vec![
+        action_line(
+            app.evolution_focus == 0,
+            if app
+                .engine
+                .as_ref()
+                .map(|e| e.pause.load(Ordering::SeqCst))
+                .unwrap_or(false)
+            {
+                "Resume evolution"
+            } else {
+                "Pause evolution"
+            },
+        ),
+        action_line(app.evolution_focus == 1, "Rollback seed config"),
+        action_line(app.evolution_focus == 2, "Stop evolution"),
+        action_line(
+            app.evolution_focus == 3,
+            if app.evolution_done {
+                "Go to results"
+            } else {
+                "Go to results (available when done)"
+            },
+        ),
+        Line::from("Shortcuts: Space pause/resume, r rollback, s stop"),
+    ];
+    let control = Paragraph::new(control_lines)
+        .style(app_surface_style())
+        .block(pane_block("Controls"));
     frame.render_widget(control, chunks[2]);
 }
 
+fn final_profile_summary_lines(app: &App) -> Vec<Line<'static>> {
+    let Some(best) = app.best.as_ref() else {
+        return vec![Line::from("No completed winner profile yet.")];
+    };
+
+    let mut lines = Vec::new();
+    if let Some(run) = app.current_run.as_ref() {
+        lines.push(Line::from(format!("Profile: {}", run.profile_name)));
+        lines.push(Line::from(format!(
+            "Codec/encoder: {}/{}   Objective: {}   Workload: {}",
+            run.codec,
+            map_codec_to_encoder(&run.codec),
+            run.objective,
+            run.workload
+        )));
+        lines.push(Line::from(format!(
+            "Source: {}   Display mode: {}",
+            run.source_label, run.display_mode
+        )));
+        lines.push(Line::from(format!(
+            "Intervals: warmup={}ms sample={}ms window={}ms",
+            run.warmup_window_ms, run.sample_interval_ms, run.sample_window_ms
+        )));
+    }
+    lines.push(Line::from(format!(
+        "Score: {:.2}   Gen/Child: {}/{}   Fail: {}",
+        best.score, best.generation, best.child, best.fail
+    )));
+    lines.push(Line::from(format!(
+        "Params: bitrate={} kbps   fps={}   intra_only={}",
+        best.params.bitrate_kbps, best.params.fps, best.params.intra_only
+    )));
+    lines.push(Line::from(format!("Reason: {}", best.reason)));
+    lines
+}
+
 fn draw_results(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app: &App) {
-    let best = app
-        .best
-        .as_ref()
-        .map(|r| {
-            format!(
-                "Best: score={:.2} gen={} child={} bitrate={} fps={} intra={}",
-                r.score, r.generation, r.child, r.params.bitrate_kbps, r.params.fps, r.params.intra_only
-            )
-        })
-        .unwrap_or_else(|| "Best: -".to_string());
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(9), Constraint::Min(7)])
+        .split(area);
+
+    frame.render_widget(
+        Paragraph::new(final_profile_summary_lines(app))
+            .style(app_surface_style())
+            .wrap(Wrap { trim: true })
+            .block(pane_block("Final profile settings")),
+        chunks[0],
+    );
+
     let lines = vec![
-        Line::from(best),
         Line::from(format!("Total candidates: {}", app.results.len())),
         Line::from(format!("Winner applied: {}", app.winner_applied)),
+        Line::from(format!(
+            "Saved profile: {}",
+            app.last_saved_profile
+                .clone()
+                .unwrap_or_else(|| "<none>".to_string())
+        )),
         Line::from(format!(
             "Export file: {}",
             app.exported_file
@@ -1250,31 +2626,51 @@ fn draw_results(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app: &A
                 .unwrap_or_else(|| "<none>".to_string())
         )),
         Line::from(""),
-        Line::from("a = apply best, e = export, Enter = finish"),
+        action_line(app.results_focus == 0, "Apply best candidate"),
+        action_line(app.results_focus == 1, "Export full results"),
+        action_line(app.results_focus == 2, "Continue to finish"),
+        Line::from(""),
+        Line::from("Shortcuts: a apply, e export"),
     ];
     frame.render_widget(
         Paragraph::new(lines)
+            .style(app_surface_style())
             .wrap(Wrap { trim: true })
-            .block(Block::default().borders(Borders::ALL).title("Results")),
-        area,
+            .block(pane_block("Results")),
+        chunks[1],
     );
 }
 
 fn draw_finish(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app: &App) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(9), Constraint::Min(4)])
+        .split(area);
+
+    frame.render_widget(
+        Paragraph::new(final_profile_summary_lines(app))
+            .style(app_surface_style())
+            .wrap(Wrap { trim: true })
+            .block(pane_block("Final profile settings")),
+        chunks[0],
+    );
+
     let lines = vec![
-        Line::from("Done."),
-        Line::from(format!("Best score: {:.2}", app.best.as_ref().map(|b| b.score).unwrap_or(0.0))),
+        Line::from("Training run complete."),
         Line::from(format!(
             "Winner applied: {}",
             if app.winner_applied { "yes" } else { "no" }
         )),
-        Line::from("Enter = exit, q = quit"),
+        Line::from(""),
+        action_line(true, "Exit tuner"),
+        Line::from("Enter/q = exit, Esc = back"),
     ];
     frame.render_widget(
         Paragraph::new(lines)
+            .style(app_surface_style())
             .wrap(Wrap { trim: true })
-            .block(Block::default().borders(Borders::ALL).title("Finish")),
-        area,
+            .block(pane_block("Finish")),
+        chunks[1],
     );
 }
 

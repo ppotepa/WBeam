@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "profiles": [
+    {
+      "key": "example-1-h264",
+      "name": "example_1.h264",
+      "codec": "h264",
+      "objective": "balanced",
+      "workload": "motion/game:synthetic-120-12s",
+      "encoder": "h264",
+      "bitrate_kbps": 18000,
+      "fps": 60,
+      "intra_only": false,
+      "created_unix_ms": 1741000000000
+    },
+    {
+      "key": "example-2-h264",
+      "name": "example_2.h264",
+      "codec": "h264",
+      "objective": "latency-first",
+      "workload": "desktop/text",
+      "encoder": "h264",
+      "bitrate_kbps": 12000,
+      "fps": 50,
+      "intra_only": false,
+      "created_unix_ms": 1741000001000
+    },
+    {
+      "key": "example-3-h265",
+      "name": "example_3.h265",
+      "codec": "h265",
+      "objective": "quality-first",
+      "workload": "mixed",
+      "encoder": "h265",
+      "bitrate_kbps": 15000,
+      "fps": 45,
+      "intra_only": false,
+      "created_unix_ms": 1741000002000
+    },
+    {
+      "key": "example-4-rawpng",
+      "name": "example_4.rawpng",
+      "codec": "rawpng",
+      "objective": "quality-first",
+      "workload": "desktop/text",
+      "encoder": "rawpng",
+      "bitrate_kbps": 0,
+      "fps": 30,
+      "intra_only": true,
+      "created_unix_ms": 1741000003000
+    }
+  ]
+}

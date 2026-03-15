@@ -237,7 +237,7 @@ public final class H264TcpPlayer {
                 NO_PRESENT_MIN_IN_FRAMES_HARD,
                 STATE_CONNECTING,
                 STATE_STREAMING
-        ).run(input, codecRef, helloBuf, hdrBuf, payloadBuf);
+        ).run(input, codecRef, helloFlags, streamSessionId, hdrBuf, payloadBuf);
     }
 
     private void framedDecodeLoopPng(InputStream input, byte[] hdrBuf, byte[] payloadBuf, boolean isUltraMode) throws IOException {

@@ -94,14 +94,96 @@ struct VirtualDepsInstallStatus {
 #[serde(rename_all = "snake_case")]
 struct StartConfigPatch {
     #[serde(skip_serializing_if = "Option::is_none")]
+    profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     encoder: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     size: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fps: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bitrate_kbps: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    intra_only: Option<bool>,
 }
 
 impl StartConfigPatch {
     fn is_empty(&self) -> bool {
-        self.encoder.is_none() && self.size.is_none()
+        self.profile.is_none()
+            && self.encoder.is_none()
+            && self.size.is_none()
+            && self.fps.is_none()
+            && self.bitrate_kbps.is_none()
+            && self.intra_only.is_none()
+    }
+}
+
+const TRAINED_PROFILES_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StoredTrainedProfile {
+    key: String,
+    name: String,
+    codec: String,
+    objective: String,
+    workload: String,
+    encoder: String,
+    bitrate_kbps: u32,
+    fps: u32,
+    intra_only: bool,
+    created_unix_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StoredTrainedProfiles {
+    #[serde(default = "trained_profiles_version")]
+    version: u32,
+    #[serde(default)]
+    profiles: Vec<StoredTrainedProfile>,
+}
+
+fn trained_profiles_version() -> u32 {
+    TRAINED_PROFILES_VERSION
+}
+
+impl Default for StoredTrainedProfiles {
+    fn default() -> Self {
+        Self {
+            version: TRAINED_PROFILES_VERSION,
+            profiles: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TrainedProfile {
+    key: String,
+    name: String,
+    codec: String,
+    objective: String,
+    workload: String,
+    encoder: String,
+    bitrate_kbps: u32,
+    fps: u32,
+    intra_only: bool,
+    created_unix_ms: u64,
+}
+
+impl From<StoredTrainedProfile> for TrainedProfile {
+    fn from(value: StoredTrainedProfile) -> Self {
+        Self {
+            key: value.key,
+            name: value.name,
+            codec: value.codec,
+            objective: value.objective,
+            workload: value.workload,
+            encoder: value.encoder,
+            bitrate_kbps: value.bitrate_kbps,
+            fps: value.fps,
+            intra_only: value.intra_only,
+            created_unix_ms: value.created_unix_ms,
+        }
     }
 }
 
@@ -134,6 +216,10 @@ static SESSION_LOGS: OnceLock<SessionLogs> = OnceLock::new();
 static WBEAM_CONFIG_CACHE: OnceLock<HashMap<String, String>> = OnceLock::new();
 
 fn wbeam_user_config_path() -> Option<PathBuf> {
+    Some(wbeam_user_config_dir()?.join("wbeam.conf"))
+}
+
+fn wbeam_user_config_dir() -> Option<PathBuf> {
     let base = std::env::var("XDG_CONFIG_HOME")
         .ok()
         .filter(|v| !v.trim().is_empty())
@@ -144,7 +230,7 @@ fn wbeam_user_config_path() -> Option<PathBuf> {
                 .filter(|v| !v.trim().is_empty())
                 .map(|h| PathBuf::from(h).join(".config"))
         })?;
-    Some(base.join("wbeam/wbeam.conf"))
+    Some(base.join("wbeam"))
 }
 
 fn ensure_user_wbeam_config(root: &PathBuf) -> Option<PathBuf> {
@@ -245,6 +331,41 @@ fn wbeam_control_port() -> u16 {
 
 fn wbeam_stream_port() -> u16 {
     wbeam_config_u16("WBEAM_STREAM_PORT", 5000)
+}
+
+fn trained_profiles_path() -> Result<PathBuf, String> {
+    let dir = wbeam_user_config_dir().ok_or_else(|| "cannot resolve user config directory".to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| format!("failed to create {}: {e}", dir.display()))?;
+    Ok(dir.join("trained_profiles.json"))
+}
+
+fn load_trained_profiles_store() -> Result<StoredTrainedProfiles, String> {
+    let path = trained_profiles_path()?;
+    if !path.exists() {
+        return Ok(StoredTrainedProfiles::default());
+    }
+    let raw = fs::read_to_string(&path)
+        .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+    serde_json::from_str::<StoredTrainedProfiles>(&raw)
+        .map_err(|e| format!("failed to parse {}: {e}", path.display()))
+}
+
+fn find_trained_profile(selector: &str) -> Result<Option<StoredTrainedProfile>, String> {
+    let needle = selector.trim();
+    if needle.is_empty() {
+        return Ok(None);
+    }
+    let store = load_trained_profiles_store()?;
+    Ok(store.profiles.into_iter().find(|profile| {
+        profile.key.eq_ignore_ascii_case(needle) || profile.name.eq_ignore_ascii_case(needle)
+    }))
+}
+
+#[tauri::command]
+fn list_trained_profiles() -> Result<Vec<TrainedProfile>, String> {
+    let mut profiles = load_trained_profiles_store()?.profiles;
+    profiles.sort_by(|a, b| b.created_unix_ms.cmp(&a.created_unix_ms));
+    Ok(profiles.into_iter().map(TrainedProfile::from).collect())
 }
 
 #[derive(Clone, Debug)]
@@ -708,6 +829,14 @@ fn normalize_size_name(value: Option<String>) -> Option<String> {
     Some(format!("{width}x{height}"))
 }
 
+fn normalize_profile_selector(value: Option<String>) -> Option<String> {
+    value
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
+}
+
 fn daemon_post_action(
     action: &str,
     serial: &str,
@@ -868,6 +997,7 @@ fn adb_api_level(serial: &str) -> Option<u32> {
 }
 
 fn adb_prepare_connect(serial: &str, stream_port: u16) -> Result<(), String> {
+    const LEGACY_DEVICE_STREAM_PORT: u16 = 5002;
     let control_port = wbeam_control_port();
     connect_log(
         serial,
@@ -953,6 +1083,30 @@ fn adb_prepare_connect(serial: &str, stream_port: u16) -> Result<(), String> {
                 serial,
                 stream_port,
                 &format!("adb reverse stream compat failed {stream_port}->{stream_port}: {err}"),
+            ),
+        }
+    }
+    if stream_port != LEGACY_DEVICE_STREAM_PORT {
+        match adb_cmd(&[
+            "-s",
+            serial,
+            "reverse",
+            &format!("tcp:{LEGACY_DEVICE_STREAM_PORT}"),
+            &format!("tcp:{stream_port}"),
+        ]) {
+            Ok(out) => connect_log(
+                serial,
+                stream_port,
+                &format!(
+                    "adb reverse stream legacy compat ok {LEGACY_DEVICE_STREAM_PORT}->{stream_port} out='{out}'"
+                ),
+            ),
+            Err(err) => connect_log(
+                serial,
+                stream_port,
+                &format!(
+                    "adb reverse stream legacy compat failed {LEGACY_DEVICE_STREAM_PORT}->{stream_port}: {err}"
+                ),
             ),
         }
     }
@@ -1480,6 +1634,7 @@ fn device_connect(
     display_mode: Option<String>,
     connect_encoder: Option<String>,
     connect_size: Option<String>,
+    connect_profile_name: Option<String>,
 ) -> Result<String, String> {
     service_ready_for_device_actions()?;
     let mut effective_stream_port = resolve_stream_port_for_serial(&serial, stream_port);
@@ -1496,10 +1651,29 @@ fn device_connect(
     if effective_stream_port == 0 {
         effective_stream_port = 5000;
     }
-    let start_patch = StartConfigPatch {
+    let selected_profile = normalize_profile_selector(connect_profile_name);
+    let mut start_patch = StartConfigPatch {
+        profile: None,
         encoder: normalize_encoder_name(connect_encoder),
         size: normalize_size_name(connect_size),
+        fps: None,
+        bitrate_kbps: None,
+        intra_only: None,
     };
+    if let Some(selector) = selected_profile.as_deref() {
+        let profile = find_trained_profile(selector)?
+            .ok_or_else(|| format!("trained profile not found: {selector}"))?;
+        start_patch.encoder = normalize_encoder_name(Some(profile.encoder.clone()));
+        if start_patch.encoder.is_none() {
+            return Err(format!(
+                "trained profile '{}' has unsupported encoder '{}'",
+                profile.name, profile.encoder
+            ));
+        }
+        start_patch.fps = Some(profile.fps.max(1));
+        start_patch.bitrate_kbps = Some(profile.bitrate_kbps.max(100));
+        start_patch.intra_only = Some(profile.intra_only);
+    }
     let chosen_mode = display_mode.unwrap_or_else(|| "duplicate".to_string());
     let normalized_mode = chosen_mode.trim().to_lowercase();
     if normalized_mode != "duplicate"
@@ -1524,11 +1698,12 @@ fn device_connect(
         "device_connect",
         "begin",
         &format!(
-            "serial={} requested_port={} effective_port={} requested_mode={} encoder={} size={}",
+            "serial={} requested_port={} effective_port={} requested_mode={} profile={} encoder={} size={}",
             serial,
             stream_port,
             effective_stream_port,
             normalized_mode,
+            selected_profile.as_deref().unwrap_or("-"),
             start_patch.encoder.as_deref().unwrap_or("-"),
             start_patch.size.as_deref().unwrap_or("-")
         ),
@@ -2260,6 +2435,7 @@ fn main() {
             list_devices_basic,
             service_status,
             host_probe_brief,
+            list_trained_profiles,
             virtual_doctor,
             virtual_install_deps_start,
             virtual_install_deps_status,

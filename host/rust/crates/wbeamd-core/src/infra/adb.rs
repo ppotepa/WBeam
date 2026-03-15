@@ -150,7 +150,6 @@ pub async fn ensure_usb_reverse(
                 warn!(reason, %serial, error = %e, "failed to execute adb reverse for control port")
             }
         }
-
     }
 }
 

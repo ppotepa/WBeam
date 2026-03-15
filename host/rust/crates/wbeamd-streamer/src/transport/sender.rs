@@ -114,15 +114,12 @@ pub fn spawn_sender(
                 // Prefer the GStreamer pipeline PTS (media time) so the
                 // Android decoder gets monotonically correct media timestamps.
                 // Fall back to wall-clock only when the buffer has no PTS.
-                let pts_us = buf
-                    .pts()
-                    .map(|t| t.useconds())
-                    .unwrap_or_else(|| {
-                        SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .map(|d| d.as_micros() as u64)
-                            .unwrap_or(0)
-                    });
+                let pts_us = buf.pts().map(|t| t.useconds()).unwrap_or_else(|| {
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map(|d| d.as_micros() as u64)
+                        .unwrap_or(0)
+                });
                 let is_key = (codec_flags & HELLO_CODEC_PNG) != 0
                     || !buf.flags().contains(gst::BufferFlags::DELTA_UNIT);
                 let frame = EncodedFrame {

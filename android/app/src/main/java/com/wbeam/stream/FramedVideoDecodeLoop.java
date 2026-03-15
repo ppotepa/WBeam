@@ -117,7 +117,14 @@ final class FramedVideoDecodeLoop {
         this.stateStreaming = stateStreaming;
     }
 
-    void run(InputStream input, MediaCodec[] codecRef, byte[] helloBuf, byte[] hdrBuf, byte[] payloadBuf) throws IOException {
+    void run(
+            InputStream input,
+            MediaCodec[] codecRef,
+            int helloFlags,
+            long streamSessionId,
+            byte[] hdrBuf,
+            byte[] payloadBuf
+    ) throws IOException {
         long bytes = 0L;
         long inFrames = 0L;
         long outFrames = 0L;
@@ -147,14 +154,11 @@ final class FramedVideoDecodeLoop {
         MediaCodecBridge.DrainStats drainStats = new MediaCodecBridge.DrainStats();
         int pendingDecodeQueue = 0;
 
-        WbtpProtocol.Hello hello = WbtpProtocol.readHello(input, helloBuf, 0x57425331, (byte) 0x01, 16);
-        final int helloFlags = hello.flags;
         final boolean isPng = (helloFlags & helloCodecPng) != 0;
         final boolean isHevc = !isPng && (helloFlags & helloCodecHevc) != 0;
         final int streamMode = helloFlags & helloModeMask;
         final boolean isUltraMode = streamMode == helloModeUltra;
         final String videoMime = isPng ? "image/png" : (isHevc ? "video/hevc" : "video/avc");
-        long streamSessionId = hello.sessionId;
         String modeLabel = streamMode == helloModeUltra
                 ? "ultra"
                 : (streamMode == helloModeQuality ? "quality" : "stable");

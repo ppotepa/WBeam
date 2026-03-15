@@ -19,8 +19,9 @@ use tracing::{error, info, warn};
 use wbeamd_api::{
     valid_values, validate_config_with_presets, ActiveConfig, BaseResponse, ClientMetricsRequest,
     ClientMetricsResponse, ConfigPatch, EffectiveRuntimeConfig, ErrorResponse, HealthResponse,
-    HostProbeResponse, KpiSnapshot, MetricsResponse, MetricsSnapshot, PresetsResponse, StatusResponse,
-    TuningStatusPatch, ValidationError, VirtualDisplayDoctorResponse, VirtualDisplayProbeResponse,
+    HostProbeResponse, KpiSnapshot, MetricsResponse, MetricsSnapshot, PresetsResponse,
+    StatusResponse, TuningStatusPatch, ValidationError, VirtualDisplayDoctorResponse,
+    VirtualDisplayProbeResponse,
 };
 
 pub mod domain;
@@ -485,6 +486,16 @@ pub struct DaemonCore {
 
 impl DaemonCore {
     fn normalize_display_mode(mode: Option<&str>) -> &'static str {
+        if mode
+            .map(|v| {
+                let normalized = v.trim();
+                normalized.eq_ignore_ascii_case("benchmark_game")
+                    || normalized.eq_ignore_ascii_case("benchmark")
+            })
+            .unwrap_or(false)
+        {
+            return "benchmark_game";
+        }
         display_backends::normalize_requested_mode(mode).as_str()
     }
 
@@ -914,12 +925,15 @@ impl DaemonCore {
     ) -> Result<ClientMetricsResponse, CoreError> {
         // P2.2: log trace_id so host logs can be correlated with Android logcat
         info!(
-            "client-metrics trace_id={} present={:.1}fps decode_p95={:.1}ms e2e_p95={:.1}ms",
+            "client-metrics trace_id={} recv={:.1}fps decode={:.1}fps present={:.1}fps recv≈{:.2}Mb/s decode_p95={:.1}ms e2e_p95={:.1}ms",
             client
                 .trace_id
                 .map(|t| format!("{:#018x}", t))
                 .unwrap_or_else(|| "-".to_string()),
+            client.recv_fps,
+            client.decode_fps,
             client.present_fps,
+            client.recv_bps as f64 / 1_000_000.0,
             client.decode_time_ms_p95,
             client.e2e_latency_ms_p95,
         );
@@ -942,6 +956,7 @@ impl DaemonCore {
                     .map(|started| started.elapsed() >= Duration::from_secs(8))
                     .unwrap_or(false);
 
+            let previous_client = inner.metrics.latest_client_metrics.clone();
             inner.metrics.latest_client_metrics = Some(client.clone());
             inner.metrics.kpi = KpiSnapshot {
                 target_fps: inner.active_config.fps,
@@ -967,6 +982,33 @@ impl DaemonCore {
 
             if client.recv_bps > 0 {
                 inner.metrics.bitrate_actual_bps = client.recv_bps;
+            }
+            let decode_starved_with_traffic = inner.state == STATE_STREAMING
+                && client.recv_bps > 150_000
+                && client.recv_fps <= 0.5
+                && client.present_fps <= 0.5;
+            let prev_decode_starved = previous_client
+                .as_ref()
+                .map(|prev| {
+                    prev.recv_bps > 150_000 && prev.recv_fps <= 0.5 && prev.present_fps <= 0.5
+                })
+                .unwrap_or(false);
+            if decode_starved_with_traffic && !prev_decode_starved {
+                inner.last_error = format!(
+                    "decode starvation: recv≈{:.2}Mb/s recv_fps={:.1} decode_fps={:.1} present_fps={:.1}",
+                    client.recv_bps as f64 / 1_000_000.0,
+                    client.recv_fps,
+                    client.decode_fps,
+                    client.present_fps
+                );
+                warn!(
+                    run_id = inner.run_id,
+                    recv_bps = client.recv_bps,
+                    recv_fps = client.recv_fps,
+                    decode_fps = client.decode_fps,
+                    present_fps = client.present_fps,
+                    "client has transport traffic but decoder/presenter output is stalled"
+                );
             }
 
             // P2.3: append JSONL telemetry record
@@ -1192,12 +1234,13 @@ impl DaemonCore {
     }
 
     async fn start_with_config(&self, cfg: ActiveConfig, reason: &str) -> Result<(), CoreError> {
-        let requested_display_mode = {
-            let inner = self.inner.lock().await;
-            inner.requested_display_mode.clone()
+        let requested_display_mode = { self.inner.lock().await.requested_display_mode.clone() };
+        let benchmark_mode = requested_display_mode.eq_ignore_ascii_case("benchmark_game");
+        let requested_mode = if benchmark_mode {
+            display_backends::DisplayMode::Duplicate
+        } else {
+            display_backends::normalize_requested_mode(Some(&requested_display_mode))
         };
-        let requested_mode =
-            display_backends::normalize_requested_mode(Some(&requested_display_mode));
         let mut launch_size = cfg.size.clone();
         if !self.host_probe.supports_streaming() {
             let reason = self.host_probe.unsupported_reason();
@@ -1299,7 +1342,11 @@ impl DaemonCore {
                 fps: cfg.fps,
                 bitrate_kbps: cfg.bitrate_kbps,
                 cursor_mode: cfg.cursor_mode.clone(),
-                gop: if cfg.intra_only { 1 } else { (cfg.fps / 8).max(6) },
+                gop: if cfg.intra_only {
+                    1
+                } else {
+                    (cfg.fps / 8).max(6)
+                },
                 intra_only: cfg.intra_only,
                 stream_mode: "unknown".to_string(),
                 queue_max_buffers: 0,
@@ -1307,7 +1354,11 @@ impl DaemonCore {
                 appsink_max_buffers: 0,
                 appsink_drop: false,
                 appsink_sync: false,
-                capture_backend: self.host_probe.capture_mode_name().to_string(),
+                capture_backend: if benchmark_mode {
+                    "benchmark_game".to_string()
+                } else {
+                    self.host_probe.capture_mode_name().to_string()
+                },
                 parse_mode: "unknown".to_string(),
                 timeout_pull_ms: 0,
                 timeout_write_ms: 0,
@@ -1339,13 +1390,12 @@ impl DaemonCore {
         let use_rust_streamer = wbeam_setting_bool(&self.settings, "WBEAM_USE_RUST_STREAMER", true);
         let rust_streamer_bin = wbeam_setting(&self.settings, "WBEAM_RUST_STREAMER_BIN")
             .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                self.root
-                    .join("host/rust/target/release/wbeamd-streamer")
-            });
+            .unwrap_or_else(|| self.root.join("host/rust/target/release/wbeamd-streamer"));
 
         let mut cmd;
         let capture_backend = self.host_probe.capture_mode_name();
+        let wayland_virtual_source =
+            !benchmark_mode && capture_backend == "wayland_portal" && requested_mode.is_virtual();
         self.stop_virtual_display_if_any().await;
         let serial_hint = self.target_serial.as_deref().unwrap_or("default");
         let activation = match display_backends::activate_start(
@@ -1369,6 +1419,7 @@ impl DaemonCore {
         info!(
             serial = serial_hint,
             requested_mode = requested_mode.as_str(),
+            benchmark_mode,
             capture_backend = capture_backend,
             x11_display = activation.display_override.as_deref().unwrap_or("-"),
             x11_region = activation
@@ -1400,8 +1451,10 @@ impl DaemonCore {
                 }
             })
             .collect::<String>();
-        let restore_token_file =
-            format!("/tmp/wbeam-portal-restore-token-{}-{}", session_suffix, self.stream_port);
+        let restore_token_file = format!(
+            "/tmp/wbeam-portal-restore-token-{}-{}",
+            session_suffix, self.stream_port
+        );
 
         if use_rust_streamer {
             if !rust_streamer_bin.exists() {
@@ -1441,15 +1494,24 @@ impl DaemonCore {
                 .arg(&restore_token_file)
                 .arg("--portal-persist-mode")
                 .arg("2")
+                .arg("--wayland-source-type")
+                .arg(if wayland_virtual_source {
+                    "virtual"
+                } else {
+                    "monitor"
+                })
                 .arg("--debug-dir")
                 .arg("/tmp/wbeam-frames")
                 .arg("--debug-fps")
                 .arg(cfg.debug_fps.to_string());
+            if benchmark_mode {
+                cmd.arg("--benchmark-game");
+            }
             cmd.env_remove("WBEAM_OVERLAY_TEXT_FILE");
             if cfg.intra_only {
                 cmd.arg("--intra-only");
             }
-            if capture_backend == "x11_gst" {
+            if !benchmark_mode && capture_backend == "x11_gst" {
                 if let Some(display) = x11_display_override.as_deref() {
                     cmd.env("DISPLAY", display);
                 }
@@ -1473,6 +1535,14 @@ impl DaemonCore {
                 }
             }
         } else {
+            if benchmark_mode {
+                let err = CoreError::Spawn(
+                    "benchmark_game mode requires Rust streamer (set WBEAM_USE_RUST_STREAMER=true)"
+                        .to_string(),
+                );
+                self.mark_start_failed(err.to_string()).await;
+                return Err(err);
+            }
             if capture_backend == "x11_gst" {
                 let err = CoreError::Spawn(
                     "x11 backend requires Rust streamer (set WBEAM_USE_RUST_STREAMER=true)"
@@ -1481,10 +1551,16 @@ impl DaemonCore {
                 self.mark_start_failed(err.to_string()).await;
                 return Err(err);
             }
+            if wayland_virtual_source {
+                let err = CoreError::Spawn(
+                    "wayland virtual_monitor mode requires Rust streamer (set WBEAM_USE_RUST_STREAMER=true)"
+                        .to_string(),
+                );
+                self.mark_start_failed(err.to_string()).await;
+                return Err(err);
+            }
             warn!("WBEAM_USE_RUST_STREAMER=false – using legacy python streamer");
-            let stream_script = self
-                .root
-                .join("host/scripts/stream_wayland_portal_h264.py");
+            let stream_script = self.root.join("host/scripts/stream_wayland_portal_h264.py");
             cmd = Command::new("python3");
             cmd.arg("-u")
                 .arg(stream_script)
@@ -1590,6 +1666,7 @@ impl DaemonCore {
 
         if line.contains("Streaming Wayland screencast")
             || line.contains("Streaming X11 screencast")
+            || line.contains("Streaming benchmark game source")
         {
             inner.state = STATE_STREAMING.to_string();
             inner.last_error.clear();
@@ -1617,6 +1694,19 @@ impl DaemonCore {
         let trimmed = line.trim();
         if !trimmed.is_empty() {
             let lower = trimmed.to_ascii_lowercase();
+            if lower.contains("client connected") {
+                info!(run_id, stream_event = "client-connected", detail = trimmed);
+                inner.last_error.clear();
+            } else if lower.contains("client disconnected")
+                || lower.contains("timeout -> reconnect client")
+            {
+                warn!(
+                    run_id,
+                    stream_event = "client-disconnected",
+                    detail = trimmed
+                );
+                inner.last_error = trimmed.to_string();
+            }
             if lower.contains("panic")
                 || lower.contains("error")
                 || lower.contains("failed")

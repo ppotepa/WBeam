@@ -186,7 +186,8 @@ async fn get_metrics(
         .resolve_core_readonly(serial, query.stream_port)
         .await
         .unwrap_or_else(|| state.sessions.default_core());
-    let payload = serde_json::to_value(core.metrics().await).unwrap_or_else(|_| serde_json::json!({}));
+    let payload =
+        serde_json::to_value(core.metrics().await).unwrap_or_else(|_| serde_json::json!({}));
     Json(payload)
 }
 
@@ -394,7 +395,8 @@ async fn auto_layout_wayland_portal_outputs(
     }
 
     let mapped = sessions.mapped_wayland_output_names().await;
-    let mut commands = kscreen_layout::build_non_overlapping_layout_commands(&outputs, Some(&mapped));
+    let mut commands =
+        kscreen_layout::build_non_overlapping_layout_commands(&outputs, Some(&mapped));
     if commands.is_empty() {
         commands = kscreen_layout::build_non_overlapping_layout_commands(&outputs, None);
     }

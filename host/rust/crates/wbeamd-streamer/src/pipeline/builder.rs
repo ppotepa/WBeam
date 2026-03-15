@@ -43,7 +43,9 @@ pub fn make_pipeline(
     let capture_backend_name = match capture {
         PreparedCapture::Wayland(_) => "wayland_portal",
         PreparedCapture::X11 => "x11",
+        PreparedCapture::BenchmarkGame => "benchmark_game",
     };
+    let source_dynamic_pad = false;
 
     // ── Source ───────────────────────────────────────────────────────────────
     let src = capture.build_source(cfg)?;
@@ -132,6 +134,21 @@ pub fn make_pipeline(
     if let Some(qmain) = &qmain {
         configure_queue(qmain);
     }
+    if source_dynamic_pad {
+        let q1_sink = q1.static_pad("sink").context("q1 sink pad")?;
+        src.connect_pad_added(move |_src, src_pad| {
+            if q1_sink.is_linked() {
+                return;
+            }
+            let caps = src_pad
+                .current_caps()
+                .unwrap_or_else(|| src_pad.query_caps(None));
+            if !caps.to_string().contains("video/") {
+                return;
+            }
+            let _ = src_pad.link(&q1_sink);
+        });
+    }
 
     let caps_source_hint = gst::Caps::builder("video/x-raw").build();
     let _ = caps_src.set_property("caps", &caps_source_hint);
@@ -211,7 +228,11 @@ pub fn make_pipeline(
     let parse_mode = if mode_png {
         "png_raw"
     } else if hevc {
-        if framed { "h265_au" } else { "h265_nal" }
+        if framed {
+            "h265_au"
+        } else {
+            "h265_nal"
+        }
     } else if framed {
         "h264_au"
     } else {
@@ -295,7 +316,15 @@ pub fn make_pipeline(
             }
         }
         if let Some(rate) = &rate {
-            gst::Element::link_many([&src, &q1, &caps_src, &convert, &scale, rate, &caps1, tee])?;
+            if source_dynamic_pad {
+                gst::Element::link_many([&q1, &caps_src, &convert, &scale, rate, &caps1, tee])?;
+            } else {
+                gst::Element::link_many([
+                    &src, &q1, &caps_src, &convert, &scale, rate, &caps1, tee,
+                ])?;
+            }
+        } else if source_dynamic_pad {
+            gst::Element::link_many([&q1, &caps_src, &convert, &scale, &caps1, tee])?;
         } else {
             gst::Element::link_many([&src, &q1, &caps_src, &convert, &scale, &caps1, tee])?;
         }
@@ -316,30 +345,54 @@ pub fn make_pipeline(
                 pipeline.add_many([
                     &src, &q1, &caps_src, &convert, &scale, rate, &caps1, &enc, parse, &sink,
                 ])?;
-                gst::Element::link_many([
-                    &src, &q1, &caps_src, &convert, &scale, rate, &caps1, &enc, parse, &sink,
-                ])?;
+                if source_dynamic_pad {
+                    gst::Element::link_many([
+                        &q1, &caps_src, &convert, &scale, rate, &caps1, &enc, parse, &sink,
+                    ])?;
+                } else {
+                    gst::Element::link_many([
+                        &src, &q1, &caps_src, &convert, &scale, rate, &caps1, &enc, parse, &sink,
+                    ])?;
+                }
             } else {
                 pipeline.add_many([
                     &src, &q1, &caps_src, &convert, &scale, &caps1, &enc, parse, &sink,
                 ])?;
-                gst::Element::link_many([
-                    &src, &q1, &caps_src, &convert, &scale, &caps1, &enc, parse, &sink,
-                ])?;
+                if source_dynamic_pad {
+                    gst::Element::link_many([
+                        &q1, &caps_src, &convert, &scale, &caps1, &enc, parse, &sink,
+                    ])?;
+                } else {
+                    gst::Element::link_many([
+                        &src, &q1, &caps_src, &convert, &scale, &caps1, &enc, parse, &sink,
+                    ])?;
+                }
             }
         } else {
             if let Some(rate) = &rate {
                 pipeline.add_many([
                     &src, &q1, &caps_src, &convert, &scale, rate, &caps1, &enc, &sink,
                 ])?;
-                gst::Element::link_many([
-                    &src, &q1, &caps_src, &convert, &scale, rate, &caps1, &enc, &sink,
-                ])?;
+                if source_dynamic_pad {
+                    gst::Element::link_many([
+                        &q1, &caps_src, &convert, &scale, rate, &caps1, &enc, &sink,
+                    ])?;
+                } else {
+                    gst::Element::link_many([
+                        &src, &q1, &caps_src, &convert, &scale, rate, &caps1, &enc, &sink,
+                    ])?;
+                }
             } else {
                 pipeline.add_many([&src, &q1, &caps_src, &convert, &scale, &caps1, &enc, &sink])?;
-                gst::Element::link_many([
-                    &src, &q1, &caps_src, &convert, &scale, &caps1, &enc, &sink,
-                ])?;
+                if source_dynamic_pad {
+                    gst::Element::link_many([
+                        &q1, &caps_src, &convert, &scale, &caps1, &enc, &sink,
+                    ])?;
+                } else {
+                    gst::Element::link_many([
+                        &src, &q1, &caps_src, &convert, &scale, &caps1, &enc, &sink,
+                    ])?;
+                }
             }
         }
     }

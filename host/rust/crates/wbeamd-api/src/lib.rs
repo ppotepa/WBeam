@@ -457,12 +457,7 @@ pub fn validate_config_with_presets(
     current: &ActiveConfig,
     preset_map: &BTreeMap<String, ActiveConfig>,
 ) -> Result<ActiveConfig, ValidationError> {
-    let base_profile = canonical_profile_name(
-        patch
-        .profile
-        .as_deref()
-        .unwrap_or(&current.profile)
-    );
+    let base_profile = canonical_profile_name(patch.profile.as_deref().unwrap_or(&current.profile));
     if !preset_map.contains_key(&base_profile) {
         return Err(ValidationError::InvalidProfile);
     }

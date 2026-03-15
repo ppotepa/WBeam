@@ -20,7 +20,7 @@ import RefreshCw from "lucide-solid/icons/refresh-cw";
 import Link2 from "lucide-solid/icons/link-2";
 import Unlink2 from "lucide-solid/icons/unlink-2";
 import Loader2 from "lucide-solid/icons/loader-2";
-import type { ConnectEncoderMode, ConnectSessionConfig, DeviceBasic } from "./types";
+import type { ConnectEncoderMode, ConnectSessionConfig, DeviceBasic, TrainedProfile } from "./types";
 import type { VirtualDepsInstallStatus, VirtualDoctor } from "./types";
 import { HostApiManager } from "./managers/hostApiManager";
 import { createSessionManager } from "./managers/sessionManager";
@@ -162,6 +162,8 @@ export default function App() {
   const [connectDialogMode, setConnectDialogMode] = createSignal<DisplayMode>("virtual_monitor");
   const [connectDialogResolutionPresetId, setConnectDialogResolutionPresetId] = createSignal<string>(RESOLUTION_PRESET_DEFAULT_ID);
   const [connectDialogEncoderMode, setConnectDialogEncoderMode] = createSignal<ConnectEncoderMode>(ENCODER_DEFAULT_MODE);
+  const [connectDialogProfileKey, setConnectDialogProfileKey] = createSignal<string>("");
+  const [trainedProfiles, setTrainedProfiles] = createSignal<TrainedProfile[]>([]);
   const [connectDialogDoctor, setConnectDialogDoctor] = createSignal<VirtualDoctor | null>(null);
   const [connectDialogDoctorLoading, setConnectDialogDoctorLoading] = createSignal(false);
   const [connectDialogBlockReason, setConnectDialogBlockReason] = createSignal("");
@@ -244,12 +246,39 @@ export default function App() {
     saveWaylandExperimentalDuplication(enabled);
   }
 
+  function recommendedProfileKey(profiles: TrainedProfile[]): string {
+    const preferred = profiles.find((profile) => profile.encoder === ENCODER_DEFAULT_MODE);
+    return preferred?.key ?? "";
+  }
+
+  async function refreshTrainedProfiles(options?: { preselectRecommended?: boolean }): Promise<void> {
+    try {
+      const profiles = await api.listTrainedProfiles();
+      setTrainedProfiles(profiles);
+      if (options?.preselectRecommended) {
+        setConnectDialogProfileKey(recommendedProfileKey(profiles));
+        return;
+      }
+      const selected = connectDialogProfileKey();
+      if (selected.length > 0 && !profiles.some((profile) => profile.key === selected)) {
+        setConnectDialogProfileKey("");
+      }
+    } catch {
+      setTrainedProfiles([]);
+      if (options?.preselectRecommended) {
+        setConnectDialogProfileKey("");
+      }
+    }
+  }
+
   function openConnectDialog(device: DeviceBasic): void {
     const isWaylandHost = isWaylandPortalHost();
     const saved = isWaylandHost ? "virtual_monitor" : (loadSavedDisplayMode(device.serial) ?? "virtual_monitor");
     setConnectDialogMode(saved);
     setConnectDialogResolutionPresetId(RESOLUTION_PRESET_DEFAULT_ID);
     setConnectDialogEncoderMode(ENCODER_DEFAULT_MODE);
+    setConnectDialogProfileKey("");
+    void refreshTrainedProfiles({ preselectRecommended: true });
     setConnectDialogDoctor(null);
     setConnectDialogDoctorLoading(!isWaylandHost);
     setConnectDialogBlockReason(connectDisabledReason(device));
@@ -307,8 +336,10 @@ export default function App() {
       }
 
       const resolvedSize = resolveSessionSizeForPreset(device, connectDialogResolutionPresetId());
-      const resolvedEncoder = connectDialogEncoderMode();
+      const selectedProfile = trainedProfiles().find((profile) => profile.key === connectDialogProfileKey()) ?? null;
+      const resolvedEncoder = selectedProfile ? undefined : connectDialogEncoderMode();
       const connectConfig: ConnectSessionConfig = {
+        profileName: selectedProfile?.key,
         encoder: resolvedEncoder,
         size: resolvedSize,
       };
@@ -413,6 +444,7 @@ export default function App() {
     }
 
     await session.refreshSnapshot();
+    await refreshTrainedProfiles();
     try {
       const doctor = await api.getVirtualDoctor();
       setVirtualStartupDoctor(doctor);
@@ -698,7 +730,8 @@ export default function App() {
             return "Creates real additional monitor space on host desktop.";
           };
           const selectedSize = () => resolveSessionSizeForPreset(device, connectDialogResolutionPresetId()) ?? "auto";
-          const selectedEncoder = () => connectDialogEncoderMode();
+          const selectedProfile = () => trainedProfiles().find((profile) => profile.key === connectDialogProfileKey()) ?? null;
+          const selectedEncoder = () => selectedProfile()?.encoder ?? connectDialogEncoderMode();
           return (
             <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Select display mode">
               <section class="connect-modal">
@@ -743,6 +776,28 @@ export default function App() {
 
                 <div class="connect-config-grid">
                   <label class="connect-config-field">
+                    <span>Trained profile</span>
+                    <select
+                      value={connectDialogProfileKey()}
+                      onChange={(event) => setConnectDialogProfileKey(event.currentTarget.value)}
+                    >
+                      <option value="">None (manual settings)</option>
+                      <For each={trainedProfiles()}>
+                        {(profile) => (
+                          <option value={profile.key}>
+                            {`${profile.name} (${profile.encoder.toUpperCase()} ${profile.workload}, ${profile.fps}fps, ${profile.bitrateKbps}kbps)`}
+                          </option>
+                        )}
+                      </For>
+                    </select>
+                    <small>
+                      {selectedProfile()
+                        ? `Using ${selectedProfile()!.codec} ${selectedProfile()!.fps}fps ${selectedProfile()!.bitrateKbps}kbps (${selectedProfile()!.objective}, ${selectedProfile()!.workload})`
+                        : "Use manual encoder and resolution settings."}
+                    </small>
+                  </label>
+
+                  <label class="connect-config-field">
                     <span>Resolution preset</span>
                     <select
                       value={connectDialogResolutionPresetId()}
@@ -761,6 +816,7 @@ export default function App() {
                     <span>Encoder</span>
                     <select
                       value={connectDialogEncoderMode()}
+                      disabled={selectedProfile() !== null}
                       onChange={(event) => setConnectDialogEncoderMode(event.currentTarget.value as ConnectEncoderMode)}
                     >
                       <For each={ENCODER_OPTIONS}>
@@ -769,7 +825,11 @@ export default function App() {
                         )}
                       </For>
                     </select>
-                    <small>Active encoder for this connect: {selectedEncoder()}</small>
+                    <small>
+                      {selectedProfile()
+                        ? `Encoder locked by profile: ${selectedEncoder()}`
+                        : `Active encoder for this connect: ${selectedEncoder()}`}
+                    </small>
                   </label>
                 </div>
 

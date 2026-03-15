@@ -4,7 +4,7 @@ mod portal;
 use anyhow::Result;
 use gstreamer as gst;
 
-use crate::cli::{CaptureBackend, ResolvedConfig};
+use crate::cli::{CaptureBackend, ResolvedConfig, WaylandSourceType};
 
 pub(crate) use portal::{request_portal_stream, PortalStream};
 
@@ -12,6 +12,7 @@ pub(crate) use portal::{request_portal_stream, PortalStream};
 pub enum PreparedCapture {
     Wayland(PortalStream),
     X11,
+    BenchmarkGame,
 }
 
 impl PreparedCapture {
@@ -19,6 +20,7 @@ impl PreparedCapture {
         match self {
             PreparedCapture::Wayland(stream) => backend::wayland::build_source(stream, cfg),
             PreparedCapture::X11 => backend::x11::build_source(),
+            PreparedCapture::BenchmarkGame => backend::benchmark_game::build_source(cfg),
         }
     }
 
@@ -29,6 +31,9 @@ impl PreparedCapture {
             }
             PreparedCapture::X11 => {
                 println!("[wbeam] Using X11 capture source (ximagesrc)");
+            }
+            PreparedCapture::BenchmarkGame => {
+                println!("[wbeam] Using benchmark game source (synthetic in-memory scene)");
             }
         }
     }
@@ -41,14 +46,26 @@ impl PreparedCapture {
             PreparedCapture::X11 => {
                 println!("[wbeam] Streaming X11 screencast on tcp://0.0.0.0:{port}");
             }
+            PreparedCapture::BenchmarkGame => {
+                println!("[wbeam] Streaming benchmark game source on tcp://0.0.0.0:{port}");
+            }
         }
     }
 }
 
 pub async fn prepare_capture(cfg: &ResolvedConfig) -> Result<PreparedCapture> {
+    if cfg.benchmark_game {
+        return Ok(PreparedCapture::BenchmarkGame);
+    }
     match cfg.capture_backend {
         CaptureBackend::WaylandPortal => {
-            println!("[wbeam] Requesting ScreenCast portal session (KDE prompt expected)...");
+            let source_type = match cfg.wayland_source_type {
+                WaylandSourceType::Monitor => "monitor",
+                WaylandSourceType::Virtual => "virtual",
+            };
+            println!(
+                "[wbeam] Requesting ScreenCast portal session source_type={source_type} (KDE prompt expected)..."
+            );
             let stream = backend::wayland::prepare(cfg).await?;
             Ok(PreparedCapture::Wayland(stream))
         }
