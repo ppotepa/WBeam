@@ -10,7 +10,6 @@ workflow:
 
 .build_release_rules: &build_release_rules
   - if: $CI_COMMIT_TAG
-  - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
   - if: '$CI_COMMIT_BRANCH == "release"'
 
 default:
@@ -20,6 +19,8 @@ default:
       if [ -n "${CI_COMMIT_TAG:-}" ]; then
         export WBEAM_VERSION="${CI_COMMIT_TAG#v}"
         export WBEAM_VERSION="${WBEAM_VERSION#V}"
+      elif [ "${CI_COMMIT_BRANCH:-}" = "release" ]; then
+        export WBEAM_VERSION="0.1.2.${CI_PIPELINE_IID}.${CI_COMMIT_SHORT_SHA}"
       else
         export WBEAM_VERSION="0.0.0.${CI_DEFAULT_BRANCH}.${CI_PIPELINE_IID}.${CI_COMMIT_SHORT_SHA}"
       fi
@@ -180,6 +181,8 @@ build_windows_server:
           $tag = $tag.Substring(1)
         }
         $env:WBEAM_VERSION = $tag
+      } elseif ($env:CI_COMMIT_BRANCH -eq "release") {
+        $env:WBEAM_VERSION = "0.1.2.$($env:CI_PIPELINE_IID).$($env:CI_COMMIT_SHORT_SHA)"
       } else {
         $env:WBEAM_VERSION = "0.0.0.$($env:CI_DEFAULT_BRANCH).$($env:CI_PIPELINE_IID).$($env:CI_COMMIT_SHORT_SHA)"
       }
@@ -237,6 +240,8 @@ build_windows_server:
           $tag = $tag.Substring(1)
         }
         $env:WBEAM_VERSION = $tag
+      } elseif ($env:CI_COMMIT_BRANCH -eq "release") {
+        $env:WBEAM_VERSION = "0.1.2.$($env:CI_PIPELINE_IID).$($env:CI_COMMIT_SHORT_SHA)"
       } else {
         $env:WBEAM_VERSION = "0.0.0.$($env:CI_DEFAULT_BRANCH).$($env:CI_PIPELINE_IID).$($env:CI_COMMIT_SHORT_SHA)"
       }
