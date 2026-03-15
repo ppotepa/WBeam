@@ -37,7 +37,10 @@ pub fn make_pipeline(
     let encoder_name = pick_encoder(&cfg.encoder)?;
     let hevc = is_hevc(&cfg.encoder);
     let is_portal = matches!(capture, PreparedCapture::Wayland(_));
+    #[cfg(feature = "evdi")]
     let is_evdi = matches!(capture, PreparedCapture::Evdi);
+    #[cfg(not(feature = "evdi"))]
+    let is_evdi = false;
     let mut profile = buffer_profile(cfg.stream_mode, cfg.fps, mode_png);
     profile.queue_buffers = cfg.queue_max_buffers.max(1);
     profile.appsink_buffers = cfg.appsink_max_buffers.max(1);
@@ -60,6 +63,7 @@ pub fn make_pipeline(
     let capture_backend_name = match capture {
         PreparedCapture::Wayland(_) => "wayland_portal",
         PreparedCapture::X11 => "x11",
+        #[cfg(feature = "evdi")]
         PreparedCapture::Evdi => "evdi",
         PreparedCapture::BenchmarkGame => "benchmark_game",
     };
