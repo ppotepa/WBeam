@@ -29,7 +29,7 @@ pub(crate) fn kscreen_enabled_output_names() -> Result<HashSet<String>, String> 
     let outputs = kscreen_query_outputs()?;
     Ok(outputs
         .into_iter()
-        .filter(output_ready_for_layout)
+        .filter(output_active)
         .map(|o| o.name)
         .collect())
 }
@@ -114,12 +114,12 @@ pub(crate) fn kscreen_query_outputs() -> Result<Vec<KscreenOutput>, String> {
     Ok(parsed)
 }
 
+pub(crate) fn output_active(output: &KscreenOutput) -> bool {
+    output.enabled && output.connected && output.width > 0 && output.height > 0
+}
+
 pub(crate) fn output_ready_for_layout(output: &KscreenOutput) -> bool {
-    output.enabled
-        && output.connected
-        && output.replication_source == 0
-        && output.width > 0
-        && output.height > 0
+    output_active(output) && output.replication_source == 0
 }
 
 pub(crate) fn output_name_looks_virtual(name: &str) -> bool {
@@ -218,6 +218,78 @@ pub(crate) fn build_virtual_replication_commands(
         })
         .map(|o| format!("output.{}.replicationSource.{}", o.name, source.id))
         .collect()
+}
+
+pub(crate) fn build_virtual_unmirror_commands(
+    outputs: &[KscreenOutput],
+    preferred_targets: Option<&HashSet<String>>,
+) -> Vec<String> {
+    outputs
+        .iter()
+        .filter(|o| output_active(o))
+        .filter(|o| output_name_looks_virtual(&o.name))
+        .filter(|o| o.replication_source != 0)
+        .filter(|o| {
+            if let Some(preferred) = preferred_targets {
+                if !preferred.is_empty() {
+                    return preferred.contains(&o.name);
+                }
+            }
+            true
+        })
+        .map(|o| format!("output.{}.mirror.none", o.name))
+        .collect()
+}
+
+pub(crate) fn build_virtual_extend_commands(
+    outputs: &[KscreenOutput],
+    preferred_targets: Option<&HashSet<String>>,
+) -> Vec<String> {
+    let mut managed = outputs
+        .iter()
+        .filter(|o| output_ready_for_layout(o))
+        .filter(|o| output_name_looks_virtual(&o.name))
+        .filter(|o| {
+            if let Some(preferred) = preferred_targets {
+                if !preferred.is_empty() {
+                    return preferred.contains(&o.name);
+                }
+            }
+            true
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if managed.is_empty() {
+        return Vec::new();
+    }
+
+    let managed_names: HashSet<String> = managed.iter().map(|o| o.name.clone()).collect();
+    let mut anchor_x = outputs
+        .iter()
+        .filter(|o| output_active(o))
+        .filter(|o| !managed_names.contains(&o.name))
+        .map(|o| o.x.saturating_add(o.width.max(320)))
+        .max()
+        .unwrap_or(0);
+    if anchor_x < 0 {
+        anchor_x = 0;
+    }
+
+    managed.sort_by(|a, b| {
+        a.x.cmp(&b.x)
+            .then_with(|| a.y.cmp(&b.y))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+
+    let mut commands = Vec::new();
+    let mut x = anchor_x;
+    for output in managed {
+        if output.x != x || output.y != 0 {
+            commands.push(format!("output.{}.position.{},{}", output.name, x, 0));
+        }
+        x = x.saturating_add(output.width.max(320));
+    }
+    commands
 }
 
 fn has_overlap(outputs: &[KscreenOutput]) -> bool {
