@@ -26,6 +26,17 @@ final class WbtpFrameIo {
         }
     }
 
+    static void readFully(InputStream input, byte[] buf, int offset, int len) throws IOException {
+        int read = 0;
+        while (read < len) {
+            int n = input.read(buf, offset + read, len - read);
+            if (n < 0) {
+                throw new IOException("stream closed");
+            }
+            read += n;
+        }
+    }
+
     static boolean tryResyncHeader(
             InputStream input,
             byte[] hdrBuf,

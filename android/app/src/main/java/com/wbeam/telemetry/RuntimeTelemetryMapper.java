@@ -2,6 +2,8 @@ package com.wbeam.telemetry;
 
 import org.json.JSONObject;
 
+import java.util.Locale;
+
 /**
  * Maps raw daemon metrics JSON into normalized runtime HUD snapshot values.
  */
@@ -39,6 +41,8 @@ public final class RuntimeTelemetryMapper {
         public long latestDroppedFrames;
         public long latestTooLateFrames;
         public double bitrateMbps;
+        public boolean tuningActive;
+        public String tuningLine;
     }
 
     public static Snapshot map(
@@ -118,6 +122,47 @@ public final class RuntimeTelemetryMapper {
             out.bitrateMbps = metrics.optLong("bitrate_actual_bps", 0L) / 1_000_000.0;
         }
 
+        JSONObject tuning = metrics.optJSONObject("tuning");
+        out.tuningActive = tuning != null && tuning.optBoolean("active", false);
+        out.tuningLine = "";
+        if (out.tuningActive && tuning != null) {
+            String codec = tuning.optString("codec", "-").toUpperCase(Locale.US);
+            String phase = tuning.optString("phase", "");
+            int generation = tuning.optInt("generation", 0);
+            int totalGenerations = tuning.optInt("total_generations", 0);
+            int child = tuning.optInt("child", 0);
+            int childrenPerGeneration = tuning.optInt("children_per_generation", 0);
+            String score = fmtScore(tuning.optDouble("score", Double.NaN));
+            String bestScore = fmtScore(tuning.optDouble("best_score", Double.NaN));
+            String note = tuning.optString("note", "");
+            if (note.length() > 28) {
+                note = note.substring(0, 28) + "...";
+            }
+            out.tuningLine = String.format(
+                    Locale.US,
+                    "%s G%d/%d C%d/%d S=%s B=%s %s %s",
+                    codec,
+                    generation,
+                    totalGenerations,
+                    child,
+                    childrenPerGeneration,
+                    score,
+                    bestScore,
+                    phase,
+                    note
+            ).trim();
+            if (out.tuningLine.length() > 120) {
+                out.tuningLine = out.tuningLine.substring(0, 120) + "...";
+            }
+        }
+
         return out;
+    }
+
+    private static String fmtScore(double value) {
+        if (!Double.isFinite(value)) {
+            return "-";
+        }
+        return String.format(Locale.US, "%.2f", value);
     }
 }

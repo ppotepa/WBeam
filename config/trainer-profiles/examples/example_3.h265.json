@@ -1,0 +1,13 @@
+{
+  "key": "example-3-h265",
+  "name": "example_3.h265",
+  "backend": "wayland_portal",
+  "codec": "h265",
+  "objective": "quality-first",
+  "workload": "mixed",
+  "encoder": "h265",
+  "bitrate_kbps": 15000,
+  "fps": 45,
+  "intra_only": false,
+  "created_unix_ms": 1741000002000
+}

@@ -1,0 +1,13 @@
+{
+  "key": "example-2-h264",
+  "name": "example_2.h264",
+  "backend": "wayland_portal",
+  "codec": "h264",
+  "objective": "latency-first",
+  "workload": "desktop/text",
+  "encoder": "h264",
+  "bitrate_kbps": 12000,
+  "fps": 50,
+  "intra_only": false,
+  "created_unix_ms": 1741000001000
+}

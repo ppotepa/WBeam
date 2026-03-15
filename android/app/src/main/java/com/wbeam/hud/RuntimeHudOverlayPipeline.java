@@ -41,6 +41,8 @@ public final class RuntimeHudOverlayPipeline {
             long bpHigh,
             long bpRecover,
             String reason,
+            boolean tuningActive,
+            String tuningLine,
             String metricChartsHtml,
             String tone,
             ResourceUsageTracker resourceUsageTracker,
@@ -84,6 +86,8 @@ public final class RuntimeHudOverlayPipeline {
         input.bpHigh = bpHigh;
         input.bpRecover = bpRecover;
         input.reason = reason;
+        input.tuningActive = tuningActive;
+        input.tuningLine = tuningLine;
         input.metricChartsHtml = metricChartsHtml;
 
         RuntimeHudOverlayRenderer.Rendered rendered = RuntimeHudOverlayRenderer.render(

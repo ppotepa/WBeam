@@ -24,6 +24,8 @@ public final class RuntimeHudRenderCoordinator {
         public String daemonBuildRevision;
         public String appBuildRevision;
         public String daemonLastError;
+        public boolean tuningActive;
+        public String tuningLine;
         public ResourceUsageTracker resourceUsageTracker;
         public WebView perfHudWebView;
         public TextView perfHudText;
@@ -86,6 +88,8 @@ public final class RuntimeHudRenderCoordinator {
                 state.bpHigh,
                 state.bpRecover,
                 state.reason,
+                state.tuningActive,
+                state.tuningLine,
                 runtimeChartsHtml,
                 state.pressureState.tone,
                 input.resourceUsageTracker,

@@ -18,8 +18,7 @@ STREAM_PORT="${3:-5000}"
 WAIT_STREAM_READY_SEC="${WAIT_STREAM_READY_SEC:-45}"
 AUTO_START_STREAM="${AUTO_START_STREAM:-1}"
 REQUIRE_STREAM_READY="${REQUIRE_STREAM_READY:-1}"
-SOAK_PROFILE="${SOAK_PROFILE:-lowlatency}"
-SOAK_APPLY_PROFILE="${SOAK_APPLY_PROFILE:-1}"
+SOAK_APPLY_CONFIG="${SOAK_APPLY_CONFIG:-1}"
 SOAK_ENABLE_LIVE_ADAPTIVE_RESTART="${SOAK_ENABLE_LIVE_ADAPTIVE_RESTART:-0}"
 SOAK_SIZE="${SOAK_SIZE:-}"
 SOAK_FPS="${SOAK_FPS:-}"
@@ -81,11 +80,11 @@ else
   echo "[soak-local] daemon already reachable at $health_url"
 fi
 
-if [[ "$SOAK_APPLY_PROFILE" == "1" ]] && [[ -n "$SOAK_PROFILE" ]]; then
+if [[ "$SOAK_APPLY_CONFIG" == "1" ]]; then
   apply_url="http://127.0.0.1:${CONTROL_PORT}/v1/apply"
   apply_json="$(python3 - <<PY
 import json
-obj = {"profile": "${SOAK_PROFILE}"}
+obj = {}
 size = "${SOAK_SIZE}".strip()
 fps = "${SOAK_FPS}".strip()
 bitrate = "${SOAK_BITRATE_KBPS}".strip()
@@ -98,10 +97,12 @@ if bitrate:
 print(json.dumps(obj))
 PY
 )"
-  echo "[soak-local] applying soak config: ${apply_json}"
-  curl -fsS --max-time 4 -X POST "$apply_url" \
-    -H 'Content-Type: application/json' \
-    -d "$apply_json" >/dev/null || true
+  if [[ "$apply_json" != "{}" ]]; then
+    echo "[soak-local] applying soak config: ${apply_json}"
+    curl -fsS --max-time 4 -X POST "$apply_url" \
+      -H 'Content-Type: application/json' \
+      -d "$apply_json" >/dev/null || true
+  fi
 fi
 echo "[soak-local] live_adaptive_restart=${SOAK_ENABLE_LIVE_ADAPTIVE_RESTART}"
 

@@ -32,14 +32,11 @@ require_absent() {
 
 echo "[matrix] check canonical executables"
 require_exec "./wbeam"
-require_exec "./trainer.sh"
 require_exec "./desktop.sh"
 require_exec "./host/scripts/run_wbeamd.sh"
 require_exec "./host/scripts/run_wbeamd_debug.sh"
 
 echo "[matrix] check canonical workflow files"
-require_file "./host/training/wizard.py"
-require_file "./desktop/apps/trainer-tauri/package.json"
 require_file "./desktop/apps/desktop-tauri/package.json"
 
 echo "[matrix] check wrapper removal"
@@ -50,18 +47,12 @@ require_absent "./proto_x11"
 echo "[matrix] syntax checks"
 bash -n \
   ./wbeam \
-  ./trainer.sh \
   ./desktop.sh \
   ./host/scripts/run_wbeamd.sh \
   ./host/scripts/run_wbeamd_debug.sh
 
 echo "[matrix] cli smoke"
 ./wbeam --help >/dev/null
-./trainer.sh --help >/dev/null
 ./desktop.sh --help >/dev/null
-
-echo "[matrix] python smoke"
-python3 -m py_compile \
-  ./host/training/wizard.py
 
 echo "[matrix] OK"

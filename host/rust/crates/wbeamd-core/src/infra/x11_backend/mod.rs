@@ -20,7 +20,12 @@ pub trait X11VirtualOutputBackend {
     fn key(&self) -> &'static str;
     fn primary(&self) -> bool;
     fn probe(&self, host_probe: &HostProbe) -> BackendProbe;
-    fn create(&self, serial: &str, size: &str, mirror_to_primary: bool) -> Result<BackendHandle, String>;
+    fn create(
+        &self,
+        serial: &str,
+        size: &str,
+        mirror_to_primary: bool,
+    ) -> Result<BackendHandle, String>;
     fn destroy(&self, handle: &BackendHandle) -> Result<(), String>;
 }
 
@@ -48,7 +53,12 @@ impl X11VirtualOutputBackend for RealOutputBackend {
         }
     }
 
-    fn create(&self, serial: &str, size: &str, mirror_to_primary: bool) -> Result<BackendHandle, String> {
+    fn create(
+        &self,
+        serial: &str,
+        size: &str,
+        mirror_to_primary: bool,
+    ) -> Result<BackendHandle, String> {
         x11_real_output::create(serial, size, mirror_to_primary).map(BackendHandle::RealOutput)
     }
 
@@ -99,7 +109,12 @@ impl X11VirtualOutputBackend for MonitorObjectBackend {
         }
     }
 
-    fn create(&self, serial: &str, size: &str, _mirror_to_primary: bool) -> Result<BackendHandle, String> {
+    fn create(
+        &self,
+        serial: &str,
+        size: &str,
+        _mirror_to_primary: bool,
+    ) -> Result<BackendHandle, String> {
         x11_monitor_object::create(serial, size).map(BackendHandle::MonitorObject)
     }
 
@@ -112,10 +127,7 @@ impl X11VirtualOutputBackend for MonitorObjectBackend {
 }
 
 pub fn backends_for_virtual_monitor() -> Vec<Box<dyn X11VirtualOutputBackend>> {
-    vec![
-        Box::new(RealOutputBackend),
-        Box::new(MonitorObjectBackend),
-    ]
+    vec![Box::new(RealOutputBackend), Box::new(MonitorObjectBackend)]
 }
 
 fn policy_file_path() -> Option<PathBuf> {
@@ -135,7 +147,8 @@ fn policy_file_path() -> Option<PathBuf> {
         let trimmed = user.trim();
         if !trimmed.is_empty() {
             return Some(
-                PathBuf::from(format!("/home/{trimmed}")).join(".config/wbeam/x11-virtual-policy.conf"),
+                PathBuf::from(format!("/home/{trimmed}"))
+                    .join(".config/wbeam/x11-virtual-policy.conf"),
             );
         }
     }
@@ -203,7 +216,11 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("duration")
             .as_nanos();
-        let base = std::env::temp_dir().join(format!("wbeam-x11-policy-test-{}-{}", std::process::id(), stamp));
+        let base = std::env::temp_dir().join(format!(
+            "wbeam-x11-policy-test-{}-{}",
+            std::process::id(),
+            stamp
+        ));
         let policy_dir = base.join("wbeam");
         fs::create_dir_all(&policy_dir).expect("create policy dir");
         let policy_file = policy_dir.join("x11-virtual-policy.conf");

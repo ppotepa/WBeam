@@ -58,7 +58,7 @@ public final class MainViewBindingCoordinator {
                 out.primaryViews.cursorOverlay,
                 out.controlViews.cursorOverlayButton
         );
-        MainActivityUiBinder.setupTrainerHudWebView(out.primaryViews.perfHudWebView);
+        MainActivityUiBinder.setupHudWebView(out.primaryViews.perfHudWebView);
         return out;
     }
 }

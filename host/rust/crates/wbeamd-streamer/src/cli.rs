@@ -1,4 +1,4 @@
-//! CLI argument parser and profile resolution for wbeamd-streamer.
+//! CLI argument parser and default configuration resolution for wbeamd-streamer.
 
 use anyhow::{Context, Result};
 use ashpd::desktop::screencast::CursorMode;
@@ -16,6 +16,13 @@ pub enum CaptureBackend {
     Auto,
     WaylandPortal,
     X11,
+    Evdi,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum WaylandSourceType {
+    Monitor,
+    Virtual,
 }
 
 #[derive(Debug, Parser, Clone)]
@@ -24,13 +31,6 @@ pub enum CaptureBackend {
     about = "Host screencast (Wayland portal/X11) -> WBTP framed sender"
 )]
 pub struct Args {
-    #[arg(long, default_value = "baseline", value_parser = [
-        "baseline",
-        "lowlatency", "balanced", "ultra",
-        "safe_60", "aggressive_60", "quality_60", "debug_60",
-        "fast60", "balanced60", "quality60", "fast60_2", "fast60_3"
-    ])]
-    pub profile: String,
     #[arg(long, default_value_t = 5000)]
     pub port: u16,
     #[arg(long)]
@@ -44,7 +44,7 @@ pub struct Args {
     #[arg(long, default_value = "h265",
             value_parser = ["h264", "h265", "rawpng"])]
     pub encoder: String,
-    #[arg(long, default_value = "embedded", value_parser = ["hidden", "embedded", "metadata"])]
+    #[arg(long, default_value = "hidden", value_parser = ["hidden", "embedded", "metadata"])]
     pub cursor_mode: String,
     #[arg(long, default_value = "/tmp/wbeam-frames")]
     pub debug_dir: String,
@@ -56,6 +56,9 @@ pub struct Args {
     pub skip_videoscale: bool,
     #[arg(long, value_enum, default_value_t = CaptureBackend::Auto)]
     pub capture_backend: CaptureBackend,
+    /// Use built-in synthetic benchmark scene instead of desktop capture.
+    #[arg(long, default_value_t = false)]
+    pub benchmark_game: bool,
     /// All-Intra mode: every frame is a full keyframe (gop-size=1).
     /// Mathematically eliminates P-frame reference artifacts at the cost of
     /// ~3-4x higher bitrate vs. P-frame HEVC — well within 300 Mbps USB.
@@ -65,9 +68,11 @@ pub struct Args {
     pub restore_token_file: Option<String>,
     #[arg(long, default_value_t = 2)]
     pub portal_persist_mode: u32,
+    #[arg(long, value_enum, default_value_t = WaylandSourceType::Monitor)]
+    pub wayland_source_type: WaylandSourceType,
 }
 
-/// Fully-resolved configuration after applying profile defaults.
+/// Fully-resolved configuration after applying default settings.
 #[derive(Debug, Clone)]
 pub struct ResolvedConfig {
     pub width: u32,
@@ -80,6 +85,7 @@ pub struct ResolvedConfig {
     pub stream_mode: StreamMode,
     pub skip_videoscale: bool,
     pub capture_backend: CaptureBackend,
+    pub benchmark_game: bool,
     /// When true, gop-size is forced to 1 — every frame is an IDR.
     pub intra_only: bool,
     pub queue_max_buffers: u32,
@@ -93,6 +99,7 @@ pub struct ResolvedConfig {
     pub h264_gop: u32,
     pub restore_token_file: Option<String>,
     pub portal_persist_mode: u32,
+    pub wayland_source_type: WaylandSourceType,
 }
 
 #[derive(Clone, Copy)]
@@ -113,233 +120,28 @@ struct ProfileDefaults {
     h264_gop: u32,
 }
 
-fn defaults_for_profile(name: &str) -> ProfileDefaults {
-    match name {
-        "baseline" => ProfileDefaults {
-            size: "1280x800",
-            fps: 60,
-            bitrate_kbps: 10_000,
-            nv_preset: "p4",
-            stream_mode: StreamMode::Ultra,
-            queue_max_buffers: 1,
-            queue_max_time_ms: 8,
-            appsink_max_buffers: 1,
-            pull_timeout_ms: 20,
-            write_timeout_ms: 40,
-            disconnect_on_timeout: false,
-            videorate_drop_only: false,
-            pipewire_keepalive_ms: 12,
-            h264_gop: 30,
-        },
-        "safe_60" => ProfileDefaults {
-            size: "1024x640",
-            fps: 60,
-            bitrate_kbps: 10_000,
-            nv_preset: "p4",
-            stream_mode: StreamMode::Stable,
-            queue_max_buffers: 1,
-            queue_max_time_ms: 12,
-            appsink_max_buffers: 2,
-            pull_timeout_ms: 33,
-            write_timeout_ms: 35,
-            disconnect_on_timeout: false,
-            videorate_drop_only: false,
-            pipewire_keepalive_ms: 25,
-            h264_gop: 30,
-        },
-        "aggressive_60" => ProfileDefaults {
-            size: "1024x640",
-            fps: 60,
-            bitrate_kbps: 7_000,
-            nv_preset: "p4",
-            stream_mode: StreamMode::Ultra,
-            queue_max_buffers: 1,
-            queue_max_time_ms: 4,
-            appsink_max_buffers: 1,
-            pull_timeout_ms: 12,
-            write_timeout_ms: 25,
-            disconnect_on_timeout: false,
-            videorate_drop_only: true,
-            pipewire_keepalive_ms: 12,
-            h264_gop: 30,
-        },
-        "quality_60" => ProfileDefaults {
-            size: "1024x640",
-            fps: 60,
-            bitrate_kbps: 11_000,
-            nv_preset: "p6",
-            stream_mode: StreamMode::Quality,
-            queue_max_buffers: 1,
-            queue_max_time_ms: 10,
-            appsink_max_buffers: 2,
-            pull_timeout_ms: 20,
-            write_timeout_ms: 35,
-            disconnect_on_timeout: false,
-            videorate_drop_only: false,
-            pipewire_keepalive_ms: 16,
-            h264_gop: 30,
-        },
-        "debug_60" => ProfileDefaults {
-            size: "1024x640",
-            fps: 60,
-            bitrate_kbps: 8_500,
-            nv_preset: "p4",
-            stream_mode: StreamMode::Stable,
-            queue_max_buffers: 1,
-            queue_max_time_ms: 8,
-            appsink_max_buffers: 1,
-            pull_timeout_ms: 20,
-            write_timeout_ms: 35,
-            disconnect_on_timeout: false,
-            videorate_drop_only: false,
-            pipewire_keepalive_ms: 20,
-            h264_gop: 30,
-        },
-        "fast60" => ProfileDefaults {
-            size: "1024x640",
-            fps: 60,
-            bitrate_kbps: 10_000,
-            nv_preset: "p4",
-            stream_mode: StreamMode::Ultra,
-            queue_max_buffers: 1,
-            queue_max_time_ms: 8,
-            appsink_max_buffers: 1,
-            pull_timeout_ms: 20,
-            write_timeout_ms: 35,
-            disconnect_on_timeout: false,
-            videorate_drop_only: false,
-            pipewire_keepalive_ms: 8,
-            h264_gop: 30,
-        },
-        "balanced60" => ProfileDefaults {
-            size: "1024x640",
-            fps: 60,
-            bitrate_kbps: 10_000,
-            nv_preset: "p6",
-            stream_mode: StreamMode::Stable,
-            queue_max_buffers: 1,
-            queue_max_time_ms: 12,
-            appsink_max_buffers: 2,
-            pull_timeout_ms: 20,
-            write_timeout_ms: 35,
-            disconnect_on_timeout: false,
-            videorate_drop_only: false,
-            pipewire_keepalive_ms: 33,
-            h264_gop: 30,
-        },
-        "quality60" => ProfileDefaults {
-            size: "1024x640",
-            fps: 60,
-            bitrate_kbps: 10_000,
-            nv_preset: "p7",
-            stream_mode: StreamMode::Quality,
-            queue_max_buffers: 1,
-            queue_max_time_ms: 12,
-            appsink_max_buffers: 3,
-            pull_timeout_ms: 20,
-            write_timeout_ms: 35,
-            disconnect_on_timeout: false,
-            videorate_drop_only: false,
-            pipewire_keepalive_ms: 33,
-            h264_gop: 30,
-        },
-        "fast60_2" => ProfileDefaults {
-            size: "1280x800",
-            fps: 60,
-            bitrate_kbps: 10_000,
-            nv_preset: "p4",
-            stream_mode: StreamMode::Ultra,
-            queue_max_buffers: 1,
-            queue_max_time_ms: 8,
-            appsink_max_buffers: 1,
-            pull_timeout_ms: 20,
-            write_timeout_ms: 35,
-            disconnect_on_timeout: false,
-            videorate_drop_only: false,
-            pipewire_keepalive_ms: 8,
-            h264_gop: 30,
-        },
-        "fast60_3" => ProfileDefaults {
-            size: "1280x800",
-            fps: 60,
-            bitrate_kbps: 10_000,
-            nv_preset: "p4",
-            stream_mode: StreamMode::Ultra,
-            queue_max_buffers: 1,
-            queue_max_time_ms: 8,
-            appsink_max_buffers: 1,
-            pull_timeout_ms: 20,
-            write_timeout_ms: 40,
-            disconnect_on_timeout: false,
-            videorate_drop_only: false,
-            pipewire_keepalive_ms: 12,
-            h264_gop: 30,
-        },
-        "lowlatency" => ProfileDefaults {
-            size: "1280x720",
-            fps: 60,
-            bitrate_kbps: 60_000,
-            nv_preset: "p4",
-            stream_mode: StreamMode::Ultra,
-            queue_max_buffers: 3,
-            queue_max_time_ms: 24,
-            appsink_max_buffers: 2,
-            pull_timeout_ms: 20,
-            write_timeout_ms: 35,
-            disconnect_on_timeout: false,
-            videorate_drop_only: false,
-            pipewire_keepalive_ms: 20,
-            h264_gop: 30,
-        },
-        "balanced" => ProfileDefaults {
-            size: "1920x1080",
-            fps: 60,
-            bitrate_kbps: 100_000,
-            nv_preset: "p6",
-            stream_mode: StreamMode::Stable,
-            queue_max_buffers: 10,
-            queue_max_time_ms: 166,
-            appsink_max_buffers: 8,
-            pull_timeout_ms: 50,
-            write_timeout_ms: 80,
-            disconnect_on_timeout: false,
-            videorate_drop_only: false,
-            pipewire_keepalive_ms: 1000,
-            h264_gop: 30,
-        },
-        _ => ProfileDefaults {
-            size: "2560x1440",
-            fps: 60,
-            bitrate_kbps: 150_000,
-            nv_preset: "p7",
-            stream_mode: StreamMode::Quality,
-            queue_max_buffers: 24,
-            queue_max_time_ms: 400,
-            appsink_max_buffers: 20,
-            pull_timeout_ms: 120,
-            write_timeout_ms: 0,
-            disconnect_on_timeout: false,
-            videorate_drop_only: false,
-            pipewire_keepalive_ms: 1000,
-            h264_gop: 30,
-        },
+fn defaults() -> ProfileDefaults {
+    ProfileDefaults {
+        size: "1280x800",
+        fps: 60,
+        bitrate_kbps: 10_000,
+        nv_preset: "p4",
+        stream_mode: StreamMode::Ultra,
+        queue_max_buffers: 1,
+        queue_max_time_ms: 8,
+        appsink_max_buffers: 1,
+        pull_timeout_ms: 20,
+        write_timeout_ms: 40,
+        disconnect_on_timeout: false,
+        videorate_drop_only: false,
+        pipewire_keepalive_ms: 12,
+        h264_gop: 30,
     }
 }
 
-fn canonical_profile_name(name: &str) -> &str {
-    match name {
-        "baseline" => "baseline",
-        "lowlatency" | "balanced" | "ultra" | "safe_60" | "aggressive_60" | "quality_60"
-        | "debug_60" | "fast60" | "balanced60" | "quality60" | "fast60_2" | "fast60_3" => {
-            "baseline"
-        }
-        _ => "baseline",
-    }
-}
-
-/// Apply profile defaults and parse size/fps/bitrate overrides.
+/// Apply default settings and parse size/fps/bitrate overrides.
 pub fn resolve_profile(args: &Args) -> Result<ResolvedConfig> {
-    let defaults = defaults_for_profile(canonical_profile_name(&args.profile));
+    let defaults = defaults();
 
     let size = args.size.as_deref().unwrap_or(defaults.size);
     let fps = args.fps.unwrap_or(defaults.fps).clamp(24, 120);
@@ -389,6 +191,7 @@ pub fn resolve_profile(args: &Args) -> Result<ResolvedConfig> {
             }
             v => v,
         },
+        benchmark_game: args.benchmark_game,
         intra_only: args.intra_only,
         queue_max_buffers: defaults.queue_max_buffers,
         queue_max_time_ms: defaults.queue_max_time_ms,
@@ -405,5 +208,6 @@ pub fn resolve_profile(args: &Args) -> Result<ResolvedConfig> {
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty()),
         portal_persist_mode: args.portal_persist_mode.min(2),
+        wayland_source_type: args.wayland_source_type,
     })
 }

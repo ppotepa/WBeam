@@ -180,6 +180,63 @@ desktop_kill_stale_tauri_app() {
   fi
 }
 
+desktop_check_daemon() {
+  local control_port daemon_name unit_path svc_active retries
+  control_port="${WBEAM_CONTROL_PORT:-5001}"
+  daemon_name="${WBEAM_DAEMON_SERVICE_NAME:-wbeam-daemon}"
+
+  if curl -fsS --max-time 2 "http://127.0.0.1:${control_port}/v1/health" >/dev/null 2>&1; then
+    echo "[desktop] daemon OK (port=${control_port})"
+    return 0
+  fi
+
+  if ! command -v systemctl >/dev/null 2>&1; then
+    echo "[desktop] warning: daemon unreachable at port ${control_port} and systemctl not available." >&2
+    echo "[desktop] start daemon manually: ./wbeam host run" >&2
+    return 0
+  fi
+
+  svc_active="$(systemctl --user is-active "$daemon_name" 2>/dev/null || true)"
+  if [[ "$svc_active" == "active" || "$svc_active" == "activating" ]]; then
+    echo "[desktop] daemon service ${svc_active}, waiting for API..."
+    retries=0
+    while (( retries < 8 )); do
+      sleep 0.5
+      if curl -fsS --max-time 1 "http://127.0.0.1:${control_port}/v1/health" >/dev/null 2>&1; then
+        echo "[desktop] daemon API ready"
+        return 0
+      fi
+      retries=$(( retries + 1 ))
+    done
+    echo "[desktop] daemon service running but API not yet reachable; proceeding..." >&2
+    return 0
+  fi
+
+  unit_path="$HOME/.config/systemd/user/${daemon_name}.service"
+  if [[ ! -f "$unit_path" ]]; then
+    echo "[desktop] warning: daemon service not installed at ${unit_path}." >&2
+    echo "[desktop] install the service first, then start it." >&2
+    return 0
+  fi
+
+  echo "[desktop] daemon service not running; attempting start..."
+  if systemctl --user start "$daemon_name" 2>/dev/null; then
+    retries=0
+    while (( retries < 10 )); do
+      sleep 0.5
+      if curl -fsS --max-time 1 "http://127.0.0.1:${control_port}/v1/health" >/dev/null 2>&1; then
+        echo "[desktop] daemon started OK"
+        return 0
+      fi
+      retries=$(( retries + 1 ))
+    done
+    echo "[desktop] daemon started but API not reachable yet; proceeding..." >&2
+  else
+    echo "[desktop] warning: failed to start daemon service; run ./wbeam host debug for details." >&2
+  fi
+  return 0
+}
+
 desktop_apply_tauri_stability_env() {
   if declare -F wbeam_apply_tauri_stability_env >/dev/null 2>&1; then
     wbeam_apply_tauri_stability_env "desktop"
@@ -200,6 +257,7 @@ run_dev() {
   local log_file
   ensure_supported_node
   desktop_adb_preflight
+  desktop_check_daemon
   desktop_kill_stale_tauri_app
   desktop_kill_stale_dev
   log_file="$(new_log_file "desktop")"
@@ -218,6 +276,7 @@ run_release() {
   local log_file
   ensure_supported_node
   desktop_adb_preflight
+  desktop_check_daemon
   desktop_kill_stale_tauri_app
   log_file="$(new_log_file "desktop")"
   echo "[desktop] log=$log_file"

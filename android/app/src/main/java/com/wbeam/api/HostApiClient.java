@@ -47,6 +47,13 @@ public final class HostApiClient {
     private static final ConnectionPool HTTP_CONNECTION_POOL =
             new ConnectionPool(2, 30, TimeUnit.SECONDS);
 
+    // Dedicated pool for the throughput probe so long-running speedtest calls
+    // cannot consume the control-plane connection budget.  The probe uses a
+    // single dedicated connection with a short keepalive to avoid competing
+    // with latency-sensitive status/start/stop calls.
+    private static final ConnectionPool HTTP_PROBE_POOL =
+            new ConnectionPool(1, 5, TimeUnit.SECONDS);
+
     public static final OkHttpClient API_HTTP = new OkHttpClient.Builder()
             .connectTimeout(1500, TimeUnit.MILLISECONDS)
             .readTimeout(1500, TimeUnit.MILLISECONDS)
@@ -55,10 +62,12 @@ public final class HostApiClient {
             .retryOnConnectionFailure(true)
             .build();
 
-    public static final OkHttpClient SPEEDTEST_HTTP = API_HTTP.newBuilder()
+    public static final OkHttpClient SPEEDTEST_HTTP = new OkHttpClient.Builder()
             .connectTimeout(2500, TimeUnit.MILLISECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .writeTimeout(2500, TimeUnit.MILLISECONDS)
+            .connectionPool(HTTP_PROBE_POOL)
+            .retryOnConnectionFailure(false)
             .build();
 
     // Singleton — no instances needed.

@@ -29,24 +29,10 @@ CURSOR_MODE_MAP = {
     "metadata": 4,
 }
 
-PROFILE_DEFAULTS = {
-    "baseline": {"size": "1280x800", "fps": 60, "bitrate_kbps": 10000, "nv_preset": "p4"},
-    "lowlatency": {"size": "1280x720", "fps": 60, "bitrate_kbps": 16000, "nv_preset": "p2"},
-    "balanced": {"size": "1920x1080", "fps": 60, "bitrate_kbps": 25000, "nv_preset": "p4"},
-    "ultra": {"size": "2560x1440", "fps": 60, "bitrate_kbps": 38000, "nv_preset": "p6"},
-}
-
-PROFILE_ALIASES = {
-    "safe_60": "baseline",
-    "aggressive_60": "baseline",
-    "quality_60": "baseline",
-    "debug_60": "baseline",
-    "fast60": "baseline",
-    "balanced60": "baseline",
-    "quality60": "baseline",
-    "fast60_2": "baseline",
-    "fast60_3": "baseline",
-}
+DEFAULT_CAPTURE_SIZE = "1280x800"
+DEFAULT_CAPTURE_FPS = 60
+DEFAULT_CAPTURE_BITRATE_KBPS = 10000
+DEFAULT_NV_PRESET = "p4"
 
 # WBTP/1 wire format - must match wbtp-core/src/lib.rs exactly.
 #   magic(4)=b"WBTP" | version(1)=1 | flags(1) | seq(4) | capture_ts_us(8) | payload_len(4)
@@ -810,11 +796,6 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Wayland KDE screencast via portal -> PipeWire -> H264 TCP"
     )
-    parser.add_argument(
-        "--profile",
-        default="baseline",
-        help="profile name (supports aliases; unknown values fallback to baseline)",
-    )
     parser.add_argument("--port", type=int, default=5000)
     parser.add_argument("--size", default=None)
     parser.add_argument("--fps", type=int, default=None)
@@ -835,27 +816,17 @@ def parse_args():
     return parser.parse_args()
 
 
-def resolve_profile(args):
-    requested = str(args.profile or "baseline").strip().lower()
-    profile = PROFILE_ALIASES.get(requested, requested)
-    if profile not in PROFILE_DEFAULTS:
-        print(
-            f"[warn] unknown profile '{requested}', falling back to baseline",
-            file=sys.stderr,
-        )
-        profile = "baseline"
-    defaults = PROFILE_DEFAULTS[profile].copy()
-
-    size = args.size or defaults["size"]
-    fps = args.fps if args.fps is not None else defaults["fps"]
-    bitrate_kbps = args.bitrate_kbps if args.bitrate_kbps is not None else defaults["bitrate_kbps"]
-    nv_preset = defaults["nv_preset"]
+def resolve_capture_defaults(args):
+    size = args.size or DEFAULT_CAPTURE_SIZE
+    fps = args.fps if args.fps is not None else DEFAULT_CAPTURE_FPS
+    bitrate_kbps = args.bitrate_kbps if args.bitrate_kbps is not None else DEFAULT_CAPTURE_BITRATE_KBPS
+    nv_preset = DEFAULT_NV_PRESET
 
     if "x" not in size:
         raise SystemExit("--size must be WIDTHxHEIGHT")
     width, height = [int(x) for x in size.lower().split("x", 1)]
 
-    return profile, width, height, fps, bitrate_kbps, nv_preset
+    return width, height, fps, bitrate_kbps, nv_preset
 
 
 def normalize_encoder_name(raw_encoder: str) -> str:
@@ -883,7 +854,7 @@ def main():
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     Gst.init(None)
 
-    profile, width, height, fps, bitrate_kbps, nv_preset = resolve_profile(args)
+    width, height, fps, bitrate_kbps, nv_preset = resolve_capture_defaults(args)
     requested_encoder = normalize_encoder_name(args.encoder)
     encoder_name = pick_encoder(requested_encoder)
     framed = args.framed or os.environ.get("WBEAM_FRAMED", "0") == "1"
@@ -895,7 +866,7 @@ def main():
     iface = dbus.Interface(portal, SCREENCAST_IFACE)
 
     print(
-        f"[wbeam] profile={profile} size={width}x{height} fps={fps} "
+        f"[wbeam] size={width}x{height} fps={fps} "
         f"bitrate={bitrate_kbps}kbps encoder={encoder_name} cursor={args.cursor_mode}"
     )
     print("[wbeam] Requesting ScreenCast portal session (you will get KDE share prompt)...")

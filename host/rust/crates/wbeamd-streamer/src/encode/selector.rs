@@ -30,4 +30,3 @@ pub(super) fn pick_encoder(requested: &str) -> Result<&'static str> {
         _ => anyhow::bail!("Unsupported encoder mode: {requested}"),
     }
 }
-

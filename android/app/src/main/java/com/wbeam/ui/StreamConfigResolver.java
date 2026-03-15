@@ -21,8 +21,8 @@ public final class StreamConfigResolver {
     }
 
     public static int[] computeScaledSize(String profile, int resScalePercent) {
-        int baseW = "ultra".equals(profile) ? 2560 : 1920;
-        int baseH = "ultra".equals(profile) ? 1440 : 1080;
+        int baseW = 1920;
+        int baseH = 1080;
         int w = Math.max(640, (baseW * resScalePercent / 100) & ~1);
         int h = Math.max(360, (baseH * resScalePercent / 100) & ~1);
         return new int[]{w, h};

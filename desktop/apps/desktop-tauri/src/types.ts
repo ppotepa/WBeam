@@ -60,10 +60,27 @@ export type VirtualDepsInstallStatus = {
   logs: string[];
 };
 
-export type ConnectEncoderMode = "profile_default" | "h264" | "h265" | "rawpng";
+export type ConnectEncoderMode = "h264" | "h265" | "rawpng";
+
+export type CaptureBackend = "auto" | "wayland_portal" | "evdi";
 
 export type ConnectSessionConfig = {
-  profile?: string;
   encoder?: "h264" | "h265" | "rawpng";
   size?: string;
+  profileName?: string;
+  captureBackend?: CaptureBackend;
+};
+
+export type TrainedProfile = {
+  key: string;
+  name: string;
+  backend: string;
+  codec: string;
+  objective: string;
+  workload: string;
+  encoder: "h264" | "h265" | "rawpng";
+  bitrateKbps: number;
+  fps: number;
+  intraOnly: boolean;
+  createdUnixMs: number;
 };

@@ -35,7 +35,8 @@ public final class ClientMetricsReporter {
 
     /**
      * Post metrics sample asynchronously (rate-limited, fire-and-forget).
-     * Safe to call from any thread.
+     * Safe to call from any thread. Silently drops the sample if the executor
+     * has already been shut down during activity teardown.
      */
     public void push(ClientMetricsSample metrics) {
         if (metrics == null) {
@@ -47,17 +48,21 @@ public final class ClientMetricsReporter {
         }
         lastPostAt = now;
 
-        ioExecutor.execute(() -> {
-            try {
-                HostApiClient.apiRequestWithRetry("POST", "/v1/client-metrics", metrics.toJson(), 1);
-            } catch (Exception e) {
-                String msg = e.getMessage();
-                if (msg == null) {
-                    msg = e.getClass().getSimpleName();
+        try {
+            ioExecutor.execute(() -> {
+                try {
+                    HostApiClient.apiRequestWithRetry("POST", "/v1/client-metrics", metrics.toJson(), 1);
+                } catch (Exception e) {
+                    String msg = e.getMessage();
+                    if (msg == null) {
+                        msg = e.getClass().getSimpleName();
+                    }
+                    Log.w(TAG, "client-metrics post failed: " + msg);
+                    warnLogger.appendWarn("client-metrics post failed: " + msg);
                 }
-                Log.w(TAG, "client-metrics post failed: " + msg);
-                warnLogger.appendWarn("client-metrics post failed: " + msg);
-            }
-        });
+            });
+        } catch (java.util.concurrent.RejectedExecutionException ignored) {
+            // Executor is shutting down — drop stale telemetry, don't crash.
+        }
     }
 }

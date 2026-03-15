@@ -627,12 +627,14 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
                 android:text="Profile"
-                android:textColor="#CBD5E1" />
+                android:textColor="#CBD5E1"
+                android:visibility="gone" />
 
             <Spinner
                 android:id="@+id/profileSpinner"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
+                android:layout_height="wrap_content"
+                android:visibility="gone" />
 
             <TextView
                 android:layout_width="match_parent"

@@ -117,7 +117,14 @@ final class FramedVideoDecodeLoop {
         this.stateStreaming = stateStreaming;
     }
 
-    void run(InputStream input, MediaCodec[] codecRef, byte[] helloBuf, byte[] hdrBuf, byte[] payloadBuf) throws IOException {
+    void run(
+            InputStream input,
+            MediaCodec[] codecRef,
+            int helloFlags,
+            long streamSessionId,
+            byte[] hdrBuf,
+            byte[] payloadBuf
+    ) throws IOException {
         long bytes = 0L;
         long inFrames = 0L;
         long outFrames = 0L;
@@ -147,14 +154,22 @@ final class FramedVideoDecodeLoop {
         MediaCodecBridge.DrainStats drainStats = new MediaCodecBridge.DrainStats();
         int pendingDecodeQueue = 0;
 
-        WbtpProtocol.Hello hello = WbtpProtocol.readHello(input, helloBuf, 0x57425331, (byte) 0x01, 16);
-        final int helloFlags = hello.flags;
+        // ── Adaptive C5 watchdog thresholds ──────────────────────────────────
+        // Start from the static values; after enough frames are decoded, scale
+        // by observed P90 decode time so that slow devices (ARM v7, low-end SoCs)
+        // do not trigger false flush/reconnect cycles during normal decode.
+        long adaptiveFlushMs     = noPresentFlushMs;
+        long adaptiveReconnectMs = noPresentReconnectMs;
+        long adaptiveHardMs      = noPresentHardResetMs;
+        // Update every 64 queued frames to amortise the percentile cost.
+        long nextAdaptiveUpdateAt = 64L;
+        final long frameBudgetMs = Math.max(1L, frameUs / 1_000L);
+
         final boolean isPng = (helloFlags & helloCodecPng) != 0;
         final boolean isHevc = !isPng && (helloFlags & helloCodecHevc) != 0;
         final int streamMode = helloFlags & helloModeMask;
         final boolean isUltraMode = streamMode == helloModeUltra;
         final String videoMime = isPng ? "image/png" : (isHevc ? "video/hevc" : "video/avc");
-        long streamSessionId = hello.sessionId;
         String modeLabel = streamMode == helloModeUltra
                 ? "ultra"
                 : (streamMode == helloModeQuality ? "quality" : "stable");
@@ -191,6 +206,11 @@ final class FramedVideoDecodeLoop {
             } catch (Exception e) {
                 throw new IOException("decoder init failed for " + videoMime, e);
             }
+            // Wait for the first IDR so we can extract and queue SPS/PPS as
+            // explicit CODEC_CONFIG buffers before handing the decoder any
+            // payload data.  Without this the decoder may show only the first
+            // keyframe (wallpaper) and refuse to render subsequent P-frames.
+            waitForKeyframe = true;
         } else {
             waitForKeyframe = true;
             Log.i(tag, "legacy AVC bootstrap enabled (API " + Build.VERSION.SDK_INT + ")");
@@ -266,8 +286,13 @@ final class FramedVideoDecodeLoop {
                                 surface
                         );
                         codecRef[0] = codec;
-                        MediaCodecBridge.queueCodecConfig(codec, legacySps, 2_000);
-                        MediaCodecBridge.queueCodecConfig(codec, legacyPps, 2_000);
+                        boolean spsOk = MediaCodecBridge.queueCodecConfig(codec, legacySps, 2_000);
+                        boolean ppsOk = MediaCodecBridge.queueCodecConfig(codec, legacyPps, 2_000);
+                        if (!spsOk || !ppsOk) {
+                            Log.w(tag, "legacy AVC: codec-config enqueue failed"
+                                    + " sps=" + spsOk + " pps=" + ppsOk
+                                    + "; will wait for next keyframe");
+                        }
                         waitForKeyframe = true;
                         Log.i(tag, "legacy AVC decoder configured from in-stream SPS/PPS");
                     } catch (IOException e) {
@@ -323,6 +348,25 @@ final class FramedVideoDecodeLoop {
                 recoveryUnlockSec++;
                 Log.w(tag, "recovery-unlock: seq=" + seqU32 + " key=" + frameIsKey
                         + " payload=" + payloadLen + " qDecode=" + pendingDecodeQueue);
+                // For the modern AVC path the decoder was started without
+                // csd-0/csd-1 in the MediaFormat.  Extract SPS/PPS from the
+                // recovery frame (they are prepended by h264parse with
+                // config-interval=-1 + disable-passthrough=true) and queue
+                // them as BUFFER_FLAG_CODEC_CONFIG so the decoder knows the
+                // stream parameters before the first IDR payload is submitted.
+                if (!isHevc && !legacyAvcBootstrap && codec != null) {
+                    StreamNalUtils.AvcCsd csd = StreamNalUtils.extractAvcCsd(payloadBuf, payloadLen);
+                    boolean spsOk = csd.sps == null || MediaCodecBridge.queueCodecConfig(codec, csd.sps, 2_000);
+                    boolean ppsOk = csd.pps == null || MediaCodecBridge.queueCodecConfig(codec, csd.pps, 2_000);
+                    if (!spsOk || !ppsOk) {
+                        // Codec-config submission failed on recovery frame.
+                        // Reset to keyframe wait so the next IDR can retry cleanly.
+                        Log.w(tag, "recovery AVC: codec-config enqueue failed"
+                                + " sps=" + spsOk + " pps=" + ppsOk
+                                + " seq=" + seqU32 + "; waiting for next keyframe");
+                        waitForKeyframe = true;
+                    }
+                }
             }
             boolean canQueue = !waitForKeyframe
                     && (pendingDecodeQueue < decodeQueueMaxFrames || isRecovery);
@@ -359,9 +403,29 @@ final class FramedVideoDecodeLoop {
 
             long nowMs = SystemClock.elapsedRealtime();
             long noPresentMs = nowMs - lastPresentMs;
+
+            // Update adaptive thresholds every 64 queued frames.
+            if (inFrames >= nextAdaptiveUpdateAt && decodeNsBufN > 8) {
+                nextAdaptiveUpdateAt = inFrames + 64L;
+                double p90Ms = StreamBufferMath.percentileMs(
+                        decodeNsBuf, Math.min(decodeNsBufN, 128), 0.90, decodeNsScratch);
+                if (p90Ms > frameBudgetMs * 1.5) {
+                    // Decoder is slower than 1.5× frame-budget at P90 — scale
+                    // thresholds proportionally (capped at 3× to prevent runaway).
+                    double ratio = Math.min(3.0, p90Ms / Math.max(1.0, frameBudgetMs));
+                    adaptiveFlushMs     = (long) (noPresentFlushMs     * ratio);
+                    adaptiveReconnectMs = (long) (noPresentReconnectMs * ratio);
+                    adaptiveHardMs      = (long) (noPresentHardResetMs * ratio);
+                } else {
+                    adaptiveFlushMs     = noPresentFlushMs;
+                    adaptiveReconnectMs = noPresentReconnectMs;
+                    adaptiveHardMs      = noPresentHardResetMs;
+                }
+            }
+
             if (!flushIssued
                     && totalInSincePresent >= noPresentMinInFramesFlush
-                    && noPresentMs >= noPresentFlushMs) {
+                    && noPresentMs >= adaptiveFlushMs) {
                 try {
                     codec.flush();
                     pendingDecodeQueue = 0;
@@ -375,23 +439,23 @@ final class FramedVideoDecodeLoop {
                 }
             }
             if (totalInSincePresent >= noPresentMinInFramesReconnect
-                    && noPresentMs >= noPresentReconnectMs) {
+                    && noPresentMs >= adaptiveReconnectMs) {
                 Log.w(tag, "C5 ladder L2: reconnect framed stream due to no-present");
                 statusListener.onStatus(stateConnecting, "decoder stalled: reconnecting stream", 0);
                 throw new IOException("C5: no frames presented for " + noPresentMs
                         + "ms (" + totalInSincePresent + " decoded) – reconnect");
             }
             if (totalInSincePresent >= noPresentMinInFramesHard
-                    && noPresentMs >= noPresentHardResetMs) {
+                    && noPresentMs >= adaptiveHardMs) {
                 Log.w(tag, "C5 ladder L3: hard reconnect watchdog");
                 statusListener.onStatus(stateConnecting, "decoder watchdog: hard reconnect", 0);
                 throw new IOException("C5: hard watchdog: "
                         + totalInSincePresent + " frames decoded, 0 presented for "
                         + noPresentMs + "ms – reconnect");
             }
-            if (noPresentMs >= noPresentHardResetMs) {
-                Log.w(tag, "C5 absolute guard: reconnect after 5s with no present");
-                statusListener.onStatus(stateConnecting, "decoder stalled >5s: reconnecting", 0);
+            if (noPresentMs >= adaptiveHardMs) {
+                Log.w(tag, "C5 absolute guard: reconnect after " + adaptiveHardMs + "ms with no present");
+                statusListener.onStatus(stateConnecting, "decoder stalled: reconnecting", 0);
                 throw new IOException("C5 absolute guard: no frame presented for " + noPresentMs + "ms");
             }
 

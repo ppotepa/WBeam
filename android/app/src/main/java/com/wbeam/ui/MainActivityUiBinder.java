@@ -38,7 +38,7 @@ public final class MainActivityUiBinder {
     private MainActivityUiBinder() {
     }
 
-    public static void setupTrainerHudWebView(WebView perfHudWebView) {
+    public static void setupHudWebView(WebView perfHudWebView) {
         if (perfHudWebView == null) {
             return;
         }
