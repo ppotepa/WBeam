@@ -300,8 +300,8 @@ async fn post_start(
                     warn!(error = %err, "wayland portal output auto-layout failed");
                 }
             } else if is_evdi {
-                if let Err(err) = auto_mirror_evdi_outputs(pre_enabled_outputs.as_ref()).await {
-                    warn!(error = %err, "evdi output auto-mirror failed");
+                if let Err(err) = auto_configure_evdi_outputs(pre_enabled_outputs.as_ref()).await {
+                    warn!(error = %err, "evdi output auto-layout failed");
                 }
             }
             (StatusCode::OK, Json(resp)).into_response()
@@ -431,12 +431,9 @@ async fn auto_layout_wayland_portal_outputs(
     Ok(())
 }
 
-async fn auto_mirror_evdi_outputs(
+async fn auto_configure_evdi_outputs(
     pre_enabled_outputs: Option<&std::collections::HashSet<String>>,
 ) -> Result<(), String> {
-    if !evdi_auto_mirror_enabled() {
-        return Ok(());
-    }
     if !kscreen_layout::command_exists("kscreen-doctor") {
         return Ok(());
     }
@@ -444,7 +441,7 @@ async fn auto_mirror_evdi_outputs(
     let outputs = kscreen_layout::kscreen_query_outputs()?;
     let enabled_now: HashSet<String> = outputs
         .iter()
-        .filter(|o| kscreen_layout::output_ready_for_layout(o))
+        .filter(|o| kscreen_layout::output_active(o))
         .map(|o| o.name.clone())
         .collect();
 
@@ -459,20 +456,54 @@ async fn auto_mirror_evdi_outputs(
         );
     }
 
-    let commands = kscreen_layout::build_virtual_replication_commands(
+    let preferred = if preferred_targets.is_empty() {
+        None
+    } else {
+        Some(&preferred_targets)
+    };
+
+    if evdi_auto_mirror_enabled() {
+        let commands = kscreen_layout::build_virtual_replication_commands(
+            &outputs,
+            preferred,
+        );
+        if commands.is_empty() {
+            return Ok(());
+        }
+
+        kscreen_layout::apply_kscreen_layout(&commands)?;
+        info!(commands = ?commands, "applied evdi auto-mirror layout");
+        return Ok(());
+    }
+
+    let unmirror_commands = kscreen_layout::build_virtual_unmirror_commands(
         &outputs,
+        preferred,
+    );
+    if !unmirror_commands.is_empty() {
+        kscreen_layout::apply_kscreen_layout(&unmirror_commands)?;
+        info!(commands = ?unmirror_commands, "applied evdi mirror detach");
+    }
+
+    let latest_outputs = if unmirror_commands.is_empty() {
+        outputs
+    } else {
+        kscreen_layout::kscreen_query_outputs()?
+    };
+    let extend_commands = kscreen_layout::build_virtual_extend_commands(
+        &latest_outputs,
         if preferred_targets.is_empty() {
             None
         } else {
             Some(&preferred_targets)
         },
     );
-    if commands.is_empty() {
+    if extend_commands.is_empty() {
         return Ok(());
     }
 
-    kscreen_layout::apply_kscreen_layout(&commands)?;
-    info!(commands = ?commands, "applied evdi auto-mirror layout");
+    kscreen_layout::apply_kscreen_layout(&extend_commands)?;
+    info!(commands = ?extend_commands, "applied evdi non-overlap layout");
     Ok(())
 }
 
@@ -485,7 +516,7 @@ fn wayland_portal_auto_layout_enabled() -> bool {
 }
 
 fn evdi_auto_mirror_enabled() -> bool {
-    let raw = std::env::var("WBEAM_EVDI_AUTO_MIRROR").unwrap_or_else(|_| "1".to_string());
+    let raw = std::env::var("WBEAM_EVDI_AUTO_MIRROR").unwrap_or_else(|_| "0".to_string());
     !matches!(
         raw.trim().to_ascii_lowercase().as_str(),
         "0" | "false" | "no" | "off"

@@ -51,6 +51,25 @@ wbeam_conf_apply_file() {
   done < "$file"
 }
 
+wbeam_conf_read_key() {
+  local file="$1"
+  local wanted_key="$2"
+  local line key value
+  [[ -f "$file" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="$(wbeam_conf_trim "$line")"
+    [[ -n "$line" ]] || continue
+    [[ "$line" == \#* ]] && continue
+    [[ "$line" == *=* ]] || continue
+    key="$(wbeam_conf_trim "${line%%=*}")"
+    [[ "$key" == "$wanted_key" ]] || continue
+    value="$(wbeam_conf_trim "${line#*=}")"
+    value="$(wbeam_conf_unquote "$value")"
+    printf '%s\n' "$value"
+    return 0
+  done < "$file"
+}
+
 wbeam_user_config_path() {
   local user_config_home="${XDG_CONFIG_HOME:-${HOME:-}/.config}"
   if [[ -z "$user_config_home" ]]; then
@@ -87,10 +106,46 @@ wbeam_ensure_user_config() {
   fi
 }
 
+wbeam_sync_version_base() {
+  local root_dir="$1"
+  local template_file="${root_dir}/config/wbeam.conf"
+  local user_file template_base user_base
+  [[ -n "${WBEAM_VERSION_BASE:-}" ]] && return 0
+  user_file="$(wbeam_user_config_path 2>/dev/null || true)"
+  [[ -n "$user_file" && -f "$user_file" && -f "$template_file" ]] || return 0
+
+  template_base="$(wbeam_conf_read_key "$template_file" "WBEAM_VERSION_BASE" | tail -n 1)"
+  [[ -n "$template_base" ]] || return 0
+  user_base="$(wbeam_conf_read_key "$user_file" "WBEAM_VERSION_BASE" | tail -n 1)"
+
+  if [[ -z "$user_base" ]]; then
+    printf '\nWBEAM_VERSION_BASE=%s\n' "$template_base" >> "$user_file" 2>/dev/null || {
+      echo "[wbeam-config] WARN: cannot append WBEAM_VERSION_BASE to ${user_file}" >&2
+      return 0
+    }
+    echo "[wbeam-config] INFO: appended WBEAM_VERSION_BASE=${template_base} to ${user_file}" >&2
+    return 0
+  fi
+
+  if [[ "$user_base" == "$template_base" ]]; then
+    return 0
+  fi
+
+  # Migrate legacy bootstrap value to the repository version line.
+  if [[ "$user_base" == "0.1.0" ]]; then
+    sed -i -E "s/^WBEAM_VERSION_BASE=.*/WBEAM_VERSION_BASE=${template_base}/" "$user_file" 2>/dev/null || {
+      echo "[wbeam-config] WARN: cannot update WBEAM_VERSION_BASE in ${user_file}" >&2
+      return 0
+    }
+    echo "[wbeam-config] INFO: updated WBEAM_VERSION_BASE ${user_base} -> ${template_base} in ${user_file}" >&2
+  fi
+}
+
 wbeam_load_config() {
   local root_dir="$1"
   local user_file
   wbeam_ensure_user_config "$root_dir"
+  wbeam_sync_version_base "$root_dir"
   user_file="$(wbeam_user_config_path 2>/dev/null || true)"
   if [[ -n "$user_file" ]]; then
     wbeam_conf_apply_file "$user_file"
