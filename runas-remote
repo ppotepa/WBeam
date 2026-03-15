@@ -392,6 +392,11 @@ XAUTHORITY_VAL="${TARGET_HOME:-/home/$TARGET_USER}/.Xauthority"
 if [[ "$SESSION_TYPE" == "x11" ]]; then
   XAUTHORITY_VAL="$(session_env_var "$SESSION_ID" XAUTHORITY || true)"
   if [[ -z "$XAUTHORITY_VAL" || ! -f "$XAUTHORITY_VAL" ]]; then
+    if [[ -n "${TARGET_HOME:-}" && -f "${TARGET_HOME}/.Xauthority" ]]; then
+      XAUTHORITY_VAL="${TARGET_HOME}/.Xauthority"
+    fi
+  fi
+  if [[ -z "$XAUTHORITY_VAL" || ! -f "$XAUTHORITY_VAL" ]]; then
     for xa in "$XDG_RUNTIME_DIR"/xauth_*; do
       [[ -f "$xa" ]] || continue
       XAUTHORITY_VAL="$xa"

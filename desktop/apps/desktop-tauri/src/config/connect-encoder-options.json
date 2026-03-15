@@ -1,10 +1,6 @@
 {
-  "defaultEncoderMode": "profile_default",
+  "defaultEncoderMode": "h264",
   "options": [
-    {
-      "id": "profile_default",
-      "label": "From trained profile"
-    },
     {
       "id": "h264",
       "label": "H.264"

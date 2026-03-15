@@ -1,5 +1,7 @@
 use super::super::super::super::{host_probe::HostProbe, x11_backend};
-use super::super::super::{Activation, ActivationError, DisplayMode, RuntimeHandle, VirtualMonitorProbe};
+use super::super::super::{
+    Activation, ActivationError, DisplayMode, RuntimeHandle, VirtualMonitorProbe,
+};
 use tracing::info;
 
 pub fn probe(host_probe: &HostProbe) -> VirtualMonitorProbe {

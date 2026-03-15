@@ -5,6 +5,7 @@ import type {
   DevicesBasicResponse,
   HostProbeBrief,
   ServiceStatus,
+  TrainedProfile,
   VirtualDepsInstallStatus,
   VirtualDoctor,
 } from "../types";
@@ -80,9 +81,10 @@ export class HostApiManager {
           serial: device.serial,
           streamPort: device.streamPort,
           displayMode,
-          connectProfile: connectConfig?.profile,
           connectEncoder: connectConfig?.encoder,
           connectSize: connectConfig?.size,
+          connectProfileName: connectConfig?.profileName,
+          connectCaptureBackend: connectConfig?.captureBackend,
         }),
         10000,
         "device_connect",
@@ -99,6 +101,18 @@ export class HostApiManager {
         invoke<VirtualDoctor>("virtual_doctor", params),
         2500,
         "virtual_doctor",
+      );
+    } catch (err) {
+      throw new Error(normalizeApiError(err));
+    }
+  }
+
+  async listTrainedProfiles(backend: string): Promise<TrainedProfile[]> {
+    try {
+      return await withTimeout(
+        invoke<TrainedProfile[]>("list_trained_profiles", { backend }),
+        2500,
+        "list_trained_profiles",
       );
     } catch (err) {
       throw new Error(normalizeApiError(err));

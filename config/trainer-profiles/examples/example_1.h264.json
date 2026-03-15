@@ -1,0 +1,13 @@
+{
+  "key": "example-1-h264",
+  "name": "example_1.h264",
+  "backend": "wayland_portal",
+  "codec": "h264",
+  "objective": "balanced",
+  "workload": "motion/game:synthetic-120-12s",
+  "encoder": "h264",
+  "bitrate_kbps": 18000,
+  "fps": 60,
+  "intra_only": false,
+  "created_unix_ms": 1741000000000
+}

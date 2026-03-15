@@ -19,8 +19,6 @@ Active implementation lives in:
 - `host/scripts`
 - `host/daemon`
 
-Compatibility aliases remain under `src/host` during transition.
-
 ## Contract
 
 - UI clients must treat host as authority.

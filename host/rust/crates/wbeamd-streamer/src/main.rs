@@ -1,7 +1,7 @@
-mod backend;
 mod capture;
 mod cli;
-mod encoder;
+mod encode;
+mod packetize;
 mod pipeline;
 mod transport;
 
@@ -16,9 +16,9 @@ use gst::glib;
 use gst::prelude::*;
 use gstreamer as gst;
 
-use backend::prepare_capture;
+use capture::prepare_capture;
 use cli::{resolve_profile, Args};
-use encoder::{is_hevc, is_png};
+use encode::{is_hevc, is_png};
 use pipeline::make_pipeline;
 use transport::{hello_mode_bits, spawn_sender, HELLO_CODEC_HEVC, HELLO_CODEC_PNG};
 
@@ -29,8 +29,18 @@ async fn main() -> Result<()> {
 
     let cfg = resolve_profile(&args)?;
     println!(
-        "[wbeam] profile={} mode={:?} capture={:?} size={}x{} fps={} bitrate={}kbps encoder={} cursor={} skip_videoscale={}",
-        args.profile, cfg.stream_mode, cfg.capture_backend, cfg.width, cfg.height, cfg.fps, cfg.bitrate_kbps, cfg.encoder, args.cursor_mode, cfg.skip_videoscale
+        "[wbeam] preset=default mode={:?} capture={:?} wayland_source={:?} size={}x{} fps={} bitrate={}kbps encoder={} cursor={} skip_videoscale={} benchmark_game={}",
+        cfg.stream_mode,
+        cfg.capture_backend,
+        cfg.wayland_source_type,
+        cfg.width,
+        cfg.height,
+        cfg.fps,
+        cfg.bitrate_kbps,
+        cfg.encoder,
+        args.cursor_mode,
+        cfg.skip_videoscale,
+        cfg.benchmark_game
     );
     let capture = prepare_capture(&cfg).await?;
     capture.announce_startup();

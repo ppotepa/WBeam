@@ -6,10 +6,12 @@ license.workspace = true
 
 [dependencies]
 hostname.workspace = true
-nix.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 wbeamd-api = { path = "../wbeamd-api" }
+
+[target.'cfg(unix)'.dependencies]
+nix.workspace = true

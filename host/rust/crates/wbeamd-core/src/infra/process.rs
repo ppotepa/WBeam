@@ -5,10 +5,14 @@
 //! child to exit.
 
 use std::path::{Path, PathBuf};
+#[cfg(not(unix))]
+use std::process::Command as StdCommand;
 use std::process::Stdio;
 use std::time::Duration;
 
+#[cfg(unix)]
 use nix::sys::signal::{kill, Signal};
+#[cfg(unix)]
 use nix::unistd::Pid;
 use tokio::process::Command;
 use tokio::time::sleep;
@@ -24,14 +28,15 @@ pub fn build_streamer_command(
     cfg: &ActiveConfig,
     stream_port: u16,
 ) -> (Command, bool) {
+    #[cfg(windows)]
+    let rust_bin = root.join("host/rust/target/release/wbeamd-streamer.exe");
+    #[cfg(not(windows))]
     let rust_bin = root.join("host/rust/target/release/wbeamd-streamer");
     let use_rust = rust_bin.exists();
 
     let mut cmd = if use_rust {
         let mut c = Command::new(&rust_bin);
-        c.arg("--profile")
-            .arg(&cfg.profile)
-            .arg("--port")
+        c.arg("--port")
             .arg(stream_port.to_string())
             .arg("--encoder")
             .arg(&cfg.encoder)
@@ -51,11 +56,15 @@ pub fn build_streamer_command(
         c
     } else {
         let script = root.join("host/scripts/stream_wayland_portal_h264.py");
-        let mut c = Command::new("python3");
+        let mut c = if cfg!(windows) {
+            let mut py = Command::new("py");
+            py.arg("-3");
+            py
+        } else {
+            Command::new("python3")
+        };
         c.arg("-u")
             .arg(script)
-            .arg("--profile")
-            .arg(&cfg.profile)
             .arg("--port")
             .arg(stream_port.to_string())
             .arg("--encoder")
@@ -86,10 +95,24 @@ pub fn build_streamer_command(
 
 /// Send SIGTERM then SIGKILL to `pid` with a short delay in between.
 pub async fn terminate_pid(pid: u32) {
-    let p = Pid::from_raw(pid as i32);
-    let _ = kill(p, Signal::SIGTERM);
-    sleep(Duration::from_millis(300)).await;
-    let _ = kill(p, Signal::SIGKILL);
+    #[cfg(unix)]
+    {
+        let p = Pid::from_raw(pid as i32);
+        let _ = kill(p, Signal::SIGTERM);
+        sleep(Duration::from_millis(300)).await;
+        let _ = kill(p, Signal::SIGKILL);
+    }
+    #[cfg(not(unix))]
+    {
+        let pid_s = pid.to_string();
+        let _ = StdCommand::new("taskkill")
+            .args(["/PID", &pid_s, "/T"])
+            .status();
+        sleep(Duration::from_millis(300)).await;
+        let _ = StdCommand::new("taskkill")
+            .args(["/PID", &pid_s, "/T", "/F"])
+            .status();
+    }
 }
 
 /// Parse a GStreamer/libx264 bitrate output line such as
@@ -133,7 +156,45 @@ pub fn parse_transport_runtime_line(line: &str) -> Option<TransportRuntimeSnapsh
     Some(out)
 }
 
-/// Return a build revision string (injected via `WBEAM_BUILD_REV` env var at
+/// Parse a `transport_stats` structured WBEAM_EVENT JSON payload.
+///
+/// The payload is the JSON object stripped of the `WBEAM_EVENT:` prefix, e.g.
+/// `{"event":"transport_stats","pipeline_fps":30,"sender_fps":30.0,...}`.
+/// Uses simple key-value extraction (no serde dependency in this crate) for
+/// performance — the payload has a flat, known schema.
+pub fn parse_transport_event(json: &str) -> Option<TransportRuntimeSnapshot> {
+    if !json.contains("\"transport_stats\"") {
+        return None;
+    }
+    let mut out = TransportRuntimeSnapshot::default();
+    // Walk key:"value" and key:number pairs.
+    for chunk in json.split(',') {
+        let chunk = chunk.trim_matches(|c| matches!(c, '{' | '}' | ' '));
+        let Some((raw_key, raw_val)) = chunk.split_once(':') else {
+            continue;
+        };
+        let key = raw_key.trim().trim_matches('"');
+        let val = raw_val.trim().trim_matches('"');
+        match key {
+            "pipeline_fps" => out.pipeline_fps = val.parse().ok()?,
+            "sender_fps" => out.sender_fps = val.parse().ok()?,
+            "timeout_misses" => out.timeout_misses = val.parse().ok()?,
+            "send_timeouts" => out.send_timeouts = val.parse().ok()?,
+            "timeout_key" => out.timeout_key = val.parse().ok()?,
+            "timeout_delta" => out.timeout_delta = val.parse().ok()?,
+            "key_retry_ok" => out.key_retry_ok = val.parse().ok()?,
+            "key_retry_fail" => out.key_retry_fail = val.parse().ok()?,
+            "queue_depth" => out.queue_depth = val.parse().ok()?,
+            "queue_peak" => out.queue_peak = val.parse().ok()?,
+            "queue_drops" => out.queue_drops = val.parse().ok()?,
+            "seq" => out.seq = val.parse().ok()?,
+            _ => {}
+        }
+    }
+    Some(out)
+}
+
+
 /// compile time, or a default placeholder).
 pub fn build_revision() -> String {
     if let Ok(runtime) = std::env::var("WBEAM_BUILD_REV") {
@@ -160,6 +221,11 @@ pub fn build_revision() -> String {
 
 /// Resolve the path to the Rust streamer binary.
 pub fn rust_streamer_bin(root: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        return root.join("host/rust/target/release/wbeamd-streamer.exe");
+    }
+    #[cfg(not(windows))]
     root.join("host/rust/target/release/wbeamd-streamer")
 }
 

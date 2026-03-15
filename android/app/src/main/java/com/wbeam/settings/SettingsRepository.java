@@ -32,12 +32,12 @@ public final class SettingsRepository {
     public SettingsSnapshot load() {
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
 
-        String profile = prefs.getString(PREF_PROFILE, "baseline");
+        String profile = prefs.getString(PREF_PROFILE, "default");
         String encoder = prefs.getString(PREF_ENCODER, "h265");
         String cursor  = prefs.getString(PREF_CURSOR, "embedded");
 
-        if (!"baseline".equals(profile)) {
-            profile = "baseline";
+        if (!"default".equals(profile)) {
+            profile = "default";
             prefs.edit().putString(PREF_PROFILE, profile).apply();
         }
 

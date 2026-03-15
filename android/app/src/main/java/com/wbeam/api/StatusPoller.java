@@ -19,8 +19,10 @@ public final class StatusPoller {
 
     private static final String TAG = "WBeamStatusPoller";
 
-    private static final long STATUS_POLL_MS           = 3_000L;
-    private static final int  HEALTH_POLL_EVERY        = 3;
+    // 5 Hz telemetry/status polling for responsive HUD updates.
+    private static final long STATUS_POLL_MS           = 200L;
+    // Keep /health lower-frequency to avoid unnecessary overhead.
+    private static final int  HEALTH_POLL_EVERY        = 16;
     private static final long AUTO_START_COOLDOWN_MS   = 4_000L;
 
     // ── Daemon state (queried by MainActivity via getters) ────────────────────
@@ -160,7 +162,7 @@ public final class StatusPoller {
                         : null;
                 JSONObject metricsPayload = HostApiClient.apiRequestWithRetry(
                         "GET", "/metrics", null, HostApiClient.API_RETRY_ATTEMPTS);
-                JSONObject metrics = metricsPayload.optJSONObject("metrics");
+                JSONObject metrics = mergeMetricsPayload(metricsPayload);
                 uiHandler.post(() -> processStatusResult(status, health, metrics));
             } catch (Exception e) {
                 uiHandler.post(() -> processOfflineResult(e));
@@ -243,5 +245,35 @@ public final class StatusPoller {
         daemonState     = "DISCONNECTED";
         Log.e(TAG, "daemon poll failed api=" + HostApiClient.API_BASE, e);
         callbacks.onDaemonOffline(wasReachable, e);
+    }
+
+    /**
+     * /metrics payload is normalized here so UI can consume one metrics object.
+     */
+    private static JSONObject mergeMetricsPayload(JSONObject payload) {
+        if (payload == null) {
+            return null;
+        }
+
+        JSONObject merged = payload.optJSONObject("metrics");
+        if (merged == null) {
+            merged = new JSONObject();
+        }
+
+        if (payload.has("connection_mode")) {
+            putQuietly(merged, "connection_mode", payload.optString("connection_mode", "live"));
+        }
+        return merged;
+    }
+
+    private static void putQuietly(JSONObject obj, String key, Object value) {
+        if (obj == null || key == null || key.isEmpty()) {
+            return;
+        }
+        try {
+            obj.put(key, value);
+        } catch (Exception ignored) {
+            // ignore malformed payload fragments; keep polling alive
+        }
     }
 }

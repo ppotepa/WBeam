@@ -2,7 +2,7 @@
 
 WBeam turns an Android phone/tablet into a USB-connected second screen for Linux.
 
-![WBeam](src/assets/wbeam.png)
+![WBeam](docs/assets/wbeam.png)
 
 ## Current Status
 
@@ -12,9 +12,8 @@ WBeam turns an Android phone/tablet into a USB-connected second screen for Linux
 - best stability right now
 
 `X11`:
-- prototype path (`proto_x11/`)
-- not feature-parity with Wayland
-- for NVIDIA hosts, true second-monitor flow currently needs a hardware dummy plug
+- support is under active redevelopment in the main codebase
+- not feature-parity with Wayland yet
 
 ## What Works
 
@@ -26,7 +25,6 @@ WBeam turns an Android phone/tablet into a USB-connected second screen for Linux
 
 ## What Is Experimental
 
-- full X11 virtual monitor flow (`proto_x11`)
 - mixed GPU topologies (NVIDIA + EVDI on X11)
 - fallback monitor-object path on X11
 
@@ -35,7 +33,7 @@ WBeam turns an Android phone/tablet into a USB-connected second screen for Linux
 If you just want it to work now:
 1. use `Wayland`
 2. run main tooling (`./wbeam`, `./wbgui`)
-3. treat `proto_x11` as R&D, not default runtime
+3. treat Wayland as primary runtime path
 
 ## Quick Start
 
@@ -47,22 +45,40 @@ If you just want it to work now:
 ./wbgui
 ```
 
-## X11 Prototype Notes
+## Trainer (autotune) quick usage
 
-- entrypoint: `./proto_x11/run`
-- policy is file-based: `~/.config/wbeam/x11-virtual-policy.conf`
-- if preflight reports `xrandr-safe-topology`, the unsafe provider-link path is blocked by design
-- this block prevents known Xorg crashes on NVIDIA+EVDI setups
+Use the interactive tuner to benchmark and generate a reusable profile:
+
+```bash
+./wbeam host tuner
+```
+
+In **Run Config**:
+
+- set `Objective` and `Workload`
+- choose **Use prerendered scenes for training**
+  - enabled: trains on deterministic synthetic scenes (`display_mode=benchmark_game`)
+  - disabled: trains on virtual desktop (`display_mode=virtual_monitor`)
+  - **Note:** Wayland virtual monitor capture is capped at ~60 fps by the compositor (KDE/GNOME ScreenCast limitation). For training at higher frame rates use prerendered scenes.
+- set **Child train time** (seconds)
+  - this is the full time budget per child
+  - default is 5s (e.g. set 10 => each child runs for 10s)
+- provide a profile name and start evolution
+
+When a run completes, the tuner shows a **Final profile settings** summary box with score and winner details (bitrate/fps/intra, source mode, child train time, reason). Saved profiles are written to:
+
+`~/.config/wbeam/trained_profiles.json`
+
+Committed example profiles are available in:
+
+`config/trainer-profiles/examples/`
 
 ## Repo Layout
 
 - `android/` - Android domain (client app + decode runtime)
-- `host/` - host domain boundary (migration target)
-- `desktop/` - desktop domain boundary (migration target)
-- `shared/` - shared contracts/protocol boundary (migration target)
-- `src/` - legacy source tree under phased migration
-- `proto/` - historical sandbox lane
-- `proto_x11/` - X11 virtual-monitor prototype lane
+- `host/` - host domain boundary
+- `desktop/` - desktop domain boundary
+- `shared/` - shared contracts/protocol boundary
 
 Structure source of truth:
 - `docs/repo-structure.md`

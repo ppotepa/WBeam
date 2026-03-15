@@ -7,8 +7,7 @@
 use std::env;
 use std::fs;
 use std::path::Path;
-
-use nix::libc;
+use std::process::Command;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostOs {
@@ -44,6 +43,8 @@ pub enum DesktopFlavor {
 pub enum CaptureMode {
     WaylandPortal,
     X11Gst,
+    /// Kernel-level EVDI virtual display (user-requested override, not auto-detected).
+    Evdi,
     UnsupportedHost,
 }
 
@@ -117,7 +118,7 @@ impl HostProbe {
     pub fn supports_streaming(&self) -> bool {
         matches!(
             self.capture_mode,
-            CaptureMode::WaylandPortal | CaptureMode::X11Gst
+            CaptureMode::WaylandPortal | CaptureMode::X11Gst | CaptureMode::Evdi
         )
     }
 
@@ -125,6 +126,7 @@ impl HostProbe {
         match self.capture_mode {
             CaptureMode::WaylandPortal => "streaming is supported".to_string(),
             CaptureMode::X11Gst => "streaming is supported".to_string(),
+            CaptureMode::Evdi => "streaming is supported".to_string(),
             CaptureMode::UnsupportedHost => format!(
                 "unsupported host environment: os={} session={} desktop={}",
                 self.os_name(),
@@ -171,8 +173,39 @@ impl HostProbe {
         match self.capture_mode {
             CaptureMode::WaylandPortal => "wayland_portal",
             CaptureMode::X11Gst => "x11_gst",
+            CaptureMode::Evdi => "evdi",
             CaptureMode::UnsupportedHost => "unsupported_host",
         }
+    }
+
+    /// Returns backends available on this host beyond the default probe mode.
+    /// `wayland_portal` / `x11_gst` come from session type; `evdi` requires the
+    /// kernel module to have allocated at least one device node.
+    pub fn available_backends(&self) -> Vec<&'static str> {
+        let mut backends = Vec::new();
+        if matches!(
+            self.capture_mode,
+            CaptureMode::WaylandPortal | CaptureMode::X11Gst
+        ) {
+            backends.push(self.capture_mode_name());
+        }
+        if Self::evdi_device_available() {
+            backends.push("evdi");
+        }
+        backends
+    }
+
+    /// Returns true when at least one EVDI device node is accessible.
+    pub fn evdi_device_available() -> bool {
+        // evdi devices appear as /dev/dri/evdi* after `modprobe evdi`.
+        if let Ok(entries) = std::fs::read_dir("/dev/dri") {
+            for entry in entries.flatten() {
+                if entry.file_name().to_string_lossy().starts_with("evdi") {
+                    return true;
+                }
+            }
+        }
+        false
     }
 }
 
@@ -259,7 +292,9 @@ fn detect_session(os: HostOs) -> SessionKind {
 }
 
 fn has_wayland_socket() -> bool {
-    let uid = unsafe { libc::geteuid() };
+    let Some(uid) = current_uid() else {
+        return false;
+    };
     if uid == 0 {
         return false;
     }
@@ -277,6 +312,20 @@ fn has_wayland_socket() -> bool {
         }
     }
     false
+}
+
+fn current_uid() -> Option<u32> {
+    if let Some(uid) = env::var("UID").ok().and_then(|raw| raw.parse::<u32>().ok()) {
+        return Some(uid);
+    }
+    let out = Command::new("id").arg("-u").output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse::<u32>()
+        .ok()
 }
 
 fn has_x11_socket() -> bool {

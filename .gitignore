@@ -17,15 +17,15 @@ android/local.properties
 android/captures/
 android/.cxx/
 .gradle-user/
-proto/front/.gradle/
-proto/front/**/.gradle/
-proto/front/**/build/
-proto/front/local.properties
-proto/front/captures/
-proto/front/.cxx/
-proto/front/**/.cxx/
-proto/front/.externalNativeBuild/
-proto/front/**/.externalNativeBuild/
+archive/legacy/proto/front/.gradle/
+archive/legacy/proto/front/**/.gradle/
+archive/legacy/proto/front/**/build/
+archive/legacy/proto/front/local.properties
+archive/legacy/proto/front/captures/
+archive/legacy/proto/front/.cxx/
+archive/legacy/proto/front/**/.cxx/
+archive/legacy/proto/front/.externalNativeBuild/
+archive/legacy/proto/front/**/.externalNativeBuild/
 *.apk
 *.aab
 *.ap_
@@ -41,24 +41,33 @@ proto/front/**/.externalNativeBuild/
 .build/
 desktop/apps/desktop-tauri/node_modules/
 desktop/apps/desktop-tauri/dist/
-desktop/apps/trainer-tauri/node_modules/
-desktop/apps/trainer-tauri/dist/
-src/apps/desktop-tauri/node_modules/
-src/apps/desktop-tauri/dist/
-src/apps/trainer-tauri/node_modules/
-src/apps/trainer-tauri/dist/
 
 # .NET
-proto/host-cs/bin/
-proto/host-cs/obj/
+archive/legacy/proto/host-cs/bin/
+archive/legacy/proto/host-cs/obj/
 
 # Python
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .venv/
 venv/
+.env.sonar
+.sonar/
+.scannerwork/
+
+# JavaScript / TypeScript tool output
+*.tsbuildinfo
+**/.vite/
+**/.cache/
+coverage/
+**/coverage/
+.nyc_output/
+.coverage
 
 # Logs and runtime output
 *.log
@@ -69,16 +78,13 @@ logs/.*
 .gradle-build.*.log
 host/logs/**
 host/rust/logs/**
-src/host/logs/**
-src/host/rust/logs/**
-src/src/
 shared/protocol/logs/**
-src/protocol/logs/**
 !host/rust/logs/.gitkeep
-!src/host/rust/logs/.gitkeep
 *.pid
 *.tmp
 *.cache
+*.profraw
+*.profdata
 all.log
 
 # Local generated helper files
@@ -96,7 +102,21 @@ ignores
 buildlog
 *.bak
 logfile
-proto/autotune-results.json
-proto/autotune-results-*.json
-proto/debugframes/
+archive/legacy/proto/autotune-results.json
+archive/legacy/proto/autotune-results-*.json
+archive/legacy/proto/debugframes/
 delivery.md
+
+# Local/session artifacts (not part of repository sources)
+agents.md
+docs/24fps.mp4
+src/
+
+# Runtime per-device state (written by daemon, not source)
+host/rust/config/runtime_state*.json
+
+# Source export zip
+code.zip
+
+# Local review working docs
+*.rw.md
