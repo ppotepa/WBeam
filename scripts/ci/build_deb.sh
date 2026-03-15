@@ -21,13 +21,25 @@ write_version_manifest
 PKGROOT="$(mktemp -d)"
 trap 'rm -rf "${PKGROOT}"' EXIT
 
-mkdir -p "${PKGROOT}/DEBIAN" "${PKGROOT}/usr/local/bin" "${PKGROOT}/usr/share/doc/wbeam"
-install -m 0755 "${ROOT_DIR}/wbeam" "${PKGROOT}/usr/local/bin/wbeam"
+mkdir -p "${PKGROOT}/DEBIAN" "${PKGROOT}/usr/local/bin" "${PKGROOT}/usr/share/doc/wbeam" "${PKGROOT}/usr/share/wbeam/host" "${PKGROOT}/usr/share/wbeam/config" "${PKGROOT}/usr/share/wbeam/host/rust/scripts"
+install -m 0755 "${ROOT_DIR}/wbeam" "${PKGROOT}/usr/share/wbeam/wbeam"
+cp -a "${ROOT_DIR}/host/scripts" "${PKGROOT}/usr/share/wbeam/host/"
+mkdir -p "${PKGROOT}/usr/share/wbeam/host/rust/systemd"
+install -m 0644 "${ROOT_DIR}/host/rust/systemd/wbeamd-rust.service.template" "${PKGROOT}/usr/share/wbeam/host/rust/systemd/wbeamd-rust.service.template"
+install -m 0755 "${ROOT_DIR}/host/rust/scripts/install_systemd_user.sh" "${PKGROOT}/usr/share/wbeam/host/rust/scripts/install_systemd_user.sh"
+install -m 0644 "${ROOT_DIR}/config/wbeam.conf" "${PKGROOT}/usr/share/wbeam/config/wbeam.conf"
+cat > "${PKGROOT}/usr/local/bin/wbeam" <<'EOF'
+#!/usr/bin/env bash
+export WBEAM_ROOT="${WBEAM_ROOT:-/usr/share/wbeam}"
+exec "${WBEAM_ROOT}/wbeam" "$@"
+EOF
+chmod 0755 "${PKGROOT}/usr/local/bin/wbeam"
 install -m 0755 "${ROOT_DIR}/host/rust/target/release/wbeamd-server" "${PKGROOT}/usr/local/bin/wbeamd-server"
 install -m 0755 "${ROOT_DIR}/host/rust/target/release/wbeamd-streamer" "${PKGROOT}/usr/local/bin/wbeamd-streamer"
 install -m 0755 "${ROOT_DIR}/desktop/apps/desktop-tauri/src-tauri/target/release/wbeam-desktop-tauri" "${PKGROOT}/usr/local/bin/wbeam-desktop-tauri"
 cat > "${PKGROOT}/usr/local/bin/wbeam-desktop" <<'EOF'
 #!/usr/bin/env bash
+export WBEAM_ROOT="${WBEAM_ROOT:-/usr/share/wbeam}"
 exec /usr/local/bin/wbeam-desktop-tauri "$@"
 EOF
 chmod 0755 "${PKGROOT}/usr/local/bin/wbeam-desktop"
