@@ -117,6 +117,7 @@ build_aarch64_tar:
       pkg-config
       build-essential
       gcc-aarch64-linux-gnu
+      libc6-dev-arm64-cross
       libssl-dev
       libdbus-1-dev
       libx11-dev
