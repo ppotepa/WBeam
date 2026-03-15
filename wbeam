@@ -14,7 +14,10 @@ CONTROL_PORT="${WBEAM_CONTROL_PORT:-5001}"
 STREAM_PORT="${WBEAM_STREAM_PORT:-5000}"
 DAEMON_NAME="${WBEAM_DAEMON_SERVICE_NAME:-wbeam-daemon}"
 
-DAEMON_BIN="$ROOT_DIR/host/rust/target/release/wbeamd-server"
+DAEMON_BIN="${WBEAM_DAEMON_BIN:-$ROOT_DIR/host/rust/target/release/wbeamd-server}"
+if [[ ! -x "$DAEMON_BIN" && -x "/usr/local/bin/wbeamd-server" ]]; then
+  DAEMON_BIN="/usr/local/bin/wbeamd-server"
+fi
 
 ANDROID_DIR="$ROOT_DIR/android"
 ANDROID_PACKAGE="${WBEAM_ANDROID_PACKAGE:-com.wbeam}"
@@ -775,6 +778,7 @@ ensure_daemon_binary() {
   echo "Daemon binary missing: $DAEMON_BIN" >&2
   echo "Build it first:" >&2
   echo "  cd $ROOT_DIR/host/rust && cargo build --release -p wbeamd-server -p wbeamd-streamer" >&2
+  echo "or install package providing /usr/local/bin/wbeamd-server" >&2
   exit 1
 }
 

@@ -199,6 +199,7 @@ run_rust() {
     --stream-port "$STREAM_PORT"
     --root "$ROOT_DIR"
   )
+  local daemon_bin=""
   local build_rev="${WBEAM_BUILD_REV:-}"
   local build_rev_file="$ROOT_DIR/.wbeam_build_version"
 
@@ -214,17 +215,37 @@ run_rust() {
     build_rev="$(tr -d '\r[:space:]' < "$build_rev_file" 2>/dev/null || true)"
   fi
 
-  if [[ -n "$build_rev" ]]; then
-    exec env WBEAM_BUILD_REV="$build_rev" cargo run \
-      --manifest-path "$ROOT_DIR/host/rust/Cargo.toml" \
-      -p wbeamd-server -- \
-      "${args[@]}"
+  if [[ -n "${WBEAM_DAEMON_BIN:-}" && -x "${WBEAM_DAEMON_BIN}" ]]; then
+    daemon_bin="${WBEAM_DAEMON_BIN}"
+  elif [[ -x "$ROOT_DIR/host/rust/target/release/wbeamd-server" ]]; then
+    daemon_bin="$ROOT_DIR/host/rust/target/release/wbeamd-server"
+  elif [[ -x "/usr/local/bin/wbeamd-server" ]]; then
+    daemon_bin="/usr/local/bin/wbeamd-server"
   fi
 
-  exec cargo run \
-      --manifest-path "$ROOT_DIR/host/rust/Cargo.toml" \
-      -p wbeamd-server -- \
-      "${args[@]}"
+  if [[ -n "$daemon_bin" ]]; then
+    if [[ -n "$build_rev" ]]; then
+      exec env WBEAM_BUILD_REV="$build_rev" "$daemon_bin" "${args[@]}"
+    fi
+    exec "$daemon_bin" "${args[@]}"
+  fi
+
+  if command -v cargo >/dev/null 2>&1 && [[ -f "$ROOT_DIR/host/rust/Cargo.toml" ]]; then
+    if [[ -n "$build_rev" ]]; then
+      exec env WBEAM_BUILD_REV="$build_rev" cargo run \
+        --manifest-path "$ROOT_DIR/host/rust/Cargo.toml" \
+        -p wbeamd-server -- \
+        "${args[@]}"
+    fi
+
+    exec cargo run \
+        --manifest-path "$ROOT_DIR/host/rust/Cargo.toml" \
+        -p wbeamd-server -- \
+        "${args[@]}"
+  fi
+
+  echo "[wbeam] rust daemon requested but no executable/cargo source available" >&2
+  exit 1
 }
 
 run_python() {
@@ -245,7 +266,12 @@ if [[ "$DAEMON_IMPL" == "rust" ]]; then
   run_rust
 fi
 
-# auto mode: prefer Rust, fallback to Python.
+# auto mode: prefer Rust runtime binary/cargo source, fallback to Python only in repo setups.
+if [[ -x "/usr/local/bin/wbeamd-server" || -x "$ROOT_DIR/host/rust/target/release/wbeamd-server" || ( -n "${WBEAM_DAEMON_BIN:-}" && -x "${WBEAM_DAEMON_BIN}" ) ]]; then
+  echo "[wbeam] daemon impl=auto -> rust"
+  run_rust
+fi
+
 if command -v cargo >/dev/null 2>&1 && [[ -f "$ROOT_DIR/host/rust/Cargo.toml" ]]; then
   echo "[wbeam] daemon impl=auto -> rust"
   run_rust

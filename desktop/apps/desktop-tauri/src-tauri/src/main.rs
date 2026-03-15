@@ -790,8 +790,20 @@ fn device_disconnect(serial: String, stream_port: u16) -> Result<String, String>
 }
 
 pub(crate) fn repo_root() -> PathBuf {
-    let raw = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../");
-    fs::canonicalize(&raw).unwrap_or(raw)
+    if let Ok(root) = std::env::var("WBEAM_ROOT") {
+        let candidate = PathBuf::from(root);
+        if candidate.exists() {
+            return fs::canonicalize(&candidate).unwrap_or(candidate);
+        }
+    }
+
+    let packaged_root = PathBuf::from("/usr/share/wbeam");
+    if packaged_root.exists() {
+        return packaged_root;
+    }
+
+    let dev_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../");
+    fs::canonicalize(&dev_root).unwrap_or(dev_root)
 }
 
 pub(crate) fn or_unknown(value: Option<String>) -> String {
