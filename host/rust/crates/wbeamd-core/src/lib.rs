@@ -389,6 +389,7 @@ struct Inner {
     last_streaming_line_at: Option<Instant>,
     metrics: MetricsSnapshot,
     current_pid: Option<u32>,
+    pipe_reader_handles: Vec<tokio::task::JoinHandle<()>>,
     run_id: u64,
     telemetry_file: Option<File>, // P2.3: JSONL export
     suppress_auto_start_until: Option<Instant>,
@@ -426,6 +427,7 @@ impl Inner {
             last_streaming_line_at: None,
             metrics: MetricsSnapshot::default(),
             current_pid: None,
+            pipe_reader_handles: Vec::new(),
             run_id: 0,
             telemetry_file: None, // P2.3
             suppress_auto_start_until: None,
@@ -1228,6 +1230,11 @@ impl DaemonCore {
 
         let mut inner = self.inner.lock().await;
         inner.current_pid = None;
+        // Cancel pipe-reader tasks — the child process is gone so further reads
+        // would only delay cleanup or hold DaemonCore refs unnecessarily.
+        for h in inner.pipe_reader_handles.drain(..) {
+            h.abort();
+        }
         inner.state = STATE_IDLE.to_string();
         inner.run_started_at = None;
         inner.stream_started_at = None;
@@ -1255,6 +1262,9 @@ impl DaemonCore {
     async fn mark_start_failed(&self, message: String) {
         let mut inner = self.inner.lock().await;
         inner.current_pid = None;
+        for h in inner.pipe_reader_handles.drain(..) {
+            h.abort();
+        }
         inner.state = STATE_IDLE.to_string();
         inner.last_error = message;
         inner.run_started_at = None;
@@ -1661,31 +1671,35 @@ impl DaemonCore {
 
         info!(run_id, pid, "stream process started");
 
+        let mut pipe_handles: Vec<tokio::task::JoinHandle<()>> = Vec::with_capacity(2);
+
         if let Some(stdout) = child.stdout.take() {
             let core = self.clone();
-            tokio::spawn(async move {
+            pipe_handles.push(tokio::spawn(async move {
                 let mut lines = BufReader::new(stdout).lines();
                 while let Ok(Some(line)) = lines.next_line().await {
                     info!(run_id, "stream: {line}");
                     core.on_stream_output(run_id, &line).await;
                 }
-            });
+            }));
         }
 
         if let Some(stderr) = child.stderr.take() {
             let core = self.clone();
-            tokio::spawn(async move {
+            pipe_handles.push(tokio::spawn(async move {
                 let mut lines = BufReader::new(stderr).lines();
                 while let Ok(Some(line)) = lines.next_line().await {
                     warn!(run_id, "stream: {line}");
                     core.on_stream_output(run_id, &line).await;
                 }
-            });
+            }));
         }
 
         {
             let mut inner = self.inner.lock().await;
             inner.current_pid = Some(pid);
+            // Track pipe-reader tasks so they can be cancelled on stop/restart.
+            inner.pipe_reader_handles = pipe_handles;
         }
 
         let exit_tx = self.exit_tx.clone();
