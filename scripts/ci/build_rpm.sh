@@ -10,6 +10,13 @@ trap 'rm -rf "${TOPDIR}"' EXIT
 
 echo "[build_rpm] Building Rust binaries..."
 cargo build --release -p wbeamd-server -p wbeamd-streamer --manifest-path "${RUST_MANIFEST}"
+echo "[build_rpm] Building desktop Tauri app..."
+(
+  cd "${ROOT_DIR}/desktop/apps/desktop-tauri"
+  npm ci
+  npm run build
+  cargo build --release --manifest-path src-tauri/Cargo.toml
+)
 write_version_manifest
 
 mkdir -p "${TOPDIR}/"{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
@@ -19,6 +26,12 @@ mkdir -p "${SRCROOT}"
 install -m 0755 "${ROOT_DIR}/wbeam" "${SRCROOT}/wbeam"
 install -m 0755 "${ROOT_DIR}/host/rust/target/release/wbeamd-server" "${SRCROOT}/wbeamd-server"
 install -m 0755 "${ROOT_DIR}/host/rust/target/release/wbeamd-streamer" "${SRCROOT}/wbeamd-streamer"
+install -m 0755 "${ROOT_DIR}/desktop/apps/desktop-tauri/src-tauri/target/release/wbeam-desktop-tauri" "${SRCROOT}/wbeam-desktop-tauri"
+cat > "${SRCROOT}/wbeam-desktop" <<'EOF'
+#!/usr/bin/env bash
+exec /usr/local/bin/wbeam-desktop-tauri "$@"
+EOF
+chmod 0755 "${SRCROOT}/wbeam-desktop"
 install -m 0644 "${ROOT_DIR}/README.md" "${SRCROOT}/README.md"
 tar -C "${TOPDIR}" -czf "${TOPDIR}/SOURCES/wbeam-${RPM_VERSION}.tar.gz" "wbeam-${RPM_VERSION}"
 
@@ -49,12 +62,16 @@ mkdir -p %{buildroot}/usr/share/doc/wbeam
 install -m 0755 wbeam %{buildroot}/usr/local/bin/wbeam
 install -m 0755 wbeamd-server %{buildroot}/usr/local/bin/wbeamd-server
 install -m 0755 wbeamd-streamer %{buildroot}/usr/local/bin/wbeamd-streamer
+install -m 0755 wbeam-desktop-tauri %{buildroot}/usr/local/bin/wbeam-desktop-tauri
+install -m 0755 wbeam-desktop %{buildroot}/usr/local/bin/wbeam-desktop
 install -m 0644 README.md %{buildroot}/usr/share/doc/wbeam/README.md
 
 %files
 /usr/local/bin/wbeam
 /usr/local/bin/wbeamd-server
 /usr/local/bin/wbeamd-streamer
+/usr/local/bin/wbeam-desktop-tauri
+/usr/local/bin/wbeam-desktop
 /usr/share/doc/wbeam/README.md
 
 %changelog
