@@ -252,7 +252,13 @@ export default function App() {
   }
 
   async function refreshTrainedProfiles(): Promise<void> {
-    const backend = connectDialogCaptureBackend() || "wayland_portal";
+    const backend = connectDialogCaptureBackend();
+    // Profiles are backend-scoped; abstract selection cannot determine a namespace.
+    if (!backend || backend === "auto") {
+      setTrainedProfiles([]);
+      setConnectDialogProfileKey("");
+      return;
+    }
     try {
       const profiles = await api.listTrainedProfiles(backend);
       setTrainedProfiles(profiles);
@@ -736,6 +742,10 @@ export default function App() {
           };
           const selectedSize = () => resolveSessionSizeForPreset(device, connectDialogResolutionPresetId()) ?? "auto";
           const backendChosen = () => connectDialogCaptureBackend() !== "";
+          const concreteBackendChosen = () => {
+            const b = connectDialogCaptureBackend();
+            return b !== "" && b !== "auto";
+          };
           const codecChosen = () => connectDialogEncoderMode() !== "";
           const profilesForCodec = () => trainedProfiles().filter((p) => p.encoder === connectDialogEncoderMode());
           const selectedProfile = () => profilesForCodec().find((profile) => profile.key === connectDialogProfileKey()) ?? null;
@@ -825,11 +835,11 @@ export default function App() {
                     <small>{codecChosen() ? `Selected: ${connectDialogEncoderMode()}` : "Choose backend first"}</small>
                   </label>
 
-                  <label class={`connect-config-field${codecChosen() ? "" : " field-locked"}`}>
+                  <label class={`connect-config-field${(codecChosen() && concreteBackendChosen()) ? "" : " field-locked"}`}>
                     <span>Profile</span>
                     <select
                       value={connectDialogProfileKey()}
-                      disabled={!codecChosen()}
+                      disabled={!codecChosen() || !concreteBackendChosen()}
                       onChange={(event) => setConnectDialogProfileKey(event.currentTarget.value)}
                     >
                       <option value="">None (manual settings)</option>
@@ -844,7 +854,13 @@ export default function App() {
                     <small>
                       {selectedProfile()
                         ? `${selectedProfile()!.fps}fps ${selectedProfile()!.bitrateKbps}kbps — ${selectedProfile()!.objective}, ${selectedProfile()!.workload}`
-                        : codecChosen() ? "Optional: use manual settings without a profile" : "Choose codec first"}
+                        : !backendChosen()
+                          ? "Choose backend first"
+                          : !concreteBackendChosen()
+                            ? "Select a specific backend (not Auto) to use profiles"
+                            : !codecChosen()
+                              ? "Choose codec first"
+                              : "Optional: use manual settings without a profile"}
                     </small>
                   </label>
 

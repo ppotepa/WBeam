@@ -204,6 +204,7 @@ pub fn spawn_sender(
                         ))),
                         StreamMode::Quality => s.set_write_timeout(None),
                     };
+                    println!("WBEAM_EVENT:{{\"event\":\"client_connected\",\"addr\":\"{addr}\"}}");
                     println!("[wbeam-framed] client connected: {addr}");
                     s
                 }
@@ -218,7 +219,7 @@ pub fn spawn_sender(
             };
 
             let session_id: u64 = rand::thread_rng().gen();
-            let hello = build_hello(session_id, codec_flags);
+            let hello = build_hello(session_id, codec_flags, cfg.width, cfg.height, fps as u32);
             let _ = conn.write_all(&hello);
             println!("[wbeam-framed] session_id=0x{session_id:016x}");
 
@@ -347,6 +348,7 @@ pub fn spawn_sender(
                         continue;
                     }
                     Err(e) => {
+                        println!("WBEAM_EVENT:{{\"event\":\"client_disconnected\",\"reason\":\"{e}\"}}");
                         println!("[wbeam-framed] client disconnected: {e}");
                         break;
                     }

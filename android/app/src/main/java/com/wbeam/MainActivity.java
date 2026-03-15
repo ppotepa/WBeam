@@ -216,7 +216,9 @@ public class MainActivity extends AppCompatActivity {
     private final MetricSeriesBuffer runtimeQueueSeries = new MetricSeriesBuffer(HUD_RESOURCE_SERIES_MAX);
     // ── Infrastructure ─────────────────────────────────────────────────────────
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
-    private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
+    private final ExecutorService controlExecutor  = Executors.newSingleThreadExecutor();
+    private final ExecutorService telemetryExecutor = Executors.newSingleThreadExecutor();
+    private final ExecutorService probeExecutor    = Executors.newFixedThreadPool(2);
 
     private StatusPoller statusPoller;
     private StreamSessionController sessionController;
@@ -322,7 +324,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void initializeControllers() {
-        metricsReporter = new ClientMetricsReporter(ioExecutor, msg -> appendLiveLog("W", msg));
+        metricsReporter = new ClientMetricsReporter(telemetryExecutor, msg -> appendLiveLog("W", msg));
         videoTestController = createVideoTestController();
         statusPoller = createStatusPoller();
         sessionController = createSessionController();
@@ -365,7 +367,7 @@ public class MainActivity extends AppCompatActivity {
     private VideoTestController createVideoTestController() {
         return new VideoTestController(
                 uiHandler,
-                ioExecutor,
+                probeExecutor,
                 VideoTestCallbacksFactory.create(
                         () -> surface,
                         () -> {
@@ -413,7 +415,7 @@ public class MainActivity extends AppCompatActivity {
     private StatusPoller createStatusPoller() {
         return new StatusPoller(
                 uiHandler,
-                ioExecutor,
+                probeExecutor,
                 StatusPollerCallbacksFactory.create(
                         this::handleDaemonStatusUpdate,
                         this::handleDaemonOffline,
@@ -500,7 +502,7 @@ public class MainActivity extends AppCompatActivity {
     private StreamSessionController createSessionController() {
         return new StreamSessionController(
                 uiHandler,
-                ioExecutor,
+                controlExecutor,
                 buildSessionUiBridge()
         );
     }
@@ -537,7 +539,9 @@ public class MainActivity extends AppCompatActivity {
                 debugOverlayToggleTask,
                 videoTestController::release,
                 this::stopLiveView,
-                ioExecutor
+                controlExecutor,
+                telemetryExecutor,
+                probeExecutor
         );
     }
 
@@ -1255,7 +1259,7 @@ public class MainActivity extends AppCompatActivity {
                 videoTestController,
                 STARTUP_VIDEO_TEST_HINT_COLOR,
                 transportProbe,
-                ioExecutor,
+                probeExecutor,
                 uiHandler,
                 daemon.reachable,
                 daemon.hostName,
@@ -1317,7 +1321,7 @@ public class MainActivity extends AppCompatActivity {
         MainStartupCoordinator.maybeStartTransportProbeNow(
                 transportProbe,
                 requiresProbe,
-                ioExecutor,
+                probeExecutor,
                 uiHandler,
                 line -> appendLiveLog("I", line),
                 line -> appendLiveLog("W", line),

@@ -341,6 +341,10 @@ pub struct HostProbeResponse {
     pub display: Option<String>,
     pub wayland_display: Option<String>,
     pub supported: bool,
+    /// All streaming backends available on this host (e.g. ["wayland_portal", "evdi"]).
+    pub available_backends: Vec<String>,
+    /// Whether the EVDI kernel module has allocated device nodes.
+    pub evdi_available: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -693,6 +693,7 @@ impl DaemonCore {
 
     pub async fn host_probe(&self) -> HostProbeResponse {
         let inner = self.inner.lock().await;
+        let evdi_available = crate::infra::host_probe::HostProbe::evdi_device_available();
         HostProbeResponse {
             base: self.base_from_inner(&inner),
             ok: true,
@@ -704,6 +705,8 @@ impl DaemonCore {
             display: self.host_probe.display.clone(),
             wayland_display: self.host_probe.wayland_display.clone(),
             supported: self.host_probe.supports_streaming(),
+            available_backends: self.host_probe.available_backends().iter().map(|s| s.to_string()).collect(),
+            evdi_available,
         }
     }
 
@@ -1708,6 +1711,34 @@ impl DaemonCore {
 
         inner.last_output_at = Some(Instant::now());
 
+        // ── Structured event dispatch (preferred) ────────────────────────────
+        // Lines from the streamer prefixed `WBEAM_EVENT:` carry JSON payloads.
+        // Handling these here keeps human-readable log parsing as a fallback only.
+        if let Some(json) = line.strip_prefix("WBEAM_EVENT:") {
+            match json.trim() {
+                j if j.contains("\"streaming_started\"") => {
+                    inner.state = STATE_STREAMING.to_string();
+                    inner.last_error.clear();
+                    inner.stream_started_at = Some(Instant::now());
+                    inner.last_streaming_line_at = Some(Instant::now());
+                    inner.metrics.bitrate_actual_bps =
+                        u64::from(inner.active_config.bitrate_kbps) * 1000;
+                    inner.no_present_streak = 0;
+                    info!(run_id, stream_event = "streaming-started");
+                }
+                j if j.contains("\"client_connected\"") => {
+                    info!(run_id, stream_event = "client-connected");
+                    inner.last_error.clear();
+                }
+                j if j.contains("\"client_disconnected\"") => {
+                    warn!(run_id, stream_event = "client-disconnected", detail = j);
+                    inner.last_error = j.to_string();
+                }
+                _ => {}
+            }
+            // Do not fall through to the legacy string-match block for event lines.
+        } else {
+        // ── Legacy string-match fallback (kept for compat) ────────────────────
         if line.contains("Streaming Wayland screencast")
             || line.contains("Streaming X11 screencast")
             || line.contains("Streaming EVDI capture")
@@ -1761,6 +1792,7 @@ impl DaemonCore {
                 inner.last_error = trimmed.to_string();
             }
         }
+        } // end legacy fallback block
         drop(inner);
         if let Some(snapshot) = effective_snapshot {
             self.persist_effective_runtime_snapshot(run_id, &snapshot);

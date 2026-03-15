@@ -10,6 +10,12 @@ if [[ -f "$WBEAM_CONFIG_HELPER" ]]; then
   wbeam_load_config "$ROOT_DIR"
 fi
 
+WBEAM_GUI_HELPER="$ROOT_DIR/host/scripts/gui_session.sh"
+if [[ -f "$WBEAM_GUI_HELPER" ]]; then
+  # shellcheck source=host/scripts/gui_session.sh
+  source "$WBEAM_GUI_HELPER"
+fi
+
 usage() {
   cat <<'USAGE'
 Usage:
@@ -84,22 +90,28 @@ session_remote_matches() {
 }
 
 resolve_active_user() {
-  local sid name type state active remote
-  while read -r sid _; do
-    [[ -n "$sid" ]] || continue
-    name="$(loginctl show-session "$sid" -p Name --value 2>/dev/null || true)"
-    type="$(loginctl show-session "$sid" -p Type --value 2>/dev/null || true)"
-    state="$(loginctl show-session "$sid" -p State --value 2>/dev/null || true)"
-    active="$(loginctl show-session "$sid" -p Active --value 2>/dev/null || true)"
-    remote="$(loginctl show-session "$sid" -p Remote --value 2>/dev/null || true)"
-    if [[ -n "$name" && "$name" != "root" && "$active" == "yes" && "$state" == "active" ]] && session_remote_matches "$remote"; then
-      if [[ "$type" == "x11" || "$type" == "wayland" ]]; then
-        echo "$name"
-        return 0
+  # Delegate to the canonical shared resolver from gui_session.sh.
+  if command -v wbeam_resolve_active_gui_user &>/dev/null; then
+    wbeam_resolve_active_gui_user "$SESSION_REMOTE_FILTER"
+  else
+    # Fallback: local implementation when gui_session.sh is not available.
+    local sid name type state active remote
+    while read -r sid _; do
+      [[ -n "$sid" ]] || continue
+      name="$(loginctl show-session "$sid" -p Name --value 2>/dev/null || true)"
+      type="$(loginctl show-session "$sid" -p Type --value 2>/dev/null || true)"
+      state="$(loginctl show-session "$sid" -p State --value 2>/dev/null || true)"
+      active="$(loginctl show-session "$sid" -p Active --value 2>/dev/null || true)"
+      remote="$(loginctl show-session "$sid" -p Remote --value 2>/dev/null || true)"
+      if [[ -n "$name" && "$name" != "root" && "$active" == "yes" && "$state" == "active" ]] && session_remote_matches "$remote"; then
+        if [[ "$type" == "x11" || "$type" == "wayland" ]]; then
+          echo "$name"
+          return 0
+        fi
       fi
-    fi
-  done < <(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1" "$2}')
-  return 1
+    done < <(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1" "$2}')
+    return 1
+  fi
 }
 
 while [[ $# -gt 0 ]]; do

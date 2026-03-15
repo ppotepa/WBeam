@@ -647,7 +647,7 @@ impl App {
     }
 
     fn run_probe(&mut self) {
-        self.log("probe: checking /v1/health /v1/status /v1/metrics");
+        self.log("probe: checking /v1/health /v1/status /v1/metrics /v1/host-probe");
         self.probe = ProbeState::default();
         self.probe.ok_health = self
             .api
@@ -660,6 +660,30 @@ impl App {
                     .to_string();
             })
             .is_ok();
+
+        // Refresh backend list from daemon capability probe so the TUI always
+        // reflects what the host can actually do, not a hardcoded fallback.
+        if let Ok(hp) = self.api.get_json("host-probe") {
+            if let Some(backends) = hp.get("available_backends").and_then(|v| v.as_array()) {
+                let live: Vec<&'static str> = backends
+                    .iter()
+                    .filter_map(|b| b.as_str())
+                    .filter_map(|b| match b {
+                        "wayland_portal" => Some("wayland_portal"),
+                        "evdi" => Some("evdi"),
+                        _ => None,
+                    })
+                    .collect();
+                if !live.is_empty() {
+                    self.backends = live;
+                    // Clamp selection index in case the new list is shorter.
+                    if self.selected_backend >= self.backends.len() {
+                        self.selected_backend = 0;
+                    }
+                    self.log(format!("probe: available backends = {:?}", self.backends));
+                }
+            }
+        }
 
         let mut status_snapshot: Option<ConnectionSnapshot> = None;
         self.probe.ok_status = self
