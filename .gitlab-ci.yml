@@ -304,9 +304,18 @@ ff_release_to_master:
       if [ -n "${CI_SERVER_TLS_CA_FILE:-}" ] && [ -f "${CI_SERVER_TLS_CA_FILE}" ]; then
         git config --global http.sslCAInfo "${CI_SERVER_TLS_CA_FILE}"
       fi
+    - |
+      if [ -n "${GITLAB_PUSH_TOKEN:-}" ]; then
+        git remote set-url origin "https://oauth2:${GITLAB_PUSH_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
+      fi
     - git fetch origin master release
     - git checkout -B master origin/master
     - git merge --ff-only origin/release
-    - git push origin master
+    - |
+      if ! git push origin master; then
+        echo "[ff_release_to_master] Push rejected (likely protected branch / missing rights)."
+        echo "[ff_release_to_master] Set project CI variable GITLAB_PUSH_TOKEN (Maintainer PAT) to enable auto-ff push."
+      fi
+  allow_failure: true
   rules:
     - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "release"'
