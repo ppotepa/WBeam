@@ -110,43 +110,60 @@ else
 fi
 
 API_ROOT="https://api.github.com/repos/${GH_OWNER}/${GH_REPO}"
-RELEASE_PAYLOAD="$(jq -n \
-  --arg tag_name "${RELEASE_TAG}" \
-  --arg target_commitish "${CI_COMMIT_SHA:-}" \
-  --arg name "${RELEASE_NAME}" \
-  --arg body "Automated release from GitLab pipeline ${CI_PIPELINE_URL:-local}. Version: ${WBEAM_VERSION}" \
-  --argjson prerelease "${PRERELEASE_JSON}" \
-  '{tag_name:$tag_name,target_commitish:$target_commitish,name:$name,body:$body,draft:false,prerelease:$prerelease}')"
 
-api_call GET "${API_ROOT}/releases/tags/${RELEASE_TAG}"
-if [[ "${API_STATUS}" == "200" ]]; then
+publish_release() {
+  local tag="$1"
+  local name="$2"
+  local prerelease="$3"
+  local release_payload
+  release_payload="$(jq -n \
+    --arg tag_name "${tag}" \
+    --arg target_commitish "${CI_COMMIT_SHA:-}" \
+    --arg name "${name}" \
+    --arg body "Automated release from GitLab pipeline ${CI_PIPELINE_URL:-local}. Version: ${WBEAM_VERSION}" \
+    --argjson prerelease "${prerelease}" \
+    '{tag_name:$tag_name,target_commitish:$target_commitish,name:$name,body:$body,draft:false,prerelease:$prerelease}')"
+
+  api_call GET "${API_ROOT}/releases/tags/${tag}"
+  if [[ "${API_STATUS}" == "200" ]]; then
+    RELEASE_ID="$(printf '%s' "${API_BODY}" | jq -r '.id')"
+    api_call PATCH "${API_ROOT}/releases/${RELEASE_ID}" "${release_payload}"
+    if [[ "${API_STATUS}" != "200" ]]; then
+      echo "[publish] Failed to update release ${tag}, status=${API_STATUS}" >&2
+      echo "${API_BODY}" >&2
+      exit 1
+    fi
+  elif [[ "${API_STATUS}" == "404" ]]; then
+    api_call POST "${API_ROOT}/releases" "${release_payload}"
+    if [[ "${API_STATUS}" != "201" ]]; then
+      echo "[publish] Failed to create release ${tag}, status=${API_STATUS}" >&2
+      echo "${API_BODY}" >&2
+      exit 1
+    fi
+  else
+    echo "[publish] Failed to fetch release ${tag}, status=${API_STATUS}" >&2
+    echo "${API_BODY}" >&2
+    exit 1
+  fi
+
   RELEASE_ID="$(printf '%s' "${API_BODY}" | jq -r '.id')"
-  api_call PATCH "${API_ROOT}/releases/${RELEASE_ID}" "${RELEASE_PAYLOAD}"
-  if [[ "${API_STATUS}" != "200" ]]; then
-    echo "[publish] Failed to update release ${RELEASE_TAG}, status=${API_STATUS}" >&2
-    echo "${API_BODY}" >&2
-    exit 1
+  UPLOAD_URL="$(printf '%s' "${API_BODY}" | jq -r '.upload_url' | sed 's/{?name,label}//')"
+
+  for file in "${DIST_DIR}"/*; do
+    [[ -f "${file}" ]] || continue
+    echo "[publish] Uploading $(basename "${file}") to ${tag}"
+    upload_asset "${UPLOAD_URL}" "${file}"
+  done
+
+  echo "[publish] Release updated: https://github.com/${GH_OWNER}/${GH_REPO}/releases/tag/${tag}"
+}
+
+publish_release "${RELEASE_TAG}" "${RELEASE_NAME}" "${PRERELEASE_JSON}"
+
+if [[ "${CI_COMMIT_BRANCH:-}" == "release" ]]; then
+  VERSION_TAG="${WBEAM_VERSION}"
+  if [[ "${VERSION_TAG}" != v* ]]; then
+    VERSION_TAG="v${VERSION_TAG}"
   fi
-elif [[ "${API_STATUS}" == "404" ]]; then
-  api_call POST "${API_ROOT}/releases" "${RELEASE_PAYLOAD}"
-  if [[ "${API_STATUS}" != "201" ]]; then
-    echo "[publish] Failed to create release ${RELEASE_TAG}, status=${API_STATUS}" >&2
-    echo "${API_BODY}" >&2
-    exit 1
-  fi
-else
-  echo "[publish] Failed to fetch release ${RELEASE_TAG}, status=${API_STATUS}" >&2
-  echo "${API_BODY}" >&2
-  exit 1
+  publish_release "${VERSION_TAG}" "${VERSION_TAG}" "false"
 fi
-
-RELEASE_ID="$(printf '%s' "${API_BODY}" | jq -r '.id')"
-UPLOAD_URL="$(printf '%s' "${API_BODY}" | jq -r '.upload_url' | sed 's/{?name,label}//')"
-
-for file in "${DIST_DIR}"/*; do
-  [[ -f "${file}" ]] || continue
-  echo "[publish] Uploading $(basename "${file}")"
-  upload_asset "${UPLOAD_URL}" "${file}"
-done
-
-echo "[publish] Release updated: https://github.com/${GH_OWNER}/${GH_REPO}/releases/tag/${RELEASE_TAG}"

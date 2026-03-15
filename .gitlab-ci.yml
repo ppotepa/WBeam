@@ -305,8 +305,9 @@ ff_release_to_master:
         git config --global http.sslCAInfo "${CI_SERVER_TLS_CA_FILE}"
       fi
     - |
-      if [ -n "${GITLAB_PUSH_TOKEN:-}" ]; then
-        git remote set-url origin "https://oauth2:${GITLAB_PUSH_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
+      PUSH_TOKEN="${GITLAB_PUSH_TOKEN:-${GITLAB_TOKEN:-}}"
+      if [ -n "${PUSH_TOKEN}" ]; then
+        git remote set-url origin "https://oauth2:${PUSH_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
       fi
     - git fetch origin master release
     - git checkout -B master origin/master
@@ -314,7 +315,7 @@ ff_release_to_master:
     - |
       if ! git push origin master; then
         echo "[ff_release_to_master] Push rejected (likely protected branch / missing rights)."
-        echo "[ff_release_to_master] Set project CI variable GITLAB_PUSH_TOKEN (Maintainer PAT) to enable auto-ff push."
+        echo "[ff_release_to_master] Set CI variable GITLAB_PUSH_TOKEN (or GITLAB_TOKEN) with push rights to enable auto-ff."
       fi
   allow_failure: true
   rules:
