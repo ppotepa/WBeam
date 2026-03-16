@@ -25,10 +25,16 @@ public final class StatusPoller {
     private static final int  HEALTH_POLL_EVERY        = 16;
     private static final long AUTO_START_COOLDOWN_MS   = 4_000L;
 
+    // ── Daemon state constants ─────────────────────────────────────────────────
+    private static final String STATE_IDLE          = "IDLE";
+    private static final String STATE_STREAMING     = "STREAMING";
+    private static final String STATE_DISCONNECTED  = "DISCONNECTED";
+    private static final String LOG_API_PREFIX      = " api=";
+
     // ── Daemon state (queried by MainActivity via getters) ────────────────────
     private boolean daemonReachable    = false;
     private String  daemonHostName     = "-";
-    private String  daemonState        = "IDLE";
+    private String  daemonState        = STATE_IDLE;
     private String  daemonLastError    = "";
     private long    daemonRunId        = 0L;
     private long    daemonUptimeSec    = 0L;
@@ -177,7 +183,7 @@ public final class StatusPoller {
         daemonReachable  = true;
 
         daemonHostName   = status.optString("host_name", daemonHostName);
-        daemonState      = status.optString("state", "IDLE").toUpperCase(Locale.US);
+        daemonState      = status.optString("state", STATE_IDLE).toUpperCase(Locale.US);
         String newLastError = status.optString("last_error", "");
         boolean errorChanged = !newLastError.equals(daemonLastError);
         daemonLastError  = newLastError;
@@ -193,7 +199,7 @@ public final class StatusPoller {
         if (!newSnapshot.equals(daemonStateSnapshot)) {
             daemonStateSnapshot = newSnapshot;
             Log.i(TAG, "daemon state=" + daemonState + " run_id=" + daemonRunId
-                    + " api=" + HostApiClient.API_BASE
+                    + LOG_API_PREFIX + HostApiClient.API_BASE
                     + (daemonLastError.isEmpty() ? "" : " last_error=" + daemonLastError));
         }
 
@@ -203,13 +209,13 @@ public final class StatusPoller {
             daemonUptimeSec, daemonService, daemonBuildRevision, metrics
         );
 
-        if ("STREAMING".equals(daemonState)) {
+        if (STATE_STREAMING.equals(daemonState)) {
             autoStartPending = false;
             callbacks.ensureDecoderRunning();
             return;
         }
 
-        if (autoStartPending && "IDLE".equals(daemonState)) {
+        if (autoStartPending && STATE_IDLE.equals(daemonState)) {
             autoStartPending = false;
             permanentlySuppressAutoStart();
             callbacks.onAutoStartFailed();
@@ -230,11 +236,11 @@ public final class StatusPoller {
             buildMismatchSnapshot = snapshot;
             if (mismatch) {
                 Log.e(TAG, "build mismatch app=" + appRev + " host=" + hostRev
-                        + " api=" + HostApiClient.API_BASE
+                        + LOG_API_PREFIX + HostApiClient.API_BASE
                         + " hint=rebuild host and redeploy APK with same WBEAM_BUILD_REV");
             } else if (daemonReachable && hostKnown && appKnown) {
                 Log.i(TAG, "build match restored app=" + appRev + " host=" + hostRev
-                        + " api=" + HostApiClient.API_BASE);
+                        + LOG_API_PREFIX + HostApiClient.API_BASE);
             }
         }
     }
@@ -242,7 +248,7 @@ public final class StatusPoller {
     private void processOfflineResult(Exception e) {
         boolean wasReachable = daemonReachable;
         daemonReachable = false;
-        daemonState     = "DISCONNECTED";
+        daemonState     = STATE_DISCONNECTED;
         Log.e(TAG, "daemon poll failed api=" + HostApiClient.API_BASE, e);
         callbacks.onDaemonOffline(wasReachable, e);
     }
