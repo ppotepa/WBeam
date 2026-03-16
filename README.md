@@ -4,73 +4,53 @@ WBeam turns an Android phone/tablet into a USB-connected second screen for Linux
 
 ![WBeam](docs/assets/wbeam.png)
 
-## Current Status
+## How it works now (real flow)
 
-`Wayland`:
-- recommended path
-- works end-to-end on current hosts
-- best stability right now
+WBeam has two sides:
+- **Host (Linux)**: daemon/service + desktop app
+- **Client (Android APK)**: receives stream over USB/ADB path
 
-`X11`:
-- support is under active redevelopment in the main codebase
-- not feature-parity with Wayland yet
-
-## What Works
-
-- host daemon + control API (`/v1/status`, `/v1/start`, `/v1/stop`)
-- Android app deploy and connect flow over USB/ADB
-- version/build compatibility checks
-- runtime diagnostics and logs
-- desktop control tooling
-
-## What Is Experimental
-
-- mixed GPU topologies (NVIDIA + EVDI on X11)
-- fallback monitor-object path on X11
-
-## Recommended Path
-
-If you just want it to work now:
-1. use `Wayland`
-2. run main tooling (`./wbeam`, `./wbgui`)
-3. treat Wayland as primary runtime path
-
-## Quick Start
-
-```bash
-./wbeam --help
-./wbeam service install
-./wbeam service start
-./wbeam android deploy-all
-./wbgui
-```
-
-## Simple local flow (recommended)
-
-Known runtime note:
-- on some hosts `Wayland` may show lower FPS and transport can feel glitchy/jittery
-- if that happens, verify backend/profile and test EVDI path
+Main practical note:
+- on some setups, `Wayland` can give lower FPS and transport may feel glitchy/jittery
+- if this happens, verify your selected backend/profile and test EVDI path
 
 Android debug menu:
 - in the APK, hold `VOL+` and `VOL-` together for about `2 seconds`
 
-Minimal install/run flow:
+## Fast local install / run
+
+This is the simplest local flow currently used in development:
+
 1. Clone repo and enter it.
-2. Connect Android device over USB (ADB visible).
-3. Run:
+2. Connect Android by USB (ADB must see device in `device` state).
+3. Run full local redeploy:
    ```bash
    ./redeploy-local
    ```
-4. After build/deploy, run desktop app:
+   This builds host + desktop, deploys APK to connected device(s), runs version checks, and launches desktop UI.
+4. If needed, start desktop manually:
    ```bash
    ./desktop.sh
    ```
-5. Install/start service from desktop/CLI (`wbeam service install`, then start).
-6. Click `Connect`.
-7. Ensure EVDI module is loaded on host:
+5. Ensure host service is installed and running (from desktop UI or CLI):
+   ```bash
+   ./wbeam service install
+   ./wbeam service start
+   ```
+6. Click **Connect** in desktop app.
+7. Ensure EVDI module is available on host:
    ```bash
    sudo modprobe evdi
    ```
+
+## Minimal commands reference
+
+```bash
+./wbeam --help
+./wbeam host build
+./wbeam android deploy-all
+./desktop.sh
+```
 
 ## Trainer (autotune) quick usage
 
