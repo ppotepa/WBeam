@@ -207,7 +207,7 @@ def close_session(session_bus, session_handle):
         session_obj = session_bus.get_object(PORTAL_BUS, session_handle)
         dbus.Interface(session_obj, SESSION_IFACE).Close()
     except Exception as exc:
-        print(f"[warn] failed to close portal session: {exc}", file=sys.stderr)
+        sys.stderr.write(f"[warn] failed to close portal session: {exc}" + "\n")
 
 
 def load_restore_token(path):
@@ -219,7 +219,7 @@ def load_restore_token(path):
     except FileNotFoundError:
         return ""
     except Exception as exc:
-        print(f"[warn] failed to read restore token from {p}: {exc}", file=sys.stderr)
+        sys.stderr.write(f"[warn] failed to read restore token from {p}: {exc}" + "\n")
         return ""
     return token
 
@@ -233,7 +233,7 @@ def save_restore_token(path, token):
         p.write_text(str(token).strip() + "\n", encoding="utf-8")
         print(f"[wbeam] saved restore token to {p}", flush=True)
     except Exception as exc:
-        print(f"[warn] failed to save restore token to {p}: {exc}", file=sys.stderr)
+        sys.stderr.write(f"[warn] failed to save restore token to {p}: {exc}" + "\n")
 
 
 def pick_encoder(requested):
@@ -549,7 +549,7 @@ def make_pipeline(
             set_if_supported(ov, "ypad", 6)
             overlays = [ov]
         if not overlays:
-            print("[warn] textoverlay element unavailable; HUD overlay disabled", file=sys.stderr)
+            sys.stderr.write("[warn] textoverlay element unavailable; HUD overlay disabled" + "\n")
             overlay_enabled = False
     tee = Gst.ElementFactory.make("tee", "tee")
 
@@ -756,7 +756,7 @@ def on_bus_message(bus, message):
     mtype = message.type
     if mtype == Gst.MessageType.ERROR:
         err, debug = message.parse_error()
-        print(f"[gst-error] {err}: {debug}", file=sys.stderr)
+        sys.stderr.write(f"[gst-error] {err}: {debug}" + "\n")
         stop()
     elif mtype == Gst.MessageType.EOS:
         src_name = message.src.get_name() if message.src else "unknown"
@@ -836,15 +836,9 @@ def normalize_encoder_name(raw_encoder: str) -> str:
     if requested == "h264":
         return "auto"
     if requested in {"h265", "rawpng", "mjpeg", "jpeg"}:
-        print(
-            f"[warn] encoder '{requested}' not supported by wayland portal h264 helper; falling back to auto",
-            file=sys.stderr,
-        )
+        sys.stderr.write(f"[warn] encoder '{requested}' not supported by wayland portal h264 helper; falling back to auto" + "\n")
         return "auto"
-    print(
-        f"[warn] unknown encoder '{requested}', falling back to auto",
-        file=sys.stderr,
-    )
+    sys.stderr.write(f"[warn] unknown encoder '{requested}', falling back to auto" + "\n")
     return "auto"
 
 
