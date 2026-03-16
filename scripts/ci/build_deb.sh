@@ -21,7 +21,7 @@ write_version_manifest
 PKGROOT="$(mktemp -d)"
 trap 'rm -rf "${PKGROOT}"' EXIT
 
-mkdir -p "${PKGROOT}/DEBIAN" "${PKGROOT}/usr/local/bin" "${PKGROOT}/usr/share/doc/wbeam" "${PKGROOT}/usr/share/wbeam/host" "${PKGROOT}/usr/share/wbeam/config" "${PKGROOT}/usr/share/wbeam/host/rust/scripts"
+mkdir -p "${PKGROOT}/DEBIAN" "${PKGROOT}/usr/local/bin" "${PKGROOT}/usr/share/doc/wbeam" "${PKGROOT}/usr/share/wbeam/host" "${PKGROOT}/usr/share/wbeam/config" "${PKGROOT}/usr/share/wbeam/host/rust/scripts" "${PKGROOT}/usr/share/applications" "${PKGROOT}/usr/share/icons/hicolor/256x256/apps"
 install -m 0755 "${ROOT_DIR}/wbeam" "${PKGROOT}/usr/share/wbeam/wbeam"
 cp -a "${ROOT_DIR}/host/scripts" "${PKGROOT}/usr/share/wbeam/host/"
 mkdir -p "${PKGROOT}/usr/share/wbeam/host/rust/systemd"
@@ -43,6 +43,19 @@ export WBEAM_ROOT="${WBEAM_ROOT:-/usr/share/wbeam}"
 exec /usr/local/bin/wbeam-desktop-tauri "$@"
 EOF
 chmod 0755 "${PKGROOT}/usr/local/bin/wbeam-desktop"
+install -m 0644 "${ROOT_DIR}/desktop/apps/desktop-tauri/src-tauri/icons/icon.png" "${PKGROOT}/usr/share/icons/hicolor/256x256/apps/wbeam.png"
+cat > "${PKGROOT}/usr/share/applications/wbeam.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=WBeam Desktop
+Comment=WBeam desktop control and host service manager
+Exec=/usr/local/bin/wbeam-desktop
+Icon=wbeam
+Terminal=false
+Categories=Utility;Network;
+StartupNotify=true
+EOF
 install -m 0644 "${ROOT_DIR}/README.md" "${PKGROOT}/usr/share/doc/wbeam/README.md"
 
 cat > "${PKGROOT}/DEBIAN/control" <<EOF
@@ -52,6 +65,7 @@ Section: utils
 Priority: optional
 Architecture: ${ARCH}
 Maintainer: WBeam CI <ci@example.local>
+Depends: libgtk-3-0, libwebkit2gtk-4.1-0, libsoup-3.0-0, libayatana-appindicator3-1
 Description: WBeam host tools and daemon binaries
  WBeam host runtime package built by GitLab CI.
 EOF
