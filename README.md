@@ -10,9 +10,11 @@ WBeam has two sides:
 - **Host (Linux)**: daemon/service + desktop app
 - **Client (Android APK)**: receives stream over USB/ADB path
 
-Main practical note:
-- on some setups, `Wayland` can give lower FPS and transport may feel glitchy/jittery
-- if this happens, verify your selected backend/profile and test EVDI path
+> [!TIP]
+> **Status now (simple):**
+> - **EVDI is the working path** and supports around **60 FPS**.
+> - **Wayland portal is still very glitchy** on some setups.
+> - If stream feels bad, use EVDI path first and check that `evdi` module is loaded.
 
 Android debug menu:
 - in the APK, hold `VOL+` and `VOL-` together for about `2 seconds`
@@ -51,6 +53,15 @@ This is the simplest local flow currently used in development:
 ./wbeam android deploy-all
 ./desktop.sh
 ```
+
+## README summary (plain English)
+
+- Connect Android with USB.
+- Run `./redeploy-local` to build and deploy everything.
+- Run `./desktop.sh` if desktop is not already open.
+- Install/start service, then click **Connect**.
+- Make sure `evdi` is loaded (`sudo modprobe evdi`).
+- If Wayland portal is glitchy, use EVDI path.
 
 ## Trainer (autotune) quick usage
 
