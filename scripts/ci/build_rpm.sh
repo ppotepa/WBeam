@@ -44,6 +44,19 @@ export WBEAM_ROOT="${WBEAM_ROOT:-/usr/share/wbeam}"
 exec /usr/local/bin/wbeam-desktop-tauri "$@"
 EOF
 chmod 0755 "${SRCROOT}/wbeam-desktop"
+install -m 0644 "${ROOT_DIR}/desktop/apps/desktop-tauri/src-tauri/icons/icon.png" "${SRCROOT}/share/wbeam/desktop-icon.png"
+cat > "${SRCROOT}/share/wbeam/wbeam.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=WBeam Desktop
+Comment=WBeam desktop control and host service manager
+Exec=/usr/local/bin/wbeam-desktop
+Icon=wbeam
+Terminal=false
+Categories=Utility;Network;
+StartupNotify=true
+EOF
 install -m 0644 "${ROOT_DIR}/README.md" "${SRCROOT}/README.md"
 tar -C "${TOPDIR}" -czf "${TOPDIR}/SOURCES/wbeam-${RPM_VERSION}.tar.gz" "wbeam-${RPM_VERSION}"
 
@@ -58,6 +71,10 @@ License:        MIT
 URL:            https://github.com/ppotepa/WBeam
 Source0:        %{name}-%{version}.tar.gz
 BuildArch:      %{_arch}
+Requires:       gtk3
+Requires:       webkit2gtk4.1
+Requires:       libsoup3
+Requires:       libayatana-appindicator-gtk3
 
 %description
 WBeam host runtime package built by GitLab CI.
@@ -71,6 +88,8 @@ WBeam host runtime package built by GitLab CI.
 %install
 mkdir -p %{buildroot}/usr/local/bin
 mkdir -p %{buildroot}/usr/share/doc/wbeam
+mkdir -p %{buildroot}/usr/share/applications
+mkdir -p %{buildroot}/usr/share/icons/hicolor/256x256/apps
 install -m 0755 wbeam %{buildroot}/usr/local/bin/wbeam
 install -m 0755 wbeamd-server %{buildroot}/usr/local/bin/wbeamd-server
 install -m 0755 wbeamd-streamer %{buildroot}/usr/local/bin/wbeamd-streamer
@@ -78,6 +97,8 @@ install -m 0755 wbeam-desktop-tauri %{buildroot}/usr/local/bin/wbeam-desktop-tau
 install -m 0755 wbeam-desktop %{buildroot}/usr/local/bin/wbeam-desktop
 mkdir -p %{buildroot}/usr/share/wbeam
 cp -a share/wbeam/. %{buildroot}/usr/share/wbeam/
+install -m 0644 share/wbeam/desktop-icon.png %{buildroot}/usr/share/icons/hicolor/256x256/apps/wbeam.png
+install -m 0644 share/wbeam/wbeam.desktop %{buildroot}/usr/share/applications/wbeam.desktop
 install -m 0644 README.md %{buildroot}/usr/share/doc/wbeam/README.md
 
 %files
@@ -91,6 +112,8 @@ install -m 0644 README.md %{buildroot}/usr/share/doc/wbeam/README.md
 /usr/share/wbeam/host/scripts
 /usr/share/wbeam/host/rust/scripts/install_systemd_user.sh
 /usr/share/wbeam/host/rust/systemd/wbeamd-rust.service.template
+/usr/share/applications/wbeam.desktop
+/usr/share/icons/hicolor/256x256/apps/wbeam.png
 /usr/share/doc/wbeam/README.md
 
 %changelog
