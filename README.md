@@ -45,6 +45,33 @@ If you just want it to work now:
 ./wbgui
 ```
 
+## Simple local flow (recommended)
+
+Known runtime note:
+- on some hosts `Wayland` may show lower FPS and transport can feel glitchy/jittery
+- if that happens, verify backend/profile and test EVDI path
+
+Android debug menu:
+- in the APK, hold `VOL+` and `VOL-` together for about `2 seconds`
+
+Minimal install/run flow:
+1. Clone repo and enter it.
+2. Connect Android device over USB (ADB visible).
+3. Run:
+   ```bash
+   ./redeploy-local
+   ```
+4. After build/deploy, run desktop app:
+   ```bash
+   ./desktop.sh
+   ```
+5. Install/start service from desktop/CLI (`wbeam service install`, then start).
+6. Click `Connect`.
+7. Ensure EVDI module is loaded on host:
+   ```bash
+   sudo modprobe evdi
+   ```
+
 ## Trainer (autotune) quick usage
 
 Use the interactive tuner to benchmark and generate a reusable profile:
