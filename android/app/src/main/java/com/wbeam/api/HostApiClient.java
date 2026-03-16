@@ -11,6 +11,7 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Locale;
+import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.ConnectionPool;
@@ -38,8 +39,20 @@ public final class HostApiClient {
     private static final String TARGET_SERIAL = resolveTargetSerial();
     public static final String API_BASE = "http://" + HOST + ":" + CONTROL_PORT;
 
+    private static final String POST_METHOD = "POST";
+    private static final String GET_METHOD = "GET";
+    private static final String START_PATH = "/start";
+    private static final String STOP_PATH = "/stop";
+    private static final String APPLY_PATH = "/apply";
+    private static final String CLIENT_METRICS_PATH = "/v1/client-metrics";
+    private static final String STATUS_PATH = "/status";
+    private static final String HEALTH_PATH = "/health";
+    private static final String METRICS_PATH = "/metrics";
+
     public  static final int  API_RETRY_ATTEMPTS      = 2;
     public  static final long API_RETRY_BASE_DELAY_MS = 300L;
+
+    private static final Random RANDOM = new Random();
 
     public static final MediaType JSON_MEDIA_TYPE =
             MediaType.parse("application/json; charset=utf-8");
@@ -131,7 +144,7 @@ public final class HostApiClient {
                 }
                 long baseDelay = Math.min(5000L, API_RETRY_BASE_DELAY_MS * (1L << i));
                 long jitterBound = Math.max(1L, baseDelay / 4L + 1L);
-                long jitter = (long) (Math.random() * jitterBound);
+                long jitter = Math.abs(RANDOM.nextLong()) % jitterBound;
                 SystemClock.sleep(baseDelay + jitter);
             }
         }
@@ -206,7 +219,7 @@ public final class HostApiClient {
                 }
             }
 
-            long expectedMin = (long) sizeMb * 1024L * 1024L;
+            long expectedMin = sizeMb * 1024L * 1024L;
             if (bytes < expectedMin) {
                 throw new IOException("transport probe short read " + bytes + "B");
             }
@@ -242,67 +255,81 @@ public final class HostApiClient {
             String path,
             JSONObject payload
     ) throws JSONException {
-        final String m = method == null ? "GET" : method.toUpperCase(Locale.US);
+        final String m = method == null ? GET_METHOD : method.toUpperCase(Locale.US);
         final String p0 = normalizePath(path);
         final int q = p0.indexOf('?');
         final String p = q > 0 ? p0.substring(0, q) : p0;
         final long nowSec = System.currentTimeMillis() / 1000L;
         final long nowMs = System.currentTimeMillis();
 
-        if ("POST".equals(m) && "/start".equals(p)) {
-            LocalApiState.state = "STARTING";
-            LocalApiState.lastError = "";
-            LocalApiState.runId++;
-            LocalApiState.startedAtSec = nowSec;
-            LocalApiState.lastClientMetricAtMs = 0L;
-            LocalApiState.lastFlowAtMs = 0L;
-            LocalApiState.firstFlowAtSec = 0L;
-            LocalApiState.latestRecvFps = 0.0;
-            LocalApiState.latestPresentFps = 0.0;
-            LocalApiState.latestRecvBps = 0L;
-        } else if ("POST".equals(m) && "/stop".equals(p)) {
-            LocalApiState.state = "IDLE";
-            LocalApiState.lastError = "";
-            LocalApiState.startedAtSec = nowSec;
-            LocalApiState.lastClientMetricAtMs = 0L;
-            LocalApiState.lastFlowAtMs = 0L;
-            LocalApiState.firstFlowAtSec = 0L;
-            LocalApiState.latestRecvFps = 0.0;
-            LocalApiState.latestPresentFps = 0.0;
-            LocalApiState.latestRecvBps = 0L;
-        } else if ("POST".equals(m) && "/apply".equals(p)) {
-            LocalApiState.state = "IDLE";
-            LocalApiState.lastError = "";
-            LocalApiState.startedAtSec = nowSec;
-            LocalApiState.lastClientMetricAtMs = 0L;
-            LocalApiState.lastFlowAtMs = 0L;
-            LocalApiState.firstFlowAtSec = 0L;
-            LocalApiState.latestRecvFps = 0.0;
-            LocalApiState.latestPresentFps = 0.0;
-            LocalApiState.latestRecvBps = 0L;
-        } else if ("POST".equals(m) && "/v1/client-metrics".equals(p)) {
-            double recvFps = payload != null ? payload.optDouble("recv_fps", 0.0) : 0.0;
-            double presentFps = payload != null ? payload.optDouble("present_fps", 0.0) : 0.0;
-            long recvBps = payload != null ? payload.optLong("recv_bps", 0L) : 0L;
-            LocalApiState.latestRecvFps = recvFps;
-            LocalApiState.latestPresentFps = presentFps;
-            LocalApiState.latestRecvBps = recvBps;
-            LocalApiState.lastClientMetricAtMs = nowMs;
-
-            boolean flowing = recvBps > 0L || recvFps >= 1.0 || presentFps >= 1.0;
-            if (flowing) {
-                LocalApiState.lastFlowAtMs = nowMs;
-                if (LocalApiState.firstFlowAtSec == 0L) {
-                    LocalApiState.firstFlowAtSec = nowSec;
-                }
-                LocalApiState.state = "STREAMING";
-            } else if (!"IDLE".equals(LocalApiState.state)) {
-                long sinceStartSec = Math.max(0L, nowSec - LocalApiState.startedAtSec);
-                LocalApiState.state = sinceStartSec < 3L ? "STARTING" : "RECONNECTING";
-            }
-            return new JSONObject();
+        if (POST_METHOD.equals(m) && START_PATH.equals(p)) {
+            handleStartRequest(nowSec);
+        } else if (POST_METHOD.equals(m) && STOP_PATH.equals(p)) {
+            handleStopRequest(nowSec);
+        } else if (POST_METHOD.equals(m) && APPLY_PATH.equals(p)) {
+            handleApplyRequest(nowSec);
+        } else if (POST_METHOD.equals(m) && CLIENT_METRICS_PATH.equals(p)) {
+            return handleClientMetricsRequest(payload, nowSec, nowMs);
         }
 
+        updateStreamingState(nowSec, nowMs);
+
+        if (GET_METHOD.equals(m) && (STATUS_PATH.equals(p) || HEALTH_PATH.equals(p))) {
+            return buildStatusOrHealthResponse(p, nowSec);
+        }
+
+        if (GET_METHOD.equals(m) && METRICS_PATH.equals(p)) {
+            return buildMetricsResponse(nowSec);
+        }
+
+        return new JSONObject();
+    }
+
+    private static void handleStartRequest(long nowSec) {
+        LocalApiState.state = "STARTING";
+        LocalApiState.lastError = "";
+        LocalApiState.runId++;
+        resetLocalApiState(nowSec);
+    }
+
+    private static void handleStopRequest(long nowSec) {
+        LocalApiState.state = "IDLE";
+        LocalApiState.lastError = "";
+        LocalApiState.startedAtSec = nowSec;
+        resetLocalApiMetrics();
+    }
+
+    private static void handleApplyRequest(long nowSec) {
+        LocalApiState.state = "IDLE";
+        LocalApiState.lastError = "";
+        LocalApiState.startedAtSec = nowSec;
+        resetLocalApiMetrics();
+    }
+
+    private static JSONObject handleClientMetricsRequest(JSONObject payload, long nowSec, long nowMs) {
+        double recvFps = payload != null ? payload.optDouble("recv_fps", 0.0) : 0.0;
+        double presentFps = payload != null ? payload.optDouble("present_fps", 0.0) : 0.0;
+        long recvBps = payload != null ? payload.optLong("recv_bps", 0L) : 0L;
+        LocalApiState.latestRecvFps = recvFps;
+        LocalApiState.latestPresentFps = presentFps;
+        LocalApiState.latestRecvBps = recvBps;
+        LocalApiState.lastClientMetricAtMs = nowMs;
+
+        boolean flowing = recvBps > 0L || recvFps >= 1.0 || presentFps >= 1.0;
+        if (flowing) {
+            LocalApiState.lastFlowAtMs = nowMs;
+            if (LocalApiState.firstFlowAtSec == 0L) {
+                LocalApiState.firstFlowAtSec = nowSec;
+            }
+            LocalApiState.state = "STREAMING";
+        } else if (!"IDLE".equals(LocalApiState.state)) {
+            long sinceStartSec = Math.max(0L, nowSec - LocalApiState.startedAtSec);
+            LocalApiState.state = sinceStartSec < 3L ? "STARTING" : "RECONNECTING";
+        }
+        return new JSONObject();
+    }
+
+    private static void updateStreamingState(long nowSec, long nowMs) {
         if ("STREAMING".equals(LocalApiState.state)) {
             long idleMs = LocalApiState.lastFlowAtMs > 0L ? (nowMs - LocalApiState.lastFlowAtMs) : Long.MAX_VALUE;
             if (idleMs > 2500L) {
@@ -314,65 +341,78 @@ public final class HostApiClient {
                 LocalApiState.state = "RECONNECTING";
             }
         }
+    }
 
-        if ("GET".equals(m) && ("/status".equals(p) || "/health".equals(p))) {
-            JSONObject out = new JSONObject();
-            out.put("state", LocalApiState.state);
-            out.put("host_name", LocalApiState.hostName);
-            out.put("run_id", LocalApiState.runId);
-            out.put("last_error", LocalApiState.lastError);
-            out.put("uptime", Math.max(0L, nowSec - LocalApiState.startedAtSec));
-            out.put("ok", true);
-            if ("/health".equals(p)) {
-                out.put("service", "android-local-api");
-                out.put("stream_process_alive", false);
-            }
-            return out;
+    private static JSONObject buildStatusOrHealthResponse(String p, long nowSec) throws JSONException {
+        JSONObject out = new JSONObject();
+        out.put("state", LocalApiState.state);
+        out.put("host_name", LocalApiState.hostName);
+        out.put("run_id", LocalApiState.runId);
+        out.put("last_error", LocalApiState.lastError);
+        out.put("uptime", Math.max(0L, nowSec - LocalApiState.startedAtSec));
+        out.put("ok", true);
+        if (HEALTH_PATH.equals(p)) {
+            out.put("service", "android-local-api");
+            out.put("stream_process_alive", false);
         }
+        return out;
+    }
 
-        if ("GET".equals(m) && "/metrics".equals(p)) {
-            JSONObject metrics = new JSONObject();
-            metrics.put("frame_in", 0);
-            metrics.put("frame_out", 0);
-            metrics.put("drops", 0);
-            metrics.put("reconnects", 0);
-            metrics.put("bitrate_actual_bps", LocalApiState.latestRecvBps);
-            long streamUptimeSec = 0L;
-            if ("STREAMING".equals(LocalApiState.state)
-                    && LocalApiState.firstFlowAtSec > 0L
-                    && nowSec >= LocalApiState.firstFlowAtSec) {
-                streamUptimeSec = nowSec - LocalApiState.firstFlowAtSec;
-            }
-            metrics.put("stream_uptime_sec", streamUptimeSec);
+    private static JSONObject buildMetricsResponse(long nowSec) throws JSONException {
+        JSONObject metrics = new JSONObject();
+        metrics.put("frame_in", 0);
+        metrics.put("frame_out", 0);
+        metrics.put("drops", 0);
+        metrics.put("reconnects", 0);
+        metrics.put("bitrate_actual_bps", LocalApiState.latestRecvBps);
 
-            JSONObject kpi = new JSONObject();
-            kpi.put("target_fps", 0.0);
-            kpi.put("present_fps", LocalApiState.latestPresentFps);
-            kpi.put("frametime_ms_p95", 0.0);
-            kpi.put("decode_time_ms_p95", 0.0);
-            kpi.put("render_time_ms_p95", 0.0);
-            kpi.put("e2e_latency_ms_p95", 0.0);
-            metrics.put("kpi", kpi);
-
-            JSONObject latestClient = new JSONObject();
-            latestClient.put("transport_queue_depth", 0);
-            latestClient.put("decode_queue_depth", 0);
-            latestClient.put("render_queue_depth", 0);
-            metrics.put("latest_client_metrics", latestClient);
-
-            JSONObject queueLimits = new JSONObject();
-            queueLimits.put("transport_queue_max", 3);
-            queueLimits.put("decode_queue_max", 2);
-            queueLimits.put("render_queue_max", 1);
-            metrics.put("queue_limits", queueLimits);
-
-            JSONObject out = new JSONObject();
-            out.put("metrics", metrics);
-            out.put("ok", true);
-            return out;
+        long streamUptimeSec = 0L;
+        if ("STREAMING".equals(LocalApiState.state)
+                && LocalApiState.firstFlowAtSec > 0L
+                && nowSec >= LocalApiState.firstFlowAtSec) {
+            streamUptimeSec = nowSec - LocalApiState.firstFlowAtSec;
         }
+        metrics.put("stream_uptime_sec", streamUptimeSec);
 
-        return new JSONObject();
+        JSONObject kpi = new JSONObject();
+        kpi.put("target_fps", 0.0);
+        kpi.put("present_fps", LocalApiState.latestPresentFps);
+        kpi.put("frametime_ms_p95", 0.0);
+        kpi.put("decode_time_ms_p95", 0.0);
+        kpi.put("render_time_ms_p95", 0.0);
+        kpi.put("e2e_latency_ms_p95", 0.0);
+        metrics.put("kpi", kpi);
+
+        JSONObject latestClient = new JSONObject();
+        latestClient.put("transport_queue_depth", 0);
+        latestClient.put("decode_queue_depth", 0);
+        latestClient.put("render_queue_depth", 0);
+        metrics.put("latest_client_metrics", latestClient);
+
+        JSONObject queueLimits = new JSONObject();
+        queueLimits.put("transport_queue_max", 3);
+        queueLimits.put("decode_queue_max", 2);
+        queueLimits.put("render_queue_max", 1);
+        metrics.put("queue_limits", queueLimits);
+
+        JSONObject out = new JSONObject();
+        out.put("metrics", metrics);
+        out.put("ok", true);
+        return out;
+    }
+
+    private static void resetLocalApiState(long nowSec) {
+        LocalApiState.startedAtSec = nowSec;
+        resetLocalApiMetrics();
+    }
+
+    private static void resetLocalApiMetrics() {
+        LocalApiState.lastClientMetricAtMs = 0L;
+        LocalApiState.lastFlowAtMs = 0L;
+        LocalApiState.firstFlowAtSec = 0L;
+        LocalApiState.latestRecvFps = 0.0;
+        LocalApiState.latestPresentFps = 0.0;
+        LocalApiState.latestRecvBps = 0L;
     }
 
     private static final class LocalApiState {
