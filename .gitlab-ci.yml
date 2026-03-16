@@ -41,6 +41,7 @@ quality_gates:
 sonar_scan_push_master:
   stage: quality
   image: sonarsource/sonar-scanner-cli:latest
+  before_script: []
   variables:
     GIT_DEPTH: "0"
   script:
