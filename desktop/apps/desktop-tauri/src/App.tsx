@@ -308,6 +308,43 @@ export default function App() {
     setConnectDialogBlockReason("");
   }
 
+  async function resolveBackendMode(
+    device: DeviceBasic,
+    waylandHost: boolean,
+  ): Promise<"virtual_monitor" | "virtual_mirror" | "duplicate" | null> {
+    if (waylandHost) {
+      return waylandExperimentalDuplication() ? "virtual_mirror" : "virtual_monitor";
+    }
+    const chosenMode = connectDialogMode();
+    if (chosenMode === "virtual_monitor") {
+      const doctor = connectDialogDoctor() ?? await api.getVirtualDoctor(device);
+      if (!isVirtualMonitorAvailable(doctor)) {
+        session.setError(
+          "Virtual monitor mode is unavailable in current host session. Use Duplicate mode."
+        );
+        return null;
+      }
+      return "virtual_monitor";
+    }
+    saveDisplayMode(device.serial, chosenMode);
+    return "duplicate";
+  }
+
+  function resolveEncoderMode(
+    selectedProfile: TrainedProfile | null,
+    encoderValue: ConnectEncoderMode | "",
+  ): ConnectEncoderMode | undefined {
+    if (selectedProfile) return undefined;
+    return encoderValue !== "" ? (encoderValue as ConnectEncoderMode) : undefined;
+  }
+
+  function resolveCaptureBackend(): import("./types").CaptureBackend | undefined {
+    const captureBackend = connectDialogCaptureBackend();
+    return captureBackend !== "" && captureBackend !== "auto"
+      ? (captureBackend as import("./types").CaptureBackend)
+      : undefined;
+  }
+
   async function confirmConnect(): Promise<void> {
     const device = connectDialogDevice();
     if (!device) return;
@@ -319,41 +356,18 @@ export default function App() {
       return;
     }
     try {
-      let backendMode: "virtual_monitor" | "virtual_mirror" | "duplicate" = "duplicate";
-      if (waylandHost) {
-        backendMode = waylandExperimentalDuplication() ? "virtual_mirror" : "virtual_monitor";
-      } else {
-        const chosenMode = connectDialogMode();
-        if (chosenMode === "virtual_monitor") {
-          const doctor = connectDialogDoctor() ?? await api.getVirtualDoctor(device);
-          if (!isVirtualMonitorAvailable(doctor)) {
-            session.setError(
-              "Virtual monitor mode is unavailable in current host session. Use Duplicate mode."
-            );
-            return;
-          }
-          backendMode = "virtual_monitor";
-        }
-        saveDisplayMode(device.serial, chosenMode);
-      }
+      const backendMode = await resolveBackendMode(device, waylandHost);
+      if (!backendMode) return;
 
       const resolvedSize = resolveSessionSizeForPreset(device, connectDialogResolutionPresetId());
       const encoderValue = connectDialogEncoderMode();
       const profilesForEncoder = trainedProfiles().filter((p) => p.encoder === encoderValue);
       const selectedProfile = profilesForEncoder.find((p) => p.key === connectDialogProfileKey()) ?? null;
-      const resolvedEncoder: ConnectEncoderMode | undefined = selectedProfile
-        ? undefined
-        : encoderValue !== ""
-          ? (encoderValue as ConnectEncoderMode)
-          : undefined;
-      const captureBackend = connectDialogCaptureBackend();
       const connectConfig: ConnectSessionConfig = {
         profileName: selectedProfile?.key,
-        encoder: resolvedEncoder,
+        encoder: resolveEncoderMode(selectedProfile, encoderValue),
         size: resolvedSize,
-        captureBackend: captureBackend !== "" && captureBackend !== "auto"
-          ? (captureBackend as import("./types").CaptureBackend)
-          : undefined,
+        captureBackend: resolveCaptureBackend(),
       };
 
       closeConnectDialog();
@@ -610,6 +624,8 @@ export default function App() {
                     const disconnectDisabled = disconnectReason.length > 0;
                     const connectBusy = isDeviceActionBusy(device, "connect");
                     const disconnectBusy = isDeviceActionBusy(device, "disconnect");
+                    const connectTitle = connectBusy ? "Connecting..." : (connectDisabled ? `Connect blocked: ${connectReason}` : "Start stream for this device");
+                    const disconnectTitle = disconnectBusy ? "Disconnecting..." : (disconnectDisabled ? disconnectReason : "Stop stream for this device");
                     return (
                       <>
                   <button
@@ -622,7 +638,7 @@ export default function App() {
                   </button>
                   <button
                     class="device-btn"
-                    title={connectBusy ? "Connecting..." : (connectDisabled ? `Connect blocked: ${connectReason}` : "Start stream for this device")}
+                    title={connectTitle}
                     disabled={connectBusy || connectDisabled}
                     onClick={() => openConnectDialog(device)}
                   >
@@ -633,7 +649,7 @@ export default function App() {
                   </button>
                   <button
                     class="device-btn"
-                    title={disconnectBusy ? "Disconnecting..." : (disconnectDisabled ? disconnectReason : "Stop stream for this device")}
+                    title={disconnectTitle}
                     disabled={disconnectDisabled}
                     onClick={() => session.disconnectDevice(device)}
                   >
@@ -713,11 +729,15 @@ export default function App() {
               service: {session.service().active ? "running" : session.service().installed ? "stopped" : "not installed"}
             </span>
             <span class="service-status-hint">
-              {session.service().active
-                ? "Service active: device probing enabled."
-                : session.service().installed
-                  ? "Service installed but stopped. Click Start."
-                  : "Install + Start service to enable probing and streaming."}
+              {(() => {
+                if (session.service().active) {
+                  return "Service active: device probing enabled.";
+                } else if (session.service().installed) {
+                  return "Service installed but stopped. Click Start.";
+                } else {
+                  return "Install + Start service to enable probing and streaming.";
+                }
+              })()}
             </span>
           </div>
           <span>{session.devices().length} devices ({session.tabletCount()} tablet, {session.phoneCount()} phone)</span>
@@ -842,6 +862,7 @@ export default function App() {
                     <span>Profile</span>
                     <select
                       value={connectDialogProfileKey()}
+                      aria-label="Profile"
                       disabled={!codecChosen() || !concreteBackendChosen()}
                       onChange={(event) => setConnectDialogProfileKey(event.currentTarget.value)}
                     >
@@ -855,15 +876,16 @@ export default function App() {
                       </For>
                     </select>
                     <small>
-                      {selectedProfile()
-                        ? `${selectedProfile()!.fps}fps ${selectedProfile()!.bitrateKbps}kbps — ${selectedProfile()!.objective}, ${selectedProfile()!.workload}`
-                        : !backendChosen()
-                          ? "Choose backend first"
-                          : !concreteBackendChosen()
-                            ? "Select a specific backend (not Auto) to use profiles"
-                            : !codecChosen()
-                              ? "Choose codec first"
-                              : "Optional: use manual settings without a profile"}
+                      {(() => {
+                        if (selectedProfile()) {
+                          const p = selectedProfile()!;
+                          return `${p.fps}fps ${p.bitrateKbps}kbps — ${p.objective}, ${p.workload}`;
+                        }
+                        if (!backendChosen()) return "Choose backend first";
+                        if (!concreteBackendChosen()) return "Select a specific backend (not Auto) to use profiles";
+                        if (!codecChosen()) return "Choose codec first";
+                        return "Optional: use manual settings without a profile";
+                      })()}
                     </small>
                   </label>
 
