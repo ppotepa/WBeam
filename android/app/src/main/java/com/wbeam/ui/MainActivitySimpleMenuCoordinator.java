@@ -8,9 +8,33 @@ import android.widget.Spinner;
 
 public final class MainActivitySimpleMenuCoordinator {
     public static final class State {
-        public boolean visible;
-        public String mode;
-        public int fps;
+        private boolean visible;
+        private String mode;
+        private int fps;
+
+        public boolean isVisible() {
+            return visible;
+        }
+
+        public void setVisible(boolean visible) {
+            this.visible = visible;
+        }
+
+        public String getMode() {
+            return mode;
+        }
+
+        public void setMode(String mode) {
+            this.mode = mode;
+        }
+
+        public int getFps() {
+            return fps;
+        }
+
+        public void setFps(int fps) {
+            this.fps = fps;
+        }
     }
 
     private MainActivitySimpleMenuCoordinator() {
@@ -22,7 +46,7 @@ public final class MainActivitySimpleMenuCoordinator {
             Runnable refreshButtons,
             Runnable scheduleAutoHide
     ) {
-        state.fps = MainActivitySettingsPresenter.simpleMenuFpsFromSelection(selectedFps);
+        state.setFps(MainActivitySettingsPresenter.simpleMenuFpsFromSelection(selectedFps));
         refreshButtons.run();
         scheduleAutoHide.run();
     }
@@ -39,12 +63,12 @@ public final class MainActivitySimpleMenuCoordinator {
         if (simpleMenuPanel == null) {
             return;
         }
-        state.mode = MainActivitySettingsPresenter.simpleMenuModeFromSelection(
+        state.setMode(MainActivitySettingsPresenter.simpleMenuModeFromSelection(
                 selectedEncoder,
                 preferredVideo
-        );
-        state.fps = MainActivitySettingsPresenter.simpleMenuFpsFromSelection(selectedFps);
-        state.visible = true;
+        ));
+        state.setFps(MainActivitySettingsPresenter.simpleMenuFpsFromSelection(selectedFps));
+        state.setVisible(true);
         refreshButtons.run();
         simpleMenuPanel.setVisibility(View.VISIBLE);
         scheduleAutoHide.run();
@@ -59,7 +83,7 @@ public final class MainActivitySimpleMenuCoordinator {
         if (simpleMenuPanel == null) {
             return;
         }
-        state.visible = false;
+        state.setVisible(false);
         uiHandler.removeCallbacks(autoHideTask);
         simpleMenuPanel.setVisibility(View.GONE);
     }
@@ -75,7 +99,7 @@ public final class MainActivitySimpleMenuCoordinator {
             Runnable refreshButtons,
             Runnable scheduleAutoHide
     ) {
-        if (state.visible) {
+        if (state.isVisible()) {
             hide(simpleMenuPanel, uiHandler, autoHideTask, state);
             return;
         }

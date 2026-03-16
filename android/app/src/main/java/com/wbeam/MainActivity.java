@@ -1041,8 +1041,8 @@ public class MainActivity extends AppCompatActivity {
                 fpsSeek,
                 ENCODER_OPTIONS,
                 PREFERRED_VIDEO,
-                simpleMenuState.mode,
-                simpleMenuState.fps
+                simpleMenuState.getMode(),
+                simpleMenuState.getFps()
         );
         refreshSettingsUi(false);
     }
@@ -1053,14 +1053,14 @@ public class MainActivity extends AppCompatActivity {
                 simpleModeH265Button,
                 simpleModeRawButton,
                 PREFERRED_VIDEO,
-                simpleMenuState.mode,
+                simpleMenuState.getMode(),
                 simpleFps30Button,
                 simpleFps45Button,
                 simpleFps60Button,
                 simpleFps90Button,
                 simpleFps120Button,
                 simpleFps144Button,
-                simpleMenuState.fps
+                simpleMenuState.getFps()
         );
     }
 

@@ -258,7 +258,7 @@ public final class H264TcpPlayer {
 
     private void framedDecodeLoopPng(InputStream input, byte[] hdrBuf, byte[] payloadBuf, boolean isUltraMode) throws IOException {
         PlayerRuntimeState runtimeState = new PlayerRuntimeState();
-        new FramedPngLoop(
+        FramedPngLoop.Config config = new FramedPngLoop.Config(
                 TAG,
                 surface,
                 statusListener,
@@ -273,7 +273,8 @@ public final class H264TcpPlayer {
                 STATE_CONNECTING,
                 STATE_STREAMING,
                 frameBufferBudgetFrames
-        ).run(input, hdrBuf, payloadBuf, isUltraMode);
+        );
+        new FramedPngLoop(config).run(input, hdrBuf, payloadBuf, isUltraMode);
     }
 
     private final class PlayerRuntimeState implements

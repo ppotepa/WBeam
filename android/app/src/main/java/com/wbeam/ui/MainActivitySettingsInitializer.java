@@ -55,9 +55,9 @@ public final class MainActivitySettingsInitializer {
             cursorOverlayController.resetEnabledDefault();
         }
         hooks.enforceCursorOverlayPolicy(false);
-        simpleMenuState.mode = preferredVideo;
-        simpleMenuState.fps = defaultFps;
-        simpleMenuState.visible = false;
+        simpleMenuState.setMode(preferredVideo);
+        simpleMenuState.setFps(defaultFps);
+        simpleMenuState.setVisible(false);
         hooks.refreshSettingsUi(true);
     }
 }

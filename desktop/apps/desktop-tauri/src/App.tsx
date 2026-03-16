@@ -27,7 +27,7 @@ import { createSessionManager } from "./managers/sessionManager";
 import connectResolutionPresets from "./config/connect-resolution-presets.json";
 import connectEncoderOptions from "./config/connect-encoder-options.json";
 
-function BatteryIcon(props: { level: number | null; charging: boolean }) {
+function BatteryIcon(props: { readonly level: number | null; readonly charging: boolean }) {
   if (props.charging) return <BatteryCharging size={14} />;
   if (props.level === null) return <BatteryMedium size={14} />;
   if (props.level >= 80) return <BatteryFull size={14} />;
@@ -35,7 +35,7 @@ function BatteryIcon(props: { level: number | null; charging: boolean }) {
   return <BatteryLow size={14} />;
 }
 
-function DeviceTypeIcon(props: { type: string }) {
+function DeviceTypeIcon(props: { readonly type: string }) {
   return props.type === "Tablet" ? <Tablet size={16} /> : <Smartphone size={16} />;
 }
 
@@ -121,7 +121,8 @@ function saveWaylandExperimentalDuplication(enabled: boolean): void {
 }
 
 function parseResolutionDims(value: string): [number, number] | null {
-  const match = value.trim().match(/^(\d{3,5})x(\d{3,5})$/);
+  const regex = /^(\d{3,5})x(\d{3,5})$/;
+  const match = regex.exec(value.trim());
   if (!match) return null;
   const w = Number(match[1]);
   const h = Number(match[2]);
@@ -368,7 +369,7 @@ export default function App() {
 
   function stopVirtualInstallPolling(): void {
     if (virtualInstallPollTimer !== null) {
-      window.clearInterval(virtualInstallPollTimer);
+      globalThis.clearInterval(virtualInstallPollTimer);
       virtualInstallPollTimer = null;
     }
   }
@@ -427,7 +428,7 @@ export default function App() {
         }
       };
       await poll();
-      virtualInstallPollTimer = window.setInterval(() => {
+      virtualInstallPollTimer = globalThis.setInterval(() => {
         void poll();
       }, 600);
     } catch (err) {
@@ -463,7 +464,7 @@ export default function App() {
       // Non-blocking check; connect flow still performs per-device guard.
     }
 
-    const timer = window.setInterval(() => {
+    const timer = globalThis.setInterval(() => {
       if (session.deviceActionBusy().length > 0 || session.refreshInFlight()) return;
       void session.refreshSnapshot({ silent: true, forceDevices: true });
     }, 1200);
@@ -476,12 +477,12 @@ export default function App() {
     const onVisibilityChange = () => {
       if (!document.hidden) refreshVisible();
     };
-    window.addEventListener("focus", onFocus);
+    globalThis.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisibilityChange);
 
     onCleanup(() => {
-      window.clearInterval(timer);
-      window.removeEventListener("focus", onFocus);
+      globalThis.clearInterval(timer);
+      globalThis.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibilityChange);
       stopVirtualInstallPolling();
     });
@@ -796,6 +797,7 @@ export default function App() {
                     <span>Capture backend</span>
                     <select
                       value={connectDialogCaptureBackend()}
+                      aria-label="Capture backend"
                       onChange={(event) => {
                         setConnectDialogCaptureBackend(event.currentTarget.value as import("./types").CaptureBackend | "");
                         setConnectDialogEncoderMode("");
@@ -819,6 +821,7 @@ export default function App() {
                     <span>Codec</span>
                     <select
                       value={connectDialogEncoderMode()}
+                      aria-label="Codec"
                       disabled={!backendChosen()}
                       onChange={(event) => {
                         setConnectDialogEncoderMode(event.currentTarget.value as ConnectEncoderMode | "");
