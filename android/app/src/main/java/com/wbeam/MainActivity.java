@@ -92,13 +92,9 @@ public class MainActivity extends AppCompatActivity {
     private static final String STATE_ERROR = "error";
 
     private static final long HUD_ADB_LOG_INTERVAL_MS = 1000;
-    private static final long LIVE_TEST_START_TIMEOUT_MS = 12000;
     private static final int TRANSPORT_QUEUE_MAX_FRAMES = 3;
     private static final int DECODE_QUEUE_MAX_FRAMES = 2;
     private static final int RENDER_QUEUE_MAX_FRAMES = 1;
-    private static final int BANDWIDTH_TEST_MB = 64;
-    private static final String TEST_VIDEO_URL =
-            "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4";
 
     private static final String[] PROFILE_OPTIONS = {
             "default"
@@ -173,7 +169,6 @@ public class MainActivity extends AppCompatActivity {
     private Button settingsButton;
     private Button logButton;
     private Button settingsCloseButton;
-    private Button applySettingsButton;
     private Button quickStartButton;
     private Button quickStopButton;
     private Button quickTestButton;
@@ -203,7 +198,6 @@ public class MainActivity extends AppCompatActivity {
     private final MainActivityInteractionPolicy.ToggleState debugToggleState =
             new MainActivityInteractionPolicy.ToggleState();
     private final HudDebugLogLimiter hudDebugLogLimiter = new HudDebugLogLimiter(HUD_ADB_LOG_INTERVAL_MS);
-    private boolean hwAvcDecodeAvailable = false;
     private final MainStatusState statusState =
             new MainStatusState(STATE_IDLE, "tap Settings -> Start Live");
     private final HudOverlayDisplay.State hudOverlayState = new HudOverlayDisplay.State();
@@ -283,7 +277,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void initializeUiBindings() {
-        hwAvcDecodeAvailable = MainInitializationCoordinator.initializeUiBindings(
+        MainInitializationCoordinator.initializeUiBindings(
                 TAG,
                 this,
                 startupBuildVersionText,
@@ -560,7 +554,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public void onBackPressed() {
         if (MainActivityInteractionPolicy.handleBackNavigation(
-                simpleMenuState.visible,
+                simpleMenuState.isVisible(),
                 settingsPanelController != null && settingsPanelController.isVisible(),
                 this::hideSimpleMenu,
                 this::hideSettingsPanel
@@ -670,7 +664,6 @@ public class MainActivity extends AppCompatActivity {
         settingsButton = controlViews.settingsButton;
         logButton = controlViews.logButton;
         settingsCloseButton = controlViews.settingsCloseButton;
-        applySettingsButton = controlViews.applySettingsButton;
         quickStartButton = controlViews.quickStartButton;
         quickStopButton = controlViews.quickStopButton;
         quickTestButton = controlViews.quickTestButton;
@@ -761,7 +754,7 @@ public class MainActivity extends AppCompatActivity {
                 simpleModeRawButton,
                 PREFERRED_VIDEO,
                 mode -> {
-                    simpleMenuState.mode = mode;
+                    simpleMenuState.setMode(mode);
                     refreshSimpleMenuButtons();
                     scheduleSimpleMenuAutoHide();
                 },
@@ -1037,7 +1030,7 @@ public class MainActivity extends AppCompatActivity {
                 simpleMenuPanel,
                 uiHandler,
                 simpleMenuAutoHideTask,
-                simpleMenuState.visible,
+                simpleMenuState.isVisible(),
                 SIMPLE_MENU_AUTO_HIDE_MS
         );
     }
