@@ -967,7 +967,7 @@ def main():
                 except FileNotFoundError:
                     return True
                 except Exception as exc:
-                    print(f"[warn] failed to read overlay text {overlay_file}: {exc}", file=sys.stderr)
+                    sys.stderr.write(f"[warn] failed to read overlay text {overlay_file}: {exc}\n")
                     return True
 
                 sections = _parse_overlay_sections(text)
@@ -985,7 +985,7 @@ def main():
                             elem.set_property("text", plain_text)
                         overlay_state[key] = new_text
                     except Exception as exc:
-                        print(f"[warn] failed to set overlay text ({key}): {exc}", file=sys.stderr)
+                        sys.stderr.write(f"[warn] failed to set overlay text ({key}): {exc}\n")
                 return True
 
             _refresh_overlay_text()
