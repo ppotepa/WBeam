@@ -19,6 +19,14 @@ import android.widget.Spinner;
 import androidx.appcompat.app.AppCompatActivity;
 
 public final class MainActivityUiBinder {
+    private static final int SPINNER_DROPDOWN_LAYOUT = android.R.layout.simple_spinner_dropdown_item;
+    private static final String PREFERRED_VIDEO_H264 = "h264";
+    private static final String PREFERRED_VIDEO_H265 = "H.265";
+    private static final String PREFERRED_VIDEO_H264_LABEL = "H.264";
+    private static final String RAW_PNG_MODE = "raw-png";
+    private static final String LOG_ON = "Log ON";
+    private static final String LOG_OFF = "Log";
+
     public interface SimpleModeCallbacks {
         void onSimpleModeSelected(String mode);
     }
@@ -74,11 +82,11 @@ public final class MainActivityUiBinder {
             return;
         }
         profileSpinner.setAdapter(new ArrayAdapter<>(
-                activity, android.R.layout.simple_spinner_dropdown_item, profileOptions));
+                activity, SPINNER_DROPDOWN_LAYOUT, profileOptions));
         encoderSpinner.setAdapter(new ArrayAdapter<>(
-                activity, android.R.layout.simple_spinner_dropdown_item, encoderOptions));
+                activity, SPINNER_DROPDOWN_LAYOUT, encoderOptions));
         cursorSpinner.setAdapter(new ArrayAdapter<>(
-                activity, android.R.layout.simple_spinner_dropdown_item, cursorOptions));
+                activity, SPINNER_DROPDOWN_LAYOUT, cursorOptions));
 
         encoderSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
@@ -184,9 +192,10 @@ public final class MainActivityUiBinder {
     public static void bindSimpleMenuTouchRefresh(View simpleMenuPanel, Runnable onRefreshAutoHide) {
         if (simpleMenuPanel != null) {
             simpleMenuPanel.setOnTouchListener((v, event) -> {
-                if (event.getActionMasked() == MotionEvent.ACTION_DOWN
-                        || event.getActionMasked() == MotionEvent.ACTION_MOVE
-                        || event.getActionMasked() == MotionEvent.ACTION_UP) {
+                int action = event.getActionMasked();
+                if (action == MotionEvent.ACTION_DOWN
+                        || action == MotionEvent.ACTION_MOVE
+                        || action == MotionEvent.ACTION_UP) {
                     onRefreshAutoHide.run();
                 }
                 return false;
@@ -223,11 +232,11 @@ public final class MainActivityUiBinder {
             SimpleModeCallbacks callbacks
     ) {
         if (simpleModePreferredButton != null) {
-            simpleModePreferredButton.setText("h264".equals(preferredVideo) ? "H.264" : "H.265");
+            simpleModePreferredButton.setText(PREFERRED_VIDEO_H264.equals(preferredVideo) ? PREFERRED_VIDEO_H264_LABEL : PREFERRED_VIDEO_H265);
             simpleModePreferredButton.setOnClickListener(v -> callbacks.onSimpleModeSelected(preferredVideo));
         }
         if (simpleModeRawButton != null) {
-            simpleModeRawButton.setOnClickListener(v -> callbacks.onSimpleModeSelected("raw-png"));
+            simpleModeRawButton.setOnClickListener(v -> callbacks.onSimpleModeSelected(RAW_PNG_MODE));
         }
     }
 
@@ -240,12 +249,18 @@ public final class MainActivityUiBinder {
             Button simpleFps144Button,
             FpsSelectionCallbacks callbacks
     ) {
-        if (simpleFps30Button != null) simpleFps30Button.setOnClickListener(v -> callbacks.onFpsSelected(30));
-        if (simpleFps45Button != null) simpleFps45Button.setOnClickListener(v -> callbacks.onFpsSelected(45));
-        if (simpleFps60Button != null) simpleFps60Button.setOnClickListener(v -> callbacks.onFpsSelected(60));
-        if (simpleFps90Button != null) simpleFps90Button.setOnClickListener(v -> callbacks.onFpsSelected(90));
-        if (simpleFps120Button != null) simpleFps120Button.setOnClickListener(v -> callbacks.onFpsSelected(120));
-        if (simpleFps144Button != null) simpleFps144Button.setOnClickListener(v -> callbacks.onFpsSelected(144));
+        bindFpsButton(simpleFps30Button, 30, callbacks);
+        bindFpsButton(simpleFps45Button, 45, callbacks);
+        bindFpsButton(simpleFps60Button, 60, callbacks);
+        bindFpsButton(simpleFps90Button, 90, callbacks);
+        bindFpsButton(simpleFps120Button, 120, callbacks);
+        bindFpsButton(simpleFps144Button, 144, callbacks);
+    }
+
+    private static void bindFpsButton(Button button, int fps, FpsSelectionCallbacks callbacks) {
+        if (button != null) {
+            button.setOnClickListener(v -> callbacks.onFpsSelected(fps));
+        }
     }
 
     public static void bindSimpleApplyButton(Button simpleApplyButton, Runnable onApply) {
@@ -284,7 +299,7 @@ public final class MainActivityUiBinder {
             liveLogText.setVisibility(nextVisible ? View.VISIBLE : View.GONE);
         }
         if (logButton != null) {
-            logButton.setText(nextVisible ? "Log ON" : "Log");
+            logButton.setText(nextVisible ? LOG_ON : LOG_OFF);
         }
         return nextVisible;
     }
