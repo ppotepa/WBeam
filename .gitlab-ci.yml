@@ -53,7 +53,6 @@ sonar_scan_push_master:
       -Dsonar.token="${SONAR_TOKEN}"
       -Dsonar.projectKey="wbeam"
       -Dsonar.projectName="WBeam"
-      -Dsonar.branch.name="${CI_COMMIT_BRANCH}"
       -Dsonar.qualitygate.wait=false
   rules:
     - if: '$CI_COMMIT_BRANCH == "master"'
