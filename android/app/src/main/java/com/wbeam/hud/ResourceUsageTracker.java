@@ -11,6 +11,10 @@ import java.util.Locale;
  * - call {@link #buildRowsHtml()} to render current compact resource rows.
  */
 public final class ResourceUsageTracker {
+    private static final String STATE_RISK = "state-risk";
+    private static final String STATE_WARN = "state-warn";
+    private static final String STATE_OK = "state-ok";
+
     private long usageSampleLastRealtimeMs = 0L;
     private long usageSampleLastCpuMs = 0L;
     private double usageCpuPct = 0.0;
@@ -54,10 +58,10 @@ public final class ResourceUsageTracker {
     }
 
     public String buildRowsHtml() {
-        String cpuTone = usageCpuPct > 85.0 ? "state-risk" : (usageCpuPct > 65.0 ? "state-warn" : "state-ok");
+        String cpuTone = usageCpuPct > 85.0 ? STATE_RISK : (usageCpuPct > 65.0 ? STATE_WARN : STATE_OK);
         double memPct = usageMemSeries.latest(0.0);
-        String memTone = memPct > 88.0 ? "state-risk" : (memPct > 70.0 ? "state-warn" : "state-ok");
-        String gpuTone = usageGpuPct > 90.0 ? "state-risk" : (usageGpuPct > 70.0 ? "state-warn" : "state-ok");
+        String memTone = memPct > 88.0 ? STATE_RISK : (memPct > 70.0 ? STATE_WARN : STATE_OK);
+        String gpuTone = usageGpuPct > 90.0 ? STATE_RISK : (usageGpuPct > 70.0 ? STATE_WARN : STATE_OK);
 
         StringBuilder html = new StringBuilder();
         html.append("<div class='res-row'><span class='rk'>CPU</span><span class='rv ")
