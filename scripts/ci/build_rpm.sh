@@ -108,6 +108,8 @@ install -m 0644 README.md %{buildroot}/usr/share/doc/wbeam/README.md
 /usr/local/bin/wbeam-desktop-tauri
 /usr/local/bin/wbeam-desktop
 /usr/share/wbeam/wbeam
+/usr/share/wbeam/desktop-icon.png
+/usr/share/wbeam/wbeam.desktop
 /usr/share/wbeam/config/wbeam.conf
 /usr/share/wbeam/host/scripts
 /usr/share/wbeam/host/rust/scripts/install_systemd_user.sh
