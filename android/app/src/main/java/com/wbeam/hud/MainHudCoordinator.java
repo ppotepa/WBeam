@@ -42,52 +42,364 @@ public final class MainHudCoordinator {
     }
 
     public static final class Input {
-        public String logTag;
-        public MainHudState state;
-        public HudOverlayDisplay.State overlayState;
+        private String logTag;
+        private MainHudState state;
+        private HudOverlayDisplay.State overlayState;
 
-        public MetricSeriesBuffer runtimePresentSeries;
-        public MetricSeriesBuffer runtimeMbpsSeries;
-        public MetricSeriesBuffer runtimeDropSeries;
-        public MetricSeriesBuffer runtimeLatencySeries;
-        public MetricSeriesBuffer runtimeQueueSeries;
-        public ResourceUsageTracker resourceUsageTracker;
+        private MetricSeriesBuffer runtimePresentSeries;
+        private MetricSeriesBuffer runtimeMbpsSeries;
+        private MetricSeriesBuffer runtimeDropSeries;
+        private MetricSeriesBuffer runtimeLatencySeries;
+        private MetricSeriesBuffer runtimeQueueSeries;
+        private ResourceUsageTracker resourceUsageTracker;
 
-        public WebView perfHudWebView;
-        public TextView perfHudText;
-        public View perfHudPanel;
+        private WebView perfHudWebView;
+        private TextView perfHudText;
+        private View perfHudPanel;
 
-        public int transportQueueMaxFrames;
-        public int decodeQueueMaxFrames;
-        public int renderQueueMaxFrames;
-        public long presentFpsStaleGraceMs;
-        public long metricsStaleGraceMs;
-        public double fpsLowAnchor;
-        public int hudTextColorOffline;
-        public int hudTextColorLive;
-        public String appBuildRevision;
+        private int transportQueueMaxFrames;
+        private int decodeQueueMaxFrames;
+        private int renderQueueMaxFrames;
+        private long presentFpsStaleGraceMs;
+        private long metricsStaleGraceMs;
+        private double fpsLowAnchor;
+        private int hudTextColorOffline;
+        private int hudTextColorLive;
+        private String appBuildRevision;
 
-        public IntProvider selectedFpsProvider;
-        public StringProvider selectedProfileProvider;
-        public StringProvider selectedEncoderProvider;
-        public StreamSizeProvider streamSizeProvider;
+        private IntProvider selectedFpsProvider;
+        private StringProvider selectedProfileProvider;
+        private StringProvider selectedEncoderProvider;
+        private StreamSizeProvider streamSizeProvider;
 
-        public BoolProvider daemonReachableProvider;
-        public StringProvider daemonStateProvider;
-        public StringProvider daemonHostNameProvider;
-        public StringProvider daemonBuildRevisionProvider;
-        public StringProvider daemonLastErrorProvider;
-        public LongProvider daemonRunIdProvider;
-        public LongProvider daemonUptimeSecProvider;
-        public StringProvider daemonStateUiProvider;
+        private BoolProvider daemonReachableProvider;
+        private StringProvider daemonStateProvider;
+        private StringProvider daemonHostNameProvider;
+        private StringProvider daemonBuildRevisionProvider;
+        private StringProvider daemonLastErrorProvider;
+        private LongProvider daemonRunIdProvider;
+        private LongProvider daemonUptimeSecProvider;
+        private StringProvider daemonStateUiProvider;
 
-        public BoolProvider debugOverlayVisibleProvider;
-        public boolean buildDebug;
+        private BoolProvider debugOverlayVisibleProvider;
+        private boolean buildDebug;
 
-        public ToggleDebugOverlayHandler debugOverlayHandler;
-        public HudTextOnlyHandler hudTextOnlyHandler;
-        public RefreshHandler refreshDebugOverlayHandler;
-        public SnapshotLogHandler snapshotLogHandler;
+        private ToggleDebugOverlayHandler debugOverlayHandler;
+        private HudTextOnlyHandler hudTextOnlyHandler;
+        private RefreshHandler refreshDebugOverlayHandler;
+        private SnapshotLogHandler snapshotLogHandler;
+
+        public String getLogTag() {
+            return logTag;
+        }
+
+        public void setLogTag(String logTag) {
+            this.logTag = logTag;
+        }
+
+        public MainHudState getState() {
+            return state;
+        }
+
+        public void setState(MainHudState state) {
+            this.state = state;
+        }
+
+        public HudOverlayDisplay.State getOverlayState() {
+            return overlayState;
+        }
+
+        public void setOverlayState(HudOverlayDisplay.State overlayState) {
+            this.overlayState = overlayState;
+        }
+
+        public MetricSeriesBuffer getRuntimePresentSeries() {
+            return runtimePresentSeries;
+        }
+
+        public void setRuntimePresentSeries(MetricSeriesBuffer runtimePresentSeries) {
+            this.runtimePresentSeries = runtimePresentSeries;
+        }
+
+        public MetricSeriesBuffer getRuntimeMbpsSeries() {
+            return runtimeMbpsSeries;
+        }
+
+        public void setRuntimeMbpsSeries(MetricSeriesBuffer runtimeMbpsSeries) {
+            this.runtimeMbpsSeries = runtimeMbpsSeries;
+        }
+
+        public MetricSeriesBuffer getRuntimeDropSeries() {
+            return runtimeDropSeries;
+        }
+
+        public void setRuntimeDropSeries(MetricSeriesBuffer runtimeDropSeries) {
+            this.runtimeDropSeries = runtimeDropSeries;
+        }
+
+        public MetricSeriesBuffer getRuntimeLatencySeries() {
+            return runtimeLatencySeries;
+        }
+
+        public void setRuntimeLatencySeries(MetricSeriesBuffer runtimeLatencySeries) {
+            this.runtimeLatencySeries = runtimeLatencySeries;
+        }
+
+        public MetricSeriesBuffer getRuntimeQueueSeries() {
+            return runtimeQueueSeries;
+        }
+
+        public void setRuntimeQueueSeries(MetricSeriesBuffer runtimeQueueSeries) {
+            this.runtimeQueueSeries = runtimeQueueSeries;
+        }
+
+        public ResourceUsageTracker getResourceUsageTracker() {
+            return resourceUsageTracker;
+        }
+
+        public void setResourceUsageTracker(ResourceUsageTracker resourceUsageTracker) {
+            this.resourceUsageTracker = resourceUsageTracker;
+        }
+
+        public WebView getPerfHudWebView() {
+            return perfHudWebView;
+        }
+
+        public void setPerfHudWebView(WebView perfHudWebView) {
+            this.perfHudWebView = perfHudWebView;
+        }
+
+        public TextView getPerfHudText() {
+            return perfHudText;
+        }
+
+        public void setPerfHudText(TextView perfHudText) {
+            this.perfHudText = perfHudText;
+        }
+
+        public View getPerfHudPanel() {
+            return perfHudPanel;
+        }
+
+        public void setPerfHudPanel(View perfHudPanel) {
+            this.perfHudPanel = perfHudPanel;
+        }
+
+        public int getTransportQueueMaxFrames() {
+            return transportQueueMaxFrames;
+        }
+
+        public void setTransportQueueMaxFrames(int transportQueueMaxFrames) {
+            this.transportQueueMaxFrames = transportQueueMaxFrames;
+        }
+
+        public int getDecodeQueueMaxFrames() {
+            return decodeQueueMaxFrames;
+        }
+
+        public void setDecodeQueueMaxFrames(int decodeQueueMaxFrames) {
+            this.decodeQueueMaxFrames = decodeQueueMaxFrames;
+        }
+
+        public int getRenderQueueMaxFrames() {
+            return renderQueueMaxFrames;
+        }
+
+        public void setRenderQueueMaxFrames(int renderQueueMaxFrames) {
+            this.renderQueueMaxFrames = renderQueueMaxFrames;
+        }
+
+        public long getPresentFpsStaleGraceMs() {
+            return presentFpsStaleGraceMs;
+        }
+
+        public void setPresentFpsStaleGraceMs(long presentFpsStaleGraceMs) {
+            this.presentFpsStaleGraceMs = presentFpsStaleGraceMs;
+        }
+
+        public long getMetricsStaleGraceMs() {
+            return metricsStaleGraceMs;
+        }
+
+        public void setMetricsStaleGraceMs(long metricsStaleGraceMs) {
+            this.metricsStaleGraceMs = metricsStaleGraceMs;
+        }
+
+        public double getFpsLowAnchor() {
+            return fpsLowAnchor;
+        }
+
+        public void setFpsLowAnchor(double fpsLowAnchor) {
+            this.fpsLowAnchor = fpsLowAnchor;
+        }
+
+        public int getHudTextColorOffline() {
+            return hudTextColorOffline;
+        }
+
+        public void setHudTextColorOffline(int hudTextColorOffline) {
+            this.hudTextColorOffline = hudTextColorOffline;
+        }
+
+        public int getHudTextColorLive() {
+            return hudTextColorLive;
+        }
+
+        public void setHudTextColorLive(int hudTextColorLive) {
+            this.hudTextColorLive = hudTextColorLive;
+        }
+
+        public String getAppBuildRevision() {
+            return appBuildRevision;
+        }
+
+        public void setAppBuildRevision(String appBuildRevision) {
+            this.appBuildRevision = appBuildRevision;
+        }
+
+        public IntProvider getSelectedFpsProvider() {
+            return selectedFpsProvider;
+        }
+
+        public void setSelectedFpsProvider(IntProvider selectedFpsProvider) {
+            this.selectedFpsProvider = selectedFpsProvider;
+        }
+
+        public StringProvider getSelectedProfileProvider() {
+            return selectedProfileProvider;
+        }
+
+        public void setSelectedProfileProvider(StringProvider selectedProfileProvider) {
+            this.selectedProfileProvider = selectedProfileProvider;
+        }
+
+        public StringProvider getSelectedEncoderProvider() {
+            return selectedEncoderProvider;
+        }
+
+        public void setSelectedEncoderProvider(StringProvider selectedEncoderProvider) {
+            this.selectedEncoderProvider = selectedEncoderProvider;
+        }
+
+        public StreamSizeProvider getStreamSizeProvider() {
+            return streamSizeProvider;
+        }
+
+        public void setStreamSizeProvider(StreamSizeProvider streamSizeProvider) {
+            this.streamSizeProvider = streamSizeProvider;
+        }
+
+        public BoolProvider getDaemonReachableProvider() {
+            return daemonReachableProvider;
+        }
+
+        public void setDaemonReachableProvider(BoolProvider daemonReachableProvider) {
+            this.daemonReachableProvider = daemonReachableProvider;
+        }
+
+        public StringProvider getDaemonStateProvider() {
+            return daemonStateProvider;
+        }
+
+        public void setDaemonStateProvider(StringProvider daemonStateProvider) {
+            this.daemonStateProvider = daemonStateProvider;
+        }
+
+        public StringProvider getDaemonHostNameProvider() {
+            return daemonHostNameProvider;
+        }
+
+        public void setDaemonHostNameProvider(StringProvider daemonHostNameProvider) {
+            this.daemonHostNameProvider = daemonHostNameProvider;
+        }
+
+        public StringProvider getDaemonBuildRevisionProvider() {
+            return daemonBuildRevisionProvider;
+        }
+
+        public void setDaemonBuildRevisionProvider(StringProvider daemonBuildRevisionProvider) {
+            this.daemonBuildRevisionProvider = daemonBuildRevisionProvider;
+        }
+
+        public StringProvider getDaemonLastErrorProvider() {
+            return daemonLastErrorProvider;
+        }
+
+        public void setDaemonLastErrorProvider(StringProvider daemonLastErrorProvider) {
+            this.daemonLastErrorProvider = daemonLastErrorProvider;
+        }
+
+        public LongProvider getDaemonRunIdProvider() {
+            return daemonRunIdProvider;
+        }
+
+        public void setDaemonRunIdProvider(LongProvider daemonRunIdProvider) {
+            this.daemonRunIdProvider = daemonRunIdProvider;
+        }
+
+        public LongProvider getDaemonUptimeSecProvider() {
+            return daemonUptimeSecProvider;
+        }
+
+        public void setDaemonUptimeSecProvider(LongProvider daemonUptimeSecProvider) {
+            this.daemonUptimeSecProvider = daemonUptimeSecProvider;
+        }
+
+        public StringProvider getDaemonStateUiProvider() {
+            return daemonStateUiProvider;
+        }
+
+        public void setDaemonStateUiProvider(StringProvider daemonStateUiProvider) {
+            this.daemonStateUiProvider = daemonStateUiProvider;
+        }
+
+        public BoolProvider getDebugOverlayVisibleProvider() {
+            return debugOverlayVisibleProvider;
+        }
+
+        public void setDebugOverlayVisibleProvider(BoolProvider debugOverlayVisibleProvider) {
+            this.debugOverlayVisibleProvider = debugOverlayVisibleProvider;
+        }
+
+        public boolean isBuildDebug() {
+            return buildDebug;
+        }
+
+        public void setBuildDebug(boolean buildDebug) {
+            this.buildDebug = buildDebug;
+        }
+
+        public ToggleDebugOverlayHandler getDebugOverlayHandler() {
+            return debugOverlayHandler;
+        }
+
+        public void setDebugOverlayHandler(ToggleDebugOverlayHandler debugOverlayHandler) {
+            this.debugOverlayHandler = debugOverlayHandler;
+        }
+
+        public HudTextOnlyHandler getHudTextOnlyHandler() {
+            return hudTextOnlyHandler;
+        }
+
+        public void setHudTextOnlyHandler(HudTextOnlyHandler hudTextOnlyHandler) {
+            this.hudTextOnlyHandler = hudTextOnlyHandler;
+        }
+
+        public RefreshHandler getRefreshDebugOverlayHandler() {
+            return refreshDebugOverlayHandler;
+        }
+
+        public void setRefreshDebugOverlayHandler(RefreshHandler refreshDebugOverlayHandler) {
+            this.refreshDebugOverlayHandler = refreshDebugOverlayHandler;
+        }
+
+        public SnapshotLogHandler getSnapshotLogHandler() {
+            return snapshotLogHandler;
+        }
+
+        public void setSnapshotLogHandler(SnapshotLogHandler snapshotLogHandler) {
+            this.snapshotLogHandler = snapshotLogHandler;
+        }
     }
 
     public interface LongProvider {
@@ -98,54 +410,54 @@ public final class MainHudCoordinator {
     }
 
     public static void updateUnavailable(Input input) {
-        if (input.perfHudText == null) {
+        if (input.getPerfHudText() == null) {
             return;
         }
         RuntimeHudAvailabilityCoordinator.applyUnavailable(
-                input.selectedFpsProvider.get(),
-                input.hudTextColorOffline,
+                input.getSelectedFpsProvider().get(),
+                input.getHudTextColorOffline(),
                 RuntimeHudAvailabilityHooksFactory.create(
                         (targetFps, presentFps, uptimeSec, frameOutHost) -> {
-                            input.state.latestTargetFps = targetFps;
-                            input.state.latestPresentFps = presentFps;
-                            input.state.latestStreamUptimeSec = uptimeSec;
-                            input.state.latestFrameOutHost = frameOutHost;
+                            input.getState().latestTargetFps = targetFps;
+                            input.getState().latestPresentFps = presentFps;
+                            input.getState().latestStreamUptimeSec = uptimeSec;
+                            input.getState().latestFrameOutHost = frameOutHost;
                         },
-                        line -> input.state.compactLine = line,
-                        input.hudTextOnlyHandler::show,
+                        line -> input.getState().compactLine = line,
+                        input.getHudTextOnlyHandler()::show,
                         alpha -> {
-                            if (input.perfHudPanel != null) {
-                                input.perfHudPanel.setAlpha(alpha);
+                            if (input.getPerfHudPanel() != null) {
+                                input.getPerfHudPanel().setAlpha(alpha);
                             }
                         },
-                        input.refreshDebugOverlayHandler::refresh,
-                        input.snapshotLogHandler::onSnapshot
+                        input.getRefreshDebugOverlayHandler()::refresh,
+                        input.getSnapshotLogHandler()::onSnapshot
                 )
         );
     }
 
     public static void update(Input input, JSONObject metrics) {
-        if (input.perfHudText == null) {
+        if (input.getPerfHudText() == null) {
             return;
         }
         long nowMs = SystemClock.elapsedRealtime();
         if (handleMissingMetrics(input, metrics, nowMs)) {
             return;
         }
-        input.state.lastPerfMetricsAtMs = nowMs;
-        input.overlayState.mode = "runtime";
+        input.getState().lastPerfMetricsAtMs = nowMs;
+        input.getOverlayState().mode = "runtime";
         updateRuntimeHud(input, metrics, nowMs);
     }
 
     private static boolean handleMissingMetrics(Input input, JSONObject metrics, long nowMs) {
         if (RuntimeHudAvailabilityCoordinator.shouldKeepLastMetrics(
                 metrics,
-                input.daemonReachableProvider.get(),
-                input.state.lastPerfMetricsAtMs,
+                input.getDaemonReachableProvider().get(),
+                input.getState().lastPerfMetricsAtMs,
                 nowMs,
-                input.metricsStaleGraceMs
+                input.getMetricsStaleGraceMs()
         )) {
-            input.snapshotLogHandler.onSnapshot("state=metrics_stale grace=1");
+            input.getSnapshotLogHandler().onSnapshot("state=metrics_stale grace=1");
             return true;
         }
         if (metrics != null) {
@@ -158,71 +470,71 @@ public final class MainHudCoordinator {
     private static void updateRuntimeHud(Input input, JSONObject metrics, long nowMs) {
         RuntimeHudStateCoordinator.Input stateInput = new RuntimeHudStateCoordinator.Input();
         stateInput.metrics = metrics;
-        stateInput.selectedFps = input.selectedFpsProvider.get();
-        stateInput.transportQueueMaxFrames = input.transportQueueMaxFrames;
-        stateInput.decodeQueueMaxFrames = input.decodeQueueMaxFrames;
-        stateInput.renderQueueMaxFrames = input.renderQueueMaxFrames;
+        stateInput.selectedFps = input.getSelectedFpsProvider().get();
+        stateInput.transportQueueMaxFrames = input.getTransportQueueMaxFrames();
+        stateInput.decodeQueueMaxFrames = input.getDecodeQueueMaxFrames();
+        stateInput.renderQueueMaxFrames = input.getRenderQueueMaxFrames();
         stateInput.nowMs = nowMs;
-        stateInput.stablePresentFps = input.state.latestStablePresentFps;
-        stateInput.stablePresentFpsAtMs = input.state.latestStablePresentFpsAtMs;
-        stateInput.presentFpsStaleGraceMs = input.presentFpsStaleGraceMs;
-        stateInput.dropPrevCount = input.state.runtimeDropPrevCount;
-        stateInput.dropPrevAtMs = input.state.runtimeDropPrevAtMs;
-        stateInput.daemonState = input.daemonStateProvider.get();
-        stateInput.latestStreamUptimeSec = input.state.latestStreamUptimeSec;
-        stateInput.latestFrameOutHost = input.state.latestFrameOutHost;
-        stateInput.daemonRunId = input.daemonRunIdProvider.get();
-        stateInput.daemonUptimeSec = input.daemonUptimeSecProvider.get();
-        stateInput.daemonLastError = input.daemonLastErrorProvider.get();
+        stateInput.stablePresentFps = input.getState().latestStablePresentFps;
+        stateInput.stablePresentFpsAtMs = input.getState().latestStablePresentFpsAtMs;
+        stateInput.presentFpsStaleGraceMs = input.getPresentFpsStaleGraceMs();
+        stateInput.dropPrevCount = input.getState().runtimeDropPrevCount;
+        stateInput.dropPrevAtMs = input.getState().runtimeDropPrevAtMs;
+        stateInput.daemonState = input.getDaemonStateProvider().get();
+        stateInput.latestStreamUptimeSec = input.getState().latestStreamUptimeSec;
+        stateInput.latestFrameOutHost = input.getState().latestFrameOutHost;
+        stateInput.daemonRunId = input.getDaemonRunIdProvider().get();
+        stateInput.daemonUptimeSec = input.getDaemonUptimeSecProvider().get();
+        stateInput.daemonLastError = input.getDaemonLastErrorProvider().get();
         RuntimeHudStateCoordinator.Output output = RuntimeHudStateCoordinator.compute(stateInput);
         RuntimeHudUpdateState state = output.state;
 
-        input.state.latestStablePresentFps = state.updatedStablePresentFps;
-        input.state.latestStablePresentFpsAtMs = state.updatedStablePresentFpsAtMs;
-        input.state.runtimeDropPrevCount = state.updatedDropPrevCount;
-        input.state.runtimeDropPrevAtMs = state.updatedDropPrevAtMs;
+        input.getState().latestStablePresentFps = state.updatedStablePresentFps;
+        input.getState().latestStablePresentFpsAtMs = state.updatedStablePresentFpsAtMs;
+        input.getState().runtimeDropPrevCount = state.updatedDropPrevCount;
+        input.getState().runtimeDropPrevAtMs = state.updatedDropPrevAtMs;
 
-        input.state.latestTargetFps = state.targetFps;
-        input.state.latestPresentFps = state.presentFps;
-        input.state.latestStreamUptimeSec = state.streamUptimeSec;
-        input.state.latestFrameOutHost = state.frameOutHost;
+        input.getState().latestTargetFps = state.targetFps;
+        input.getState().latestPresentFps = state.presentFps;
+        input.getState().latestStreamUptimeSec = state.streamUptimeSec;
+        input.getState().latestFrameOutHost = state.frameOutHost;
 
-        input.state.compactLine = output.compactLine;
-        input.refreshDebugOverlayHandler.refresh();
+        input.getState().compactLine = output.compactLine;
+        input.getRefreshDebugOverlayHandler().refresh();
 
         if (output.pressureLog != null) {
-            Log.w(input.logTag, output.pressureLog);
+            Log.w(input.getLogTag(), output.pressureLog);
         }
 
-        int[] streamSize = input.streamSizeProvider.get();
+        int[] streamSize = input.getStreamSizeProvider().get();
         RuntimeHudRenderCoordinator.Input renderInput = new RuntimeHudRenderCoordinator.Input();
-        renderInput.runtimePresentSeries = input.runtimePresentSeries;
-        renderInput.runtimeMbpsSeries = input.runtimeMbpsSeries;
-        renderInput.runtimeDropSeries = input.runtimeDropSeries;
-        renderInput.runtimeLatencySeries = input.runtimeLatencySeries;
-        renderInput.runtimeQueueSeries = input.runtimeQueueSeries;
+        renderInput.runtimePresentSeries = input.getRuntimePresentSeries();
+        renderInput.runtimeMbpsSeries = input.getRuntimeMbpsSeries();
+        renderInput.runtimeDropSeries = input.getRuntimeDropSeries();
+        renderInput.runtimeLatencySeries = input.getRuntimeLatencySeries();
+        renderInput.runtimeQueueSeries = input.getRuntimeQueueSeries();
         renderInput.state = state;
-        renderInput.fpsLowAnchor = input.fpsLowAnchor;
-        renderInput.daemonReachable = input.daemonReachableProvider.get();
-        renderInput.selectedProfile = input.selectedProfileProvider.get();
-        renderInput.selectedEncoder = input.selectedEncoderProvider.get();
+        renderInput.fpsLowAnchor = input.getFpsLowAnchor();
+        renderInput.daemonReachable = input.getDaemonReachableProvider().get();
+        renderInput.selectedProfile = input.getSelectedProfileProvider().get();
+        renderInput.selectedEncoder = input.getSelectedEncoderProvider().get();
         renderInput.streamWidth = streamSize[0];
         renderInput.streamHeight = streamSize[1];
-        renderInput.daemonHostName = input.daemonHostNameProvider.get();
+        renderInput.daemonHostName = input.getDaemonHostNameProvider().get();
         renderInput.daemonStateUi = output.daemonStateUi;
-        renderInput.daemonBuildRevision = input.daemonBuildRevisionProvider.get();
-        renderInput.appBuildRevision = input.appBuildRevision;
-        renderInput.daemonLastError = input.daemonLastErrorProvider.get();
+        renderInput.daemonBuildRevision = input.getDaemonBuildRevisionProvider().get();
+        renderInput.appBuildRevision = input.getAppBuildRevision();
+        renderInput.daemonLastError = input.getDaemonLastErrorProvider().get();
         renderInput.tuningActive = state.tuningActive;
         renderInput.tuningLine = state.tuningLine;
-        renderInput.resourceUsageTracker = input.resourceUsageTracker;
-        renderInput.perfHudWebView = input.perfHudWebView;
-        renderInput.perfHudText = input.perfHudText;
-        renderInput.perfHudPanel = input.perfHudPanel;
-        renderInput.hudOverlayState = input.overlayState;
-        renderInput.hudTextColorLive = input.hudTextColorLive;
+        renderInput.resourceUsageTracker = input.getResourceUsageTracker();
+        renderInput.perfHudWebView = input.getPerfHudWebView();
+        renderInput.perfHudText = input.getPerfHudText();
+        renderInput.perfHudPanel = input.getPerfHudPanel();
+        renderInput.hudOverlayState = input.getOverlayState();
+        renderInput.hudTextColorLive = input.getHudTextColorLive();
         RuntimeHudRenderCoordinator.render(renderInput);
 
-        input.snapshotLogHandler.onSnapshot(output.debugSnapshot);
+        input.getSnapshotLogHandler().onSnapshot(output.debugSnapshot);
     }
 }
