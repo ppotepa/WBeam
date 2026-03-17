@@ -345,6 +345,19 @@ fn normalize_profile_selector(value: Option<String>) -> Option<String> {
         .map(str::to_string)
 }
 
+fn normalize_runtime_profile(value: Option<String>) -> Option<String> {
+    let trimmed = value
+        .as_deref()
+        .map(str::trim)
+        .map(str::to_lowercase)
+        .filter(|v| !v.is_empty())?;
+    match trimmed.as_str() {
+        "adaptive" | "adaptive_auto" | "adaptive_locked_backend" => Some("adaptive".to_string()),
+        "default" | "baseline" => Some("default".to_string()),
+        _ => None,
+    }
+}
+
 // NOSONAR S3776 - Daemon action URL/body shaping needs explicit option handling
 fn normalize_display_mode_param(mode: &str) -> Option<&'static str> {
     match mode.trim().to_lowercase().as_str() {
@@ -705,6 +718,7 @@ fn device_connect(
     connect_encoder: Option<String>,
     connect_size: Option<String>,
     connect_profile_name: Option<String>,
+    connect_runtime_profile: Option<String>,
     connect_capture_backend: Option<String>,
 ) -> Result<String, String> {
     service_ready_for_device_actions()?;
@@ -725,27 +739,29 @@ fn device_connect(
     }
     let selected_profile = normalize_profile_selector(connect_profile_name);
     let mut start_patch = StartConfigPatch {
-        profile: None,
+        profile: normalize_runtime_profile(connect_runtime_profile),
         encoder: normalize_encoder_name(connect_encoder),
         size: normalize_size_name(connect_size),
         fps: None,
         bitrate_kbps: None,
         intra_only: None,
     };
-    if let Some(selector) = selected_profile.as_deref() {
-        let profile_backend = connect_capture_backend.as_deref().unwrap_or("wayland_portal");
-        let profile = find_trained_profile(selector, profile_backend)?
-            .ok_or_else(|| format!("trained profile not found: {selector}"))?;
-        start_patch.encoder = normalize_encoder_name(Some(profile.encoder.clone()));
-        if start_patch.encoder.is_none() {
-            return Err(format!(
-                "trained profile '{}' has unsupported encoder '{}'",
-                profile.name, profile.encoder
-            ));
+    if start_patch.profile.is_none() {
+        if let Some(selector) = selected_profile.as_deref() {
+            let profile_backend = connect_capture_backend.as_deref().unwrap_or("wayland_portal");
+            let profile = find_trained_profile(selector, profile_backend)?
+                .ok_or_else(|| format!("trained profile not found: {selector}"))?;
+            start_patch.encoder = normalize_encoder_name(Some(profile.encoder.clone()));
+            if start_patch.encoder.is_none() {
+                return Err(format!(
+                    "trained profile '{}' has unsupported encoder '{}'",
+                    profile.name, profile.encoder
+                ));
+            }
+            start_patch.fps = Some(profile.fps.max(1));
+            start_patch.bitrate_kbps = Some(profile.bitrate_kbps.max(100));
+            start_patch.intra_only = Some(profile.intra_only);
         }
-        start_patch.fps = Some(profile.fps.max(1));
-        start_patch.bitrate_kbps = Some(profile.bitrate_kbps.max(100));
-        start_patch.intra_only = Some(profile.intra_only);
     }
     let chosen_mode = display_mode.unwrap_or_else(|| "duplicate".to_string());
     let normalized_mode = chosen_mode.trim().to_lowercase();
@@ -754,12 +770,13 @@ fn device_connect(
         "device_connect",
         "begin",
         &format!(
-            "serial={} requested_port={} effective_port={} requested_mode={} profile={} encoder={} size={}",
+            "serial={} requested_port={} effective_port={} requested_mode={} profile={} runtime_profile={} encoder={} size={}",
             serial,
             stream_port,
             effective_stream_port,
             normalized_mode,
             selected_profile.as_deref().unwrap_or("-"),
+            start_patch.profile.as_deref().unwrap_or("-"),
             start_patch.encoder.as_deref().unwrap_or("-"),
             start_patch.size.as_deref().unwrap_or("-")
         ),
@@ -853,13 +870,16 @@ pub(crate) fn repo_root() -> PathBuf {
             return fs::canonicalize(&candidate).unwrap_or(candidate);
         }
     }
+    let dev_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../");
+    if dev_root.join("wbeam").exists() && dev_root.join("host").exists() {
+        return fs::canonicalize(&dev_root).unwrap_or(dev_root);
+    }
 
     let packaged_root = PathBuf::from("/usr/share/wbeam");
     if packaged_root.exists() {
         return packaged_root;
     }
 
-    let dev_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../");
     fs::canonicalize(&dev_root).unwrap_or(dev_root)
 }
 

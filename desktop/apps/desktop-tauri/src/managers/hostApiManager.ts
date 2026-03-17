@@ -100,6 +100,7 @@ export class HostApiManager {
           connectEncoder: connectConfig?.encoder,
           connectSize: connectConfig?.size,
           connectProfileName: connectConfig?.profileName,
+          connectRuntimeProfile: connectConfig?.runtimeProfile,
           connectCaptureBackend: connectConfig?.captureBackend,
         }),
         10000,

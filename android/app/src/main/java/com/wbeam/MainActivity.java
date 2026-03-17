@@ -100,7 +100,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String DEFAULT_PROFILE = "default";
     private static final String ADAPTIVE_PROFILE = "adaptive";
     private static final String DEFAULT_CURSOR_MODE = "embedded";
-    private static final String[] PROFILE_OPTIONS = {DEFAULT_PROFILE, ADAPTIVE_PROFILE};
+    private static final String[] PROFILE_OPTIONS = {ADAPTIVE_PROFILE, DEFAULT_PROFILE};
     /**
      * Preferred video encoder for this device.
      */

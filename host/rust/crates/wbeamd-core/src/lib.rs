@@ -45,6 +45,9 @@ const NO_PRESENT_MIN_RECV_FPS: f64 = 10.0;
 const NO_PRESENT_MAX_PRESENT_FPS: f64 = 1.0;
 const REVERSE_REFRESH_BACKSTOP: Duration = Duration::from_secs(120);
 const EFFECTIVE_RUNTIME_PREFIX: &str = "[wbeam-effective]";
+const INSTALLED_STREAMER_BIN: &str = "/usr/local/bin/wbeamd-streamer";
+const EVDI_FEATURE_MISSING_MARKER: &str =
+    "capture_backend=evdi requires wbeamd-streamer to be built with --features evdi";
 
 fn now_unix_ms() -> u128 {
     match SystemTime::now().duration_since(UNIX_EPOCH) {
@@ -152,6 +155,13 @@ fn contains_ascii_case_insensitive(haystack: &str, needle: &str) -> bool {
         .as_bytes()
         .windows(needle.len())
         .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
+}
+
+fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() {
+        return false;
+    }
+    haystack.windows(needle.len()).any(|window| window == needle)
 }
 
 fn user_wbeam_config_path() -> Option<PathBuf> {
@@ -1557,21 +1567,132 @@ impl DaemonCore {
         if !wbeam_setting_bool(&self.settings, "WBEAM_USE_RUST_STREAMER", true) {
             warn!("WBEAM_USE_RUST_STREAMER=false is no longer supported; using Rust streamer");
         }
+        let default_streamer_bin = self.root.join("host/rust/target/release/wbeamd-streamer");
+        let installed_streamer_bin = PathBuf::from(INSTALLED_STREAMER_BIN);
         let rust_streamer_bin = wbeam_setting(&self.settings, "WBEAM_RUST_STREAMER_BIN")
             .map(PathBuf::from)
-            .unwrap_or_else(|| self.root.join("host/rust/target/release/wbeamd-streamer"));
+            .unwrap_or_else(|| {
+                if default_streamer_bin.exists() {
+                    default_streamer_bin.clone()
+                } else if installed_streamer_bin.exists() {
+                    installed_streamer_bin.clone()
+                } else {
+                    default_streamer_bin.clone()
+                }
+            });
         if rust_streamer_bin.exists() {
             return Ok(rust_streamer_bin);
         }
 
         error!(
-            path = %rust_streamer_bin.display(),
-            "rust streamer binary not found – run `./devtool host build` to build it"
+            requested_path = %rust_streamer_bin.display(),
+            default_path = %default_streamer_bin.display(),
+            installed_path = %installed_streamer_bin.display(),
+            "rust streamer binary not found – run `./wbeam host build` to build it"
         );
         Err(CoreError::Spawn(format!(
-            "rust streamer binary not found: {} (run `./devtool host build`)",
-            rust_streamer_bin.display()
+            "rust streamer binary not found: {} (checked {} and {}; run `./wbeam host build`)",
+            rust_streamer_bin.display(),
+            default_streamer_bin.display(),
+            installed_streamer_bin.display()
         )))
+    }
+
+    fn streamer_binary_missing_evdi_feature(path: &Path) -> Result<bool, CoreError> {
+        let bytes = std::fs::read(path).map_err(|err| {
+            CoreError::Spawn(format!(
+                "failed to inspect streamer binary '{}': {err}",
+                path.display()
+            ))
+        })?;
+        Ok(contains_subslice(
+            &bytes,
+            EVDI_FEATURE_MISSING_MARKER.as_bytes(),
+        ))
+    }
+
+    fn summarize_command_output(output: &std::process::Output) -> String {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if !stderr.is_empty() {
+            return stderr;
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !stdout.is_empty() {
+            return stdout;
+        }
+        format!("exit status {:?}", output.status.code())
+    }
+
+    async fn rebuild_streamer_with_evdi_feature(&self, rust_streamer_bin: &Path) -> Result<(), CoreError> {
+        let manifest_path = self.root.join("host/rust/Cargo.toml");
+        if !manifest_path.exists() {
+            return Err(CoreError::Spawn(format!(
+                "capture_backend=evdi requested, but streamer '{}' lacks evdi support and manifest '{}' is missing for auto-rebuild",
+                rust_streamer_bin.display(),
+                manifest_path.display()
+            )));
+        }
+
+        info!(
+            streamer = %rust_streamer_bin.display(),
+            manifest = %manifest_path.display(),
+            "evdi backend requested with non-evdi streamer; rebuilding with evdi feature"
+        );
+        let output = Command::new("cargo")
+            .arg("build")
+            .arg("--release")
+            .arg("-p")
+            .arg("wbeamd-streamer")
+            .arg("--no-default-features")
+            .arg("--features")
+            .arg("evdi")
+            .arg("--manifest-path")
+            .arg(&manifest_path)
+            .output()
+            .await
+            .map_err(|err| {
+                CoreError::Spawn(format!(
+                    "failed to run cargo for evdi streamer rebuild: {err}"
+                ))
+            })?;
+        if !output.status.success() {
+            return Err(CoreError::Spawn(format!(
+                "failed to rebuild evdi-enabled streamer: {}",
+                Self::summarize_command_output(&output)
+            )));
+        }
+        Ok(())
+    }
+
+    async fn ensure_streamer_supports_capture_backend(
+        &self,
+        rust_streamer_bin: &Path,
+        capture_backend: &str,
+    ) -> Result<(), CoreError> {
+        if capture_backend != "evdi" {
+            return Ok(());
+        }
+        if !Self::streamer_binary_missing_evdi_feature(rust_streamer_bin)? {
+            return Ok(());
+        }
+
+        let default_streamer_bin = self.root.join("host/rust/target/release/wbeamd-streamer");
+        if rust_streamer_bin != default_streamer_bin {
+            return Err(CoreError::Spawn(format!(
+                "capture_backend=evdi requested, but streamer '{}' was built without evdi support. Rebuild that binary with `cargo build --release -p wbeamd-streamer --no-default-features --features evdi` or point WBEAM_RUST_STREAMER_BIN to an evdi-enabled binary.",
+                rust_streamer_bin.display()
+            )));
+        }
+
+        self.rebuild_streamer_with_evdi_feature(rust_streamer_bin)
+            .await?;
+        if Self::streamer_binary_missing_evdi_feature(rust_streamer_bin)? {
+            return Err(CoreError::Spawn(format!(
+                "capture_backend=evdi requested, but streamer '{}' still lacks evdi support after rebuild",
+                rust_streamer_bin.display()
+            )));
+        }
+        Ok(())
     }
 
     fn resolve_start_capture_backend(&self, capture_backend_override: Option<&str>) -> String {
@@ -1851,6 +1972,18 @@ impl DaemonCore {
         };
         let capture_backend =
             self.resolve_start_capture_backend(capture_backend_override.as_deref());
+        if let Err(err) = self
+            .ensure_streamer_supports_capture_backend(&rust_streamer_bin, &capture_backend)
+            .await
+        {
+            self.mark_start_failed(err.to_string()).await;
+            return Err(err);
+        }
+        info!(
+            streamer = %rust_streamer_bin.display(),
+            capture_backend,
+            "starting streamer process"
+        );
         let wayland_virtual_source =
             !benchmark_mode && capture_backend == "wayland_portal" && requested_mode.is_virtual();
         let activation = match self
@@ -2251,6 +2384,17 @@ mod tests {
             ActiveConfig::balanced_default(),
             presets,
         )
+    }
+
+    #[test]
+    fn contains_subslice_matches_expected_markers() {
+        assert!(contains_subslice(b"abcdef", b"cde"));
+        assert!(!contains_subslice(b"abcdef", b"xyz"));
+    }
+
+    #[test]
+    fn contains_subslice_rejects_empty_marker() {
+        assert!(!contains_subslice(b"abcdef", b""));
     }
 
     /// Client metrics indicating high decode pressure (decode_p95 > 12 ms).

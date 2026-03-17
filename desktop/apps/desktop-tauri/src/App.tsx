@@ -264,6 +264,7 @@ export default function App() {
   const [connectDialogMode, setConnectDialogMode] = createSignal<DisplayMode>("virtual_monitor");
   const [connectDialogResolutionPresetId, setConnectDialogResolutionPresetId] = createSignal<string>(RESOLUTION_PRESET_DEFAULT_ID);
   const [connectDialogEncoderMode, setConnectDialogEncoderMode] = createSignal<ConnectEncoderMode | "">("");
+  const [connectDialogAdaptive, setConnectDialogAdaptive] = createSignal(false);
   const [connectDialogProfileKey, setConnectDialogProfileKey] = createSignal<string>("");
   const [connectDialogCaptureBackend, setConnectDialogCaptureBackend] = createSignal<CaptureBackend | "">("");
   const [trainedProfiles, setTrainedProfiles] = createSignal<TrainedProfile[]>([]);
@@ -370,6 +371,7 @@ export default function App() {
     setConnectDialogMode(saved);
     setConnectDialogResolutionPresetId(RESOLUTION_PRESET_DEFAULT_ID);
     setConnectDialogEncoderMode("");
+    setConnectDialogAdaptive(false);
     setConnectDialogProfileKey("");
     setConnectDialogCaptureBackend("");
     void refreshTrainedProfiles();
@@ -451,11 +453,17 @@ function resolveEncoderMode(
       const backendMode = await resolveBackendMode(device, waylandHost);
       if (!backendMode) return;
 
-      const resolvedSize = resolveSessionSizeForPreset(device, connectDialogResolutionPresetId());
+      const adaptiveEnabled = connectDialogAdaptive();
+      const resolvedSize = adaptiveEnabled
+        ? undefined
+        : resolveSessionSizeForPreset(device, connectDialogResolutionPresetId());
       const encoderValue = connectDialogEncoderMode();
-      const profilesForEncoder = trainedProfiles().filter((p) => p.encoder === encoderValue);
+      const profilesForEncoder = adaptiveEnabled
+        ? []
+        : trainedProfiles().filter((p) => p.encoder === encoderValue);
       const selectedProfile = profilesForEncoder.find((p) => p.key === connectDialogProfileKey()) ?? null;
       const connectConfig: ConnectSessionConfig = {
+        runtimeProfile: adaptiveEnabled ? "adaptive" : undefined,
         profileName: selectedProfile?.key,
         encoder: resolveEncoderMode(selectedProfile, encoderValue),
         size: resolvedSize,
@@ -853,7 +861,11 @@ function resolveEncoderMode(
             }
             return "Creates real additional monitor space on host desktop.";
           };
-          const selectedSize = () => resolveSessionSizeForPreset(device, connectDialogResolutionPresetId()) ?? "auto";
+          const adaptiveEnabled = () => connectDialogAdaptive();
+          const selectedSize = () => {
+            if (adaptiveEnabled()) return "auto (adaptive)";
+            return resolveSessionSizeForPreset(device, connectDialogResolutionPresetId()) ?? "auto";
+          };
           const backendChosen = () => connectDialogCaptureBackend() !== "";
           const concreteBackendChosen = () => {
             const b = connectDialogCaptureBackend();
@@ -952,12 +964,27 @@ function resolveEncoderMode(
                     <small>{codecChosen() ? `Selected: ${connectDialogEncoderMode()}` : "Choose backend first"}</small>
                   </label>
 
-                  <label class={`connect-config-field${(codecChosen() && concreteBackendChosen()) ? "" : " field-locked"}`}>
+                  <div class={`mode-option-check${codecChosen() ? "" : " disabled"}`}>
+                    <label class={`checkbox-option${codecChosen() ? "" : " disabled"}`}>
+                      <input
+                        type="checkbox"
+                        checked={adaptiveEnabled()}
+                        disabled={!codecChosen()}
+                        onChange={(event) => setConnectDialogAdaptive(event.currentTarget.checked)}
+                      />
+                      <span>
+                        Adaptive mode
+                        <small>Use profile=adaptive and let host tune quality dynamically. Resolution/profile overrides are skipped.</small>
+                      </span>
+                    </label>
+                  </div>
+
+                  <label class={`connect-config-field${(codecChosen() && concreteBackendChosen() && !adaptiveEnabled()) ? "" : " field-locked"}`}>
                     <span>Profile</span>
                     <select
                       value={connectDialogProfileKey()}
                       aria-label="Profile"
-                      disabled={!codecChosen() || !concreteBackendChosen()}
+                      disabled={!codecChosen() || !concreteBackendChosen() || adaptiveEnabled()}
                       onChange={(event) => setConnectDialogProfileKey(event.currentTarget.value)}
                     >
                       <option value="">None (manual settings)</option>
@@ -976,6 +1003,7 @@ function resolveEncoderMode(
                           const p = profile;
                           return `${p.fps}fps ${p.bitrateKbps}kbps — ${p.objective}, ${p.workload}`;
                         }
+                        if (adaptiveEnabled()) return "Adaptive mode enabled — trained profile selection is skipped";
                         if (!backendChosen()) return "Choose backend first";
                         if (!concreteBackendChosen()) return "Select a specific backend (not Auto) to use profiles";
                         if (!codecChosen()) return "Choose codec first";
@@ -984,10 +1012,11 @@ function resolveEncoderMode(
                     </small>
                   </label>
 
-                  <label class="connect-config-field">
+                  <label class={`connect-config-field${adaptiveEnabled() ? " field-locked" : ""}`}>
                     <span>Resolution preset</span>
                     <select
                       value={connectDialogResolutionPresetId()}
+                      disabled={adaptiveEnabled()}
                       onChange={(event) => setConnectDialogResolutionPresetId(event.currentTarget.value)}
                     >
                       <For each={RESOLUTION_PRESET_OPTIONS}>
