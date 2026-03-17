@@ -2,6 +2,7 @@ package com.wbeam.api;
 
 import org.json.JSONObject;
 
+@SuppressWarnings("java:S107")
 public final class StatusPollerCallbacksFactory {
     public interface DaemonStatusUpdate {
         void onDaemonStatusUpdate(

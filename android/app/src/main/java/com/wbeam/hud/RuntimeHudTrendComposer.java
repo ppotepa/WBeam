@@ -25,7 +25,7 @@ public final class RuntimeHudTrendComposer {
         runtimeMbpsSeries.addSample(Math.max(0.0, bitrateMbps));
         runtimeDropSeries.addSample(Math.max(0.0, dropPerSec));
         runtimeLatencySeries.addSample(Math.max(0.0, e2eP95));
-        double queueDepth = qT + (double) qD + qR;
+        double queueDepth = (double) qT + qD + qR;
         runtimeQueueSeries.addSample(Math.max(0.0, queueDepth));
         return RuntimeTrendGridRenderer.buildMetricTrendRowsHtml(
                 runtimePresentSeries.toJsonFinite(),

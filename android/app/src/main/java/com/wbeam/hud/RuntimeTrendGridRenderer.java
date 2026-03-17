@@ -5,6 +5,7 @@ import org.json.JSONArray;
 /**
  * Pure renderer for runtime trend cards used by runtime HUD web layout.
  */
+@SuppressWarnings("java:S107")
 public final class RuntimeTrendGridRenderer {
     private RuntimeTrendGridRenderer() {}
 

@@ -1,5 +1,6 @@
 package com.wbeam.hud;
 
+@SuppressWarnings("java:S107")
 public final class MainHudInputFactory {
     private MainHudInputFactory() {
     }
