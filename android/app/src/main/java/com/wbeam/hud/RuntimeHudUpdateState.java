@@ -2,6 +2,7 @@ package com.wbeam.hud;
 
 import com.wbeam.telemetry.RuntimeTelemetryMapper;
 
+@SuppressWarnings("java:S107")
 public final class RuntimeHudUpdateState {
     public final long frameInHost;
     public final long frameOutHost;

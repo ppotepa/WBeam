@@ -17,6 +17,7 @@ public final class HudRenderSupport {
 
     private HudRenderSupport() {}
 
+    @SuppressWarnings({"java:S3776", "java:S135"})
     public static String buildTrendSparkChartFromJson(JSONArray series, String toneClass) {
         if (series == null || series.length() == 0) {
             return buildTrendSparkPlaceholderSvg(toneClass);
@@ -317,7 +318,7 @@ public final class HudRenderSupport {
         if (!Double.isNaN(targetMbps) && !Double.isInfinite(targetMbps) && targetMbps > 0.0) {
             return String.format(Locale.US, "%.2f (target)", targetMbps);
         }
-        return "PENDING";
+        return PENDING_TEXT;
     }
 
     public static String safeText(String value) {

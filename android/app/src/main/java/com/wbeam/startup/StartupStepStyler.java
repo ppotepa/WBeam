@@ -142,6 +142,7 @@ public final class StartupStepStyler {
         private final TextView detail;
         private final String detailText;
 
+        @SuppressWarnings("java:S107")
         private StepStateConfig(Builder builder) {
             this.state = builder.state;
             this.animTick = builder.animTick;
