@@ -69,10 +69,14 @@ const ENCODER_OPTION_DATA = connectEncoderOptions as {
 
 const RESOLUTION_PRESET_OPTIONS: ResolutionPresetEntry[] = RESOLUTION_PRESET_DATA.presets ?? [];
 const RESOLUTION_PRESET_IDS = new Set(RESOLUTION_PRESET_OPTIONS.map((item) => item.id));
-const RESOLUTION_PRESET_DEFAULT_ID =
-  (RESOLUTION_PRESET_DATA.defaultPresetId && RESOLUTION_PRESET_IDS.has(RESOLUTION_PRESET_DATA.defaultPresetId))
-    ? RESOLUTION_PRESET_DATA.defaultPresetId
-    : (RESOLUTION_PRESET_OPTIONS[0]?.id ?? "device_max");
+function resolveDefaultResolutionPresetId(): string {
+  const configuredId = RESOLUTION_PRESET_DATA.defaultPresetId;
+  if (configuredId && RESOLUTION_PRESET_IDS.has(configuredId)) {
+    return configuredId;
+  }
+  return RESOLUTION_PRESET_OPTIONS[0]?.id ?? "device_max";
+}
+const RESOLUTION_PRESET_DEFAULT_ID = resolveDefaultResolutionPresetId();
 
 const ENCODER_OPTIONS = ENCODER_OPTION_DATA.options ?? [
   { id: "h264" as const, label: "H.264" },
@@ -172,9 +176,8 @@ function resolveDeviceVersionStatus(
   if (!service.installed) return { cls: "warn", label: "Install desktop service first" };
   if (!service.active) return { cls: "warn", label: "Start desktop service to verify" };
   if (!daemonVersionKnown) return { cls: "warn", label: "Daemon unreachable - cannot verify" };
-  return device.apkMatchesDaemon
-    ? { cls: "ok", label: "Version match" }
-    : { cls: "bad", label: "Update required" };
+  if (device.apkMatchesDaemon) return { cls: "ok", label: "Version match" };
+  return { cls: "bad", label: "Update required" };
 }
 
 function resolveConnectDisabledReason(params: {
@@ -306,6 +309,16 @@ export default function App() {
     return resolveDisconnectDisabledReason(device, isDeviceBusy(device), session.service().active);
   }
 
+  function modeLabel(): "Basic" | "Advanced" {
+    if (mode() === "basic") return "Basic";
+    return "Advanced";
+  }
+
+  function emptyDevicesMessage(): string {
+    if (session.service().active) return "No connected ADB devices.";
+    return "Probing paused until desktop service is running.";
+  }
+
   function isDeviceActionBusy(device: DeviceBasic, action: "connect" | "disconnect"): boolean {
     return session.deviceActionBusy().includes(`${device.serial}:${action}`);
   }
@@ -409,13 +422,14 @@ export default function App() {
     return "duplicate";
   }
 
-  function resolveEncoderMode(
-    selectedProfile: TrainedProfile | null,
-    encoderValue: ConnectEncoderMode | "",
-  ): ConnectEncoderMode | undefined {
-    if (selectedProfile) return undefined;
-    return encoderValue === "" ? undefined : encoderValue;
-  }
+function resolveEncoderMode(
+  selectedProfile: TrainedProfile | null,
+  encoderValue: ConnectEncoderMode | "",
+): ConnectEncoderMode | undefined {
+  if (selectedProfile) return undefined;
+  if (encoderValue === "") return undefined;
+  return encoderValue;
+}
 
   function resolveCaptureBackend(): CaptureBackend | undefined {
     const captureBackend = connectDialogCaptureBackend();
@@ -469,6 +483,11 @@ export default function App() {
   function closeVirtualInstallModal(): void {
     if (virtualInstallStatus().running) return;
     setVirtualInstallVisible(false);
+  }
+
+  function installServiceOrUpgrade(): Promise<void> {
+    if (upgradeAvailable()) return session.upgradeService();
+    return session.callServiceAction("service_install");
   }
 
   async function installVirtualDeps(): Promise<void> {
@@ -586,7 +605,7 @@ export default function App() {
         <header class="panel-header">
           <div>
             <h1>WBeam - {hostName()}</h1>
-            <p class="mode-line">Mode: {mode() === "basic" ? "Basic" : "Advanced"}</p>
+            <p class="mode-line">Mode: {modeLabel()}</p>
           </div>
           <div class="header-actions">
             <button
@@ -613,9 +632,7 @@ export default function App() {
         </Show>
         <Show when={!session.loading() && session.devices().length === 0 && !session.error()}>
           <p class="empty-line">
-            {session.service().active
-              ? "No connected ADB devices."
-              : "Probing paused until desktop service is running."}
+            {emptyDevicesMessage()}
           </p>
         </Show>
 
@@ -754,7 +771,6 @@ export default function App() {
             />
             <span>
               Use experimental virtual mirroring (Wayland only)
-              {" "}
               <small>
                 Applies to Wayland connects only. For X11 this option is unavailable.
               </small>
@@ -770,7 +786,7 @@ export default function App() {
               || !session.service().available
               || (!upgradeAvailable() && session.service().installed)
             }
-            onClick={() => (upgradeAvailable() ? session.upgradeService() : session.callServiceAction("service_install"))}
+            onClick={() => installServiceOrUpgrade()}
             title={upgradeAvailable() ? "Upgrade service to current host build" : "Install user service"}
           >
             <Download size={14} />
@@ -868,7 +884,6 @@ export default function App() {
                     />
                     <span>
                       Virtual monitor (extend host desktop)
-                      {" "}
                       <small>
                         {virtualMonitorHint()}
                       </small>
@@ -883,7 +898,6 @@ export default function App() {
                     />
                     <span>
                       Duplicate current screen
-                      {" "}
                       <small>Works with current host backend.</small>
                     </span>
                   </label>
