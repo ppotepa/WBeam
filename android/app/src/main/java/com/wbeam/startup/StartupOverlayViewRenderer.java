@@ -204,45 +204,53 @@ public final class StartupOverlayViewRenderer {
     ) {
         applyStepState(
                 model.getStep1State(),
-                "1",
                 preflightAnimTick,
-                views.getStep1Card(),
-                views.getStep1Badge(),
-                views.getStep1Label(),
-                views.getStep1Status(),
-                views.getStep1Detail(),
+                new StepBinding(
+                        "1",
+                        views.getStep1Card(),
+                        views.getStep1Badge(),
+                        views.getStep1Label(),
+                        views.getStep1Status(),
+                        views.getStep1Detail()
+                ),
                 model.getStep1Detail()
         );
         applyStepState(
                 model.getStep2State(),
-                "2",
                 preflightAnimTick,
-                views.getStep2Card(),
-                views.getStep2Badge(),
-                views.getStep2Label(),
-                views.getStep2Status(),
-                views.getStep2Detail(),
+                new StepBinding(
+                        "2",
+                        views.getStep2Card(),
+                        views.getStep2Badge(),
+                        views.getStep2Label(),
+                        views.getStep2Status(),
+                        views.getStep2Detail()
+                ),
                 model.getStep2Detail()
         );
         applyStepState(
                 model.getStep3State(),
-                "3",
                 preflightAnimTick,
-                views.getStep3Card(),
-                views.getStep3Badge(),
-                views.getStep3Label(),
-                views.getStep3Status(),
-                views.getStep3Detail(),
+                new StepBinding(
+                        "3",
+                        views.getStep3Card(),
+                        views.getStep3Badge(),
+                        views.getStep3Label(),
+                        views.getStep3Status(),
+                        views.getStep3Detail()
+                ),
                 model.getStep3Detail()
         );
 
         if (views.getSubtitleText() != null) {
             views.getSubtitleText().setText(model.getSubtitle());
-            views.getSubtitleText().setTextColor(model.getStep3State() == StartupOverlayModelBuilder.Model.SS_OK
-                    ? SUBTITLE_OK_COLOR
-                    : model.getStep3State() == StartupOverlayModelBuilder.Model.SS_ERROR
-                    ? SUBTITLE_ERROR_COLOR
-                    : SUBTITLE_NEUTRAL_COLOR);
+            int subtitleColor = SUBTITLE_NEUTRAL_COLOR;
+            if (model.getStep3State() == StartupOverlayModelBuilder.Model.SS_OK) {
+                subtitleColor = SUBTITLE_OK_COLOR;
+            } else if (model.getStep3State() == StartupOverlayModelBuilder.Model.SS_ERROR) {
+                subtitleColor = SUBTITLE_ERROR_COLOR;
+            }
+            views.getSubtitleText().setTextColor(subtitleColor);
         }
 
         if (views.getInfoText() != null) {
@@ -251,17 +259,7 @@ public final class StartupOverlayViewRenderer {
         }
     }
 
-    private static void applyStepState(
-            int stepState,
-            String stepNumber,
-            int preflightAnimTick,
-            View stepCard,
-            TextView stepBadge,
-            TextView stepLabel,
-            TextView stepStatus,
-            TextView stepDetail,
-            String detail
-    ) {
+    private static void applyStepState(int stepState, int preflightAnimTick, StepBinding step, String detail) {
         StartupStepStyler.applyStepState(
                 StartupStepStyler.StepStateConfig.builder()
                         .setState(stepState)
@@ -269,14 +267,39 @@ public final class StartupOverlayViewRenderer {
                         .setSsOk(StartupOverlayModelBuilder.Model.SS_OK)
                         .setSsError(StartupOverlayModelBuilder.Model.SS_ERROR)
                         .setSsActive(StartupOverlayModelBuilder.Model.SS_ACTIVE)
-                        .setNumber(stepNumber)
-                        .setCard(stepCard)
-                        .setBadge(stepBadge)
-                        .setLabel(stepLabel)
-                        .setStatus(stepStatus)
-                        .setDetail(stepDetail)
+                        .setNumber(step.number)
+                        .setCard(step.card)
+                        .setBadge(step.badge)
+                        .setLabel(step.label)
+                        .setStatus(step.status)
+                        .setDetail(step.detail)
                         .setDetailText(detail)
                         .build()
         );
+    }
+
+    private static final class StepBinding {
+        private final String number;
+        private final View card;
+        private final TextView badge;
+        private final TextView label;
+        private final TextView status;
+        private final TextView detail;
+
+        private StepBinding(
+                String number,
+                View card,
+                TextView badge,
+                TextView label,
+                TextView status,
+                TextView detail
+        ) {
+            this.number = number;
+            this.card = card;
+            this.badge = badge;
+            this.label = label;
+            this.status = status;
+            this.detail = detail;
+        }
     }
 }

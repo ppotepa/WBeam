@@ -340,7 +340,7 @@ export default function App() {
       setTrainedProfiles(profiles);
       const selected = connectDialogProfileKey();
       const selectedExists = profiles.some((profile) => profile.key === selected);
-      if (selected.length > 0 && selectedExists === false) {
+      if (selected.length > 0 && !selectedExists) {
         setConnectDialogProfileKey("");
       }
     } catch {
@@ -350,7 +350,10 @@ export default function App() {
 
   function openConnectDialog(device: DeviceBasic): void {
     const isWaylandHost = isWaylandPortalHost();
-    const saved = isWaylandHost ? "virtual_monitor" : (loadSavedDisplayMode(device.serial) ?? "virtual_monitor");
+    let saved: DisplayMode = "virtual_monitor";
+    if (!isWaylandHost) {
+      saved = loadSavedDisplayMode(device.serial) ?? "virtual_monitor";
+    }
     setConnectDialogMode(saved);
     setConnectDialogResolutionPresetId(RESOLUTION_PRESET_DEFAULT_ID);
     setConnectDialogEncoderMode("");
@@ -673,20 +676,16 @@ export default function App() {
                 <div class="line end-line">
                   {(() => {
                     const st = resolveDeviceVersionStatus(device, session.service(), daemonVersionKnown());
+                    const statusHint = session.service().active
+                      ? "APK version should match daemon build revision"
+                      : "Version check is paused until desktop service is running";
                     return (
-                  <span
-                    class={`status ${st.cls}`}
-                    title={
-                      session.service().active
-                        ? "APK version should match daemon build revision"
-                        : "Version check is paused until desktop service is running"
-                    }
-                  >
-                    <Show when={st.cls === "ok"} fallback={<AlertTriangle size={14} />}>
-                      <ShieldCheck size={14} />
-                    </Show>
-                    {st.label}
-                  </span>
+                      <span class={`status ${st.cls}`} title={statusHint}>
+                        <Show when={st.cls === "ok"} fallback={<AlertTriangle size={14} />}>
+                          <ShieldCheck size={14} />
+                        </Show>
+                        {st.label}
+                      </span>
                     );
                   })()}
                 </div>
@@ -701,38 +700,41 @@ export default function App() {
                     const disconnectBusy = isDeviceActionBusy(device, "disconnect");
                     const connectActionTitle = connectTitle(connectBusy, connectDisabled, connectReason);
                     const disconnectActionTitle = disconnectTitle(disconnectBusy, disconnectDisabled, disconnectReason);
+                    const connectLabel = connectBusy ? "Connecting..." : "Connect";
+                    const disconnectLabel = disconnectBusy ? "Stopping..." : "Disconnect";
                     return (
                       <>
-                  <button
-                    class="device-btn"
-                    title="Refresh this device state"
-                    disabled={session.refreshing() || isDeviceBusy(device)}
-                    onClick={() => session.refreshSnapshot()}
-                  >
-                    <RefreshCw size={13} /> Refresh
-                  </button>
-                  <button
-                    class="device-btn"
-                    title={connectActionTitle}
-                    disabled={connectBusy || connectDisabled}
-                    onClick={() => openConnectDialog(device)}
-                  >
-                    <Show when={connectBusy} fallback={<Link2 size={13} />}>
-                      <Loader2 size={13} class="spinning" />
-                    </Show>
-                    {connectBusy ? "Connecting..." : "Connect"}
-                  </button>
-                  <button
-                    class="device-btn"
-                    title={disconnectActionTitle}
-                    disabled={disconnectDisabled}
-                    onClick={() => session.disconnectDevice(device)}
-                  >
-                    <Show when={disconnectBusy} fallback={<Unlink2 size={13} />}>
-                      <Loader2 size={13} class="spinning" />
-                    </Show>
-                    {disconnectBusy ? "Stopping..." : "Disconnect"}
-                  </button>
+                        <button
+                          class="device-btn"
+                          title="Refresh this device state"
+                          disabled={session.refreshing() || isDeviceBusy(device)}
+                          onClick={() => session.refreshSnapshot()}
+                        >
+                          <RefreshCw size={13} />
+                          <span>Refresh</span>
+                        </button>
+                        <button
+                          class="device-btn"
+                          title={connectActionTitle}
+                          disabled={connectBusy || connectDisabled}
+                          onClick={() => openConnectDialog(device)}
+                        >
+                          <Show when={connectBusy} fallback={<Link2 size={13} />}>
+                            <Loader2 size={13} class="spinning" />
+                          </Show>
+                          <span>{connectLabel}</span>
+                        </button>
+                        <button
+                          class="device-btn"
+                          title={disconnectActionTitle}
+                          disabled={disconnectDisabled}
+                          onClick={() => session.disconnectDevice(device)}
+                        >
+                          <Show when={disconnectBusy} fallback={<Unlink2 size={13} />}>
+                            <Loader2 size={13} class="spinning" />
+                          </Show>
+                          <span>{disconnectLabel}</span>
+                        </button>
                       </>
                     );
                   })()}
@@ -771,7 +773,8 @@ export default function App() {
             onClick={() => (upgradeAvailable() ? session.upgradeService() : session.callServiceAction("service_install"))}
             title={upgradeAvailable() ? "Upgrade service to current host build" : "Install user service"}
           >
-            <Download size={14} /> {upgradeAvailable() ? "Upgrade" : "Install service"}
+            <Download size={14} />
+            <span>{upgradeAvailable() ? "Upgrade" : "Install service"}</span>
           </button>
           <button
             class="svc-btn"
@@ -779,7 +782,8 @@ export default function App() {
             onClick={() => session.callServiceAction("service_uninstall")}
             title="Uninstall user service"
           >
-            <Trash2 size={14} /> Uninstall
+            <Trash2 size={14} />
+            <span>Uninstall</span>
           </button>
           <button
             class="svc-btn"
@@ -787,7 +791,8 @@ export default function App() {
             onClick={() => session.callServiceAction("service_start")}
             title="Start service"
           >
-            <Play size={14} /> Start
+            <Play size={14} />
+            <span>Start</span>
           </button>
           <button
             class="svc-btn"
@@ -795,7 +800,8 @@ export default function App() {
             onClick={() => session.callServiceAction("service_stop")}
             title="Stop service"
           >
-            <Square size={14} /> Stop
+            <Square size={14} />
+            <span>Stop</span>
           </button>
         </section>
 
@@ -948,8 +954,9 @@ export default function App() {
                     </select>
                     <small>
                       {(() => {
-                        if (selectedProfile()) {
-                          const p = selectedProfile()!;
+                        const profile = selectedProfile();
+                        if (profile) {
+                          const p = profile;
                           return `${p.fps}fps ${p.bitrateKbps}kbps — ${p.objective}, ${p.workload}`;
                         }
                         if (!backendChosen()) return "Choose backend first";

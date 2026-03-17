@@ -24,25 +24,40 @@ final class WbtpProtocol {
 
     static Hello readHello(InputStream input, byte[] helloBuf, int helloMagic, byte helloVersion, int helloHeaderSize)
             throws IOException {
-        // Read base 16 bytes first — enough for v1 and to parse helloLen.
         WbtpFrameIo.readFully(input, helloBuf, helloHeaderSize);
-        int magic = ((helloBuf[0] & 0xFF) << 24)
-                | ((helloBuf[1] & 0xFF) << 16)
-                | ((helloBuf[2] & 0xFF) << 8)
-                | (helloBuf[3] & 0xFF);
-        int helloLen = ((helloBuf[6] & 0xFF) << 8) | (helloBuf[7] & 0xFF);
+        int magic = parseMagic(helloBuf);
+        int helloLen = parseHelloLength(helloBuf);
         if (magic != helloMagic) {
             throw new IOException("WBTP: bad stream hello magic");
         }
-        // Accept any version ≥ the minimum we understand; require size ≥ base.
         if (helloBuf[4] < helloVersion) {
-            throw new IOException("WBTP: server hello version " + (helloBuf[4] & 0xFF) + " < expected " + (helloVersion & 0xFF));
+            throw new IOException(
+                    "WBTP: server hello version " + (helloBuf[4] & 0xFF) + " < expected " + (helloVersion & 0xFF)
+            );
         }
         if (helloLen < helloHeaderSize) {
             throw new IOException("WBTP: hello helloLen=" + helloLen + " < expected " + helloHeaderSize);
         }
         int flags = helloBuf[5] & 0xFF;
-        long sessionId = ((helloBuf[8] & 0xFFL) << 56)
+        long sessionId = parseSessionId(helloBuf);
+        int extraBytes = helloLen - helloHeaderSize;
+        HelloGeometry geometry = readHelloGeometry(input, helloBuf, helloHeaderSize, extraBytes);
+        return new Hello(flags, sessionId, geometry.width, geometry.height, geometry.fps);
+    }
+
+    private static int parseMagic(byte[] helloBuf) {
+        return ((helloBuf[0] & 0xFF) << 24)
+                | ((helloBuf[1] & 0xFF) << 16)
+                | ((helloBuf[2] & 0xFF) << 8)
+                | (helloBuf[3] & 0xFF);
+    }
+
+    private static int parseHelloLength(byte[] helloBuf) {
+        return ((helloBuf[6] & 0xFF) << 8) | (helloBuf[7] & 0xFF);
+    }
+
+    private static long parseSessionId(byte[] helloBuf) {
+        return ((helloBuf[8] & 0xFFL) << 56)
                 | ((helloBuf[9] & 0xFFL) << 48)
                 | ((helloBuf[10] & 0xFFL) << 40)
                 | ((helloBuf[11] & 0xFFL) << 32)
@@ -50,31 +65,46 @@ final class WbtpProtocol {
                 | ((helloBuf[13] & 0xFFL) << 16)
                 | ((helloBuf[14] & 0xFFL) << 8)
                 | (helloBuf[15] & 0xFFL);
+    }
 
-        // v2 extension: read additional bytes if helloLen > base.
-        int extraBytes = helloLen - helloHeaderSize;
-        int width = 0, height = 0, fps = 0;
-        if (extraBytes > 0) {
-            int toRead = Math.min(extraBytes, helloBuf.length - helloHeaderSize);
-            WbtpFrameIo.readFully(input, helloBuf, helloHeaderSize, toRead);
-            // Skip any remaining bytes that exceed our buffer.
-            int remaining = extraBytes - toRead;
-            if (remaining > 0) {
-                byte[] drain = new byte[Math.min(remaining, 256)];
-                int drained = 0;
-                while (drained < remaining) {
-                    int r = input.read(drain, 0, Math.min(drain.length, remaining - drained));
-                    if (r < 0) throw new IOException("WBTP: EOF while draining extended hello");
-                    drained += r;
-                }
-            }
-            if (helloHeaderSize + 6 <= helloBuf.length && extraBytes >= 6) {
-                width  = ((helloBuf[helloHeaderSize]     & 0xFF) << 8) | (helloBuf[helloHeaderSize + 1] & 0xFF);
-                height = ((helloBuf[helloHeaderSize + 2] & 0xFF) << 8) | (helloBuf[helloHeaderSize + 3] & 0xFF);
-                fps    = ((helloBuf[helloHeaderSize + 4] & 0xFF) << 8) | (helloBuf[helloHeaderSize + 5] & 0xFF);
-            }
+    private static HelloGeometry readHelloGeometry(
+            InputStream input,
+            byte[] helloBuf,
+            int helloHeaderSize,
+            int extraBytes
+    ) throws IOException {
+        if (extraBytes <= 0) {
+            return new HelloGeometry(0, 0, 0);
         }
-        return new Hello(flags, sessionId, width, height, fps);
+        int toRead = Math.min(extraBytes, helloBuf.length - helloHeaderSize);
+        WbtpFrameIo.readFully(input, helloBuf, helloHeaderSize, toRead);
+        drainExtendedHello(input, extraBytes - toRead);
+        return parseHelloGeometry(helloBuf, helloHeaderSize, extraBytes);
+    }
+
+    private static void drainExtendedHello(InputStream input, int remaining) throws IOException {
+        if (remaining <= 0) {
+            return;
+        }
+        byte[] drain = new byte[Math.min(remaining, 256)];
+        int drained = 0;
+        while (drained < remaining) {
+            int read = input.read(drain, 0, Math.min(drain.length, remaining - drained));
+            if (read < 0) {
+                throw new IOException("WBTP: EOF while draining extended hello");
+            }
+            drained += read;
+        }
+    }
+
+    private static HelloGeometry parseHelloGeometry(byte[] helloBuf, int helloHeaderSize, int extraBytes) {
+        if (helloHeaderSize + 6 > helloBuf.length || extraBytes < 6) {
+            return new HelloGeometry(0, 0, 0);
+        }
+        int width = ((helloBuf[helloHeaderSize] & 0xFF) << 8) | (helloBuf[helloHeaderSize + 1] & 0xFF);
+        int height = ((helloBuf[helloHeaderSize + 2] & 0xFF) << 8) | (helloBuf[helloHeaderSize + 3] & 0xFF);
+        int fps = ((helloBuf[helloHeaderSize + 4] & 0xFF) << 8) | (helloBuf[helloHeaderSize + 5] & 0xFF);
+        return new HelloGeometry(width, height, fps);
     }
 
     static FrameHeader readFrameHeader(
@@ -152,6 +182,18 @@ final class WbtpProtocol {
             this.ptsUs = ptsUs;
             this.payloadLen = payloadLen;
             this.resynced = resynced;
+        }
+    }
+
+    private static final class HelloGeometry {
+        final int width;
+        final int height;
+        final int fps;
+
+        HelloGeometry(int width, int height, int fps) {
+            this.width = width;
+            this.height = height;
+            this.fps = fps;
         }
     }
 }

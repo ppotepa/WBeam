@@ -6,6 +6,7 @@ public final class MainActivityDebugInfoFormatter {
     private MainActivityDebugInfoFormatter() {
     }
 
+    @SuppressWarnings("java:S107")
     public static String buildDebugOverlayText(
             String lastUiState,
             String daemonHostName,
@@ -22,7 +23,7 @@ public final class MainActivityDebugInfoFormatter {
         double lossPct = Math.max(0.0, ((safeTarget - latestPresentFps) / safeTarget) * 100.0);
         return String.format(
                 Locale.US,
-                "DBG %s | host:%s | daemon:%s\nFPS %.0f/%.1f (loss %.0f%%)  thresholds: green <=20%% orange >20%% red >55%%\n%s\n%s",
+                "DBG %s | host:%s | daemon:%s%nFPS %.0f/%.1f (loss %.0f%%)  thresholds: green <=20%% orange >20%% red >55%%%n%s%n%s",
                 state,
                 host,
                 daemonStateUi,

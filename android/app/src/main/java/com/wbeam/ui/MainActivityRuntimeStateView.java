@@ -29,6 +29,7 @@ public final class MainActivityRuntimeStateView {
         }
     }
 
+    @SuppressWarnings("java:S107")
     public static void refreshDebugOverlayText(
             boolean debugBuild,
             TextView debugInfoText,
@@ -60,8 +61,8 @@ public final class MainActivityRuntimeStateView {
     public static String effectiveDaemonState(
             String rawState,
             double presentFps,
-        long streamUptimeSec,
-        long frameOutHost
+            long streamUptimeSec,
+            long frameOutHost
     ) {
         String normalized = rawState == null ? "IDLE" : rawState.toUpperCase(Locale.US);
         if (!"STREAMING".equals(normalized)) {
