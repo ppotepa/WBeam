@@ -1273,10 +1273,10 @@ public class MainActivity extends AppCompatActivity {
 
         com.wbeam.startup.StartupOverlayStateSync.StateValues synced =
                 MainStartupCoordinator.updatePreflightOverlay(input);
-        uiState.startupBeganAtMs = synced.startupBeganAtMs;
-        uiState.controlRetryCount = synced.controlRetryCount;
-        uiState.startupDismissed = synced.startupDismissed;
-        uiState.preflightComplete = synced.preflightComplete;
+        uiState.startupBeganAtMs = synced.getStartupBeganAtMs();
+        uiState.controlRetryCount = synced.getControlRetryCount();
+        uiState.startupDismissed = synced.isStartupDismissed();
+        uiState.preflightComplete = synced.isPreflightComplete();
     }
 
     private String effectiveDaemonStateUi() {

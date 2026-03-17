@@ -57,12 +57,12 @@ public final class RuntimeHudComputation {
             long latestStablePresentFpsAtMs,
             long staleGraceMs
     ) {
-        double presentFps = runtime.presentFps;
+        double presentFps = runtime.getPresentFps();
         boolean hasFlowSignals =
-                runtime.streamUptimeSec > 0
-                        || runtime.frameOutHost > 0
-                        || runtime.recvFps >= 1.0
-                        || runtime.decodeFps >= 1.0;
+                runtime.getStreamUptimeSec() > 0
+                        || runtime.getFrameOutHost() > 0
+                        || runtime.getRecvFps() >= 1.0
+                        || runtime.getDecodeFps() >= 1.0;
         if (presentFps >= 1.0) {
             return new FpsStabilizationResult(presentFps, presentFps, nowMs);
         }
