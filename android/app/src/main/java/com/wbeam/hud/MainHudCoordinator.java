@@ -469,25 +469,25 @@ public final class MainHudCoordinator {
 
     private static void updateRuntimeHud(Input input, JSONObject metrics, long nowMs) {
         RuntimeHudStateCoordinator.Input stateInput = new RuntimeHudStateCoordinator.Input();
-        stateInput.metrics = metrics;
-        stateInput.selectedFps = input.getSelectedFpsProvider().get();
-        stateInput.transportQueueMaxFrames = input.getTransportQueueMaxFrames();
-        stateInput.decodeQueueMaxFrames = input.getDecodeQueueMaxFrames();
-        stateInput.renderQueueMaxFrames = input.getRenderQueueMaxFrames();
-        stateInput.nowMs = nowMs;
-        stateInput.stablePresentFps = input.getState().latestStablePresentFps;
-        stateInput.stablePresentFpsAtMs = input.getState().latestStablePresentFpsAtMs;
-        stateInput.presentFpsStaleGraceMs = input.getPresentFpsStaleGraceMs();
-        stateInput.dropPrevCount = input.getState().runtimeDropPrevCount;
-        stateInput.dropPrevAtMs = input.getState().runtimeDropPrevAtMs;
-        stateInput.daemonState = input.getDaemonStateProvider().get();
-        stateInput.latestStreamUptimeSec = input.getState().latestStreamUptimeSec;
-        stateInput.latestFrameOutHost = input.getState().latestFrameOutHost;
-        stateInput.daemonRunId = input.getDaemonRunIdProvider().get();
-        stateInput.daemonUptimeSec = input.getDaemonUptimeSecProvider().get();
-        stateInput.daemonLastError = input.getDaemonLastErrorProvider().get();
+        stateInput.setMetrics(metrics);
+        stateInput.setSelectedFps(input.getSelectedFpsProvider().get());
+        stateInput.setTransportQueueMaxFrames(input.getTransportQueueMaxFrames());
+        stateInput.setDecodeQueueMaxFrames(input.getDecodeQueueMaxFrames());
+        stateInput.setRenderQueueMaxFrames(input.getRenderQueueMaxFrames());
+        stateInput.setNowMs(nowMs);
+        stateInput.setStablePresentFps(input.getState().latestStablePresentFps);
+        stateInput.setStablePresentFpsAtMs(input.getState().latestStablePresentFpsAtMs);
+        stateInput.setPresentFpsStaleGraceMs(input.getPresentFpsStaleGraceMs());
+        stateInput.setDropPrevCount(input.getState().runtimeDropPrevCount);
+        stateInput.setDropPrevAtMs(input.getState().runtimeDropPrevAtMs);
+        stateInput.setDaemonState(input.getDaemonStateProvider().get());
+        stateInput.setLatestStreamUptimeSec(input.getState().latestStreamUptimeSec);
+        stateInput.setLatestFrameOutHost(input.getState().latestFrameOutHost);
+        stateInput.setDaemonRunId(input.getDaemonRunIdProvider().get());
+        stateInput.setDaemonUptimeSec(input.getDaemonUptimeSecProvider().get());
+        stateInput.setDaemonLastError(input.getDaemonLastErrorProvider().get());
         RuntimeHudStateCoordinator.Output output = RuntimeHudStateCoordinator.compute(stateInput);
-        RuntimeHudUpdateState state = output.state;
+        RuntimeHudUpdateState state = output.getState();
 
         input.getState().latestStablePresentFps = state.updatedStablePresentFps;
         input.getState().latestStablePresentFpsAtMs = state.updatedStablePresentFpsAtMs;
@@ -499,42 +499,42 @@ public final class MainHudCoordinator {
         input.getState().latestStreamUptimeSec = state.streamUptimeSec;
         input.getState().latestFrameOutHost = state.frameOutHost;
 
-        input.getState().compactLine = output.compactLine;
+        input.getState().compactLine = output.getCompactLine();
         input.getRefreshDebugOverlayHandler().refresh();
 
-        if (output.pressureLog != null) {
-            Log.w(input.getLogTag(), output.pressureLog);
+        if (output.getPressureLog() != null) {
+            Log.w(input.getLogTag(), output.getPressureLog());
         }
 
         int[] streamSize = input.getStreamSizeProvider().get();
         RuntimeHudRenderCoordinator.Input renderInput = new RuntimeHudRenderCoordinator.Input();
-        renderInput.runtimePresentSeries = input.getRuntimePresentSeries();
-        renderInput.runtimeMbpsSeries = input.getRuntimeMbpsSeries();
-        renderInput.runtimeDropSeries = input.getRuntimeDropSeries();
-        renderInput.runtimeLatencySeries = input.getRuntimeLatencySeries();
-        renderInput.runtimeQueueSeries = input.getRuntimeQueueSeries();
-        renderInput.state = state;
-        renderInput.fpsLowAnchor = input.getFpsLowAnchor();
-        renderInput.daemonReachable = input.getDaemonReachableProvider().get();
-        renderInput.selectedProfile = input.getSelectedProfileProvider().get();
-        renderInput.selectedEncoder = input.getSelectedEncoderProvider().get();
-        renderInput.streamWidth = streamSize[0];
-        renderInput.streamHeight = streamSize[1];
-        renderInput.daemonHostName = input.getDaemonHostNameProvider().get();
-        renderInput.daemonStateUi = output.daemonStateUi;
-        renderInput.daemonBuildRevision = input.getDaemonBuildRevisionProvider().get();
-        renderInput.appBuildRevision = input.getAppBuildRevision();
-        renderInput.daemonLastError = input.getDaemonLastErrorProvider().get();
-        renderInput.tuningActive = state.tuningActive;
-        renderInput.tuningLine = state.tuningLine;
-        renderInput.resourceUsageTracker = input.getResourceUsageTracker();
-        renderInput.perfHudWebView = input.getPerfHudWebView();
-        renderInput.perfHudText = input.getPerfHudText();
-        renderInput.perfHudPanel = input.getPerfHudPanel();
-        renderInput.hudOverlayState = input.getOverlayState();
-        renderInput.hudTextColorLive = input.getHudTextColorLive();
+        renderInput.setRuntimePresentSeries(input.getRuntimePresentSeries());
+        renderInput.setRuntimeMbpsSeries(input.getRuntimeMbpsSeries());
+        renderInput.setRuntimeDropSeries(input.getRuntimeDropSeries());
+        renderInput.setRuntimeLatencySeries(input.getRuntimeLatencySeries());
+        renderInput.setRuntimeQueueSeries(input.getRuntimeQueueSeries());
+        renderInput.setState(state);
+        renderInput.setFpsLowAnchor(input.getFpsLowAnchor());
+        renderInput.setDaemonReachable(input.getDaemonReachableProvider().get());
+        renderInput.setSelectedProfile(input.getSelectedProfileProvider().get());
+        renderInput.setSelectedEncoder(input.getSelectedEncoderProvider().get());
+        renderInput.setStreamWidth(streamSize[0]);
+        renderInput.setStreamHeight(streamSize[1]);
+        renderInput.setDaemonHostName(input.getDaemonHostNameProvider().get());
+        renderInput.setDaemonStateUi(output.getDaemonStateUi());
+        renderInput.setDaemonBuildRevision(input.getDaemonBuildRevisionProvider().get());
+        renderInput.setAppBuildRevision(input.getAppBuildRevision());
+        renderInput.setDaemonLastError(input.getDaemonLastErrorProvider().get());
+        renderInput.setTuningActive(state.tuningActive);
+        renderInput.setTuningLine(state.tuningLine);
+        renderInput.setResourceUsageTracker(input.getResourceUsageTracker());
+        renderInput.setPerfHudWebView(input.getPerfHudWebView());
+        renderInput.setPerfHudText(input.getPerfHudText());
+        renderInput.setPerfHudPanel(input.getPerfHudPanel());
+        renderInput.setHudOverlayState(input.getOverlayState());
+        renderInput.setHudTextColorLive(input.getHudTextColorLive());
         RuntimeHudRenderCoordinator.render(renderInput);
 
-        input.getSnapshotLogHandler().onSnapshot(output.debugSnapshot);
+        input.getSnapshotLogHandler().onSnapshot(output.getDebugSnapshot());
     }
 }
