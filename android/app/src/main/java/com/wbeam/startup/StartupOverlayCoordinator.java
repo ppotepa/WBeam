@@ -42,13 +42,13 @@ public final class StartupOverlayCoordinator {
         hooks.applyModel(model);
 
         State next = new State();
-        next.startupBeganAtMs = model.updatedStartupBeganAtMs;
-        next.controlRetryCount = model.updatedControlRetryCount;
+        next.startupBeganAtMs = model.getUpdatedStartupBeganAtMs();
+        next.controlRetryCount = model.getUpdatedControlRetryCount();
         next.startupDismissed = state.startupDismissed;
         next.preflightComplete = state.preflightComplete;
 
         PreflightStateMachine.Transition transition =
-                PreflightStateMachine.next(model.allOk, state.startupDismissed, 800L);
+                PreflightStateMachine.next(model.isAllOk(), state.startupDismissed, 800L);
         next.startupDismissed = transition.startupDismissed;
         next.preflightComplete = transition.preflightComplete;
         if (transition.showOverlayNow) {

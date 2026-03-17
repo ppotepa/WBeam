@@ -93,32 +93,32 @@ public final class StartupOverlayInputFactory {
 
     public static StartupOverlayModelBuilder.Input build(State state) {
         StartupOverlayModelBuilder.Input input = new StartupOverlayModelBuilder.Input();
-        input.daemonReachable = state.daemonReachable;
-        input.daemonHostName = state.daemonHostName;
-        input.daemonService = state.daemonService;
-        input.daemonBuildRevision = state.daemonBuildRevision;
-        input.daemonState = state.daemonState;
-        input.daemonLastError = state.daemonLastError;
-        input.handshakeResolved = state.handshakeResolved;
-        input.buildMismatch = state.buildMismatch;
-        input.requiresTransportProbe = state.requiresTransportProbe;
-        input.probeOk = state.probeOk;
-        input.probeInFlight = state.probeInFlight;
-        input.probeInfo = state.probeInfo;
-        input.apiImpl = state.apiImpl;
-        input.apiBase = state.apiBase;
-        input.apiHost = state.apiHost;
-        input.streamHost = state.streamHost;
-        input.streamPort = state.streamPort;
-        input.appBuildRevision = state.appBuildRevision;
-        input.lastUiInfo = state.lastUiInfo;
-        input.effectiveDaemonState = state.effectiveDaemonState;
-        input.latestPresentFps = state.latestPresentFps;
-        input.startupBeganAtMs = state.startupBeganAtMs;
-        input.controlRetryCount = state.controlRetryCount;
-        input.nowMs = state.nowMs;
-        input.lastStatsLine = state.lastStatsLine;
-        input.daemonErrCompact = state.daemonErrCompact;
+        input.setDaemonReachable(state.daemonReachable);
+        input.setDaemonHostName(state.daemonHostName);
+        input.setDaemonService(state.daemonService);
+        input.setDaemonBuildRevision(state.daemonBuildRevision);
+        input.setDaemonState(state.daemonState);
+        input.setDaemonLastError(state.daemonLastError);
+        input.setHandshakeResolved(state.handshakeResolved);
+        input.setBuildMismatch(state.buildMismatch);
+        input.setRequiresTransportProbe(state.requiresTransportProbe);
+        input.setProbeOk(state.probeOk);
+        input.setProbeInFlight(state.probeInFlight);
+        input.setProbeInfo(state.probeInfo);
+        input.setApiImpl(state.apiImpl);
+        input.setApiBase(state.apiBase);
+        input.setApiHost(state.apiHost);
+        input.setStreamHost(state.streamHost);
+        input.setStreamPort(state.streamPort);
+        input.setAppBuildRevision(state.appBuildRevision);
+        input.setLastUiInfo(state.lastUiInfo);
+        input.setEffectiveDaemonState(state.effectiveDaemonState);
+        input.setLatestPresentFps(state.latestPresentFps);
+        input.setStartupBeganAtMs(state.startupBeganAtMs);
+        input.setControlRetryCount(state.controlRetryCount);
+        input.setNowMs(state.nowMs);
+        input.setLastStatsLine(state.lastStatsLine);
+        input.setDaemonErrCompact(state.daemonErrCompact);
         return input;
     }
 }

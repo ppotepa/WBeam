@@ -59,7 +59,7 @@ public final class StartupOverlayViewRenderer {
             Views views
     ) {
         applyStepState(
-                model.step1State,
+                model.getStep1State(),
                 "1",
                 preflightAnimTick,
                 views.step1Card,
@@ -67,10 +67,10 @@ public final class StartupOverlayViewRenderer {
                 views.step1Label,
                 views.step1Status,
                 views.step1Detail,
-                model.step1Detail
+                model.getStep1Detail()
         );
         applyStepState(
-                model.step2State,
+                model.getStep2State(),
                 "2",
                 preflightAnimTick,
                 views.step2Card,
@@ -78,10 +78,10 @@ public final class StartupOverlayViewRenderer {
                 views.step2Label,
                 views.step2Status,
                 views.step2Detail,
-                model.step2Detail
+                model.getStep2Detail()
         );
         applyStepState(
-                model.step3State,
+                model.getStep3State(),
                 "3",
                 preflightAnimTick,
                 views.step3Card,
@@ -89,20 +89,20 @@ public final class StartupOverlayViewRenderer {
                 views.step3Label,
                 views.step3Status,
                 views.step3Detail,
-                model.step3Detail
+                model.getStep3Detail()
         );
 
         if (views.subtitleText != null) {
-            views.subtitleText.setText(model.subtitle);
-            views.subtitleText.setTextColor(model.step3State == StartupOverlayModelBuilder.Model.SS_OK
+            views.subtitleText.setText(model.getSubtitle());
+            views.subtitleText.setTextColor(model.getStep3State() == StartupOverlayModelBuilder.Model.SS_OK
                     ? SUBTITLE_OK_COLOR
-                    : model.step3State == StartupOverlayModelBuilder.Model.SS_ERROR
+                    : model.getStep3State() == StartupOverlayModelBuilder.Model.SS_ERROR
                     ? SUBTITLE_ERROR_COLOR
                     : SUBTITLE_NEUTRAL_COLOR);
         }
 
         if (views.infoText != null) {
-            views.infoText.setText(model.infoLog);
+            views.infoText.setText(model.getInfoLog());
             views.infoText.setTextColor(INFO_TEXT_COLOR);
         }
     }
