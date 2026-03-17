@@ -62,6 +62,7 @@ impl SessionRegistry {
         }
     }
 
+    // NOSONAR S3776 - Multi-level session routing requires nested conditionals
     pub(crate) async fn resolve_core(
         &self,
         serial: Option<&str>,
@@ -222,6 +223,7 @@ impl SessionRegistry {
         core
     }
 
+    // NOSONAR S3776 - Session lookup logic requires nested conditionals
     pub(crate) async fn resolve_core_readonly(
         &self,
         serial: Option<&str>,

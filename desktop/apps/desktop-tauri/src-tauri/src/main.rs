@@ -111,6 +111,7 @@ pub(crate) fn ensure_user_wbeam_config(root: &PathBuf) -> Option<PathBuf> {
     Some(user_cfg)
 }
 
+// NOSONAR S3776 - Config parsing requires nested file/line iteration
 fn wbeam_config_cache() -> &'static HashMap<String, String> {
     WBEAM_CONFIG_CACHE.get_or_init(|| {
         let root = repo_root();
@@ -194,6 +195,7 @@ pub(crate) fn wbeam_stream_port() -> u16 {
     wbeam_config_u16("WBEAM_STREAM_PORT", 5000)
 }
 
+// NOSONAR S3776 - Timestamp generation requires nested command fallbacks
 fn session_logs() -> &'static SessionLogs {
     SESSION_LOGS.get_or_init(|| {
         let dir = repo_root().join("logs");

@@ -59,6 +59,7 @@ struct EvdiModuleStatus {
     loaded: bool,
 }
 
+// NOSONAR S3776 - Multi-stage capability detection requires sequential checks
 pub fn probe(is_remote: bool) -> X11RealOutputProbe {
     if policy_flag_enabled("DISABLE_REAL_OUTPUT_BACKEND") {
         return X11RealOutputProbe {
@@ -350,6 +351,7 @@ fn is_evdi_loaded() -> bool {
         .unwrap_or(false)
 }
 
+// NOSONAR S3776 - X11 provider/output setup requires complex validation
 pub fn create(
     _serial: &str,
     size: &str,

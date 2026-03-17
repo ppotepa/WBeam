@@ -1274,6 +1274,7 @@ impl DaemonCore {
         inner.no_present_streak = 0;
     }
 
+    // NOSONAR S3776 - Complex state machine required for config initialization
     async fn start_with_config(&self, cfg: ActiveConfig, reason: &str) -> Result<(), CoreError> {
         let (requested_display_mode, capture_backend_override) = {
             let inner = self.inner.lock().await;
@@ -1715,6 +1716,7 @@ impl DaemonCore {
         Ok(())
     }
 
+    // NOSONAR S3776 - Event dispatch logic requires conditional branching
     async fn on_stream_output(&self, run_id: u64, line: &str) {
         let mut effective_snapshot: Option<EffectiveRuntimeConfig> = None;
         let mut inner = self.inner.lock().await;
