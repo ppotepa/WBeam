@@ -8,7 +8,8 @@ ARCH="$(dpkg --print-architecture)"
 PKG_NAME="wbeam"
 
 echo "[build_deb] Building Rust binaries..."
-cargo build --release -p wbeamd-server -p wbeamd-streamer --manifest-path "${RUST_MANIFEST}"
+cargo build --release -p wbeamd-server --manifest-path "${RUST_MANIFEST}"
+cargo build --release -p wbeamd-streamer --no-default-features --features evdi --manifest-path "${RUST_MANIFEST}"
 echo "[build_deb] Building desktop Tauri app..."
 (
   cd "${ROOT_DIR}/desktop/apps/desktop-tauri"

@@ -56,7 +56,7 @@ Groups:
 
 Examples:
   ./wbgui
-  ./wbeam host build             # cargo build --release wbeamd-server + wbeamd-streamer
+  ./wbeam host build             # build wbeamd-server + wbeamd-streamer (evdi)
   ./wbeam host run               # release binary, foreground
   ./wbeam host debug             # debug build + coloured logs + ADB sidecar
   ./wbeam host probe             # host fingerprint JSON (os/session/display/providers/tools)
@@ -701,7 +701,9 @@ host_build() {
   build_version="$(build_version_for_build)"
   echo "[host] Build version: $build_version"
   echo "[host] Building Rust backend (release)…"
-  cd "$rust_dir" && WBEAM_BUILD_REV="$build_version" cargo build --release -p wbeamd-server -p wbeamd-streamer
+  cd "$rust_dir" && \
+    WBEAM_BUILD_REV="$build_version" cargo build --release -p wbeamd-server && \
+    WBEAM_BUILD_REV="$build_version" cargo build --release -p wbeamd-streamer --no-default-features --features evdi
   echo "[host] Build OK → $DAEMON_BIN"
 }
 
@@ -711,7 +713,8 @@ ensure_daemon_binary() {
   fi
   echo "Daemon binary missing: $DAEMON_BIN" >&2
   echo "Build it first:" >&2
-  echo "  cd $ROOT_DIR/host/rust && cargo build --release -p wbeamd-server -p wbeamd-streamer" >&2
+  echo "  cd $ROOT_DIR/host/rust && cargo build --release -p wbeamd-server" >&2
+  echo "  cd $ROOT_DIR/host/rust && cargo build --release -p wbeamd-streamer --no-default-features --features evdi" >&2
   echo "or install package providing /usr/local/bin/wbeamd-server" >&2
   exit 1
 }

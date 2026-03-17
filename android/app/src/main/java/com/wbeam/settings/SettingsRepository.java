@@ -13,6 +13,7 @@ public final class SettingsRepository {
 
     private static final String PREFS = "wbeam_settings";
     private static final String PROFILE_DEFAULT = "default";
+    private static final String PROFILE_ADAPTIVE = "adaptive";
     private static final String ENCODER_H264 = "h264";
     private static final String ENCODER_H265 = "h265";
     private static final String ENCODER_RAW_PNG = "raw-png";
@@ -43,7 +44,7 @@ public final class SettingsRepository {
         String encoder = prefs.getString(PREF_ENCODER, ENCODER_H265);
         String cursor  = prefs.getString(PREF_CURSOR, CURSOR_EMBEDDED);
 
-        if (!PROFILE_DEFAULT.equals(profile)) {
+        if (!PROFILE_DEFAULT.equals(profile) && !PROFILE_ADAPTIVE.equals(profile)) {
             profile = PROFILE_DEFAULT;
             prefs.edit().putString(PREF_PROFILE, profile).apply();
         }

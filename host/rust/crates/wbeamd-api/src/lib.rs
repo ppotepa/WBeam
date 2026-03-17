@@ -6,7 +6,8 @@ use thiserror::Error;
 pub const VALID_ENCODERS: &[&str] = &["h264", "h265", "rawpng"];
 pub const VALID_CURSOR_MODES: &[&str] = &["hidden", "embedded", "metadata"];
 pub const DEFAULT_PROFILE: &str = "default";
-pub const VALID_PROFILES: &[&str] = &[DEFAULT_PROFILE];
+pub const ADAPTIVE_PROFILE: &str = "adaptive";
+pub const VALID_PROFILES: &[&str] = &[DEFAULT_PROFILE, ADAPTIVE_PROFILE];
 
 pub fn canonical_profile_name(raw: &str) -> String {
     let trimmed = raw.trim();
@@ -15,6 +16,12 @@ pub fn canonical_profile_name(raw: &str) -> String {
     }
     if trimmed.eq_ignore_ascii_case(DEFAULT_PROFILE) || trimmed.eq_ignore_ascii_case("baseline") {
         return DEFAULT_PROFILE.to_string();
+    }
+    if trimmed.eq_ignore_ascii_case(ADAPTIVE_PROFILE)
+        || trimmed.eq_ignore_ascii_case("adaptive_auto")
+        || trimmed.eq_ignore_ascii_case("adaptive_locked_backend")
+    {
+        return ADAPTIVE_PROFILE.to_string();
     }
     DEFAULT_PROFILE.to_string()
 }
@@ -446,6 +453,10 @@ pub fn presets() -> BTreeMap<String, ActiveConfig> {
         DEFAULT_PROFILE.to_string(),
         cfg(DEFAULT_PROFILE, "1280x800", 60, 10_000, "h264"),
     );
+    map.insert(
+        ADAPTIVE_PROFILE.to_string(),
+        cfg(ADAPTIVE_PROFILE, "1280x800", 60, 12_000, "h264"),
+    );
     map
 }
 
@@ -652,5 +663,26 @@ mod tests {
         };
         let cfg = validate_config(patch, &current).expect("valid config");
         assert_eq!(cfg.bitrate_kbps, 250_000);
+    }
+
+    #[test]
+    fn canonical_profile_maps_adaptive_aliases() {
+        assert_eq!(canonical_profile_name("adaptive"), ADAPTIVE_PROFILE.to_string());
+        assert_eq!(
+            canonical_profile_name("adaptive_locked_backend"),
+            ADAPTIVE_PROFILE.to_string()
+        );
+        assert_eq!(canonical_profile_name("baseline"), DEFAULT_PROFILE.to_string());
+    }
+
+    #[test]
+    fn validate_config_accepts_adaptive_profile() {
+        let current = base_config("h264", 10_000);
+        let patch = ConfigPatch {
+            profile: Some("adaptive".to_string()),
+            ..Default::default()
+        };
+        let cfg = validate_config(patch, &current).expect("adaptive profile should be valid");
+        assert_eq!(cfg.profile, ADAPTIVE_PROFILE);
     }
 }

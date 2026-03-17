@@ -9,7 +9,8 @@ TOPDIR="$(mktemp -d)"
 trap 'rm -rf "${TOPDIR}"' EXIT
 
 echo "[build_rpm] Building Rust binaries..."
-cargo build --release -p wbeamd-server -p wbeamd-streamer --manifest-path "${RUST_MANIFEST}"
+cargo build --release -p wbeamd-server --manifest-path "${RUST_MANIFEST}"
+cargo build --release -p wbeamd-streamer --no-default-features --features evdi --manifest-path "${RUST_MANIFEST}"
 echo "[build_rpm] Building desktop Tauri app..."
 (
   cd "${ROOT_DIR}/desktop/apps/desktop-tauri"

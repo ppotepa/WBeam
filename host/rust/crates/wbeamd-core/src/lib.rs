@@ -28,8 +28,8 @@ pub mod domain;
 pub mod infra;
 
 use domain::policy::{
-    adaptation_reason, config_for_level, is_high_pressure, is_low_pressure,
-    HIGH_PRESSURE_STREAK_REQUIRED, LOW_PRESSURE_STREAK_REQUIRED, MAX_ADAPTATION_LEVEL,
+    adaptation_cooldown_secs, adaptation_reason, config_for_level, high_pressure_streak_required,
+    is_high_pressure, is_low_pressure, low_pressure_streak_required, MAX_ADAPTATION_LEVEL,
 };
 use domain::state::{
     STATE_ERROR, STATE_IDLE, STATE_RECONNECTING, STATE_STARTING, STATE_STOPPING, STATE_STREAMING,
@@ -39,7 +39,6 @@ use infra::{adb, config_store, display_backends, host_probe, telemetry};
 
 const DEFAULT_START_TIMEOUT: Duration = Duration::from_secs(45);
 const DUPLICATE_START_GUARD: Duration = Duration::from_secs(3);
-const ADAPTATION_COOLDOWN: Duration = Duration::from_secs(domain::policy::ADAPTATION_COOLDOWN_SECS);
 const NO_PRESENT_RESTART_STREAK_REQUIRED: u8 = 4;
 const NO_PRESENT_RESTART_COOLDOWN: Duration = Duration::from_secs(15);
 const NO_PRESENT_MIN_RECV_FPS: f64 = 10.0;
@@ -1160,11 +1159,15 @@ impl DaemonCore {
     }
 
     fn apply_adaptation_level(inner: &mut Inner, now: Instant) -> bool {
+        let profile = inner.baseline_config.profile.as_str();
+        let cooldown = Duration::from_secs(adaptation_cooldown_secs(profile));
+        let high_streak_required = high_pressure_streak_required(profile);
+        let low_streak_required = low_pressure_streak_required(profile);
         let cooldown_ready = inner
             .last_adaptation_at
-            .map(|t| now.duration_since(t) >= ADAPTATION_COOLDOWN)
+            .map(|t| now.duration_since(t) >= cooldown)
             .unwrap_or(true);
-        if cooldown_ready && inner.high_pressure_streak >= HIGH_PRESSURE_STREAK_REQUIRED {
+        if cooldown_ready && inner.high_pressure_streak >= high_streak_required {
             if inner.adaptation_level < MAX_ADAPTATION_LEVEL {
                 inner.adaptation_level = inner.adaptation_level.saturating_add(1);
                 inner.metrics.adaptive_action = "degrade".to_string();
@@ -1175,7 +1178,7 @@ impl DaemonCore {
             inner.high_pressure_streak = 0;
             return false;
         }
-        if cooldown_ready && inner.low_pressure_streak >= LOW_PRESSURE_STREAK_REQUIRED {
+        if cooldown_ready && inner.low_pressure_streak >= low_streak_required {
             if inner.adaptation_level > 0 {
                 inner.adaptation_level = inner.adaptation_level.saturating_sub(1);
                 inner.metrics.adaptive_action = "recover".to_string();
@@ -2529,7 +2532,7 @@ mod tests {
             inner.adaptation_level = 1;
             inner.last_adaptation_at = Some(Instant::now() - Duration::from_secs(5));
         }
-        for _ in 0..LOW_PRESSURE_STREAK_REQUIRED {
+        for _ in 0..domain::policy::LOW_PRESSURE_STREAK_REQUIRED {
             core.ingest_client_metrics(low_pressure_client())
                 .await
                 .expect("ingest");
@@ -2550,7 +2553,7 @@ mod tests {
             inner.adaptation_level = 0;
             inner.last_adaptation_at = Some(Instant::now() - Duration::from_secs(5));
         }
-        for _ in 0..LOW_PRESSURE_STREAK_REQUIRED {
+        for _ in 0..domain::policy::LOW_PRESSURE_STREAK_REQUIRED {
             core.ingest_client_metrics(low_pressure_client())
                 .await
                 .expect("ingest");

@@ -4,14 +4,40 @@
 //! the `Inner` lock or any async runtime state.  This makes them trivially
 //! testable without spinning up a full `DaemonCore`.
 
-use wbeamd_api::{ActiveConfig, ClientMetricsRequest};
+use wbeamd_api::{ActiveConfig, ClientMetricsRequest, ADAPTIVE_PROFILE};
 
 // ── Thresholds & tuning constants ───────────────────────────────────────────
 
 pub const ADAPTATION_COOLDOWN_SECS: u64 = 4;
+pub const ADAPTIVE_ADAPTATION_COOLDOWN_SECS: u64 = 3;
 pub const HIGH_PRESSURE_STREAK_REQUIRED: u8 = 2;
 pub const LOW_PRESSURE_STREAK_REQUIRED: u8 = 8;
+pub const ADAPTIVE_LOW_PRESSURE_STREAK_REQUIRED: u8 = 5;
 pub const MAX_ADAPTATION_LEVEL: u8 = 3;
+
+pub fn is_adaptive_profile(profile: &str) -> bool {
+    profile.eq_ignore_ascii_case(ADAPTIVE_PROFILE)
+}
+
+pub fn adaptation_cooldown_secs(profile: &str) -> u64 {
+    if is_adaptive_profile(profile) {
+        ADAPTIVE_ADAPTATION_COOLDOWN_SECS
+    } else {
+        ADAPTATION_COOLDOWN_SECS
+    }
+}
+
+pub fn high_pressure_streak_required(_profile: &str) -> u8 {
+    HIGH_PRESSURE_STREAK_REQUIRED
+}
+
+pub fn low_pressure_streak_required(profile: &str) -> u8 {
+    if is_adaptive_profile(profile) {
+        ADAPTIVE_LOW_PRESSURE_STREAK_REQUIRED
+    } else {
+        LOW_PRESSURE_STREAK_REQUIRED
+    }
+}
 
 fn frame_budget_ms(fps_target: u32) -> f64 {
     1000.0 / fps_target.max(24) as f64
@@ -108,8 +134,10 @@ pub fn adaptation_reason(client: &ClientMetricsRequest, high: bool, low: bool) -
 pub fn config_for_level(base: &ActiveConfig, level: u8) -> ActiveConfig {
     let mut cfg = base.clone();
     let png_profile = base.encoder == "rawpng";
+    let adaptive_profile = is_adaptive_profile(&base.profile);
 
-    let (scale_pct, fps_pct, bitrate_pct) = quality_profile_for_level(level, png_profile);
+    let (scale_pct, fps_pct, bitrate_pct) =
+        quality_profile_for_level(level, png_profile, adaptive_profile);
     cfg.size = scaled_size_or_original(&cfg.size, scale_pct);
     cfg.fps = scaled_fps(base.fps, fps_pct, png_profile);
     cfg.bitrate_kbps = scaled_bitrate(base.bitrate_kbps, bitrate_pct, png_profile, &cfg.encoder);
@@ -148,7 +176,18 @@ fn scaled_bitrate(base_bitrate: u32, bitrate_pct: u32, png_profile: bool, encode
     }
 }
 
-fn quality_profile_for_level(level: u8, png_profile: bool) -> (u32, u32, u32) {
+fn quality_profile_for_level(level: u8, png_profile: bool, adaptive_profile: bool) -> (u32, u32, u32) {
+    if adaptive_profile {
+        return match (level, png_profile) {
+            (0, _) => (100, 100, 100),
+            (1, true) => (96, 86, 92),
+            (1, false) => (94, 94, 90),
+            (2, true) => (90, 74, 82),
+            (2, false) => (88, 88, 78),
+            (_, true) => (82, 58, 68),
+            (_, false) => (80, 80, 64),
+        };
+    }
     match (level, png_profile) {
         (0, _) => (100, 100, 100),
         (1, true) => (95, 80, 90),
@@ -266,5 +305,23 @@ mod tests {
         base.bitrate_kbps = 150_000;
         let cfg = config_for_level(&base, 0);
         assert_eq!(cfg.bitrate_kbps, 100_000);
+    }
+
+    #[test]
+    fn adaptive_profile_degrades_bitrate_more_gently_than_default() {
+        let mut base = ActiveConfig::balanced_default();
+        base.profile = ADAPTIVE_PROFILE.to_string();
+        base.bitrate_kbps = 20_000;
+        let adaptive_cfg = config_for_level(&base, 2);
+
+        base.profile = "default".to_string();
+        let default_cfg = config_for_level(&base, 2);
+        assert!(adaptive_cfg.bitrate_kbps > default_cfg.bitrate_kbps);
+    }
+
+    #[test]
+    fn adaptive_profile_uses_shorter_recovery_streak() {
+        assert_eq!(low_pressure_streak_required("adaptive"), ADAPTIVE_LOW_PRESSURE_STREAK_REQUIRED);
+        assert_eq!(low_pressure_streak_required("default"), LOW_PRESSURE_STREAK_REQUIRED);
     }
 }

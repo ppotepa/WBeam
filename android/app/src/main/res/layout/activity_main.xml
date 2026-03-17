@@ -628,13 +628,13 @@
                 android:layout_marginTop="10dp"
                 android:text="Profile"
                 android:textColor="#CBD5E1"
-                android:visibility="gone" />
+                android:visibility="visible" />
 
             <Spinner
                 android:id="@+id/profileSpinner"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:visibility="gone" />
+                android:visibility="visible" />
 
             <TextView
                 android:layout_width="match_parent"

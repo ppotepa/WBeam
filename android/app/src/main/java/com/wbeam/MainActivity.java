@@ -98,8 +98,9 @@ public class MainActivity extends AppCompatActivity {
     private static final int RENDER_QUEUE_MAX_FRAMES = 1;
 
     private static final String DEFAULT_PROFILE = "default";
+    private static final String ADAPTIVE_PROFILE = "adaptive";
     private static final String DEFAULT_CURSOR_MODE = "embedded";
-    private static final String[] PROFILE_OPTIONS = {DEFAULT_PROFILE};
+    private static final String[] PROFILE_OPTIONS = {DEFAULT_PROFILE, ADAPTIVE_PROFILE};
     /**
      * Preferred video encoder for this device.
      */
