@@ -5,6 +5,8 @@
 
 use std::io::Write;
 use std::net::{SocketAddr, TcpListener, TcpStream};
+#[cfg(unix)]
+use std::os::fd::AsRawFd;
 use std::sync::mpsc::{self, RecvTimeoutError, TrySendError};
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
@@ -231,6 +233,26 @@ enum FrameSendOutcome {
     Disconnect,
 }
 
+enum KeyframeRetryOutcome {
+    Recovered,
+    Dropped,
+}
+
+#[derive(Clone, Copy)]
+enum QueueMode {
+    DropWhenFull,
+    BlockWhenFull,
+}
+
+impl SenderRuntime {
+    fn queue_mode(self) -> QueueMode {
+        match self.stream_mode {
+            StreamMode::Ultra => QueueMode::DropWhenFull,
+            StreamMode::Stable | StreamMode::Quality => QueueMode::BlockWhenFull,
+        }
+    }
+}
+
 fn producer_frame(
     sample: gst::Sample,
     codec_flags: u8,
@@ -263,7 +285,7 @@ fn producer_frame(
     })
 }
 
-fn enqueue_ultra_frame(
+fn enqueue_drop_frame(
     tx: &mpsc::SyncSender<EncodedFrame>,
     frame: EncodedFrame,
     queue_stats: &QueueStats,
@@ -281,7 +303,7 @@ fn enqueue_ultra_frame(
     }
 }
 
-fn enqueue_buffered_frame(
+fn enqueue_blocking_frame(
     tx: &mpsc::SyncSender<EncodedFrame>,
     frame: EncodedFrame,
     stop: &Arc<AtomicBool>,
@@ -306,6 +328,19 @@ fn enqueue_buffered_frame(
     }
 }
 
+fn enqueue_frame(
+    tx: &mpsc::SyncSender<EncodedFrame>,
+    frame: EncodedFrame,
+    queue_mode: QueueMode,
+    stop: &Arc<AtomicBool>,
+    queue_stats: &QueueStats,
+) -> bool {
+    match queue_mode {
+        QueueMode::DropWhenFull => enqueue_drop_frame(tx, frame, queue_stats),
+        QueueMode::BlockWhenFull => enqueue_blocking_frame(tx, frame, stop, queue_stats),
+    }
+}
+
 fn spawn_producer(
     appsink: gst_app::AppSink,
     runtime: SenderRuntime,
@@ -315,6 +350,7 @@ fn spawn_producer(
     queue_stats: QueueStats,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
+        let queue_mode = runtime.queue_mode();
         while !stop.load(Ordering::Acquire) {
             let Some(sample) = appsink.try_pull_sample(runtime.pull_timeout()) else {
                 continue;
@@ -322,12 +358,7 @@ fn spawn_producer(
             let Some(frame) = producer_frame(sample, runtime.codec_flags, &last_keyframe) else {
                 continue;
             };
-            let queued = match runtime.stream_mode {
-                StreamMode::Ultra => enqueue_ultra_frame(&tx, frame, &queue_stats),
-                StreamMode::Stable | StreamMode::Quality => {
-                    enqueue_buffered_frame(&tx, frame, &stop, &queue_stats)
-                }
-            };
+            let queued = enqueue_frame(&tx, frame, queue_mode, &stop, &queue_stats);
             if !queued {
                 break;
             }
@@ -335,11 +366,51 @@ fn spawn_producer(
     })
 }
 
+#[cfg(unix)]
+fn wait_for_connection(listener: &TcpListener, stop: &Arc<AtomicBool>, timeout: Duration) -> bool {
+    let fd = listener.as_raw_fd();
+    let timeout_ms = timeout.as_millis().min(i32::MAX as u128) as i32;
+    while !stop.load(Ordering::Acquire) {
+        let mut pollfd = libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let result = unsafe { libc::poll(&mut pollfd as *mut libc::pollfd, 1, timeout_ms) };
+        if result > 0 {
+            return true;
+        }
+        if result == 0 {
+            return false;
+        }
+        let err = std::io::Error::last_os_error();
+        if err.kind() == std::io::ErrorKind::Interrupted {
+            continue;
+        }
+        eprintln!("[wbeam-framed] listener poll error: {err}");
+        return false;
+    }
+    false
+}
+
+#[cfg(not(unix))]
+fn wait_for_connection(_listener: &TcpListener, stop: &Arc<AtomicBool>, timeout: Duration) -> bool {
+    if stop.load(Ordering::Acquire) {
+        return false;
+    }
+    std::thread::sleep(timeout);
+    false
+}
+
 fn accept_client(
     listener: &TcpListener,
     runtime: SenderRuntime,
     configured_write_timeout_ms: u32,
+    stop: &Arc<AtomicBool>,
 ) -> ConnectionOutcome {
+    if !wait_for_connection(listener, stop, Duration::from_millis(100)) {
+        return ConnectionOutcome::Retry;
+    }
     match listener.accept() {
         Ok((stream, addr)) => {
             let _ = stream.set_nodelay(true);
@@ -353,10 +424,7 @@ fn accept_client(
             println!("[wbeam-framed] client connected: {addr}");
             ConnectionOutcome::Connected(stream)
         }
-        Err(ref err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-            std::thread::sleep(Duration::from_millis(10));
-            ConnectionOutcome::Retry
-        }
+        Err(ref err) if err.kind() == std::io::ErrorKind::WouldBlock => ConnectionOutcome::Retry,
         Err(err) => {
             eprintln!("[wbeam-framed] accept error: {err}");
             ConnectionOutcome::Fatal
@@ -429,6 +497,68 @@ fn retry_keyframe_send(conn: &mut TcpStream, header: &[u8], frame: &EncodedFrame
     false
 }
 
+fn complete_frame_send(seq: &mut u32, stats: &mut SessionStats) -> FrameSendOutcome {
+    *seq = seq.wrapping_add(1);
+    stats.frames += 1;
+    FrameSendOutcome::Sent
+}
+
+fn on_keyframe_timeout(
+    conn: &mut TcpStream,
+    runtime: SenderRuntime,
+    frame: &EncodedFrame,
+    header: &[u8],
+    seq: u32,
+    stats: &mut SessionStats,
+) -> KeyframeRetryOutcome {
+    stats.soft_timeout_key += 1;
+    if retry_keyframe_send(conn, header, frame) {
+        stats.key_retry_ok += 1;
+        return KeyframeRetryOutcome::Recovered;
+    }
+
+    stats.key_retry_fail += 1;
+    println!(
+        "[wbeam-framed] soft-timeout on keyframe seq={} size={} mode={:?}",
+        seq,
+        frame.data.len(),
+        runtime.stream_mode
+    );
+    KeyframeRetryOutcome::Dropped
+}
+
+fn timeout_send_outcome(
+    conn: &mut TcpStream,
+    runtime: SenderRuntime,
+    frame: &EncodedFrame,
+    header: &[u8],
+    seq: &mut u32,
+    stats: &mut SessionStats,
+) -> FrameSendOutcome {
+    stats.send_timeouts += 1;
+    if frame.is_key {
+        match on_keyframe_timeout(conn, runtime, frame, header, *seq, stats) {
+            KeyframeRetryOutcome::Recovered => return complete_frame_send(seq, stats),
+            KeyframeRetryOutcome::Dropped => {}
+        }
+    } else {
+        stats.soft_timeout_delta += 1;
+    }
+
+    if runtime.disconnect_on_timeout {
+        println!("[wbeam-framed] timeout -> reconnect client");
+        return FrameSendOutcome::Disconnect;
+    }
+    stats.dropped += 1;
+    FrameSendOutcome::Continue
+}
+
+fn hard_disconnect(err: std::io::Error) -> FrameSendOutcome {
+    println!("WBEAM_EVENT:{{\"event\":\"client_disconnected\",\"reason\":\"{err}\"}}");
+    println!("[wbeam-framed] client disconnected: {err}");
+    FrameSendOutcome::Disconnect
+}
+
 fn send_frame(
     conn: &mut TcpStream,
     runtime: SenderRuntime,
@@ -438,47 +568,15 @@ fn send_frame(
 ) -> FrameSendOutcome {
     let header = build_header(*seq, frame.pts_us, frame.data.len(), frame.is_key);
     match send_all_vectored(conn, &header, &frame.data) {
-        Ok(()) => {
-            *seq = seq.wrapping_add(1);
-            stats.frames += 1;
-            FrameSendOutcome::Sent
-        }
+        Ok(()) => complete_frame_send(seq, stats),
         Err(ref err)
             if err.kind() == std::io::ErrorKind::WouldBlock
                 || err.kind() == std::io::ErrorKind::TimedOut =>
         {
-            stats.send_timeouts += 1;
-            if frame.is_key {
-                stats.soft_timeout_key += 1;
-                if retry_keyframe_send(conn, &header, &frame) {
-                    stats.key_retry_ok += 1;
-                    *seq = seq.wrapping_add(1);
-                    stats.frames += 1;
-                    return FrameSendOutcome::Sent;
-                }
-                stats.key_retry_fail += 1;
-                println!(
-                    "[wbeam-framed] soft-timeout on keyframe seq={} size={} mode={:?}",
-                    *seq,
-                    frame.data.len(),
-                    runtime.stream_mode
-                );
-            } else {
-                stats.soft_timeout_delta += 1;
-            }
-            if runtime.disconnect_on_timeout {
-                println!("[wbeam-framed] timeout -> reconnect client");
-                return FrameSendOutcome::Disconnect;
-            }
-            stats.dropped += 1;
-            FrameSendOutcome::Continue
+            timeout_send_outcome(conn, runtime, &frame, &header, seq, stats)
         }
         Err(ref err) if err.kind() == std::io::ErrorKind::Interrupted => FrameSendOutcome::Continue,
-        Err(err) => {
-            println!("WBEAM_EVENT:{{\"event\":\"client_disconnected\",\"reason\":\"{err}\"}}");
-            println!("[wbeam-framed] client disconnected: {err}");
-            FrameSendOutcome::Disconnect
-        }
+        Err(err) => hard_disconnect(err),
     }
 }
 
@@ -525,6 +623,34 @@ fn run_client_session(
     }
 }
 
+fn run_accept_loop(
+    listener: &TcpListener,
+    runtime: SenderRuntime,
+    configured_write_timeout_ms: u32,
+    rx: &mpsc::Receiver<EncodedFrame>,
+    last_keyframe: &Arc<Mutex<Option<CachedKeyframe>>>,
+    stop: &Arc<AtomicBool>,
+    fps_counter: &Arc<AtomicU64>,
+    queue_stats: &QueueStats,
+) {
+    while !stop.load(Ordering::Acquire) {
+        let conn = match accept_client(listener, runtime, configured_write_timeout_ms, stop) {
+            ConnectionOutcome::Connected(conn) => conn,
+            ConnectionOutcome::Retry => continue,
+            ConnectionOutcome::Fatal => break,
+        };
+        run_client_session(
+            conn,
+            runtime,
+            rx,
+            last_keyframe,
+            stop,
+            fps_counter,
+            queue_stats,
+        );
+    }
+}
+
 // ── Sender thread ─────────────────────────────────────────────────────────────
 
 /// Spawn the sender thread that:
@@ -565,27 +691,92 @@ pub fn spawn_sender(
 
         // Acquire pairs with the Release store on the shutdown writer; cheaper
         // than SeqCst (avoids full fences on ARM/weak-order architectures).
-        while !stop.load(Ordering::Acquire) {
-            let conn = match accept_client(&listener, runtime, cfg.write_timeout_ms) {
-                ConnectionOutcome::Connected(conn) => conn,
-                ConnectionOutcome::Retry => continue,
-                ConnectionOutcome::Fatal => break,
-            };
-            run_client_session(
-                conn,
-                runtime,
-                &rx,
-                &last_keyframe,
-                &stop,
-                &fps_counter,
-                &queue_stats,
-            );
-            if stop.load(Ordering::Acquire) {
-                break;
-            }
-        }
+        run_accept_loop(
+            &listener,
+            runtime,
+            cfg.write_timeout_ms,
+            &rx,
+            &last_keyframe,
+            &stop,
+            &fps_counter,
+            &queue_stats,
+        );
 
         stop.store(true, Ordering::Release);
         let _ = producer_handle.join();
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn enqueue_drop_mode_counts_drop_without_blocking() {
+        let (tx, rx) = mpsc::sync_channel::<EncodedFrame>(1);
+        let queue_stats = QueueStats::new();
+        let stop = Arc::new(AtomicBool::new(false));
+        let frame = EncodedFrame {
+            pts_us: 1,
+            is_key: false,
+            data: Arc::from([1u8, 2, 3]),
+        };
+        let another = EncodedFrame {
+            pts_us: 2,
+            is_key: false,
+            data: Arc::from([4u8, 5, 6]),
+        };
+
+        assert!(enqueue_frame(
+            &tx,
+            frame,
+            QueueMode::DropWhenFull,
+            &stop,
+            &queue_stats
+        ));
+        assert!(enqueue_frame(
+            &tx,
+            another,
+            QueueMode::DropWhenFull,
+            &stop,
+            &queue_stats
+        ));
+
+        assert!(rx.try_recv().is_ok());
+        let (_, _, drops) = queue_stats.snapshot_and_reset();
+        assert_eq!(drops, 1);
+    }
+
+    #[test]
+    fn enqueue_blocking_mode_stops_when_requested() {
+        let (tx, _rx) = mpsc::sync_channel::<EncodedFrame>(1);
+        let queue_stats = QueueStats::new();
+        let stop = Arc::new(AtomicBool::new(false));
+        let first = EncodedFrame {
+            pts_us: 1,
+            is_key: false,
+            data: Arc::from([1u8]),
+        };
+        let second = EncodedFrame {
+            pts_us: 2,
+            is_key: false,
+            data: Arc::from([2u8]),
+        };
+
+        assert!(enqueue_frame(
+            &tx,
+            first,
+            QueueMode::BlockWhenFull,
+            &stop,
+            &queue_stats
+        ));
+        stop.store(true, Ordering::Release);
+        assert!(!enqueue_frame(
+            &tx,
+            second,
+            QueueMode::BlockWhenFull,
+            &stop,
+            &queue_stats
+        ));
+    }
 }
