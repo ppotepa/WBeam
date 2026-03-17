@@ -6,6 +6,12 @@ import java.util.Locale;
  * Builds preflight/startup overlay model from current runtime snapshot.
  */
 public final class StartupOverlayModelBuilder {
+    private static final String ATTEMPT_PREFIX = "attempt #";
+    private static final String RECONNECTS_PREFIX = "reconnects: ";
+    private static final String LOCAL_API = "local";
+    private static final String STREAMING_STATE = "STREAMING";
+    private static final String STREAM_START_ABORTED = "stream start aborted";
+
     private StartupOverlayModelBuilder() {}
 
     public static final class Input {
@@ -59,153 +65,261 @@ public final class StartupOverlayModelBuilder {
 
     public static Model build(Input in) {
         Model out = new Model();
+        TimingState timing = calculateTiming(in);
+        out.updatedStartupBeganAtMs = timing.startupBeganAtMs;
+        out.updatedControlRetryCount = timing.controlRetryCount;
+        out.elapsedMs = timing.elapsedMs;
+
+        Step1State step1 = buildStep1(in, timing);
+        out.step1State = step1.state;
+        out.step1Detail = step1.detail;
+
+        Step2State step2 = buildStep2(in, step1.state);
+        out.step2State = step2.state;
+        out.step2Detail = step2.detail;
+
+        Step3Context ctx = createStep3Context(in, timing.elapsedMs);
+        Step3State step3 = buildStep3(in, step2.state, ctx, timing.elapsedMs);
+        out.step3State = step3.state;
+        out.step3Detail = step3.detail;
+
+        out.subtitle = buildSubtitle(in, step1.state, step2.state, step3.state, ctx, timing);
+        out.infoLog = buildInfoLog(in);
+        out.allOk = step1.state == Model.SS_OK && step2.state == Model.SS_OK && step3.state == Model.SS_OK;
+        return out;
+    }
+
+    private static class TimingState {
+        long elapsedMs;
+        long startupBeganAtMs;
+        int controlRetryCount;
+
+        TimingState(long elapsedMs, long startupBeganAtMs, int controlRetryCount) {
+            this.elapsedMs = elapsedMs;
+            this.startupBeganAtMs = startupBeganAtMs;
+            this.controlRetryCount = controlRetryCount;
+        }
+    }
+
+    private static class Step1State {
+        int state;
+        String detail;
+
+        Step1State(int state, String detail) {
+            this.state = state;
+            this.detail = detail;
+        }
+    }
+
+    private static class Step2State {
+        int state;
+        String detail;
+
+        Step2State(int state, String detail) {
+            this.state = state;
+            this.detail = detail;
+        }
+    }
+
+    private static class Step3State {
+        int state;
+        String detail;
+
+        Step3State(int state, String detail) {
+            this.state = state;
+            this.detail = detail;
+        }
+    }
+
+    private static class Step3Context {
+        boolean streamFlowing;
+        int streamReconnects;
+        String streamAddr;
+        boolean daemonStartFailure;
+        String streamFixHint;
+
+        Step3Context(boolean streamFlowing, int streamReconnects, String streamAddr,
+                     boolean daemonStartFailure, String streamFixHint) {
+            this.streamFlowing = streamFlowing;
+            this.streamReconnects = streamReconnects;
+            this.streamAddr = streamAddr;
+            this.daemonStartFailure = daemonStartFailure;
+            this.streamFixHint = streamFixHint;
+        }
+    }
+
+    private static TimingState calculateTiming(Input in) {
         long elapsedMs = in.startupBeganAtMs > 0L
                 ? Math.max(0L, in.nowMs - in.startupBeganAtMs)
                 : 0L;
-        long updatedStartupBeganAtMs = in.startupBeganAtMs;
-        int updatedControlRetryCount = in.controlRetryCount;
+        long startupBeganAtMs = in.startupBeganAtMs;
+        int controlRetryCount = in.controlRetryCount;
 
         if (!in.daemonReachable && elapsedMs > 20_000L) {
-            updatedControlRetryCount++;
-            updatedStartupBeganAtMs = in.nowMs;
+            controlRetryCount++;
+            startupBeganAtMs = in.nowMs;
             elapsedMs = 0L;
         }
-        if (in.daemonReachable && updatedControlRetryCount > 0) {
-            updatedControlRetryCount = 0;
+        if (in.daemonReachable && controlRetryCount > 0) {
+            controlRetryCount = 0;
         }
-        out.updatedStartupBeganAtMs = updatedStartupBeganAtMs;
-        out.updatedControlRetryCount = updatedControlRetryCount;
-        out.elapsedMs = elapsedMs;
+        return new TimingState(elapsedMs, startupBeganAtMs, controlRetryCount);
+    }
 
-        int step1 = in.daemonReachable ? Model.SS_OK : Model.SS_ACTIVE;
-        String step1Detail;
-        if (step1 == Model.SS_OK) {
-            boolean isLocalImpl = "local".equalsIgnoreCase(in.apiImpl);
-            if (isLocalImpl) {
-                step1Detail = "on-device (local api) \u00b7 no host connection needed";
-            } else {
-                step1Detail = "reachable \u00b7 api_impl=" + safe(in.apiImpl)
-                        + " \u00b7 " + safe(in.daemonHostName);
-            }
-        } else if (updatedControlRetryCount == 0) {
-            step1Detail = "polling " + safe(in.apiBase)
-                    + " \u2026 (" + (elapsedMs / 1000L) + "s)"
+    private static Step1State buildStep1(Input in, TimingState timing) {
+        int state = in.daemonReachable ? Model.SS_OK : Model.SS_ACTIVE;
+        String detail;
+        if (state == Model.SS_OK) {
+            boolean isLocalImpl = LOCAL_API.equalsIgnoreCase(in.apiImpl);
+            detail = isLocalImpl
+                    ? "on-device (local api) \u00b7 no host connection needed"
+                    : "reachable \u00b7 api_impl=" + safe(in.apiImpl) + " \u00b7 " + safe(in.daemonHostName);
+        } else if (timing.controlRetryCount == 0) {
+            detail = "polling " + safe(in.apiBase)
+                    + " \u2026 (" + (timing.elapsedMs / 1000L) + "s)"
                     + " \u00b7 install/start desktop service if this does not recover";
         } else {
-            step1Detail = "no response \u00b7 retry #" + updatedControlRetryCount
+            detail = "no response \u00b7 retry #" + timing.controlRetryCount
                     + " \u00b7 polling " + safe(in.apiBase)
-                    + " (" + (elapsedMs / 1000L) + "s)"
+                    + " (" + (timing.elapsedMs / 1000L) + "s)"
                     + " \u00b7 check desktop service status";
         }
+        return new Step1State(state, detail);
+    }
 
-        int step2;
-        String step2Detail;
-        if (step1 != Model.SS_OK) {
-            step2 = Model.SS_PENDING;
-            step2Detail = "waiting for control link";
-        } else if (!in.handshakeResolved) {
-            step2 = Model.SS_ACTIVE;
-            step2Detail = "resolving service / api version\u2026";
-        } else if (in.buildMismatch) {
-            step2 = Model.SS_ERROR;
-            step2Detail = "build mismatch · app=" + safe(in.appBuildRevision)
+    private static Step2State buildStep2(Input in, int step1State) {
+        if (step1State != Model.SS_OK) {
+            return new Step2State(Model.SS_PENDING, "waiting for control link");
+        }
+        if (!in.handshakeResolved) {
+            return new Step2State(Model.SS_ACTIVE, "resolving service / api version\u2026");
+        }
+        if (in.buildMismatch) {
+            String detail = "build mismatch · app=" + safe(in.appBuildRevision)
                     + " · host=" + safe(in.daemonBuildRevision);
-        } else {
-            step2 = Model.SS_OK;
-            if (in.requiresTransportProbe) {
-                if (in.probeOk) {
-                    step2Detail = "service=" + safe(in.daemonService) + " · transport test OK";
-                } else if (in.probeInFlight) {
-                    step2Detail = "service=" + safe(in.daemonService) + " · transport test in progress…";
-                } else {
-                    step2Detail = "service=" + safe(in.daemonService) + " · transport test pending";
-                }
+            return new Step2State(Model.SS_ERROR, detail);
+        }
+        String detail = buildStep2OkDetail(in);
+        return new Step2State(Model.SS_OK, detail);
+    }
+
+    private static String buildStep2OkDetail(Input in) {
+        if (in.requiresTransportProbe) {
+            if (in.probeOk) {
+                return "service=" + safe(in.daemonService) + " · transport test OK";
+            } else if (in.probeInFlight) {
+                return "service=" + safe(in.daemonService) + " · transport test in progress…";
             } else {
-                step2Detail = "service=" + safe(in.daemonService) + " · " + safe(in.apiImpl);
+                return "service=" + safe(in.daemonService) + " · transport test pending";
             }
         }
+        return "service=" + safe(in.daemonService) + " · " + safe(in.apiImpl);
+    }
 
-        boolean streamFlowing = "STREAMING".equalsIgnoreCase(safe(in.effectiveDaemonState));
+    private static Step3Context createStep3Context(Input in, long elapsedMs) {
+        boolean streamFlowing = STREAMING_STATE.equalsIgnoreCase(safe(in.effectiveDaemonState));
         int streamReconnects = parseReconnectCount(in.lastStatsLine);
         String streamAddr = streamAddress(in.streamHost);
         boolean daemonStartFailure = safe(in.daemonErrCompact)
                 .toLowerCase(Locale.US)
-                .contains("stream start aborted");
+                .contains(STREAM_START_ABORTED);
         boolean streamIsLoopback = isLoopbackHost(in.streamHost);
         String streamFixHint = streamIsLoopback
                 ? "check ADB reverse for stream/control ports \u00b7 ensure desktop service is running"
                 : "check USB tethering / host IP / LAN \u00b7 ensure desktop service is running";
+        return new Step3Context(streamFlowing, streamReconnects, streamAddr, daemonStartFailure, streamFixHint);
+    }
 
-        int step3;
-        String step3Detail;
-        if (step2 != Model.SS_OK) {
-            step3 = Model.SS_PENDING;
-            step3Detail = (step2 == Model.SS_ERROR && in.buildMismatch)
+    private static Step3State buildStep3(Input in, int step2State, Step3Context ctx, long elapsedMs) {
+        if (step2State != Model.SS_OK) {
+            String detail = (step2State == Model.SS_ERROR && in.buildMismatch)
                     ? "blocked by build mismatch"
                     : "waiting for handshake";
-        } else if (in.requiresTransportProbe && !in.probeOk) {
-            step3 = Model.SS_ACTIVE;
-            if (in.probeInFlight) {
-                step3Detail = "testing transport I/O… " + safe(in.probeInfo);
-            } else {
-                step3Detail = "transport test retrying… " + safe(in.probeInfo);
-            }
-        } else if (streamFlowing) {
-            step3 = Model.SS_OK;
-            step3Detail = "live \u00b7 fps=" + String.format(Locale.US, "%.0f", in.latestPresentFps)
-                    + " \u00b7 " + safe(in.effectiveDaemonState).toLowerCase(Locale.US);
-        } else {
-            boolean hasWaited = elapsedMs > 5_000L;
-            if (daemonStartFailure && hasWaited) {
-                step3 = Model.SS_ERROR;
-                step3Detail = "host stream start failed \u00b7 " + safe(in.daemonErrCompact);
-            } else {
-                step3 = Model.SS_ACTIVE;
-                if (streamReconnects > 0 && hasWaited) {
-                    step3Detail = "retry #" + streamReconnects
-                            + " \u00b7 " + streamAddr + ":" + in.streamPort
-                            + " unreachable \u00b7 " + streamFixHint
-                            + (safe(in.daemonErrCompact).isEmpty() ? "" : " \u00b7 host error: " + safe(in.daemonErrCompact));
-                } else if (streamReconnects > 0) {
-                    step3Detail = "reconnecting \u00b7 attempt #" + streamReconnects + " \u00b7 awaiting frames\u2026";
-                } else if (hasWaited) {
-                    step3Detail = "connecting to " + streamAddr + ":" + in.streamPort
-                            + " \u00b7 " + streamFixHint
-                            + (safe(in.daemonErrCompact).isEmpty() ? "" : " \u00b7 host error: " + safe(in.daemonErrCompact));
-                } else {
-                    step3Detail = "decoder started \u00b7 awaiting frames\u2026";
-                }
-            }
+            return new Step3State(Model.SS_PENDING, detail);
         }
+        if (in.requiresTransportProbe && !in.probeOk) {
+            int state = Model.SS_ACTIVE;
+            String detail = in.probeInFlight
+                    ? "testing transport I/O… " + safe(in.probeInfo)
+                    : "transport test retrying… " + safe(in.probeInfo);
+            return new Step3State(state, detail);
+        }
+        if (ctx.streamFlowing) {
+            String detail = "live \u00b7 fps=" + String.format(Locale.US, "%.0f", in.latestPresentFps)
+                    + " \u00b7 " + safe(in.effectiveDaemonState).toLowerCase(Locale.US);
+            return new Step3State(Model.SS_OK, detail);
+        }
+        return buildStep3Active(in, ctx, elapsedMs);
+    }
 
-        String subtitle;
-        if (step1 != Model.SS_OK) {
-            if (elapsedMs < 2000L && updatedControlRetryCount == 0) {
-                subtitle = "starting up\u2026";
-            } else if (updatedControlRetryCount == 0) {
-                subtitle = "awaiting control link \u00b7 start desktop service if needed\u2026";
-            } else {
-                subtitle = "retrying control link \u00b7 attempt #" + updatedControlRetryCount
-                        + " \u00b7 check desktop service\u2026";
-            }
-        } else if (step2 != Model.SS_OK) {
-            subtitle = (step2 == Model.SS_ERROR && in.buildMismatch)
+    private static Step3State buildStep3Active(Input in, Step3Context ctx, long elapsedMs) {
+        boolean hasWaited = elapsedMs > 5_000L;
+        if (ctx.daemonStartFailure && hasWaited) {
+            return new Step3State(Model.SS_ERROR, "host stream start failed \u00b7 " + safe(in.daemonErrCompact));
+        }
+        String detail = buildStep3ActiveDetail(in, ctx, elapsedMs, hasWaited);
+        return new Step3State(Model.SS_ACTIVE, detail);
+    }
+
+    private static String buildStep3ActiveDetail(Input in, Step3Context ctx, long elapsedMs, boolean hasWaited) {
+        if (ctx.streamReconnects > 0 && hasWaited) {
+            return "retry #" + ctx.streamReconnects
+                    + " \u00b7 " + ctx.streamAddr + ":" + in.streamPort
+                    + " unreachable \u00b7 " + ctx.streamFixHint
+                    + (safe(in.daemonErrCompact).isEmpty() ? "" : " \u00b7 host error: " + safe(in.daemonErrCompact));
+        }
+        if (ctx.streamReconnects > 0) {
+            return "reconnecting \u00b7 " + ATTEMPT_PREFIX + ctx.streamReconnects + " \u00b7 awaiting frames\u2026";
+        }
+        if (hasWaited) {
+            return "connecting to " + ctx.streamAddr + ":" + in.streamPort
+                    + " \u00b7 " + ctx.streamFixHint
+                    + (safe(in.daemonErrCompact).isEmpty() ? "" : " \u00b7 host error: " + safe(in.daemonErrCompact));
+        }
+        return "decoder started \u00b7 awaiting frames\u2026";
+    }
+
+    private static String buildSubtitle(Input in, int step1State, int step2State, int step3State,
+                                        Step3Context ctx, TimingState timing) {
+        if (step1State != Model.SS_OK) {
+            return buildSubtitleStep1NotOk(timing);
+        }
+        if (step2State != Model.SS_OK) {
+            return (step2State == Model.SS_ERROR && in.buildMismatch)
                     ? "build mismatch \u00b7 redeploy APK or rebuild host"
                     : "handshake in progress\u2026";
-        } else if (step3 != Model.SS_OK) {
-            if (step3 == Model.SS_ERROR && daemonStartFailure) {
-                subtitle = "host stream start failed \u00b7 check host logs";
-            } else {
-                subtitle = streamReconnects > 0
-                        ? "stream reconnecting \u00b7 attempt #" + streamReconnects + "\u2026"
-                        : elapsedMs > 5_000L
-                                ? "stream unreachable \u00b7 retrying\u2026"
-                                : "waiting for video frames\u2026";
-            }
-        } else {
-            subtitle = "all systems ready";
         }
+        if (step3State != Model.SS_OK) {
+            if (step3State == Model.SS_ERROR && ctx.daemonStartFailure) {
+                return "host stream start failed \u00b7 check host logs";
+            }
+            return buildSubtitleStep3NotOk(ctx, timing.elapsedMs);
+        }
+        return "all systems ready";
+    }
 
+    private static String buildSubtitleStep1NotOk(TimingState timing) {
+        if (timing.elapsedMs < 2000L && timing.controlRetryCount == 0) {
+            return "starting up\u2026";
+        }
+        if (timing.controlRetryCount == 0) {
+            return "awaiting control link \u00b7 start desktop service if needed\u2026";
+        }
+        return "retrying control link \u00b7 " + ATTEMPT_PREFIX + timing.controlRetryCount
+                + " \u00b7 check desktop service\u2026";
+    }
+
+    private static String buildSubtitleStep3NotOk(Step3Context ctx, long elapsedMs) {
+        if (ctx.streamReconnects > 0) {
+            return "stream reconnecting \u00b7 " + ATTEMPT_PREFIX + ctx.streamReconnects + "\u2026";
+        }
+        if (elapsedMs > 5_000L) {
+            return "stream unreachable \u00b7 retrying\u2026";
+        }
+        return "waiting for video frames\u2026";
+    }
+
+    private static String buildInfoLog(Input in) {
         StringBuilder info = new StringBuilder();
         info.append("api=").append(safe(in.apiBase))
                 .append("  impl=").append(safe(in.apiImpl)).append('\n')
@@ -219,17 +333,7 @@ public final class StartupOverlayModelBuilder {
         } else if (!safe(in.lastUiInfo).isEmpty()) {
             info.append('\n').append("hint=").append(safe(in.lastUiInfo));
         }
-
-        out.step1State = step1;
-        out.step1Detail = step1Detail;
-        out.step2State = step2;
-        out.step2Detail = step2Detail;
-        out.step3State = step3;
-        out.step3Detail = step3Detail;
-        out.subtitle = subtitle;
-        out.infoLog = info.toString();
-        out.allOk = step1 == Model.SS_OK && step2 == Model.SS_OK && step3 == Model.SS_OK;
-        return out;
+        return info.toString();
     }
 
     private static int parseReconnectCount(String statsLine) {
@@ -237,11 +341,11 @@ public final class StartupOverlayModelBuilder {
             return 0;
         }
         try {
-            int rIdx = statsLine.indexOf("reconnects: ");
+            int rIdx = statsLine.indexOf(RECONNECTS_PREFIX);
             if (rIdx < 0) {
                 return 0;
             }
-            String rPart = statsLine.substring(rIdx + "reconnects: ".length()).trim();
+            String rPart = statsLine.substring(rIdx + RECONNECTS_PREFIX.length()).trim();
             int end = 0;
             while (end < rPart.length() && Character.isDigit(rPart.charAt(end))) {
                 end++;
