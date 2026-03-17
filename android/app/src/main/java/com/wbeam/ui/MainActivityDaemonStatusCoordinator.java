@@ -8,21 +8,117 @@ public final class MainActivityDaemonStatusCoordinator {
     }
 
     public static final class Input {
-        public boolean reachable;
-        public boolean wasReachable;
-        public String hostName;
-        public String state;
-        public String lastError;
-        public boolean errorChanged;
-        public String service;
-        public JSONObject metrics;
-        public boolean handshakeResolved;
-        public boolean requiresTransportProbeNow;
+        private boolean reachable;
+        private boolean wasReachable;
+        private String hostName;
+        private String state;
+        private String lastError;
+        private boolean errorChanged;
+        private String service;
+        private JSONObject metrics;
+        private boolean handshakeResolved;
+        private boolean requiresTransportProbeNow;
+
+        public boolean isReachable() {
+            return reachable;
+        }
+
+        public void setReachable(boolean reachable) {
+            this.reachable = reachable;
+        }
+
+        public boolean isWasReachable() {
+            return wasReachable;
+        }
+
+        public void setWasReachable(boolean wasReachable) {
+            this.wasReachable = wasReachable;
+        }
+
+        public String getHostName() {
+            return hostName;
+        }
+
+        public void setHostName(String hostName) {
+            this.hostName = hostName;
+        }
+
+        public String getState() {
+            return state;
+        }
+
+        public void setState(String state) {
+            this.state = state;
+        }
+
+        public String getLastError() {
+            return lastError;
+        }
+
+        public void setLastError(String lastError) {
+            this.lastError = lastError;
+        }
+
+        public boolean isErrorChanged() {
+            return errorChanged;
+        }
+
+        public void setErrorChanged(boolean errorChanged) {
+            this.errorChanged = errorChanged;
+        }
+
+        public String getService() {
+            return service;
+        }
+
+        public void setService(String service) {
+            this.service = service;
+        }
+
+        public JSONObject getMetrics() {
+            return metrics;
+        }
+
+        public void setMetrics(JSONObject metrics) {
+            this.metrics = metrics;
+        }
+
+        public boolean isHandshakeResolved() {
+            return handshakeResolved;
+        }
+
+        public void setHandshakeResolved(boolean handshakeResolved) {
+            this.handshakeResolved = handshakeResolved;
+        }
+
+        public boolean isRequiresTransportProbeNow() {
+            return requiresTransportProbeNow;
+        }
+
+        public void setRequiresTransportProbeNow(boolean requiresTransportProbeNow) {
+            this.requiresTransportProbeNow = requiresTransportProbeNow;
+        }
     }
 
     public static final class Output {
-        public boolean handshakeResolved;
-        public String hostStatsLine;
+        private boolean handshakeResolved;
+        private String hostStatsLine;
+
+        public boolean isHandshakeResolved() {
+            return handshakeResolved;
+        }
+
+        public void setHandshakeResolved(boolean handshakeResolved) {
+            this.handshakeResolved = handshakeResolved;
+        }
+
+        public String getHostStatsLine() {
+            return hostStatsLine;
+        }
+
+        public void setHostStatsLine(String hostStatsLine) {
+            this.hostStatsLine = hostStatsLine;
+        }
     }
 
     private MainActivityDaemonStatusCoordinator() {
@@ -34,25 +130,24 @@ public final class MainActivityDaemonStatusCoordinator {
             StatusPollerUiUpdateCoordinator.TransitionHooks statusTransitionHooks
     ) {
         Output output = new Output();
-        output.handshakeResolved = StatusPollerUiUpdateCoordinator.resolveHandshake(
-                input.handshakeResolved,
-                input.service
-        );
+        output.setHandshakeResolved(StatusPollerUiUpdateCoordinator.resolveHandshake(
+                input.isHandshakeResolved(),
+                input.getService()
+        ));
         StatusPollerUiUpdateCoordinator.maybeStartTransportProbe(
-                input.requiresTransportProbeNow,
+                input.isRequiresTransportProbeNow(),
                 transportProbeStarter::start
         );
         StatusPollerUiUpdateCoordinator.handleStatusTransition(
-                input.wasReachable,
-                input.hostName,
-                input.errorChanged,
-                input.lastError,
-                StatusPollerUiUpdateCoordinator.shouldStopLiveViewForDaemonState(input.state),
+                input.isWasReachable(),
+                input.getHostName(),
+                input.isErrorChanged(),
+                input.getLastError(),
+                StatusPollerUiUpdateCoordinator.shouldStopLiveViewForDaemonState(input.getState()),
                 statusTransitionHooks
         );
-        output.hostStatsLine = StatusPollerUiUpdateCoordinator.buildStatsLine(
-                input.metrics,
-                input.lastError
+        output.setHostStatsLine(
+                StatusPollerUiUpdateCoordinator.buildStatsLine(input.getMetrics(), input.getLastError())
         );
         return output;
     }

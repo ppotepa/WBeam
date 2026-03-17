@@ -25,6 +25,11 @@ import okhttp3.ResponseBody;
 public final class VideoTestController {
 
     private static final String TAG = "WBeamVideoTest";
+    private static final String UI_STATE_ERROR = "error";
+    private static final String UI_STATE_CONNECTING = "connecting";
+    private static final String UI_STATE_STREAMING = "streaming";
+    private static final String LIVE_TEST_PREFIX = "[RUN TESTS LIVE] ";
+    private static final String PRESET_PREFIX = "preset\n";
     private static final long   LIVE_TEST_START_TIMEOUT_MS = 12_000L;
     private static final int    BANDWIDTH_TEST_MB          = 64;
     private static final String TEST_VIDEO_URL =
@@ -150,7 +155,7 @@ public final class VideoTestController {
         this.callbacks  = callbacks;
         this.startTimeoutTask = () -> {
             logError("timed out waiting for media to prepare, aborting");
-            callbacks.onStatus("error", "RUN TESTS LIVE timeout", 0);
+            callbacks.onStatus(UI_STATE_ERROR, "RUN TESTS LIVE timeout", 0);
             setOverlay("RUN TESTS LIVE TIMEOUT", null,
                     "media never became ready \u2013 network too slow?");
             release();
@@ -173,7 +178,7 @@ public final class VideoTestController {
     public void startPublicVideoTest() {
         Surface surface = callbacks.getSurface();
         if (surface == null || !surface.isValid()) {
-            callbacks.onStatus("error", "surface not ready yet", 0);
+            callbacks.onStatus(UI_STATE_ERROR, "surface not ready yet", 0);
             return;
         }
 
@@ -183,13 +188,13 @@ public final class VideoTestController {
 
         callbacks.setLiveLogVisible(true);
         setOverlay("RUN TESTS LIVE LOADING",
-                "preset\n" + cfg.toMultiline(),
+                PRESET_PREFIX + cfg.toMultiline(),
                 "phase: preparing media pipeline");
         callbacks.stopVideoPlayer();
         release();
 
         try {
-            callbacks.onStatus("connecting", "RUN TESTS LIVE loading", 0);
+            callbacks.onStatus(UI_STATE_CONNECTING, "RUN TESTS LIVE loading", 0);
             callbacks.onStatsLine("source: RUN TESTS LIVE | " + presetLine);
 
             MediaPlayer mp = new MediaPlayer();
@@ -202,65 +207,7 @@ public final class VideoTestController {
             uiHandler.removeCallbacks(startTimeoutTask);
             uiHandler.postDelayed(startTimeoutTask, LIVE_TEST_START_TIMEOUT_MS);
 
-            mp.setOnPreparedListener(ready -> {
-                if (mediaPlayer != ready) {
-                    logWarn("prepared callback ignored for stale player");
-                    return;
-                }
-                uiHandler.removeCallbacks(startTimeoutTask);
-                logInfo("media prepared; starting playback");
-                try {
-                    ready.start();
-                } catch (IllegalStateException ex) {
-                    logError("start() failed: " + shortError(ex));
-                    callbacks.onStatus("error",
-                            "RUN TESTS LIVE failed: IllegalStateException", 0);
-                    setOverlay("RUN TESTS LIVE FAILED",
-                            "preset\n" + cfg.toMultiline(), shortError(ex));
-                    release();
-                    return;
-                }
-                callbacks.onStatus("streaming", "RUN TESTS LIVE playing", 0);
-                setOverlay("RUN TESTS LIVE ACTIVE",
-                        "preset\n" + cfg.toMultiline(), "phase: playback started");
-                uiHandler.postDelayed(this::clearOverlay, 900);
-            });
-
-            mp.setOnCompletionListener(done -> {
-                if (mediaPlayer != done) return;
-                uiHandler.removeCallbacks(startTimeoutTask);
-                logInfo("playback completed");
-                callbacks.onStatus("idle", "RUN TESTS LIVE completed", 0);
-                clearOverlay();
-            });
-
-            mp.setOnErrorListener((errPlayer, what, extra) -> {
-                if (mediaPlayer != errPlayer) return true;
-                uiHandler.removeCallbacks(startTimeoutTask);
-                logError("player error what=" + what + " extra=" + extra);
-                callbacks.onStatus("error",
-                        "RUN TESTS LIVE error: " + what + "/" + extra, 0);
-                setOverlay("RUN TESTS LIVE ERROR",
-                        "preset\n" + cfg.toMultiline(),
-                        "player error: " + what + "/" + extra);
-                return true;
-            });
-
-            mp.setOnInfoListener((infoPlayer, what, extra) -> {
-                if (mediaPlayer != infoPlayer) return true;
-                if (what == MediaPlayer.MEDIA_INFO_BUFFERING_START) {
-                    logWarn("buffering start");
-                    callbacks.onStatus("connecting", "RUN TESTS LIVE buffering", 0);
-                    setOverlay("RUN TESTS LIVE LOADING",
-                            "preset\n" + cfg.toMultiline(), "phase: buffering");
-                } else if (what == MediaPlayer.MEDIA_INFO_BUFFERING_END) {
-                    logInfo("buffering end");
-                    callbacks.onStatus("streaming", "RUN TESTS LIVE playing", 0);
-                    setOverlay("RUN TESTS LIVE ACTIVE",
-                            "preset\n" + cfg.toMultiline(), "phase: streaming frames");
-                }
-                return false;
-            });
+            configureMediaPlayerListeners(mp, cfg);
 
             logInfo("prepareAsync() start; source=public test stream");
             mp.prepareAsync();
@@ -269,12 +216,77 @@ public final class VideoTestController {
             uiHandler.removeCallbacks(startTimeoutTask);
             logError("startup failed: " + shortError(e));
             Log.e(TAG, "failed to start public test video", e);
-            callbacks.onStatus("error",
+            callbacks.onStatus(UI_STATE_ERROR,
                     "RUN TESTS LIVE failed: " + e.getClass().getSimpleName(), 0);
             setOverlay("RUN TESTS LIVE FAILED",
-                    "preset\n" + callbacks.getTestConfig().toMultiline(), shortError(e));
+                    PRESET_PREFIX + callbacks.getTestConfig().toMultiline(), shortError(e));
             release();
         }
+    }
+
+    private void configureMediaPlayerListeners(MediaPlayer player, TestConfig config) {
+        player.setOnPreparedListener(ready -> handlePrepared(ready, config));
+        player.setOnCompletionListener(this::handleCompletion);
+        player.setOnErrorListener((errPlayer, what, extra) -> handlePlayerError(errPlayer, what, extra, config));
+        player.setOnInfoListener((infoPlayer, what, extra) -> handlePlayerInfo(infoPlayer, what, config));
+    }
+
+    private void handlePrepared(MediaPlayer ready, TestConfig config) {
+        if (mediaPlayer != ready) {
+            logWarn("prepared callback ignored for stale player");
+            return;
+        }
+        uiHandler.removeCallbacks(startTimeoutTask);
+        logInfo("media prepared; starting playback");
+        try {
+            ready.start();
+        } catch (IllegalStateException ex) {
+            logError("start() failed: " + shortError(ex));
+            callbacks.onStatus(UI_STATE_ERROR, "RUN TESTS LIVE failed: IllegalStateException", 0);
+            setOverlay("RUN TESTS LIVE FAILED", PRESET_PREFIX + config.toMultiline(), shortError(ex));
+            release();
+            return;
+        }
+        callbacks.onStatus(UI_STATE_STREAMING, "RUN TESTS LIVE playing", 0);
+        setOverlay("RUN TESTS LIVE ACTIVE", PRESET_PREFIX + config.toMultiline(), "phase: playback started");
+        uiHandler.postDelayed(this::clearOverlay, 900);
+    }
+
+    private void handleCompletion(MediaPlayer done) {
+        if (mediaPlayer != done) {
+            return;
+        }
+        uiHandler.removeCallbacks(startTimeoutTask);
+        logInfo("playback completed");
+        callbacks.onStatus("idle", "RUN TESTS LIVE completed", 0);
+        clearOverlay();
+    }
+
+    private boolean handlePlayerError(MediaPlayer errPlayer, int what, int extra, TestConfig config) {
+        if (mediaPlayer != errPlayer) {
+            return true;
+        }
+        uiHandler.removeCallbacks(startTimeoutTask);
+        logError("player error what=" + what + " extra=" + extra);
+        callbacks.onStatus(UI_STATE_ERROR, "RUN TESTS LIVE error: " + what + "/" + extra, 0);
+        setOverlay("RUN TESTS LIVE ERROR", PRESET_PREFIX + config.toMultiline(), "player error: " + what + "/" + extra);
+        return true;
+    }
+
+    private boolean handlePlayerInfo(MediaPlayer infoPlayer, int what, TestConfig config) {
+        if (mediaPlayer != infoPlayer) {
+            return true;
+        }
+        if (what == MediaPlayer.MEDIA_INFO_BUFFERING_START) {
+            logWarn("buffering start");
+            callbacks.onStatus(UI_STATE_CONNECTING, "RUN TESTS LIVE buffering", 0);
+            setOverlay("RUN TESTS LIVE LOADING", PRESET_PREFIX + config.toMultiline(), "phase: buffering");
+        } else if (what == MediaPlayer.MEDIA_INFO_BUFFERING_END) {
+            logInfo("buffering end");
+            callbacks.onStatus(UI_STATE_STREAMING, "RUN TESTS LIVE playing", 0);
+            setOverlay("RUN TESTS LIVE ACTIVE", PRESET_PREFIX + config.toMultiline(), "phase: streaming frames");
+        }
+        return false;
     }
 
     /**
@@ -283,13 +295,13 @@ public final class VideoTestController {
      */
     public void startBandwidthTest() {
         if (!callbacks.isDaemonReachable()) {
-            callbacks.onStatus("error",
+            callbacks.onStatus(UI_STATE_ERROR,
                     "host API offline - cannot run bandwidth test", 0);
             callbacks.showToast("Host API offline", false);
             return;
         }
 
-        callbacks.onStatus("connecting", "running USB bandwidth test...", 0);
+        callbacks.onStatus(UI_STATE_CONNECTING, "running USB bandwidth test...", 0);
         callbacks.onStatsLine(
                 "bandwidth test: downloading random payload from host API");
         callbacks.logInfo(
@@ -317,7 +329,7 @@ public final class VideoTestController {
             } catch (Exception e) {
                 uiHandler.post(() -> {
                     String reason = shortError(e);
-                    callbacks.onStatus("error",
+                    callbacks.onStatus(UI_STATE_ERROR,
                             "bandwidth test failed: " + reason, 0);
                     callbacks.logError("bandwidth test failed: " + reason);
                     callbacks.showToast(
@@ -336,13 +348,25 @@ public final class VideoTestController {
         MediaPlayer mp = mediaPlayer;
         mediaPlayer = null;
         if (mp != null) {
-            try { mp.setOnPreparedListener(null);   } catch (Exception ignored) { }
-            try { mp.setOnCompletionListener(null); } catch (Exception ignored) { }
-            try { mp.setOnErrorListener(null);      } catch (Exception ignored) { }
-            try { mp.setOnInfoListener(null);       } catch (Exception ignored) { }
-            try { mp.stop();    } catch (Exception ignored) { }
-            try { mp.reset();   } catch (Exception ignored) { }
-            try { mp.release(); } catch (Exception ignored) { }
+            runMediaPlayerStep(() -> mp.setOnPreparedListener(null), "clear prepared listener");
+            runMediaPlayerStep(() -> mp.setOnCompletionListener(null), "clear completion listener");
+            runMediaPlayerStep(() -> mp.setOnErrorListener(null), "clear error listener");
+            runMediaPlayerStep(() -> mp.setOnInfoListener(null), "clear info listener");
+            runMediaPlayerStep(mp::stop, "stop");
+            runMediaPlayerStep(mp::reset, "reset");
+            runMediaPlayerStep(mp::release, "release");
+        }
+    }
+
+    private interface MediaPlayerStep {
+        void run();
+    }
+
+    private void runMediaPlayerStep(MediaPlayerStep step, String label) {
+        try {
+            step.run();
+        } catch (RuntimeException error) {
+            logWarn("MediaPlayer " + label + " failed: " + shortError(error));
         }
     }
 
@@ -409,19 +433,19 @@ public final class VideoTestController {
     }
 
     private void logInfo(String msg)  {
-        callbacks.logInfo("[RUN TESTS LIVE] " + msg);
-        Log.i(TAG, "[RUN TESTS LIVE] " + msg);
+        callbacks.logInfo(LIVE_TEST_PREFIX + msg);
+        Log.i(TAG, LIVE_TEST_PREFIX + msg);
     }
     private void logWarn(String msg)  {
-        callbacks.logWarn("[RUN TESTS LIVE] " + msg);
-        Log.w(TAG, "[RUN TESTS LIVE] " + msg);
+        callbacks.logWarn(LIVE_TEST_PREFIX + msg);
+        Log.w(TAG, LIVE_TEST_PREFIX + msg);
     }
     private void logError(String msg) {
-        callbacks.logError("[RUN TESTS LIVE] " + msg);
-        Log.e(TAG, "[RUN TESTS LIVE] " + msg);
+        callbacks.logError(LIVE_TEST_PREFIX + msg);
+        Log.e(TAG, LIVE_TEST_PREFIX + msg);
     }
 
-    private static String shortError(Exception e) {
+    private static String shortError(Throwable e) {
         String msg = e.getMessage();
         if (msg != null) {
             msg = msg.trim();

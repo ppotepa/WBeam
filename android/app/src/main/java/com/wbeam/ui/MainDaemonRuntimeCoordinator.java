@@ -385,16 +385,16 @@ public final class MainDaemonRuntimeCoordinator {
         );
         MainActivityDaemonStatusCoordinator.Input daemonInput =
                 new MainActivityDaemonStatusCoordinator.Input();
-        daemonInput.reachable = input.isReachable();
-        daemonInput.wasReachable = input.isWasReachable();
-        daemonInput.hostName = input.getHostName();
-        daemonInput.state = input.getState();
-        daemonInput.lastError = input.getLastError();
-        daemonInput.errorChanged = input.isErrorChanged();
-        daemonInput.service = input.getService();
-        daemonInput.metrics = input.getMetrics();
-        daemonInput.handshakeResolved = context.uiState.handshakeResolved;
-        daemonInput.requiresTransportProbeNow = context.requiresTransportProbeNowProvider.get();
+        daemonInput.setReachable(input.isReachable());
+        daemonInput.setWasReachable(input.isWasReachable());
+        daemonInput.setHostName(input.getHostName());
+        daemonInput.setState(input.getState());
+        daemonInput.setLastError(input.getLastError());
+        daemonInput.setErrorChanged(input.isErrorChanged());
+        daemonInput.setService(input.getService());
+        daemonInput.setMetrics(input.getMetrics());
+        daemonInput.setHandshakeResolved(context.getUiState().handshakeResolved);
+        daemonInput.setRequiresTransportProbeNow(context.getRequiresTransportProbeNowProvider().get());
 
         MainActivityDaemonStatusCoordinator.Output output =
                 MainActivityDaemonStatusCoordinator.process(
@@ -411,10 +411,10 @@ public final class MainDaemonRuntimeCoordinator {
                                 context.getStopLiveViewTask()::run
                         )
                 );
-        context.getUiState().handshakeResolved = output.handshakeResolved;
+        context.getUiState().handshakeResolved = output.isHandshakeResolved();
         context.getRefreshUiTask().run();
-        if (output.hostStatsLine != null) {
-            context.getStatsSink().onStats(output.hostStatsLine);
+        if (output.getHostStatsLine() != null) {
+            context.getStatsSink().onStats(output.getHostStatsLine());
         }
         context.getPerfHudSink().onMetrics(input.getMetrics());
     }
