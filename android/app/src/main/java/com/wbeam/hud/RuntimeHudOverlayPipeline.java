@@ -5,9 +5,12 @@ import android.webkit.WebView;
 import android.widget.TextView;
 
 public final class RuntimeHudOverlayPipeline {
+    private static final String MODE_RUNTIME = "runtime";
+
     private RuntimeHudOverlayPipeline() {
     }
 
+    @SuppressWarnings("java:S107")
     public static void render(
             boolean daemonReachable,
             String selectedProfile,
@@ -102,14 +105,14 @@ public final class RuntimeHudOverlayPipeline {
             if (!HudOverlayDisplay.showWebHtml(
                     perfHudWebView,
                     perfHudText,
-                    "runtime",
+                    MODE_RUNTIME,
                     rendered.html,
                     hudOverlayState
             ) && perfHudText != null) {
                 HudOverlayDisplay.showTextOnly(
                         perfHudWebView,
                         perfHudText,
-                        "runtime",
+                        MODE_RUNTIME,
                         rendered.textFallback,
                         fallbackTextColor,
                         hudOverlayState
@@ -119,7 +122,7 @@ public final class RuntimeHudOverlayPipeline {
             HudOverlayDisplay.showTextOnly(
                     perfHudWebView,
                     perfHudText,
-                    "runtime",
+                    MODE_RUNTIME,
                     rendered.textFallback,
                     fallbackTextColor,
                     hudOverlayState
