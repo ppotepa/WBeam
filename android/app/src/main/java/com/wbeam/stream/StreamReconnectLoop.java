@@ -28,6 +28,7 @@ final class StreamReconnectLoop {
         void closeSocket();
     }
 
+    @SuppressWarnings("java:S112")
     interface StreamWorker {
         void run(BufferedInputStream input, MediaCodec[] codecHolder) throws Exception;
     }
@@ -44,6 +45,7 @@ final class StreamReconnectLoop {
         final String stateStreaming;
         final String stateError;
 
+        @SuppressWarnings("java:S107")
         Config(String tag, String host, int port, int socketRecvBufferSize,
                RuntimeState runtimeState, StatusListener statusListener,
                StreamWorker streamWorker, String stateConnecting,

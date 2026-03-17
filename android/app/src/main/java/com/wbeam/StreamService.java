@@ -62,6 +62,7 @@ public class StreamService extends Service {
         return START_STICKY;
     }
 
+    @SuppressWarnings("java:S3776")
     private void startWorker() {
         if (worker != null && worker.isAlive()) {
             emitStatus(STATE_STREAMING, "worker already running", 0);

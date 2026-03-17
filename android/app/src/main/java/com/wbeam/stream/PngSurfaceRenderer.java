@@ -7,6 +7,7 @@ import android.graphics.Paint;
 import android.graphics.Rect;
 import android.view.Surface;
 
+@SuppressWarnings("java:S108")
 final class PngSurfaceRenderer {
 
     private final Surface surface;
@@ -31,7 +32,7 @@ final class PngSurfaceRenderer {
             }
             dstRect.set(0, 0, canvas.getWidth(), canvas.getHeight());
             canvas.drawBitmap(bitmap, null, dstRect, paint);
-            return RenderResult.renderedFrame();
+            return RenderResult.ofRenderedFrame();
         } catch (Exception e) {
             return RenderResult.notRendered();
         } finally {
@@ -53,7 +54,7 @@ final class PngSurfaceRenderer {
             this.rendered = rendered;
         }
 
-        static RenderResult renderedFrame() {
+        static RenderResult ofRenderedFrame() {
             return new RenderResult(true);
         }
 

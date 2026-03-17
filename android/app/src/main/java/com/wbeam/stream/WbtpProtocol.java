@@ -3,6 +3,7 @@ package com.wbeam.stream;
 import java.io.IOException;
 import java.io.InputStream;
 
+@SuppressWarnings("java:S3776")
 final class WbtpProtocol {
 
     private WbtpProtocol() {
@@ -101,9 +102,12 @@ final class WbtpProtocol {
         if (helloHeaderSize + 6 > helloBuf.length || extraBytes < 6) {
             return new HelloGeometry(0, 0, 0);
         }
-        int width = ((helloBuf[helloHeaderSize] & 0xFF) << 8) | (helloBuf[helloHeaderSize + 1] & 0xFF);
-        int height = ((helloBuf[helloHeaderSize + 2] & 0xFF) << 8) | (helloBuf[helloHeaderSize + 3] & 0xFF);
-        int fps = ((helloBuf[helloHeaderSize + 4] & 0xFF) << 8) | (helloBuf[helloHeaderSize + 5] & 0xFF);
+        int width = ((helloBuf[helloHeaderSize] & 0xFF) << 8)
+                | (helloBuf[helloHeaderSize + 1] & 0xFF);
+        int height = ((helloBuf[helloHeaderSize + 2] & 0xFF) << 8)
+                | (helloBuf[helloHeaderSize + 3] & 0xFF);
+        int fps = ((helloBuf[helloHeaderSize + 4] & 0xFF) << 8)
+                | (helloBuf[helloHeaderSize + 5] & 0xFF);
         return new HelloGeometry(width, height, fps);
     }
 
