@@ -56,7 +56,7 @@ public final class MainViewBindingCoordinator {
         out.startupOverlayController.setTickListener(tickListener::onTick);
         out.cursorOverlayController = new CursorOverlayController(
                 out.primaryViews.cursorOverlay,
-                out.controlViews.cursorOverlayButton
+                out.controlViews.getCursorOverlayButton()
         );
         MainActivityUiBinder.setupHudWebView(out.primaryViews.perfHudWebView);
         return out;
