@@ -7,8 +7,10 @@ import android.util.Log;
 import com.wbeam.api.StatusListener;
 
 import java.io.BufferedInputStream;
+import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.util.Random;
 
 final class StreamReconnectLoop {
 
@@ -30,108 +32,130 @@ final class StreamReconnectLoop {
         void run(BufferedInputStream input, MediaCodec[] codecHolder) throws Exception;
     }
 
-    private final String tag;
-    private final String host;
-    private final int port;
-    private final int socketRecvBufferSize;
-    private final RuntimeState runtimeState;
-    private final StatusListener statusListener;
-    private final StreamWorker streamWorker;
-    private final String stateConnecting;
-    private final String stateStreaming;
-    private final String stateError;
+    static class Config {
+        final String tag;
+        final String host;
+        final int port;
+        final int socketRecvBufferSize;
+        final RuntimeState runtimeState;
+        final StatusListener statusListener;
+        final StreamWorker streamWorker;
+        final String stateConnecting;
+        final String stateStreaming;
+        final String stateError;
 
-    StreamReconnectLoop(
-            String tag,
-            String host,
-            int port,
-            int socketRecvBufferSize,
-            RuntimeState runtimeState,
-            StatusListener statusListener,
-            StreamWorker streamWorker,
-            String stateConnecting,
-            String stateStreaming,
-            String stateError
-    ) {
-        this.tag = tag;
-        this.host = host;
-        this.port = port;
-        this.socketRecvBufferSize = socketRecvBufferSize;
-        this.runtimeState = runtimeState;
-        this.statusListener = statusListener;
-        this.streamWorker = streamWorker;
-        this.stateConnecting = stateConnecting;
-        this.stateStreaming = stateStreaming;
-        this.stateError = stateError;
+        Config(String tag, String host, int port, int socketRecvBufferSize,
+               RuntimeState runtimeState, StatusListener statusListener,
+               StreamWorker streamWorker, String stateConnecting,
+               String stateStreaming, String stateError) {
+            this.tag = tag;
+            this.host = host;
+            this.port = port;
+            this.socketRecvBufferSize = socketRecvBufferSize;
+            this.runtimeState = runtimeState;
+            this.statusListener = statusListener;
+            this.streamWorker = streamWorker;
+            this.stateConnecting = stateConnecting;
+            this.stateStreaming = stateStreaming;
+            this.stateError = stateError;
+        }
+    }
+
+    private final Config config;
+    private final Random random = new Random();
+
+    StreamReconnectLoop(Config config) {
+        this.config = config;
     }
 
     void run() {
         android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO);
 
-        while (runtimeState.isRunning()) {
+        while (config.runtimeState.isRunning()) {
             final MediaCodec[] codecHolder = {null};
             try {
-                statusListener.onStatus(stateConnecting, "connecting to " + host + ":" + port, 0);
-                statusListener.onStats(
-                        "fps in/out: - | drops: " + runtimeState.getDroppedTotal()
-                                + " | late: " + runtimeState.getTooLateTotal()
-                                + " | reconnects: " + runtimeState.getReconnects()
-                );
-
-                Socket socket = new Socket();
-                socket.connect(new InetSocketAddress(host, port), 2000);
-                socket.setTcpNoDelay(true);
-                socket.setReceiveBufferSize(socketRecvBufferSize);
-                socket.setSoTimeout(5_000);
-                runtimeState.setSocket(socket);
-                runtimeState.incrementSessionConnectId();
-                runtimeState.resetSampleSeq();
-
-                statusListener.onStatus(stateStreaming, "connected [framed]", 0);
-                streamWorker.run(new BufferedInputStream(socket.getInputStream(), 256 * 1024), codecHolder);
-
-            } catch (Throwable e) {
-                if (runtimeState.isRunning()) {
-                    long reconnects = runtimeState.incrementReconnects();
-                    long reconnectDelayMs = Math.min(5000L, runtimeState.getReconnectDelayMs() + 400L);
-                    runtimeState.setReconnectDelayMs(reconnectDelayMs);
-                    String reason = e.getClass().getSimpleName() + ": " + e.getMessage();
-                    boolean isException = (e instanceof Exception);
-                    if (isException && H264TcpPlayer.isExpectedStreamClose((Exception) e)) {
-                        Log.w(tag, "stream worker reconnect #" + reconnects
-                                + " delay_ms=" + reconnectDelayMs + " reason=" + reason);
-                        statusListener.onStatus(stateConnecting, "stream reconnecting: " + reason, 0);
-                    } else {
-                        Log.e(tag, "stream worker failed", e);
-                        statusListener.onStatus(stateError, "stream error: " + e.getClass().getSimpleName(), 0);
-                    }
-                    statusListener.onStats(
-                            "fps in/out: - | drops: " + runtimeState.getDroppedTotal()
-                                    + " | late: " + runtimeState.getTooLateTotal()
-                                    + " | reconnects: " + runtimeState.getReconnects()
-                    );
-                }
+                logConnectionAttempt();
+                connectAndStream(codecHolder);
+            } catch (Exception e) {
+                handleStreamError(e);
             } finally {
-                runtimeState.closeSocket();
-                MediaCodec codec = codecHolder[0];
-                if (codec != null) {
-                    try {
-                        codec.stop();
-                    } catch (Exception ignored) {
-                    }
-                    try {
-                        codec.release();
-                    } catch (Exception ignored) {
-                    }
-                }
+                config.runtimeState.closeSocket();
+                releaseCodec(codecHolder[0]);
             }
 
-            if (runtimeState.isRunning()) {
-                long reconnectDelayMs = runtimeState.getReconnectDelayMs();
-                long jitterBound = Math.max(1L, reconnectDelayMs / 4L + 1L);
-                long jitterMs = (long) (Math.random() * jitterBound);
-                SystemClock.sleep(reconnectDelayMs + jitterMs);
+            if (config.runtimeState.isRunning()) {
+                sleepWithJitter();
             }
         }
+    }
+
+    private void logConnectionAttempt() {
+        config.statusListener.onStatus(config.stateConnecting,
+                "connecting to " + config.host + ":" + config.port, 0);
+        config.statusListener.onStats(
+                "fps in/out: - | drops: " + config.runtimeState.getDroppedTotal()
+                        + " | late: " + config.runtimeState.getTooLateTotal()
+                        + " | reconnects: " + config.runtimeState.getReconnects()
+        );
+    }
+
+    private void connectAndStream(MediaCodec[] codecHolder) throws Exception {
+        try (Socket socket = new Socket()) {
+            socket.connect(new InetSocketAddress(config.host, config.port), 2000);
+            socket.setTcpNoDelay(true);
+            socket.setReceiveBufferSize(config.socketRecvBufferSize);
+            socket.setSoTimeout(5_000);
+            config.runtimeState.setSocket(socket);
+            config.runtimeState.incrementSessionConnectId();
+            config.runtimeState.resetSampleSeq();
+
+            config.statusListener.onStatus(config.stateStreaming, "connected [framed]", 0);
+            config.streamWorker.run(new BufferedInputStream(socket.getInputStream(), 256 * 1024), codecHolder);
+        }
+    }
+
+    private void handleStreamError(Exception e) {
+        if (config.runtimeState.isRunning()) {
+            long reconnects = config.runtimeState.incrementReconnects();
+            long reconnectDelayMs = Math.min(5000L, config.runtimeState.getReconnectDelayMs() + 400L);
+            config.runtimeState.setReconnectDelayMs(reconnectDelayMs);
+            String reason = e.getClass().getSimpleName() + ": " + e.getMessage();
+            
+            if (H264TcpPlayer.isExpectedStreamClose(e)) {
+                Log.w(config.tag, "stream worker reconnect #" + reconnects
+                        + " delay_ms=" + reconnectDelayMs + " reason=" + reason);
+                config.statusListener.onStatus(config.stateConnecting, "stream reconnecting: " + reason, 0);
+            } else {
+                Log.e(config.tag, "stream worker failed", e);
+                config.statusListener.onStatus(config.stateError, "stream error: " + e.getClass().getSimpleName(), 0);
+            }
+            config.statusListener.onStats(
+                    "fps in/out: - | drops: " + config.runtimeState.getDroppedTotal()
+                            + " | late: " + config.runtimeState.getTooLateTotal()
+                            + " | reconnects: " + config.runtimeState.getReconnects()
+            );
+        }
+    }
+
+    private void releaseCodec(MediaCodec codec) {
+        if (codec != null) {
+            try {
+                codec.stop();
+            } catch (IllegalStateException ignored) {
+                // Expected when codec is not in proper state
+            }
+            try {
+                codec.release();
+            } catch (IllegalStateException ignored) {
+                // Expected when codec is already released
+            }
+        }
+    }
+
+    private void sleepWithJitter() {
+        long reconnectDelayMs = config.runtimeState.getReconnectDelayMs();
+        long jitterBound = Math.max(1L, reconnectDelayMs / 4L + 1L);
+        long jitterMs = random.nextLong(jitterBound);
+        SystemClock.sleep(reconnectDelayMs + jitterMs);
     }
 }

@@ -158,7 +158,7 @@ public final class H264TcpPlayer {
     private void runLoop() {
         PlayerRuntimeState runtimeState = new PlayerRuntimeState();
 
-        new StreamReconnectLoop(
+        StreamReconnectLoop.Config config = new StreamReconnectLoop.Config(
                 TAG,
                 HOST,
                 PORT,
@@ -169,7 +169,8 @@ public final class H264TcpPlayer {
                 STATE_CONNECTING,
                 STATE_STREAMING,
                 STATE_ERROR
-        ).run();
+        );
+        new StreamReconnectLoop(config).run();
     }
 
     private void framedDecodeLoop(InputStream input, MediaCodec[] codecRef) throws IOException {
