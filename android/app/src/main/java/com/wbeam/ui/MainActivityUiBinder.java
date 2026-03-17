@@ -89,6 +89,7 @@ public final class MainActivityUiBinder {
         cursorSpinner.setOnItemSelectedListener(createSpinnerListener(config.onCursorSelectionChanged));
     }
 
+    @SuppressWarnings("java:S1186")
     private static AdapterView.OnItemSelectedListener createSpinnerListener(Runnable onChanged) {
         return new AdapterView.OnItemSelectedListener() {
             @Override
@@ -103,6 +104,7 @@ public final class MainActivityUiBinder {
         };
     }
 
+    @SuppressWarnings("java:S1186")
     private static void onNoSelection() {
         // Intentionally ignored: UI actions only run on explicit selection.
     }

@@ -122,6 +122,7 @@ public final class MainInitializationCoordinator {
     private MainInitializationCoordinator() {
     }
 
+    @SuppressWarnings("java:S1172")
     public static boolean initializeUiBindings(UiBindingsConfig config) {
         config.bindViewsTask.run();
         config.setScreenAlwaysOnTask.run();

@@ -5,6 +5,7 @@ import android.widget.Toast;
 
 import android.util.Log;
 
+@SuppressWarnings("java:S107")
 public final class HostApiFailureNotifier {
     @FunctionalInterface
     public interface StatusSink {

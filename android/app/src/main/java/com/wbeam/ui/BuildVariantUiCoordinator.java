@@ -4,6 +4,7 @@ import android.view.View;
 
 import com.wbeam.widget.FpsLossGraphView;
 
+@SuppressWarnings("java:S107")
 public final class BuildVariantUiCoordinator {
     @FunctionalInterface
     public interface Action {
