@@ -7,6 +7,7 @@ public final class MainActivityDaemonStatusCoordinator {
         void start();
     }
 
+    @SuppressWarnings("java:S1104")
     public static final class Input {
         private boolean reachable;
         private boolean wasReachable;
@@ -100,6 +101,7 @@ public final class MainActivityDaemonStatusCoordinator {
         }
     }
 
+    @SuppressWarnings("java:S1104")
     public static final class Output {
         private boolean handshakeResolved;
         private String hostStatsLine;
