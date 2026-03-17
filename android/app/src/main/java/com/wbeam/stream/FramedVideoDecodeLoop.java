@@ -16,6 +16,12 @@ import java.util.Locale;
 
 final class FramedVideoDecodeLoop {
 
+    private static final String SEP_SPS = " sps=";
+    private static final String SEP_PPS = " pps=";
+    private static final String SEP_SEQ = " seq=";
+    private static final String SEP_PAYLOAD = " payload=";
+    private static final String SEP_QDECODE = " qDecode=";
+
     interface RuntimeState {
         boolean isRunning();
         long getDroppedTotal();
@@ -169,10 +175,22 @@ final class FramedVideoDecodeLoop {
         final boolean isHevc = !isPng && (helloFlags & helloCodecHevc) != 0;
         final int streamMode = helloFlags & helloModeMask;
         final boolean isUltraMode = streamMode == helloModeUltra;
-        final String videoMime = isPng ? "image/png" : (isHevc ? "video/hevc" : "video/avc");
-        String modeLabel = streamMode == helloModeUltra
-                ? "ultra"
-                : (streamMode == helloModeQuality ? "quality" : "stable");
+        final String videoMime;
+        if (isPng) {
+            videoMime = "image/png";
+        } else if (isHevc) {
+            videoMime = "video/hevc";
+        } else {
+            videoMime = "video/avc";
+        }
+        final String modeLabel;
+        if (streamMode == helloModeUltra) {
+            modeLabel = "ultra";
+        } else if (streamMode == helloModeQuality) {
+            modeLabel = "quality";
+        } else {
+            modeLabel = "stable";
+        }
         Log.i(tag, String.format(Locale.US, "WBTP hello session=0x%016x codec=%s mode=%s",
                 streamSessionId, isPng ? "PNG" : (isHevc ? "HEVC" : "AVC"), modeLabel));
 
@@ -240,7 +258,7 @@ final class FramedVideoDecodeLoop {
                     framePayloadHardCap,
                     tag,
                     "WBTP payload buffer grow "
-                            + " seq=" + seqU32 + " payload=" + payloadLen + " mode=" + modeLabel + " "
+                            + SEP_SEQ + seqU32 + SEP_PAYLOAD + payloadLen + " mode=" + modeLabel + " "
             );
             if (grownPayloadBuf != payloadBuf) {
                 payloadBuf = grownPayloadBuf;
@@ -290,7 +308,7 @@ final class FramedVideoDecodeLoop {
                         boolean ppsOk = MediaCodecBridge.queueCodecConfig(codec, legacyPps, 2_000);
                         if (!spsOk || !ppsOk) {
                             Log.w(tag, "legacy AVC: codec-config enqueue failed"
-                                    + " sps=" + spsOk + " pps=" + ppsOk
+                                    + SEP_SPS + spsOk + SEP_PPS + ppsOk
                                     + "; will wait for next keyframe");
                         }
                         waitForKeyframe = true;
@@ -347,7 +365,7 @@ final class FramedVideoDecodeLoop {
                 waitForKeyframe = false;
                 recoveryUnlockSec++;
                 Log.w(tag, "recovery-unlock: seq=" + seqU32 + " key=" + frameIsKey
-                        + " payload=" + payloadLen + " qDecode=" + pendingDecodeQueue);
+                        + SEP_PAYLOAD + payloadLen + SEP_QDECODE + pendingDecodeQueue);
                 // For the modern AVC path the decoder was started without
                 // csd-0/csd-1 in the MediaFormat.  Extract SPS/PPS from the
                 // recovery frame (they are prepended by h264parse with
@@ -362,8 +380,8 @@ final class FramedVideoDecodeLoop {
                         // Codec-config submission failed on recovery frame.
                         // Reset to keyframe wait so the next IDR can retry cleanly.
                         Log.w(tag, "recovery AVC: codec-config enqueue failed"
-                                + " sps=" + spsOk + " pps=" + ppsOk
-                                + " seq=" + seqU32 + "; waiting for next keyframe");
+                                + SEP_SPS + spsOk + SEP_PPS + ppsOk
+                                + SEP_SEQ + seqU32 + "; waiting for next keyframe");
                         waitForKeyframe = true;
                     }
                 }
@@ -392,9 +410,9 @@ final class FramedVideoDecodeLoop {
                     waitGateDropsSec++;
                     if ((waitGateDropsSec & 31) == 1) {
                         Log.w(tag, "waitForKeyframe drop: seq=" + seqU32
-                                + " payload=" + payloadLen
+                                + SEP_PAYLOAD + payloadLen
                                 + " dropped=" + waitGateDropsSec
-                                + " qDecode=" + pendingDecodeQueue);
+                                + SEP_QDECODE + pendingDecodeQueue);
                     }
                 }
                 waitForKeyframe = true;

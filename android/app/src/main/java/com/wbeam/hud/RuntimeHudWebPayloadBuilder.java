@@ -109,14 +109,14 @@ public final class RuntimeHudWebPayloadBuilder {
                 + " | drops=" + in.drops
                 + (in.tuningActive ? " | tune=" + HudRenderSupport.safeText(in.tuningLine) : "");
 
-        return RuntimeHudShellRenderer.buildHtml(
-                chips.toString(),
-                cards.toString(),
-                in.metricChartsHtml == null ? "" : in.metricChartsHtml,
-                trend,
-                details.toString(),
-                in.resourceRowsHtml,
-                "scale-1x"
-        );
+        RuntimeHudShellRenderer.HtmlContent content = new RuntimeHudShellRenderer.HtmlContent();
+        content.chipsHtml = chips.toString();
+        content.cardsHtml = cards.toString();
+        content.chartsHtml = in.metricChartsHtml == null ? "" : in.metricChartsHtml;
+        content.trendText = trend;
+        content.detailsRowsHtml = details.toString();
+        content.resourceRowsHtml = in.resourceRowsHtml;
+        content.scaleClass = "scale-1x";
+        return RuntimeHudShellRenderer.buildHtml(content);
     }
 }
