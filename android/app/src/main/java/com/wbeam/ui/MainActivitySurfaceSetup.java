@@ -24,6 +24,7 @@ public final class MainActivitySurfaceSetup {
         void onMotion(float x, float y, int actionMasked);
     }
 
+    @SuppressWarnings("java:S1104")
     public static final class Input {
         public SurfaceView preview;
         public SurfaceStateHandler onSurfaceCreated;
