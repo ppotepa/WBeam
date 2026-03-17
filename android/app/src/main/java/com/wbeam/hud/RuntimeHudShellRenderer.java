@@ -17,15 +17,14 @@ public final class RuntimeHudShellRenderer {
     private static final String BG_NAVY_MEDIUM = "rgba(2,10,14,.45)";
     private static final String BG_NAVY_DARK = "rgba(2,10,14,.35)";
 
-    @SuppressWarnings("java:S1104")
     public static final class HtmlContent {
-        public String chipsHtml;
-        public String cardsHtml;
-        public String chartsHtml;
-        public String trendText;
-        public String detailsRowsHtml;
-        public String resourceRowsHtml;
-        public String scaleClass;
+        String chipsHtml;
+        String cardsHtml;
+        String chartsHtml;
+        String trendText;
+        String detailsRowsHtml;
+        String resourceRowsHtml;
+        String scaleClass;
     }
 
     private RuntimeHudShellRenderer() {}

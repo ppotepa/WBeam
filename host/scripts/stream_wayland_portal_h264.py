@@ -502,11 +502,11 @@ def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=Non
         finally:
             try:
                 conn.close()
-            except Exception:
+            except OSError:
                 pass
     try:
         srv.close()
-    except Exception:
+    except OSError:
         pass
     print("[wbeam-framed] sender thread stopped", flush=True)
 

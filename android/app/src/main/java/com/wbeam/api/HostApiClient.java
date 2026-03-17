@@ -133,7 +133,8 @@ public final class HostApiClient {
             return apiRequest(method, path, payload);
         }
         IOException lastIo = null;
-        for (int i = 0; i < Math.max(1, attempts); i++) {
+        int effectiveAttempts = Math.max(1, attempts);
+        for (int i = 0; i < effectiveAttempts; i++) {
             try {
                 return apiRequest(method, path, payload);
             } catch (IOException io) {
@@ -141,7 +142,7 @@ public final class HostApiClient {
                 if (isLikelyStaleHttpConnection(io)) {
                     API_HTTP.connectionPool().evictAll();
                 }
-                if (i == attempts - 1) {
+                if (i == effectiveAttempts - 1) {
                     break;
                 }
                 long baseDelay = Math.min(5000L, API_RETRY_BASE_DELAY_MS * (1L << i));

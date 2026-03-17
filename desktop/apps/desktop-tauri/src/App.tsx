@@ -20,8 +20,15 @@ import RefreshCw from "lucide-solid/icons/refresh-cw";
 import Link2 from "lucide-solid/icons/link-2";
 import Unlink2 from "lucide-solid/icons/unlink-2";
 import Loader2 from "lucide-solid/icons/loader-2";
-import type { ConnectEncoderMode, ConnectSessionConfig, DeviceBasic, TrainedProfile } from "./types";
-import type { CaptureBackend, VirtualDepsInstallStatus, VirtualDoctor } from "./types";
+import type {
+  CaptureBackend,
+  ConnectEncoderMode,
+  ConnectSessionConfig,
+  DeviceBasic,
+  TrainedProfile,
+  VirtualDepsInstallStatus,
+  VirtualDoctor,
+} from "./types";
 import { HostApiManager } from "./managers/hostApiManager";
 import { createSessionManager } from "./managers/sessionManager";
 import connectResolutionPresets from "./config/connect-resolution-presets.json";
@@ -217,6 +224,34 @@ function serviceStatusHint(service: ServiceStatus): string {
   return "Install + Start service to enable probing and streaming.";
 }
 
+function connectTitle(connectBusy: boolean, connectDisabled: boolean, reason: string): string {
+  if (connectBusy) return "Connecting...";
+  if (connectDisabled) return `Connect blocked: ${reason}`;
+  return "Start stream for this device";
+}
+
+function disconnectTitle(disconnectBusy: boolean, disconnectDisabled: boolean, reason: string): string {
+  if (disconnectBusy) return "Disconnecting...";
+  if (disconnectDisabled) return reason;
+  return "Stop stream for this device";
+}
+
+function installProgressBarClass(status: VirtualDepsInstallStatus): string {
+  if (status.running) return "install-progress-bar running";
+  if (status.success) return "install-progress-bar ok";
+  return "install-progress-bar bad";
+}
+
+function installStatusClass(status: VirtualDepsInstallStatus): string {
+  if (!status.done) return "setup-message";
+  return status.success ? "setup-message install-ok" : "setup-message install-bad";
+}
+
+function installStatusText(status: VirtualDepsInstallStatus): string {
+  if (!status.done) return "Installing...";
+  return status.success ? "Installation completed successfully." : "Installation failed.";
+}
+
 export default function App() {
   const api = new HostApiManager();
   const session = createSessionManager(api);
@@ -304,7 +339,8 @@ export default function App() {
       const profiles = await api.listTrainedProfiles(backend);
       setTrainedProfiles(profiles);
       const selected = connectDialogProfileKey();
-      if (selected.length > 0 && !profiles.some((profile) => profile.key === selected)) {
+      const selectedExists = profiles.some((profile) => profile.key === selected);
+      if (selected.length > 0 && selectedExists === false) {
         setConnectDialogProfileKey("");
       }
     } catch {
@@ -663,16 +699,8 @@ export default function App() {
                     const disconnectDisabled = disconnectReason.length > 0;
                     const connectBusy = isDeviceActionBusy(device, "connect");
                     const disconnectBusy = isDeviceActionBusy(device, "disconnect");
-                    const connectTitle = connectBusy
-                      ? "Connecting..."
-                      : connectDisabled
-                        ? `Connect blocked: ${connectReason}`
-                        : "Start stream for this device";
-                    const disconnectTitle = disconnectBusy
-                      ? "Disconnecting..."
-                      : disconnectDisabled
-                        ? disconnectReason
-                        : "Stop stream for this device";
+                    const connectActionTitle = connectTitle(connectBusy, connectDisabled, connectReason);
+                    const disconnectActionTitle = disconnectTitle(disconnectBusy, disconnectDisabled, disconnectReason);
                     return (
                       <>
                   <button
@@ -685,7 +713,7 @@ export default function App() {
                   </button>
                   <button
                     class="device-btn"
-                    title={connectTitle}
+                    title={connectActionTitle}
                     disabled={connectBusy || connectDisabled}
                     onClick={() => openConnectDialog(device)}
                   >
@@ -696,7 +724,7 @@ export default function App() {
                   </button>
                   <button
                     class="device-btn"
-                    title={disconnectTitle}
+                    title={disconnectActionTitle}
                     disabled={disconnectDisabled}
                     onClick={() => session.disconnectDevice(device)}
                   >
@@ -1002,30 +1030,10 @@ export default function App() {
             <h3>Installing virtual desktop dependencies</h3>
             <p class="connect-modal-subtitle">Elevation is required (root/pkexec prompt).</p>
             <div class="install-progress">
-              <div
-                class={`install-progress-bar ${
-                  virtualInstallStatus().running
-                    ? "running"
-                    : virtualInstallStatus().success
-                      ? "ok"
-                      : "bad"
-                }`}
-              />
+              <div class={installProgressBarClass(virtualInstallStatus())} />
             </div>
-            <p
-              class={`setup-message ${
-                virtualInstallStatus().done
-                  ? virtualInstallStatus().success
-                    ? "install-ok"
-                    : "install-bad"
-                  : ""
-              }`}
-            >
-              {virtualInstallStatus().done
-                ? virtualInstallStatus().success
-                  ? "Installation completed successfully."
-                  : "Installation failed."
-                : "Installing..."}
+            <p class={installStatusClass(virtualInstallStatus())}>
+              {installStatusText(virtualInstallStatus())}
             </p>
             <p class="setup-hint">{virtualInstallStatus().message}</p>
             <textarea

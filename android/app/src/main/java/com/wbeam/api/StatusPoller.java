@@ -31,6 +31,7 @@ public final class StatusPoller {
     private static final String STATE_STREAMING     = "STREAMING";
     private static final String STATE_DISCONNECTED  = "DISCONNECTED";
     private static final String LOG_API_PREFIX      = " api=";
+    private static final String METRIC_CONNECTION_MODE = "connection_mode";
 
     // ── Daemon state (queried by MainActivity via getters) ────────────────────
     private boolean daemonReachable    = false;
@@ -70,6 +71,7 @@ public final class StatusPoller {
 
     public interface Callbacks {
         /** Called on UI thread after a successful poll. */
+        @SuppressWarnings("java:S107")
         void onDaemonStatusUpdate(
                 boolean reachable,
                 boolean wasReachable,
@@ -151,6 +153,7 @@ public final class StatusPoller {
 
     // ── Poll logic ────────────────────────────────────────────────────────────
 
+    @SuppressWarnings("java:S3398")
     private void pollAsync() {
         if (statusPollInFlight) {
             return;
@@ -216,7 +219,7 @@ public final class StatusPoller {
             return;
         }
 
-        if (autoStartPending && STATE_IDLE.equals(daemonState)) {
+        if (autoStartPending && STATE_IDLE.equals(daemonState) && !isAutoStartSuppressed()) {
             autoStartPending = false;
             permanentlySuppressAutoStart();
             callbacks.onAutoStartFailed();
@@ -268,9 +271,21 @@ public final class StatusPoller {
         }
 
         if (payload.has("connection_mode")) {
-            putQuietly(merged, "connection_mode", payload.optString("connection_mode", "live"));
+            putQuietly(
+                    merged,
+                    METRIC_CONNECTION_MODE,
+                    payload.optString(METRIC_CONNECTION_MODE, "live")
+            );
         }
         return merged;
+    }
+
+    private boolean isAutoStartSuppressed() {
+        long nowMs = SystemClock.elapsedRealtime();
+        if (nowMs < suppressAutoStartUntil) {
+            return true;
+        }
+        return (nowMs - lastAutoStartAt) < AUTO_START_COOLDOWN_MS;
     }
 
     private static void putQuietly(JSONObject obj, String key, Object value) {
