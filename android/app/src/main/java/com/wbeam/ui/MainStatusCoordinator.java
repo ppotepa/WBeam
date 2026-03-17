@@ -26,24 +26,25 @@ public final class MainStatusCoordinator {
             String logTag
     ) {
         MainActivityStatusTracker.UpdateResult next = MainActivityStatusTracker.update(
-                state,
-                info,
-                bps,
-                stateIdle,
-                stateError,
-                SystemClock.elapsedRealtime(),
-                30_000L,
-                statusState.criticalErrorInfo,
-                statusState.criticalErrorLogAtMs
+                MainActivityStatusTracker.UpdateInput.create()
+                        .setState(state)
+                        .setInfo(info)
+                        .setBps(bps)
+                        .setDefaultState(stateIdle)
+                        .setErrorState(stateError)
+                        .setNowMs(SystemClock.elapsedRealtime())
+                        .setCriticalLogStaleMs(30_000L)
+                        .setLastCriticalErrorInfo(statusState.criticalErrorInfo)
+                        .setLastCriticalErrorLogAtMs(statusState.criticalErrorLogAtMs)
         );
-        statusState.uiState = next.state;
-        statusState.uiInfo = next.info;
-        statusState.uiBps = next.bps;
-        statusState.criticalErrorInfo = next.criticalErrorInfo;
-        statusState.criticalErrorLogAtMs = next.criticalErrorLogAtMs;
-        if (next.shouldLogCritical) {
-            criticalLogHandler.onCritical(next.criticalLogLine);
-            Log.e(logTag, next.criticalLogLine);
+        statusState.uiState = next.getState();
+        statusState.uiInfo = next.getInfo();
+        statusState.uiBps = next.getBps();
+        statusState.criticalErrorInfo = next.getCriticalErrorInfo();
+        statusState.criticalErrorLogAtMs = next.getCriticalErrorLogAtMs();
+        if (next.shouldLogCritical()) {
+            criticalLogHandler.onCritical(next.getCriticalLogLine());
+            Log.e(logTag, next.getCriticalLogLine());
         }
     }
 
