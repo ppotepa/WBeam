@@ -18,7 +18,7 @@ import com.wbeam.startup.StartupOverlayController;
 import com.wbeam.startup.StartupOverlayViewRenderer;
 import com.wbeam.startup.StartupOverlayViewsBinder;
 
-@SuppressWarnings("java:S1104")
+@SuppressWarnings({"java:S1104", "java:S107"})
 public final class MainViewBindingCoordinator {
     public interface TickListener {
         void onTick(int tick);

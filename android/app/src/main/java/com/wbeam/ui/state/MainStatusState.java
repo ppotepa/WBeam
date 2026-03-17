@@ -2,7 +2,7 @@ package com.wbeam.ui.state;
 
 import com.wbeam.ui.MainActivityStatusPresenter;
 
-@SuppressWarnings("java:S1104")
+@SuppressWarnings({"java:S1104", "java:S107"})
 public final class MainStatusState {
     private String uiState;
     private String uiInfo;

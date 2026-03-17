@@ -18,6 +18,7 @@ import android.widget.Spinner;
 
 import androidx.appcompat.app.AppCompatActivity;
 
+@SuppressWarnings("java:S107")
 public final class MainActivityUiBinder {
     private static final int SPINNER_DROPDOWN_LAYOUT = android.R.layout.simple_spinner_dropdown_item;
     private static final String PREFERRED_VIDEO_H264 = "h264";
