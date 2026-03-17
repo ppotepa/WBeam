@@ -15,7 +15,6 @@ import java.util.concurrent.ExecutorService;
  * Polls the WBeam daemon's /status, /health, and /metrics endpoints every STATUS_POLL_MS.
  * Holds all daemon state fields so MainActivity can query them without coupling to the poll logic.
  */
-@SuppressWarnings({"java:S1068", "java:S1450", "java:S107", "java:S3398", "java:S1192"})
 public final class StatusPoller {
 
     private static final String TAG = "WBeamStatusPoller";
@@ -32,6 +31,10 @@ public final class StatusPoller {
     private static final String STATE_DISCONNECTED  = "DISCONNECTED";
     private static final String LOG_API_PREFIX      = " api=";
     private static final String METRIC_CONNECTION_MODE = "connection_mode";
+    private static final String METHOD_GET = "GET";
+    private static final String PATH_STATUS = "/status";
+    private static final String PATH_HEALTH = "/health";
+    private static final String PATH_METRICS = "/metrics";
 
     // ── Daemon state (queried by MainActivity via getters) ────────────────────
     private boolean daemonReachable    = false;
@@ -165,13 +168,13 @@ public final class StatusPoller {
         ioExecutor.execute(() -> {
             try {
                 JSONObject status = HostApiClient.apiRequestWithRetry(
-                        "GET", "/status", null, HostApiClient.API_RETRY_ATTEMPTS);
+                        METHOD_GET, PATH_STATUS, null, HostApiClient.API_RETRY_ATTEMPTS);
                 JSONObject health = fetchHealth
                         ? HostApiClient.apiRequestWithRetry(
-                                "GET", "/health", null, HostApiClient.API_RETRY_ATTEMPTS)
+                                METHOD_GET, PATH_HEALTH, null, HostApiClient.API_RETRY_ATTEMPTS)
                         : null;
                 JSONObject metricsPayload = HostApiClient.apiRequestWithRetry(
-                        "GET", "/metrics", null, HostApiClient.API_RETRY_ATTEMPTS);
+                        METHOD_GET, PATH_METRICS, null, HostApiClient.API_RETRY_ATTEMPTS);
                 JSONObject metrics = mergeMetricsPayload(metricsPayload);
                 uiHandler.post(() -> processStatusResult(status, health, metrics));
             } catch (Exception e) {
@@ -282,10 +285,8 @@ public final class StatusPoller {
 
     private boolean isAutoStartSuppressed() {
         long nowMs = SystemClock.elapsedRealtime();
-        if (nowMs < suppressAutoStartUntil) {
-            return true;
-        }
-        return (nowMs - lastAutoStartAt) < AUTO_START_COOLDOWN_MS;
+        return nowMs < suppressAutoStartUntil
+                || (nowMs - lastAutoStartAt) < AUTO_START_COOLDOWN_MS;
     }
 
     private static void putQuietly(JSONObject obj, String key, Object value) {

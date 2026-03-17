@@ -84,28 +84,26 @@ public final class MainActivityUiBinder {
         cursorSpinner.setAdapter(new ArrayAdapter<>(
                 activity, SPINNER_DROPDOWN_LAYOUT, config.cursorOptions));
 
-        encoderSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+        encoderSpinner.setOnItemSelectedListener(createSpinnerListener(config.onEncoderSelectionChanged));
+        cursorSpinner.setOnItemSelectedListener(createSpinnerListener(config.onCursorSelectionChanged));
+    }
+
+    private static AdapterView.OnItemSelectedListener createSpinnerListener(Runnable onChanged) {
+        return new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                config.onEncoderSelectionChanged.run();
+                onChanged.run();
             }
 
             @Override
             public void onNothingSelected(AdapterView<?> parent) {
-                // No-op: we only react to explicit user selections.
+                onNoSelection();
             }
-        });
-        cursorSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                config.onCursorSelectionChanged.run();
-            }
+        };
+    }
 
-            @Override
-            public void onNothingSelected(AdapterView<?> parent) {
-                // No-op: we only react to explicit user selections.
-            }
-        });
+    private static void onNoSelection() {
+        // Intentionally ignored: UI actions only run on explicit selection.
     }
 
     public static void setupSeekbars(

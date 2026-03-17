@@ -101,7 +101,7 @@ public final class HudRenderSupport {
     }
 
     private static String toneStrokeColor(String toneClass) {
-        String tone = toneClass == null ? "" : toneClass.trim().toLowerCase(Locale.US);
+        String tone = normalizeTone(toneClass);
         if (TONE_STATE_RISK.equals(tone)) {
             return "#f87171";
         }
@@ -115,7 +115,7 @@ public final class HudRenderSupport {
     }
 
     private static String toneFillColor(String toneClass) {
-        String tone = toneClass == null ? "" : toneClass.trim().toLowerCase(Locale.US);
+        String tone = normalizeTone(toneClass);
         if (TONE_STATE_RISK.equals(tone)) {
             return "rgba(248,113,113,0.20)";
         }
@@ -129,7 +129,7 @@ public final class HudRenderSupport {
     }
 
     private static String toneDotColor(String toneClass) {
-        String tone = toneClass == null ? "" : toneClass.trim().toLowerCase(Locale.US);
+        String tone = normalizeTone(toneClass);
         if (TONE_STATE_RISK.equals(tone)) {
             return "#fecaca";
         }
@@ -328,7 +328,7 @@ public final class HudRenderSupport {
     }
 
     public static String hudToneClass(String tone) {
-        String t = tone == null ? "" : tone.trim().toLowerCase(Locale.US);
+        String t = normalizeTone(tone);
         if ("risk".equals(t) || "bad".equals(t) || "red".equals(t)) {
             return TONE_STATE_RISK;
         }
@@ -378,5 +378,9 @@ public final class HudRenderSupport {
             return min;
         }
         return Math.max(min, Math.min(max, value));
+    }
+
+    private static String normalizeTone(String toneClass) {
+        return toneClass == null ? "" : toneClass.trim().toLowerCase(Locale.US);
     }
 }

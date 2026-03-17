@@ -50,6 +50,8 @@ public final class HostApiClient {
     private static final String METRICS_PATH = "/metrics";
     private static final String STATE_STREAMING = "STREAMING";
     private static final String STATE_RECONNECTING = "RECONNECTING";
+    private static final String STATE_STARTING = "STARTING";
+    private static final String STATE_IDLE = "IDLE";
 
     public  static final int  API_RETRY_ATTEMPTS      = 2;
     public  static final long API_RETRY_BASE_DELAY_MS = 300L;
@@ -89,15 +91,20 @@ public final class HostApiClient {
     private HostApiClient() {}
 
     private static String resolveHost() {
-        String configured = BuildConfig.WBEAM_API_HOST;
-        if (configured == null || configured.trim().isEmpty()) {
-            configured = BuildConfig.WBEAM_HOST;
-        }
+        String configured = firstConfiguredHost();
         if (configured == null) {
             return "127.0.0.1";
         }
         String trimmed = configured.trim();
         return trimmed.isEmpty() ? "127.0.0.1" : trimmed;
+    }
+
+    private static String firstConfiguredHost() {
+        String apiHost = BuildConfig.WBEAM_API_HOST;
+        if (apiHost != null && !apiHost.trim().isEmpty()) {
+            return apiHost;
+        }
+        return BuildConfig.WBEAM_HOST;
     }
 
     private static String resolveTargetSerial() {
@@ -289,14 +296,14 @@ public final class HostApiClient {
     }
 
     private static void handleStartRequest(long nowSec) {
-        LocalApiState.state = "STARTING";
+        LocalApiState.state = STATE_STARTING;
         LocalApiState.lastError = "";
         LocalApiState.runId++;
         resetLocalApiState(nowSec);
     }
 
     private static void handleStopRequest(long nowSec) {
-        LocalApiState.state = "IDLE";
+        LocalApiState.state = STATE_IDLE;
         LocalApiState.lastError = "";
         LocalApiState.startedAtSec = nowSec;
         resetLocalApiMetrics();
@@ -320,9 +327,9 @@ public final class HostApiClient {
                 LocalApiState.firstFlowAtSec = nowSec;
             }
             LocalApiState.state = STATE_STREAMING;
-        } else if (!"IDLE".equals(LocalApiState.state)) {
+        } else if (!STATE_IDLE.equals(LocalApiState.state)) {
             long sinceStartSec = Math.max(0L, nowSec - LocalApiState.startedAtSec);
-            LocalApiState.state = sinceStartSec < 3L ? "STARTING" : STATE_RECONNECTING;
+            LocalApiState.state = sinceStartSec < 3L ? STATE_STARTING : STATE_RECONNECTING;
         }
         return new JSONObject();
     }
@@ -333,7 +340,7 @@ public final class HostApiClient {
             if (idleMs > 2500L) {
                 LocalApiState.state = STATE_RECONNECTING;
             }
-        } else if (!"IDLE".equals(LocalApiState.state)) {
+        } else if (!STATE_IDLE.equals(LocalApiState.state)) {
             long sinceStartSec = Math.max(0L, nowSec - LocalApiState.startedAtSec);
             if (sinceStartSec >= 3L) {
                 LocalApiState.state = STATE_RECONNECTING;
@@ -412,7 +419,7 @@ public final class HostApiClient {
     }
 
     private static final class LocalApiState {
-        private static String state = "IDLE";
+        private static String state = STATE_IDLE;
         private static String lastError = "";
         private static long runId = 0L;
         private static long startedAtSec = System.currentTimeMillis() / 1000L;

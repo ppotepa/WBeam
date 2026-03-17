@@ -28,6 +28,13 @@ public final class VideoTestController {
     private static final String UI_STATE_ERROR = "error";
     private static final String UI_STATE_CONNECTING = "connecting";
     private static final String UI_STATE_STREAMING = "streaming";
+    private static final String UI_STATE_IDLE = "idle";
+    private static final String DAEMON_STATE_STREAMING = "STREAMING";
+    private static final String DAEMON_STATE_STARTING = "STARTING";
+    private static final String DAEMON_STATE_RECONNECTING = "RECONNECTING";
+    private static final String DAEMON_STATE_ERROR = "ERROR";
+    private static final String DAEMON_STATE_DISCONNECTED = "DISCONNECTED";
+    private static final String RUN_TESTS_LIVE = "RUN TESTS LIVE";
     private static final String LIVE_TEST_PREFIX = "[RUN TESTS LIVE] ";
     private static final String PRESET_PREFIX = "preset\n";
     private static final long   LIVE_TEST_START_TIMEOUT_MS = 12_000L;
@@ -181,7 +188,10 @@ public final class VideoTestController {
             callbacks.onStatus(UI_STATE_ERROR, "surface not ready yet", 0);
             return;
         }
+        runPublicVideoTest(surface);
+    }
 
+    private void runPublicVideoTest(Surface surface) {
         TestConfig cfg = callbacks.getTestConfig();
         String presetLine = cfg.toLine();
         logInfo("requested with preset: " + presetLine);
@@ -410,17 +420,23 @@ public final class VideoTestController {
     }
 
     private static String uiStateFromDaemonState(String daemonState) {
-        if ("STREAMING".equals(daemonState))                            return "streaming";
-        if ("STARTING".equals(daemonState)
-                || "RECONNECTING".equals(daemonState))                  return "connecting";
-        if ("ERROR".equals(daemonState)
-                || "DISCONNECTED".equals(daemonState))                  return "error";
-        return "idle";
+        if (DAEMON_STATE_STREAMING.equals(daemonState)) {
+            return UI_STATE_STREAMING;
+        }
+        if (DAEMON_STATE_STARTING.equals(daemonState)
+                || DAEMON_STATE_RECONNECTING.equals(daemonState)) {
+            return UI_STATE_CONNECTING;
+        }
+        if (DAEMON_STATE_ERROR.equals(daemonState)
+                || DAEMON_STATE_DISCONNECTED.equals(daemonState)) {
+            return UI_STATE_ERROR;
+        }
+        return UI_STATE_IDLE;
     }
 
     private void setOverlay(String title, String body, String hint) {
         overlayActive = true;
-        overlayTitle  = title != null ? title : "RUN TESTS LIVE";
+        overlayTitle  = title != null ? title : RUN_TESTS_LIVE;
         overlayBody   = body  != null ? body  : "";
         overlayHint   = hint  != null ? hint  : "";
         callbacks.onOverlayChanged();
