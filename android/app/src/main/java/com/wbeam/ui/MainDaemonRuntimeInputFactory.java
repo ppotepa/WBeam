@@ -26,17 +26,17 @@ public final class MainDaemonRuntimeInputFactory {
     ) {
         MainDaemonRuntimeCoordinator.StatusInput input =
                 new MainDaemonRuntimeCoordinator.StatusInput();
-        input.reachable = reachable;
-        input.wasReachable = wasReachable;
-        input.hostName = hostName;
-        input.state = state;
-        input.runId = runId;
-        input.lastError = lastError;
-        input.errorChanged = errorChanged;
-        input.uptimeSec = uptimeSec;
-        input.service = service;
-        input.buildRevision = buildRevision;
-        input.metrics = metrics;
+        input.setReachable(reachable);
+        input.setWasReachable(wasReachable);
+        input.setHostName(hostName);
+        input.setState(state);
+        input.setRunId(runId);
+        input.setLastError(lastError);
+        input.setErrorChanged(errorChanged);
+        input.setUptimeSec(uptimeSec);
+        input.setService(service);
+        input.setBuildRevision(buildRevision);
+        input.setMetrics(metrics);
         return input;
     }
 
@@ -54,16 +54,16 @@ public final class MainDaemonRuntimeInputFactory {
     ) {
         MainDaemonRuntimeCoordinator.StatusContext context =
                 new MainDaemonRuntimeCoordinator.StatusContext();
-        context.daemon = daemon;
-        context.uiState = uiState;
-        context.requiresTransportProbeNowProvider = requiresTransportProbeNowProvider;
-        context.probeStarter = probeStarter;
-        context.hostConnectedNotifier = hostConnectedNotifier;
-        context.lineLogger = lineLogger;
-        context.stopLiveViewTask = stopLiveViewTask;
-        context.refreshUiTask = refreshUiTask;
-        context.statsSink = statsSink;
-        context.perfHudSink = perfHudSink;
+        context.setDaemon(daemon);
+        context.setUiState(uiState);
+        context.setRequiresTransportProbeNowProvider(requiresTransportProbeNowProvider);
+        context.setProbeStarter(probeStarter);
+        context.setHostConnectedNotifier(hostConnectedNotifier);
+        context.setLineLogger(lineLogger);
+        context.setStopLiveViewTask(stopLiveViewTask);
+        context.setRefreshUiTask(refreshUiTask);
+        context.setStatsSink(statsSink);
+        context.setPerfHudSink(perfHudSink);
         return context;
     }
 
@@ -84,20 +84,20 @@ public final class MainDaemonRuntimeInputFactory {
     ) {
         MainDaemonRuntimeCoordinator.OfflineContext context =
                 new MainDaemonRuntimeCoordinator.OfflineContext();
-        context.daemon = daemon;
-        context.uiState = uiState;
-        context.transportProbe = transportProbe;
-        context.stateError = stateError;
-        context.apiBase = HostApiClient.API_BASE;
-        context.stopLiveViewTask = stopLiveViewTask;
-        context.updateActionButtonsTask = updateActionButtonsTask;
-        context.updateHostHintTask = updateHostHintTask;
-        context.updatePerfHudUnavailableTask = updatePerfHudUnavailableTask;
-        context.refreshStatusTextTask = refreshStatusTextTask;
-        context.updatePreflightOverlayTask = updatePreflightOverlayTask;
-        context.uiStatusSink = uiStatusSink;
-        context.lineLogger = lineLogger;
-        context.toastSink = toastSink;
+        context.setDaemon(daemon);
+        context.setUiState(uiState);
+        context.setTransportProbe(transportProbe);
+        context.setStateError(stateError);
+        context.setApiBase(HostApiClient.API_BASE);
+        context.setStopLiveViewTask(stopLiveViewTask);
+        context.setUpdateActionButtonsTask(updateActionButtonsTask);
+        context.setUpdateHostHintTask(updateHostHintTask);
+        context.setUpdatePerfHudUnavailableTask(updatePerfHudUnavailableTask);
+        context.setRefreshStatusTextTask(refreshStatusTextTask);
+        context.setUpdatePreflightOverlayTask(updatePreflightOverlayTask);
+        context.setUiStatusSink(uiStatusSink);
+        context.setLineLogger(lineLogger);
+        context.setToastSink(toastSink);
         return context;
     }
 }

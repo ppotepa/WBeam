@@ -46,123 +46,403 @@ public final class MainDaemonRuntimeCoordinator {
     }
 
     public static final class StatusInput {
-        public boolean reachable;
-        public boolean wasReachable;
-        public String hostName;
-        public String state;
-        public long runId;
-        public String lastError;
-        public boolean errorChanged;
-        public long uptimeSec;
-        public String service;
-        public String buildRevision;
-        public JSONObject metrics;
+        private boolean reachable;
+        private boolean wasReachable;
+        private String hostName;
+        private String state;
+        private long runId;
+        private String lastError;
+        private boolean errorChanged;
+        private long uptimeSec;
+        private String service;
+        private String buildRevision;
+        private JSONObject metrics;
+
+        public boolean isReachable() {
+            return reachable;
+        }
+
+        public void setReachable(boolean reachable) {
+            this.reachable = reachable;
+        }
+
+        public boolean isWasReachable() {
+            return wasReachable;
+        }
+
+        public void setWasReachable(boolean wasReachable) {
+            this.wasReachable = wasReachable;
+        }
+
+        public String getHostName() {
+            return hostName;
+        }
+
+        public void setHostName(String hostName) {
+            this.hostName = hostName;
+        }
+
+        public String getState() {
+            return state;
+        }
+
+        public void setState(String state) {
+            this.state = state;
+        }
+
+        public long getRunId() {
+            return runId;
+        }
+
+        public void setRunId(long runId) {
+            this.runId = runId;
+        }
+
+        public String getLastError() {
+            return lastError;
+        }
+
+        public void setLastError(String lastError) {
+            this.lastError = lastError;
+        }
+
+        public boolean isErrorChanged() {
+            return errorChanged;
+        }
+
+        public void setErrorChanged(boolean errorChanged) {
+            this.errorChanged = errorChanged;
+        }
+
+        public long getUptimeSec() {
+            return uptimeSec;
+        }
+
+        public void setUptimeSec(long uptimeSec) {
+            this.uptimeSec = uptimeSec;
+        }
+
+        public String getService() {
+            return service;
+        }
+
+        public void setService(String service) {
+            this.service = service;
+        }
+
+        public String getBuildRevision() {
+            return buildRevision;
+        }
+
+        public void setBuildRevision(String buildRevision) {
+            this.buildRevision = buildRevision;
+        }
+
+        public JSONObject getMetrics() {
+            return metrics;
+        }
+
+        public void setMetrics(JSONObject metrics) {
+            this.metrics = metrics;
+        }
     }
 
     public static final class StatusContext {
-        public MainDaemonState daemon;
-        public MainUiState uiState;
-        public BoolProvider requiresTransportProbeNowProvider;
-        public ProbeStarter probeStarter;
-        public HostConnectedNotifier hostConnectedNotifier;
-        public LineLogger lineLogger;
-        public UiTask stopLiveViewTask;
-        public UiTask refreshUiTask;
-        public StatsSink statsSink;
-        public PerfHudSink perfHudSink;
+        private MainDaemonState daemon;
+        private MainUiState uiState;
+        private BoolProvider requiresTransportProbeNowProvider;
+        private ProbeStarter probeStarter;
+        private HostConnectedNotifier hostConnectedNotifier;
+        private LineLogger lineLogger;
+        private UiTask stopLiveViewTask;
+        private UiTask refreshUiTask;
+        private StatsSink statsSink;
+        private PerfHudSink perfHudSink;
+
+        public MainDaemonState getDaemon() {
+            return daemon;
+        }
+
+        public void setDaemon(MainDaemonState daemon) {
+            this.daemon = daemon;
+        }
+
+        public MainUiState getUiState() {
+            return uiState;
+        }
+
+        public void setUiState(MainUiState uiState) {
+            this.uiState = uiState;
+        }
+
+        public BoolProvider getRequiresTransportProbeNowProvider() {
+            return requiresTransportProbeNowProvider;
+        }
+
+        public void setRequiresTransportProbeNowProvider(BoolProvider requiresTransportProbeNowProvider) {
+            this.requiresTransportProbeNowProvider = requiresTransportProbeNowProvider;
+        }
+
+        public ProbeStarter getProbeStarter() {
+            return probeStarter;
+        }
+
+        public void setProbeStarter(ProbeStarter probeStarter) {
+            this.probeStarter = probeStarter;
+        }
+
+        public HostConnectedNotifier getHostConnectedNotifier() {
+            return hostConnectedNotifier;
+        }
+
+        public void setHostConnectedNotifier(HostConnectedNotifier hostConnectedNotifier) {
+            this.hostConnectedNotifier = hostConnectedNotifier;
+        }
+
+        public LineLogger getLineLogger() {
+            return lineLogger;
+        }
+
+        public void setLineLogger(LineLogger lineLogger) {
+            this.lineLogger = lineLogger;
+        }
+
+        public UiTask getStopLiveViewTask() {
+            return stopLiveViewTask;
+        }
+
+        public void setStopLiveViewTask(UiTask stopLiveViewTask) {
+            this.stopLiveViewTask = stopLiveViewTask;
+        }
+
+        public UiTask getRefreshUiTask() {
+            return refreshUiTask;
+        }
+
+        public void setRefreshUiTask(UiTask refreshUiTask) {
+            this.refreshUiTask = refreshUiTask;
+        }
+
+        public StatsSink getStatsSink() {
+            return statsSink;
+        }
+
+        public void setStatsSink(StatsSink statsSink) {
+            this.statsSink = statsSink;
+        }
+
+        public PerfHudSink getPerfHudSink() {
+            return perfHudSink;
+        }
+
+        public void setPerfHudSink(PerfHudSink perfHudSink) {
+            this.perfHudSink = perfHudSink;
+        }
     }
 
     public static final class OfflineContext {
-        public MainDaemonState daemon;
-        public MainUiState uiState;
-        public TransportProbeCoordinator transportProbe;
-        public String stateError;
-        public String apiBase;
-        public UiTask stopLiveViewTask;
-        public UiTask updateActionButtonsTask;
-        public UiTask updateHostHintTask;
-        public UiTask updatePerfHudUnavailableTask;
-        public UiTask refreshStatusTextTask;
-        public UiTask updatePreflightOverlayTask;
-        public UiStatusSink uiStatusSink;
-        public LineLogger lineLogger;
-        public UiMessageSink toastSink;
+        private MainDaemonState daemon;
+        private MainUiState uiState;
+        private TransportProbeCoordinator transportProbe;
+        private String stateError;
+        private String apiBase;
+        private UiTask stopLiveViewTask;
+        private UiTask updateActionButtonsTask;
+        private UiTask updateHostHintTask;
+        private UiTask updatePerfHudUnavailableTask;
+        private UiTask refreshStatusTextTask;
+        private UiTask updatePreflightOverlayTask;
+        private UiStatusSink uiStatusSink;
+        private LineLogger lineLogger;
+        private UiMessageSink toastSink;
+
+        public MainDaemonState getDaemon() {
+            return daemon;
+        }
+
+        public void setDaemon(MainDaemonState daemon) {
+            this.daemon = daemon;
+        }
+
+        public MainUiState getUiState() {
+            return uiState;
+        }
+
+        public void setUiState(MainUiState uiState) {
+            this.uiState = uiState;
+        }
+
+        public TransportProbeCoordinator getTransportProbe() {
+            return transportProbe;
+        }
+
+        public void setTransportProbe(TransportProbeCoordinator transportProbe) {
+            this.transportProbe = transportProbe;
+        }
+
+        public String getStateError() {
+            return stateError;
+        }
+
+        public void setStateError(String stateError) {
+            this.stateError = stateError;
+        }
+
+        public String getApiBase() {
+            return apiBase;
+        }
+
+        public void setApiBase(String apiBase) {
+            this.apiBase = apiBase;
+        }
+
+        public UiTask getStopLiveViewTask() {
+            return stopLiveViewTask;
+        }
+
+        public void setStopLiveViewTask(UiTask stopLiveViewTask) {
+            this.stopLiveViewTask = stopLiveViewTask;
+        }
+
+        public UiTask getUpdateActionButtonsTask() {
+            return updateActionButtonsTask;
+        }
+
+        public void setUpdateActionButtonsTask(UiTask updateActionButtonsTask) {
+            this.updateActionButtonsTask = updateActionButtonsTask;
+        }
+
+        public UiTask getUpdateHostHintTask() {
+            return updateHostHintTask;
+        }
+
+        public void setUpdateHostHintTask(UiTask updateHostHintTask) {
+            this.updateHostHintTask = updateHostHintTask;
+        }
+
+        public UiTask getUpdatePerfHudUnavailableTask() {
+            return updatePerfHudUnavailableTask;
+        }
+
+        public void setUpdatePerfHudUnavailableTask(UiTask updatePerfHudUnavailableTask) {
+            this.updatePerfHudUnavailableTask = updatePerfHudUnavailableTask;
+        }
+
+        public UiTask getRefreshStatusTextTask() {
+            return refreshStatusTextTask;
+        }
+
+        public void setRefreshStatusTextTask(UiTask refreshStatusTextTask) {
+            this.refreshStatusTextTask = refreshStatusTextTask;
+        }
+
+        public UiTask getUpdatePreflightOverlayTask() {
+            return updatePreflightOverlayTask;
+        }
+
+        public void setUpdatePreflightOverlayTask(UiTask updatePreflightOverlayTask) {
+            this.updatePreflightOverlayTask = updatePreflightOverlayTask;
+        }
+
+        public UiStatusSink getUiStatusSink() {
+            return uiStatusSink;
+        }
+
+        public void setUiStatusSink(UiStatusSink uiStatusSink) {
+            this.uiStatusSink = uiStatusSink;
+        }
+
+        public LineLogger getLineLogger() {
+            return lineLogger;
+        }
+
+        public void setLineLogger(LineLogger lineLogger) {
+            this.lineLogger = lineLogger;
+        }
+
+        public UiMessageSink getToastSink() {
+            return toastSink;
+        }
+
+        public void setToastSink(UiMessageSink toastSink) {
+            this.toastSink = toastSink;
+        }
     }
 
     private MainDaemonRuntimeCoordinator() {
     }
 
     public static void onStatusUpdate(StatusInput input, StatusContext context) {
-        context.daemon.applySnapshot(
-                input.reachable,
-                input.hostName,
-                input.state,
-                input.lastError,
-                input.runId,
-                input.uptimeSec,
-                input.service,
-                input.buildRevision
+        context.getDaemon().applySnapshot(
+                input.isReachable(),
+                input.getHostName(),
+                input.getState(),
+                input.getLastError(),
+                input.getRunId(),
+                input.getUptimeSec(),
+                input.getService(),
+                input.getBuildRevision()
         );
         MainActivityDaemonStatusCoordinator.Input daemonInput =
                 new MainActivityDaemonStatusCoordinator.Input();
-        daemonInput.reachable = input.reachable;
-        daemonInput.wasReachable = input.wasReachable;
-        daemonInput.hostName = input.hostName;
-        daemonInput.state = input.state;
-        daemonInput.lastError = input.lastError;
-        daemonInput.errorChanged = input.errorChanged;
-        daemonInput.service = input.service;
-        daemonInput.metrics = input.metrics;
+        daemonInput.reachable = input.isReachable();
+        daemonInput.wasReachable = input.isWasReachable();
+        daemonInput.hostName = input.getHostName();
+        daemonInput.state = input.getState();
+        daemonInput.lastError = input.getLastError();
+        daemonInput.errorChanged = input.isErrorChanged();
+        daemonInput.service = input.getService();
+        daemonInput.metrics = input.getMetrics();
         daemonInput.handshakeResolved = context.uiState.handshakeResolved;
         daemonInput.requiresTransportProbeNow = context.requiresTransportProbeNowProvider.get();
 
         MainActivityDaemonStatusCoordinator.Output output =
                 MainActivityDaemonStatusCoordinator.process(
                         daemonInput,
-                        () -> context.probeStarter.start(
-                                context.requiresTransportProbeNowProvider.get()
+                        () -> context.getProbeStarter().start(
+                                context.getRequiresTransportProbeNowProvider().get()
                         ),
                         StatusTransitionHooksFactory.create(
-                                context.hostConnectedNotifier::notify,
-                                changedLastError -> context.lineLogger.log(
+                                context.getHostConnectedNotifier()::notify,
+                                changedLastError -> context.getLineLogger().log(
                                         "E",
                                         "host last_error: " + changedLastError
                                 ),
-                                context.stopLiveViewTask::run
+                                context.getStopLiveViewTask()::run
                         )
                 );
-        context.uiState.handshakeResolved = output.handshakeResolved;
-        context.refreshUiTask.run();
+        context.getUiState().handshakeResolved = output.handshakeResolved;
+        context.getRefreshUiTask().run();
         if (output.hostStatsLine != null) {
-            context.statsSink.onStats(output.hostStatsLine);
+            context.getStatsSink().onStats(output.hostStatsLine);
         }
-        context.perfHudSink.onMetrics(input.metrics);
+        context.getPerfHudSink().onMetrics(input.getMetrics());
     }
 
     public static void onOffline(boolean wasReachable, Exception error, OfflineContext context) {
         HostOfflineFlowCoordinator.handle(
                 wasReachable,
                 error,
-                context.stateError,
-                context.apiBase,
+                context.getStateError(),
+                context.getApiBase(),
                 HostOfflineHooksFactory.create(
                         () -> {
-                            context.daemon.markDisconnected();
-                            context.stopLiveViewTask.run();
-                            context.uiState.handshakeResolved = false;
-                            context.transportProbe.markWaitingForControlLink();
+                            context.getDaemon().markDisconnected();
+                            context.getStopLiveViewTask().run();
+                            context.getUiState().handshakeResolved = false;
+                            context.getTransportProbe().markWaitingForControlLink();
                         },
                         reachableBeforeDrop -> {
-                            context.updateActionButtonsTask.run();
-                            context.updateHostHintTask.run();
-                            context.updatePerfHudUnavailableTask.run();
-                            resetStartupAfterDisconnect(context.uiState, reachableBeforeDrop);
-                            context.updatePreflightOverlayTask.run();
+                            context.getUpdateActionButtonsTask().run();
+                            context.getUpdateHostHintTask().run();
+                            context.getUpdatePerfHudUnavailableTask().run();
+                            resetStartupAfterDisconnect(context.getUiState(), reachableBeforeDrop);
+                            context.getUpdatePreflightOverlayTask().run();
                         },
-                        context.refreshStatusTextTask::run,
-                        context.uiStatusSink::onStatus,
-                        line -> context.lineLogger.log("E", line),
-                        context.toastSink::show
+                        context.getRefreshStatusTextTask()::run,
+                        context.getUiStatusSink()::onStatus,
+                        line -> context.getLineLogger().log("E", line),
+                        context.getToastSink()::show
                 )
         );
     }
