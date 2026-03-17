@@ -11,38 +11,262 @@ public final class RuntimeTelemetryMapper {
     private RuntimeTelemetryMapper() {}
 
     public static final class Snapshot {
-        public long frameInHost;
-        public long frameOutHost;
-        public long streamUptimeSec;
+        private long frameInHost;
+        private long frameOutHost;
+        private long streamUptimeSec;
 
-        public double targetFps;
-        public double presentFps;
-        public double recvFps;
-        public double decodeFps;
-        public double frametimeP95;
-        public double decodeP95;
-        public double renderP95;
-        public double e2eP95;
+        private double targetFps;
+        private double presentFps;
+        private double recvFps;
+        private double decodeFps;
+        private double frametimeP95;
+        private double decodeP95;
+        private double renderP95;
+        private double e2eP95;
 
-        public int qT;
-        public int qD;
-        public int qR;
-        public int qTMax;
-        public int qDMax;
-        public int qRMax;
+        private int qT;
+        private int qD;
+        private int qR;
+        private int qTMax;
+        private int qDMax;
+        private int qRMax;
 
-        public int adaptiveLevel;
-        public String adaptiveAction;
-        public long drops;
-        public long bpHigh;
-        public long bpRecover;
-        public String reason;
+        private int adaptiveLevel;
+        private String adaptiveAction;
+        private long drops;
+        private long bpHigh;
+        private long bpRecover;
+        private String reason;
 
-        public long latestDroppedFrames;
-        public long latestTooLateFrames;
-        public double bitrateMbps;
-        public boolean tuningActive;
-        public String tuningLine;
+        private long latestDroppedFrames;
+        private long latestTooLateFrames;
+        private double bitrateMbps;
+        private boolean tuningActive;
+        private String tuningLine;
+
+        public long getFrameInHost() {
+            return frameInHost;
+        }
+
+        public void setFrameInHost(long frameInHost) {
+            this.frameInHost = frameInHost;
+        }
+
+        public long getFrameOutHost() {
+            return frameOutHost;
+        }
+
+        public void setFrameOutHost(long frameOutHost) {
+            this.frameOutHost = frameOutHost;
+        }
+
+        public long getStreamUptimeSec() {
+            return streamUptimeSec;
+        }
+
+        public void setStreamUptimeSec(long streamUptimeSec) {
+            this.streamUptimeSec = streamUptimeSec;
+        }
+
+        public double getTargetFps() {
+            return targetFps;
+        }
+
+        public void setTargetFps(double targetFps) {
+            this.targetFps = targetFps;
+        }
+
+        public double getPresentFps() {
+            return presentFps;
+        }
+
+        public void setPresentFps(double presentFps) {
+            this.presentFps = presentFps;
+        }
+
+        public double getRecvFps() {
+            return recvFps;
+        }
+
+        public void setRecvFps(double recvFps) {
+            this.recvFps = recvFps;
+        }
+
+        public double getDecodeFps() {
+            return decodeFps;
+        }
+
+        public void setDecodeFps(double decodeFps) {
+            this.decodeFps = decodeFps;
+        }
+
+        public double getFrametimeP95() {
+            return frametimeP95;
+        }
+
+        public void setFrametimeP95(double frametimeP95) {
+            this.frametimeP95 = frametimeP95;
+        }
+
+        public double getDecodeP95() {
+            return decodeP95;
+        }
+
+        public void setDecodeP95(double decodeP95) {
+            this.decodeP95 = decodeP95;
+        }
+
+        public double getRenderP95() {
+            return renderP95;
+        }
+
+        public void setRenderP95(double renderP95) {
+            this.renderP95 = renderP95;
+        }
+
+        public double getE2eP95() {
+            return e2eP95;
+        }
+
+        public void setE2eP95(double e2eP95) {
+            this.e2eP95 = e2eP95;
+        }
+
+        public int getQT() {
+            return qT;
+        }
+
+        public void setQT(int qT) {
+            this.qT = qT;
+        }
+
+        public int getQD() {
+            return qD;
+        }
+
+        public void setQD(int qD) {
+            this.qD = qD;
+        }
+
+        public int getQR() {
+            return qR;
+        }
+
+        public void setQR(int qR) {
+            this.qR = qR;
+        }
+
+        public int getQTMax() {
+            return qTMax;
+        }
+
+        public void setQTMax(int qTMax) {
+            this.qTMax = qTMax;
+        }
+
+        public int getQDMax() {
+            return qDMax;
+        }
+
+        public void setQDMax(int qDMax) {
+            this.qDMax = qDMax;
+        }
+
+        public int getQRMax() {
+            return qRMax;
+        }
+
+        public void setQRMax(int qRMax) {
+            this.qRMax = qRMax;
+        }
+
+        public int getAdaptiveLevel() {
+            return adaptiveLevel;
+        }
+
+        public void setAdaptiveLevel(int adaptiveLevel) {
+            this.adaptiveLevel = adaptiveLevel;
+        }
+
+        public String getAdaptiveAction() {
+            return adaptiveAction;
+        }
+
+        public void setAdaptiveAction(String adaptiveAction) {
+            this.adaptiveAction = adaptiveAction;
+        }
+
+        public long getDrops() {
+            return drops;
+        }
+
+        public void setDrops(long drops) {
+            this.drops = drops;
+        }
+
+        public long getBpHigh() {
+            return bpHigh;
+        }
+
+        public void setBpHigh(long bpHigh) {
+            this.bpHigh = bpHigh;
+        }
+
+        public long getBpRecover() {
+            return bpRecover;
+        }
+
+        public void setBpRecover(long bpRecover) {
+            this.bpRecover = bpRecover;
+        }
+
+        public String getReason() {
+            return reason;
+        }
+
+        public void setReason(String reason) {
+            this.reason = reason;
+        }
+
+        public long getLatestDroppedFrames() {
+            return latestDroppedFrames;
+        }
+
+        public void setLatestDroppedFrames(long latestDroppedFrames) {
+            this.latestDroppedFrames = latestDroppedFrames;
+        }
+
+        public long getLatestTooLateFrames() {
+            return latestTooLateFrames;
+        }
+
+        public void setLatestTooLateFrames(long latestTooLateFrames) {
+            this.latestTooLateFrames = latestTooLateFrames;
+        }
+
+        public double getBitrateMbps() {
+            return bitrateMbps;
+        }
+
+        public void setBitrateMbps(double bitrateMbps) {
+            this.bitrateMbps = bitrateMbps;
+        }
+
+        public boolean isTuningActive() {
+            return tuningActive;
+        }
+
+        public void setTuningActive(boolean tuningActive) {
+            this.tuningActive = tuningActive;
+        }
+
+        public String getTuningLine() {
+            return tuningLine;
+        }
+
+        public void setTuningLine(String tuningLine) {
+            this.tuningLine = tuningLine;
+        }
     }
 
     public static Snapshot map(
@@ -57,75 +281,75 @@ public final class RuntimeTelemetryMapper {
         JSONObject latest = metrics.optJSONObject("latest_client_metrics");
         JSONObject limits = metrics.optJSONObject("queue_limits");
 
-        out.frameInHost = metrics.optLong("frame_in", 0);
-        out.frameOutHost = metrics.optLong("frame_out", 0);
-        out.streamUptimeSec = metrics.optLong("stream_uptime_sec", 0);
+        out.setFrameInHost(metrics.optLong("frame_in", 0));
+        out.setFrameOutHost(metrics.optLong("frame_out", 0));
+        out.setStreamUptimeSec(metrics.optLong("stream_uptime_sec", 0));
 
-        out.targetFps = kpi != null ? kpi.optDouble("target_fps", selectedFps) : selectedFps;
-        if (!Double.isFinite(out.targetFps) || out.targetFps <= 0.0) {
-            out.targetFps = selectedFps;
+        out.setTargetFps(kpi != null ? kpi.optDouble("target_fps", selectedFps) : selectedFps);
+        if (!Double.isFinite(out.getTargetFps()) || out.getTargetFps() <= 0.0) {
+            out.setTargetFps(selectedFps);
         }
-        out.presentFps = kpi != null ? kpi.optDouble("present_fps", 0.0) : 0.0;
-        out.recvFps = kpi != null ? kpi.optDouble("recv_fps", 0.0) : 0.0;
-        out.decodeFps = kpi != null ? kpi.optDouble("decode_fps", 0.0) : 0.0;
-        if (!Double.isFinite(out.presentFps) || out.presentFps < 0.0) {
-            out.presentFps = 0.0;
+        out.setPresentFps(kpi != null ? kpi.optDouble("present_fps", 0.0) : 0.0);
+        out.setRecvFps(kpi != null ? kpi.optDouble("recv_fps", 0.0) : 0.0);
+        out.setDecodeFps(kpi != null ? kpi.optDouble("decode_fps", 0.0) : 0.0);
+        if (!Double.isFinite(out.getPresentFps()) || out.getPresentFps() < 0.0) {
+            out.setPresentFps(0.0);
         }
-        if (out.presentFps < 1.0) {
-            if (Double.isFinite(out.decodeFps) && out.decodeFps >= 1.0) {
-                out.presentFps = out.decodeFps;
-            } else if (Double.isFinite(out.recvFps) && out.recvFps >= 1.0) {
-                out.presentFps = out.recvFps;
+        if (out.getPresentFps() < 1.0) {
+            if (Double.isFinite(out.getDecodeFps()) && out.getDecodeFps() >= 1.0) {
+                out.setPresentFps(out.getDecodeFps());
+            } else if (Double.isFinite(out.getRecvFps()) && out.getRecvFps() >= 1.0) {
+                out.setPresentFps(out.getRecvFps());
             }
         }
 
-        out.frametimeP95 = kpi != null ? kpi.optDouble("frametime_ms_p95", 0.0) : 0.0;
-        out.decodeP95 = kpi != null ? kpi.optDouble("decode_time_ms_p95", 0.0) : 0.0;
-        out.renderP95 = kpi != null ? kpi.optDouble("render_time_ms_p95", 0.0) : 0.0;
-        out.e2eP95 = kpi != null ? kpi.optDouble("e2e_latency_ms_p95", 0.0) : 0.0;
+        out.setFrametimeP95(kpi != null ? kpi.optDouble("frametime_ms_p95", 0.0) : 0.0);
+        out.setDecodeP95(kpi != null ? kpi.optDouble("decode_time_ms_p95", 0.0) : 0.0);
+        out.setRenderP95(kpi != null ? kpi.optDouble("render_time_ms_p95", 0.0) : 0.0);
+        out.setE2eP95(kpi != null ? kpi.optDouble("e2e_latency_ms_p95", 0.0) : 0.0);
 
-        out.qT = latest != null ? latest.optInt("transport_queue_depth", 0) : 0;
-        out.qD = latest != null ? latest.optInt("decode_queue_depth", 0) : 0;
-        out.qR = latest != null ? latest.optInt("render_queue_depth", 0) : 0;
+        out.setQT(latest != null ? latest.optInt("transport_queue_depth", 0) : 0);
+        out.setQD(latest != null ? latest.optInt("decode_queue_depth", 0) : 0);
+        out.setQR(latest != null ? latest.optInt("render_queue_depth", 0) : 0);
 
-        out.qTMax = limits != null
+        out.setQTMax(limits != null
                 ? limits.optInt("transport_queue_max", transportQueueMaxFrames)
-                : transportQueueMaxFrames;
-        out.qDMax = limits != null
+                : transportQueueMaxFrames);
+        out.setQDMax(limits != null
                 ? limits.optInt("decode_queue_max", decodeQueueMaxFrames)
-                : decodeQueueMaxFrames;
-        out.qRMax = limits != null
+                : decodeQueueMaxFrames);
+        out.setQRMax(limits != null
                 ? limits.optInt("render_queue_max", renderQueueMaxFrames)
-                : renderQueueMaxFrames;
+                : renderQueueMaxFrames);
 
-        out.adaptiveLevel = metrics.optInt("adaptive_level", 0);
-        out.adaptiveAction = metrics.optString("adaptive_action", "hold");
-        out.drops = metrics.optLong("drops", 0);
-        out.bpHigh = metrics.optLong("backpressure_high_events", 0);
-        out.bpRecover = metrics.optLong("backpressure_recover_events", 0);
-        out.reason = metrics.optString("adaptive_reason", "");
-        if (out.reason.length() > 44) {
-            out.reason = out.reason.substring(0, 44) + "...";
+        out.setAdaptiveLevel(metrics.optInt("adaptive_level", 0));
+        out.setAdaptiveAction(metrics.optString("adaptive_action", "hold"));
+        out.setDrops(metrics.optLong("drops", 0));
+        out.setBpHigh(metrics.optLong("backpressure_high_events", 0));
+        out.setBpRecover(metrics.optLong("backpressure_recover_events", 0));
+        out.setReason(metrics.optString("adaptive_reason", ""));
+        if (out.getReason().length() > 44) {
+            out.setReason(out.getReason().substring(0, 44) + "...");
         }
 
-        out.latestDroppedFrames = latest != null ? latest.optLong("dropped_frames", -1L) : -1L;
-        out.latestTooLateFrames = latest != null ? latest.optLong("too_late_frames", 0L) : 0L;
+        out.setLatestDroppedFrames(latest != null ? latest.optLong("dropped_frames", -1L) : -1L);
+        out.setLatestTooLateFrames(latest != null ? latest.optLong("too_late_frames", 0L) : 0L);
 
-        out.bitrateMbps = 0.0;
+        out.setBitrateMbps(0.0);
         if (latest != null) {
             long recvBps = latest.optLong("recv_bps", 0L);
             if (recvBps > 0L) {
-                out.bitrateMbps = recvBps / 1_000_000.0;
+                out.setBitrateMbps(recvBps / 1_000_000.0);
             }
         }
-        if (out.bitrateMbps <= 0.0) {
-            out.bitrateMbps = metrics.optLong("bitrate_actual_bps", 0L) / 1_000_000.0;
+        if (out.getBitrateMbps() <= 0.0) {
+            out.setBitrateMbps(metrics.optLong("bitrate_actual_bps", 0L) / 1_000_000.0);
         }
 
         JSONObject tuning = metrics.optJSONObject("tuning");
-        out.tuningActive = tuning != null && tuning.optBoolean("active", false);
-        out.tuningLine = "";
-        if (out.tuningActive && tuning != null) {
+        out.setTuningActive(tuning != null && tuning.optBoolean("active", false));
+        out.setTuningLine("");
+        if (out.isTuningActive() && tuning != null) {
             String codec = tuning.optString("codec", "-").toUpperCase(Locale.US);
             String phase = tuning.optString("phase", "");
             int generation = tuning.optInt("generation", 0);
@@ -138,7 +362,7 @@ public final class RuntimeTelemetryMapper {
             if (note.length() > 28) {
                 note = note.substring(0, 28) + "...";
             }
-            out.tuningLine = String.format(
+            out.setTuningLine(String.format(
                     Locale.US,
                     "%s G%d/%d C%d/%d S=%s B=%s %s %s",
                     codec,
@@ -150,9 +374,9 @@ public final class RuntimeTelemetryMapper {
                     bestScore,
                     phase,
                     note
-            ).trim();
-            if (out.tuningLine.length() > 120) {
-                out.tuningLine = out.tuningLine.substring(0, 120) + "...";
+            ).trim());
+            if (out.getTuningLine().length() > 120) {
+                out.setTuningLine(out.getTuningLine().substring(0, 120) + "...");
             }
         }
 
