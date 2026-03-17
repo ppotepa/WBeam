@@ -1,6 +1,7 @@
 package com.wbeam.startup;
 
 public final class StartupOverlayStateSync {
+    @SuppressWarnings("java:S1104")
     public static final class StateValues {
         private long startupBeganAtMs;
         private int controlRetryCount;

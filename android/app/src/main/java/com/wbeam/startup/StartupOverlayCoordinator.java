@@ -13,6 +13,7 @@ public final class StartupOverlayCoordinator {
         void scheduleHide(long delayMs, Runnable action);
     }
 
+    @SuppressWarnings("java:S1104")
     public static final class State {
         private long startupBeganAtMs;
         private int controlRetryCount;

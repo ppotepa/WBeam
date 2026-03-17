@@ -3,6 +3,7 @@ package com.wbeam.hud;
 /**
  * Renders full HTML shell for runtime HUD.
  */
+@SuppressWarnings("java:S107")
 public final class RuntimeHudShellRenderer {
     private static final String COLOR_BORDER_PRIMARY = "rgba(126,245,255,.52)";
     private static final String COLOR_BORDER_SECONDARY = "rgba(126,245,255,.5)";

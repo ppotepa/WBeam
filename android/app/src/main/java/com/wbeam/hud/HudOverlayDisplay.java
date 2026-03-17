@@ -5,6 +5,7 @@ import android.webkit.WebView;
 import android.widget.TextView;
 
 public final class HudOverlayDisplay {
+    @SuppressWarnings("java:S1104")
     public static final class State {
         private String mode = "none";
         private String lastWebHtml = "";
