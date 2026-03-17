@@ -14,6 +14,7 @@ public final class MainUiControlsCoordinator {
     private MainUiControlsCoordinator() {
     }
 
+    @SuppressWarnings("java:S107")
     public static void loadSavedSettings(
             Spinner profileSpinner,
             Spinner encoderSpinner,
@@ -60,6 +61,7 @@ public final class MainUiControlsCoordinator {
         );
     }
 
+    @SuppressWarnings("java:S107")
     public static void updateSettingValueLabels(
             TextView resValueText,
             TextView fpsValueText,
@@ -90,6 +92,7 @@ public final class MainUiControlsCoordinator {
         return IntraOnlyButtonController.apply(intraOnlyButton, selectedEncoder, previousEnabled);
     }
 
+    @SuppressWarnings("java:S107")
     public static void updateHostHint(
             TextView hostHintText,
             boolean daemonReachable,
@@ -237,6 +240,7 @@ public final class MainUiControlsCoordinator {
         );
     }
 
+    @SuppressWarnings("java:S107")
     public static void toggleSimpleMenu(
             View simpleMenuPanel,
             Handler uiHandler,
@@ -295,6 +299,7 @@ public final class MainUiControlsCoordinator {
         );
     }
 
+    @SuppressWarnings("java:S107")
     public static void refreshSimpleMenuButtons(
             View simpleMenuPanel,
             Button simpleModeH265Button,
