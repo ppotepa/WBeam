@@ -96,17 +96,15 @@ public class MainActivity extends AppCompatActivity {
     private static final int DECODE_QUEUE_MAX_FRAMES = 2;
     private static final int RENDER_QUEUE_MAX_FRAMES = 1;
 
-    private static final String[] PROFILE_OPTIONS = {
-            "default"
-    };
+    private static final String DEFAULT_PROFILE = "default";
+    private static final String DEFAULT_CURSOR_MODE = "embedded";
+    private static final String[] PROFILE_OPTIONS = {DEFAULT_PROFILE};
     /**
      * Preferred video encoder for this device.
      */
     static final String PREFERRED_VIDEO = DecoderCapabilityInspector.preferredVideoEncoder();
     private static final String[] ENCODER_OPTIONS = {PREFERRED_VIDEO, "raw-png"};
-    private static final String[] CURSOR_OPTIONS = {"embedded", "hidden", "metadata"};
-    private static final String DEFAULT_PROFILE = "default";
-    private static final String DEFAULT_CURSOR_MODE = "embedded";
+    private static final String[] CURSOR_OPTIONS = {DEFAULT_CURSOR_MODE, "hidden", "metadata"};
     private static final int DEFAULT_RES_SCALE = 100;
     private static final int DEFAULT_FPS = 60;
     private static final int DEFAULT_BITRATE_MBPS = 25;
@@ -129,10 +127,8 @@ public class MainActivity extends AppCompatActivity {
     private static final double FPS_LOW_ANCHOR = 10.0;
 
     // ── Views ──────────────────────────────────────────────────────────────────
-    private View rootLayout;
     private View topBar;
     private View quickActionRow;
-    private View settingsPanel;
     private View simpleMenuPanel;
     private View statusPanel;
     private View perfHudPanel;
@@ -141,7 +137,6 @@ public class MainActivity extends AppCompatActivity {
     private View preflightOverlay;
     private View debugControlsRow;
     private View statusLed;
-    private View cursorOverlay;
     private SurfaceView previewSurface;
     private TextView statusText;
     private TextView detailText;
@@ -176,7 +171,6 @@ public class MainActivity extends AppCompatActivity {
     private Button stopButton;
     private Button testButton;
     private Button fullscreenButton;
-    private Button cursorOverlayButton;
     private Button intraOnlyButton;
     private Button simpleModeH265Button;
     private Button simpleModeRawButton;
@@ -411,7 +405,33 @@ public class MainActivity extends AppCompatActivity {
                 uiHandler,
                 probeExecutor,
                 StatusPollerCallbacksFactory.create(
-                        this::handleDaemonStatusUpdate,
+                        (
+                                reachable,
+                                wasReachable,
+                                hostName,
+                                state,
+                                runId,
+                                lastError,
+                                errorChanged,
+                                uptimeSec,
+                                service,
+                                buildRevision,
+                                metrics
+                        ) -> handleDaemonStatusUpdate(
+                                MainDaemonRuntimeInputFactory.createStatusInput(
+                                        reachable,
+                                        wasReachable,
+                                        hostName,
+                                        state,
+                                        runId,
+                                        lastError,
+                                        errorChanged,
+                                        uptimeSec,
+                                        service,
+                                        buildRevision,
+                                        metrics
+                                )
+                        ),
                         this::handleDaemonOffline,
                         () -> requestStartGuarded(false, true),
                         () -> appendLiveLog(
@@ -423,34 +443,7 @@ public class MainActivity extends AppCompatActivity {
         );
     }
 
-    private void handleDaemonStatusUpdate(
-            boolean reachable,
-            boolean wasReachable,
-            String hostName,
-            String state,
-            long runId,
-            String lastError,
-            boolean errorChanged,
-            long uptimeSec,
-            String service,
-            String buildRevision,
-            JSONObject metrics
-    ) {
-        MainDaemonRuntimeCoordinator.StatusInput input =
-                MainDaemonRuntimeInputFactory.createStatusInput(
-                        reachable,
-                        wasReachable,
-                        hostName,
-                        state,
-                        runId,
-                        lastError,
-                        errorChanged,
-                        uptimeSec,
-                        service,
-                        buildRevision,
-                        metrics
-                );
-
+    private void handleDaemonStatusUpdate(MainDaemonRuntimeCoordinator.StatusInput input) {
         MainDaemonRuntimeCoordinator.StatusContext context =
                 MainDaemonRuntimeInputFactory.createStatusContext(
                         daemon,
@@ -620,10 +613,8 @@ public class MainActivity extends AppCompatActivity {
                 }
         );
         MainActivityPrimaryViewsBinder.Views primaryViews = bound.primaryViews;
-        rootLayout = primaryViews.getRootLayout();
         topBar = primaryViews.getTopBar();
         quickActionRow = primaryViews.getQuickActionRow();
-        settingsPanel = primaryViews.getSettingsPanel();
         simpleMenuPanel = primaryViews.getSimpleMenuPanel();
         statusPanel = primaryViews.getStatusPanel();
         perfHudPanel = primaryViews.getPerfHudPanel();
@@ -632,7 +623,6 @@ public class MainActivity extends AppCompatActivity {
         preflightOverlay = primaryViews.getPreflightOverlay();
         debugControlsRow = primaryViews.getDebugControlsRow();
         statusLed = primaryViews.getStatusLed();
-        cursorOverlay = primaryViews.getCursorOverlay();
         statusText = primaryViews.getStatusText();
         detailText = primaryViews.getDetailText();
         bpsText = primaryViews.getBpsText();
@@ -671,7 +661,6 @@ public class MainActivity extends AppCompatActivity {
         stopButton = controlViews.getStopButton();
         testButton = controlViews.getTestButton();
         fullscreenButton = controlViews.getFullscreenButton();
-        cursorOverlayButton = controlViews.getCursorOverlayButton();
         intraOnlyButton = controlViews.getIntraOnlyButton();
         simpleModeH265Button = controlViews.getSimpleModeH265Button();
         simpleModeRawButton = controlViews.getSimpleModeRawButton();

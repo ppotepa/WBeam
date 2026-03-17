@@ -9,6 +9,12 @@ import java.util.Locale;
  * Pure HUD rendering/formatting helpers used by runtime overlays.
  */
 public final class HudRenderSupport {
+    private static final String TONE_STATE_RISK = "state-risk";
+    private static final String TONE_STATE_WARN = "state-warn";
+    private static final String TONE_STATE_OK = "state-ok";
+    private static final String PENDING_TEXT = "PENDING";
+    private static final double[] EMPTY_SERIES_WINDOW = new double[0];
+
     private HudRenderSupport() {}
 
     public static String buildTrendSparkChartFromJson(JSONArray series, String toneClass) {
@@ -19,16 +25,14 @@ public final class HudRenderSupport {
         double lo = Double.POSITIVE_INFINITY;
         double hi = Double.NEGATIVE_INFINITY;
         for (int i = 0; i < series.length(); i++) {
-            if (series.isNull(i)) {
-                continue;
+            if (!series.isNull(i)) {
+                double v = series.optDouble(i, Double.NaN);
+                if (Double.isFinite(v)) {
+                    values.addLast(v);
+                    lo = Math.min(lo, v);
+                    hi = Math.max(hi, v);
+                }
             }
-            double v = series.optDouble(i, Double.NaN);
-            if (!Double.isFinite(v)) {
-                continue;
-            }
-            values.addLast(v);
-            lo = Math.min(lo, v);
-            hi = Math.max(hi, v);
         }
         if (!Double.isFinite(lo) || !Double.isFinite(hi) || values.isEmpty()) {
             return buildTrendSparkPlaceholderSvg(toneClass);
@@ -98,13 +102,13 @@ public final class HudRenderSupport {
 
     private static String toneStrokeColor(String toneClass) {
         String tone = toneClass == null ? "" : toneClass.trim().toLowerCase(Locale.US);
-        if ("state-risk".equals(tone)) {
+        if (TONE_STATE_RISK.equals(tone)) {
             return "#f87171";
         }
-        if ("state-warn".equals(tone)) {
+        if (TONE_STATE_WARN.equals(tone)) {
             return "#fbbf24";
         }
-        if ("state-ok".equals(tone)) {
+        if (TONE_STATE_OK.equals(tone)) {
             return "#6ee7b7";
         }
         return "#8dd9ff";
@@ -112,13 +116,13 @@ public final class HudRenderSupport {
 
     private static String toneFillColor(String toneClass) {
         String tone = toneClass == null ? "" : toneClass.trim().toLowerCase(Locale.US);
-        if ("state-risk".equals(tone)) {
+        if (TONE_STATE_RISK.equals(tone)) {
             return "rgba(248,113,113,0.20)";
         }
-        if ("state-warn".equals(tone)) {
+        if (TONE_STATE_WARN.equals(tone)) {
             return "rgba(251,191,36,0.22)";
         }
-        if ("state-ok".equals(tone)) {
+        if (TONE_STATE_OK.equals(tone)) {
             return "rgba(110,231,183,0.20)";
         }
         return "rgba(141,217,255,0.20)";
@@ -126,13 +130,13 @@ public final class HudRenderSupport {
 
     private static String toneDotColor(String toneClass) {
         String tone = toneClass == null ? "" : toneClass.trim().toLowerCase(Locale.US);
-        if ("state-risk".equals(tone)) {
+        if (TONE_STATE_RISK.equals(tone)) {
             return "#fecaca";
         }
-        if ("state-warn".equals(tone)) {
+        if (TONE_STATE_WARN.equals(tone)) {
             return "#fde68a";
         }
-        if ("state-ok".equals(tone)) {
+        if (TONE_STATE_OK.equals(tone)) {
             return "#bbf7d0";
         }
         return "#dbeafe";
@@ -162,25 +166,23 @@ public final class HudRenderSupport {
 
     public static String buildSeriesStats(JSONArray series, String unitSuffix) {
         if (series == null || series.length() == 0) {
-            return "PENDING";
+            return PENDING_TEXT;
         }
         double last = Double.NaN;
         double lo = Double.POSITIVE_INFINITY;
         double hi = Double.NEGATIVE_INFINITY;
         for (int i = 0; i < series.length(); i++) {
-            if (series.isNull(i)) {
-                continue;
+            if (!series.isNull(i)) {
+                double v = series.optDouble(i, Double.NaN);
+                if (Double.isFinite(v)) {
+                    last = v;
+                    lo = Math.min(lo, v);
+                    hi = Math.max(hi, v);
+                }
             }
-            double v = series.optDouble(i, Double.NaN);
-            if (!Double.isFinite(v)) {
-                continue;
-            }
-            last = v;
-            lo = Math.min(lo, v);
-            hi = Math.max(hi, v);
         }
         if (!Double.isFinite(last) || !Double.isFinite(lo) || !Double.isFinite(hi)) {
-            return "PENDING";
+            return PENDING_TEXT;
         }
         String unit = unitSuffix == null ? "" : unitSuffix.trim();
         if (!unit.isEmpty()) {
@@ -200,7 +202,7 @@ public final class HudRenderSupport {
         if (!unit.isEmpty()) {
             unit = " " + unit;
         }
-        if (w == null) {
+        if (w.length == 0) {
             return "<div class='trend-meta'>"
                     + "<div class='trend-meta-row'>"
                     + "<span class='trend-meta-item low'>LOW: -</span>"
@@ -226,25 +228,23 @@ public final class HudRenderSupport {
             double fpsLowAnchor
     ) {
         if (series == null || series.length() == 0) {
-            return null;
+            return EMPTY_SERIES_WINDOW;
         }
         double last = Double.NaN;
         double lo = Double.POSITIVE_INFINITY;
         double hi = Double.NEGATIVE_INFINITY;
         for (int i = 0; i < series.length(); i++) {
-            if (series.isNull(i)) {
-                continue;
+            if (!series.isNull(i)) {
+                double v = series.optDouble(i, Double.NaN);
+                if (Double.isFinite(v)) {
+                    last = v;
+                    lo = Math.min(lo, v);
+                    hi = Math.max(hi, v);
+                }
             }
-            double v = series.optDouble(i, Double.NaN);
-            if (!Double.isFinite(v)) {
-                continue;
-            }
-            last = v;
-            lo = Math.min(lo, v);
-            hi = Math.max(hi, v);
         }
         if (!Double.isFinite(last) || !Double.isFinite(lo) || !Double.isFinite(hi)) {
-            return null;
+            return EMPTY_SERIES_WINDOW;
         }
         String key = normalizeMetricKey(metricLabel);
         double displayLow;
@@ -330,13 +330,13 @@ public final class HudRenderSupport {
     public static String hudToneClass(String tone) {
         String t = tone == null ? "" : tone.trim().toLowerCase(Locale.US);
         if ("risk".equals(t) || "bad".equals(t) || "red".equals(t)) {
-            return "state-risk";
+            return TONE_STATE_RISK;
         }
         if ("warn".equals(t) || "orange".equals(t) || "yellow".equals(t)) {
-            return "state-warn";
+            return TONE_STATE_WARN;
         }
         if ("ok".equals(t) || "good".equals(t) || "green".equals(t)) {
-            return "state-ok";
+            return TONE_STATE_OK;
         }
         return "state-pending";
     }
