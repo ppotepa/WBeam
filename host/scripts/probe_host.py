@@ -80,6 +80,10 @@ def resolve_xauthority(uid: int) -> str:
     return ""
 
 
+VIRTUAL_PROVIDER_KEYWORDS = ("evdi", "displaylink", "vkms", "virtual")
+VIRTUAL_OUTPUT_KEYWORDS = ("virtual", "evdi", "vkms", "dummy", "dvi-i-", "dvi-d-")
+
+
 def parse_xrandr_providers(raw: str) -> List[Dict[str, object]]:
     providers: List[Dict[str, object]] = []
     for line in raw.splitlines():
@@ -113,6 +117,59 @@ def parse_xrandr_outputs(raw: str) -> List[Dict[str, object]]:
             }
         )
     return outs
+
+
+def check_virtual_provider(providers: List[Dict[str, object]]) -> bool:
+    return any(
+        isinstance(p, dict)
+        and any(
+            kw in str(p.get("name", "")).lower()
+            for kw in VIRTUAL_PROVIDER_KEYWORDS
+        )
+        for p in providers
+    )
+
+
+def extract_virtual_outputs(
+    outputs: List[Dict[str, object]],
+) -> Tuple[List[Dict[str, object]], List[Dict[str, object]]]:
+    disconnected = [
+        o for o in outputs if isinstance(o, dict) and not bool(o.get("connected"))
+    ]
+    likely_virtual = [
+        o
+        for o in disconnected
+        if any(
+            kw in str(o.get("name", "")).lower()
+            for kw in VIRTUAL_OUTPUT_KEYWORDS
+        )
+    ]
+    return disconnected, likely_virtual
+
+
+def determine_virtual_reason(
+    xrandr_ok: bool,
+    providers_count: int,
+    has_virtual_provider: bool,
+    likely_virtual_count: int,
+    evdi_available: bool,
+    evdi_loaded: bool,
+) -> str:
+    if xrandr_ok and providers_count >= 2 and has_virtual_provider and likely_virtual_count > 0:
+        return "ready"
+    if not xrandr_ok:
+        return "xrandr unavailable or unauthorized in current session"
+    if not evdi_available:
+        return "evdi module is not installed (real-output backend unavailable)"
+    if not evdi_loaded:
+        return "evdi module is installed but not loaded"
+    if providers_count < 2:
+        return "no virtual RandR provider is exposed to X11 (only primary provider visible)"
+    if not has_virtual_provider:
+        return "no provider looks virtual/evdi/displaylink/vkms"
+    if likely_virtual_count == 0:
+        return "no candidate disconnected virtual output detected"
+    return "missing virtual provider/output topology for real RandR output backend"
 
 
 def linux_probe() -> Dict[str, object]:
@@ -221,25 +278,8 @@ def linux_probe() -> Dict[str, object]:
 
     providers = xrandr.get("providers", []) if isinstance(xrandr, dict) else []
     outputs = xrandr.get("outputs", []) if isinstance(xrandr, dict) else []
-    has_virtual_provider = any(
-        isinstance(p, dict)
-        and any(
-            kw in str(p.get("name", "")).lower()
-            for kw in ("evdi", "displaylink", "vkms", "virtual")
-        )
-        for p in providers
-    )
-    disconnected_outputs = [
-        o for o in outputs if isinstance(o, dict) and not bool(o.get("connected"))
-    ]
-    likely_virtual_outputs = [
-        o
-        for o in disconnected_outputs
-        if any(
-            kw in str(o.get("name", "")).lower()
-            for kw in ("virtual", "evdi", "vkms", "dummy", "dvi-i-", "dvi-d-")
-        )
-    ]
+    has_virtual_provider = check_virtual_provider(providers)
+    disconnected_outputs, likely_virtual_outputs = extract_virtual_outputs(outputs)
 
     evdi_module_path = Path("/lib/modules") / platform.release() / "updates/dkms/evdi.ko.zst"
     rc_modinfo, _, _ = run_cmd(["modinfo", "evdi"]) if tool_exists("modinfo") else (1, "", "")
@@ -276,22 +316,14 @@ def linux_probe() -> Dict[str, object]:
         and has_virtual_provider
         and len(likely_virtual_outputs) > 0
     )
-    if virtual_real_output_ready:
-        virtual_reason = "ready"
-    elif not xrandr.get("ok"):
-        virtual_reason = "xrandr unavailable or unauthorized in current session"
-    elif not evdi_available:
-        virtual_reason = "evdi module is not installed (real-output backend unavailable)"
-    elif not evdi_loaded:
-        virtual_reason = "evdi module is installed but not loaded"
-    elif len(providers) < 2:
-        virtual_reason = "no virtual RandR provider is exposed to X11 (only primary provider visible)"
-    elif not has_virtual_provider:
-        virtual_reason = "no provider looks virtual/evdi/displaylink/vkms"
-    elif len(likely_virtual_outputs) == 0:
-        virtual_reason = "no candidate disconnected virtual output detected"
-    else:
-        virtual_reason = "missing virtual provider/output topology for real RandR output backend"
+    virtual_reason = determine_virtual_reason(
+        bool(xrandr.get("ok")),
+        len(providers),
+        has_virtual_provider,
+        len(likely_virtual_outputs),
+        evdi_available,
+        evdi_loaded,
+    )
 
     return {
         "session": {

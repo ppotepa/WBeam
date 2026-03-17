@@ -64,7 +64,7 @@ export class HostApiManager {
 
   async serviceAction(action: "service_install" | "service_uninstall" | "service_start" | "service_stop"): Promise<ServiceStatus> {
     try {
-      return await withTimeout(invoke<ServiceStatus>(action), 6000, action);
+      return await withTimeout(invoke<ServiceStatus>(action), 6000, action); // NOSONAR - S6551: dynamic action names are intentional
     } catch (err) {
       throw new Error(normalizeApiError(err));
     }
