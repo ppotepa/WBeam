@@ -68,44 +68,42 @@ public final class MainActivityUiBinder {
     }
 
     public static void setupSpinners(
-            AppCompatActivity activity,
-            Spinner profileSpinner,
-            Spinner encoderSpinner,
-            Spinner cursorSpinner,
-            String[] profileOptions,
-            String[] encoderOptions,
-            String[] cursorOptions,
-            Runnable onEncoderSelectionChanged,
-            Runnable onCursorSelectionChanged
+            SpinnerSetupConfig config
     ) {
+        AppCompatActivity activity = config.activity;
+        Spinner profileSpinner = config.profileSpinner;
+        Spinner encoderSpinner = config.encoderSpinner;
+        Spinner cursorSpinner = config.cursorSpinner;
         if (profileSpinner == null || encoderSpinner == null || cursorSpinner == null) {
             return;
         }
         profileSpinner.setAdapter(new ArrayAdapter<>(
-                activity, SPINNER_DROPDOWN_LAYOUT, profileOptions));
+                activity, SPINNER_DROPDOWN_LAYOUT, config.profileOptions));
         encoderSpinner.setAdapter(new ArrayAdapter<>(
-                activity, SPINNER_DROPDOWN_LAYOUT, encoderOptions));
+                activity, SPINNER_DROPDOWN_LAYOUT, config.encoderOptions));
         cursorSpinner.setAdapter(new ArrayAdapter<>(
-                activity, SPINNER_DROPDOWN_LAYOUT, cursorOptions));
+                activity, SPINNER_DROPDOWN_LAYOUT, config.cursorOptions));
 
         encoderSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                onEncoderSelectionChanged.run();
+                config.onEncoderSelectionChanged.run();
             }
 
             @Override
             public void onNothingSelected(AdapterView<?> parent) {
+                // No-op: we only react to explicit user selections.
             }
         });
         cursorSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                onCursorSelectionChanged.run();
+                config.onCursorSelectionChanged.run();
             }
 
             @Override
             public void onNothingSelected(AdapterView<?> parent) {
+                // No-op: we only react to explicit user selections.
             }
         });
     }
@@ -131,10 +129,12 @@ public final class MainActivityUiBinder {
 
             @Override
             public void onStartTrackingTouch(SeekBar seekBar) {
+                // No-op: we only need progress updates.
             }
 
             @Override
             public void onStopTrackingTouch(SeekBar seekBar) {
+                // No-op: we only need progress updates.
             }
         };
 
@@ -309,6 +309,63 @@ public final class MainActivityUiBinder {
             if (view != null) {
                 view.setVisibility(visibility);
             }
+        }
+    }
+
+    public static final class SpinnerSetupConfig {
+        private AppCompatActivity activity;
+        private Spinner profileSpinner;
+        private Spinner encoderSpinner;
+        private Spinner cursorSpinner;
+        private String[] profileOptions;
+        private String[] encoderOptions;
+        private String[] cursorOptions;
+        private Runnable onEncoderSelectionChanged;
+        private Runnable onCursorSelectionChanged;
+
+        public SpinnerSetupConfig setActivity(AppCompatActivity activity) {
+            this.activity = activity;
+            return this;
+        }
+
+        public SpinnerSetupConfig setProfileSpinner(Spinner profileSpinner) {
+            this.profileSpinner = profileSpinner;
+            return this;
+        }
+
+        public SpinnerSetupConfig setEncoderSpinner(Spinner encoderSpinner) {
+            this.encoderSpinner = encoderSpinner;
+            return this;
+        }
+
+        public SpinnerSetupConfig setCursorSpinner(Spinner cursorSpinner) {
+            this.cursorSpinner = cursorSpinner;
+            return this;
+        }
+
+        public SpinnerSetupConfig setProfileOptions(String[] profileOptions) {
+            this.profileOptions = profileOptions;
+            return this;
+        }
+
+        public SpinnerSetupConfig setEncoderOptions(String[] encoderOptions) {
+            this.encoderOptions = encoderOptions;
+            return this;
+        }
+
+        public SpinnerSetupConfig setCursorOptions(String[] cursorOptions) {
+            this.cursorOptions = cursorOptions;
+            return this;
+        }
+
+        public SpinnerSetupConfig setOnEncoderSelectionChanged(Runnable onEncoderSelectionChanged) {
+            this.onEncoderSelectionChanged = onEncoderSelectionChanged;
+            return this;
+        }
+
+        public SpinnerSetupConfig setOnCursorSelectionChanged(Runnable onCursorSelectionChanged) {
+            this.onCursorSelectionChanged = onCursorSelectionChanged;
+            return this;
         }
     }
 }

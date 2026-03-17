@@ -32,97 +32,93 @@ public final class MainInitializationCoordinator {
     }
 
     public static final class UiBindingsConfig {
-        public final String logTag;
-        public final AppCompatActivity activity;
-        public final String[] profileOptions;
-        public final String[] encoderOptions;
-        public final String[] cursorOptions;
-        public final UiTask bindViewsTask;
-        public final UiTask setScreenAlwaysOnTask;
-        public final UiTask setupSurfaceCallbacksTask;
-        public final UiTask setupButtonsTask;
-        public final UiTask loadSavedSettingsTask;
-        public final UiTask updateIntraOnlyButtonTask;
-        public final UiTask updateHostHintTask;
-        public final CursorPolicyTask enforceCursorOverlayPolicyTask;
-        public final UiTask updateSettingValueLabelsTask;
+        private String logTag;
+        private AppCompatActivity activity;
+        private String[] profileOptions;
+        private String[] encoderOptions;
+        private String[] cursorOptions;
+        private UiTask bindViewsTask;
+        private UiTask setScreenAlwaysOnTask;
+        private UiTask setupSurfaceCallbacksTask;
+        private UiTask setupButtonsTask;
+        private UiTask loadSavedSettingsTask;
+        private UiTask updateIntraOnlyButtonTask;
+        private UiTask updateHostHintTask;
+        private CursorPolicyTask enforceCursorOverlayPolicyTask;
+        private UiTask updateSettingValueLabelsTask;
 
-        public UiBindingsConfig(
-                String logTag,
-                AppCompatActivity activity,
-                String[] profileOptions,
-                String[] encoderOptions,
-                String[] cursorOptions,
-                UiTask bindViewsTask,
-                UiTask setScreenAlwaysOnTask,
-                UiTask setupSurfaceCallbacksTask,
-                UiTask setupButtonsTask,
-                UiTask loadSavedSettingsTask,
-                UiTask updateIntraOnlyButtonTask,
-                UiTask updateHostHintTask,
-                CursorPolicyTask enforceCursorOverlayPolicyTask,
-                UiTask updateSettingValueLabelsTask
-        ) {
+        public UiBindingsConfig setLogTag(String logTag) {
             this.logTag = logTag;
+            return this;
+        }
+
+        public UiBindingsConfig setActivity(AppCompatActivity activity) {
             this.activity = activity;
+            return this;
+        }
+
+        public UiBindingsConfig setProfileOptions(String[] profileOptions) {
             this.profileOptions = profileOptions;
+            return this;
+        }
+
+        public UiBindingsConfig setEncoderOptions(String[] encoderOptions) {
             this.encoderOptions = encoderOptions;
+            return this;
+        }
+
+        public UiBindingsConfig setCursorOptions(String[] cursorOptions) {
             this.cursorOptions = cursorOptions;
+            return this;
+        }
+
+        public UiBindingsConfig setBindViewsTask(UiTask bindViewsTask) {
             this.bindViewsTask = bindViewsTask;
+            return this;
+        }
+
+        public UiBindingsConfig setSetScreenAlwaysOnTask(UiTask setScreenAlwaysOnTask) {
             this.setScreenAlwaysOnTask = setScreenAlwaysOnTask;
+            return this;
+        }
+
+        public UiBindingsConfig setSetupSurfaceCallbacksTask(UiTask setupSurfaceCallbacksTask) {
             this.setupSurfaceCallbacksTask = setupSurfaceCallbacksTask;
+            return this;
+        }
+
+        public UiBindingsConfig setSetupButtonsTask(UiTask setupButtonsTask) {
             this.setupButtonsTask = setupButtonsTask;
+            return this;
+        }
+
+        public UiBindingsConfig setLoadSavedSettingsTask(UiTask loadSavedSettingsTask) {
             this.loadSavedSettingsTask = loadSavedSettingsTask;
+            return this;
+        }
+
+        public UiBindingsConfig setUpdateIntraOnlyButtonTask(UiTask updateIntraOnlyButtonTask) {
             this.updateIntraOnlyButtonTask = updateIntraOnlyButtonTask;
+            return this;
+        }
+
+        public UiBindingsConfig setUpdateHostHintTask(UiTask updateHostHintTask) {
             this.updateHostHintTask = updateHostHintTask;
+            return this;
+        }
+
+        public UiBindingsConfig setEnforceCursorOverlayPolicyTask(CursorPolicyTask enforceCursorOverlayPolicyTask) {
             this.enforceCursorOverlayPolicyTask = enforceCursorOverlayPolicyTask;
+            return this;
+        }
+
+        public UiBindingsConfig setUpdateSettingValueLabelsTask(UiTask updateSettingValueLabelsTask) {
             this.updateSettingValueLabelsTask = updateSettingValueLabelsTask;
+            return this;
         }
     }
 
     private MainInitializationCoordinator() {
-    }
-
-    public static boolean initializeUiBindings(
-            String logTag,
-            AppCompatActivity activity,
-            TextView ignoredStartupBuildVersionText,
-            Spinner ignoredProfileSpinner,
-            Spinner ignoredEncoderSpinner,
-            Spinner ignoredCursorSpinner,
-            String[] profileOptions,
-            String[] encoderOptions,
-            String[] cursorOptions,
-            SeekBar ignoredResolutionSeek,
-            SeekBar ignoredFpsSeek,
-            SeekBar ignoredBitrateSeek,
-            UiTask bindViewsTask,
-            UiTask setScreenAlwaysOnTask,
-            UiTask setupSurfaceCallbacksTask,
-            UiTask setupButtonsTask,
-            UiTask loadSavedSettingsTask,
-            UiTask updateIntraOnlyButtonTask,
-            UiTask updateHostHintTask,
-            CursorPolicyTask enforceCursorOverlayPolicyTask,
-            UiTask updateSettingValueLabelsTask
-    ) {
-        UiBindingsConfig config = new UiBindingsConfig(
-                logTag,
-                activity,
-                profileOptions,
-                encoderOptions,
-                cursorOptions,
-                bindViewsTask,
-                setScreenAlwaysOnTask,
-                setupSurfaceCallbacksTask,
-                setupButtonsTask,
-                loadSavedSettingsTask,
-                updateIntraOnlyButtonTask,
-                updateHostHintTask,
-                enforceCursorOverlayPolicyTask,
-                updateSettingValueLabelsTask
-        );
-        return initializeUiBindings(config);
     }
 
     public static boolean initializeUiBindings(UiBindingsConfig config) {
@@ -175,67 +171,66 @@ public final class MainInitializationCoordinator {
     }
 
     public static final class StartupStateConfig {
-        public final MainUiState uiState;
-        public final StartupOverlayController startupOverlayController;
-        public final UiStateRefreshTask refreshSettingsUiTask;
-        public final UiTask setDebugControlsHiddenTask;
-        public final UiTask applyBuildVariantUiTask;
-        public final UiTask setDefaultStatsLineTask;
-        public final UiTask updatePerfHudUnavailableTask;
-        public final UiTask updatePreflightOverlayTask;
-        public final UiTask setIdleWaitingStatusTask;
-        public final StatusPoller statusPoller;
+        private MainUiState uiState;
+        private StartupOverlayController startupOverlayController;
+        private UiStateRefreshTask refreshSettingsUiTask;
+        private UiTask setDebugControlsHiddenTask;
+        private UiTask applyBuildVariantUiTask;
+        private UiTask setDefaultStatsLineTask;
+        private UiTask updatePerfHudUnavailableTask;
+        private UiTask updatePreflightOverlayTask;
+        private UiTask setIdleWaitingStatusTask;
+        private StatusPoller statusPoller;
 
-        public StartupStateConfig(
-                MainUiState uiState,
-                StartupOverlayController startupOverlayController,
-                UiStateRefreshTask refreshSettingsUiTask,
-                UiTask setDebugControlsHiddenTask,
-                UiTask applyBuildVariantUiTask,
-                UiTask setDefaultStatsLineTask,
-                UiTask updatePerfHudUnavailableTask,
-                UiTask updatePreflightOverlayTask,
-                UiTask setIdleWaitingStatusTask,
-                StatusPoller statusPoller
-        ) {
+        public StartupStateConfig setUiState(MainUiState uiState) {
             this.uiState = uiState;
-            this.startupOverlayController = startupOverlayController;
-            this.refreshSettingsUiTask = refreshSettingsUiTask;
-            this.setDebugControlsHiddenTask = setDebugControlsHiddenTask;
-            this.applyBuildVariantUiTask = applyBuildVariantUiTask;
-            this.setDefaultStatsLineTask = setDefaultStatsLineTask;
-            this.updatePerfHudUnavailableTask = updatePerfHudUnavailableTask;
-            this.updatePreflightOverlayTask = updatePreflightOverlayTask;
-            this.setIdleWaitingStatusTask = setIdleWaitingStatusTask;
-            this.statusPoller = statusPoller;
+            return this;
         }
-    }
 
-    public static void initializeStartupState(
-            MainUiState uiState,
-            StartupOverlayController startupOverlayController,
-            UiStateRefreshTask refreshSettingsUiTask,
-            UiTask setDebugControlsHiddenTask,
-            UiTask applyBuildVariantUiTask,
-            UiTask setDefaultStatsLineTask,
-            UiTask updatePerfHudUnavailableTask,
-            UiTask updatePreflightOverlayTask,
-            UiTask setIdleWaitingStatusTask,
-            StatusPoller statusPoller
-    ) {
-        StartupStateConfig config = new StartupStateConfig(
-                uiState,
-                startupOverlayController,
-                refreshSettingsUiTask,
-                setDebugControlsHiddenTask,
-                applyBuildVariantUiTask,
-                setDefaultStatsLineTask,
-                updatePerfHudUnavailableTask,
-                updatePreflightOverlayTask,
-                setIdleWaitingStatusTask,
-                statusPoller
-        );
-        initializeStartupState(config);
+        public StartupStateConfig setStartupOverlayController(StartupOverlayController startupOverlayController) {
+            this.startupOverlayController = startupOverlayController;
+            return this;
+        }
+
+        public StartupStateConfig setRefreshSettingsUiTask(UiStateRefreshTask refreshSettingsUiTask) {
+            this.refreshSettingsUiTask = refreshSettingsUiTask;
+            return this;
+        }
+
+        public StartupStateConfig setSetDebugControlsHiddenTask(UiTask setDebugControlsHiddenTask) {
+            this.setDebugControlsHiddenTask = setDebugControlsHiddenTask;
+            return this;
+        }
+
+        public StartupStateConfig setApplyBuildVariantUiTask(UiTask applyBuildVariantUiTask) {
+            this.applyBuildVariantUiTask = applyBuildVariantUiTask;
+            return this;
+        }
+
+        public StartupStateConfig setSetDefaultStatsLineTask(UiTask setDefaultStatsLineTask) {
+            this.setDefaultStatsLineTask = setDefaultStatsLineTask;
+            return this;
+        }
+
+        public StartupStateConfig setUpdatePerfHudUnavailableTask(UiTask updatePerfHudUnavailableTask) {
+            this.updatePerfHudUnavailableTask = updatePerfHudUnavailableTask;
+            return this;
+        }
+
+        public StartupStateConfig setUpdatePreflightOverlayTask(UiTask updatePreflightOverlayTask) {
+            this.updatePreflightOverlayTask = updatePreflightOverlayTask;
+            return this;
+        }
+
+        public StartupStateConfig setSetIdleWaitingStatusTask(UiTask setIdleWaitingStatusTask) {
+            this.setIdleWaitingStatusTask = setIdleWaitingStatusTask;
+            return this;
+        }
+
+        public StartupStateConfig setStatusPoller(StatusPoller statusPoller) {
+            this.statusPoller = statusPoller;
+            return this;
+        }
     }
 
     public static void initializeStartupState(StartupStateConfig config) {

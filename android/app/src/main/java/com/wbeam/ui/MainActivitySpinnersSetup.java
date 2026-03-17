@@ -25,15 +25,16 @@ public final class MainActivitySpinnersSetup {
             Action onCursorChange
     ) {
         MainActivityUiBinder.setupSpinners(
-                activity,
-                profileSpinner,
-                encoderSpinner,
-                cursorSpinner,
-                profileOptions,
-                encoderOptions,
-                cursorOptions,
-                onProfileOrEncoderChange::run,
-                onCursorChange::run
+                new MainActivityUiBinder.SpinnerSetupConfig()
+                        .setActivity(activity)
+                        .setProfileSpinner(profileSpinner)
+                        .setEncoderSpinner(encoderSpinner)
+                        .setCursorSpinner(cursorSpinner)
+                        .setProfileOptions(profileOptions)
+                        .setEncoderOptions(encoderOptions)
+                        .setCursorOptions(cursorOptions)
+                        .setOnEncoderSelectionChanged(onProfileOrEncoderChange::run)
+                        .setOnCursorSelectionChanged(onCursorChange::run)
         );
     }
 }

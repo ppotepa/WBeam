@@ -272,27 +272,21 @@ public class MainActivity extends AppCompatActivity {
 
     private void initializeUiBindings() {
         MainInitializationCoordinator.initializeUiBindings(
-                TAG,
-                this,
-                startupBuildVersionText,
-                profileSpinner,
-                encoderSpinner,
-                cursorSpinner,
-                PROFILE_OPTIONS,
-                ENCODER_OPTIONS,
-                CURSOR_OPTIONS,
-                resolutionSeek,
-                fpsSeek,
-                bitrateSeek,
-                this::bindViews,
-                () -> setScreenAlwaysOn(true),
-                this::setupSurfaceCallbacks,
-                this::setupButtons,
-                this::loadSavedSettings,
-                this::updateIntraOnlyButton,
-                this::updateHostHint,
-                this::enforceCursorOverlayPolicy,
-                this::updateSettingValueLabels
+                new MainInitializationCoordinator.UiBindingsConfig()
+                        .setLogTag(TAG)
+                        .setActivity(this)
+                        .setProfileOptions(PROFILE_OPTIONS)
+                        .setEncoderOptions(ENCODER_OPTIONS)
+                        .setCursorOptions(CURSOR_OPTIONS)
+                        .setBindViewsTask(this::bindViews)
+                        .setSetScreenAlwaysOnTask(() -> setScreenAlwaysOn(true))
+                        .setSetupSurfaceCallbacksTask(this::setupSurfaceCallbacks)
+                        .setSetupButtonsTask(this::setupButtons)
+                        .setLoadSavedSettingsTask(this::loadSavedSettings)
+                        .setUpdateIntraOnlyButtonTask(this::updateIntraOnlyButton)
+                        .setUpdateHostHintTask(this::updateHostHint)
+                        .setEnforceCursorOverlayPolicyTask(this::enforceCursorOverlayPolicy)
+                        .setUpdateSettingValueLabelsTask(this::updateSettingValueLabels)
         );
     }
 
@@ -339,16 +333,21 @@ public class MainActivity extends AppCompatActivity {
 
     private void initializeStartupState() {
         MainInitializationCoordinator.initializeStartupState(
-                uiState,
-                startupOverlayController,
-                this::refreshSettingsUi,
-                () -> setDebugControlsVisible(false),
-                this::applyBuildVariantUi,
-                () -> updateStatsLine(MainActivityStatusPresenter.DEFAULT_STATS_LINE),
-                this::updatePerfHudUnavailable,
-                this::updatePreflightOverlay,
-                () -> updateStatus(STATE_IDLE, "waiting for desktop connect", 0),
-                statusPoller
+                new MainInitializationCoordinator.StartupStateConfig()
+                        .setUiState(uiState)
+                        .setStartupOverlayController(startupOverlayController)
+                        .setRefreshSettingsUiTask(this::refreshSettingsUi)
+                        .setSetDebugControlsHiddenTask(() -> setDebugControlsVisible(false))
+                        .setApplyBuildVariantUiTask(this::applyBuildVariantUi)
+                        .setSetDefaultStatsLineTask(
+                                () -> updateStatsLine(MainActivityStatusPresenter.DEFAULT_STATS_LINE)
+                        )
+                        .setUpdatePerfHudUnavailableTask(this::updatePerfHudUnavailable)
+                        .setUpdatePreflightOverlayTask(this::updatePreflightOverlay)
+                        .setSetIdleWaitingStatusTask(
+                                () -> updateStatus(STATE_IDLE, "waiting for desktop connect", 0)
+                        )
+                        .setStatusPoller(statusPoller)
         );
     }
 
