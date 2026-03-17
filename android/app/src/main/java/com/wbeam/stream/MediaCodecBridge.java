@@ -90,6 +90,7 @@ final class MediaCodecBridge {
         }
     }
 
+    @SuppressWarnings({"java:S3776", "java:S135"})
     static void drainLatestFrame(
             MediaCodec codec,
             MediaCodec.BufferInfo info,

@@ -31,7 +31,7 @@ final class PngSurfaceRenderer {
             }
             dstRect.set(0, 0, canvas.getWidth(), canvas.getHeight());
             canvas.drawBitmap(bitmap, null, dstRect, paint);
-            return RenderResult.rendered();
+            return RenderResult.renderedFrame();
         } catch (Exception e) {
             return RenderResult.notRendered();
         } finally {
@@ -39,6 +39,7 @@ final class PngSurfaceRenderer {
                 try {
                     surface.unlockCanvasAndPost(canvas);
                 } catch (Exception ignored) {
+                    // surface may already be invalidated during teardown
                 }
             }
             bitmap.recycle();
@@ -52,7 +53,7 @@ final class PngSurfaceRenderer {
             this.rendered = rendered;
         }
 
-        static RenderResult rendered() {
+        static RenderResult renderedFrame() {
             return new RenderResult(true);
         }
 
