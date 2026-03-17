@@ -594,6 +594,7 @@ pub fn destroy(handle: &X11RealOutputHandle) -> Result<(), String> {
     Ok(())
 }
 
+// NOSONAR S3776 - xrandr output parsing needs explicit stateful line handling
 fn parse_outputs(raw: &str) -> Vec<OutputInfo> {
     let mut out = Vec::new();
     let mut current: Option<OutputInfo> = None;
@@ -1388,6 +1389,7 @@ Provider 1: id: 0x48 cap: 0xf, Source Output, Sink Output, Source Offload, Sink 
     }
 }
 
+// NOSONAR S3776 - Xauthority discovery intentionally evaluates multiple trust-ordered paths
 fn resolve_xauthority_for_display(display: &str) -> Option<PathBuf> {
     let uid = std::env::var("UID")
         .ok()

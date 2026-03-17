@@ -82,19 +82,21 @@ def resolve_xauthority(uid: int) -> str:
 
 VIRTUAL_PROVIDER_KEYWORDS = ("evdi", "displaylink", "vkms", "virtual")
 VIRTUAL_OUTPUT_KEYWORDS = ("virtual", "evdi", "vkms", "dummy", "dvi-i-", "dvi-d-")
+XRANDR_NAME_LABEL = "name:"
+POWERSHELL_EXE = "powershell.exe"
 
 
 def parse_xrandr_providers(raw: str) -> List[Dict[str, object]]:
     providers: List[Dict[str, object]] = []
     for line in raw.splitlines():
-        if "Provider" not in line or "name:" not in line:
+        if "Provider" not in line or XRANDR_NAME_LABEL not in line:
             continue
         pid = ""
         for tok in line.replace(",", " ").split():
             if tok.startswith("0x"):
                 pid = tok
                 break
-        name = line.split("name:", 1)[1].strip() if "name:" in line else "unknown"
+        name = line.split(XRANDR_NAME_LABEL, 1)[1].strip() if XRANDR_NAME_LABEL in line else "unknown"
         providers.append({"id": pid or "0x0", "name": name, "raw": line.strip()})
     return providers
 
@@ -172,7 +174,7 @@ def determine_virtual_reason(
     return "missing virtual provider/output topology for real RandR output backend"
 
 
-def linux_probe() -> Dict[str, object]:
+def linux_probe() -> Dict[str, object]:  # NOSONAR: host probing needs explicit staged fallbacks
     uid = os.getuid()
     session_type = os.environ.get("XDG_SESSION_TYPE", "").strip().lower()
     wayland_display = os.environ.get("WAYLAND_DISPLAY", "").strip()
@@ -279,7 +281,7 @@ def linux_probe() -> Dict[str, object]:
     providers = xrandr.get("providers", []) if isinstance(xrandr, dict) else []
     outputs = xrandr.get("outputs", []) if isinstance(xrandr, dict) else []
     has_virtual_provider = check_virtual_provider(providers)
-    disconnected_outputs, likely_virtual_outputs = extract_virtual_outputs(outputs)
+    _disconnected_outputs, likely_virtual_outputs = extract_virtual_outputs(outputs)
 
     evdi_module_path = Path("/lib/modules") / platform.release() / "updates/dkms/evdi.ko.zst"
     rc_modinfo, _, _ = run_cmd(["modinfo", "evdi"]) if tool_exists("modinfo") else (1, "", "")
@@ -356,11 +358,11 @@ def windows_probe() -> Dict[str, object]:
         "powershell": {"attempted": False, "ok": False, "error": ""},
         "video_controllers": [],
     }
-    if not tool_exists("powershell.exe") and not tool_exists("powershell"):
+    if not tool_exists(POWERSHELL_EXE) and not tool_exists("powershell"):
         details["powershell"]["error"] = "powershell not found"
         return details
 
-    pwsh = "powershell.exe" if tool_exists("powershell.exe") else "powershell"
+    pwsh = POWERSHELL_EXE if tool_exists(POWERSHELL_EXE) else "powershell"
     details["powershell"]["attempted"] = True
 
     script = (
