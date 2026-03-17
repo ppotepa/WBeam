@@ -21,7 +21,7 @@ import Link2 from "lucide-solid/icons/link-2";
 import Unlink2 from "lucide-solid/icons/unlink-2";
 import Loader2 from "lucide-solid/icons/loader-2";
 import type { ConnectEncoderMode, ConnectSessionConfig, DeviceBasic, TrainedProfile } from "./types";
-import type { VirtualDepsInstallStatus, VirtualDoctor } from "./types";
+import type { CaptureBackend, VirtualDepsInstallStatus, VirtualDoctor } from "./types";
 import { HostApiManager } from "./managers/hostApiManager";
 import { createSessionManager } from "./managers/sessionManager";
 import connectResolutionPresets from "./config/connect-resolution-presets.json";
@@ -154,6 +154,69 @@ function resolveSessionSizeForPreset(device: DeviceBasic, presetId: string): str
   return normalizeLandscapeSize(preset.size ?? "");
 }
 
+type ServiceStatus = { active: boolean; installed: boolean };
+
+function resolveDeviceVersionStatus(
+  device: DeviceBasic,
+  service: ServiceStatus,
+  daemonVersionKnown: boolean,
+): { cls: "ok" | "warn" | "bad"; label: string } {
+  if (!device.apkInstalled) return { cls: "warn", label: "APK missing" };
+  if (!service.installed) return { cls: "warn", label: "Install desktop service first" };
+  if (!service.active) return { cls: "warn", label: "Start desktop service to verify" };
+  if (!daemonVersionKnown) return { cls: "warn", label: "Daemon unreachable - cannot verify" };
+  return device.apkMatchesDaemon
+    ? { cls: "ok", label: "Version match" }
+    : { cls: "bad", label: "Update required" };
+}
+
+function resolveConnectDisabledReason(params: {
+  device: DeviceBasic;
+  deviceBusy: boolean;
+  waylandPortalHost: boolean;
+  deviceActionBusy: string[];
+  serviceActive: boolean;
+  daemonVersionKnown: boolean;
+}): string {
+  const { device, deviceBusy, waylandPortalHost, deviceActionBusy, serviceActive, daemonVersionKnown } = params;
+  if (deviceBusy) return "This device action is already in progress";
+  if (waylandPortalHost) {
+    const otherConnectInFlight = deviceActionBusy
+      .some((entry) => entry.endsWith(":connect") && !entry.startsWith(`${device.serial}:`));
+    if (otherConnectInFlight) {
+      return "Another Wayland portal connect is in progress";
+    }
+  }
+  if (!serviceActive) return "Desktop service must be running";
+  if (!daemonVersionKnown) return "Daemon API unreachable";
+  if (!device.apkInstalled) return "APK is not installed on this device";
+  if (!device.apkMatchesDaemon) return "APK version must match daemon version";
+  if (device.streamState === "STREAMING") return "Device is already streaming";
+  if (device.streamState === "CONNECTING") return "Device is already connecting";
+  return "";
+}
+
+function resolveDisconnectDisabledReason(device: DeviceBasic, deviceBusy: boolean, serviceActive: boolean): string {
+  if (deviceBusy) return "This device action is already in progress";
+  if (!serviceActive) return "Desktop service must be running";
+  if (device.streamState !== "STREAMING" && device.streamState !== "CONNECTING") {
+    return "Device is not streaming";
+  }
+  return "";
+}
+
+function serviceStatusText(service: ServiceStatus): string {
+  if (service.active) return "running";
+  if (service.installed) return "stopped";
+  return "not installed";
+}
+
+function serviceStatusHint(service: ServiceStatus): string {
+  if (service.active) return "Service active: device probing enabled.";
+  if (service.installed) return "Service installed but stopped. Click Start.";
+  return "Install + Start service to enable probing and streaming.";
+}
+
 export default function App() {
   const api = new HostApiManager();
   const session = createSessionManager(api);
@@ -164,7 +227,7 @@ export default function App() {
   const [connectDialogResolutionPresetId, setConnectDialogResolutionPresetId] = createSignal<string>(RESOLUTION_PRESET_DEFAULT_ID);
   const [connectDialogEncoderMode, setConnectDialogEncoderMode] = createSignal<ConnectEncoderMode | "">("");
   const [connectDialogProfileKey, setConnectDialogProfileKey] = createSignal<string>("");
-  const [connectDialogCaptureBackend, setConnectDialogCaptureBackend] = createSignal<import("./types").CaptureBackend | "">("");
+  const [connectDialogCaptureBackend, setConnectDialogCaptureBackend] = createSignal<CaptureBackend | "">("");
   const [trainedProfiles, setTrainedProfiles] = createSignal<TrainedProfile[]>([]);
   const [connectDialogDoctor, setConnectDialogDoctor] = createSignal<VirtualDoctor | null>(null);
   const [connectDialogDoctorLoading, setConnectDialogDoctorLoading] = createSignal(false);
@@ -193,42 +256,19 @@ export default function App() {
 
   const daemonVersionKnown = () => session.daemonVersion().length > 0;
 
-  function deviceVersionStatus(device: DeviceBasic): { cls: "ok" | "warn" | "bad"; label: string } {
-    if (!device.apkInstalled) return { cls: "warn", label: "APK missing" };
-    if (!session.service().installed) return { cls: "warn", label: "Install desktop service first" };
-    if (!session.service().active) return { cls: "warn", label: "Start desktop service to verify" };
-    if (!daemonVersionKnown()) return { cls: "warn", label: "Daemon unreachable - cannot verify" };
-    return device.apkMatchesDaemon
-      ? { cls: "ok", label: "Version match" }
-      : { cls: "bad", label: "Update required" };
-  }
-
   function connectDisabledReason(device: DeviceBasic): string {
-    if (isDeviceBusy(device)) return "This device action is already in progress";
-    if (isWaylandPortalHost()) {
-      const otherConnectInFlight = session
-        .deviceActionBusy()
-        .some((entry) => entry.endsWith(":connect") && !entry.startsWith(`${device.serial}:`));
-      if (otherConnectInFlight) {
-        return "Another Wayland portal connect is in progress";
-      }
-    }
-    if (!session.service().active) return "Desktop service must be running";
-    if (!daemonVersionKnown()) return "Daemon API unreachable";
-    if (!device.apkInstalled) return "APK is not installed on this device";
-    if (!device.apkMatchesDaemon) return "APK version must match daemon version";
-    if (device.streamState === "STREAMING") return "Device is already streaming";
-    if (device.streamState === "CONNECTING") return "Device is already connecting";
-    return "";
+    return resolveConnectDisabledReason({
+      device,
+      deviceBusy: isDeviceBusy(device),
+      waylandPortalHost: isWaylandPortalHost(),
+      deviceActionBusy: session.deviceActionBusy(),
+      serviceActive: session.service().active,
+      daemonVersionKnown: daemonVersionKnown(),
+    });
   }
 
   function disconnectDisabledReason(device: DeviceBasic): string {
-    if (isDeviceBusy(device)) return "This device action is already in progress";
-    if (!session.service().active) return "Desktop service must be running";
-    if (device.streamState !== "STREAMING" && device.streamState !== "CONNECTING") {
-      return "Device is not streaming";
-    }
-    return "";
+    return resolveDisconnectDisabledReason(device, isDeviceBusy(device), session.service().active);
   }
 
   function isDeviceActionBusy(device: DeviceBasic, action: "connect" | "disconnect"): boolean {
@@ -335,14 +375,13 @@ export default function App() {
     encoderValue: ConnectEncoderMode | "",
   ): ConnectEncoderMode | undefined {
     if (selectedProfile) return undefined;
-    return encoderValue !== "" ? (encoderValue as ConnectEncoderMode) : undefined;
+    return encoderValue === "" ? undefined : encoderValue;
   }
 
-  function resolveCaptureBackend(): import("./types").CaptureBackend | undefined {
+  function resolveCaptureBackend(): CaptureBackend | undefined {
     const captureBackend = connectDialogCaptureBackend();
-    return captureBackend !== "" && captureBackend !== "auto"
-      ? (captureBackend as import("./types").CaptureBackend)
-      : undefined;
+    if (captureBackend === "" || captureBackend === "auto") return undefined;
+    return captureBackend;
   }
 
   async function confirmConnect(): Promise<void> {
@@ -597,7 +636,7 @@ export default function App() {
 
                 <div class="line end-line">
                   {(() => {
-                    const st = deviceVersionStatus(device);
+                    const st = resolveDeviceVersionStatus(device, session.service(), daemonVersionKnown());
                     return (
                   <span
                     class={`status ${st.cls}`}
@@ -624,8 +663,16 @@ export default function App() {
                     const disconnectDisabled = disconnectReason.length > 0;
                     const connectBusy = isDeviceActionBusy(device, "connect");
                     const disconnectBusy = isDeviceActionBusy(device, "disconnect");
-                    const connectTitle = connectBusy ? "Connecting..." : (connectDisabled ? `Connect blocked: ${connectReason}` : "Start stream for this device");
-                    const disconnectTitle = disconnectBusy ? "Disconnecting..." : (disconnectDisabled ? disconnectReason : "Stop stream for this device");
+                    const connectTitle = connectBusy
+                      ? "Connecting..."
+                      : connectDisabled
+                        ? `Connect blocked: ${connectReason}`
+                        : "Start stream for this device";
+                    const disconnectTitle = disconnectBusy
+                      ? "Disconnecting..."
+                      : disconnectDisabled
+                        ? disconnectReason
+                        : "Stop stream for this device";
                     return (
                       <>
                   <button
@@ -677,6 +724,7 @@ export default function App() {
             />
             <span>
               Use experimental virtual mirroring (Wayland only)
+              {" "}
               <small>
                 Applies to Wayland connects only. For X11 this option is unavailable.
               </small>
@@ -726,18 +774,10 @@ export default function App() {
         <footer class="status-bar" title={session.service().summary}>
           <div class={`service-status-strip ${session.serviceState()}`}>
             <span class="service-status-main">
-              service: {session.service().active ? "running" : session.service().installed ? "stopped" : "not installed"}
+              service: {serviceStatusText(session.service())}
             </span>
             <span class="service-status-hint">
-              {(() => {
-                if (session.service().active) {
-                  return "Service active: device probing enabled.";
-                } else if (session.service().installed) {
-                  return "Service installed but stopped. Click Start.";
-                } else {
-                  return "Install + Start service to enable probing and streaming.";
-                }
-              })()}
+              {serviceStatusHint(session.service())}
             </span>
           </div>
           <span>{session.devices().length} devices ({session.tabletCount()} tablet, {session.phoneCount()} phone)</span>
@@ -754,6 +794,7 @@ export default function App() {
           const virtualMonitorSelected = () => connectDialogMode() === "virtual_monitor";
           const doctor = () => connectDialogDoctor();
           const virtualMonitorAvailable = () => isVirtualMonitorAvailable(doctor() ?? null);
+          const virtualMonitorUnavailable = () => !virtualMonitorAvailable();
           const virtualMonitorHint = () => {
             if (!virtualMonitorAvailable()) return "Not implemented for current host session yet.";
             if (doctor()?.resolver === "linux_x11_monitor_object_experimental") {
@@ -771,7 +812,7 @@ export default function App() {
           const profilesForCodec = () => trainedProfiles().filter((p) => p.encoder === connectDialogEncoderMode());
           const selectedProfile = () => profilesForCodec().find((profile) => profile.key === connectDialogProfileKey()) ?? null;
           return (
-            <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Select display mode">
+            <dialog open class="modal-backdrop" aria-label="Select display mode">
               <section class="connect-modal">
                 <h3>Connect session</h3>
                 <p class="connect-modal-subtitle">{device.model} ({device.serial})</p>
@@ -783,16 +824,17 @@ export default function App() {
                     </p>
                   )}
                 >
-                  <label class={`mode-option ${virtualMonitorSelected() ? "selected" : ""} ${!virtualMonitorAvailable() ? "disabled" : ""}`}>
+                  <label class={`mode-option ${virtualMonitorSelected() ? "selected" : ""} ${virtualMonitorUnavailable() ? "disabled" : ""}`}>
                     <input
                       type="radio"
                       name="display-mode"
                       checked={virtualMonitorSelected()}
-                      disabled={!virtualMonitorAvailable()}
+                      disabled={virtualMonitorUnavailable()}
                       onChange={() => setConnectDialogMode("virtual_monitor")}
                     />
                     <span>
                       Virtual monitor (extend host desktop)
+                      {" "}
                       <small>
                         {virtualMonitorHint()}
                       </small>
@@ -807,6 +849,7 @@ export default function App() {
                     />
                     <span>
                       Duplicate current screen
+                      {" "}
                       <small>Works with current host backend.</small>
                     </span>
                   </label>
@@ -819,7 +862,7 @@ export default function App() {
                       value={connectDialogCaptureBackend()}
                       aria-label="Capture backend"
                       onChange={(event) => {
-                        setConnectDialogCaptureBackend(event.currentTarget.value as import("./types").CaptureBackend | "");
+                        setConnectDialogCaptureBackend(event.currentTarget.value as CaptureBackend | "");
                         setConnectDialogEncoderMode("");
                         setConnectDialogProfileKey("");
                         void refreshTrainedProfiles();
@@ -921,7 +964,7 @@ export default function App() {
                   </button>
                 </div>
               </section>
-            </div>
+            </dialog>
           );
         }}
       </Show>
@@ -929,7 +972,7 @@ export default function App() {
         {(doctorAccessor) => {
           const doctor = doctorAccessor();
           return (
-            <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Virtual desktop setup">
+            <dialog open class="modal-backdrop" aria-label="Virtual desktop setup">
               <section class="connect-modal setup-modal">
                 <h3>Virtual desktop setup</h3>
                 <p class="connect-modal-subtitle">Host backend: {doctor.hostBackend}</p>
@@ -949,23 +992,39 @@ export default function App() {
                   </button>
                 </div>
               </section>
-            </div>
+            </dialog>
           );
         }}
       </Show>
       <Show when={virtualInstallVisible()}>
-        <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Installing dependencies">
+        <dialog open class="modal-backdrop" aria-label="Installing dependencies">
           <section class="connect-modal setup-modal install-modal">
             <h3>Installing virtual desktop dependencies</h3>
             <p class="connect-modal-subtitle">Elevation is required (root/pkexec prompt).</p>
             <div class="install-progress">
-              <div class={`install-progress-bar ${virtualInstallStatus().running ? "running" : virtualInstallStatus().success ? "ok" : "bad"}`} />
+              <div
+                class={`install-progress-bar ${
+                  virtualInstallStatus().running
+                    ? "running"
+                    : virtualInstallStatus().success
+                      ? "ok"
+                      : "bad"
+                }`}
+              />
             </div>
-            <p class={`setup-message ${virtualInstallStatus().done ? (virtualInstallStatus().success ? "install-ok" : "install-bad") : ""}`}>
+            <p
+              class={`setup-message ${
+                virtualInstallStatus().done
+                  ? virtualInstallStatus().success
+                    ? "install-ok"
+                    : "install-bad"
+                  : ""
+              }`}
+            >
               {virtualInstallStatus().done
-                ? (virtualInstallStatus().success
+                ? virtualInstallStatus().success
                   ? "Installation completed successfully."
-                  : "Installation failed.")
+                  : "Installation failed."
                 : "Installing..."}
             </p>
             <p class="setup-hint">{virtualInstallStatus().message}</p>
@@ -984,7 +1043,7 @@ export default function App() {
               </button>
             </div>
           </section>
-        </div>
+        </dialog>
       </Show>
     </main>
   );
@@ -994,7 +1053,7 @@ function isVirtualMonitorResolver(resolver: string | undefined): boolean {
 }
 
 function isVirtualMonitorAvailable(doctor: VirtualDoctor | null): boolean {
-  if (!doctor || !doctor.ok) return false;
+  if (!doctor?.ok) return false;
   if (isVirtualMonitorResolver(doctor.resolver)) return true;
   return false;
 }
