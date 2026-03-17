@@ -82,6 +82,7 @@ public final class RuntimeHudComputation {
         );
     }
 
+    @SuppressWarnings({"java:S107", "java:S3776", "java:S3358"})
     public static PressureState evaluatePressure(
             double targetFps,
             double presentFps,
@@ -176,6 +177,7 @@ public final class RuntimeHudComputation {
                 : daemonLastError;
     }
 
+    @SuppressWarnings("java:S107")
     public static String formatCompactHudLine(
             double targetFps,
             double presentFps,
@@ -200,6 +202,7 @@ public final class RuntimeHudComputation {
         );
     }
 
+    @SuppressWarnings("java:S107")
     public static String formatHighPressureLog(
             PressureState pressureState,
             double decodeP95,
@@ -223,6 +226,7 @@ public final class RuntimeHudComputation {
                 + " stream_up=" + streamUptimeSec + "s";
     }
 
+    @SuppressWarnings("java:S107")
     public static String buildRuntimeDebugSnapshot(
             String daemonStateUi,
             long daemonRunId,

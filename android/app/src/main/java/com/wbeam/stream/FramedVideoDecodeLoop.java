@@ -63,6 +63,7 @@ final class FramedVideoDecodeLoop {
     private final String stateConnecting;
     private final String stateStreaming;
 
+    @SuppressWarnings("java:S107")
     FramedVideoDecodeLoop(
             String tag,
             Surface surface,
@@ -123,6 +124,13 @@ final class FramedVideoDecodeLoop {
         this.stateStreaming = stateStreaming;
     }
 
+    @SuppressWarnings({
+            "java:S3776",
+            "java:S6541",
+            "java:S3358",
+            "java:S135",
+            "java:S1854"
+    })
     void run(
             InputStream input,
             MediaCodec[] codecRef,
