@@ -21,6 +21,7 @@ final class StreamNalUtils {
         return type == 5 || type == 7 || type == 8; // IDR/SPS/PPS
     }
 
+    @SuppressWarnings({"java:S3776", "java:S135"})
     static boolean containsRecoveryNal(byte[] data, int size, boolean isHevc, int scanLimit) {
         int limit = Math.min(size, scanLimit);
         int i = 0;
@@ -45,6 +46,7 @@ final class StreamNalUtils {
         return false;
     }
 
+    @SuppressWarnings("java:S3776")
     static AvcCsd extractAvcCsd(byte[] data, int size) {
         byte[] sps = null;
         byte[] pps = null;
@@ -95,4 +97,3 @@ final class StreamNalUtils {
         }
     }
 }
-

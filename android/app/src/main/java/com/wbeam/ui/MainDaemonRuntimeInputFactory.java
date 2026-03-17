@@ -11,6 +11,7 @@ public final class MainDaemonRuntimeInputFactory {
     private MainDaemonRuntimeInputFactory() {
     }
 
+    @SuppressWarnings("java:S107")
     public static MainDaemonRuntimeCoordinator.StatusInput createStatusInput(
             boolean reachable,
             boolean wasReachable,
@@ -40,6 +41,7 @@ public final class MainDaemonRuntimeInputFactory {
         return input;
     }
 
+    @SuppressWarnings("java:S107")
     public static MainDaemonRuntimeCoordinator.StatusContext createStatusContext(
             MainDaemonState daemon,
             MainUiState uiState,
@@ -67,6 +69,7 @@ public final class MainDaemonRuntimeInputFactory {
         return context;
     }
 
+    @SuppressWarnings("java:S107")
     public static MainDaemonRuntimeCoordinator.OfflineContext createOfflineContext(
             MainDaemonState daemon,
             MainUiState uiState,
