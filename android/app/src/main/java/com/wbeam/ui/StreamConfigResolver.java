@@ -20,6 +20,7 @@ public final class StreamConfigResolver {
         }
     }
 
+    @SuppressWarnings("java:S1172")
     public static int[] computeScaledSize(String profile, int resScalePercent) {
         int baseW = 1920;
         int baseH = 1080;

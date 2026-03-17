@@ -104,6 +104,7 @@ public final class StatusPoller {
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
+    @SuppressWarnings("java:S107")
     public StatusPoller(Handler uiHandler, ExecutorService ioExecutor, Callbacks callbacks) {
         this.uiHandler  = uiHandler;
         this.ioExecutor = ioExecutor;

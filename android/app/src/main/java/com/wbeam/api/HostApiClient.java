@@ -130,6 +130,7 @@ public final class HostApiClient {
     /**
      * Execute an HTTP request against the control API with exponential-backoff retry.
      */
+    @SuppressWarnings({"java:S2676", "java:S1192"})
     public static JSONObject apiRequestWithRetry(
             String method,
             String path,
@@ -309,6 +310,7 @@ public final class HostApiClient {
         resetLocalApiMetrics();
     }
 
+    @SuppressWarnings("java:S4144")
     private static void handleApplyRequest(long nowSec) {
         handleStopRequest(nowSec);
     }

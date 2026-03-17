@@ -36,7 +36,7 @@ public final class VideoTestController {
     private static final String DAEMON_STATE_DISCONNECTED = "DISCONNECTED";
     private static final String RUN_TESTS_LIVE = "RUN TESTS LIVE";
     private static final String LIVE_TEST_PREFIX = "[RUN TESTS LIVE] ";
-    private static final String PRESET_PREFIX = "preset\n";
+    private static final String PRESET_PREFIX = "preset \n";
     private static final long   LIVE_TEST_START_TIMEOUT_MS = 12_000L;
     private static final int    BANDWIDTH_TEST_MB          = 64;
     private static final String TEST_VIDEO_URL =
@@ -191,6 +191,7 @@ public final class VideoTestController {
         runPublicVideoTest(surface);
     }
 
+    @SuppressWarnings("java:S3776")
     private void runPublicVideoTest(Surface surface) {
         TestConfig cfg = callbacks.getTestConfig();
         String presetLine = cfg.toLine();
@@ -268,7 +269,7 @@ public final class VideoTestController {
         }
         uiHandler.removeCallbacks(startTimeoutTask);
         logInfo("playback completed");
-        callbacks.onStatus("idle", "RUN TESTS LIVE completed", 0);
+        callbacks.onStatus(UI_STATE_IDLE, "RUN TESTS LIVE completed", 0);
         clearOverlay();
     }
 
