@@ -6,7 +6,9 @@ import android.widget.TextView;
 
 public final class HudOverlayDisplay {
     public static final class State {
+        @SuppressWarnings("java:S1104")
         public String mode = "none";
+        @SuppressWarnings("java:S1104")
         public String lastWebHtml = "";
     }
 
