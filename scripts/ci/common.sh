@@ -19,16 +19,20 @@ normalize_tag_version() {
   printf '%s\n' "${raw}"
 }
 
-build_stamp() {
-  date -u +%Y%m%d%H%M
-}
-
 wbeam_version() {
+  local base short_sha
+  base="${WBEAM_VERSION_BASE:-0.1.2}"
   if [[ -n "${CI_COMMIT_TAG:-}" ]]; then
-    normalize_tag_version "${CI_COMMIT_TAG}"
-  else
-    printf '0.0.0.main.%s.%s\n' "$(build_stamp)" "${CI_COMMIT_SHORT_SHA:-dev}"
+    base="$(normalize_tag_version "${CI_COMMIT_TAG}")"
   fi
+
+  short_sha="${CI_COMMIT_SHA:-${CI_COMMIT_SHORT_SHA:-}}"
+  if [[ "${#short_sha}" -ge 5 ]]; then
+    short_sha="${short_sha:0:5}"
+  else
+    short_sha="dev00"
+  fi
+  printf '%s.%s\n' "${base}" "${short_sha}"
 }
 
 WBEAM_VERSION="${WBEAM_VERSION:-$(wbeam_version)}"

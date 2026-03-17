@@ -20,5 +20,5 @@ libc = "0.2"
 wbtp-core = { path = "../../../../shared/protocol/rust/crates/wbtp-core" }
 
 [features]
-default = []
+default = ["evdi"]
 evdi = []

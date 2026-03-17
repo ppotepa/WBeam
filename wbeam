@@ -30,7 +30,6 @@ ANDROID_PIPELINE_FILE="$ROOT_DIR/.wbeam_android_pipeline"
 LOG_DIR="$ROOT_DIR/logs"
 ADB_LOGCAT_PID_FILE="$LOG_DIR/adb-logcat.pid"
 BUILD_VERSION_FILE="$ROOT_DIR/.wbeam_build_version"
-BUILD_NUMBER_FILE="$ROOT_DIR/.wbeam_buildno"
 DEVICE_PORTS_FILE="$ROOT_DIR/.wbeam_device_ports"
 VERSION_BASE="${WBEAM_VERSION_BASE:-0.1.2}"
 
@@ -285,93 +284,32 @@ normalize_build_version() {
   if [[ -z "$raw" ]]; then
     return 1
   fi
-  if [[ "$raw" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\.[A-Za-z0-9._-]+$ ]]; then
+  if [[ "$raw" =~ ^([0-9]+\.[0-9]+\.[0-9]+)\.[0-9]+\.([A-Za-z0-9._-]+)$ ]]; then
+    echo "${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+  elif [[ "$raw" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[A-Za-z0-9._-]+)?$ ]]; then
     echo "$raw"
-  elif [[ "$raw" =~ ^[0-9]+\.[A-Za-z0-9._-]+$ ]]; then
+  else
     echo "${VERSION_BASE}.${raw}"
-  elif [[ "$raw" =~ ^[0-9]+$ ]]; then
-    echo "${VERSION_BASE}.${raw}.dev"
+  fi
+}
+
+git_short_rev() {
+  local hash
+  hash="$(git -C "$ROOT_DIR" rev-parse --short=5 HEAD 2>/dev/null || true)"
+  if [[ "$hash" =~ ^[A-Fa-f0-9]{5}$ ]]; then
+    echo "$hash"
   else
-    echo "${VERSION_BASE}.0.${raw}"
+    echo "dev00"
   fi
-}
-
-build_number_read_file() {
-  if [[ -f "$BUILD_NUMBER_FILE" ]]; then
-    tr -d '\r[:space:]' < "$BUILD_NUMBER_FILE" 2>/dev/null || true
-  fi
-}
-
-build_number_from_version() {
-  local raw="${1:-}"
-  if [[ "$raw" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.([0-9]+)\.[A-Za-z0-9._-]+$ ]]; then
-    echo "${BASH_REMATCH[1]}"
-    return 0
-  fi
-  if [[ "$raw" =~ ^[0-9]+\.[0-9]+\.[0-9]+\+b([0-9]+)$ ]]; then
-    echo "${BASH_REMATCH[1]}"
-    return 0
-  fi
-  if [[ "$raw" =~ ^[0-9]+\.[0-9]+\.([0-9]+)$ ]]; then
-    echo "${BASH_REMATCH[1]}"
-    return 0
-  fi
-  if [[ "$raw" =~ ^[0-9]+\.([0-9]+)\.[A-Za-z0-9._-]+$ ]]; then
-    echo "${BASH_REMATCH[1]}"
-    return 0
-  fi
-  return 1
-}
-
-build_number_seed_max() {
-  local file_no version_no version_raw
-  file_no="$(build_number_read_file)"
-  if [[ ! "$file_no" =~ ^[0-9]+$ ]]; then
-    file_no=0
-  fi
-
-  version_no=0
-  version_raw="$(build_version_read_file)"
-  if [[ -n "$version_raw" ]]; then
-    version_no="$(build_number_from_version "$version_raw" || true)"
-    if [[ ! "$version_no" =~ ^[0-9]+$ ]]; then
-      version_no=0
-    fi
-  fi
-
-  if (( version_no > file_no )); then
-    echo "$version_no"
-  else
-    echo "$file_no"
-  fi
-}
-
-build_number_next() {
-  local n
-  n="$(build_number_seed_max)"
-  n=$((n + 1))
-  printf '%s\n' "$n" > "$BUILD_NUMBER_FILE"
-  echo "$n"
 }
 
 build_version_generate() {
-  local next_no hash
-  next_no="$(build_number_next)"
-  hash="$(git -C "$ROOT_DIR" rev-parse --verify HEAD 2>/dev/null || true)"
-  if [[ "$hash" =~ ^[a-f0-9]{40}$ ]]; then
-    # Keep suffix deterministic for a given commit; this avoids random build ids.
-    hash="${hash: -5}"
-  else
-    hash="nogit"
-  fi
-  echo "${VERSION_BASE}.${next_no}.${hash}"
+  echo "${VERSION_BASE}.$(git_short_rev)"
 }
 
-build_version_write_new() {
-  local v
-  v="$(build_version_generate)"
-  printf '%s\n' "$v" > "$BUILD_VERSION_FILE"
-  echo "$v"
+build_version_write_file() {
+  local version="$1"
+  printf '%s\n' "$version" > "$BUILD_VERSION_FILE"
 }
 
 build_version_read_file() {
@@ -382,11 +320,14 @@ build_version_read_file() {
 
 build_version_for_build() {
   local explicit="${WBEAM_BUILD_REV:-}"
+  local version
   if [[ -n "$explicit" ]]; then
-    normalize_build_version "$explicit"
-    return 0
+    version="$(normalize_build_version "$explicit")"
+  else
+    version="$(build_version_generate)"
   fi
-  build_version_write_new
+  build_version_write_file "$version"
+  echo "$version"
 }
 
 build_version_for_runtime() {
@@ -401,17 +342,11 @@ build_version_for_runtime() {
     normalize_build_version "$from_file"
     return 0
   fi
-  local build_no
-  build_no="$(build_number_read_file)"
-  if [[ "$build_no" =~ ^[0-9]+$ ]]; then
-    echo "${VERSION_BASE}.${build_no}.dev"
-  else
-    echo "${VERSION_BASE}.0.dev"
-  fi
+  build_version_generate
 }
 
 version_new() {
-  build_version_write_new
+  build_version_for_build
 }
 
 version_current() {
@@ -503,7 +438,6 @@ version_doctor() {
 
     file_build="$(build_version_read_file || true)"
     echo "[version-doctor] build_file=${BUILD_VERSION_FILE} value=${file_build:-<empty>}"
-    echo "[version-doctor] buildno_file=${BUILD_NUMBER_FILE} value=$(build_number_read_file || true)"
 
     if [[ -n "${WBEAM_BUILD_REV:-}" ]]; then
       echo "[version-doctor] env_WBEAM_BUILD_REV=${WBEAM_BUILD_REV}"
@@ -1914,7 +1848,7 @@ watch_doctor_once() {
   fi
 
   file_build="$(build_version_read_file || true)"
-  echo "build_file=${file_build:-<empty>} buildno=$(build_number_read_file || true)"
+  echo "build_file=${file_build:-<empty>}"
   if [[ -n "${WBEAM_BUILD_REV:-}" ]]; then
     echo "env_build_rev=${WBEAM_BUILD_REV}"
   else

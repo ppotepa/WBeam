@@ -2,6 +2,7 @@ use std::process::Command;
 
 fn main() {
     println!("cargo:rerun-if-env-changed=WBEAM_BUILD_REV");
+    println!("cargo:rerun-if-env-changed=WBEAM_VERSION_BASE");
     println!("cargo:rerun-if-changed=../../.git/HEAD");
 
     let revision = std::env::var("WBEAM_BUILD_REV")
@@ -10,8 +11,9 @@ fn main() {
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| {
             format!(
-                "0.1.0.0.{}",
-                git_short_rev().unwrap_or_else(|| "dev0".to_string())
+                "{}.{}",
+                version_base(),
+                git_short_rev().unwrap_or_else(|| "dev00".to_string())
             )
         });
 
@@ -20,12 +22,20 @@ fn main() {
     println!("cargo:rustc-env=WBEAM_BUILD_REV={revision}");
 }
 
+fn version_base() -> String {
+    std::env::var("WBEAM_VERSION_BASE")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "0.1.2".to_string())
+}
+
 fn git_short_rev() -> Option<String> {
     let repo_hint = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
     let output = Command::new("git")
         .arg("-C")
         .arg(repo_hint)
-        .args(["rev-parse", "--short=4", "HEAD"])
+        .args(["rev-parse", "--short=5", "HEAD"])
         .output()
         .ok()?;
 

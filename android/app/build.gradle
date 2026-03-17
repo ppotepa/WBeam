@@ -5,7 +5,7 @@ plugins {
 def resolveGitShortRev() {
     try {
         def repoDir = rootDir.parentFile
-        def proc = ["git", "-C", repoDir.absolutePath, "rev-parse", "--short=4", "HEAD"].execute()
+        def proc = ["git", "-C", repoDir.absolutePath, "rev-parse", "--short=5", "HEAD"].execute()
         proc.waitFor()
         if (proc.exitValue() == 0) {
             def rev = proc.in.text.trim()
@@ -18,9 +18,11 @@ def resolveGitShortRev() {
     return "dev0"
 }
 
+def wbeamVersionBaseRaw = (project.findProperty("WBEAM_VERSION_BASE") ?: System.getenv("WBEAM_VERSION_BASE") ?: "0.1.2").toString().trim()
+def wbeamVersionBase = wbeamVersionBaseRaw.isEmpty() ? "0.1.2" : wbeamVersionBaseRaw
 def wbeamBuildRevisionRaw = (project.findProperty("WBEAM_BUILD_REV") ?: System.getenv("WBEAM_BUILD_REV") ?: "").toString().trim()
 def wbeamBuildRevision = wbeamBuildRevisionRaw.isEmpty()
-    ? "0.1.0.0.${resolveGitShortRev()}"
+    ? "${wbeamVersionBase}.${resolveGitShortRev()}"
     : wbeamBuildRevisionRaw
 def wbeamMinSdkRaw = (project.findProperty("WBEAM_MIN_SDK") ?: System.getenv("WBEAM_MIN_SDK") ?: "17").toString()
 def wbeamMinSdk = Integer.parseInt(wbeamMinSdkRaw)

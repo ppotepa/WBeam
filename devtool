@@ -16,7 +16,6 @@ HOST_WORKSPACE_DIR="$ROOT_DIR/host/rust"
 CONTROL_PORT="${WBEAM_CONTROL_PORT:-5001}"
 STREAM_PORT="${WBEAM_STREAM_PORT:-5000}"
 BUILD_VERSION_FILE="$ROOT_DIR/.wbeam_build_version"
-BUILD_NUMBER_FILE="$ROOT_DIR/.wbeam_buildno"
 VERSION_BASE="${WBEAM_VERSION_BASE:-0.1.2}"
 
 mkdir -p "$TARGET_DIR"
@@ -52,51 +51,44 @@ normalize_build_version() {
   if [[ -z "$raw" ]]; then
     return 1
   fi
-  if [[ "$raw" =~ ^[0-9]+\.[0-9]+\..+ ]]; then
+  if [[ "$raw" =~ ^([0-9]+\.[0-9]+\.[0-9]+)\.[0-9]+\.([A-Za-z0-9._-]+)$ ]]; then
+    echo "${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+  elif [[ "$raw" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[A-Za-z0-9._-]+)?$ ]]; then
     echo "$raw"
   else
     echo "${VERSION_BASE}.${raw}"
   fi
 }
 
+git_short_rev() {
+  local hash
+  hash="$(git -C "$ROOT_DIR" rev-parse --short=5 HEAD 2>/dev/null || true)"
+  if [[ "$hash" =~ ^[A-Fa-f0-9]{5}$ ]]; then
+    echo "$hash"
+  else
+    echo "dev00"
+  fi
+}
+
+build_version_generate() {
+  echo "${VERSION_BASE}.$(git_short_rev)"
+}
+
+build_version_write_file() {
+  local version="$1"
+  printf '%s\n' "$version" > "$BUILD_VERSION_FILE"
+}
+
 build_version_for_build() {
   local explicit="${WBEAM_BUILD_REV:-}"
+  local version
   if [[ -n "$explicit" ]]; then
-    normalize_build_version "$explicit"
-    return 0
+    version="$(normalize_build_version "$explicit")"
+  else
+    version="$(build_version_generate)"
   fi
-
-  local n version_raw version_no
-  n=0
-  if [[ -f "$BUILD_NUMBER_FILE" ]]; then
-    n="$(tr -d '\r[:space:]' < "$BUILD_NUMBER_FILE" 2>/dev/null || echo 0)"
-  fi
-  if [[ ! "$n" =~ ^[0-9]+$ ]]; then
-    n=0
-  fi
-
-  version_no=0
-  if [[ -f "$BUILD_VERSION_FILE" ]]; then
-    version_raw="$(tr -d '\r[:space:]' < "$BUILD_VERSION_FILE" 2>/dev/null || true)"
-    if [[ "$version_raw" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.([0-9]+)\.[A-Za-z0-9._-]+$ ]]; then
-      version_no="${BASH_REMATCH[1]}"
-    elif [[ "$version_raw" =~ ^[0-9]+\.[0-9]+\.([0-9]+)$ ]]; then
-      version_no="${BASH_REMATCH[1]}"
-    elif [[ "$version_raw" =~ ^[0-9]+\.[0-9]+\.[0-9]+\+b([0-9]+)$ ]]; then
-      version_no="${BASH_REMATCH[1]}"
-    elif [[ "$version_raw" =~ ^[0-9]+\.([0-9]+)\.[A-Za-z0-9._-]+$ ]]; then
-      version_no="${BASH_REMATCH[1]}"
-    fi
-  fi
-  if [[ "$version_no" =~ ^[0-9]+$ ]] && (( version_no > n )); then
-    n="$version_no"
-  fi
-
-  n=$((n + 1))
-  printf '%s\n' "$n" > "$BUILD_NUMBER_FILE"
-  local v="${VERSION_BASE}.${n}"
-  printf '%s\n' "$v" > "$BUILD_VERSION_FILE"
-  echo "$v"
+  build_version_write_file "$version"
+  echo "$version"
 }
 
 run_gui() {

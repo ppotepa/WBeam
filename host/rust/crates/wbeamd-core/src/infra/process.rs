@@ -167,18 +167,8 @@ pub fn build_revision() -> String {
         }
     }
 
-    if let Ok(root) = std::env::var("WBEAM_ROOT") {
-        let path = Path::new(&root).join(".wbeam_build_version");
-        if let Ok(content) = std::fs::read_to_string(path) {
-            let trimmed = content.trim();
-            if !trimmed.is_empty() {
-                return trimmed.to_string();
-            }
-        }
-    }
-
     option_env!("WBEAM_BUILD_REV")
-        .unwrap_or("0.1.0.0.dev")
+        .unwrap_or("0.1.2.dev00")
         .to_string()
 }
 

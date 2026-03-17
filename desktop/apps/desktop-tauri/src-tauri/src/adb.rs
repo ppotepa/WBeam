@@ -542,7 +542,35 @@ pub(crate) fn host_expected_apk_version() -> String {
         }
     }
 
+    if let Some(from_repo) = repo_build_revision() {
+        return from_repo;
+    }
+
     String::new()
+}
+
+fn repo_build_revision() -> Option<String> {
+    let base = crate::wbeam_config_value("WBEAM_VERSION_BASE")
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "0.1.2".to_string());
+    let repo_root = crate::repo_root();
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(&repo_root)
+        .args(["rev-parse", "--short=5", "HEAD"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let rev = String::from_utf8(output.stdout).ok()?.trim().to_string();
+    if rev.is_empty() {
+        None
+    } else {
+        Some(format!("{base}.{rev}"))
+    }
 }
 
 pub(crate) fn host_build_revision_from_health() -> Option<String> {
