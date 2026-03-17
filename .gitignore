@@ -120,3 +120,7 @@ code.zip
 
 # Local review working docs
 *.rw.md
+
+# Sonar exports
+issues.md
+sonar.issues.md
