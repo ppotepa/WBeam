@@ -48,17 +48,17 @@ public final class MainViewBindingCoordinator {
         out.controlViews = MainActivityControlViewsBinder.bind(activity);
         out.previewSurface = activity.findViewById(R.id.previewSurface);
         out.immersiveModeController =
-                new ImmersiveModeController(activity, out.primaryViews.rootLayout);
-        out.settingsPanelController = new SettingsPanelController(out.primaryViews.settingsPanel);
+                new ImmersiveModeController(activity, out.primaryViews.getRootLayout());
+        out.settingsPanelController = new SettingsPanelController(out.primaryViews.getSettingsPanel());
         out.startupBuildVersionText = StartupOverlayViewsBinder.bind(activity, startupOverlayViews);
         out.startupOverlayController =
-                new StartupOverlayController(uiHandler, out.primaryViews.preflightOverlay);
+                new StartupOverlayController(uiHandler, out.primaryViews.getPreflightOverlay());
         out.startupOverlayController.setTickListener(tickListener::onTick);
         out.cursorOverlayController = new CursorOverlayController(
-                out.primaryViews.cursorOverlay,
+                out.primaryViews.getCursorOverlay(),
                 out.controlViews.getCursorOverlayButton()
         );
-        MainActivityUiBinder.setupHudWebView(out.primaryViews.perfHudWebView);
+        MainActivityUiBinder.setupHudWebView(out.primaryViews.getPerfHudWebView());
         return out;
     }
 }
