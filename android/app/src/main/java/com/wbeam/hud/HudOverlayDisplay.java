@@ -6,10 +6,24 @@ import android.widget.TextView;
 
 public final class HudOverlayDisplay {
     public static final class State {
-        @SuppressWarnings("java:S1104")
-        public String mode = "none";
-        @SuppressWarnings("java:S1104")
-        public String lastWebHtml = "";
+        private String mode = "none";
+        private String lastWebHtml = "";
+
+        public String getMode() {
+            return mode;
+        }
+
+        public void setMode(String mode) {
+            this.mode = mode;
+        }
+
+        public String getLastWebHtml() {
+            return lastWebHtml;
+        }
+
+        public void setLastWebHtml(String lastWebHtml) {
+            this.lastWebHtml = lastWebHtml;
+        }
     }
 
     private HudOverlayDisplay() {
@@ -25,11 +39,11 @@ public final class HudOverlayDisplay {
         if (perfHudWebView == null || html == null) {
             return false;
         }
-        if (!modeTag.equals(state.mode) || !html.equals(state.lastWebHtml)) {
+        if (!modeTag.equals(state.getMode()) || !html.equals(state.getLastWebHtml())) {
             perfHudWebView.loadDataWithBaseURL(null, html, "text/html", "utf-8", null);
-            state.lastWebHtml = html;
+            state.setLastWebHtml(html);
         }
-        state.mode = modeTag;
+        state.setMode(modeTag);
         perfHudWebView.setVisibility(View.VISIBLE);
         if (perfHudText != null) {
             perfHudText.setVisibility(View.GONE);
@@ -45,8 +59,8 @@ public final class HudOverlayDisplay {
             int color,
             State state
     ) {
-        state.mode = modeTag;
-        state.lastWebHtml = "";
+        state.setMode(modeTag);
+        state.setLastWebHtml("");
         if (perfHudWebView != null) {
             perfHudWebView.setVisibility(View.GONE);
         }

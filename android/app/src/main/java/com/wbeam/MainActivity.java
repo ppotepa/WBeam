@@ -1217,13 +1217,13 @@ public class MainActivity extends AppCompatActivity {
                 BuildConfig.DEBUG,
                 debugInfoText,
                 debugInfoPanel,
-                statusState.uiState,
+                statusState.getUiState(),
                 daemon.hostName,
                 effectiveDaemonStateUi(),
                 hudState.latestTargetFps,
                 hudState.latestPresentFps,
                 getSelectedFps(),
-                statusState.statsLine,
+                statusState.getStatsLine(),
                 hudState.compactLine
         );
     }
@@ -1255,9 +1255,9 @@ public class MainActivity extends AppCompatActivity {
                 BuildConfig.WBEAM_STREAM_HOST,
                 BuildConfig.WBEAM_STREAM_PORT,
                 BuildConfig.WBEAM_BUILD_REV,
-                statusState.uiInfo,
+                statusState.getUiInfo(),
                 hudState.latestPresentFps,
-                statusState.statsLine,
+                statusState.getStatsLine(),
                 ErrorTextUtil.compactDaemonErrorForUi(daemon.lastError),
                 uiState.preflightAnimTick,
                 uiState.startupBeganAtMs,

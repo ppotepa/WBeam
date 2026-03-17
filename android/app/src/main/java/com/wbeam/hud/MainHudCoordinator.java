@@ -445,7 +445,7 @@ public final class MainHudCoordinator {
             return;
         }
         input.getState().lastPerfMetricsAtMs = nowMs;
-        input.getOverlayState().mode = "runtime";
+        input.getOverlayState().setMode("runtime");
         updateRuntimeHud(input, metrics, nowMs);
     }
 
