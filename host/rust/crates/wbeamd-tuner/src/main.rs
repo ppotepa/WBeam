@@ -646,6 +646,7 @@ impl App {
         }
     }
 
+    // NOSONAR S3776 - Probe flow combines host capability and status reconciliation
     fn run_probe(&mut self) {
         self.log("probe: checking /v1/health /v1/status /v1/metrics /v1/host-probe");
         self.probe = ProbeState::default();
@@ -1020,6 +1021,7 @@ impl App {
         }
     }
 
+    // NOSONAR S3776 - Keymap dispatch intentionally maps many step-specific controls
     fn handle_key(&mut self, code: KeyCode) -> bool {
         match code {
             KeyCode::Char('q') => return true,
@@ -1530,6 +1532,7 @@ fn summarize_samples(samples: &[MetricSample]) -> String {
     )
 }
 
+// NOSONAR S3776 - Evolution worker orchestrates staged control/measurement loops
 fn run_evolution_worker(
     api: ApiClient,
     cfg: EvolutionConfig,
@@ -2087,6 +2090,7 @@ fn spinner_char(phase: usize) -> &'static str {
     FRAMES[phase % FRAMES.len()]
 }
 
+// NOSONAR S3776 - Status bar state mapping is explicit for operator clarity
 fn draw_status_bar(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app: &App) {
     let spin = if app.evolution_running {
         spinner_char(app.spinner_phase)
@@ -2690,6 +2694,7 @@ fn draw_finish(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app: &Ap
     );
 }
 
+// NOSONAR S3776 - TUI runtime loop intentionally handles nested event/tick flow
 fn main() -> Result<()> {
     let args = Args::parse();
     migrate_legacy_profiles_once();

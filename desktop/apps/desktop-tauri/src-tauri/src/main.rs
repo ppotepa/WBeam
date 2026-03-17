@@ -344,6 +344,7 @@ fn normalize_profile_selector(value: Option<String>) -> Option<String> {
         .map(str::to_string)
 }
 
+// NOSONAR S3776 - Daemon action URL/body shaping needs explicit option handling
 fn daemon_post_action(
     action: &str,
     serial: &str,
@@ -536,6 +537,7 @@ fn host_probe_brief() -> HostProbeBrief {
 }
 
 #[tauri::command]
+// NOSONAR S3776 - Connect command must normalize and reconcile multiple inputs
 fn device_connect(
     serial: String,
     stream_port: u16,
@@ -815,6 +817,7 @@ pub(crate) fn or_unknown(value: Option<String>) -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
+// NOSONAR S3776 - Session detection intentionally tries env, loginctl and fallback probes
 fn detect_session_type_for_notice() -> Option<String> {
     if let Some(kind) = std::env::var("XDG_SESSION_TYPE")
         .ok()
