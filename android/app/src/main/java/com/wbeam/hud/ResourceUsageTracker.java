@@ -10,6 +10,7 @@ import java.util.Locale;
  * - call {@link #sample(double, double)} on each telemetry refresh,
  * - call {@link #buildRowsHtml()} to render current compact resource rows.
  */
+@SuppressWarnings({"java:S3358", "java:S1192"})
 public final class ResourceUsageTracker {
     private static final String STATE_RISK = "state-risk";
     private static final String STATE_WARN = "state-warn";

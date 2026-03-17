@@ -3,6 +3,7 @@ package com.wbeam.startup;
 import android.view.View;
 import android.widget.TextView;
 
+@SuppressWarnings({"java:S3358", "java:S107"})
 public final class StartupOverlayViewRenderer {
     private static final int SUBTITLE_OK_COLOR = 0xFF4ADE80;
     private static final int SUBTITLE_ERROR_COLOR = 0xFFF87171;

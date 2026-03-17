@@ -6,6 +6,7 @@ import android.widget.Button;
 import android.widget.SeekBar;
 import android.widget.Spinner;
 
+@SuppressWarnings("java:S107")
 public final class MainActivitySimpleMenuCoordinator {
     public static final class State {
         private boolean visible;

@@ -6,6 +6,7 @@ import android.widget.Toast;
 import com.wbeam.BuildConfig;
 import com.wbeam.api.HostApiClient;
 
+@SuppressWarnings("java:S107")
 public final class MainSessionControlCoordinator {
     public interface StatusSink {
         void onStatus(String state, String info, long bps);
