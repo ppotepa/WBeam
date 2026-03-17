@@ -40,6 +40,7 @@ public final class LiveViewPlaybackCoordinator {
     private LiveViewPlaybackCoordinator() {
     }
 
+    @SuppressWarnings("java:S107")
     public static H264TcpPlayer start(
             String tag,
             Surface surface,
@@ -151,6 +152,7 @@ public final class LiveViewPlaybackCoordinator {
                 ));
             }
         } catch (Exception ignored) {
+            // surface frame logging is best-effort
         }
     }
 }

@@ -36,10 +36,12 @@ public final class DecoderCapabilityInspector {
                 }
             }
         } catch (Exception ignored) {
+            // fall back to AVC when codec enumeration fails
         }
         return "h264";
     }
 
+    @SuppressWarnings("java:S3776")
     public static boolean hasHardwareAvcDecoder(String logTag) {
         try {
             MediaCodecInfo[] infos;
