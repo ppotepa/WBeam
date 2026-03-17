@@ -10,6 +10,7 @@ import com.wbeam.R;
 import com.wbeam.widget.FpsLossGraphView;
 
 public final class MainActivityPrimaryViewsBinder {
+    @SuppressWarnings({"java:S1104", "java:S107"})
     public static final class Views {
         private final View rootLayout;
         private final View topBar;

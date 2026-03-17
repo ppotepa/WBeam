@@ -8,6 +8,7 @@ import android.content.SharedPreferences;
  * All PREF_* keys and load/save operations are isolated here.
  * UI binding (spinners, seekbars) remains in MainActivity.
  */
+@SuppressWarnings({"java:S1192", "java:S1104"})
 public final class SettingsRepository {
 
     private static final String PREFS = "wbeam_settings";

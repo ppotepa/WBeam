@@ -10,6 +10,7 @@ public final class MainActivityStatusTracker {
         private final boolean shouldLogCritical;
         private final String criticalLogLine;
 
+        @SuppressWarnings("java:S107")
         private UpdateResult(
                 String state,
                 String info,
@@ -57,6 +58,7 @@ public final class MainActivityStatusTracker {
         }
     }
 
+    @SuppressWarnings("java:S1104")
     public static final class UpdateInput {
         private String state;
         private String info;

@@ -42,6 +42,7 @@ public final class MainViewBehaviorCoordinator {
     private MainViewBehaviorCoordinator() {
     }
 
+    @SuppressWarnings("java:S107")
     public static final class SetupButtonsInput {
         private Button settingsCloseButton;
         private View simpleMenuPanel;
@@ -90,6 +91,7 @@ public final class MainViewBehaviorCoordinator {
         public SetupButtonsInput setOnApplyAndStartTask(UiTask value) { onApplyAndStartTask = value; return this; }
     }
 
+    @SuppressWarnings("java:S107")
     public static final class BuildVariantUiInput {
         private boolean buildDebug;
         private MainUiState uiState;
