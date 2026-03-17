@@ -48,6 +48,8 @@ public final class HostApiClient {
     private static final String STATUS_PATH = "/status";
     private static final String HEALTH_PATH = "/health";
     private static final String METRICS_PATH = "/metrics";
+    private static final String STATE_STREAMING = "STREAMING";
+    private static final String STATE_RECONNECTING = "RECONNECTING";
 
     public  static final int  API_RETRY_ATTEMPTS      = 2;
     public  static final long API_RETRY_BASE_DELAY_MS = 300L;
@@ -144,7 +146,7 @@ public final class HostApiClient {
                 }
                 long baseDelay = Math.min(5000L, API_RETRY_BASE_DELAY_MS * (1L << i));
                 long jitterBound = Math.max(1L, baseDelay / 4L + 1L);
-                long jitter = Math.abs(RANDOM.nextLong()) % jitterBound;
+                long jitter = RANDOM.nextLong(jitterBound);
                 SystemClock.sleep(baseDelay + jitter);
             }
         }
@@ -300,20 +302,15 @@ public final class HostApiClient {
     }
 
     private static void handleApplyRequest(long nowSec) {
-        LocalApiState.state = "IDLE";
-        LocalApiState.lastError = "";
-        LocalApiState.startedAtSec = nowSec;
-        resetLocalApiMetrics();
+        handleStopRequest(nowSec);
     }
 
     private static JSONObject handleClientMetricsRequest(JSONObject payload, long nowSec, long nowMs) {
         double recvFps = payload != null ? payload.optDouble("recv_fps", 0.0) : 0.0;
         double presentFps = payload != null ? payload.optDouble("present_fps", 0.0) : 0.0;
         long recvBps = payload != null ? payload.optLong("recv_bps", 0L) : 0L;
-        LocalApiState.latestRecvFps = recvFps;
         LocalApiState.latestPresentFps = presentFps;
         LocalApiState.latestRecvBps = recvBps;
-        LocalApiState.lastClientMetricAtMs = nowMs;
 
         boolean flowing = recvBps > 0L || recvFps >= 1.0 || presentFps >= 1.0;
         if (flowing) {
@@ -321,24 +318,24 @@ public final class HostApiClient {
             if (LocalApiState.firstFlowAtSec == 0L) {
                 LocalApiState.firstFlowAtSec = nowSec;
             }
-            LocalApiState.state = "STREAMING";
+            LocalApiState.state = STATE_STREAMING;
         } else if (!"IDLE".equals(LocalApiState.state)) {
             long sinceStartSec = Math.max(0L, nowSec - LocalApiState.startedAtSec);
-            LocalApiState.state = sinceStartSec < 3L ? "STARTING" : "RECONNECTING";
+            LocalApiState.state = sinceStartSec < 3L ? "STARTING" : STATE_RECONNECTING;
         }
         return new JSONObject();
     }
 
     private static void updateStreamingState(long nowSec, long nowMs) {
-        if ("STREAMING".equals(LocalApiState.state)) {
+        if (STATE_STREAMING.equals(LocalApiState.state)) {
             long idleMs = LocalApiState.lastFlowAtMs > 0L ? (nowMs - LocalApiState.lastFlowAtMs) : Long.MAX_VALUE;
             if (idleMs > 2500L) {
-                LocalApiState.state = "RECONNECTING";
+                LocalApiState.state = STATE_RECONNECTING;
             }
         } else if (!"IDLE".equals(LocalApiState.state)) {
             long sinceStartSec = Math.max(0L, nowSec - LocalApiState.startedAtSec);
             if (sinceStartSec >= 3L) {
-                LocalApiState.state = "RECONNECTING";
+                LocalApiState.state = STATE_RECONNECTING;
             }
         }
     }
@@ -346,7 +343,7 @@ public final class HostApiClient {
     private static JSONObject buildStatusOrHealthResponse(String p, long nowSec) throws JSONException {
         JSONObject out = new JSONObject();
         out.put("state", LocalApiState.state);
-        out.put("host_name", LocalApiState.hostName);
+        out.put("host_name", LocalApiState.HOST_NAME);
         out.put("run_id", LocalApiState.runId);
         out.put("last_error", LocalApiState.lastError);
         out.put("uptime", Math.max(0L, nowSec - LocalApiState.startedAtSec));
@@ -367,7 +364,7 @@ public final class HostApiClient {
         metrics.put("bitrate_actual_bps", LocalApiState.latestRecvBps);
 
         long streamUptimeSec = 0L;
-        if ("STREAMING".equals(LocalApiState.state)
+        if (STATE_STREAMING.equals(LocalApiState.state)
                 && LocalApiState.firstFlowAtSec > 0L
                 && nowSec >= LocalApiState.firstFlowAtSec) {
             streamUptimeSec = nowSec - LocalApiState.firstFlowAtSec;
@@ -407,10 +404,8 @@ public final class HostApiClient {
     }
 
     private static void resetLocalApiMetrics() {
-        LocalApiState.lastClientMetricAtMs = 0L;
         LocalApiState.lastFlowAtMs = 0L;
         LocalApiState.firstFlowAtSec = 0L;
-        LocalApiState.latestRecvFps = 0.0;
         LocalApiState.latestPresentFps = 0.0;
         LocalApiState.latestRecvBps = 0L;
     }
@@ -421,11 +416,9 @@ public final class HostApiClient {
         private static long runId = 0L;
         private static long startedAtSec = System.currentTimeMillis() / 1000L;
         private static long firstFlowAtSec = 0L;
-        private static long lastClientMetricAtMs = 0L;
         private static long lastFlowAtMs = 0L;
-        private static double latestRecvFps = 0.0;
         private static double latestPresentFps = 0.0;
         private static long latestRecvBps = 0L;
-        private static final String hostName = "android-local";
+        private static final String HOST_NAME = "android-local";
     }
 }
