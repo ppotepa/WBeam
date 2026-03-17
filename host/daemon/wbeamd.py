@@ -15,7 +15,7 @@ from dataclasses import dataclass, field, asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 
 STATES = {"IDLE", "STARTING", "STREAMING", "RECONNECTING", "ERROR", "STOPPING"}

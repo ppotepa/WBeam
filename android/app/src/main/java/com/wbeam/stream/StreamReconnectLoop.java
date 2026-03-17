@@ -9,7 +9,6 @@ import com.wbeam.api.StatusListener;
 import java.io.BufferedInputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
-import java.util.Locale;
 
 final class StreamReconnectLoop {
 
