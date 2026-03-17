@@ -31,7 +31,6 @@ use domain::policy::{
     adaptation_reason, config_for_level, is_high_pressure, is_low_pressure,
     HIGH_PRESSURE_STREAK_REQUIRED, LOW_PRESSURE_STREAK_REQUIRED, MAX_ADAPTATION_LEVEL,
 };
-#[allow(unused_imports)]
 use domain::state::{
     STATE_ERROR, STATE_IDLE, STATE_RECONNECTING, STATE_STARTING, STATE_STOPPING, STATE_STREAMING,
 };
