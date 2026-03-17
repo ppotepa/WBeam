@@ -13,13 +13,20 @@ final class PngSurfaceRenderer {
     private final Surface surface;
     private final Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
     private final Rect dstRect = new Rect();
+    private final BitmapFactory.Options decodeOptions = new BitmapFactory.Options();
+    private Bitmap reusableBitmap;
 
     PngSurfaceRenderer(Surface surface) {
         this.surface = surface;
+        decodeOptions.inMutable = true;
+        decodeOptions.inScaled = false;
     }
 
     RenderResult render(byte[] payloadBuf, int payloadLen) {
-        Bitmap bitmap = BitmapFactory.decodeByteArray(payloadBuf, 0, payloadLen);
+        if (!surface.isValid()) {
+            return RenderResult.notRendered();
+        }
+        Bitmap bitmap = decodeBitmap(payloadBuf, payloadLen);
         if (bitmap == null) {
             return RenderResult.notRendered();
         }
@@ -43,7 +50,20 @@ final class PngSurfaceRenderer {
                     // surface may already be invalidated during teardown
                 }
             }
-            bitmap.recycle();
+        }
+    }
+
+    private Bitmap decodeBitmap(byte[] payloadBuf, int payloadLen) {
+        decodeOptions.inBitmap = reusableBitmap;
+        try {
+            Bitmap decoded = BitmapFactory.decodeByteArray(payloadBuf, 0, payloadLen, decodeOptions);
+            reusableBitmap = decoded;
+            return decoded;
+        } catch (IllegalArgumentException ignored) {
+            decodeOptions.inBitmap = null;
+            Bitmap decoded = BitmapFactory.decodeByteArray(payloadBuf, 0, payloadLen, decodeOptions);
+            reusableBitmap = decoded;
+            return decoded;
         }
     }
 

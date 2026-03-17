@@ -71,7 +71,7 @@ final class StreamReconnectLoop {
     }
 
     void run() {
-        android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO);
+        android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DISPLAY);
 
         while (config.runtimeState.isRunning()) {
             final MediaCodec[] codecHolder = {null};

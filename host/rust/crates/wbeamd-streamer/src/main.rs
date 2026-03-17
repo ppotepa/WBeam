@@ -45,14 +45,8 @@ async fn main() -> Result<()> {
     let capture = prepare_capture(&cfg).await?;
     capture.announce_startup();
 
-    let (pipeline, appsink, fps_counter) = make_pipeline(
-        &capture,
-        &cfg,
-        args.port,
-        &args.debug_dir,
-        args.debug_fps,
-        args.framed,
-    )?;
+    let (pipeline, appsink, fps_counter) =
+        make_pipeline(&capture, &cfg, &args.debug_dir, args.debug_fps, args.framed)?;
 
     let bus = pipeline.bus().context("pipeline bus")?;
 

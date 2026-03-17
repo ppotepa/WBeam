@@ -105,13 +105,30 @@ public final class LiveViewPlaybackCoordinator {
             MetricsSink metricsSink
     ) {
         return new StatusListener() {
+            private String lastStatusState;
+            private String lastStatusInfo;
+            private long lastStatusBps = Long.MIN_VALUE;
+            private String lastStatsLine;
+
             @Override
             public void onStatus(String state, String info, long bps) {
+                if (bps == lastStatusBps
+                        && equalsNullable(state, lastStatusState)
+                        && equalsNullable(info, lastStatusInfo)) {
+                    return;
+                }
+                lastStatusState = state;
+                lastStatusInfo = info;
+                lastStatusBps = bps;
                 uiThreadRunner.post(() -> statusSink.onStatus(state, info, bps));
             }
 
             @Override
             public void onStats(String line) {
+                if (equalsNullable(line, lastStatsLine)) {
+                    return;
+                }
+                lastStatsLine = line;
                 uiThreadRunner.post(() -> statsSink.onStats(line));
             }
 
@@ -120,6 +137,10 @@ public final class LiveViewPlaybackCoordinator {
                 metricsSink.onMetrics(metrics);
             }
         };
+    }
+
+    private static boolean equalsNullable(String left, String right) {
+        return left == null ? right == null : left.equals(right);
     }
 
     private static void logStartLiveViewConfig(

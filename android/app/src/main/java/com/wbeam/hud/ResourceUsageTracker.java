@@ -2,8 +2,6 @@ package com.wbeam.hud;
 
 import android.os.SystemClock;
 
-import java.util.Locale;
-
 /**
  * Tracks lightweight local resource proxies used in HUD (CPU/MEM/GPU*).
  * Contract:
@@ -12,6 +10,7 @@ import java.util.Locale;
  */
 @SuppressWarnings({"java:S3358", "java:S1192"})
 public final class ResourceUsageTracker {
+    private static final long SAMPLE_INTERVAL_MS = 500L;
     private static final String STATE_RISK = "state-risk";
     private static final String STATE_WARN = "state-warn";
     private static final String STATE_OK = "state-ok";
@@ -26,6 +25,8 @@ public final class ResourceUsageTracker {
     private final MetricSeriesBuffer usageCpuSeries;
     private final MetricSeriesBuffer usageMemSeries;
     private final MetricSeriesBuffer usageGpuSeries;
+    private boolean rowsHtmlDirty = true;
+    private String cachedRowsHtml = "";
 
     public ResourceUsageTracker(int seriesMax) {
         int cap = Math.max(16, seriesMax);
@@ -36,6 +37,9 @@ public final class ResourceUsageTracker {
 
     public void sample(double targetFps, double renderP95Ms) {
         long nowMs = SystemClock.elapsedRealtime();
+        if (usageSampleLastRealtimeMs > 0L && (nowMs - usageSampleLastRealtimeMs) < SAMPLE_INTERVAL_MS) {
+            return;
+        }
         long procCpuNow = android.os.Process.getElapsedCpuTime();
         if (usageSampleLastRealtimeMs > 0L && usageSampleLastCpuMs > 0L) {
             long dWall = Math.max(1L, nowMs - usageSampleLastRealtimeMs);
@@ -58,37 +62,46 @@ public final class ResourceUsageTracker {
         usageCpuSeries.addSample(usageCpuPct);
         usageMemSeries.addSample(memPct);
         usageGpuSeries.addSample(usageGpuPct);
+        rowsHtmlDirty = true;
     }
 
     public String buildRowsHtml() {
+        if (!rowsHtmlDirty) {
+            return cachedRowsHtml;
+        }
         String cpuTone = resolveTone(usageCpuPct, 85.0, 65.0);
         double memPct = usageMemSeries.latest(0.0);
         String memTone = resolveTone(memPct, 88.0, 70.0);
         String gpuTone = resolveTone(usageGpuPct, 90.0, 70.0);
 
-        StringBuilder html = new StringBuilder();
+        StringBuilder html = new StringBuilder(2048);
         html.append("<div class='res-row'><span class='rk'>CPU</span><span class='rv ")
                 .append(cpuTone)
                 .append("'>")
-                .append(String.format(Locale.US, "%.0f%%", usageCpuPct))
+                .append(fmt0(usageCpuPct))
+                .append('%')
                 .append(ROW_SPARK_OPEN)
                 .append(buildSparkBarsHtml(usageCpuSeries, cpuTone))
                 .append(ROW_CLOSE);
         html.append("<div class='res-row'><span class='rk'>MEM</span><span class='rv ")
                 .append(memTone)
                 .append("'>")
-                .append(String.format(Locale.US, "%.0f MB", usageMemMb))
+                .append(fmt0(usageMemMb))
+                .append(" MB")
                 .append(ROW_SPARK_OPEN)
                 .append(buildSparkBarsHtml(usageMemSeries, memTone))
                 .append(ROW_CLOSE);
         html.append("<div class='res-row'><span class='rk'>GPU*</span><span class='rv ")
                 .append(gpuTone)
                 .append("'>")
-                .append(String.format(Locale.US, "%.0f%%", usageGpuPct))
+                .append(fmt0(usageGpuPct))
+                .append('%')
                 .append(ROW_SPARK_OPEN)
                 .append(buildSparkBarsHtml(usageGpuSeries, gpuTone))
                 .append(ROW_CLOSE);
-        return html.toString();
+        cachedRowsHtml = html.toString();
+        rowsHtmlDirty = false;
+        return cachedRowsHtml;
     }
 
     private static String resolveTone(double value, double riskThreshold, double warnThreshold) {
@@ -105,6 +118,7 @@ public final class ResourceUsageTracker {
         if (series == null || series.isEmpty()) {
             return HudRenderSupport.buildSparkPlaceholderBars(toneClass, 18);
         }
+        String escapedTone = HudRenderSupport.escapeHtml(toneClass);
         StringBuilder bars = new StringBuilder();
         for (Double sample : series) {
             double value = sample == null ? 0.0 : sample;
@@ -113,7 +127,7 @@ public final class ResourceUsageTracker {
                 height = 8;
             }
             bars.append("<span class='spark-bar ")
-                    .append(HudRenderSupport.escapeHtml(toneClass))
+                    .append(escapedTone)
                     .append("' style='height:")
                     .append(height)
                     .append("%'></span>");
@@ -126,5 +140,12 @@ public final class ResourceUsageTracker {
             return min;
         }
         return Math.max(min, Math.min(max, value));
+    }
+
+    private static String fmt0(double value) {
+        if (!Double.isFinite(value)) {
+            return "0";
+        }
+        return String.valueOf(Math.round(value));
     }
 }

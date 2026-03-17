@@ -7,6 +7,7 @@ import android.os.SystemClock;
 import android.view.Surface;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 
 final class MediaCodecBridge {
@@ -37,6 +38,42 @@ final class MediaCodecBridge {
             return false;
         }
         inputBuffer.put(data, offset, size);
+        codec.queueInputBuffer(inputIndex, 0, size, ptsUs, 0);
+        return true;
+    }
+
+    static boolean queueNalFromStream(
+            MediaCodec codec,
+            InputStream input,
+            byte[] scratch,
+            int size,
+            long ptsUs,
+            long inputTimeoutUs
+    ) throws IOException {
+        int inputIndex = codec.dequeueInputBuffer(inputTimeoutUs);
+        if (inputIndex < 0) {
+            return false;
+        }
+        ByteBuffer inputBuffer = getInputBuffer(codec, inputIndex);
+        if (inputBuffer == null) {
+            codec.queueInputBuffer(inputIndex, 0, 0, ptsUs, 0);
+            return false;
+        }
+        inputBuffer.clear();
+        if (size > inputBuffer.remaining()) {
+            codec.queueInputBuffer(inputIndex, 0, 0, ptsUs, 0);
+            return false;
+        }
+        int remaining = size;
+        while (remaining > 0) {
+            int chunk = Math.min(remaining, scratch.length);
+            int read = input.read(scratch, 0, chunk);
+            if (read < 0) {
+                throw new IOException("stream closed");
+            }
+            inputBuffer.put(scratch, 0, read);
+            remaining -= read;
+        }
         codec.queueInputBuffer(inputIndex, 0, size, ptsUs, 0);
         return true;
     }

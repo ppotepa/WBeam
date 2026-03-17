@@ -1,7 +1,5 @@
 package com.wbeam.ui;
 
-import java.util.Locale;
-
 /**
  * Formats user-facing status and host hint text.
  */
@@ -54,17 +52,34 @@ public final class StatusTextFormatter {
         return uiInfo + " | " + transport;
     }
 
-    public static String formatBps(long bps) {
-        if (bps <= 0) {
+    public static String formatBytesPerSec(long bytesPerSec) {
+        if (bytesPerSec <= 0) {
             return "-";
         }
-        if (bps >= 1024L * 1024L) {
-            return String.format(Locale.US, "%.2f MB/s", bps / (1024.0 * 1024.0));
+        if (bytesPerSec >= 1024L * 1024L) {
+            return formatFixed(bytesPerSec / (1024.0 * 1024.0), 2) + " MB/s";
         }
-        if (bps >= 1024L) {
-            return String.format(Locale.US, "%.1f KB/s", bps / 1024.0);
+        if (bytesPerSec >= 1024L) {
+            return formatFixed(bytesPerSec / 1024.0, 1) + " KB/s";
         }
-        return bps + " B/s";
+        return bytesPerSec + " B/s";
+    }
+
+    public static String formatBitsPerSec(long bitsPerSec) {
+        if (bitsPerSec <= 0) {
+            return "-";
+        }
+        if (bitsPerSec >= 1_000_000L) {
+            return formatFixed(bitsPerSec / 1_000_000.0, 2) + " Mb/s";
+        }
+        if (bitsPerSec >= 1_000L) {
+            return formatFixed(bitsPerSec / 1_000.0, 1) + " Kb/s";
+        }
+        return bitsPerSec + " b/s";
+    }
+
+    public static String formatBps(long bps) {
+        return formatBytesPerSec(bps);
     }
 
     private static String safe(String value, String fallback) {
@@ -72,5 +87,47 @@ public final class StatusTextFormatter {
             return fallback;
         }
         return value.trim();
+    }
+
+    private static String formatFixed(double value, int decimals) {
+        if (!Double.isFinite(value)) {
+            return "0";
+        }
+        int safeDecimals = Math.max(0, Math.min(3, decimals));
+        long factor;
+        switch (safeDecimals) {
+            case 0:
+                factor = 1L;
+                break;
+            case 1:
+                factor = 10L;
+                break;
+            case 2:
+                factor = 100L;
+                break;
+            default:
+                factor = 1000L;
+                break;
+        }
+        long rounded = Math.round(value * factor);
+        long whole = Math.abs(rounded) / factor;
+        long fraction = Math.abs(rounded) % factor;
+        StringBuilder out = new StringBuilder();
+        if (rounded < 0L) {
+            out.append('-');
+        }
+        out.append(whole);
+        if (safeDecimals == 0) {
+            return out.toString();
+        }
+        out.append('.');
+        if (safeDecimals >= 3 && fraction < 100L) {
+            out.append('0');
+        }
+        if (safeDecimals >= 2 && fraction < 10L) {
+            out.append('0');
+        }
+        out.append(fraction);
+        return out.toString();
     }
 }

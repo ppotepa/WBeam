@@ -53,6 +53,10 @@ public final class HostApiClient {
     private static final String STATE_RECONNECTING = "RECONNECTING";
     private static final String STATE_STARTING = "STARTING";
     private static final String STATE_IDLE = "IDLE";
+    private static final long BITS_PER_BYTE = 8L;
+    private static final String STATUS_SESSION_PATH = appendSessionQuery(STATUS_PATH);
+    private static final String HEALTH_SESSION_PATH = appendSessionQuery(HEALTH_PATH);
+    private static final String METRICS_SESSION_PATH = appendSessionQuery(METRICS_PATH);
 
     public  static final int  API_RETRY_ATTEMPTS      = 2;
     public  static final long API_RETRY_BASE_DELAY_MS = 300L;
@@ -87,6 +91,9 @@ public final class HostApiClient {
             .connectionPool(HTTP_PROBE_POOL)
             .retryOnConnectionFailure(false)
             .build();
+    private static final Request STATUS_GET_REQUEST = buildGetRequest(STATUS_SESSION_PATH);
+    private static final Request HEALTH_GET_REQUEST = buildGetRequest(HEALTH_SESSION_PATH);
+    private static final Request METRICS_GET_REQUEST = buildGetRequest(METRICS_SESSION_PATH);
 
     // Singleton — no instances needed.
     private HostApiClient() {}
@@ -141,6 +148,12 @@ public final class HostApiClient {
         if (API_IMPL_LOCAL) {
             return apiRequest(method, path, payload);
         }
+        if (payload == null && GET_METHOD.equalsIgnoreCase(method)) {
+            Request cachedGetRequest = resolveCachedGetRequest(path);
+            if (cachedGetRequest != null) {
+                return apiRequestWithRetry(cachedGetRequest, attempts);
+            }
+        }
         IOException lastIo = null;
         int effectiveAttempts = Math.max(1, attempts);
         for (int i = 0; i < effectiveAttempts; i++) {
@@ -164,6 +177,54 @@ public final class HostApiClient {
     }
 
     /**
+     * Execute a prebuilt HTTP request against the control API with exponential-backoff retry.
+     */
+    @SuppressWarnings({"java:S2676", "java:S1192"})
+    public static JSONObject apiRequestWithRetry(
+            Request request,
+            int attempts
+    ) throws IOException, JSONException {
+        IOException lastIo = null;
+        int effectiveAttempts = Math.max(1, attempts);
+        for (int i = 0; i < effectiveAttempts; i++) {
+            try {
+                return apiRequest(request);
+            } catch (IOException io) {
+                lastIo = io;
+                if (isLikelyStaleHttpConnection(io)) {
+                    API_HTTP.connectionPool().evictAll();
+                }
+                if (i == effectiveAttempts - 1) {
+                    break;
+                }
+                long baseDelay = Math.min(5000L, API_RETRY_BASE_DELAY_MS * (1L << i));
+                long jitterBound = Math.max(1L, baseDelay / 4L + 1L);
+                long jitter = RANDOM.nextLong(jitterBound);
+                SystemClock.sleep(baseDelay + jitter);
+            }
+        }
+        throw lastIo != null ? lastIo : new IOException("request failed");
+    }
+
+    public static JSONObject getStatusWithRetry(int attempts) throws IOException, JSONException {
+        return API_IMPL_LOCAL
+                ? apiRequestWithRetry(GET_METHOD, STATUS_PATH, null, attempts)
+                : apiRequestWithRetry(STATUS_GET_REQUEST, attempts);
+    }
+
+    public static JSONObject getHealthWithRetry(int attempts) throws IOException, JSONException {
+        return API_IMPL_LOCAL
+                ? apiRequestWithRetry(GET_METHOD, HEALTH_PATH, null, attempts)
+                : apiRequestWithRetry(HEALTH_GET_REQUEST, attempts);
+    }
+
+    public static JSONObject getMetricsWithRetry(int attempts) throws IOException, JSONException {
+        return API_IMPL_LOCAL
+                ? apiRequestWithRetry(GET_METHOD, METRICS_PATH, null, attempts)
+                : apiRequestWithRetry(METRICS_GET_REQUEST, attempts);
+    }
+
+    /**
      * Execute a single HTTP request against the control API.
      */
     public static JSONObject apiRequest(
@@ -179,16 +240,18 @@ public final class HostApiClient {
             ? RequestBody.create(JSON_MEDIA_TYPE, payload.toString())
                 : null;
         String sessionPath = appendSessionQuery(path);
-        Request request = new Request.Builder()
-                .url(API_BASE + sessionPath)
+        Request request = new Request.Builder().url(API_BASE + sessionPath)
                 .header("Accept", "application/json")
                 .method(method, body)
                 .build();
+        return apiRequest(request);
+    }
 
+    public static JSONObject apiRequest(Request request) throws IOException, JSONException {
         try (Response response = API_HTTP.newCall(request).execute()) {
             int code = response.code();
             ResponseBody responseBody = response.body();
-            String text = responseBody != null ? responseBody.string().trim() : "";
+            String text = responseBody != null ? responseBody.string() : "";
             if (code < 200 || code >= 300) {
                 throw new IOException("HTTP " + code + ": " + text);
             }
@@ -262,6 +325,28 @@ public final class HostApiClient {
         return path.startsWith("/") ? path : ("/" + path);
     }
 
+    private static Request buildGetRequest(String sessionPath) {
+        return new Request.Builder()
+                .url(API_BASE + sessionPath)
+                .header("Accept", "application/json")
+                .get()
+                .build();
+    }
+
+    private static Request resolveCachedGetRequest(String path) {
+        String normalized = normalizePath(path);
+        if (STATUS_PATH.equals(normalized)) {
+            return STATUS_GET_REQUEST;
+        }
+        if (HEALTH_PATH.equals(normalized)) {
+            return HEALTH_GET_REQUEST;
+        }
+        if (METRICS_PATH.equals(normalized)) {
+            return METRICS_GET_REQUEST;
+        }
+        return null;
+    }
+
     private static synchronized JSONObject localApiRequest(
             String method,
             String path,
@@ -319,11 +404,11 @@ public final class HostApiClient {
     private static JSONObject handleClientMetricsRequest(JSONObject payload, long nowSec, long nowMs) {
         double recvFps = payload != null ? payload.optDouble("recv_fps", 0.0) : 0.0;
         double presentFps = payload != null ? payload.optDouble("present_fps", 0.0) : 0.0;
-        long recvBps = payload != null ? payload.optLong("recv_bps", 0L) : 0L;
+        long recvBytesPerSec = payload != null ? payload.optLong("recv_bps", 0L) : 0L;
         LocalApiState.latestPresentFps = presentFps;
-        LocalApiState.latestRecvBps = recvBps;
+        LocalApiState.latestRecvBytesPerSec = recvBytesPerSec;
 
-        boolean flowing = recvBps > 0L || recvFps >= 1.0 || presentFps >= 1.0;
+        boolean flowing = recvBytesPerSec > 0L || recvFps >= 1.0 || presentFps >= 1.0;
         if (flowing) {
             LocalApiState.lastFlowAtMs = nowMs;
             if (LocalApiState.firstFlowAtSec == 0L) {
@@ -372,7 +457,7 @@ public final class HostApiClient {
         metrics.put("frame_out", 0);
         metrics.put("drops", 0);
         metrics.put("reconnects", 0);
-        metrics.put("bitrate_actual_bps", LocalApiState.latestRecvBps);
+        metrics.put("bitrate_actual_bps", LocalApiState.latestRecvBytesPerSec * BITS_PER_BYTE);
 
         long streamUptimeSec = 0L;
         if (STATE_STREAMING.equals(LocalApiState.state)
@@ -418,7 +503,7 @@ public final class HostApiClient {
         LocalApiState.lastFlowAtMs = 0L;
         LocalApiState.firstFlowAtSec = 0L;
         LocalApiState.latestPresentFps = 0.0;
-        LocalApiState.latestRecvBps = 0L;
+        LocalApiState.latestRecvBytesPerSec = 0L;
     }
 
     private static final class LocalApiState {
@@ -429,7 +514,7 @@ public final class HostApiClient {
         private static long firstFlowAtSec = 0L;
         private static long lastFlowAtMs = 0L;
         private static double latestPresentFps = 0.0;
-        private static long latestRecvBps = 0L;
+        private static long latestRecvBytesPerSec = 0L;
         private static final String HOST_NAME = "android-local";
     }
 }

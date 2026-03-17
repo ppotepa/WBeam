@@ -6,8 +6,6 @@ import java.util.Locale;
  * Builds runtime HUD web payload (chips/cards/details/trend/html shell).
  */
 public final class RuntimeHudWebPayloadBuilder {
-    private static final String METRIC_FORMAT = "%.2f ms";
-
     private RuntimeHudWebPayloadBuilder() {}
 
     public static final class Input {
@@ -342,15 +340,33 @@ public final class RuntimeHudWebPayloadBuilder {
         }
     }
 
-    public static String build(Input in) {
-        String streamMode = String.format(
-                Locale.US,
-                "%s | %dx%d | %.0ffps",
-                in.getSelectedEncoder().toUpperCase(Locale.US),
-                in.getStreamWidth(),
-                in.getStreamHeight(),
-                in.getTargetFps()
-        );
+    @SuppressWarnings("java:S1104")
+    public static final class RenderPayload {
+        private RuntimeHudShellRenderer.HtmlContent htmlContent;
+        private String updateScript;
+
+        public RuntimeHudShellRenderer.HtmlContent getHtmlContent() {
+            return htmlContent;
+        }
+
+        public void setHtmlContent(RuntimeHudShellRenderer.HtmlContent htmlContent) {
+            this.htmlContent = htmlContent;
+        }
+
+        public String getUpdateScript() {
+            return updateScript;
+        }
+
+        public void setUpdateScript(String updateScript) {
+            this.updateScript = updateScript;
+        }
+    }
+
+    public static RenderPayload build(Input in) {
+        String toneClass = HudRenderSupport.hudToneClass(in.getTone());
+        String streamMode = HudRenderSupport.safeText(in.getSelectedEncoder()).toUpperCase(Locale.US)
+                + " | " + in.getStreamWidth() + "x" + in.getStreamHeight()
+                + " | " + Math.round(in.getTargetFps()) + "fps";
         String profileRev = HudRenderSupport.safeText(in.getDaemonBuildRevision()).equals("-")
                 ? HudRenderSupport.safeText(in.getAppBuildRevision())
                 : HudRenderSupport.safeText(in.getDaemonBuildRevision());
@@ -360,21 +376,21 @@ public final class RuntimeHudWebPayloadBuilder {
         chips.append(HudRenderSupport.hudChip("PROFILE REV", profileRev, ""));
         chips.append(HudRenderSupport.hudChip("STREAM MODE", streamMode, ""));
         chips.append(HudRenderSupport.hudChip("DEVICE", in.getDaemonHostName(), ""));
-        chips.append(HudRenderSupport.hudChip("STATE", in.getDaemonStateUi(), HudRenderSupport.hudToneClass(in.getTone())));
+        chips.append(HudRenderSupport.hudChip("STATE", in.getDaemonStateUi(), toneClass));
         if (in.isTuningActive()) {
             chips.append(HudRenderSupport.hudChip("TUNING", "ACTIVE", "state-warn"));
         }
 
         StringBuilder cards = new StringBuilder();
-        cards.append(HudRenderSupport.hudCard("PRESENT FPS", String.format(Locale.US, "%.1f", in.getPresentFps()), HudRenderSupport.hudToneClass(in.getTone())));
-        cards.append(HudRenderSupport.hudCard("RECV FPS", String.format(Locale.US, "%.1f", in.getRecvFps()), ""));
-        cards.append(HudRenderSupport.hudCard("DECODE FPS", String.format(Locale.US, "%.1f", in.getDecodeFps()), ""));
-        cards.append(HudRenderSupport.hudCard("LIVE MBPS", HudRenderSupport.fmtDoubleOrPlaceholder(in.getLiveMbps(), "%.2f", "PENDING"), HudRenderSupport.hudToneClass(in.getTone())));
-        cards.append(HudRenderSupport.hudCard("E2E p95", String.format(Locale.US, "%.1f ms", in.getE2eP95()), HudRenderSupport.hudToneClass(in.getTone())));
-        cards.append(HudRenderSupport.hudCard("Decode p95", String.format(Locale.US, METRIC_FORMAT, in.getDecodeP95()), ""));
-        cards.append(HudRenderSupport.hudCard("Render p95", String.format(Locale.US, METRIC_FORMAT, in.getRenderP95()), ""));
-        cards.append(HudRenderSupport.hudCard("Frame p95", String.format(Locale.US, METRIC_FORMAT, in.getFrametimeP95()), ""));
-        cards.append(HudRenderSupport.hudCard("Drops / s", HudRenderSupport.fmtDoubleOrPlaceholder(in.getDropsPerSec(), "%.3f", "PENDING"), HudRenderSupport.hudToneClass(in.getTone())));
+        cards.append(HudRenderSupport.hudCard("PRESENT FPS", HudRenderSupport.fmt1(in.getPresentFps()), toneClass));
+        cards.append(HudRenderSupport.hudCard("RECV FPS", HudRenderSupport.fmt1(in.getRecvFps()), ""));
+        cards.append(HudRenderSupport.hudCard("DECODE FPS", HudRenderSupport.fmt1(in.getDecodeFps()), ""));
+        cards.append(HudRenderSupport.hudCard("LIVE MBPS", HudRenderSupport.fmtDoubleOrPlaceholder(in.getLiveMbps(), "%.2f", "PENDING"), toneClass));
+        cards.append(HudRenderSupport.hudCard("E2E p95", HudRenderSupport.fmt1(in.getE2eP95()) + " ms", toneClass));
+        cards.append(HudRenderSupport.hudCard("Decode p95", HudRenderSupport.fmtDoubleOrPlaceholder(in.getDecodeP95(), "%.2f", "-") + " ms", ""));
+        cards.append(HudRenderSupport.hudCard("Render p95", HudRenderSupport.fmtDoubleOrPlaceholder(in.getRenderP95(), "%.2f", "-") + " ms", ""));
+        cards.append(HudRenderSupport.hudCard("Frame p95", HudRenderSupport.fmtDoubleOrPlaceholder(in.getFrametimeP95(), "%.2f", "-") + " ms", ""));
+        cards.append(HudRenderSupport.hudCard("Drops / s", HudRenderSupport.fmtDoubleOrPlaceholder(in.getDropsPerSec(), "%.3f", "PENDING"), toneClass));
         cards.append(HudRenderSupport.hudCard("Drops total", String.valueOf(in.getDrops()), ""));
 
         StringBuilder details = new StringBuilder();
@@ -393,9 +409,9 @@ public final class RuntimeHudWebPayloadBuilder {
         details.append(HudRenderSupport.hudDetailRow("Daemon build", HudRenderSupport.safeText(in.getDaemonBuildRevision())));
 
         String trend = "runtime health=" + in.getTone().toUpperCase(Locale.US)
-                + " | recv=" + String.format(Locale.US, "%.1f", in.getRecvFps())
-                + " decode=" + String.format(Locale.US, "%.1f", in.getDecodeFps())
-                + " present=" + String.format(Locale.US, "%.1f", in.getPresentFps())
+                + " | recv=" + HudRenderSupport.fmt1(in.getRecvFps())
+                + " decode=" + HudRenderSupport.fmt1(in.getDecodeFps())
+                + " present=" + HudRenderSupport.fmt1(in.getPresentFps())
                 + " | drops=" + in.getDrops()
                 + (in.isTuningActive() ? " | tune=" + HudRenderSupport.safeText(in.getTuningLine()) : "");
 
@@ -407,6 +423,9 @@ public final class RuntimeHudWebPayloadBuilder {
         content.setDetailsRowsHtml(details.toString());
         content.setResourceRowsHtml(in.getResourceRowsHtml());
         content.setScaleClass("scale-1x");
-        return RuntimeHudShellRenderer.buildHtml(content);
+        RenderPayload payload = new RenderPayload();
+        payload.setHtmlContent(content);
+        payload.setUpdateScript(RuntimeHudShellRenderer.buildUpdateScript(content));
+        return payload;
     }
 }

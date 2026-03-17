@@ -84,7 +84,11 @@ public final class MainStatusCoordinator {
             TextView statsText,
             String line
     ) {
-        statusState.setStatsLine(MainActivityStatusPresenter.normalizeStatsLine(line));
-        statsText.setText(statusState.getStatsLine());
+        String normalized = MainActivityStatusPresenter.normalizeStatsLine(line);
+        if (normalized.equals(statusState.getStatsLine())) {
+            return;
+        }
+        statusState.setStatsLine(normalized);
+        statsText.setText(normalized);
     }
 }

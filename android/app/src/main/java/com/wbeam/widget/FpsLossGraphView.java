@@ -24,6 +24,7 @@ public class FpsLossGraphView extends View {
     private float[] lossHistory = new float[120];
     private int sampleCount = 0;
     private int writeIndex = 0;
+    private boolean redrawPending = false;
 
     public FpsLossGraphView(Context context) {
         super(context);
@@ -60,7 +61,7 @@ public class FpsLossGraphView extends View {
         lossHistory = new float[clamped];
         sampleCount = 0;
         writeIndex = 0;
-        invalidate();
+        requestRedraw();
     }
 
     public void addSample(double targetFps, double presentFps) {
@@ -77,12 +78,13 @@ public class FpsLossGraphView extends View {
         if (sampleCount < levelHistory.length) {
             sampleCount++;
         }
-        invalidate();
+        requestRedraw();
     }
 
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
+        redrawPending = false;
 
         int width = getWidth();
         int height = getHeight();
@@ -122,5 +124,13 @@ public class FpsLossGraphView extends View {
             float top = height - (level * height);
             canvas.drawRect(left, top, right, height, barPaint);
         }
+    }
+
+    private void requestRedraw() {
+        if (redrawPending) {
+            return;
+        }
+        redrawPending = true;
+        postInvalidateOnAnimation();
     }
 }

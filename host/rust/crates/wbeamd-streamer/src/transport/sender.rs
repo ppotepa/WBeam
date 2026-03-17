@@ -25,26 +25,23 @@ use crate::packetize::{build_header, build_hello, send_all_vectored};
 
 use super::HELLO_CODEC_PNG;
 
-// Arc<[u8]> shares the encoded payload between producer (keyframe cache) and
-// sender without a second heap allocation. Cloning the Arc is an atomic
-// increment, replacing the previous data.clone() on every keyframe.
 #[derive(Clone)]
 struct CachedKeyframe {
     pts_us: u64,
-    data: Arc<[u8]>,
+    buffer: gst::Buffer,
 }
 
 struct EncodedFrame {
     pts_us: u64,
     is_key: bool,
-    data: Arc<[u8]>,
+    buffer: gst::Buffer,
 }
 
 fn sender_queue_capacity(mode: StreamMode) -> usize {
     match mode {
         StreamMode::Ultra => 4,
-        StreamMode::Stable => 16,
-        StreamMode::Quality => 48,
+        StreamMode::Stable => 8,
+        StreamMode::Quality => 16,
     }
 }
 
@@ -259,8 +256,6 @@ fn producer_frame(
     last_keyframe: &Arc<Mutex<Option<CachedKeyframe>>>,
 ) -> Option<EncodedFrame> {
     let buf = sample.buffer()?;
-    let map = buf.map_readable().ok()?;
-    let data = map.as_slice();
     let pts_us = buf.pts().map(|t| t.useconds()).unwrap_or_else(|| {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -269,19 +264,19 @@ fn producer_frame(
     });
     let is_key =
         (codec_flags & HELLO_CODEC_PNG) != 0 || !buf.flags().contains(gst::BufferFlags::DELTA_UNIT);
-    let data_arc: Arc<[u8]> = Arc::from(data);
+    let buffer = buf.to_owned();
     if is_key {
         if let Ok(mut guard) = last_keyframe.lock() {
             *guard = Some(CachedKeyframe {
                 pts_us,
-                data: data_arc.clone(),
+                buffer: buffer.clone(),
             });
         }
     }
     Some(EncodedFrame {
         pts_us,
         is_key,
-        data: data_arc,
+        buffer,
     })
 }
 
@@ -458,8 +453,12 @@ fn send_cached_keyframe(
 ) {
     if let Ok(guard) = last_keyframe.lock() {
         if let Some(kf) = guard.as_ref() {
-            let kf_header = build_header(*seq, kf.pts_us, kf.data.len(), true);
-            if send_all_vectored(conn, &kf_header, &kf.data).is_ok() {
+            let Ok(map) = kf.buffer.map_readable() else {
+                return;
+            };
+            let payload = map.as_slice();
+            let kf_header = build_header(*seq, kf.pts_us, payload.len(), true);
+            if send_all_vectored(conn, &kf_header, payload).is_ok() {
                 *seq = seq.wrapping_add(1);
             }
         }
@@ -481,9 +480,9 @@ fn recv_frame(
     }
 }
 
-fn retry_keyframe_send(conn: &mut TcpStream, header: &[u8], frame: &EncodedFrame) -> bool {
+fn retry_keyframe_send(conn: &mut TcpStream, header: &[u8], payload: &[u8]) -> bool {
     for _ in 0..2 {
-        match send_all_vectored(conn, header, &frame.data) {
+        match send_all_vectored(conn, header, payload) {
             Ok(()) => return true,
             Err(ref retry_err)
                 if retry_err.kind() == std::io::ErrorKind::WouldBlock
@@ -506,13 +505,14 @@ fn complete_frame_send(seq: &mut u32, stats: &mut SessionStats) -> FrameSendOutc
 fn on_keyframe_timeout(
     conn: &mut TcpStream,
     runtime: SenderRuntime,
-    frame: &EncodedFrame,
+    _frame: &EncodedFrame,
     header: &[u8],
+    payload: &[u8],
     seq: u32,
     stats: &mut SessionStats,
 ) -> KeyframeRetryOutcome {
     stats.soft_timeout_key += 1;
-    if retry_keyframe_send(conn, header, frame) {
+    if retry_keyframe_send(conn, header, payload) {
         stats.key_retry_ok += 1;
         return KeyframeRetryOutcome::Recovered;
     }
@@ -521,7 +521,7 @@ fn on_keyframe_timeout(
     println!(
         "[wbeam-framed] soft-timeout on keyframe seq={} size={} mode={:?}",
         seq,
-        frame.data.len(),
+        payload.len(),
         runtime.stream_mode
     );
     KeyframeRetryOutcome::Dropped
@@ -532,12 +532,13 @@ fn timeout_send_outcome(
     runtime: SenderRuntime,
     frame: &EncodedFrame,
     header: &[u8],
+    payload: &[u8],
     seq: &mut u32,
     stats: &mut SessionStats,
 ) -> FrameSendOutcome {
     stats.send_timeouts += 1;
     if frame.is_key {
-        match on_keyframe_timeout(conn, runtime, frame, header, *seq, stats) {
+        match on_keyframe_timeout(conn, runtime, frame, header, payload, *seq, stats) {
             KeyframeRetryOutcome::Recovered => return complete_frame_send(seq, stats),
             KeyframeRetryOutcome::Dropped => {}
         }
@@ -566,14 +567,19 @@ fn send_frame(
     seq: &mut u32,
     stats: &mut SessionStats,
 ) -> FrameSendOutcome {
-    let header = build_header(*seq, frame.pts_us, frame.data.len(), frame.is_key);
-    match send_all_vectored(conn, &header, &frame.data) {
+    let Ok(map) = frame.buffer.map_readable() else {
+        stats.dropped += 1;
+        return FrameSendOutcome::Continue;
+    };
+    let payload = map.as_slice();
+    let header = build_header(*seq, frame.pts_us, payload.len(), frame.is_key);
+    match send_all_vectored(conn, &header, payload) {
         Ok(()) => complete_frame_send(seq, stats),
         Err(ref err)
             if err.kind() == std::io::ErrorKind::WouldBlock
                 || err.kind() == std::io::ErrorKind::TimedOut =>
         {
-            timeout_send_outcome(conn, runtime, &frame, &header, seq, stats)
+            timeout_send_outcome(conn, runtime, &frame, &header, payload, seq, stats)
         }
         Err(ref err) if err.kind() == std::io::ErrorKind::Interrupted => FrameSendOutcome::Continue,
         Err(err) => hard_disconnect(err),
@@ -710,21 +716,31 @@ pub fn spawn_sender(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Once;
+
+    static GST_INIT: Once = Once::new();
+
+    fn init_gst() {
+        GST_INIT.call_once(|| {
+            gst::init().expect("gst init");
+        });
+    }
 
     #[test]
     fn enqueue_drop_mode_counts_drop_without_blocking() {
+        init_gst();
         let (tx, rx) = mpsc::sync_channel::<EncodedFrame>(1);
         let queue_stats = QueueStats::new();
         let stop = Arc::new(AtomicBool::new(false));
         let frame = EncodedFrame {
             pts_us: 1,
             is_key: false,
-            data: Arc::from([1u8, 2, 3]),
+            buffer: gst::Buffer::from_slice(vec![1u8, 2, 3]),
         };
         let another = EncodedFrame {
             pts_us: 2,
             is_key: false,
-            data: Arc::from([4u8, 5, 6]),
+            buffer: gst::Buffer::from_slice(vec![4u8, 5, 6]),
         };
 
         assert!(enqueue_frame(
@@ -749,18 +765,19 @@ mod tests {
 
     #[test]
     fn enqueue_blocking_mode_stops_when_requested() {
+        init_gst();
         let (tx, _rx) = mpsc::sync_channel::<EncodedFrame>(1);
         let queue_stats = QueueStats::new();
         let stop = Arc::new(AtomicBool::new(false));
         let first = EncodedFrame {
             pts_us: 1,
             is_key: false,
-            data: Arc::from([1u8]),
+            buffer: gst::Buffer::from_slice(vec![1u8]),
         };
         let second = EncodedFrame {
             pts_us: 2,
             is_key: false,
-            data: Arc::from([2u8]),
+            buffer: gst::Buffer::from_slice(vec![2u8]),
         };
 
         assert!(enqueue_frame(

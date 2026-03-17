@@ -980,7 +980,7 @@ impl DaemonCore {
             client.recv_fps,
             client.decode_fps,
             client.present_fps,
-            client.recv_bps as f64 / 1_000_000.0,
+            (client.recv_bps as f64 * 8.0) / 1_000_000.0,
             client.decode_time_ms_p95,
             client.e2e_latency_ms_p95,
         );
@@ -1029,7 +1029,7 @@ impl DaemonCore {
             inner.metrics.drops = client.dropped_frames.saturating_add(client.too_late_frames);
         }
         if client.recv_bps > 0 {
-            inner.metrics.bitrate_actual_bps = client.recv_bps;
+            inner.metrics.bitrate_actual_bps = client.recv_bps.saturating_mul(8);
         }
     }
 
@@ -1053,7 +1053,7 @@ impl DaemonCore {
 
         inner.last_error = format!(
             "decode starvation: recv≈{:.2}Mb/s recv_fps={:.1} decode_fps={:.1} present_fps={:.1}",
-            client.recv_bps as f64 / 1_000_000.0,
+            (client.recv_bps as f64 * 8.0) / 1_000_000.0,
             client.recv_fps,
             client.decode_fps,
             client.present_fps
@@ -1796,7 +1796,9 @@ impl DaemonCore {
             pipe_handles.push(tokio::spawn(async move {
                 let mut lines = BufReader::new(stdout).lines();
                 while let Ok(Some(line)) = lines.next_line().await {
-                    info!(run_id, "stream: {line}");
+                    if !line.starts_with("WBEAM_EVENT:") {
+                        info!(run_id, "stream: {line}");
+                    }
                     core.on_stream_output(run_id, &line).await;
                 }
             }));
@@ -1806,7 +1808,9 @@ impl DaemonCore {
             pipe_handles.push(tokio::spawn(async move {
                 let mut lines = BufReader::new(stderr).lines();
                 while let Ok(Some(line)) = lines.next_line().await {
-                    warn!(run_id, "stream: {line}");
+                    if !line.starts_with("WBEAM_EVENT:") {
+                        warn!(run_id, "stream: {line}");
+                    }
                     core.on_stream_output(run_id, &line).await;
                 }
             }));
@@ -1900,12 +1904,26 @@ impl DaemonCore {
             return;
         }
 
+        let trimmed = line.trim_start();
         let streaming_started = Self::is_streaming_started_line(line);
-        let bitrate_actual_bps = proc::parse_kbps_line_to_bps(line);
-        let transport_runtime = proc::parse_transport_runtime_line(line);
-        let detected_last_error = Self::detect_last_error_from_log_line(line);
-        let needs_effective_runtime_snapshot =
-            line.trim_start().starts_with(EFFECTIVE_RUNTIME_PREFIX);
+        let needs_effective_runtime_snapshot = trimmed.starts_with(EFFECTIVE_RUNTIME_PREFIX);
+        let bitrate_actual_bps = line
+            .contains("kb/s:")
+            .then(|| proc::parse_kbps_line_to_bps(line))
+            .flatten();
+        let transport_runtime = (line.contains("pipeline_fps=") && line.contains("[wbeam-framed]"))
+            .then(|| proc::parse_transport_runtime_line(line))
+            .flatten();
+        let maybe_error_line = line.contains("ERROR")
+            || line.contains("error")
+            || line.contains("failed")
+            || line.contains("Failed")
+            || line.contains("panic")
+            || line.contains("cannot")
+            || line.contains("property '");
+        let detected_last_error = maybe_error_line
+            .then(|| Self::detect_last_error_from_log_line(line))
+            .flatten();
         let mut effective_reason: Option<String> = None;
 
         {

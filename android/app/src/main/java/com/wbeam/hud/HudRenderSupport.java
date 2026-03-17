@@ -18,6 +18,65 @@ public final class HudRenderSupport {
 
     private HudRenderSupport() {}
 
+    private static final class SeriesSnapshot {
+        private final double[] values;
+        private final int count;
+        private final double last;
+        private final double rawLow;
+        private final double rawHigh;
+        private final double displayLow;
+        private final double displayMid;
+        private final double displayHigh;
+
+        private SeriesSnapshot(
+                double[] values,
+                int count,
+                double last,
+                double rawLow,
+                double rawHigh,
+                double displayLow,
+                double displayMid,
+                double displayHigh
+        ) {
+            this.values = values;
+            this.count = count;
+            this.last = last;
+            this.rawLow = rawLow;
+            this.rawHigh = rawHigh;
+            this.displayLow = displayLow;
+            this.displayMid = displayMid;
+            this.displayHigh = displayHigh;
+        }
+
+        private static SeriesSnapshot empty() {
+            return new SeriesSnapshot(EMPTY_SERIES_WINDOW, 0, Double.NaN, Double.NaN, Double.NaN, 0.0, 0.0, 0.0);
+        }
+    }
+
+    public static String buildTrendCardHtml(
+            String label,
+            MetricSeriesBuffer series,
+            String toneClass,
+            String unitSuffix,
+            double fpsLowAnchor
+    ) {
+        SeriesSnapshot snapshot = snapshotSeries(label, series, fpsLowAnchor);
+        String bars = buildTrendSparkChart(snapshot, toneClass);
+        String stats = buildSeriesStats(snapshot, unitSuffix);
+        String meta = buildSeriesMetaHtml(snapshot, unitSuffix);
+        return "<div class='trend-card'><div class='trend-head'><span class='trend-label'>"
+                + escapeHtml(label)
+                + "</span><span class='trend-range "
+                + escapeHtml(toneClass == null ? "" : toneClass)
+                + "'>"
+                + escapeHtml(stats)
+                + "</span></div><div class='spark'>"
+                + bars
+                + "</div>"
+                + meta
+                + "</div>";
+    }
+
     @SuppressWarnings({"java:S3776", "java:S135"})
     public static String buildTrendSparkChartFromJson(JSONArray series, String toneClass) {
         if (series == null || series.length() == 0) {
@@ -92,6 +151,63 @@ public final class HudRenderSupport {
                 + "</svg>";
     }
 
+    private static String buildTrendSparkChart(SeriesSnapshot snapshot, String toneClass) {
+        if (snapshot.count <= 0 || snapshot.values.length == 0) {
+            return buildTrendSparkPlaceholderSvg(toneClass);
+        }
+        double lo = snapshot.rawLow;
+        double hi = snapshot.rawHigh;
+        if (!Double.isFinite(lo) || !Double.isFinite(hi)) {
+            return buildTrendSparkPlaceholderSvg(toneClass);
+        }
+        double span = hi - lo;
+        if (span < 1e-3) {
+            span = Math.max(1.0, Math.abs(hi) * 0.25);
+        }
+        double pad = Math.max(0.1, span * 0.12);
+        double yMin = lo - pad;
+        double yMax = hi + pad;
+        double ySpan = Math.max(1e-3, yMax - yMin);
+
+        String stroke = toneStrokeColor(toneClass);
+        String fill = toneFillColor(toneClass);
+        String dot = toneDotColor(toneClass);
+        if (snapshot.count == 1) {
+            double norm = clampDouble((snapshot.values[0] - yMin) / ySpan, 0.0, 1.0);
+            double y = 100.0 - (norm * 100.0);
+            return "<svg class='spark-svg' viewBox='0 0 100 100' preserveAspectRatio='none'>"
+                    + "<rect x='0' y='0' width='100' height='100' fill='transparent'/>"
+                    + "<line x1='0' y1='" + fmt2(y) + "' x2='100' y2='" + fmt2(y) + "' stroke='" + stroke + "' stroke-width='2.4'/>"
+                    + "<circle cx='50' cy='" + fmt2(y) + "' r='2.2' fill='" + dot + "'/>"
+                    + "</svg>";
+        }
+
+        StringBuilder polyline = new StringBuilder();
+        StringBuilder area = new StringBuilder("M 0 100 ");
+        StringBuilder dots = new StringBuilder();
+        for (int i = 0; i < snapshot.count; i++) {
+            double norm = clampDouble((snapshot.values[i] - yMin) / ySpan, 0.0, 1.0);
+            double x = (i * 100.0) / Math.max(1, snapshot.count - 1);
+            double y = 100.0 - (norm * 100.0);
+            area.append("L ").append(fmt2(x)).append(" ").append(fmt2(y)).append(" ");
+            polyline.append(fmt2(x)).append(",").append(fmt2(y)).append(" ");
+            dots.append("<circle cx='")
+                    .append(fmt2(x))
+                    .append("' cy='")
+                    .append(fmt2(y))
+                    .append("' r='1.0' fill='")
+                    .append(dot)
+                    .append("'/>");
+        }
+        area.append("L 100 100 Z");
+        return "<svg class='spark-svg' viewBox='0 0 100 100' preserveAspectRatio='none'>"
+                + "<rect x='0' y='0' width='100' height='100' fill='transparent'/>"
+                + "<path d='" + area + "' fill='" + fill + "'/>"
+                + "<polyline points='" + polyline + "' fill='none' stroke='" + stroke + "' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/>"
+                + dots
+                + "</svg>";
+    }
+
     private static String buildTrendSparkPlaceholderSvg(String toneClass) {
         String stroke = toneStrokeColor(toneClass);
         String fill = toneFillColor(toneClass);
@@ -148,7 +264,7 @@ public final class HudRenderSupport {
         if (!Double.isFinite(value)) {
             return "0.00";
         }
-        return String.format(Locale.US, "%.2f", value);
+        return formatFixed(value, 2);
     }
 
     public static String buildSparkPlaceholderBars(String toneClass, int count) {
@@ -190,7 +306,7 @@ public final class HudRenderSupport {
         if (!unit.isEmpty()) {
             unit = " " + unit;
         }
-        return String.format(Locale.US, "L %.2f%s · %.2f..%.2f", last, unit, lo, hi);
+        return "L " + formatFixed(last, 2) + unit + " · " + formatFixed(lo, 2) + ".." + formatFixed(hi, 2);
     }
 
     public static String buildSeriesMetaHtml(
@@ -286,7 +402,7 @@ public final class HudRenderSupport {
         if (!Double.isFinite(value)) {
             return "-";
         }
-        return String.format(Locale.US, "%.1f", value);
+        return formatFixed(value, 1);
     }
 
     public static double latestFiniteFromSeries(JSONArray series) {
@@ -309,15 +425,24 @@ public final class HudRenderSupport {
         if (Double.isNaN(value) || Double.isInfinite(value) || value < 0.0) {
             return fallback;
         }
+        if ("%.1f".equals(pattern)) {
+            return formatFixed(value, 1);
+        }
+        if ("%.2f".equals(pattern)) {
+            return formatFixed(value, 2);
+        }
+        if ("%.3f".equals(pattern)) {
+            return formatFixed(value, 3);
+        }
         return String.format(Locale.US, pattern, value);
     }
 
     public static String fmtLiveMbps(double liveMbps, double targetMbps) {
         if (!Double.isNaN(liveMbps) && !Double.isInfinite(liveMbps) && liveMbps > 0.0) {
-            return String.format(Locale.US, "%.2f", liveMbps);
+            return formatFixed(liveMbps, 2);
         }
         if (!Double.isNaN(targetMbps) && !Double.isInfinite(targetMbps) && targetMbps > 0.0) {
-            return String.format(Locale.US, "%.2f (target)", targetMbps);
+            return formatFixed(targetMbps, 2) + " (target)";
         }
         return PENDING_TEXT;
     }
@@ -367,12 +492,46 @@ public final class HudRenderSupport {
         if (value == null) {
             return "";
         }
-        return value
-                .replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\"", "&quot;")
-                .replace("'", "&#39;");
+        int specialAt = firstSpecialHtmlIndex(value);
+        if (specialAt < 0) {
+            return value;
+        }
+        StringBuilder escaped = new StringBuilder(value.length() + 16);
+        escaped.append(value, 0, specialAt);
+        for (int i = specialAt; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            switch (ch) {
+                case '&':
+                    escaped.append("&amp;");
+                    break;
+                case '<':
+                    escaped.append("&lt;");
+                    break;
+                case '>':
+                    escaped.append("&gt;");
+                    break;
+                case '"':
+                    escaped.append("&quot;");
+                    break;
+                case '\'':
+                    escaped.append("&#39;");
+                    break;
+                default:
+                    escaped.append(ch);
+                    break;
+            }
+        }
+        return escaped.toString();
+    }
+
+    private static int firstSpecialHtmlIndex(String value) {
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if (ch == '&' || ch == '<' || ch == '>' || ch == '"' || ch == '\'') {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private static double clampDouble(double value, double min, double max) {
@@ -380,6 +539,134 @@ public final class HudRenderSupport {
             return min;
         }
         return Math.max(min, Math.min(max, value));
+    }
+
+    private static String buildSeriesStats(SeriesSnapshot snapshot, String unitSuffix) {
+        if (snapshot.count <= 0) {
+            return PENDING_TEXT;
+        }
+        String unit = unitSuffix == null ? "" : unitSuffix.trim();
+        if (!unit.isEmpty()) {
+            unit = " " + unit;
+        }
+        return "L " + formatFixed(snapshot.last, 2) + unit
+                + " · " + formatFixed(snapshot.rawLow, 2)
+                + ".." + formatFixed(snapshot.rawHigh, 2);
+    }
+
+    private static String buildSeriesMetaHtml(SeriesSnapshot snapshot, String unitSuffix) {
+        String unit = unitSuffix == null ? "" : unitSuffix.trim();
+        if (!unit.isEmpty()) {
+            unit = " " + unit;
+        }
+        if (snapshot.count <= 0) {
+            return "<div class='trend-meta'>"
+                    + "<div class='trend-meta-row'>"
+                    + "<span class='trend-meta-item low'>LOW: -</span>"
+                    + "<span class='trend-meta-item mid'>MID: -</span>"
+                    + "<span class='trend-meta-item high'>HIGH: -</span>"
+                    + "</div>"
+                    + "<div class='trend-meta-cur'>CUR: -</div>"
+                    + "</div>";
+        }
+        return "<div class='trend-meta'>"
+                + "<div class='trend-meta-row'>"
+                + "<span class='trend-meta-item low'>LOW: " + escapeHtml(fmt1(snapshot.displayLow) + unit) + "</span>"
+                + "<span class='trend-meta-item mid'>MID: " + escapeHtml(fmt1(snapshot.displayMid) + unit) + "</span>"
+                + "<span class='trend-meta-item high'>HIGH: " + escapeHtml(fmt1(snapshot.displayHigh) + unit) + "</span>"
+                + "</div>"
+                + "<div class='trend-meta-cur'>CUR: " + escapeHtml(fmt1(snapshot.last) + unit) + "</div>"
+                + "</div>";
+    }
+
+    private static SeriesSnapshot snapshotSeries(String metricLabel, MetricSeriesBuffer series, double fpsLowAnchor) {
+        if (series == null || series.isEmpty()) {
+            return SeriesSnapshot.empty();
+        }
+        int count = 0;
+        double last = Double.NaN;
+        double lo = Double.POSITIVE_INFINITY;
+        double hi = Double.NEGATIVE_INFINITY;
+        for (Double sample : series) {
+            if (sample == null || !Double.isFinite(sample)) {
+                continue;
+            }
+            double value = sample;
+            last = value;
+            lo = Math.min(lo, value);
+            hi = Math.max(hi, value);
+            count++;
+        }
+        if (count == 0 || !Double.isFinite(last) || !Double.isFinite(lo) || !Double.isFinite(hi)) {
+            return SeriesSnapshot.empty();
+        }
+        double[] values = new double[count];
+        int idx = 0;
+        for (Double sample : series) {
+            if (sample == null || !Double.isFinite(sample)) {
+                continue;
+            }
+            values[idx++] = sample;
+            if (idx == count) {
+                break;
+            }
+        }
+        String key = normalizeMetricKey(metricLabel);
+        double displayLow;
+        if ("fps".equals(key)) {
+            displayLow = fpsLowAnchor;
+        } else if ("mbps".equals(key) || "latency".equals(key) || "drops".equals(key) || "queue".equals(key)) {
+            displayLow = 0.0;
+        } else {
+            displayLow = Math.max(0.0, Math.min(lo, hi));
+        }
+        double displayHigh = Math.max(hi, displayLow + 1.0);
+        double displayMid = (displayLow + displayHigh) * 0.5;
+        return new SeriesSnapshot(values, count, last, lo, hi, displayLow, displayMid, displayHigh);
+    }
+
+    private static String formatFixed(double value, int decimals) {
+        if (!Double.isFinite(value)) {
+            return "-";
+        }
+        int safeDecimals = Math.max(0, Math.min(3, decimals));
+        long factor;
+        switch (safeDecimals) {
+            case 0:
+                factor = 1L;
+                break;
+            case 1:
+                factor = 10L;
+                break;
+            case 2:
+                factor = 100L;
+                break;
+            default:
+                factor = 1000L;
+                break;
+        }
+        long rounded = Math.round(value * factor);
+        boolean negative = rounded < 0L;
+        long abs = Math.abs(rounded);
+        long whole = abs / factor;
+        long fraction = abs % factor;
+        StringBuilder out = new StringBuilder();
+        if (negative) {
+            out.append('-');
+        }
+        out.append(whole);
+        if (safeDecimals <= 0) {
+            return out.toString();
+        }
+        out.append('.');
+        if (safeDecimals >= 3 && fraction < 100L) {
+            out.append('0');
+        }
+        if (safeDecimals >= 2 && fraction < 10L) {
+            out.append('0');
+        }
+        out.append(fraction);
+        return out.toString();
     }
 
     private static String normalizeTone(String toneClass) {

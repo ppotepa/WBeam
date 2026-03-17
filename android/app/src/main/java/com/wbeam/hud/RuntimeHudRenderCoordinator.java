@@ -5,6 +5,8 @@ import android.webkit.WebView;
 import android.widget.TextView;
 
 public final class RuntimeHudRenderCoordinator {
+    private static final String MODE_RUNTIME = "runtime";
+
     public static final class Input {
         private MetricSeriesBuffer runtimePresentSeries;
         private MetricSeriesBuffer runtimeMbpsSeries;
@@ -239,6 +241,26 @@ public final class RuntimeHudRenderCoordinator {
 
     public static void render(Input input) {
         RuntimeHudUpdateState state = input.getState();
+        HudOverlayDisplay.State overlayState = input.getHudOverlayState();
+        long semanticSignature = buildRuntimeSemanticSignature(input, state);
+        if (renderFromCacheIfFresh(input, overlayState, semanticSignature)) {
+            RuntimeHudTrendComposer.appendSamples(
+                    input.getRuntimePresentSeries(),
+                    input.getRuntimeMbpsSeries(),
+                    input.getRuntimeDropSeries(),
+                    input.getRuntimeLatencySeries(),
+                    input.getRuntimeQueueSeries(),
+                    state.presentFps,
+                    state.bitrateMbps,
+                    state.dropPerSec,
+                    state.e2eP95,
+                    state.qT,
+                    state.qD,
+                    state.qR
+            );
+            return;
+        }
+
         String runtimeChartsHtml = RuntimeHudTrendComposer.appendSamplesAndBuildHtml(
                 input.getRuntimePresentSeries(),
                 input.getRuntimeMbpsSeries(),
@@ -255,7 +277,7 @@ public final class RuntimeHudRenderCoordinator {
                 state.pressureState.tone,
                 input.getFpsLowAnchor()
         );
-        RuntimeHudOverlayPipeline.render(
+        RuntimeHudOverlayRenderer.Rendered rendered = RuntimeHudOverlayPipeline.render(
                 input.isDaemonReachable(),
                 input.getSelectedProfile(),
                 input.getSelectedEncoder(),
@@ -299,5 +321,102 @@ public final class RuntimeHudRenderCoordinator {
                 input.getHudOverlayState(),
                 input.getHudTextColorLive()
         );
+        if (overlayState != null) {
+            overlayState.setRuntimeSemanticSignature(semanticSignature);
+            overlayState.setLastRuntimeTextFallback(rendered.textFallback == null ? "" : rendered.textFallback);
+        }
+    }
+
+    private static boolean renderFromCacheIfFresh(
+            Input input,
+            HudOverlayDisplay.State overlayState,
+            long semanticSignature
+    ) {
+        if (overlayState == null
+                || overlayState.getRuntimeSemanticSignature() != semanticSignature
+                || !MODE_RUNTIME.equals(overlayState.getMode())) {
+            return false;
+        }
+        WebView webView = input.getPerfHudWebView();
+        TextView textView = input.getPerfHudText();
+        if (webView != null && overlayState.getLastWebHtml() != null && !overlayState.getLastWebHtml().isEmpty()) {
+            HudOverlayDisplay.showWebOnly(
+                    webView,
+                    textView,
+                    MODE_RUNTIME,
+                    overlayState
+            );
+        } else if (textView != null && overlayState.getLastRuntimeTextFallback() != null) {
+            HudOverlayDisplay.showTextOnly(
+                    webView,
+                    textView,
+                    MODE_RUNTIME,
+                    overlayState.getLastRuntimeTextFallback(),
+                    input.getHudTextColorLive(),
+                    overlayState
+            );
+        } else {
+            return false;
+        }
+        View panel = input.getPerfHudPanel();
+        if (panel != null) {
+            panel.setAlpha(0.96f);
+        }
+        return true;
+    }
+
+    private static long buildRuntimeSemanticSignature(Input input, RuntimeHudUpdateState state) {
+        long sig = 17L;
+        sig = mix(sig, input.isDaemonReachable() ? 1L : 0L);
+        sig = mix(sig, input.getStreamWidth());
+        sig = mix(sig, input.getStreamHeight());
+        sig = mix(sig, input.getState().qTMax);
+        sig = mix(sig, input.getState().qDMax);
+        sig = mix(sig, input.getState().qRMax);
+        sig = mix(sig, state.qT);
+        sig = mix(sig, state.qD);
+        sig = mix(sig, state.qR);
+        sig = mix(sig, state.adaptiveLevel);
+        sig = mix(sig, state.drops);
+        sig = mix(sig, state.bpHigh);
+        sig = mix(sig, state.bpRecover);
+        sig = mix(sig, quantize(state.targetFps, 2.0));
+        sig = mix(sig, quantize(state.presentFps, 2.0));
+        sig = mix(sig, quantize(state.recvFps, 2.0));
+        sig = mix(sig, quantize(state.decodeFps, 2.0));
+        sig = mix(sig, quantize(state.bitrateMbps, 2.0));
+        sig = mix(sig, quantize(state.dropPerSec, 2.0));
+        sig = mix(sig, quantize(state.e2eP95, 2.0));
+        sig = mix(sig, quantize(state.decodeP95, 2.0));
+        sig = mix(sig, quantize(state.renderP95, 2.0));
+        sig = mix(sig, quantize(state.frametimeP95, 2.0));
+        sig = mix(sig, safeHash(input.getSelectedProfile()));
+        sig = mix(sig, safeHash(input.getSelectedEncoder()));
+        sig = mix(sig, safeHash(input.getDaemonHostName()));
+        sig = mix(sig, safeHash(input.getDaemonStateUi()));
+        sig = mix(sig, safeHash(input.getDaemonBuildRevision()));
+        sig = mix(sig, safeHash(input.getAppBuildRevision()));
+        sig = mix(sig, safeHash(input.getDaemonLastError()));
+        sig = mix(sig, safeHash(state.adaptiveAction));
+        sig = mix(sig, safeHash(state.reason));
+        sig = mix(sig, state.tuningActive ? 1L : 0L);
+        sig = mix(sig, safeHash(state.tuningLine));
+        sig = mix(sig, safeHash(state.pressureState != null ? state.pressureState.tone : ""));
+        return sig;
+    }
+
+    private static long mix(long left, long right) {
+        return (left * 31L) ^ right;
+    }
+
+    private static long quantize(double value, double stepsPerUnit) {
+        if (!Double.isFinite(value)) {
+            return 0L;
+        }
+        return Math.round(value * stepsPerUnit);
+    }
+
+    private static int safeHash(String value) {
+        return value == null ? 0 : value.hashCode();
     }
 }

@@ -52,7 +52,7 @@ public final class MainActivityUiBinder {
             return;
         }
         WebSettings settings = perfHudWebView.getSettings();
-        settings.setJavaScriptEnabled(false);
+        settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(false);
         settings.setAllowFileAccess(false);
         settings.setBuiltInZoomControls(false);
@@ -60,7 +60,7 @@ public final class MainActivityUiBinder {
         settings.setUseWideViewPort(false);
         settings.setLoadWithOverviewMode(false);
         perfHudWebView.setBackgroundColor(Color.TRANSPARENT);
-        perfHudWebView.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+        perfHudWebView.setLayerType(View.LAYER_TYPE_NONE, null);
         perfHudWebView.setVerticalScrollBarEnabled(false);
         perfHudWebView.setHorizontalScrollBarEnabled(false);
         perfHudWebView.setOverScrollMode(View.OVER_SCROLL_NEVER);

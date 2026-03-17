@@ -87,15 +87,7 @@ final class WbtpProtocol {
         if (remaining <= 0) {
             return;
         }
-        byte[] drain = new byte[Math.min(remaining, 256)];
-        int drained = 0;
-        while (drained < remaining) {
-            int read = input.read(drain, 0, Math.min(drain.length, remaining - drained));
-            if (read < 0) {
-                throw new IOException("WBTP: EOF while draining extended hello");
-            }
-            drained += read;
-        }
+        WbtpFrameIo.skipFully(input, new byte[Math.min(remaining, 256)], remaining);
     }
 
     private static HelloGeometry parseHelloGeometry(byte[] helloBuf, int helloHeaderSize, int extraBytes) {

@@ -52,8 +52,8 @@ fn build_ultra_profile(frame_ns: u64, mode_png: bool) -> BufferProfile {
 }
 
 fn build_stable_profile(frame_ns: u64, mode_png: bool) -> BufferProfile {
-    let queue_buffers = if mode_png { 12 } else { 10 };
-    let appsink_buffers = if mode_png { 10 } else { 8 };
+    let queue_buffers = if mode_png { 6 } else { 5 };
+    let appsink_buffers = if mode_png { 4 } else { 3 };
     profile_with_buffers(
         frame_ns,
         queue_buffers,
@@ -65,8 +65,8 @@ fn build_stable_profile(frame_ns: u64, mode_png: bool) -> BufferProfile {
 }
 
 fn build_quality_profile(frame_ns: u64, mode_png: bool) -> BufferProfile {
-    let queue_buffers = if mode_png { 20 } else { 24 };
-    let appsink_buffers = if mode_png { 16 } else { 20 };
+    let queue_buffers = if mode_png { 10 } else { 8 };
+    let appsink_buffers = if mode_png { 6 } else { 5 };
     profile_with_buffers(
         frame_ns,
         queue_buffers,

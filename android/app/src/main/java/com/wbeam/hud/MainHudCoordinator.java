@@ -9,6 +9,8 @@ import android.widget.TextView;
 import org.json.JSONObject;
 
 public final class MainHudCoordinator {
+    private static final long VISIBLE_HUD_RENDER_INTERVAL_MS = 700L;
+
     public interface IntProvider {
         int get();
     }
@@ -413,6 +415,7 @@ public final class MainHudCoordinator {
         if (input.getPerfHudText() == null) {
             return;
         }
+        boolean overlayVisible = isDebugOverlayVisible(input);
         RuntimeHudAvailabilityCoordinator.applyUnavailable(
                 input.getSelectedFpsProvider().get(),
                 input.getHudTextColorOffline(),
@@ -424,14 +427,26 @@ public final class MainHudCoordinator {
                             input.getState().latestFrameOutHost = frameOutHost;
                         },
                         line -> input.getState().compactLine = line,
-                        input.getHudTextOnlyHandler()::show,
+                        (modeTag, text, color) -> {
+                            if (overlayVisible) {
+                                input.getHudTextOnlyHandler().show(modeTag, text, color);
+                            }
+                        },
                         alpha -> {
-                            if (input.getPerfHudPanel() != null) {
+                            if (overlayVisible && input.getPerfHudPanel() != null) {
                                 input.getPerfHudPanel().setAlpha(alpha);
                             }
                         },
-                        input.getRefreshDebugOverlayHandler()::refresh,
-                        input.getSnapshotLogHandler()::onSnapshot
+                        () -> {
+                            if (overlayVisible) {
+                                input.getRefreshDebugOverlayHandler().refresh();
+                            }
+                        },
+                        message -> {
+                            if (overlayVisible) {
+                                input.getSnapshotLogHandler().onSnapshot(message);
+                            }
+                        }
                 )
         );
     }
@@ -449,6 +464,24 @@ public final class MainHudCoordinator {
         updateRuntimeHud(input, metrics, nowMs);
     }
 
+    private static boolean isDebugOverlayVisible(Input input) {
+        return input.getDebugOverlayVisibleProvider() == null
+                || input.getDebugOverlayVisibleProvider().get();
+    }
+
+    private static boolean shouldRenderVisibleOverlay(Input input, long nowMs) {
+        HudOverlayDisplay.State overlayState = input.getOverlayState();
+        return overlayState == null
+                || !isVisibleHudRenderIntervalActive(overlayState, nowMs);
+    }
+
+    private static boolean isVisibleHudRenderIntervalActive(
+            HudOverlayDisplay.State overlayState,
+            long nowMs
+    ) {
+        return nowMs - overlayState.getLastRenderAtMs() < VISIBLE_HUD_RENDER_INTERVAL_MS;
+    }
+
     private static boolean handleMissingMetrics(Input input, JSONObject metrics, long nowMs) {
         if (RuntimeHudAvailabilityCoordinator.shouldKeepLastMetrics(
                 metrics,
@@ -457,7 +490,9 @@ public final class MainHudCoordinator {
                 nowMs,
                 input.getMetricsStaleGraceMs()
         )) {
-            input.getSnapshotLogHandler().onSnapshot("state=metrics_stale grace=1");
+            if (isDebugOverlayVisible(input)) {
+                input.getSnapshotLogHandler().onSnapshot("state=metrics_stale grace=1");
+            }
             return true;
         }
         if (metrics != null) {
@@ -500,11 +535,36 @@ public final class MainHudCoordinator {
         input.getState().latestFrameOutHost = state.frameOutHost;
 
         input.getState().compactLine = output.getCompactLine();
-        input.getRefreshDebugOverlayHandler().refresh();
+        boolean overlayVisible = isDebugOverlayVisible(input);
+        if (overlayVisible) {
+            input.getRefreshDebugOverlayHandler().refresh();
+        }
 
         if (output.getPressureLog() != null) {
             Log.w(input.getLogTag(), output.getPressureLog());
         }
+
+        if (!overlayVisible || !shouldRenderVisibleOverlay(input, nowMs)) {
+            RuntimeHudTrendComposer.appendSamples(
+                    input.getRuntimePresentSeries(),
+                    input.getRuntimeMbpsSeries(),
+                    input.getRuntimeDropSeries(),
+                    input.getRuntimeLatencySeries(),
+                    input.getRuntimeQueueSeries(),
+                    state.presentFps,
+                    state.bitrateMbps,
+                    state.dropPerSec,
+                    state.e2eP95,
+                    state.qT,
+                    state.qD,
+                    state.qR
+            );
+            if (overlayVisible) {
+                input.getSnapshotLogHandler().onSnapshot(output.getDebugSnapshot());
+            }
+            return;
+        }
+        input.getOverlayState().setLastRenderAtMs(nowMs);
 
         int[] streamSize = input.getStreamSizeProvider().get();
         RuntimeHudRenderCoordinator.Input renderInput = new RuntimeHudRenderCoordinator.Input();

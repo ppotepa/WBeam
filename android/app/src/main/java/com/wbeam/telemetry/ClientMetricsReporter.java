@@ -22,6 +22,8 @@ public final class ClientMetricsReporter {
     private final WarnLogger      warnLogger;
 
     private long lastPostAt = 0L;
+    private boolean postInFlight = false;
+    private ClientMetricsSample pendingMetrics;
 
     /** Callback to surface warning messages to the UI live-log. */
     public interface WarnLogger {
@@ -42,27 +44,47 @@ public final class ClientMetricsReporter {
         if (metrics == null) {
             return;
         }
-        long now = SystemClock.elapsedRealtime();
-        if (now - lastPostAt < CLIENT_METRICS_INTERVAL_MS) {
+        ClientMetricsSample metricsToPost;
+        synchronized (this) {
+            pendingMetrics = metrics;
+            long now = SystemClock.elapsedRealtime();
+            if (postInFlight || now - lastPostAt < CLIENT_METRICS_INTERVAL_MS) {
+                return;
+            }
+            metricsToPost = pendingMetrics;
+            pendingMetrics = null;
+            postInFlight = true;
+            lastPostAt = now;
+        }
+
+        if (metricsToPost == null) {
             return;
         }
-        lastPostAt = now;
 
         try {
-            ioExecutor.execute(() -> {
-                try {
-                    HostApiClient.apiRequestWithRetry("POST", "/v1/client-metrics", metrics.toJson(), 1);
-                } catch (Exception e) {
-                    String msg = e.getMessage();
-                    if (msg == null) {
-                        msg = e.getClass().getSimpleName();
-                    }
-                    Log.w(TAG, "client-metrics post failed: " + msg);
-                    warnLogger.appendWarn("client-metrics post failed: " + msg);
-                }
-            });
+            ioExecutor.execute(() -> postMetrics(metricsToPost));
         } catch (java.util.concurrent.RejectedExecutionException ignored) {
-            // Executor is shutting down — drop stale telemetry, don't crash.
+            synchronized (this) {
+                postInFlight = false;
+            }
+            // Executor is shutting down — keep dropping stale telemetry, don't crash.
+        }
+    }
+
+    private void postMetrics(ClientMetricsSample metrics) {
+        try {
+            HostApiClient.apiRequestWithRetry("POST", "/v1/client-metrics", metrics.toJson(), 1);
+        } catch (Exception e) {
+            String msg = e.getMessage();
+            if (msg == null) {
+                msg = e.getClass().getSimpleName();
+            }
+            Log.w(TAG, "client-metrics post failed: " + msg);
+            warnLogger.appendWarn("client-metrics post failed: " + msg);
+        } finally {
+            synchronized (this) {
+                postInFlight = false;
+            }
         }
     }
 }

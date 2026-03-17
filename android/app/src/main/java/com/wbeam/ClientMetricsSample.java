@@ -11,6 +11,7 @@ public final class ClientMetricsSample {
     public final double recvFps;
     public final double decodeFps;
     public final double presentFps;
+    // Protocol key is recv_bps for compatibility, but value is bytes/sec.
     public final long   recvBps;
     public final double decodeMsP50;
     public final double decodeMsP95;

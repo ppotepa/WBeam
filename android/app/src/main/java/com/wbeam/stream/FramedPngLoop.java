@@ -12,6 +12,7 @@ import java.io.InputStream;
 import java.util.Locale;
 
 final class FramedPngLoop {
+    private static final long BACKLOG_CHECK_INTERVAL_MS = 100L;
 
     interface RuntimeState {
         boolean isRunning();
@@ -159,23 +160,32 @@ final class FramedPngLoop {
     }
 
     private void skipBacklogFramesIfNeeded(InputStream input, RunContext ctx) throws IOException {
+        if (!ctx.dropBacklogFrames) {
+            return;
+        }
+        long nowMs = SystemClock.elapsedRealtime();
+        if (ctx.lastBacklogCheckMs > 0L
+                && (nowMs - ctx.lastBacklogCheckMs) < BACKLOG_CHECK_INTERVAL_MS) {
+            return;
+        }
+        ctx.lastBacklogCheckMs = nowMs;
+
         int payloadEstimate = Math.max(8 * 1024, ctx.maxPayloadSeen + config.frameHeaderSize);
         int backlogBytes = Math.max(0, input.available());
         int backlogFramesEstimate = payloadEstimate > 0 ? (backlogBytes / payloadEstimate) : 0;
         int skippedBacklog = 0;
 
-        while (ctx.dropBacklogFrames && backlogFramesEstimate > config.frameBufferBudgetFrames) {
+        while (backlogFramesEstimate > config.frameBufferBudgetFrames) {
             WbtpProtocol.FrameHeader skippedFrameHeader = readFrameHeader(input, ctx.hdrBuf);
             if (skippedFrameHeader.resynced) {
                 ctx.resyncSuccessSec++;
             }
 
             long nextLen = skippedFrameHeader.payloadLen;
-            byte[] grownBacklogPayloadBuf = ensurePayloadCapacity(ctx.payloadBuf, (int) nextLen, ctx);
-            ctx.payloadBuf = grownBacklogPayloadBuf;
             ctx.maxPayloadSeen = Math.max(ctx.maxPayloadSeen, (int) nextLen);
-            
-            WbtpFrameIo.readFully(input, ctx.payloadBuf, (int) nextLen);
+
+            WbtpPayloadBuffer.validatePayloadLength((int) nextLen, config.framePayloadHardCap);
+            WbtpFrameIo.skipFully(input, ctx.skipScratch, (int) nextLen);
             ctx.bytes += config.frameHeaderSize + nextLen;
             skippedBacklog++;
 
@@ -292,8 +302,10 @@ final class FramedPngLoop {
         long lastPresentMs = SystemClock.elapsedRealtime();
         long expectedSeq = -1L;
         long lastQueuedPtsUs = -1L;
+        long lastBacklogCheckMs = 0L;
         final int seqGapBudget;
         final boolean dropBacklogFrames;
+        final byte[] skipScratch = new byte[16 * 1024];
         byte[] hdrBuf;
         byte[] payloadBuf;
 

@@ -11,7 +11,7 @@ public final class RuntimeHudOverlayPipeline {
     }
 
     @SuppressWarnings("java:S107")
-    public static void render(
+    public static RuntimeHudOverlayRenderer.Rendered render(
             boolean daemonReachable,
             String selectedProfile,
             String selectedEncoder,
@@ -106,7 +106,7 @@ public final class RuntimeHudOverlayPipeline {
                     perfHudWebView,
                     perfHudText,
                     MODE_RUNTIME,
-                    rendered.html,
+                    rendered.webPayload,
                     hudOverlayState
             ) && perfHudText != null) {
                 HudOverlayDisplay.showTextOnly(
@@ -131,5 +131,6 @@ public final class RuntimeHudOverlayPipeline {
         if (perfHudPanel != null) {
             perfHudPanel.setAlpha(0.96f);
         }
+        return rendered;
     }
 }

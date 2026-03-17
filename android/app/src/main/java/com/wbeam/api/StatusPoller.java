@@ -12,7 +12,7 @@ import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 
 /**
- * Polls the WBeam daemon's /status, /health, and /metrics endpoints every STATUS_POLL_MS.
+ * Polls the WBeam daemon's /status, /health, and /metrics endpoints.
  * Holds all daemon state fields so MainActivity can query them without coupling to the poll logic.
  */
 @SuppressWarnings({"java:S1068", "java:S1450", "java:S1192"})
@@ -20,16 +20,27 @@ public final class StatusPoller {
 
     private static final String TAG = "WBeamStatusPoller";
 
-    // 5 Hz telemetry/status polling for responsive HUD updates.
-    private static final long STATUS_POLL_MS           = 200L;
-    // Keep /health lower-frequency to avoid unnecessary overhead.
-    private static final int  HEALTH_POLL_EVERY        = 16;
+    // Keep reconnect/startup fast, but use battery-friendlier cadence otherwise.
+    private static final long STATUS_POLL_RECONNECT_MS          = 200L;
+    private static final long STATUS_POLL_STREAMING_VISIBLE_MS  = 800L;
+    private static final long STATUS_POLL_STREAMING_HIDDEN_MS   = 1_200L;
+    private static final long STATUS_POLL_IDLE_MS               = 3_000L;
+    private static final long STATUS_POLL_OFFLINE_MS            = 5_000L;
+    // /health is mostly static (service + revision), so keep it much less frequent.
+    private static final long HEALTH_POLL_INTERVAL_MS  = 20_000L;
+    // When HUD is hidden, host metrics don't need full 5 Hz cadence.
+    private static final int  METRICS_POLL_EVERY_STREAMING_HIDDEN = 2;
+    private static final long STATUS_UI_HEARTBEAT_MS   = 2_000L;
+    private static final long ENSURE_DECODER_INTERVAL_MS = 1_000L;
     private static final long AUTO_START_COOLDOWN_MS   = 4_000L;
 
     // ── Daemon state constants ─────────────────────────────────────────────────
     private static final String STATE_IDLE          = "IDLE";
     private static final String STATE_STREAMING     = "STREAMING";
     private static final String STATE_DISCONNECTED  = "DISCONNECTED";
+    private static final String STATE_CONNECTING    = "CONNECTING";
+    private static final String STATE_STARTING      = "STARTING";
+    private static final String STATE_RECONNECTING  = "RECONNECTING";
     private static final String LOG_API_PREFIX      = " api=";
     private static final String METRIC_CONNECTION_MODE = "connection_mode";
     private static final String METHOD_GET = "GET";
@@ -46,12 +57,18 @@ public final class StatusPoller {
     private long    daemonUptimeSec    = 0L;
     private String  daemonService      = "-";
     private String  daemonBuildRevision = "-";
-    private String  daemonStateSnapshot = "";
+    private boolean daemonStateLogInitialized = false;
+    private String  daemonStateLogValue = STATE_IDLE;
+    private long    daemonRunIdLogValue = 0L;
+    private String  daemonLastErrorLogValue = "";
     private String  buildMismatchSnapshot = "";
 
     // ── Poll bookkeeping ──────────────────────────────────────────────────────
     private volatile boolean statusPollInFlight = false;
     private long    statusPollTick   = 0L;
+    private long    lastUiDispatchAtMs = 0L;
+    private long    lastEnsureDecoderAtMs = 0L;
+    private long    nextHealthPollAtMs = 0L;
 
     // ── Auto-start state (shared with StreamSessionController via getters/setters) ──
     private long    suppressAutoStartUntil = 0L;
@@ -61,17 +78,22 @@ public final class StatusPoller {
     // ── Infrastructure ────────────────────────────────────────────────────────
     private final Handler         uiHandler;
     private final ExecutorService ioExecutor;
+    private final BoolProvider    metricsVisibleProvider;
     private final Callbacks       callbacks;
 
     private final Runnable pollTask = new Runnable() {
         @Override
         public void run() {
             pollAsync();
-            uiHandler.postDelayed(this, STATUS_POLL_MS);
+            uiHandler.postDelayed(this, nextPollDelayMs());
         }
     };
 
     // ── Callback interface ────────────────────────────────────────────────────
+
+    public interface BoolProvider {
+        boolean get();
+    }
 
     public interface Callbacks {
         /** Called on UI thread after a successful poll. */
@@ -106,9 +128,15 @@ public final class StatusPoller {
     // ── Constructor ───────────────────────────────────────────────────────────
 
     @SuppressWarnings("java:S107")
-    public StatusPoller(Handler uiHandler, ExecutorService ioExecutor, Callbacks callbacks) {
+    public StatusPoller(
+            Handler uiHandler,
+            ExecutorService ioExecutor,
+            BoolProvider metricsVisibleProvider,
+            Callbacks callbacks
+    ) {
         this.uiHandler  = uiHandler;
         this.ioExecutor = ioExecutor;
+        this.metricsVisibleProvider = metricsVisibleProvider;
         this.callbacks  = callbacks;
     }
 
@@ -165,19 +193,24 @@ public final class StatusPoller {
         }
         statusPollInFlight = true;
         long pollTick = ++statusPollTick;
-        boolean fetchHealth = (pollTick % HEALTH_POLL_EVERY) == 1;
+        long nowMs = SystemClock.elapsedRealtime();
+        boolean metricsVisible = metricsVisibleProvider != null && metricsVisibleProvider.get();
+        boolean fetchHealth = shouldFetchHealth(nowMs);
+        boolean fetchMetrics = shouldFetchMetrics(pollTick, metricsVisible, fetchHealth);
 
         ioExecutor.execute(() -> {
             try {
-                JSONObject status = HostApiClient.apiRequestWithRetry(
-                        METHOD_GET, PATH_STATUS, null, HostApiClient.API_RETRY_ATTEMPTS);
+                JSONObject status = HostApiClient.getStatusWithRetry(HostApiClient.API_RETRY_ATTEMPTS);
                 JSONObject health = fetchHealth
-                        ? HostApiClient.apiRequestWithRetry(
-                                METHOD_GET, PATH_HEALTH, null, HostApiClient.API_RETRY_ATTEMPTS)
+                        ? HostApiClient.getHealthWithRetry(HostApiClient.API_RETRY_ATTEMPTS)
                         : null;
-                JSONObject metricsPayload = HostApiClient.apiRequestWithRetry(
-                        METHOD_GET, PATH_METRICS, null, HostApiClient.API_RETRY_ATTEMPTS);
-                JSONObject metrics = mergeMetricsPayload(metricsPayload);
+                JSONObject metricsPayload = fetchMetrics
+                        ? HostApiClient.getMetricsWithRetry(metricsVisible ? HostApiClient.API_RETRY_ATTEMPTS : 1)
+                        : null;
+                if (health != null) {
+                    nextHealthPollAtMs = SystemClock.elapsedRealtime() + HEALTH_POLL_INTERVAL_MS;
+                }
+                JSONObject metrics = fetchMetrics ? mergeMetricsPayload(metricsPayload) : null;
                 uiHandler.post(() -> processStatusResult(status, health, metrics));
             } catch (Exception e) {
                 uiHandler.post(() -> processOfflineResult(e));
@@ -188,6 +221,7 @@ public final class StatusPoller {
     }
 
     private void processStatusResult(JSONObject status, JSONObject health, JSONObject metrics) {
+        long nowMs = SystemClock.elapsedRealtime();
         boolean wasReachable = daemonReachable;
         daemonReachable  = true;
 
@@ -204,23 +238,35 @@ public final class StatusPoller {
             : daemonBuildRevision;
         maybeLogBuildMismatch();
 
-        String newSnapshot = daemonState + "|" + daemonRunId + "|" + daemonLastError;
-        if (!newSnapshot.equals(daemonStateSnapshot)) {
-            daemonStateSnapshot = newSnapshot;
+        boolean statusChanged = !daemonStateLogInitialized
+                || !daemonState.equals(daemonStateLogValue)
+                || daemonRunId != daemonRunIdLogValue
+                || !daemonLastError.equals(daemonLastErrorLogValue);
+        if (statusChanged) {
+            daemonStateLogInitialized = true;
+            daemonStateLogValue = daemonState;
+            daemonRunIdLogValue = daemonRunId;
+            daemonLastErrorLogValue = daemonLastError;
             Log.i(TAG, "daemon state=" + daemonState + " run_id=" + daemonRunId
                     + LOG_API_PREFIX + HostApiClient.API_BASE
                     + (daemonLastError.isEmpty() ? "" : " last_error=" + daemonLastError));
         }
 
-        callbacks.onDaemonStatusUpdate(
-                true, wasReachable,
-                daemonHostName, daemonState, daemonRunId, daemonLastError, errorChanged,
-            daemonUptimeSec, daemonService, daemonBuildRevision, metrics
-        );
+        if (shouldDispatchUiUpdate(wasReachable, statusChanged, errorChanged, metrics, nowMs)) {
+            lastUiDispatchAtMs = nowMs;
+            callbacks.onDaemonStatusUpdate(
+                    true, wasReachable,
+                    daemonHostName, daemonState, daemonRunId, daemonLastError, errorChanged,
+                    daemonUptimeSec, daemonService, daemonBuildRevision, metrics
+            );
+        }
 
         if (STATE_STREAMING.equals(daemonState)) {
             autoStartPending = false;
-            callbacks.ensureDecoderRunning();
+            if (statusChanged || (nowMs - lastEnsureDecoderAtMs) >= ENSURE_DECODER_INTERVAL_MS) {
+                lastEnsureDecoderAtMs = nowMs;
+                callbacks.ensureDecoderRunning();
+            }
             return;
         }
 
@@ -258,8 +304,65 @@ public final class StatusPoller {
         boolean wasReachable = daemonReachable;
         daemonReachable = false;
         daemonState     = STATE_DISCONNECTED;
+        daemonStateLogInitialized = false;
+        nextHealthPollAtMs = 0L;
         Log.e(TAG, "daemon poll failed api=" + HostApiClient.API_BASE, e);
         callbacks.onDaemonOffline(wasReachable, e);
+    }
+
+    private boolean shouldDispatchUiUpdate(
+            boolean wasReachable,
+            boolean statusChanged,
+            boolean errorChanged,
+            JSONObject metrics,
+            long nowMs
+    ) {
+        if (!wasReachable || statusChanged || errorChanged || metrics != null) {
+            return true;
+        }
+        return (nowMs - lastUiDispatchAtMs) >= STATUS_UI_HEARTBEAT_MS;
+    }
+
+    private long nextPollDelayMs() {
+        if (!daemonReachable) {
+            return STATUS_POLL_OFFLINE_MS;
+        }
+        if (autoStartPending
+                || STATE_CONNECTING.equals(daemonState)
+                || STATE_STARTING.equals(daemonState)
+                || STATE_RECONNECTING.equals(daemonState)) {
+            return STATUS_POLL_RECONNECT_MS;
+        }
+        if (STATE_STREAMING.equals(daemonState)) {
+            return isMetricsVisible() ? STATUS_POLL_STREAMING_VISIBLE_MS : STATUS_POLL_STREAMING_HIDDEN_MS;
+        }
+        return STATUS_POLL_IDLE_MS;
+    }
+
+    private boolean shouldFetchMetrics(long pollTick, boolean metricsVisible, boolean fetchHealth) {
+        if (metricsVisible) {
+            return true;
+        }
+        if (fetchHealth) {
+            return false;
+        }
+        if (STATE_CONNECTING.equals(daemonState)
+                || STATE_STARTING.equals(daemonState)
+                || STATE_RECONNECTING.equals(daemonState)) {
+            return true;
+        }
+        if (STATE_STREAMING.equals(daemonState)) {
+            return (pollTick % METRICS_POLL_EVERY_STREAMING_HIDDEN) == 1L;
+        }
+        return false;
+    }
+
+    private boolean shouldFetchHealth(long nowMs) {
+        return !daemonReachable || nowMs >= nextHealthPollAtMs;
+    }
+
+    private boolean isMetricsVisible() {
+        return metricsVisibleProvider != null && metricsVisibleProvider.get();
     }
 
     /**

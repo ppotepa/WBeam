@@ -16,6 +16,7 @@ import java.util.Locale;
 
 @SuppressWarnings("java:S6541")
 final class FramedVideoDecodeLoop {
+    private static final long DRAIN_IDLE_CHECK_MS = 33L;
 
     private static final String SEP_SPS = " sps=";
     private static final String SEP_PPS = " pps=";
@@ -151,6 +152,7 @@ final class FramedVideoDecodeLoop {
         long flushCountSec = 0L;
         long recoveryUnlockSec = 0L;
         long waitGateDropsSec = 0L;
+        byte[] streamReadScratch = new byte[16 * 1024];
         long decodeNsTotal = 0L;
         long[] decodeNsBuf = new long[128];
         long[] decodeNsScratch = new long[128];
@@ -168,6 +170,7 @@ final class FramedVideoDecodeLoop {
         MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
         MediaCodecBridge.DrainStats drainStats = new MediaCodecBridge.DrainStats();
         int pendingDecodeQueue = 0;
+        long lastDrainAttemptMs = 0L;
 
         // ── Adaptive C5 watchdog thresholds ──────────────────────────────────
         // Start from the static values; after enough frames are decoded, scale
@@ -261,27 +264,14 @@ final class FramedVideoDecodeLoop {
             int payloadLen = frameHeader.payloadLen;
 
             WbtpPayloadBuffer.validatePayloadLength(payloadLen, framePayloadHardCap);
-            byte[] grownPayloadBuf = WbtpPayloadBuffer.ensureCapacity(
-                    payloadBuf,
-                    payloadLen,
-                    framePayloadHardCap,
-                    tag,
-                    "WBTP payload buffer grow "
-                            + SEP_SEQ + seqU32 + SEP_PAYLOAD + payloadLen + " mode=" + modeLabel + " "
-            );
-            if (grownPayloadBuf != payloadBuf) {
-                payloadBuf = grownPayloadBuf;
-                payloadGrowEvents++;
-            }
             maxPayloadSeen = Math.max(maxPayloadSeen, payloadLen);
-
-            WbtpFrameIo.readFully(input, payloadBuf, payloadLen);
-            bytes += frameHeaderSize + payloadLen;
 
             if (expectedSeq < 0) {
                 expectedSeq = seqU32;
             }
             if (seqU32 < expectedSeq) {
+                WbtpFrameIo.skipFully(input, streamReadScratch, payloadLen);
+                bytes += frameHeaderSize + payloadLen;
                 droppedSec++;
                 continue;
             }
@@ -289,143 +279,193 @@ final class FramedVideoDecodeLoop {
                 expectedSeq = seqU32;
             }
             if (lastQueuedPtsUs > 0 && ptsUs + 1_000 < lastQueuedPtsUs) {
+                WbtpFrameIo.skipFully(input, streamReadScratch, payloadLen);
+                bytes += frameHeaderSize + payloadLen;
                 droppedSec++;
                 expectedSeq = seqU32 + 1;
                 continue;
             }
 
-            if (legacyAvcBootstrap && codec == null) {
-                StreamNalUtils.AvcCsd avcCsd = StreamNalUtils.extractAvcCsd(payloadBuf, payloadLen);
-                if (avcCsd.sps != null) {
-                    legacySps = avcCsd.sps;
-                }
-                if (avcCsd.pps != null) {
-                    legacyPps = avcCsd.pps;
-                }
-                if (legacySps != null && legacyPps != null) {
-                    try {
-                        codec = MediaCodecBridge.createAvcDecoderWithCsd(
-                                legacySps,
-                                legacyPps,
-                                decodeWidth,
-                                decodeHeight,
-                                framePayloadInitialCap,
-                                surface
-                        );
-                        codecRef[0] = codec;
-                        boolean spsOk = MediaCodecBridge.queueCodecConfig(codec, legacySps, 2_000);
-                        boolean ppsOk = MediaCodecBridge.queueCodecConfig(codec, legacyPps, 2_000);
-                        if (!spsOk || !ppsOk) {
-                            Log.w(tag, "legacy AVC: codec-config enqueue failed"
-                                    + SEP_SPS + spsOk + SEP_PPS + ppsOk
-                                    + "; will wait for next keyframe");
-                        }
-                        waitForKeyframe = true;
-                        Log.i(tag, "legacy AVC decoder configured from in-stream SPS/PPS");
-                    } catch (IOException e) {
-                        throw e;
-                    } catch (Exception e) {
-                        throw new IOException("legacy AVC bootstrap failed", e);
-                    }
-                } else {
-                    droppedSec++;
-                    expectedSeq = seqU32 + 1;
-                    continue;
-                }
-            }
-
-            if (codec == null) {
-                droppedSec++;
-                expectedSeq = seqU32 + 1;
-                continue;
-            }
-
-            MediaCodecBridge.drainLatestFrame(
-                    codec,
-                    bufferInfo,
-                    drainStats,
-                    dropLateOutput,
-                    pendingDecodeQueue >= decodeQueueMaxFrames ? 16_000 : 5_000
-            );
             long nowAfterDrain = SystemClock.elapsedRealtime();
-            pendingDecodeQueue = Math.max(0, pendingDecodeQueue - drainStats.releasedCount);
-            if (drainStats.releasedCount > 0) {
-                lastDecodeProgressMs = nowAfterDrain;
-            } else if (pendingDecodeQueue >= decodeQueueMaxFrames
-                    && (nowAfterDrain - lastDecodeProgressMs) > 300) {
-                pendingDecodeQueue = decodeQueueMaxFrames - 1;
-            }
-            if (drainStats.renderedCount > 0) {
-                outFrames += drainStats.renderedCount;
-                lastPresentMs = nowAfterDrain;
-                totalInSincePresent = 0;
-                flushIssued = false;
-                if (drainStats.lastRenderedPtsUs > 0) {
-                    lastPresentedPtsUs = drainStats.lastRenderedPtsUs;
+            boolean decoderBackpressured = false;
+            if (codec != null) {
+                boolean shouldDrain = pendingDecodeQueue > 0
+                        || lastDrainAttemptMs == 0L
+                        || (nowAfterDrain - lastDrainAttemptMs) >= DRAIN_IDLE_CHECK_MS;
+                if (shouldDrain) {
+                    MediaCodecBridge.drainLatestFrame(
+                            codec,
+                            bufferInfo,
+                            drainStats,
+                            dropLateOutput,
+                            pendingDecodeQueue >= decodeQueueMaxFrames ? 16_000 : 5_000
+                    );
+                    lastDrainAttemptMs = nowAfterDrain;
+                    nowAfterDrain = SystemClock.elapsedRealtime();
+                } else {
+                    drainStats.reset();
                 }
-            }
-            tooLateSec += drainStats.droppedLateCount;
-            renderNsMax = Math.max(renderNsMax, drainStats.renderNsMax);
-
-            boolean isRecovery = frameIsKey || StreamNalUtils.containsRecoveryNal(
-                    payloadBuf, payloadLen, isHevc, frameResyncScanLimit
-            );
-            if (waitForKeyframe && isRecovery) {
-                waitForKeyframe = false;
-                recoveryUnlockSec++;
-                Log.w(tag, "recovery-unlock: seq=" + seqU32 + " key=" + frameIsKey
-                        + SEP_PAYLOAD + payloadLen + SEP_QDECODE + pendingDecodeQueue);
-                // For the modern AVC path the decoder was started without
-                // csd-0/csd-1 in the MediaFormat.  Extract SPS/PPS from the
-                // recovery frame (they are prepended by h264parse with
-                // config-interval=-1 + disable-passthrough=true) and queue
-                // them as BUFFER_FLAG_CODEC_CONFIG so the decoder knows the
-                // stream parameters before the first IDR payload is submitted.
-                if (!isHevc && !legacyAvcBootstrap && codec != null) {
-                    StreamNalUtils.AvcCsd csd = StreamNalUtils.extractAvcCsd(payloadBuf, payloadLen);
-                    boolean spsOk = csd.sps == null || MediaCodecBridge.queueCodecConfig(codec, csd.sps, 2_000);
-                    boolean ppsOk = csd.pps == null || MediaCodecBridge.queueCodecConfig(codec, csd.pps, 2_000);
-                    if (!spsOk || !ppsOk) {
-                        // Codec-config submission failed on recovery frame.
-                        // Reset to keyframe wait so the next IDR can retry cleanly.
-                        Log.w(tag, "recovery AVC: codec-config enqueue failed"
-                                + SEP_SPS + spsOk + SEP_PPS + ppsOk
-                                + SEP_SEQ + seqU32 + "; waiting for next keyframe");
-                        waitForKeyframe = true;
+                pendingDecodeQueue = Math.max(0, pendingDecodeQueue - drainStats.releasedCount);
+                if (drainStats.releasedCount > 0) {
+                    lastDecodeProgressMs = nowAfterDrain;
+                } else if (pendingDecodeQueue >= decodeQueueMaxFrames
+                        && (nowAfterDrain - lastDecodeProgressMs) > 300) {
+                    pendingDecodeQueue = decodeQueueMaxFrames - 1;
+                }
+                if (drainStats.renderedCount > 0) {
+                    outFrames += drainStats.renderedCount;
+                    lastPresentMs = nowAfterDrain;
+                    totalInSincePresent = 0;
+                    flushIssued = false;
+                    if (drainStats.lastRenderedPtsUs > 0) {
+                        lastPresentedPtsUs = drainStats.lastRenderedPtsUs;
                     }
                 }
+                tooLateSec += drainStats.droppedLateCount;
+                renderNsMax = Math.max(renderNsMax, drainStats.renderNsMax);
+                decoderBackpressured = pendingDecodeQueue >= decodeQueueMaxFrames;
             }
-            boolean canQueue = !waitForKeyframe
-                    && (pendingDecodeQueue < decodeQueueMaxFrames || isRecovery);
-            if (canQueue) {
-                long t0 = SystemClock.elapsedRealtimeNanos();
-                if (MediaCodecBridge.queueNal(codec, payloadBuf, 0, payloadLen, ptsUs, 1_000)) {
-                    long dn = SystemClock.elapsedRealtimeNanos() - t0;
-                    decodeNsTotal += dn;
-                    decodeNsBuf[(decodeNsBufN++) & 127] = dn;
-                    inFrames++;
-                    totalInSincePresent++;
-                    pendingDecodeQueue = Math.min(decodeQueueMaxFrames, pendingDecodeQueue + 1);
-                    lastDecodeProgressMs = nowAfterDrain;
-                    lastQueuedPtsUs = ptsUs;
-                    expectedSeq = seqU32 + 1;
-                } else {
+
+            boolean needsRecoveryScan = !frameIsKey && waitForKeyframe;
+            boolean useBufferedPayload = frameIsKey
+                    || needsRecoveryScan
+                    || (legacyAvcBootstrap && codec == null);
+            boolean isRecovery = frameIsKey;
+
+            if (!useBufferedPayload && codec != null) {
+                bytes += frameHeaderSize + payloadLen;
+                if (decoderBackpressured) {
+                    WbtpFrameIo.skipFully(input, streamReadScratch, payloadLen);
                     droppedSec++;
                     expectedSeq = seqU32 + 1;
+                } else {
+                    long t0 = SystemClock.elapsedRealtimeNanos();
+                    if (MediaCodecBridge.queueNalFromStream(codec, input, streamReadScratch, payloadLen, ptsUs, 1_000)) {
+                        long dn = SystemClock.elapsedRealtimeNanos() - t0;
+                        decodeNsTotal += dn;
+                        decodeNsBuf[(decodeNsBufN++) & 127] = dn;
+                        inFrames++;
+                        totalInSincePresent++;
+                        pendingDecodeQueue = Math.min(decodeQueueMaxFrames, pendingDecodeQueue + 1);
+                        lastDecodeProgressMs = nowAfterDrain;
+                        lastQueuedPtsUs = ptsUs;
+                        expectedSeq = seqU32 + 1;
+                    } else {
+                        WbtpFrameIo.skipFully(input, streamReadScratch, payloadLen);
+                        droppedSec++;
+                        expectedSeq = seqU32 + 1;
+                    }
                 }
             } else {
-                droppedSec++;
-                if (waitForKeyframe && !isRecovery) {
-                    waitGateDropsSec++;
-                    if ((waitGateDropsSec & 31) == 1) {
-                        Log.w(tag, "waitForKeyframe drop: seq=" + seqU32
-                                + SEP_PAYLOAD + payloadLen
-                                + " dropped=" + waitGateDropsSec
-                                + SEP_QDECODE + pendingDecodeQueue);
+                byte[] grownPayloadBuf = WbtpPayloadBuffer.ensureCapacity(
+                        payloadBuf,
+                        payloadLen,
+                        framePayloadHardCap,
+                        tag,
+                        "WBTP payload buffer grow "
+                                + SEP_SEQ + seqU32 + SEP_PAYLOAD + payloadLen + " mode=" + modeLabel + " "
+                );
+                if (grownPayloadBuf != payloadBuf) {
+                    payloadBuf = grownPayloadBuf;
+                    payloadGrowEvents++;
+                }
+
+                WbtpFrameIo.readFully(input, payloadBuf, payloadLen);
+                bytes += frameHeaderSize + payloadLen;
+
+                if (legacyAvcBootstrap && codec == null) {
+                    StreamNalUtils.AvcCsd avcCsd = StreamNalUtils.extractAvcCsd(payloadBuf, payloadLen);
+                    if (avcCsd.sps != null) {
+                        legacySps = avcCsd.sps;
+                    }
+                    if (avcCsd.pps != null) {
+                        legacyPps = avcCsd.pps;
+                    }
+                    if (legacySps != null && legacyPps != null) {
+                        try {
+                            codec = MediaCodecBridge.createAvcDecoderWithCsd(
+                                    legacySps,
+                                    legacyPps,
+                                    decodeWidth,
+                                    decodeHeight,
+                                    framePayloadInitialCap,
+                                    surface
+                            );
+                            codecRef[0] = codec;
+                            boolean spsOk = MediaCodecBridge.queueCodecConfig(codec, legacySps, 2_000);
+                            boolean ppsOk = MediaCodecBridge.queueCodecConfig(codec, legacyPps, 2_000);
+                            if (!spsOk || !ppsOk) {
+                                Log.w(tag, "legacy AVC: codec-config enqueue failed"
+                                        + SEP_SPS + spsOk + SEP_PPS + ppsOk
+                                        + "; will wait for next keyframe");
+                            }
+                            waitForKeyframe = true;
+                            Log.i(tag, "legacy AVC decoder configured from in-stream SPS/PPS");
+                        } catch (IOException e) {
+                            throw e;
+                        } catch (Exception e) {
+                            throw new IOException("legacy AVC bootstrap failed", e);
+                        }
+                    } else {
+                        droppedSec++;
+                        expectedSeq = seqU32 + 1;
+                    }
+                } else if (codec == null) {
+                    droppedSec++;
+                    expectedSeq = seqU32 + 1;
+                } else {
+                    isRecovery = frameIsKey || (needsRecoveryScan && StreamNalUtils.containsRecoveryNal(
+                            payloadBuf, payloadLen, isHevc, frameResyncScanLimit
+                    ));
+                    if (waitForKeyframe && isRecovery) {
+                        waitForKeyframe = false;
+                        recoveryUnlockSec++;
+                        Log.w(tag, "recovery-unlock: seq=" + seqU32 + " key=" + frameIsKey
+                                + SEP_PAYLOAD + payloadLen + SEP_QDECODE + pendingDecodeQueue);
+                        if (!isHevc && !legacyAvcBootstrap) {
+                            StreamNalUtils.AvcCsd csd = StreamNalUtils.extractAvcCsd(payloadBuf, payloadLen);
+                            boolean spsOk = csd.sps == null || MediaCodecBridge.queueCodecConfig(codec, csd.sps, 2_000);
+                            boolean ppsOk = csd.pps == null || MediaCodecBridge.queueCodecConfig(codec, csd.pps, 2_000);
+                            if (!spsOk || !ppsOk) {
+                                Log.w(tag, "recovery AVC: codec-config enqueue failed"
+                                        + SEP_SPS + spsOk + SEP_PPS + ppsOk
+                                        + SEP_SEQ + seqU32 + "; waiting for next keyframe");
+                                waitForKeyframe = true;
+                            }
+                        }
+                    }
+                    boolean canQueue = !waitForKeyframe
+                            && (!decoderBackpressured || isRecovery);
+                    if (canQueue) {
+                        long t0 = SystemClock.elapsedRealtimeNanos();
+                        if (MediaCodecBridge.queueNal(codec, payloadBuf, 0, payloadLen, ptsUs, 1_000)) {
+                            long dn = SystemClock.elapsedRealtimeNanos() - t0;
+                            decodeNsTotal += dn;
+                            decodeNsBuf[(decodeNsBufN++) & 127] = dn;
+                            inFrames++;
+                            totalInSincePresent++;
+                            pendingDecodeQueue = Math.min(decodeQueueMaxFrames, pendingDecodeQueue + 1);
+                            lastDecodeProgressMs = nowAfterDrain;
+                            lastQueuedPtsUs = ptsUs;
+                            expectedSeq = seqU32 + 1;
+                        } else {
+                            droppedSec++;
+                            expectedSeq = seqU32 + 1;
+                        }
+                    } else {
+                        droppedSec++;
+                        if (waitForKeyframe && !isRecovery) {
+                            waitGateDropsSec++;
+                            if ((waitGateDropsSec & 31) == 1) {
+                                Log.w(tag, "waitForKeyframe drop: seq=" + seqU32
+                                        + SEP_PAYLOAD + payloadLen
+                                        + " dropped=" + waitGateDropsSec
+                                        + SEP_QDECODE + pendingDecodeQueue);
+                            }
+                        }
+                        expectedSeq = seqU32 + 1;
                     }
                 }
-                waitForKeyframe = true;
-                expectedSeq = seqU32 + 1;
             }
 
             long nowMs = SystemClock.elapsedRealtime();

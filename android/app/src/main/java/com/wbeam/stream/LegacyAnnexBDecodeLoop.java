@@ -12,6 +12,7 @@ import java.io.InputStream;
 import java.util.Locale;
 
 final class LegacyAnnexBDecodeLoop {
+    private static final long DRAIN_IDLE_CHECK_MS = 33L;
 
     interface RuntimeState {
         boolean isRunning();
@@ -102,6 +103,7 @@ final class LegacyAnnexBDecodeLoop {
         long lastPresentedPtsUs = -1L;
         long pendingWithNoPresent = 0;
         long lastDecodeProgressMs = SystemClock.elapsedRealtime();
+        long lastDrainAttemptMs = 0L;
         MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
         MediaCodecBridge.DrainStats drainStats = new MediaCodecBridge.DrainStats();
 
@@ -203,14 +205,23 @@ final class LegacyAnnexBDecodeLoop {
                     }
 
                     frames++;
-                    MediaCodecBridge.drainLatestFrame(
-                            codec, bufferInfo, drainStats, true,
-                            pendingDecodeQueue >= decodeQueueMaxFrames ? 16_000 : 5_000);
+                    long nowMs = SystemClock.elapsedRealtime();
+                    boolean shouldDrain = pendingDecodeQueue > 0
+                            || lastDrainAttemptMs == 0L
+                            || (nowMs - lastDrainAttemptMs) >= DRAIN_IDLE_CHECK_MS;
+                    if (shouldDrain) {
+                        MediaCodecBridge.drainLatestFrame(
+                                codec, bufferInfo, drainStats, true,
+                                pendingDecodeQueue >= decodeQueueMaxFrames ? 16_000 : 5_000);
+                        lastDrainAttemptMs = nowMs;
+                    } else {
+                        drainStats.reset();
+                    }
                     pendingDecodeQueue = Math.max(0, pendingDecodeQueue - drainStats.releasedCount);
                     if (drainStats.releasedCount > 0) {
-                        lastDecodeProgressMs = SystemClock.elapsedRealtime();
+                        lastDecodeProgressMs = nowMs;
                     } else if (pendingDecodeQueue >= decodeQueueMaxFrames
-                            && (SystemClock.elapsedRealtime() - lastDecodeProgressMs) > 300) {
+                            && (nowMs - lastDecodeProgressMs) > 300) {
                         pendingDecodeQueue = decodeQueueMaxFrames - 1;
                     }
                     outFrames += drainStats.renderedCount;
@@ -266,14 +277,23 @@ final class LegacyAnnexBDecodeLoop {
                         int nalSize = next - sHead;
                         if (nalSize > 0) {
                             frames++;
-                            MediaCodecBridge.drainLatestFrame(
-                                    codec, bufferInfo, drainStats, true,
-                                    pendingDecodeQueue >= decodeQueueMaxFrames ? 16_000 : 5_000);
+                            long nowMs = SystemClock.elapsedRealtime();
+                            boolean shouldDrain = pendingDecodeQueue > 0
+                                    || lastDrainAttemptMs == 0L
+                                    || (nowMs - lastDrainAttemptMs) >= DRAIN_IDLE_CHECK_MS;
+                            if (shouldDrain) {
+                                MediaCodecBridge.drainLatestFrame(
+                                        codec, bufferInfo, drainStats, true,
+                                        pendingDecodeQueue >= decodeQueueMaxFrames ? 16_000 : 5_000);
+                                lastDrainAttemptMs = nowMs;
+                            } else {
+                                drainStats.reset();
+                            }
                             pendingDecodeQueue = Math.max(0, pendingDecodeQueue - drainStats.releasedCount);
                             if (drainStats.releasedCount > 0) {
-                                lastDecodeProgressMs = SystemClock.elapsedRealtime();
+                                lastDecodeProgressMs = nowMs;
                             } else if (pendingDecodeQueue >= decodeQueueMaxFrames
-                                    && (SystemClock.elapsedRealtime() - lastDecodeProgressMs) > 300) {
+                                    && (nowMs - lastDecodeProgressMs) > 300) {
                                 pendingDecodeQueue = decodeQueueMaxFrames - 1;
                             }
                             outFrames += drainStats.renderedCount;

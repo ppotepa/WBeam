@@ -46,7 +46,7 @@ public final class MainActivityRuntimeStateView {
         if (!debugBuild || debugInfoText == null || debugInfoPanel == null) {
             return;
         }
-        debugInfoText.setText(MainActivityDebugInfoFormatter.buildDebugOverlayText(
+        String nextText = MainActivityDebugInfoFormatter.buildDebugOverlayText(
                 lastUiState,
                 daemonHostName,
                 daemonStateUi,
@@ -55,7 +55,11 @@ public final class MainActivityRuntimeStateView {
                 selectedFps,
                 lastStatsLine,
                 lastHudCompactLine
-        ));
+        );
+        CharSequence current = debugInfoText.getText();
+        if (current == null || !current.toString().contentEquals(nextText)) {
+            debugInfoText.setText(nextText);
+        }
     }
 
     @SuppressWarnings("java:S107")

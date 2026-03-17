@@ -151,6 +151,7 @@ fn wait_for_frame(
     stats: &mut EvdiLoopStats,
     width: i32,
     height: i32,
+    poll_timeout_ms: i32,
 ) -> bool {
     let immediate = unsafe { ffi::evdi_request_update(handle, 0) };
     if immediate {
@@ -162,7 +163,7 @@ fn wait_for_frame(
         events: libc::POLLIN,
         revents: 0,
     };
-    let polled = unsafe { libc::poll(&mut pollfd as *mut libc::pollfd, 1, 33) };
+    let polled = unsafe { libc::poll(&mut pollfd as *mut libc::pollfd, 1, poll_timeout_ms) };
     if polled <= 0 {
         stats.event_poll_timeouts = stats.event_poll_timeouts.saturating_add(1);
         maybe_log_event_wait(stats, width, height);
@@ -276,6 +277,7 @@ fn evdi_loop(
     let mut stats = EvdiLoopStats::new();
     let mut pixels = vec![0u8; frame_size];
     let mut rects = vec![ffi::EvdiRect::default(); MAX_RECTS];
+    let poll_timeout_ms = ((frame_duration_ns / 1_000_000) as i32).clamp(4, 16);
 
     register_evdi_buffer(handle, &mut pixels, &mut rects, width, height);
 
@@ -283,7 +285,15 @@ fn evdi_loop(
     let mut ctx = evdi_event_context();
 
     loop {
-        if !wait_for_frame(handle, fd, &mut ctx, &mut stats, width, height) {
+        if !wait_for_frame(
+            handle,
+            fd,
+            &mut ctx,
+            &mut stats,
+            width,
+            height,
+            poll_timeout_ms,
+        ) {
             continue;
         }
 

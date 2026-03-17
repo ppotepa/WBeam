@@ -186,14 +186,14 @@ public final class StartupOverlayViewRenderer {
             int hintColor
     ) {
         if (views.getTitleText() != null) {
-            views.getTitleText().setText(title);
+            setTextIfChanged(views.getTitleText(), title);
         }
         if (views.getSubtitleText() != null) {
-            views.getSubtitleText().setText(body);
+            setTextIfChanged(views.getSubtitleText(), body);
         }
         if (views.getInfoText() != null) {
-            views.getInfoText().setText(hint);
-            views.getInfoText().setTextColor(hintColor);
+            setTextIfChanged(views.getInfoText(), hint);
+            setTextColorIfChanged(views.getInfoText(), hintColor);
         }
         return true;
     }
@@ -244,19 +244,19 @@ public final class StartupOverlayViewRenderer {
         );
 
         if (views.getSubtitleText() != null) {
-            views.getSubtitleText().setText(model.getSubtitle());
+            setTextIfChanged(views.getSubtitleText(), model.getSubtitle());
             int subtitleColor = SUBTITLE_NEUTRAL_COLOR;
             if (model.getStep3State() == StartupOverlayModelBuilder.Model.SS_OK) {
                 subtitleColor = SUBTITLE_OK_COLOR;
             } else if (model.getStep3State() == StartupOverlayModelBuilder.Model.SS_ERROR) {
                 subtitleColor = SUBTITLE_ERROR_COLOR;
             }
-            views.getSubtitleText().setTextColor(subtitleColor);
+            setTextColorIfChanged(views.getSubtitleText(), subtitleColor);
         }
 
         if (views.getInfoText() != null) {
-            views.getInfoText().setText(model.getInfoLog());
-            views.getInfoText().setTextColor(INFO_TEXT_COLOR);
+            setTextIfChanged(views.getInfoText(), model.getInfoLog());
+            setTextColorIfChanged(views.getInfoText(), INFO_TEXT_COLOR);
         }
     }
 
@@ -301,6 +301,21 @@ public final class StartupOverlayViewRenderer {
             this.label = label;
             this.status = status;
             this.detail = detail;
+        }
+    }
+
+    private static void setTextIfChanged(TextView view, String value) {
+        CharSequence current = view.getText();
+        String next = value == null ? "" : value;
+        if (current != null && current.toString().contentEquals(next)) {
+            return;
+        }
+        view.setText(next);
+    }
+
+    private static void setTextColorIfChanged(TextView view, int color) {
+        if (view.getCurrentTextColor() != color) {
+            view.setTextColor(color);
         }
     }
 }

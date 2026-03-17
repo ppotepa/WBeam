@@ -8,6 +8,8 @@ import java.util.Locale;
  * Maps raw daemon metrics JSON into normalized runtime HUD snapshot values.
  */
 public final class RuntimeTelemetryMapper {
+    private static final double BITS_PER_BYTE = 8.0;
+
     private RuntimeTelemetryMapper() {}
 
     public static final class Snapshot {
@@ -338,9 +340,9 @@ public final class RuntimeTelemetryMapper {
 
         out.setBitrateMbps(0.0);
         if (latest != null) {
-            long recvBps = latest.optLong("recv_bps", 0L);
-            if (recvBps > 0L) {
-                out.setBitrateMbps(recvBps / 1_000_000.0);
+            long recvBytesPerSec = latest.optLong("recv_bps", 0L);
+            if (recvBytesPerSec > 0L) {
+                out.setBitrateMbps((recvBytesPerSec * BITS_PER_BYTE) / 1_000_000.0);
             }
         }
         if (out.getBitrateMbps() <= 0.0) {
@@ -363,19 +365,19 @@ public final class RuntimeTelemetryMapper {
             if (note.length() > 28) {
                 note = note.substring(0, 28) + "...";
             }
-            out.setTuningLine(String.format(
-                    Locale.US,
-                    "%s G%d/%d C%d/%d S=%s B=%s %s %s",
-                    codec,
-                    generation,
-                    totalGenerations,
-                    child,
-                    childrenPerGeneration,
-                    score,
-                    bestScore,
-                    phase,
-                    note
-            ).trim());
+            StringBuilder line = new StringBuilder(64);
+            line.append(codec)
+                    .append(" G").append(generation).append('/').append(totalGenerations)
+                    .append(" C").append(child).append('/').append(childrenPerGeneration)
+                    .append(" S=").append(score)
+                    .append(" B=").append(bestScore);
+            if (!phase.isEmpty()) {
+                line.append(' ').append(phase);
+            }
+            if (!note.isEmpty()) {
+                line.append(' ').append(note);
+            }
+            out.setTuningLine(line.toString());
             if (out.getTuningLine().length() > 120) {
                 out.setTuningLine(out.getTuningLine().substring(0, 120) + "...");
             }
@@ -388,6 +390,50 @@ public final class RuntimeTelemetryMapper {
         if (!Double.isFinite(value)) {
             return "-";
         }
-        return String.format(Locale.US, "%.2f", value);
+        return formatFixed(value, 2);
+    }
+
+    private static String formatFixed(double value, int decimals) {
+        if (!Double.isFinite(value)) {
+            return "-";
+        }
+        int safeDecimals = Math.max(0, Math.min(3, decimals));
+        long factor;
+        switch (safeDecimals) {
+            case 0:
+                factor = 1L;
+                break;
+            case 1:
+                factor = 10L;
+                break;
+            case 2:
+                factor = 100L;
+                break;
+            default:
+                factor = 1000L;
+                break;
+        }
+        long rounded = Math.round(value * factor);
+        boolean negative = rounded < 0L;
+        long abs = Math.abs(rounded);
+        long whole = abs / factor;
+        long fraction = abs % factor;
+        StringBuilder out = new StringBuilder();
+        if (negative) {
+            out.append('-');
+        }
+        out.append(whole);
+        if (safeDecimals <= 0) {
+            return out.toString();
+        }
+        out.append('.');
+        if (safeDecimals >= 3 && fraction < 100L) {
+            out.append('0');
+        }
+        if (safeDecimals >= 2 && fraction < 10L) {
+            out.append('0');
+        }
+        out.append(fraction);
+        return out.toString();
     }
 }

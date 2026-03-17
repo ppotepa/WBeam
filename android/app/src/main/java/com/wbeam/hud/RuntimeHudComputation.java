@@ -2,8 +2,6 @@ package com.wbeam.hud;
 
 import com.wbeam.telemetry.RuntimeTelemetryMapper;
 
-import java.util.Locale;
-
 public final class RuntimeHudComputation {
     public static final class FpsStabilizationResult {
         public final double presentFps;
@@ -105,18 +103,18 @@ public final class RuntimeHudComputation {
         boolean queuePressure = qT >= qTMax || qD >= qDMax || qR >= qRMax;
         if (!warmingUp) {
             if (fpsUnderPressure) {
-                pressureReasonBuilder.append("fps<").append(String.format(Locale.US, "%.1f", fpsFloor));
+                pressureReasonBuilder.append("fps<").append(fmt1(fpsFloor));
             }
             if (decodeP95 > 12.0) {
                 appendPressureSegment(
                         pressureReasonBuilder,
-                        "dec>12(" + String.format(Locale.US, "%.1f", decodeP95) + ")"
+                        "dec>12(" + fmt1(decodeP95) + ")"
                 );
             }
             if (renderP95 > 7.0) {
                 appendPressureSegment(
                         pressureReasonBuilder,
-                        "ren>7(" + String.format(Locale.US, "%.1f", renderP95) + ")"
+                        "ren>7(" + fmt1(renderP95) + ")"
                 );
             }
             if (qT >= qTMax) {
@@ -188,18 +186,24 @@ public final class RuntimeHudComputation {
             int qD,
             int qR
     ) {
-        return String.format(
-                Locale.US,
-                "hud fps %.0f/%.1f | e2e %.1fms | dec %.1fms | ren %.1fms | q %d/%d/%d",
-                targetFps,
-                presentFps,
-                e2eP95,
-                decodeP95,
-                renderP95,
-                qT,
-                qD,
-                qR
-        );
+        StringBuilder line = new StringBuilder(96);
+        line.append("hud fps ")
+                .append(fmt0(targetFps))
+                .append('/')
+                .append(fmt1(presentFps))
+                .append(" | e2e ")
+                .append(fmt1(e2eP95))
+                .append("ms | dec ")
+                .append(fmt1(decodeP95))
+                .append("ms | ren ")
+                .append(fmt1(renderP95))
+                .append("ms | q ")
+                .append(qT)
+                .append('/')
+                .append(qD)
+                .append('/')
+                .append(qR);
+        return line.toString();
     }
 
     @SuppressWarnings("java:S107")
@@ -217,12 +221,12 @@ public final class RuntimeHudComputation {
             long streamUptimeSec
     ) {
         return "HUD RED warmingUp=" + pressureState.warmingUp + " hp=" + pressureState.reason
-                + " dec_p95=" + String.format(Locale.US, "%.2f", decodeP95)
-                + " ren_p95=" + String.format(Locale.US, "%.2f", renderP95)
+                + " dec_p95=" + fmt2(decodeP95)
+                + " ren_p95=" + fmt2(renderP95)
                 + " qT=" + qT + "/" + qTMax
                 + " qD=" + qD + "/" + qDMax
                 + " qR=" + qR + "/" + qRMax
-                + " fps_present=" + String.format(Locale.US, "%.1f", presentFps)
+                + " fps_present=" + fmt1(presentFps)
                 + " stream_up=" + streamUptimeSec + "s";
     }
 
@@ -255,37 +259,28 @@ public final class RuntimeHudComputation {
             String reason,
             String daemonLastError
     ) {
-        return String.format(
-                Locale.US,
-                "state=%s run_id=%d up=%ds stream_up=%ds host_in_out=%d/%d fps_target=%.0f fps_present=%.1f frame_p95=%.2f dec_p95=%.2f ren_p95=%.2f e2e_p95=%.2f q=%d/%d/%d qmax=%d/%d/%d adapt=L%d:%s drops=%d bp=%d/%d warmup=%b hp=%s reason=%s host_err=%s",
-                daemonStateUi,
-                daemonRunId,
-                daemonUptimeSec,
-                streamUptimeSec,
-                frameInHost,
-                frameOutHost,
-                targetFps,
-                presentFps,
-                frametimeP95,
-                decodeP95,
-                renderP95,
-                e2eP95,
-                qT,
-                qD,
-                qR,
-                qTMax,
-                qDMax,
-                qRMax,
-                adaptiveLevel,
-                adaptiveAction,
-                drops,
-                bpHigh,
-                bpRecover,
-                pressureState.warmingUp,
-                pressureState.reason,
-                reason.isEmpty() ? "-" : reason,
-                compactHostError(daemonLastError, 44)
-        );
+        StringBuilder snapshot = new StringBuilder(320);
+        snapshot.append("state=").append(daemonStateUi)
+                .append(" run_id=").append(daemonRunId)
+                .append(" up=").append(daemonUptimeSec).append('s')
+                .append(" stream_up=").append(streamUptimeSec).append('s')
+                .append(" host_in_out=").append(frameInHost).append('/').append(frameOutHost)
+                .append(" fps_target=").append(fmt0(targetFps))
+                .append(" fps_present=").append(fmt1(presentFps))
+                .append(" frame_p95=").append(fmt2(frametimeP95))
+                .append(" dec_p95=").append(fmt2(decodeP95))
+                .append(" ren_p95=").append(fmt2(renderP95))
+                .append(" e2e_p95=").append(fmt2(e2eP95))
+                .append(" q=").append(qT).append('/').append(qD).append('/').append(qR)
+                .append(" qmax=").append(qTMax).append('/').append(qDMax).append('/').append(qRMax)
+                .append(" adapt=L").append(adaptiveLevel).append(':').append(adaptiveAction)
+                .append(" drops=").append(drops)
+                .append(" bp=").append(bpHigh).append('/').append(bpRecover)
+                .append(" warmup=").append(pressureState.warmingUp)
+                .append(" hp=").append(pressureState.reason)
+                .append(" reason=").append(reason.isEmpty() ? "-" : reason)
+                .append(" host_err=").append(compactHostError(daemonLastError, 44));
+        return snapshot.toString();
     }
 
     private static void appendPressureSegment(StringBuilder sb, String segment) {
@@ -293,5 +288,60 @@ public final class RuntimeHudComputation {
             sb.append(',');
         }
         sb.append(segment);
+    }
+
+    private static String fmt0(double value) {
+        return formatFixed(value, 0);
+    }
+
+    private static String fmt1(double value) {
+        return formatFixed(value, 1);
+    }
+
+    private static String fmt2(double value) {
+        return formatFixed(value, 2);
+    }
+
+    private static String formatFixed(double value, int decimals) {
+        if (!Double.isFinite(value)) {
+            return "0";
+        }
+        int safeDecimals = Math.max(0, Math.min(3, decimals));
+        long factor;
+        switch (safeDecimals) {
+            case 0:
+                factor = 1L;
+                break;
+            case 1:
+                factor = 10L;
+                break;
+            case 2:
+                factor = 100L;
+                break;
+            default:
+                factor = 1000L;
+                break;
+        }
+        long rounded = Math.round(value * factor);
+        long abs = Math.abs(rounded);
+        long whole = abs / factor;
+        long fraction = abs % factor;
+        StringBuilder out = new StringBuilder();
+        if (rounded < 0L) {
+            out.append('-');
+        }
+        out.append(whole);
+        if (safeDecimals == 0) {
+            return out.toString();
+        }
+        out.append('.');
+        if (safeDecimals >= 3 && fraction < 100L) {
+            out.append('0');
+        }
+        if (safeDecimals >= 2 && fraction < 10L) {
+            out.append('0');
+        }
+        out.append(fraction);
+        return out.toString();
     }
 }

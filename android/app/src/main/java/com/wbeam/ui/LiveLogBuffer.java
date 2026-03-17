@@ -9,8 +9,14 @@ import android.text.style.ForegroundColorSpan;
  * Holds and trims colored live log lines for UI display.
  */
 public final class LiveLogBuffer {
+    private static final int COLOR_INFO = Color.parseColor("#166534");
+    private static final int COLOR_WARN = Color.parseColor("#F59E0B");
+    private static final int COLOR_ERROR = Color.parseColor("#7F1D1D");
+    private static final int COLOR_DEFAULT = Color.parseColor("#9CA3AF");
+
     private final int maxLines;
     private final SpannableStringBuilder buffer = new SpannableStringBuilder();
+    private int lineCount = 0;
 
     public LiveLogBuffer(int maxLines) {
         this.maxLines = Math.max(1, maxLines);
@@ -28,41 +34,52 @@ public final class LiveLogBuffer {
                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
         );
 
-        int linesToTrim = countLines(buffer) - maxLines;
-        while (linesToTrim > 0) {
-            int newline = buffer.toString().indexOf('\n');
+        lineCount += countLineBreaks(text);
+        while (lineCount > maxLines) {
+            int newline = indexOfNewline(buffer, 0);
             if (newline < 0) {
+                lineCount = buffer.length() == 0 ? 0 : 1;
                 break;
             }
             buffer.delete(0, newline + 1);
-            linesToTrim--;
+            lineCount--;
         }
         return buffer;
     }
 
     private int colorForLevel(String level) {
         if ("I".equals(level)) {
-            return Color.parseColor("#166534");
+            return COLOR_INFO;
         }
         if ("W".equals(level)) {
-            return Color.parseColor("#F59E0B");
+            return COLOR_WARN;
         }
         if ("E".equals(level)) {
-            return Color.parseColor("#7F1D1D");
+            return COLOR_ERROR;
         }
-        return Color.parseColor("#9CA3AF");
+        return COLOR_DEFAULT;
     }
 
-    private int countLines(CharSequence text) {
-        if (text == null || text.length() == 0) {
+    private static int countLineBreaks(CharSequence text) {
+        if (text == null) {
             return 0;
         }
-        int lines = 1;
+        int breaks = 0;
         for (int i = 0; i < text.length(); i++) {
             if (text.charAt(i) == '\n') {
-                lines++;
+                breaks++;
             }
         }
-        return lines;
+        return breaks;
+    }
+
+    private static int indexOfNewline(CharSequence text, int fromIndex) {
+        int start = Math.max(0, fromIndex);
+        for (int i = start; i < text.length(); i++) {
+            if (text.charAt(i) == '\n') {
+                return i;
+            }
+        }
+        return -1;
     }
 }

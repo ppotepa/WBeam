@@ -37,8 +37,12 @@ public final class BuildVariantUiCoordinator {
                 debugFpsGraphView.setCapacity(debugFpsGraphPoints);
             }
             setDebugOverlayVisible.run(debugOverlayVisible);
-            startDebugGraphSampling.run();
-            refreshDebugInfoOverlay.run();
+            if (debugOverlayVisible) {
+                startDebugGraphSampling.run();
+                refreshDebugInfoOverlay.run();
+            } else {
+                stopDebugGraphSampling.run();
+            }
             return;
         }
         MainActivityUiBinder.applyVisibility(View.GONE, debugInfoPanel);

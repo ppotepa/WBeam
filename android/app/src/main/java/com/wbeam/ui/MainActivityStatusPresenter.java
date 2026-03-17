@@ -56,10 +56,10 @@ public final class MainActivityStatusPresenter {
     public static void renderStatus(RenderStatusInput input) {
         int color = StatusColorResolver.ledColorForState(input.state, input.streamingState, input.connectingState);
         if (input.statusText != null) {
-            input.statusText.setText(input.state.toUpperCase(Locale.US));
+            setTextIfChanged(input.statusText, input.state.toUpperCase(Locale.US));
         }
         if (input.detailText != null) {
-            input.detailText.setText(StatusTextFormatter.buildTransportDetail(
+            setTextIfChanged(input.detailText, StatusTextFormatter.buildTransportDetail(
                     input.info,
                     input.daemonReachable,
                     input.daemonHostName,
@@ -67,7 +67,7 @@ public final class MainActivityStatusPresenter {
             ));
         }
         if (input.bpsText != null) {
-            input.bpsText.setText("throughput: " + StatusTextFormatter.formatBps(input.bps));
+            setTextIfChanged(input.bpsText, "throughput: " + StatusTextFormatter.formatBytesPerSec(input.bps));
         }
 
         if (input.statusLed == null) {
@@ -92,7 +92,7 @@ public final class MainActivityStatusPresenter {
         String errCompact = compactError(lastError, 80);
         return "host in/out: " + frameIn + "/" + frameOut
                 + " | drops: " + drops + " | reconnects: " + reconnects
-                + " | bitrate: " + StatusTextFormatter.formatBps(bitrateBps)
+                + " | bitrate: " + StatusTextFormatter.formatBitsPerSec(bitrateBps)
                 + (errCompact.isEmpty() ? "" : " | last_error: " + errCompact);
     }
 
@@ -101,5 +101,20 @@ public final class MainActivityStatusPresenter {
             return "";
         }
         return text.length() > maxLen ? text.substring(0, maxLen) + "..." : text;
+    }
+
+    private static void setTextIfChanged(TextView view, String value) {
+        CharSequence current = view.getText();
+        if (value == null) {
+            if (current == null || current.length() == 0) {
+                return;
+            }
+            view.setText((CharSequence) null);
+            return;
+        }
+        if (current != null && current.toString().contentEquals(value)) {
+            return;
+        }
+        view.setText(value);
     }
 }

@@ -21,17 +21,54 @@ public final class MainActivityDebugInfoFormatter {
         String host = daemonHostName == null || daemonHostName.trim().isEmpty() ? "-" : daemonHostName;
         double safeTarget = latestTargetFps > 0.0 ? latestTargetFps : (double) selectedFps;
         double lossPct = Math.max(0.0, ((safeTarget - latestPresentFps) / safeTarget) * 100.0);
-        return String.format(
-                Locale.US,
-                "DBG %s | host:%s | daemon:%s%nFPS %.0f/%.1f (loss %.0f%%)  thresholds: green <=20%% orange >20%% red >55%%%n%s%n%s",
-                state,
-                host,
-                daemonStateUi,
-                safeTarget,
-                latestPresentFps,
-                lossPct,
-                lastStatsLine,
-                lastHudCompactLine
-        );
+        StringBuilder text = new StringBuilder(224);
+        text.append("DBG ")
+                .append(state)
+                .append(" | host:")
+                .append(host)
+                .append(" | daemon:")
+                .append(daemonStateUi)
+                .append('\n')
+                .append("FPS ")
+                .append(fmt0(safeTarget))
+                .append('/')
+                .append(fmt1(latestPresentFps))
+                .append(" (loss ")
+                .append(fmt0(lossPct))
+                .append("%)  thresholds: green <=20% orange >20% red >55%")
+                .append('\n')
+                .append(lastStatsLine)
+                .append('\n')
+                .append(lastHudCompactLine);
+        return text.toString();
+    }
+
+    private static String fmt0(double value) {
+        return formatFixed(value, 0);
+    }
+
+    private static String fmt1(double value) {
+        return formatFixed(value, 1);
+    }
+
+    private static String formatFixed(double value, int decimals) {
+        if (!Double.isFinite(value)) {
+            return "0";
+        }
+        int safeDecimals = Math.max(0, Math.min(2, decimals));
+        long factor = safeDecimals == 0 ? 1L : 10L;
+        long rounded = Math.round(value * factor);
+        long whole = Math.abs(rounded) / factor;
+        long fraction = Math.abs(rounded) % factor;
+        StringBuilder out = new StringBuilder();
+        if (rounded < 0L) {
+            out.append('-');
+        }
+        out.append(whole);
+        if (safeDecimals == 0) {
+            return out.toString();
+        }
+        out.append('.').append(fraction);
+        return out.toString();
     }
 }

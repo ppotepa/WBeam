@@ -18,10 +18,15 @@ public final class StartupOverlayController {
     private final View overlayView;
     private TickListener tickListener;
     private int animTick = 0;
+    private boolean pulseEnabled = false;
+    private boolean overlayVisible = true;
 
     private final Runnable pulseTask = new Runnable() {
         @Override
         public void run() {
+            if (!pulseEnabled || !overlayVisible) {
+                return;
+            }
             animTick = (animTick + 1) % 4;
             if (tickListener != null) {
                 tickListener.onTick(animTick);
@@ -33,6 +38,7 @@ public final class StartupOverlayController {
     public StartupOverlayController(Handler uiHandler, View overlayView) {
         this.uiHandler = uiHandler;
         this.overlayView = overlayView;
+        this.overlayVisible = overlayView == null || overlayView.getVisibility() == View.VISIBLE;
     }
 
     public void setTickListener(TickListener listener) {
@@ -40,23 +46,33 @@ public final class StartupOverlayController {
     }
 
     public void startPulse() {
+        pulseEnabled = true;
         uiHandler.removeCallbacks(pulseTask);
-        uiHandler.post(pulseTask);
+        if (overlayVisible) {
+            uiHandler.post(pulseTask);
+        }
     }
 
     public void stopPulse() {
+        pulseEnabled = false;
         uiHandler.removeCallbacks(pulseTask);
     }
 
     public void setVisible(boolean visible) {
+        overlayVisible = visible;
         if (overlayView == null) {
             return;
         }
         if (visible) {
             overlayView.setVisibility(View.VISIBLE);
             overlayView.setAlpha(1f);
+            if (pulseEnabled) {
+                uiHandler.removeCallbacks(pulseTask);
+                uiHandler.post(pulseTask);
+            }
             return;
         }
+        uiHandler.removeCallbacks(pulseTask);
         overlayView.animate()
                 .alpha(0f)
                 .setDuration(FADE_OUT_MS)

@@ -333,16 +333,16 @@ public final class RuntimeHudOverlayRenderer {
     }
 
     public static final class Rendered {
-        public final String html;
+        public final RuntimeHudWebPayloadBuilder.RenderPayload webPayload;
         public final String textFallback;
 
-        private Rendered(String html, String textFallback) {
-            this.html = html;
+        private Rendered(RuntimeHudWebPayloadBuilder.RenderPayload webPayload, String textFallback) {
+            this.webPayload = webPayload;
             this.textFallback = textFallback;
         }
 
-        public static Rendered create(String html, String textFallback) {
-            return new Rendered(html, textFallback);
+        public static Rendered create(RuntimeHudWebPayloadBuilder.RenderPayload webPayload, String textFallback) {
+            return new Rendered(webPayload, textFallback);
         }
     }
 
@@ -350,7 +350,7 @@ public final class RuntimeHudOverlayRenderer {
 
     public static Rendered render(Input input, ResourceRowsProvider resourceRowsProvider) {
         RuntimeHudWebPayloadBuilder.Input payload = copyToPayload(input, resourceRowsProvider);
-        String html = RuntimeHudWebPayloadBuilder.build(payload);
+        RuntimeHudWebPayloadBuilder.RenderPayload webPayload = RuntimeHudWebPayloadBuilder.build(payload);
         String textFallback = RuntimeHudFallbackFormatter.buildText(
                 input.isDaemonReachable(),
                 input.getTargetFps(),
@@ -372,7 +372,7 @@ public final class RuntimeHudOverlayRenderer {
                 input.getBpRecover(),
                 input.getReason()
         );
-        return Rendered.create(html, textFallback);
+        return Rendered.create(webPayload, textFallback);
     }
 
     private static RuntimeHudWebPayloadBuilder.Input copyToPayload(Input input, ResourceRowsProvider resourceRowsProvider) {

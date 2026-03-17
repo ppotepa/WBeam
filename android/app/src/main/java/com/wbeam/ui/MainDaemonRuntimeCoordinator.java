@@ -373,7 +373,18 @@ public final class MainDaemonRuntimeCoordinator {
     }
 
     public static void onStatusUpdate(StatusInput input, StatusContext context) {
-        context.getDaemon().applySnapshot(
+        MainDaemonState daemon = context.getDaemon();
+        MainUiState uiState = context.getUiState();
+        boolean prevReachable = daemon.reachable;
+        String prevHostName = daemon.hostName;
+        String prevState = daemon.state;
+        String prevLastError = daemon.lastError;
+        long prevRunId = daemon.runId;
+        String prevService = daemon.service;
+        String prevBuildRevision = daemon.buildRevision;
+        boolean prevHandshakeResolved = uiState.handshakeResolved;
+
+        daemon.applySnapshot(
                 input.isReachable(),
                 input.getHostName(),
                 input.getState(),
@@ -411,12 +422,28 @@ public final class MainDaemonRuntimeCoordinator {
                                 context.getStopLiveViewTask()::run
                         )
                 );
-        context.getUiState().handshakeResolved = output.isHandshakeResolved();
-        context.getRefreshUiTask().run();
-        if (output.getHostStatsLine() != null) {
+        uiState.handshakeResolved = output.isHandshakeResolved();
+
+        boolean daemonCoreChanged = prevReachable != daemon.reachable
+                || !sameText(prevHostName, daemon.hostName)
+                || !sameText(prevState, daemon.state)
+                || !sameText(prevLastError, daemon.lastError)
+                || prevRunId != daemon.runId
+                || !sameText(prevService, daemon.service)
+                || !sameText(prevBuildRevision, daemon.buildRevision);
+        boolean handshakeChanged = prevHandshakeResolved != uiState.handshakeResolved;
+        boolean hasStatsUpdate = output.getHostStatsLine() != null;
+        boolean hasMetricsUpdate = input.getMetrics() != null;
+
+        if (daemonCoreChanged || handshakeChanged || hasStatsUpdate || hasMetricsUpdate) {
+            context.getRefreshUiTask().run();
+        }
+        if (hasStatsUpdate) {
             context.getStatsSink().onStats(output.getHostStatsLine());
         }
-        context.getPerfHudSink().onMetrics(input.getMetrics());
+        if (hasMetricsUpdate) {
+            context.getPerfHudSink().onMetrics(input.getMetrics());
+        }
     }
 
     public static void onOffline(boolean wasReachable, Exception error, OfflineContext context) {
@@ -454,5 +481,9 @@ public final class MainDaemonRuntimeCoordinator {
             uiState.startupBeganAtMs = SystemClock.elapsedRealtime();
             uiState.controlRetryCount = 0;
         }
+    }
+
+    private static boolean sameText(String left, String right) {
+        return left == null ? right == null : left.equals(right);
     }
 }

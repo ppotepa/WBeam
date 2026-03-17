@@ -1,62 +1,31 @@
 //! GStreamer pipeline construction.
 //!
-//! Builds the PipeWire → videoconvert → videoscale → (optional videorate) →
-//! encoder → h264parse/h265parse → appsink pipeline, with an optional debug JPEG
+//! Builds the PipeWire -> videoconvert -> videoscale -> (optional videorate) ->
+//! encoder -> h264parse/h265parse -> appsink pipeline, with an optional debug JPEG
 //! branch when `debug_fps > 0`.
+
+mod caps;
+mod debug;
+mod runtime;
 
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
 };
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
 
 use crate::capture::PreparedCapture;
 use crate::cli::ResolvedConfig;
-use crate::encode::{configure_encoder, is_hevc, is_png, pick_encoder};
+use crate::encode::configure_encoder;
 
-use super::profile::{buffer_profile, BufferProfile};
-
-struct PipelineRuntime {
-    mode_png: bool,
-    encoder_name: &'static str,
-    hevc: bool,
-    profile: BufferProfile,
-    capture_backend_name: &'static str,
-    debug_enabled: bool,
-    raw_format: &'static str,
-    effective_drop_only: bool,
-    effective_gop: u32,
-    parse_mode: &'static str,
-}
-
-impl PipelineRuntime {
-    fn new(
-        capture: &PreparedCapture,
-        cfg: &ResolvedConfig,
-        debug_fps: u32,
-        framed: bool,
-    ) -> Result<Self> {
-        let mode_png = is_png(&cfg.encoder);
-        let encoder_name = pick_encoder(&cfg.encoder)?;
-        let hevc = is_hevc(&cfg.encoder);
-        Ok(Self {
-            mode_png,
-            encoder_name,
-            hevc,
-            profile: pipeline_profile(capture, cfg, mode_png),
-            capture_backend_name: capture_backend_name(capture),
-            debug_enabled: debug_fps > 0,
-            raw_format: raw_format(mode_png, encoder_name),
-            effective_drop_only: effective_drop_only(capture, cfg),
-            effective_gop: effective_gop(cfg),
-            parse_mode: parse_mode(mode_png, hevc, framed),
-        })
-    }
-}
+use super::profile::BufferProfile;
+use caps::{debug_caps, raw_caps, sink_caps, source_hint_caps};
+use debug::DebugBranchElements;
+use runtime::PipelineRuntime;
 
 struct PipelineElements {
     src: gst::Element,
@@ -73,89 +42,92 @@ struct PipelineElements {
     sink: gst::Element,
 }
 
-fn pipeline_profile(
-    capture: &PreparedCapture,
-    cfg: &ResolvedConfig,
-    mode_png: bool,
-) -> BufferProfile {
-    let mut profile = buffer_profile(cfg.stream_mode, cfg.fps, mode_png);
-    profile.queue_buffers = cfg.queue_max_buffers.max(1);
-    profile.appsink_buffers = cfg.appsink_max_buffers.max(1);
-    profile.queue_time_ns = (cfg.queue_max_time_ms.max(1) as u64) * 1_000_000u64;
-    if matches!(capture, PreparedCapture::Wayland(_)) {
-        profile.queue_leaky = "upstream";
-        if profile.queue_buffers < 4 {
-            profile.queue_buffers = 4;
+impl PipelineElements {
+    fn add_to_pipeline(&self, pipeline: &gst::Pipeline) -> Result<()> {
+        pipeline.add_many([
+            &self.src,
+            &self.q1,
+            &self.caps_src,
+            &self.convert,
+            &self.scale,
+        ])?;
+        if let Some(rate) = &self.rate {
+            pipeline.add(rate)?;
         }
-        profile.queue_time_ns = 0;
+        pipeline.add(&self.caps1)?;
+        if let Some(tee) = &self.tee {
+            pipeline.add(tee)?;
+        }
+        if let Some(qmain) = &self.qmain {
+            pipeline.add(qmain)?;
+        }
+        pipeline.add(&self.enc)?;
+        if let Some(parse) = &self.parse {
+            pipeline.add(parse)?;
+        }
+        pipeline.add(&self.sink)?;
+        Ok(())
     }
-    profile
-}
 
-fn capture_backend_name(capture: &PreparedCapture) -> &'static str {
-    match capture {
-        PreparedCapture::Wayland(_) => "wayland_portal",
-        PreparedCapture::X11 => "x11",
-        #[cfg(feature = "evdi")]
-        PreparedCapture::Evdi => "evdi",
-        PreparedCapture::BenchmarkGame => "benchmark_game",
-    }
-}
-
-fn raw_format(mode_png: bool, encoder_name: &str) -> &'static str {
-    if mode_png {
-        "RGBA"
-    } else if encoder_name == "nvenc264" || encoder_name == "nvenc265" {
-        "NV12"
-    } else {
-        "I420"
-    }
-}
-
-fn effective_drop_only(capture: &PreparedCapture, cfg: &ResolvedConfig) -> bool {
-    #[cfg(feature = "evdi")]
-    let is_evdi = matches!(capture, PreparedCapture::Evdi);
-    #[cfg(not(feature = "evdi"))]
-    let is_evdi = false;
-    matches!(capture, PreparedCapture::Wayland(_)) || is_evdi || cfg.videorate_drop_only
-}
-
-fn effective_gop(cfg: &ResolvedConfig) -> u32 {
-    if cfg.intra_only {
-        1
-    } else if cfg.h264_gop > 0 {
-        cfg.h264_gop
-    } else {
-        (cfg.fps / 8).max(6)
-    }
-}
-
-fn parse_mode(mode_png: bool, hevc: bool, framed: bool) -> &'static str {
-    if mode_png {
-        "png_raw"
-    } else if hevc {
-        if framed {
-            "h265_au"
+    fn link_source_chain(&self) -> Result<()> {
+        if let Some(rate) = &self.rate {
+            gst::Element::link_many([
+                &self.src,
+                &self.q1,
+                &self.caps_src,
+                &self.convert,
+                &self.scale,
+                rate,
+                &self.caps1,
+            ])?;
         } else {
-            "h265_nal"
+            gst::Element::link_many([
+                &self.src,
+                &self.q1,
+                &self.caps_src,
+                &self.convert,
+                &self.scale,
+                &self.caps1,
+            ])?;
         }
-    } else if framed {
-        "h264_au"
-    } else {
-        "h264_nal"
+        Ok(())
     }
+
+    fn link_encoded_chain(&self, input: &gst::Element) -> Result<()> {
+        if let Some(parse) = &self.parse {
+            gst::Element::link_many([input, &self.enc, parse, &self.sink])?;
+        } else {
+            gst::Element::link_many([input, &self.enc, &self.sink])?;
+        }
+        Ok(())
+    }
+
+    fn link_output_chain(&self) -> Result<()> {
+        match (&self.tee, &self.qmain) {
+            (Some(tee), Some(qmain)) => {
+                gst::Element::link_many([&self.caps1, tee])?;
+                link_tee_branch(tee, qmain, "qmain")?;
+                self.link_encoded_chain(qmain)
+            }
+            (None, None) => self.link_encoded_chain(&self.caps1),
+            _ => Err(anyhow!("debug pipeline state is inconsistent")),
+        }
+    }
+}
+
+fn build_element(factory: &str, name: &str) -> Result<gst::Element> {
+    gst::ElementFactory::make(factory)
+        .name(name)
+        .build()
+        .with_context(|| format!("{factory} not available"))
 }
 
 fn create_scale_element(cfg: &ResolvedConfig) -> Result<gst::Element> {
     if cfg.skip_videoscale {
-        return Ok(gst::ElementFactory::make("identity")
-            .name("scale_passthrough")
-            .build()?);
+        return build_element("identity", "scale_passthrough");
     }
 
-    let scale = gst::ElementFactory::make("videoscale")
-        .name("scale")
-        .build()?;
+    let scale = build_element("videoscale", "scale")?;
     let _ = scale.set_property_from_str("method", "lanczos");
     Ok(scale)
 }
@@ -166,55 +138,32 @@ fn create_pipeline_elements(
     runtime: &PipelineRuntime,
 ) -> Result<PipelineElements> {
     let src = capture.build_source(cfg)?;
-    let q1 = gst::ElementFactory::make("queue").name("q1").build()?;
-    let caps_src = gst::ElementFactory::make("capsfilter")
-        .name("caps_src")
-        .build()?;
-    let convert = gst::ElementFactory::make("videoconvert")
-        .name("conv")
-        .build()?;
+    let q1 = build_element("queue", "q1")?;
+    let caps_src = build_element("capsfilter", "caps_src")?;
+    let convert = build_element("videoconvert", "conv")?;
     let scale = create_scale_element(cfg)?;
     let rate = runtime
         .profile
         .use_videorate
-        .then(|| gst::ElementFactory::make("videorate").name("rate").build())
+        .then(|| build_element("videorate", "rate"))
         .transpose()?;
-    let caps1 = gst::ElementFactory::make("capsfilter")
-        .name("caps1")
-        .build()?;
+    let caps1 = build_element("capsfilter", "caps1")?;
     let tee = runtime
         .debug_enabled
-        .then(|| gst::ElementFactory::make("tee").name("tee").build())
+        .then(|| build_element("tee", "tee"))
         .transpose()?;
     let qmain = runtime
         .debug_enabled
-        .then(|| gst::ElementFactory::make("queue").name("qmain").build())
+        .then(|| build_element("queue", "qmain"))
         .transpose()?;
 
-    let enc_element = match runtime.encoder_name {
-        "nvenc264" => "nvh264enc",
-        "x264" => "x264enc",
-        "nvenc265" => "nvh265enc",
-        "x265" => "x265enc",
-        "rawpng" => "pngenc",
-        _ => "x265enc",
-    };
-    let enc = gst::ElementFactory::make(enc_element)
-        .name("enc")
-        .build()
-        .with_context(|| format!("{enc_element} not available"))?;
-    let parse = (!runtime.mode_png)
-        .then(|| {
-            gst::ElementFactory::make(if runtime.hevc {
-                "h265parse"
-            } else {
-                "h264parse"
-            })
-            .name("parse")
-            .build()
-        })
+    let enc_element = runtime.encoder_factory();
+    let enc = build_element(enc_element, "enc")?;
+    let parse = runtime
+        .parse_factory()
+        .map(|factory| build_element(factory, "parse"))
         .transpose()?;
-    let sink = gst::ElementFactory::make("appsink").name("sink").build()?;
+    let sink = build_element("appsink", "sink")?;
 
     Ok(PipelineElements {
         src,
@@ -245,36 +194,6 @@ fn configure_main_queues(elements: &PipelineElements, profile: &BufferProfile) {
     configure_queue(&elements.q1, profile);
     if let Some(qmain) = &elements.qmain {
         configure_queue(qmain, profile);
-    }
-}
-
-fn source_hint_caps() -> gst::Caps {
-    gst::Caps::builder("video/x-raw").build()
-}
-
-fn raw_caps(cfg: &ResolvedConfig, runtime: &PipelineRuntime) -> gst::Caps {
-    let mut caps = gst::Caps::builder("video/x-raw")
-        .field("format", runtime.raw_format)
-        .field("width", cfg.width as i32)
-        .field("height", cfg.height as i32);
-    if runtime.profile.use_videorate {
-        caps = caps.field("framerate", gst::Fraction::new(cfg.fps as i32, 1));
-    }
-    caps.build()
-}
-
-fn sink_caps(runtime: &PipelineRuntime, framed: bool) -> gst::Caps {
-    if runtime.mode_png {
-        gst::Caps::builder("image/png").build()
-    } else {
-        gst::Caps::builder(if runtime.hevc {
-            "video/x-h265"
-        } else {
-            "video/x-h264"
-        })
-        .field("stream-format", "byte-stream")
-        .field("alignment", if framed { "au" } else { "nal" })
-        .build()
     }
 }
 
@@ -345,68 +264,6 @@ fn configure_pipeline_elements(
     configure_appsink(&elements.sink, runtime, framed)
 }
 
-fn add_main_elements_to_pipeline(
-    pipeline: &gst::Pipeline,
-    elements: &PipelineElements,
-) -> Result<()> {
-    pipeline.add_many([
-        &elements.src,
-        &elements.q1,
-        &elements.caps_src,
-        &elements.convert,
-        &elements.scale,
-    ])?;
-    if let Some(rate) = &elements.rate {
-        pipeline.add(rate)?;
-    }
-    pipeline.add(&elements.caps1)?;
-    if let Some(tee) = &elements.tee {
-        pipeline.add(tee)?;
-    }
-    if let Some(qmain) = &elements.qmain {
-        pipeline.add(qmain)?;
-    }
-    pipeline.add(&elements.enc)?;
-    if let Some(parse) = &elements.parse {
-        pipeline.add(parse)?;
-    }
-    pipeline.add(&elements.sink)?;
-    Ok(())
-}
-
-fn link_source_path(elements: &PipelineElements) -> Result<()> {
-    if let Some(rate) = &elements.rate {
-        gst::Element::link_many([
-            &elements.src,
-            &elements.q1,
-            &elements.caps_src,
-            &elements.convert,
-            &elements.scale,
-            rate,
-            &elements.caps1,
-        ])?;
-    } else {
-        gst::Element::link_many([
-            &elements.src,
-            &elements.q1,
-            &elements.caps_src,
-            &elements.convert,
-            &elements.scale,
-            &elements.caps1,
-        ])?;
-    }
-    Ok(())
-}
-
-fn link_encoded_path(input: &gst::Element, elements: &PipelineElements) -> Result<()> {
-    if let Some(parse) = &elements.parse {
-        gst::Element::link_many([input, &elements.enc, parse, &elements.sink])?;
-    } else {
-        gst::Element::link_many([input, &elements.enc, &elements.sink])?;
-    }
-    Ok(())
-}
-
 fn link_tee_branch(tee: &gst::Element, downstream: &gst::Element, name: &str) -> Result<()> {
     let tee_pad = tee
         .request_pad_simple("src_%u")
@@ -419,74 +276,9 @@ fn link_tee_branch(tee: &gst::Element, downstream: &gst::Element, name: &str) ->
 }
 
 fn add_and_link_main_path(pipeline: &gst::Pipeline, elements: &PipelineElements) -> Result<()> {
-    add_main_elements_to_pipeline(pipeline, elements)?;
-    link_source_path(elements)?;
-
-    if let Some(tee) = &elements.tee {
-        gst::Element::link_many([&elements.caps1, tee])?;
-        let qmain = elements
-            .qmain
-            .as_ref()
-            .context("qmain missing while debug enabled")?;
-        link_tee_branch(tee, qmain, "qmain")?;
-        link_encoded_path(qmain, elements)?;
-    } else {
-        link_encoded_path(&elements.caps1, elements)?;
-    }
-    Ok(())
-}
-
-fn configure_debug_queue(qdbg: &gst::Element) {
-    let _ = qdbg.set_property("max-size-buffers", 1u32);
-    let _ = qdbg.set_property("max-size-bytes", 0u32);
-    let _ = qdbg.set_property("max-size-time", 200_000_000u64);
-    let _ = qdbg.set_property_from_str("leaky", "downstream");
-}
-
-fn debug_caps(debug_fps: u32) -> gst::Caps {
-    gst::Caps::builder("video/x-raw")
-        .field("format", "I420")
-        .field("framerate", gst::Fraction::new(debug_fps as i32, 1))
-        .build()
-}
-
-fn attach_debug_branch(
-    pipeline: &gst::Pipeline,
-    tee: &gst::Element,
-    debug_dir: &str,
-    debug_fps: u32,
-) -> Result<()> {
-    std::fs::create_dir_all(debug_dir).with_context(|| format!("create debug dir {debug_dir}"))?;
-
-    let qdbg = gst::ElementFactory::make("queue").name("qdbg").build()?;
-    let vrdbg = gst::ElementFactory::make("videorate")
-        .name("vrdbg")
-        .build()?;
-    let convdbg = gst::ElementFactory::make("videoconvert")
-        .name("convdbg")
-        .build()?;
-    let capsdbg = gst::ElementFactory::make("capsfilter")
-        .name("capsdbg")
-        .build()?;
-    let jpeg = gst::ElementFactory::make("jpegenc")
-        .name("jpegdbg")
-        .build()?;
-    let multi = gst::ElementFactory::make("multifilesink")
-        .name("filesdbg")
-        .build()?;
-
-    configure_debug_queue(&qdbg);
-    let _ = capsdbg.set_property("caps", &debug_caps(debug_fps));
-    multi.set_property("location", format!("{debug_dir}/frame-%06d.jpg"));
-    multi.set_property("sync", false);
-    multi.set_property("async", false);
-    multi.set_property("post-messages", false);
-    multi.set_property("max-files", 300u32);
-    let _ = jpeg.set_property("quality", 70i32);
-
-    pipeline.add_many([&qdbg, &vrdbg, &convdbg, &capsdbg, &jpeg, &multi])?;
-    link_tee_branch(tee, &qdbg, "qdbg")?;
-    gst::Element::link_many([&qdbg, &vrdbg, &convdbg, &capsdbg, &jpeg, &multi])?;
+    elements.add_to_pipeline(pipeline)?;
+    elements.link_source_chain()?;
+    elements.link_output_chain()?;
     Ok(())
 }
 
@@ -502,24 +294,29 @@ fn attach_fps_probe(sink: &gst::Element) -> Arc<AtomicU64> {
     fps_counter
 }
 
-fn log_effective_runtime(cfg: &ResolvedConfig, runtime: &PipelineRuntime) {
-    if !runtime.mode_png {
-        println!(
-            "[wbeam] encoder-select requested={} backend={} raw_format={} fps={} bitrate={}kbps gop={} intra_only={}",
-            cfg.encoder,
-            runtime.encoder_name,
-            runtime.raw_format,
-            cfg.fps,
-            cfg.bitrate_kbps,
-            runtime.effective_gop,
-            cfg.intra_only
-        );
-    } else {
+fn log_encoder_selection(cfg: &ResolvedConfig, runtime: &PipelineRuntime) {
+    if runtime.mode_png {
         println!(
             "[wbeam] encoder-select requested={} backend={} raw_format={} fps={} bitrate={}kbps",
             cfg.encoder, runtime.encoder_name, runtime.raw_format, cfg.fps, cfg.bitrate_kbps
         );
+        return;
     }
+
+    println!(
+        "[wbeam] encoder-select requested={} backend={} raw_format={} fps={} bitrate={}kbps gop={} intra_only={}",
+        cfg.encoder,
+        runtime.encoder_name,
+        runtime.raw_format,
+        cfg.fps,
+        cfg.bitrate_kbps,
+        runtime.effective_gop,
+        cfg.intra_only
+    );
+}
+
+fn log_effective_runtime(cfg: &ResolvedConfig, runtime: &PipelineRuntime) {
+    log_encoder_selection(cfg, runtime);
     println!(
         "[wbeam-effective] requested_encoder={} resolved_backend={} raw_format={} size={}x{} fps={} bitrate_kbps={} cursor_mode={:?} gop={} intra_only={} stream_mode={:?} queue_max_buffers={} queue_max_time_ms={} appsink_max_buffers={} appsink_drop={} appsink_sync={} capture_backend={} parse_mode={} timeout_pull_ms={} timeout_write_ms={} timeout_disconnect={} videorate_drop_only={} pipewire_keepalive_ms={} portal_queue_leaky={} portal_queue_time_ns={}",
         cfg.encoder,
@@ -550,14 +347,13 @@ fn log_effective_runtime(cfg: &ResolvedConfig, runtime: &PipelineRuntime) {
     );
 }
 
-/// Build the full capture → encode → appsink pipeline.
+/// Build the full capture -> encode -> appsink pipeline.
 ///
-/// Returns the `(Pipeline, AppSink, fps_counter)` triple.  The `fps_counter`
+/// Returns the `(Pipeline, AppSink, fps_counter)` triple. The `fps_counter`
 /// is incremented by a pad probe on the appsink's sink pad on every buffer.
 pub fn make_pipeline(
     capture: &PreparedCapture,
     cfg: &ResolvedConfig,
-    _port: u16,
     debug_dir: &str,
     debug_fps: u32,
     framed: bool,
@@ -570,7 +366,11 @@ pub fn make_pipeline(
     add_and_link_main_path(&pipeline, &elements)?;
 
     if let Some(tee) = &elements.tee {
-        attach_debug_branch(&pipeline, tee, debug_dir, debug_fps)?;
+        DebugBranchElements::new(debug_fps, debug_dir)?.attach_to_pipeline(
+            &pipeline,
+            tee,
+            link_tee_branch,
+        )?;
     }
 
     let fps_counter = attach_fps_probe(&elements.sink);
@@ -691,5 +491,20 @@ mod tests {
         let h264_caps_str = h264_caps.to_string();
         assert!(h264_caps_str.contains("video/x-h264"));
         assert!(h264_caps_str.contains("alignment=(string)nal"));
+    }
+
+    #[test]
+    fn runtime_resolves_encoder_and_parser_factories() {
+        let png_runtime = test_runtime(true, false, false);
+        assert_eq!(png_runtime.encoder_factory(), "pngenc");
+        assert_eq!(png_runtime.parse_factory(), None);
+
+        let h265_runtime = test_runtime(false, true, true);
+        assert_eq!(h265_runtime.encoder_factory(), "x265enc");
+        assert_eq!(h265_runtime.parse_factory(), Some("h265parse"));
+
+        let h264_runtime = test_runtime(false, false, true);
+        assert_eq!(h264_runtime.encoder_factory(), "x264enc");
+        assert_eq!(h264_runtime.parse_factory(), Some("h264parse"));
     }
 }
