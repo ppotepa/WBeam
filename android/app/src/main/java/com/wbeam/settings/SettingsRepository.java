@@ -64,11 +64,16 @@ public final class SettingsRepository {
         boolean localCursor = prefs.getBoolean(PREF_LOCAL_CURSOR, true);
         boolean intraOnly   = prefs.getBoolean(PREF_INTRA_ONLY, false);
 
-        return new SettingsSnapshot(
-                profile, encoder, cursor,
-                resScale, fps, bitrateMbps,
-                localCursor, intraOnly
-        );
+        return new SettingsSnapshot.Builder()
+                .setProfile(profile)
+                .setEncoder(encoder)
+                .setCursor(cursor)
+                .setResScale(resScale)
+                .setFps(fps)
+                .setBitrateMbps(bitrateMbps)
+                .setLocalCursor(localCursor)
+                .setIntraOnly(intraOnly)
+                .build();
     }
 
     /** Persist the current settings snapshot. */
@@ -97,19 +102,71 @@ public final class SettingsRepository {
         public final boolean localCursor;
         public final boolean intraOnly;
 
-        public SettingsSnapshot(
-                String profile, String encoder, String cursor,
-                int resScale, int fps, int bitrateMbps,
-                boolean localCursor, boolean intraOnly
-        ) {
-            this.profile     = profile;
-            this.encoder     = encoder;
-            this.cursor      = cursor;
-            this.resScale    = resScale;
-            this.fps         = fps;
-            this.bitrateMbps = bitrateMbps;
-            this.localCursor = localCursor;
-            this.intraOnly   = intraOnly;
+        public SettingsSnapshot(Builder builder) {
+            this.profile     = builder.profile;
+            this.encoder     = builder.encoder;
+            this.cursor      = builder.cursor;
+            this.resScale    = builder.resScale;
+            this.fps         = builder.fps;
+            this.bitrateMbps = builder.bitrateMbps;
+            this.localCursor = builder.localCursor;
+            this.intraOnly   = builder.intraOnly;
+        }
+
+        public static final class Builder {
+            public String  profile;
+            public String  encoder;
+            public String  cursor;
+            public int     resScale;
+            public int     fps;
+            public int     bitrateMbps;
+            public boolean localCursor;
+            public boolean intraOnly;
+
+            public Builder setProfile(String profile) {
+                this.profile = profile;
+                return this;
+            }
+
+            public Builder setEncoder(String encoder) {
+                this.encoder = encoder;
+                return this;
+            }
+
+            public Builder setCursor(String cursor) {
+                this.cursor = cursor;
+                return this;
+            }
+
+            public Builder setResScale(int resScale) {
+                this.resScale = resScale;
+                return this;
+            }
+
+            public Builder setFps(int fps) {
+                this.fps = fps;
+                return this;
+            }
+
+            public Builder setBitrateMbps(int bitrateMbps) {
+                this.bitrateMbps = bitrateMbps;
+                return this;
+            }
+
+            public Builder setLocalCursor(boolean localCursor) {
+                this.localCursor = localCursor;
+                return this;
+            }
+
+            public Builder setIntraOnly(boolean intraOnly) {
+                this.intraOnly = intraOnly;
+                return this;
+            }
+
+            public SettingsSnapshot build() {
+                return new SettingsSnapshot(this);
+            }
         }
     }
+
 }

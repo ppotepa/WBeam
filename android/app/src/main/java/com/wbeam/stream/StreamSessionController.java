@@ -19,8 +19,6 @@ import java.util.concurrent.ExecutorService;
  */
 public final class StreamSessionController {
 
-    private static final String TAG = "WBeamSessionCtrl";
-
     private static final long AUTO_START_FAILURE_BACKOFF_MS = 30_000L;
     private static final long STOP_SUPPRESS_AUTO_START_MS   = 12_000L;
 
