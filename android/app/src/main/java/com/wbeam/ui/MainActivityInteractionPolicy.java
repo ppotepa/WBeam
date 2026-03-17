@@ -3,12 +3,14 @@ package com.wbeam.ui;
 import android.view.KeyEvent;
 
 public final class MainActivityInteractionPolicy {
+    @SuppressWarnings("java:S1104")
     public static final class ToggleState {
         public boolean volumeUpHeld;
         public boolean volumeDownHeld;
         public boolean debugOverlayToggleArmed;
     }
 
+    @SuppressWarnings("java:S1104")
     public static final class ToggleAction {
         public boolean handled;
         public boolean scheduleToggle;
