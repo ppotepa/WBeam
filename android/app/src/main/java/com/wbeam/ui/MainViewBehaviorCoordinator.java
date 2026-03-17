@@ -42,6 +42,78 @@ public final class MainViewBehaviorCoordinator {
     private MainViewBehaviorCoordinator() {
     }
 
+    public static final class SetupButtonsInput {
+        private Button settingsCloseButton;
+        private View simpleMenuPanel;
+        private View debugInfoPanel;
+        private Handler uiHandler;
+        private Runnable debugInfoFadeTask;
+        private float debugInfoAlphaTouch;
+        private long debugInfoAlphaResetMs;
+        private Button simpleModeH265Button;
+        private Button simpleModeRawButton;
+        private String preferredVideo;
+        private ModeSelectedHandler onModeSelected;
+        private Button simpleFps30Button;
+        private Button simpleFps45Button;
+        private Button simpleFps60Button;
+        private Button simpleFps90Button;
+        private Button simpleFps120Button;
+        private Button simpleFps144Button;
+        private FpsSelectedHandler onFpsSelected;
+        private Button simpleApplyButton;
+        private UiTask hideSettingsPanelTask;
+        private UiTask scheduleSimpleMenuAutoHideTask;
+        private UiTask onApplyAndStartTask;
+
+        public SetupButtonsInput setSettingsCloseButton(Button value) { settingsCloseButton = value; return this; }
+        public SetupButtonsInput setSimpleMenuPanel(View value) { simpleMenuPanel = value; return this; }
+        public SetupButtonsInput setDebugInfoPanel(View value) { debugInfoPanel = value; return this; }
+        public SetupButtonsInput setUiHandler(Handler value) { uiHandler = value; return this; }
+        public SetupButtonsInput setDebugInfoFadeTask(Runnable value) { debugInfoFadeTask = value; return this; }
+        public SetupButtonsInput setDebugInfoAlphaTouch(float value) { debugInfoAlphaTouch = value; return this; }
+        public SetupButtonsInput setDebugInfoAlphaResetMs(long value) { debugInfoAlphaResetMs = value; return this; }
+        public SetupButtonsInput setSimpleModeH265Button(Button value) { simpleModeH265Button = value; return this; }
+        public SetupButtonsInput setSimpleModeRawButton(Button value) { simpleModeRawButton = value; return this; }
+        public SetupButtonsInput setPreferredVideo(String value) { preferredVideo = value; return this; }
+        public SetupButtonsInput setOnModeSelected(ModeSelectedHandler value) { onModeSelected = value; return this; }
+        public SetupButtonsInput setSimpleFps30Button(Button value) { simpleFps30Button = value; return this; }
+        public SetupButtonsInput setSimpleFps45Button(Button value) { simpleFps45Button = value; return this; }
+        public SetupButtonsInput setSimpleFps60Button(Button value) { simpleFps60Button = value; return this; }
+        public SetupButtonsInput setSimpleFps90Button(Button value) { simpleFps90Button = value; return this; }
+        public SetupButtonsInput setSimpleFps120Button(Button value) { simpleFps120Button = value; return this; }
+        public SetupButtonsInput setSimpleFps144Button(Button value) { simpleFps144Button = value; return this; }
+        public SetupButtonsInput setOnFpsSelected(FpsSelectedHandler value) { onFpsSelected = value; return this; }
+        public SetupButtonsInput setSimpleApplyButton(Button value) { simpleApplyButton = value; return this; }
+        public SetupButtonsInput setHideSettingsPanelTask(UiTask value) { hideSettingsPanelTask = value; return this; }
+        public SetupButtonsInput setScheduleSimpleMenuAutoHideTask(UiTask value) { scheduleSimpleMenuAutoHideTask = value; return this; }
+        public SetupButtonsInput setOnApplyAndStartTask(UiTask value) { onApplyAndStartTask = value; return this; }
+    }
+
+    public static final class BuildVariantUiInput {
+        private boolean buildDebug;
+        private MainUiState uiState;
+        private FpsLossGraphView debugFpsGraphView;
+        private int debugFpsGraphPoints;
+        private View debugInfoPanel;
+        private UiTask forceFullscreenTask;
+        private OverlayVisibilityApplier overlayVisibilityApplier;
+        private UiTask startDebugGraphSamplingTask;
+        private UiTask refreshDebugInfoOverlayTask;
+        private UiTask stopDebugGraphSamplingTask;
+
+        public BuildVariantUiInput setBuildDebug(boolean value) { buildDebug = value; return this; }
+        public BuildVariantUiInput setUiState(MainUiState value) { uiState = value; return this; }
+        public BuildVariantUiInput setDebugFpsGraphView(FpsLossGraphView value) { debugFpsGraphView = value; return this; }
+        public BuildVariantUiInput setDebugFpsGraphPoints(int value) { debugFpsGraphPoints = value; return this; }
+        public BuildVariantUiInput setDebugInfoPanel(View value) { debugInfoPanel = value; return this; }
+        public BuildVariantUiInput setForceFullscreenTask(UiTask value) { forceFullscreenTask = value; return this; }
+        public BuildVariantUiInput setOverlayVisibilityApplier(OverlayVisibilityApplier value) { overlayVisibilityApplier = value; return this; }
+        public BuildVariantUiInput setStartDebugGraphSamplingTask(UiTask value) { startDebugGraphSamplingTask = value; return this; }
+        public BuildVariantUiInput setRefreshDebugInfoOverlayTask(UiTask value) { refreshDebugInfoOverlayTask = value; return this; }
+        public BuildVariantUiInput setStopDebugGraphSamplingTask(UiTask value) { stopDebugGraphSamplingTask = value; return this; }
+    }
+
     public static void setupSurfaceCallbacks(
             SurfaceView previewSurface,
             CursorOverlayController cursorOverlayController,
@@ -62,79 +134,46 @@ public final class MainViewBehaviorCoordinator {
         MainActivitySurfaceSetup.setup(input);
     }
 
-    public static void setupButtons(
-            Button settingsCloseButton,
-            View simpleMenuPanel,
-            View debugInfoPanel,
-            Handler uiHandler,
-            Runnable debugInfoFadeTask,
-            float debugInfoAlphaTouch,
-            long debugInfoAlphaResetMs,
-            Button simpleModeH265Button,
-            Button simpleModeRawButton,
-            String preferredVideo,
-            ModeSelectedHandler onModeSelected,
-            Button simpleFps30Button,
-            Button simpleFps45Button,
-            Button simpleFps60Button,
-            Button simpleFps90Button,
-            Button simpleFps120Button,
-            Button simpleFps144Button,
-            FpsSelectedHandler onFpsSelected,
-            Button simpleApplyButton,
-            UiTask hideSettingsPanelTask,
-            UiTask scheduleSimpleMenuAutoHideTask,
-            UiTask onApplyAndStartTask
-    ) {
+    public static void setupButtons(SetupButtonsInput input) {
         MainActivityButtonsSetup.setup(
-                settingsCloseButton,
-                simpleMenuPanel,
-                debugInfoPanel,
-                uiHandler,
-                debugInfoFadeTask,
-                debugInfoAlphaTouch,
-                debugInfoAlphaResetMs,
-                simpleModeH265Button,
-                simpleModeRawButton,
-                preferredVideo,
-                onModeSelected::onMode,
-                simpleFps30Button,
-                simpleFps45Button,
-                simpleFps60Button,
-                simpleFps90Button,
-                simpleFps120Button,
-                simpleFps144Button,
-                onFpsSelected::onFps,
-                simpleApplyButton,
-                hideSettingsPanelTask::run,
-                scheduleSimpleMenuAutoHideTask::run,
-                onApplyAndStartTask::run
+                new MainActivityButtonsSetup.SetupInput()
+                        .setSettingsCloseButton(input.settingsCloseButton)
+                        .setSimpleMenuPanel(input.simpleMenuPanel)
+                        .setDebugInfoPanel(input.debugInfoPanel)
+                        .setUiHandler(input.uiHandler)
+                        .setDebugInfoFadeTask(input.debugInfoFadeTask)
+                        .setDebugInfoAlphaTouch(input.debugInfoAlphaTouch)
+                        .setDebugInfoAlphaResetMs(input.debugInfoAlphaResetMs)
+                        .setSimpleModeH265Button(input.simpleModeH265Button)
+                        .setSimpleModeRawButton(input.simpleModeRawButton)
+                        .setPreferredVideo(input.preferredVideo)
+                        .setModeSelected(input.onModeSelected::onMode)
+                        .setSimpleFps30Button(input.simpleFps30Button)
+                        .setSimpleFps45Button(input.simpleFps45Button)
+                        .setSimpleFps60Button(input.simpleFps60Button)
+                        .setSimpleFps90Button(input.simpleFps90Button)
+                        .setSimpleFps120Button(input.simpleFps120Button)
+                        .setSimpleFps144Button(input.simpleFps144Button)
+                        .setFpsSelected(input.onFpsSelected::onFps)
+                        .setSimpleApplyButton(input.simpleApplyButton)
+                        .setOnSettingsClose(input.hideSettingsPanelTask::run)
+                        .setOnSimpleMenuTouchRefresh(input.scheduleSimpleMenuAutoHideTask::run)
+                        .setOnSimpleApply(input.onApplyAndStartTask::run)
         );
     }
 
-    public static void applyBuildVariantUi(
-            boolean buildDebug,
-            MainUiState uiState,
-            FpsLossGraphView debugFpsGraphView,
-            int debugFpsGraphPoints,
-            View debugInfoPanel,
-            UiTask forceFullscreenTask,
-            OverlayVisibilityApplier overlayVisibilityApplier,
-            UiTask startDebugGraphSamplingTask,
-            UiTask refreshDebugInfoOverlayTask,
-            UiTask stopDebugGraphSamplingTask
-    ) {
+    public static void applyBuildVariantUi(BuildVariantUiInput input) {
         BuildVariantUiCoordinator.apply(
-                buildDebug,
-                uiState.debugOverlayVisible,
-                debugFpsGraphView,
-                debugFpsGraphPoints,
-                debugInfoPanel,
-                forceFullscreenTask::run,
-                overlayVisibilityApplier::apply,
-                startDebugGraphSamplingTask::run,
-                refreshDebugInfoOverlayTask::run,
-                stopDebugGraphSamplingTask::run
+                input.buildDebug,
+                input.uiState.debugOverlayVisible,
+                input.debugFpsGraphView,
+                input.debugFpsGraphPoints,
+                input.debugInfoPanel,
+                input.forceFullscreenTask::run,
+                input.overlayVisibilityApplier::apply,
+                input.startDebugGraphSamplingTask::run,
+                input.refreshDebugInfoOverlayTask::run,
+                input.stopDebugGraphSamplingTask::run
         );
     }
 

@@ -23,57 +23,82 @@ public final class MainActivityButtonsSetup {
     private MainActivityButtonsSetup() {
     }
 
-    public static void setup(
-            Button settingsCloseButton,
-            View simpleMenuPanel,
-            View debugInfoPanel,
-            Handler uiHandler,
-            Runnable debugInfoFadeTask,
-            float debugInfoAlphaTouch,
-            long debugInfoAlphaResetMs,
-            Button simpleModeH265Button,
-            Button simpleModeRawButton,
-            String preferredVideo,
-            ModeSelected modeSelected,
-            Button simpleFps30Button,
-            Button simpleFps45Button,
-            Button simpleFps60Button,
-            Button simpleFps90Button,
-            Button simpleFps120Button,
-            Button simpleFps144Button,
-            FpsSelected fpsSelected,
-            Button simpleApplyButton,
-            Action onSettingsClose,
-            Action onSimpleMenuTouchRefresh,
-            Action onSimpleApply
-    ) {
-        MainActivityUiBinder.bindSettingsCloseButton(settingsCloseButton, onSettingsClose::run);
+    public static final class SetupInput {
+        private Button settingsCloseButton;
+        private View simpleMenuPanel;
+        private View debugInfoPanel;
+        private Handler uiHandler;
+        private Runnable debugInfoFadeTask;
+        private float debugInfoAlphaTouch;
+        private long debugInfoAlphaResetMs;
+        private Button simpleModeH265Button;
+        private Button simpleModeRawButton;
+        private String preferredVideo;
+        private ModeSelected modeSelected;
+        private Button simpleFps30Button;
+        private Button simpleFps45Button;
+        private Button simpleFps60Button;
+        private Button simpleFps90Button;
+        private Button simpleFps120Button;
+        private Button simpleFps144Button;
+        private FpsSelected fpsSelected;
+        private Button simpleApplyButton;
+        private Action onSettingsClose;
+        private Action onSimpleMenuTouchRefresh;
+        private Action onSimpleApply;
+
+        public SetupInput setSettingsCloseButton(Button value) { settingsCloseButton = value; return this; }
+        public SetupInput setSimpleMenuPanel(View value) { simpleMenuPanel = value; return this; }
+        public SetupInput setDebugInfoPanel(View value) { debugInfoPanel = value; return this; }
+        public SetupInput setUiHandler(Handler value) { uiHandler = value; return this; }
+        public SetupInput setDebugInfoFadeTask(Runnable value) { debugInfoFadeTask = value; return this; }
+        public SetupInput setDebugInfoAlphaTouch(float value) { debugInfoAlphaTouch = value; return this; }
+        public SetupInput setDebugInfoAlphaResetMs(long value) { debugInfoAlphaResetMs = value; return this; }
+        public SetupInput setSimpleModeH265Button(Button value) { simpleModeH265Button = value; return this; }
+        public SetupInput setSimpleModeRawButton(Button value) { simpleModeRawButton = value; return this; }
+        public SetupInput setPreferredVideo(String value) { preferredVideo = value; return this; }
+        public SetupInput setModeSelected(ModeSelected value) { modeSelected = value; return this; }
+        public SetupInput setSimpleFps30Button(Button value) { simpleFps30Button = value; return this; }
+        public SetupInput setSimpleFps45Button(Button value) { simpleFps45Button = value; return this; }
+        public SetupInput setSimpleFps60Button(Button value) { simpleFps60Button = value; return this; }
+        public SetupInput setSimpleFps90Button(Button value) { simpleFps90Button = value; return this; }
+        public SetupInput setSimpleFps120Button(Button value) { simpleFps120Button = value; return this; }
+        public SetupInput setSimpleFps144Button(Button value) { simpleFps144Button = value; return this; }
+        public SetupInput setFpsSelected(FpsSelected value) { fpsSelected = value; return this; }
+        public SetupInput setSimpleApplyButton(Button value) { simpleApplyButton = value; return this; }
+        public SetupInput setOnSettingsClose(Action value) { onSettingsClose = value; return this; }
+        public SetupInput setOnSimpleMenuTouchRefresh(Action value) { onSimpleMenuTouchRefresh = value; return this; }
+        public SetupInput setOnSimpleApply(Action value) { onSimpleApply = value; return this; }
+    }
+
+    public static void setup(SetupInput input) {
+        MainActivityUiBinder.bindSettingsCloseButton(input.settingsCloseButton, input.onSettingsClose::run);
         MainActivityUiBinder.bindSimpleMenuTouchRefresh(
-                simpleMenuPanel,
-                onSimpleMenuTouchRefresh::run
+                input.simpleMenuPanel,
+                input.onSimpleMenuTouchRefresh::run
         );
         MainActivityUiBinder.bindDebugInfoTouchFade(
-                debugInfoPanel,
-                uiHandler,
-                debugInfoFadeTask,
-                debugInfoAlphaTouch,
-                debugInfoAlphaResetMs
+                input.debugInfoPanel,
+                input.uiHandler,
+                input.debugInfoFadeTask,
+                input.debugInfoAlphaTouch,
+                input.debugInfoAlphaResetMs
         );
         MainActivityUiBinder.bindSimpleModeButtons(
-                simpleModeH265Button,
-                simpleModeRawButton,
-                preferredVideo,
-                modeSelected::onSelected
+                input.simpleModeH265Button,
+                input.simpleModeRawButton,
+                input.preferredVideo,
+                input.modeSelected::onSelected
         );
         MainActivityUiBinder.bindSimpleFpsButtons(
-                simpleFps30Button,
-                simpleFps45Button,
-                simpleFps60Button,
-                simpleFps90Button,
-                simpleFps120Button,
-                simpleFps144Button,
-                fpsSelected::onSelected
+                input.simpleFps30Button,
+                input.simpleFps45Button,
+                input.simpleFps60Button,
+                input.simpleFps90Button,
+                input.simpleFps120Button,
+                input.simpleFps144Button,
+                input.fpsSelected::onSelected
         );
-        MainActivityUiBinder.bindSimpleApplyButton(simpleApplyButton, onSimpleApply::run);
+        MainActivityUiBinder.bindSimpleApplyButton(input.simpleApplyButton, input.onSimpleApply::run);
     }
 }

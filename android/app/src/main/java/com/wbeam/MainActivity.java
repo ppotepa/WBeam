@@ -688,16 +688,17 @@ public class MainActivity extends AppCompatActivity {
                 fullscreenButton
         );
         MainViewBehaviorCoordinator.applyBuildVariantUi(
-                BuildConfig.DEBUG,
-                uiState,
-                debugFpsGraphView,
-                DEBUG_FPS_GRAPH_POINTS,
-                debugInfoPanel,
-                () -> setFullscreen(true),
-                this::setDebugOverlayVisible,
-                this::startDebugGraphSampling,
-                this::refreshDebugInfoOverlay,
-                this::stopDebugGraphSampling
+                new MainViewBehaviorCoordinator.BuildVariantUiInput()
+                        .setBuildDebug(BuildConfig.DEBUG)
+                        .setUiState(uiState)
+                        .setDebugFpsGraphView(debugFpsGraphView)
+                        .setDebugFpsGraphPoints(DEBUG_FPS_GRAPH_POINTS)
+                        .setDebugInfoPanel(debugInfoPanel)
+                        .setForceFullscreenTask(() -> setFullscreen(true))
+                        .setOverlayVisibilityApplier(this::setDebugOverlayVisible)
+                        .setStartDebugGraphSamplingTask(this::startDebugGraphSampling)
+                        .setRefreshDebugInfoOverlayTask(this::refreshDebugInfoOverlay)
+                        .setStopDebugGraphSamplingTask(this::stopDebugGraphSampling)
         );
     }
 
@@ -731,36 +732,37 @@ public class MainActivity extends AppCompatActivity {
 
     private void setupButtons() {
         MainViewBehaviorCoordinator.setupButtons(
-                settingsCloseButton,
-                simpleMenuPanel,
-                debugInfoPanel,
-                uiHandler,
-                debugInfoFadeTask,
-                DEBUG_INFO_ALPHA_TOUCH,
-                DEBUG_INFO_ALPHA_RESET_MS,
-                simpleModeH265Button,
-                simpleModeRawButton,
-                PREFERRED_VIDEO,
-                mode -> {
-                    simpleMenuState.setMode(mode);
-                    refreshSimpleMenuButtons();
-                    scheduleSimpleMenuAutoHide();
-                },
-                simpleFps30Button,
-                simpleFps45Button,
-                simpleFps60Button,
-                simpleFps90Button,
-                simpleFps120Button,
-                simpleFps144Button,
-                this::selectSimpleFps,
-                simpleApplyButton,
-                this::hideSettingsPanel,
-                this::scheduleSimpleMenuAutoHide,
-                () -> {
-                    applySimpleMenuToSettings();
-                    requestStartGuarded(false, true);
-                    hideSimpleMenu();
-                }
+                new MainViewBehaviorCoordinator.SetupButtonsInput()
+                        .setSettingsCloseButton(settingsCloseButton)
+                        .setSimpleMenuPanel(simpleMenuPanel)
+                        .setDebugInfoPanel(debugInfoPanel)
+                        .setUiHandler(uiHandler)
+                        .setDebugInfoFadeTask(debugInfoFadeTask)
+                        .setDebugInfoAlphaTouch(DEBUG_INFO_ALPHA_TOUCH)
+                        .setDebugInfoAlphaResetMs(DEBUG_INFO_ALPHA_RESET_MS)
+                        .setSimpleModeH265Button(simpleModeH265Button)
+                        .setSimpleModeRawButton(simpleModeRawButton)
+                        .setPreferredVideo(PREFERRED_VIDEO)
+                        .setOnModeSelected(mode -> {
+                            simpleMenuState.setMode(mode);
+                            refreshSimpleMenuButtons();
+                            scheduleSimpleMenuAutoHide();
+                        })
+                        .setSimpleFps30Button(simpleFps30Button)
+                        .setSimpleFps45Button(simpleFps45Button)
+                        .setSimpleFps60Button(simpleFps60Button)
+                        .setSimpleFps90Button(simpleFps90Button)
+                        .setSimpleFps120Button(simpleFps120Button)
+                        .setSimpleFps144Button(simpleFps144Button)
+                        .setOnFpsSelected(this::selectSimpleFps)
+                        .setSimpleApplyButton(simpleApplyButton)
+                        .setHideSettingsPanelTask(this::hideSettingsPanel)
+                        .setScheduleSimpleMenuAutoHideTask(this::scheduleSimpleMenuAutoHide)
+                        .setOnApplyAndStartTask(() -> {
+                            applySimpleMenuToSettings();
+                            requestStartGuarded(false, true);
+                            hideSimpleMenu();
+                        })
         );
         updateActionButtonsEnabled();
     }
@@ -915,14 +917,15 @@ public class MainActivity extends AppCompatActivity {
 
     private void handleApiFailure(String prefix, boolean userAction, Exception e) {
         MainSessionControlCoordinator.handleApiFailure(
-                this,
-                TAG,
-                STATE_ERROR,
-                prefix,
-                userAction,
-                e,
-                this::updateStatus,
-                this::appendLiveLog
+                new MainSessionControlCoordinator.ApiFailureInput()
+                        .setContext(this)
+                        .setTag(TAG)
+                        .setStateError(STATE_ERROR)
+                        .setPrefix(prefix)
+                        .setUserAction(userAction)
+                        .setError(e)
+                        .setStatusSink(this::updateStatus)
+                        .setLineLogger(this::appendLiveLog)
         );
     }
 
@@ -936,15 +939,16 @@ public class MainActivity extends AppCompatActivity {
 
     private void requestStartGuarded(boolean userAction, boolean ensureViewer) {
         MainSessionControlCoordinator.requestStartGuarded(
-                this,
-                userAction,
-                ensureViewer,
-                daemon.reachable,
-                uiState.handshakeResolved,
-                daemon.buildRevision,
-                this::updateStatus,
-                this::appendLiveLog,
-                sessionController::requestStart
+                new MainSessionControlCoordinator.RequestStartInput()
+                        .setContext(this)
+                        .setUserAction(userAction)
+                        .setEnsureViewer(ensureViewer)
+                        .setDaemonReachable(daemon.reachable)
+                        .setHandshakeResolved(uiState.handshakeResolved)
+                        .setDaemonBuildRevision(daemon.buildRevision)
+                        .setStatusSink(this::updateStatus)
+                        .setLineLogger(this::appendLiveLog)
+                        .setStartRequester(sessionController::requestStart)
         );
     }
 

@@ -37,6 +37,56 @@ public final class MainActivitySimpleMenuCoordinator {
         }
     }
 
+    public static final class ToggleInput {
+        private View simpleMenuPanel;
+        private Handler uiHandler;
+        private Runnable autoHideTask;
+        private State state;
+        private String selectedEncoder;
+        private String preferredVideo;
+        private int selectedFps;
+        private Runnable refreshButtons;
+        private Runnable scheduleAutoHide;
+
+        public ToggleInput setSimpleMenuPanel(View value) { simpleMenuPanel = value; return this; }
+        public ToggleInput setUiHandler(Handler value) { uiHandler = value; return this; }
+        public ToggleInput setAutoHideTask(Runnable value) { autoHideTask = value; return this; }
+        public ToggleInput setState(State value) { state = value; return this; }
+        public ToggleInput setSelectedEncoder(String value) { selectedEncoder = value; return this; }
+        public ToggleInput setPreferredVideo(String value) { preferredVideo = value; return this; }
+        public ToggleInput setSelectedFps(int value) { selectedFps = value; return this; }
+        public ToggleInput setRefreshButtons(Runnable value) { refreshButtons = value; return this; }
+        public ToggleInput setScheduleAutoHide(Runnable value) { scheduleAutoHide = value; return this; }
+    }
+
+    public static final class RefreshButtonsInput {
+        private View simpleMenuPanel;
+        private Button simpleModeH265Button;
+        private Button simpleModeRawButton;
+        private String preferredVideo;
+        private String mode;
+        private Button simpleFps30Button;
+        private Button simpleFps45Button;
+        private Button simpleFps60Button;
+        private Button simpleFps90Button;
+        private Button simpleFps120Button;
+        private Button simpleFps144Button;
+        private int fps;
+
+        public RefreshButtonsInput setSimpleMenuPanel(View value) { simpleMenuPanel = value; return this; }
+        public RefreshButtonsInput setSimpleModeH265Button(Button value) { simpleModeH265Button = value; return this; }
+        public RefreshButtonsInput setSimpleModeRawButton(Button value) { simpleModeRawButton = value; return this; }
+        public RefreshButtonsInput setPreferredVideo(String value) { preferredVideo = value; return this; }
+        public RefreshButtonsInput setMode(String value) { mode = value; return this; }
+        public RefreshButtonsInput setSimpleFps30Button(Button value) { simpleFps30Button = value; return this; }
+        public RefreshButtonsInput setSimpleFps45Button(Button value) { simpleFps45Button = value; return this; }
+        public RefreshButtonsInput setSimpleFps60Button(Button value) { simpleFps60Button = value; return this; }
+        public RefreshButtonsInput setSimpleFps90Button(Button value) { simpleFps90Button = value; return this; }
+        public RefreshButtonsInput setSimpleFps120Button(Button value) { simpleFps120Button = value; return this; }
+        public RefreshButtonsInput setSimpleFps144Button(Button value) { simpleFps144Button = value; return this; }
+        public RefreshButtonsInput setFps(int value) { fps = value; return this; }
+    }
+
     private MainActivitySimpleMenuCoordinator() {
     }
 
@@ -88,29 +138,19 @@ public final class MainActivitySimpleMenuCoordinator {
         simpleMenuPanel.setVisibility(View.GONE);
     }
 
-    public static void toggle(
-            View simpleMenuPanel,
-            Handler uiHandler,
-            Runnable autoHideTask,
-            State state,
-            String selectedEncoder,
-            String preferredVideo,
-            int selectedFps,
-            Runnable refreshButtons,
-            Runnable scheduleAutoHide
-    ) {
-        if (state.isVisible()) {
-            hide(simpleMenuPanel, uiHandler, autoHideTask, state);
+    public static void toggle(ToggleInput input) {
+        if (input.state.isVisible()) {
+            hide(input.simpleMenuPanel, input.uiHandler, input.autoHideTask, input.state);
             return;
         }
         show(
-                simpleMenuPanel,
-                selectedEncoder,
-                preferredVideo,
-                selectedFps,
-                state,
-                refreshButtons,
-                scheduleAutoHide
+                input.simpleMenuPanel,
+                input.selectedEncoder,
+                input.preferredVideo,
+                input.selectedFps,
+                input.state,
+                input.refreshButtons,
+                input.scheduleAutoHide
         );
     }
 
@@ -146,35 +186,22 @@ public final class MainActivitySimpleMenuCoordinator {
         );
     }
 
-    public static void refreshButtons(
-            View simpleMenuPanel,
-            Button simpleModeH265Button,
-            Button simpleModeRawButton,
-            String preferredVideo,
-            String mode,
-            Button simpleFps30Button,
-            Button simpleFps45Button,
-            Button simpleFps60Button,
-            Button simpleFps90Button,
-            Button simpleFps120Button,
-            Button simpleFps144Button,
-            int fps
-    ) {
-        if (simpleMenuPanel == null) {
+    public static void refreshButtons(RefreshButtonsInput input) {
+        if (input.simpleMenuPanel == null) {
             return;
         }
         MainActivitySettingsPresenter.applySimpleMenuButtons(
-                simpleModeH265Button,
-                simpleModeRawButton,
-                preferredVideo,
-                mode,
-                simpleFps30Button,
-                simpleFps45Button,
-                simpleFps60Button,
-                simpleFps90Button,
-                simpleFps120Button,
-                simpleFps144Button,
-                fps
+                input.simpleModeH265Button,
+                input.simpleModeRawButton,
+                input.preferredVideo,
+                input.mode,
+                input.simpleFps30Button,
+                input.simpleFps45Button,
+                input.simpleFps60Button,
+                input.simpleFps90Button,
+                input.simpleFps120Button,
+                input.simpleFps144Button,
+                input.fps
         );
     }
 }

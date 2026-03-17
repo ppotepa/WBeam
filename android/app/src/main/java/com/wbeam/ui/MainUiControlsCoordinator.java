@@ -107,17 +107,18 @@ public final class MainUiControlsCoordinator {
             String selectedCursorMode
     ) {
         HostHintPresenter.apply(
-                hostHintText,
-                daemonReachable,
-                apiBase,
-                daemonHostName,
-                daemonStateUi,
-                daemonService,
-                selectedProfile,
-                cfg,
-                selectedEncoder,
-                intraOnlyEnabled,
-                selectedCursorMode
+                new HostHintPresenter.Input()
+                        .setHostHintText(hostHintText)
+                        .setDaemonReachable(daemonReachable)
+                        .setApiBase(apiBase)
+                        .setDaemonHostName(daemonHostName)
+                        .setDaemonStateUi(daemonStateUi)
+                        .setDaemonService(daemonService)
+                        .setSelectedProfile(selectedProfile)
+                        .setCfg(cfg)
+                        .setSelectedEncoder(selectedEncoder)
+                        .setIntraOnlyEnabled(intraOnlyEnabled)
+                        .setSelectedCursorMode(selectedCursorMode)
         );
     }
 
@@ -253,15 +254,16 @@ public final class MainUiControlsCoordinator {
             Runnable scheduleSimpleMenuAutoHide
     ) {
         MainActivitySimpleMenuCoordinator.toggle(
-                simpleMenuPanel,
-                uiHandler,
-                simpleMenuAutoHideTask,
-                simpleMenuState,
-                selectedEncoder,
-                preferredVideo,
-                selectedFps,
-                refreshSimpleMenuButtons::run,
-                scheduleSimpleMenuAutoHide::run
+                new MainActivitySimpleMenuCoordinator.ToggleInput()
+                        .setSimpleMenuPanel(simpleMenuPanel)
+                        .setUiHandler(uiHandler)
+                        .setAutoHideTask(simpleMenuAutoHideTask)
+                        .setState(simpleMenuState)
+                        .setSelectedEncoder(selectedEncoder)
+                        .setPreferredVideo(preferredVideo)
+                        .setSelectedFps(selectedFps)
+                        .setRefreshButtons(refreshSimpleMenuButtons::run)
+                        .setScheduleAutoHide(scheduleSimpleMenuAutoHide::run)
         );
     }
 
@@ -315,18 +317,19 @@ public final class MainUiControlsCoordinator {
             int fps
     ) {
         MainActivitySimpleMenuCoordinator.refreshButtons(
-                simpleMenuPanel,
-                simpleModeH265Button,
-                simpleModeRawButton,
-                preferredVideo,
-                mode,
-                simpleFps30Button,
-                simpleFps45Button,
-                simpleFps60Button,
-                simpleFps90Button,
-                simpleFps120Button,
-                simpleFps144Button,
-                fps
+                new MainActivitySimpleMenuCoordinator.RefreshButtonsInput()
+                        .setSimpleMenuPanel(simpleMenuPanel)
+                        .setSimpleModeH265Button(simpleModeH265Button)
+                        .setSimpleModeRawButton(simpleModeRawButton)
+                        .setPreferredVideo(preferredVideo)
+                        .setMode(mode)
+                        .setSimpleFps30Button(simpleFps30Button)
+                        .setSimpleFps45Button(simpleFps45Button)
+                        .setSimpleFps60Button(simpleFps60Button)
+                        .setSimpleFps90Button(simpleFps90Button)
+                        .setSimpleFps120Button(simpleFps120Button)
+                        .setSimpleFps144Button(simpleFps144Button)
+                        .setFps(fps)
         );
     }
 
