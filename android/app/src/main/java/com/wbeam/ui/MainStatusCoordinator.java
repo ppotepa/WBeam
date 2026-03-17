@@ -15,6 +15,7 @@ public final class MainStatusCoordinator {
     private MainStatusCoordinator() {
     }
 
+    @SuppressWarnings("java:S107")
     public static void updateStatus(
             String state,
             String info,
@@ -48,6 +49,7 @@ public final class MainStatusCoordinator {
         }
     }
 
+    @SuppressWarnings("java:S107")
     public static void renderStatus(
             TextView statusText,
             TextView detailText,

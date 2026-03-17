@@ -269,6 +269,7 @@ public final class RuntimeTelemetryMapper {
         }
     }
 
+    @SuppressWarnings("java:S3776")
     public static Snapshot map(
             JSONObject metrics,
             int selectedFps,
