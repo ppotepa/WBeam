@@ -81,27 +81,27 @@ public final class SettingsRepository {
     public void save(SettingsSnapshot s) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .edit()
-                .putString(PREF_PROFILE,          s.profile)
-                .putString(PREF_ENCODER,          s.encoder)
-                .putString(PREF_CURSOR,           s.cursor)
-                .putInt(PREF_RES_SCALE,           s.resScale)
-                .putInt(PREF_FPS,                 s.fps)
-                .putInt(PREF_BITRATE,             s.bitrateMbps)
-                .putBoolean(PREF_LOCAL_CURSOR,    s.localCursor)
-                .putBoolean(PREF_INTRA_ONLY,      s.intraOnly)
+                .putString(PREF_PROFILE,          s.getProfile())
+                .putString(PREF_ENCODER,          s.getEncoder())
+                .putString(PREF_CURSOR,           s.getCursor())
+                .putInt(PREF_RES_SCALE,           s.getResScale())
+                .putInt(PREF_FPS,                 s.getFps())
+                .putInt(PREF_BITRATE,             s.getBitrateMbps())
+                .putBoolean(PREF_LOCAL_CURSOR,    s.isLocalCursor())
+                .putBoolean(PREF_INTRA_ONLY,      s.isIntraOnly())
                 .apply();
     }
 
     /** Immutable snapshot of all user settings. */
     public static final class SettingsSnapshot {
-        public final String  profile;
-        public final String  encoder;
-        public final String  cursor;
-        public final int     resScale;
-        public final int     fps;
-        public final int     bitrateMbps;
-        public final boolean localCursor;
-        public final boolean intraOnly;
+        private final String  profile;
+        private final String  encoder;
+        private final String  cursor;
+        private final int     resScale;
+        private final int     fps;
+        private final int     bitrateMbps;
+        private final boolean localCursor;
+        private final boolean intraOnly;
 
         public SettingsSnapshot(Builder builder) {
             this.profile     = builder.profile;
@@ -112,6 +112,38 @@ public final class SettingsRepository {
             this.bitrateMbps = builder.bitrateMbps;
             this.localCursor = builder.localCursor;
             this.intraOnly   = builder.intraOnly;
+        }
+
+        public String getProfile() {
+            return profile;
+        }
+
+        public String getEncoder() {
+            return encoder;
+        }
+
+        public String getCursor() {
+            return cursor;
+        }
+
+        public int getResScale() {
+            return resScale;
+        }
+
+        public int getFps() {
+            return fps;
+        }
+
+        public int getBitrateMbps() {
+            return bitrateMbps;
+        }
+
+        public boolean isLocalCursor() {
+            return localCursor;
+        }
+
+        public boolean isIntraOnly() {
+            return intraOnly;
         }
 
         public static final class Builder {

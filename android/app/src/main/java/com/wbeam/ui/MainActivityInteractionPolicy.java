@@ -5,17 +5,73 @@ import android.view.KeyEvent;
 public final class MainActivityInteractionPolicy {
     @SuppressWarnings("java:S1104")
     public static final class ToggleState {
-        public boolean volumeUpHeld;
-        public boolean volumeDownHeld;
-        public boolean debugOverlayToggleArmed;
+        private boolean volumeUpHeld;
+        private boolean volumeDownHeld;
+        private boolean debugOverlayToggleArmed;
+
+        public boolean isVolumeUpHeld() {
+            return volumeUpHeld;
+        }
+
+        public void setVolumeUpHeld(boolean volumeUpHeld) {
+            this.volumeUpHeld = volumeUpHeld;
+        }
+
+        public boolean isVolumeDownHeld() {
+            return volumeDownHeld;
+        }
+
+        public void setVolumeDownHeld(boolean volumeDownHeld) {
+            this.volumeDownHeld = volumeDownHeld;
+        }
+
+        public boolean isDebugOverlayToggleArmed() {
+            return debugOverlayToggleArmed;
+        }
+
+        public void setDebugOverlayToggleArmed(boolean debugOverlayToggleArmed) {
+            this.debugOverlayToggleArmed = debugOverlayToggleArmed;
+        }
     }
 
     @SuppressWarnings("java:S1104")
     public static final class ToggleAction {
-        public boolean handled;
-        public boolean scheduleToggle;
-        public boolean cancelScheduledToggle;
-        public boolean resetArmed;
+        private boolean handled;
+        private boolean scheduleToggle;
+        private boolean cancelScheduledToggle;
+        private boolean resetArmed;
+
+        public boolean isHandled() {
+            return handled;
+        }
+
+        public void setHandled(boolean handled) {
+            this.handled = handled;
+        }
+
+        public boolean isScheduleToggle() {
+            return scheduleToggle;
+        }
+
+        public void setScheduleToggle(boolean scheduleToggle) {
+            this.scheduleToggle = scheduleToggle;
+        }
+
+        public boolean isCancelScheduledToggle() {
+            return cancelScheduledToggle;
+        }
+
+        public void setCancelScheduledToggle(boolean cancelScheduledToggle) {
+            this.cancelScheduledToggle = cancelScheduledToggle;
+        }
+
+        public boolean isResetArmed() {
+            return resetArmed;
+        }
+
+        public void setResetArmed(boolean resetArmed) {
+            this.resetArmed = resetArmed;
+        }
     }
 
     private MainActivityInteractionPolicy() {
@@ -48,16 +104,16 @@ public final class MainActivityInteractionPolicy {
         if (!debugBuild || !isVolumeKey(keyCode)) {
             return action;
         }
-        action.handled = true;
+        action.setHandled(true);
         if (repeatCount == 0) {
             if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
-                state.volumeUpHeld = true;
+                state.setVolumeUpHeld(true);
             } else if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-                state.volumeDownHeld = true;
+                state.setVolumeDownHeld(true);
             }
-            if (state.volumeUpHeld && state.volumeDownHeld && !state.debugOverlayToggleArmed) {
-                action.cancelScheduledToggle = true;
-                action.scheduleToggle = true;
+            if (state.isVolumeUpHeld() && state.isVolumeDownHeld() && !state.isDebugOverlayToggleArmed()) {
+                action.setCancelScheduledToggle(true);
+                action.setScheduleToggle(true);
             }
         }
         return action;
@@ -72,17 +128,17 @@ public final class MainActivityInteractionPolicy {
         if (!debugBuild || !isVolumeKey(keyCode)) {
             return action;
         }
-        action.handled = true;
+        action.setHandled(true);
         if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
-            state.volumeUpHeld = false;
+            state.setVolumeUpHeld(false);
         } else if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-            state.volumeDownHeld = false;
+            state.setVolumeDownHeld(false);
         }
-        if (!state.volumeUpHeld || !state.volumeDownHeld) {
-            action.cancelScheduledToggle = true;
+        if (!state.isVolumeUpHeld() || !state.isVolumeDownHeld()) {
+            action.setCancelScheduledToggle(true);
         }
-        if (!state.volumeUpHeld && !state.volumeDownHeld) {
-            action.resetArmed = true;
+        if (!state.isVolumeUpHeld() && !state.isVolumeDownHeld()) {
+            action.setResetArmed(true);
         }
         return action;
     }

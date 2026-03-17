@@ -241,10 +241,10 @@ public class MainActivity extends AppCompatActivity {
         if (!BuildConfig.DEBUG) {
             return;
         }
-        if (debugToggleState.volumeUpHeld
-                && debugToggleState.volumeDownHeld
-                && !debugToggleState.debugOverlayToggleArmed) {
-            debugToggleState.debugOverlayToggleArmed = true;
+        if (debugToggleState.isVolumeUpHeld()
+                && debugToggleState.isVolumeDownHeld()
+                && !debugToggleState.isDebugOverlayToggleArmed()) {
+            debugToggleState.setDebugOverlayToggleArmed(true);
             boolean nextVisible = !uiState.debugOverlayVisible;
             setDebugOverlayVisible(nextVisible);
             Toast.makeText(
@@ -565,11 +565,11 @@ public class MainActivity extends AppCompatActivity {
                         keyCode,
                         event.getRepeatCount()
                 );
-        if (action.handled) {
-            if (action.cancelScheduledToggle) {
+        if (action.isHandled()) {
+            if (action.isCancelScheduledToggle()) {
                 uiHandler.removeCallbacks(debugOverlayToggleTask);
             }
-            if (action.scheduleToggle) {
+            if (action.isScheduleToggle()) {
                 uiHandler.postDelayed(debugOverlayToggleTask, DEBUG_OVERLAY_TOGGLE_HOLD_MS);
             }
             return true;
@@ -585,12 +585,12 @@ public class MainActivity extends AppCompatActivity {
                         BuildConfig.DEBUG,
                         keyCode
                 );
-        if (action.handled) {
-            if (action.cancelScheduledToggle) {
+        if (action.isHandled()) {
+            if (action.isCancelScheduledToggle()) {
                 uiHandler.removeCallbacks(debugOverlayToggleTask);
             }
-            if (action.resetArmed) {
-                debugToggleState.debugOverlayToggleArmed = false;
+            if (action.isResetArmed()) {
+                debugToggleState.setDebugOverlayToggleArmed(false);
             }
             return true;
         }
@@ -611,7 +611,7 @@ public class MainActivity extends AppCompatActivity {
                     updatePreflightOverlay();
                 }
         );
-        MainActivityPrimaryViewsBinder.Views primaryViews = bound.primaryViews;
+        MainActivityPrimaryViewsBinder.Views primaryViews = bound.getPrimaryViews();
         topBar = primaryViews.getTopBar();
         quickActionRow = primaryViews.getQuickActionRow();
         simpleMenuPanel = primaryViews.getSimpleMenuPanel();
@@ -629,13 +629,13 @@ public class MainActivity extends AppCompatActivity {
         perfHudText = primaryViews.getPerfHudText();
         perfHudWebView = primaryViews.getPerfHudWebView();
         debugInfoText = primaryViews.getDebugInfoText();
-        previewSurface = bound.previewSurface;
+        previewSurface = bound.getPreviewSurface();
 
-        immersiveModeController = bound.immersiveModeController;
-        settingsPanelController = bound.settingsPanelController;
-        startupBuildVersionText = bound.startupBuildVersionText;
-        startupOverlayController = bound.startupOverlayController;
-        MainActivityControlViewsBinder.Views controlViews = bound.controlViews;
+        immersiveModeController = bound.getImmersiveModeController();
+        settingsPanelController = bound.getSettingsPanelController();
+        startupBuildVersionText = bound.getStartupBuildVersionText();
+        startupOverlayController = bound.getStartupOverlayController();
+        MainActivityControlViewsBinder.Views controlViews = bound.getControlViews();
         liveLogText = controlViews.getLiveLogText();
         resValueText = controlViews.getResValueText();
         fpsValueText = controlViews.getFpsValueText();
@@ -670,7 +670,7 @@ public class MainActivity extends AppCompatActivity {
         simpleFps120Button = controlViews.getSimpleFps120Button();
         simpleFps144Button = controlViews.getSimpleFps144Button();
         simpleApplyButton = controlViews.getSimpleApplyButton();
-        cursorOverlayController = bound.cursorOverlayController;
+        cursorOverlayController = bound.getCursorOverlayController();
     }
 
     private void applyBuildVariantUi() {

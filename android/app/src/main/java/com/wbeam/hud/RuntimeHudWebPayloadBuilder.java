@@ -400,13 +400,13 @@ public final class RuntimeHudWebPayloadBuilder {
                 + (in.isTuningActive() ? " | tune=" + HudRenderSupport.safeText(in.getTuningLine()) : "");
 
         RuntimeHudShellRenderer.HtmlContent content = new RuntimeHudShellRenderer.HtmlContent();
-        content.chipsHtml = chips.toString();
-        content.cardsHtml = cards.toString();
-        content.chartsHtml = in.getMetricChartsHtml() == null ? "" : in.getMetricChartsHtml();
-        content.trendText = trend;
-        content.detailsRowsHtml = details.toString();
-        content.resourceRowsHtml = in.getResourceRowsHtml();
-        content.scaleClass = "scale-1x";
+        content.setChipsHtml(chips.toString());
+        content.setCardsHtml(cards.toString());
+        content.setChartsHtml(in.getMetricChartsHtml() == null ? "" : in.getMetricChartsHtml());
+        content.setTrendText(trend);
+        content.setDetailsRowsHtml(details.toString());
+        content.setResourceRowsHtml(in.getResourceRowsHtml());
+        content.setScaleClass("scale-1x");
         return RuntimeHudShellRenderer.buildHtml(content);
     }
 }

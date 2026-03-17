@@ -18,19 +18,75 @@ public final class RuntimeHudShellRenderer {
     private static final String BG_NAVY_DARK = "rgba(2,10,14,.35)";
 
     public static final class HtmlContent {
-        String chipsHtml;
-        String cardsHtml;
-        String chartsHtml;
-        String trendText;
-        String detailsRowsHtml;
-        String resourceRowsHtml;
-        String scaleClass;
+        private String chipsHtml;
+        private String cardsHtml;
+        private String chartsHtml;
+        private String trendText;
+        private String detailsRowsHtml;
+        private String resourceRowsHtml;
+        private String scaleClass;
+
+        public String getChipsHtml() {
+            return chipsHtml;
+        }
+
+        public void setChipsHtml(String chipsHtml) {
+            this.chipsHtml = chipsHtml;
+        }
+
+        public String getCardsHtml() {
+            return cardsHtml;
+        }
+
+        public void setCardsHtml(String cardsHtml) {
+            this.cardsHtml = cardsHtml;
+        }
+
+        public String getChartsHtml() {
+            return chartsHtml;
+        }
+
+        public void setChartsHtml(String chartsHtml) {
+            this.chartsHtml = chartsHtml;
+        }
+
+        public String getTrendText() {
+            return trendText;
+        }
+
+        public void setTrendText(String trendText) {
+            this.trendText = trendText;
+        }
+
+        public String getDetailsRowsHtml() {
+            return detailsRowsHtml;
+        }
+
+        public void setDetailsRowsHtml(String detailsRowsHtml) {
+            this.detailsRowsHtml = detailsRowsHtml;
+        }
+
+        public String getResourceRowsHtml() {
+            return resourceRowsHtml;
+        }
+
+        public void setResourceRowsHtml(String resourceRowsHtml) {
+            this.resourceRowsHtml = resourceRowsHtml;
+        }
+
+        public String getScaleClass() {
+            return scaleClass;
+        }
+
+        public void setScaleClass(String scaleClass) {
+            this.scaleClass = scaleClass;
+        }
     }
 
     private RuntimeHudShellRenderer() {}
 
     public static String buildHtml(HtmlContent content) {
-        String bodyClass = "hud-live " + HudRenderSupport.safeText(content.scaleClass);
+        String bodyClass = "hud-live " + HudRenderSupport.safeText(content.getScaleClass());
         return "<!doctype html><html><head><meta charset='utf-8'/>"
                 + "<meta name='viewport' content='width=device-width,height=device-height,initial-scale=1,maximum-scale=1,viewport-fit=cover'/>"
                 + "<style>"
@@ -79,11 +135,11 @@ public final class RuntimeHudShellRenderer {
                 + "</style></head><body class='" + bodyClass + "'><div class='root'>"
                 + "<div class='top'>"
                 + HudRenderSupport.hudChip("HUD MODE", "RUNTIME", "")
-                + content.chipsHtml
+                + content.getChipsHtml()
                 + "</div>"
                 + "<div class='main'>"
-                + "<div class='panel panel-main'><div class='kpi'>" + content.cardsHtml + "</div><div class='metric-trends'>" + content.chartsHtml + "</div><div class='trend'>" + HudRenderSupport.escapeHtml(HudRenderSupport.safeText(content.trendText)) + "</div><div class='resource'><div class='title'>DEVICE RESOURCES (* GPU proxy from render time)</div>" + content.resourceRowsHtml + "</div></div>"
-                + "<div class='panel panel-side'><table class='detail-table'>" + content.detailsRowsHtml + "</table></div>"
+                + "<div class='panel panel-main'><div class='kpi'>" + content.getCardsHtml() + "</div><div class='metric-trends'>" + content.getChartsHtml() + "</div><div class='trend'>" + HudRenderSupport.escapeHtml(HudRenderSupport.safeText(content.getTrendText())) + "</div><div class='resource'><div class='title'>DEVICE RESOURCES (* GPU proxy from render time)</div>" + content.getResourceRowsHtml() + "</div></div>"
+                + "<div class='panel panel-side'><table class='detail-table'>" + content.getDetailsRowsHtml() + "</table></div>"
                 + "</div>"
                 + "</div></body></html>";
     }

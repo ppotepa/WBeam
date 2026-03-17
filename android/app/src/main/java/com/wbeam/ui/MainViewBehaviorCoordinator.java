@@ -51,13 +51,14 @@ public final class MainViewBehaviorCoordinator {
             CursorMotionHandler onCursorOverlayMotion
     ) {
         MainActivitySurfaceSetup.Input input = new MainActivitySurfaceSetup.Input();
-        input.preview = previewSurface;
-        input.onSurfaceCreated = onSurfaceCreated::onChanged;
-        input.onSurfaceChanged = onSurfaceChanged::onChanged;
-        input.onSurfaceDestroyed = onSurfaceDestroyed::onDestroyed;
-        input.isCursorOverlayEnabled =
-                () -> cursorOverlayController != null && cursorOverlayController.isOverlayEnabled();
-        input.onCursorOverlayMotion = onCursorOverlayMotion::onMotion;
+        input.setPreview(previewSurface);
+        input.setOnSurfaceCreated(onSurfaceCreated::onChanged);
+        input.setOnSurfaceChanged(onSurfaceChanged::onChanged);
+        input.setOnSurfaceDestroyed(onSurfaceDestroyed::onDestroyed);
+        input.setIsCursorOverlayEnabled(
+                () -> cursorOverlayController != null && cursorOverlayController.isOverlayEnabled()
+        );
+        input.setOnCursorOverlayMotion(onCursorOverlayMotion::onMotion);
         MainActivitySurfaceSetup.setup(input);
     }
 

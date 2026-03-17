@@ -26,12 +26,60 @@ public final class MainActivitySurfaceSetup {
 
     @SuppressWarnings("java:S1104")
     public static final class Input {
-        public SurfaceView preview;
-        public SurfaceStateHandler onSurfaceCreated;
-        public SurfaceStateHandler onSurfaceChanged;
-        public Action onSurfaceDestroyed;
-        public CursorEnabledSupplier isCursorOverlayEnabled;
-        public CursorMotionHandler onCursorOverlayMotion;
+        private SurfaceView preview;
+        private SurfaceStateHandler onSurfaceCreated;
+        private SurfaceStateHandler onSurfaceChanged;
+        private Action onSurfaceDestroyed;
+        private CursorEnabledSupplier isCursorOverlayEnabled;
+        private CursorMotionHandler onCursorOverlayMotion;
+
+        public SurfaceView getPreview() {
+            return preview;
+        }
+
+        public void setPreview(SurfaceView preview) {
+            this.preview = preview;
+        }
+
+        public SurfaceStateHandler getOnSurfaceCreated() {
+            return onSurfaceCreated;
+        }
+
+        public void setOnSurfaceCreated(SurfaceStateHandler onSurfaceCreated) {
+            this.onSurfaceCreated = onSurfaceCreated;
+        }
+
+        public SurfaceStateHandler getOnSurfaceChanged() {
+            return onSurfaceChanged;
+        }
+
+        public void setOnSurfaceChanged(SurfaceStateHandler onSurfaceChanged) {
+            this.onSurfaceChanged = onSurfaceChanged;
+        }
+
+        public Action getOnSurfaceDestroyed() {
+            return onSurfaceDestroyed;
+        }
+
+        public void setOnSurfaceDestroyed(Action onSurfaceDestroyed) {
+            this.onSurfaceDestroyed = onSurfaceDestroyed;
+        }
+
+        public CursorEnabledSupplier getIsCursorOverlayEnabled() {
+            return isCursorOverlayEnabled;
+        }
+
+        public void setIsCursorOverlayEnabled(CursorEnabledSupplier isCursorOverlayEnabled) {
+            this.isCursorOverlayEnabled = isCursorOverlayEnabled;
+        }
+
+        public CursorMotionHandler getOnCursorOverlayMotion() {
+            return onCursorOverlayMotion;
+        }
+
+        public void setOnCursorOverlayMotion(CursorMotionHandler onCursorOverlayMotion) {
+            this.onCursorOverlayMotion = onCursorOverlayMotion;
+        }
     }
 
     private MainActivitySurfaceSetup() {
@@ -39,13 +87,13 @@ public final class MainActivitySurfaceSetup {
 
     public static void setup(Input input) {
         MainActivityUiBinder.setupSurfaceCallbacks(
-                input.preview,
+                input.getPreview(),
                 MainActivitySurfaceCallbacksFactory.create(
-                        input.onSurfaceCreated::onState,
-                        input.onSurfaceChanged::onState,
-                        input.onSurfaceDestroyed::run,
-                        input.isCursorOverlayEnabled::get,
-                        input.onCursorOverlayMotion::onMotion
+                        input.getOnSurfaceCreated()::onState,
+                        input.getOnSurfaceChanged()::onState,
+                        input.getOnSurfaceDestroyed()::run,
+                        input.getIsCursorOverlayEnabled()::get,
+                        input.getOnCursorOverlayMotion()::onMotion
                 )
         );
     }
