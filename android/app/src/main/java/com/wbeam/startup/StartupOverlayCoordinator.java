@@ -14,10 +14,42 @@ public final class StartupOverlayCoordinator {
     }
 
     public static final class State {
-        public long startupBeganAtMs;
-        public int controlRetryCount;
-        public boolean startupDismissed;
-        public boolean preflightComplete;
+        private long startupBeganAtMs;
+        private int controlRetryCount;
+        private boolean startupDismissed;
+        private boolean preflightComplete;
+
+        public long getStartupBeganAtMs() {
+            return startupBeganAtMs;
+        }
+
+        public void setStartupBeganAtMs(long startupBeganAtMs) {
+            this.startupBeganAtMs = startupBeganAtMs;
+        }
+
+        public int getControlRetryCount() {
+            return controlRetryCount;
+        }
+
+        public void setControlRetryCount(int controlRetryCount) {
+            this.controlRetryCount = controlRetryCount;
+        }
+
+        public boolean isStartupDismissed() {
+            return startupDismissed;
+        }
+
+        public void setStartupDismissed(boolean startupDismissed) {
+            this.startupDismissed = startupDismissed;
+        }
+
+        public boolean isPreflightComplete() {
+            return preflightComplete;
+        }
+
+        public void setPreflightComplete(boolean preflightComplete) {
+            this.preflightComplete = preflightComplete;
+        }
     }
 
     private StartupOverlayCoordinator() {
@@ -42,21 +74,21 @@ public final class StartupOverlayCoordinator {
         hooks.applyModel(model);
 
         State next = new State();
-        next.startupBeganAtMs = model.getUpdatedStartupBeganAtMs();
-        next.controlRetryCount = model.getUpdatedControlRetryCount();
-        next.startupDismissed = state.startupDismissed;
-        next.preflightComplete = state.preflightComplete;
+        next.setStartupBeganAtMs(model.getUpdatedStartupBeganAtMs());
+        next.setControlRetryCount(model.getUpdatedControlRetryCount());
+        next.setStartupDismissed(state.isStartupDismissed());
+        next.setPreflightComplete(state.isPreflightComplete());
 
         PreflightStateMachine.Transition transition =
-                PreflightStateMachine.next(model.isAllOk(), state.startupDismissed, 800L);
-        next.startupDismissed = transition.startupDismissed;
-        next.preflightComplete = transition.preflightComplete;
+                PreflightStateMachine.next(model.isAllOk(), state.isStartupDismissed(), 800L);
+        next.setStartupDismissed(transition.startupDismissed);
+        next.setPreflightComplete(transition.preflightComplete);
         if (transition.showOverlayNow) {
             hooks.setOverlayVisible(true);
         }
         if (transition.scheduleHide) {
             hooks.scheduleHide(transition.hideDelayMs, () -> {
-                if (next.startupDismissed) {
+                if (next.isStartupDismissed()) {
                     hooks.setOverlayVisible(false);
                 }
             });

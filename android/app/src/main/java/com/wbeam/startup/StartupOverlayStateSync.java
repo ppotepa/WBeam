@@ -2,10 +2,42 @@ package com.wbeam.startup;
 
 public final class StartupOverlayStateSync {
     public static final class StateValues {
-        public long startupBeganAtMs;
-        public int controlRetryCount;
-        public boolean startupDismissed;
-        public boolean preflightComplete;
+        private long startupBeganAtMs;
+        private int controlRetryCount;
+        private boolean startupDismissed;
+        private boolean preflightComplete;
+
+        public long getStartupBeganAtMs() {
+            return startupBeganAtMs;
+        }
+
+        public void setStartupBeganAtMs(long startupBeganAtMs) {
+            this.startupBeganAtMs = startupBeganAtMs;
+        }
+
+        public int getControlRetryCount() {
+            return controlRetryCount;
+        }
+
+        public void setControlRetryCount(int controlRetryCount) {
+            this.controlRetryCount = controlRetryCount;
+        }
+
+        public boolean isStartupDismissed() {
+            return startupDismissed;
+        }
+
+        public void setStartupDismissed(boolean startupDismissed) {
+            this.startupDismissed = startupDismissed;
+        }
+
+        public boolean isPreflightComplete() {
+            return preflightComplete;
+        }
+
+        public void setPreflightComplete(boolean preflightComplete) {
+            this.preflightComplete = preflightComplete;
+        }
     }
 
     private StartupOverlayStateSync() {
@@ -13,19 +45,19 @@ public final class StartupOverlayStateSync {
 
     public static StartupOverlayCoordinator.State snapshot(StateValues values) {
         StartupOverlayCoordinator.State state = new StartupOverlayCoordinator.State();
-        state.startupBeganAtMs = values.startupBeganAtMs;
-        state.controlRetryCount = values.controlRetryCount;
-        state.startupDismissed = values.startupDismissed;
-        state.preflightComplete = values.preflightComplete;
+        state.setStartupBeganAtMs(values.getStartupBeganAtMs());
+        state.setControlRetryCount(values.getControlRetryCount());
+        state.setStartupDismissed(values.isStartupDismissed());
+        state.setPreflightComplete(values.isPreflightComplete());
         return state;
     }
 
     public static StateValues fromState(StartupOverlayCoordinator.State state) {
         StateValues values = new StateValues();
-        values.startupBeganAtMs = state.startupBeganAtMs;
-        values.controlRetryCount = state.controlRetryCount;
-        values.startupDismissed = state.startupDismissed;
-        values.preflightComplete = state.preflightComplete;
+        values.setStartupBeganAtMs(state.getStartupBeganAtMs());
+        values.setControlRetryCount(state.getControlRetryCount());
+        values.setStartupDismissed(state.isStartupDismissed());
+        values.setPreflightComplete(state.isPreflightComplete());
         return values;
     }
 }

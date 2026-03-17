@@ -392,10 +392,10 @@ public final class MainStartupCoordinator {
 
     public static StartupOverlayStateSync.StateValues updatePreflightOverlay(Input input) {
         StartupOverlayStateSync.StateValues current = new StartupOverlayStateSync.StateValues();
-        current.startupBeganAtMs = input.getStartupBeganAtMs();
-        current.controlRetryCount = input.getControlRetryCount();
-        current.startupDismissed = input.isStartupDismissed();
-        current.preflightComplete = input.isPreflightComplete();
+        current.setStartupBeganAtMs(input.getStartupBeganAtMs());
+        current.setControlRetryCount(input.getControlRetryCount());
+        current.setStartupDismissed(input.isStartupDismissed());
+        current.setPreflightComplete(input.isPreflightComplete());
 
         StartupOverlayCoordinator.State next = StartupOverlayCoordinator.update(
                 StartupOverlayHookBuilder.create(
