@@ -18,6 +18,7 @@ import com.wbeam.startup.StartupOverlayControllerGuard;
 import com.wbeam.stream.DecoderCapabilityInspector;
 import com.wbeam.ui.state.MainUiState;
 
+@SuppressWarnings("java:S107")
 public final class MainInitializationCoordinator {
     public interface UiTask {
         void run();

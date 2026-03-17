@@ -15,7 +15,7 @@ import java.util.concurrent.ExecutorService;
  * Polls the WBeam daemon's /status, /health, and /metrics endpoints every STATUS_POLL_MS.
  * Holds all daemon state fields so MainActivity can query them without coupling to the poll logic.
  */
-@SuppressWarnings({"java:S1068", "java:S1450"})
+@SuppressWarnings({"java:S1068", "java:S1450", "java:S1192"})
 public final class StatusPoller {
 
     private static final String TAG = "WBeamStatusPoller";

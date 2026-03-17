@@ -26,7 +26,7 @@ import okhttp3.ResponseBody;
  * Thin HTTP client utilities for the WBeam control API (port 5001).
  * Holds shared OkHttp instances and provides retry-aware request helpers.
  */
-@SuppressWarnings({"java:S1068", "java:S115"})
+@SuppressWarnings({"java:S1068", "java:S115", "java:S1192"})
 public final class HostApiClient {
 
     private static final String API_IMPL = BuildConfig.WBEAM_API_IMPL == null

@@ -173,6 +173,7 @@ public final class H264TcpPlayer {
         new StreamReconnectLoop(config).run();
     }
 
+    @SuppressWarnings("java:S3358")
     private void framedDecodeLoop(InputStream input, MediaCodec[] codecRef) throws IOException {
         byte[] helloBuf = new byte[WbtpProtocol.HELLO_BUF_SIZE];
         byte[] hdrBuf = new byte[FRAME_HEADER_SIZE];
@@ -208,8 +209,8 @@ public final class H264TcpPlayer {
             codecLabel = "AVC";
         }
         // Use authoritative geometry from Hello v2; fall back to UI-side config for v1 servers.
-        int resolvedWidth  = (hello.width  > 0) ? hello.width  : decodeWidth;
-        int resolvedHeight = (hello.height > 0) ? hello.height : decodeHeight;
+        int resolvedWidth = resolveDimension(hello.width, decodeWidth);
+        int resolvedHeight = resolveDimension(hello.height, decodeHeight);
         Log.i(TAG, String.format(Locale.US,
                 "WBTP hello session=0x%016x codec=%s mode=%s geometry=%dx%d%s",
                 streamSessionId, codecLabel, modeLabel,
@@ -253,6 +254,13 @@ public final class H264TcpPlayer {
                 STATE_CONNECTING,
                 STATE_STREAMING
         ).run(input, codecRef, helloFlags, streamSessionId, hdrBuf, payloadBuf);
+    }
+
+    private static int resolveDimension(int helloDimension, int fallbackDimension) {
+        if (helloDimension > 0) {
+            return helloDimension;
+        }
+        return fallbackDimension;
     }
 
     private void framedDecodeLoopPng(InputStream input, byte[] hdrBuf, byte[] payloadBuf, boolean isUltraMode) throws IOException {
