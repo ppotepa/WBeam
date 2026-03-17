@@ -1,5 +1,6 @@
 package com.wbeam.hud;
 
+@SuppressWarnings("java:S1104")
 public final class MainHudState {
     public String compactLine = "hud: waiting for metrics";
     public double latestTargetFps = 60.0;
