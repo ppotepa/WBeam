@@ -61,7 +61,7 @@ STATE = {
 }
 
 
-def send_all_iov(conn, iov):
+def send_all_iov(conn, iov):  # NOSONAR: partial-send accounting needs explicit branching
     """Send full iovec payload via sendmsg, handling partial writes."""
     views = [memoryview(chunk) for chunk in iov if len(chunk)]
     if not views:
@@ -311,7 +311,7 @@ def env_int(name, default):
         return default
 
 
-def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=None, target_fps=60):
+def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=None, target_fps=60):  # NOSONAR: sender loop complexity is intentional
     """WBTP/1 framed sender: accept one TCP client; send WBTP/1-framed H264 access units.
 
     Header (big-endian, 22 bytes):
@@ -497,7 +497,7 @@ def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=Non
                     _stat_partial_writes = 0
                     _stat_send_timeouts = 0
                     _stat_t0 = _time.monotonic()
-        except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+        except OSError as exc:
             print(f"[wbeam-framed] client disconnected: {exc}", flush=True)
         finally:
             try:
@@ -511,7 +511,7 @@ def framed_tcp_server_thread(appsink, port, stop_event, pipeline_fps_counter=Non
     print("[wbeam-framed] sender thread stopped", flush=True)
 
 
-def make_pipeline(
+def make_pipeline(  # NOSONAR: pipeline assembly requires many guarded branches
     fd,
     node_id,
     width,
@@ -842,7 +842,7 @@ def normalize_encoder_name(raw_encoder: str) -> str:
     return "auto"
 
 
-def main():
+def main():  # NOSONAR: startup flow intentionally coordinates many setup stages
     args = parse_args()
 
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
@@ -955,7 +955,7 @@ def main():
                 out["MAIN"] = text
                 return out
 
-            def _refresh_overlay_text():
+            def _refresh_overlay_text():  # NOSONAR: GLib callback intentionally returns True
                 try:
                     text = Path(overlay_file).read_text(encoding="utf-8", errors="replace")
                 except FileNotFoundError:

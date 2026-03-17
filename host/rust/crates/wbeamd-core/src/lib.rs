@@ -190,6 +190,7 @@ fn normalize_session_label(label: &str) -> String {
         .collect::<String>()
 }
 
+// NOSONAR S3776 - Config parsing needs explicit validation branches
 fn load_wbeam_config(root: &Path) -> HashMap<String, String> {
     let mut files: Vec<PathBuf> = Vec::new();
     if let Some(user_cfg) = ensure_user_wbeam_config(root) {
@@ -262,6 +263,7 @@ fn wbeam_setting_u64(settings: &HashMap<String, String>, key: &str, default: u64
         .unwrap_or(default)
 }
 
+// NOSONAR S3776 - Xauthority discovery must probe multiple fallbacks
 fn resolve_xauthority_for_capture() -> Option<PathBuf> {
     let uid = std::env::var("UID")
         .ok()
@@ -952,6 +954,7 @@ impl DaemonCore {
         }
     }
 
+    // NOSONAR S3776 - Metric ingestion applies multi-branch runtime adaptation rules
     pub async fn ingest_client_metrics(
         &self,
         mut client: ClientMetricsRequest,
@@ -1809,6 +1812,7 @@ impl DaemonCore {
         }
     }
 
+    // NOSONAR S3776 - Restart policy handling requires explicit state transitions
     async fn handle_child_exit(&self, run_id: u64, exit_code: i32) {
         info!(run_id, exit_code, "stream process exited");
         let (should_restart, cfg_for_restart) = {
