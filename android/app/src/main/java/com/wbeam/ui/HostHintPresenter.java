@@ -32,6 +32,7 @@ public final class HostHintPresenter {
     private HostHintPresenter() {
     }
 
+    @SuppressWarnings("java:S107")
     public static void apply(Input input) {
         if (input.hostHintText == null) {
             return;

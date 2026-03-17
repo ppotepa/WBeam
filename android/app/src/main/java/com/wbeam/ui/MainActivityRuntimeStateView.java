@@ -58,6 +58,7 @@ public final class MainActivityRuntimeStateView {
         ));
     }
 
+    @SuppressWarnings("java:S107")
     public static String effectiveDaemonState(
             String rawState,
             double presentFps,

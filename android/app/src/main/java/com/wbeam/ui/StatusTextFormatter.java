@@ -8,6 +8,7 @@ import java.util.Locale;
 public final class StatusTextFormatter {
     private StatusTextFormatter() {}
 
+    @SuppressWarnings("java:S107")
     public static String buildHostHintText(
             boolean daemonReachable,
             String apiBase,
