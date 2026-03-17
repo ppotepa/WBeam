@@ -15,26 +15,26 @@ public final class StartupOverlayViewsBinder {
             AppCompatActivity activity,
             StartupOverlayViewRenderer.Views views
     ) {
-        views.titleText = activity.findViewById(R.id.startupTitle);
-        views.subtitleText = activity.findViewById(R.id.startupSubtitle);
-        views.step1Card = activity.findViewById(R.id.startupStep1Row);
-        views.step2Card = activity.findViewById(R.id.startupStep2Row);
-        views.step3Card = activity.findViewById(R.id.startupStep3Row);
-        views.step1Badge = activity.findViewById(R.id.startupStep1Badge);
-        views.step1Label = activity.findViewById(R.id.startupStep1Label);
-        views.step1Detail = activity.findViewById(R.id.startupStep1Detail);
-        views.step1Status = activity.findViewById(R.id.startupStep1Status);
-        views.step2Badge = activity.findViewById(R.id.startupStep2Badge);
-        views.step2Label = activity.findViewById(R.id.startupStep2Label);
-        views.step2Detail = activity.findViewById(R.id.startupStep2Detail);
-        views.step2Status = activity.findViewById(R.id.startupStep2Status);
-        views.step3Badge = activity.findViewById(R.id.startupStep3Badge);
-        views.step3Label = activity.findViewById(R.id.startupStep3Label);
-        views.step3Detail = activity.findViewById(R.id.startupStep3Detail);
-        views.step3Status = activity.findViewById(R.id.startupStep3Status);
-        views.infoText = activity.findViewById(R.id.startupInfoText);
-        if (views.infoText != null) {
-            views.infoText.setMovementMethod(new ScrollingMovementMethod());
+        views.setTitleText(activity.findViewById(R.id.startupTitle));
+        views.setSubtitleText(activity.findViewById(R.id.startupSubtitle));
+        views.setStep1Card(activity.findViewById(R.id.startupStep1Row));
+        views.setStep2Card(activity.findViewById(R.id.startupStep2Row));
+        views.setStep3Card(activity.findViewById(R.id.startupStep3Row));
+        views.setStep1Badge(activity.findViewById(R.id.startupStep1Badge));
+        views.setStep1Label(activity.findViewById(R.id.startupStep1Label));
+        views.setStep1Detail(activity.findViewById(R.id.startupStep1Detail));
+        views.setStep1Status(activity.findViewById(R.id.startupStep1Status));
+        views.setStep2Badge(activity.findViewById(R.id.startupStep2Badge));
+        views.setStep2Label(activity.findViewById(R.id.startupStep2Label));
+        views.setStep2Detail(activity.findViewById(R.id.startupStep2Detail));
+        views.setStep2Status(activity.findViewById(R.id.startupStep2Status));
+        views.setStep3Badge(activity.findViewById(R.id.startupStep3Badge));
+        views.setStep3Label(activity.findViewById(R.id.startupStep3Label));
+        views.setStep3Detail(activity.findViewById(R.id.startupStep3Detail));
+        views.setStep3Status(activity.findViewById(R.id.startupStep3Status));
+        views.setInfoText(activity.findViewById(R.id.startupInfoText));
+        if (views.getInfoText() != null) {
+            views.getInfoText().setMovementMethod(new ScrollingMovementMethod());
         }
         return activity.findViewById(R.id.startupBuildVersion);
     }
