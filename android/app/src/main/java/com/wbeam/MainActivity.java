@@ -84,6 +84,7 @@ import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+@SuppressWarnings({"java:S107", "java:S1450", "java:S1068", "java:S1192"})
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "WBeamMain";
     private static final String STATE_IDLE = "idle";

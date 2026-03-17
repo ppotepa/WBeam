@@ -8,6 +8,7 @@ import java.util.Locale;
 /**
  * Pure HUD rendering/formatting helpers used by runtime overlays.
  */
+@SuppressWarnings("java:S1192")
 public final class HudRenderSupport {
     private static final String TONE_STATE_RISK = "state-risk";
     private static final String TONE_STATE_WARN = "state-warn";
