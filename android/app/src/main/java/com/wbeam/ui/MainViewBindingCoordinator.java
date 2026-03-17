@@ -23,6 +23,7 @@ public final class MainViewBindingCoordinator {
         void onTick(int tick);
     }
 
+    @SuppressWarnings("java:S1104")
     public static final class BoundViews {
         public MainActivityPrimaryViewsBinder.Views primaryViews;
         public MainActivityControlViewsBinder.Views controlViews;

@@ -51,6 +51,13 @@ final class LegacyAnnexBDecodeLoop {
         this.stateStreaming = stateStreaming;
     }
 
+    @SuppressWarnings({
+            "java:S3776",
+            "java:S6541",
+            "java:S135",
+            "java:S1854",
+            "java:S1481"
+    })
     void run(InputStream input, MediaCodec codec) throws IOException {
         byte[] readBuf = new byte[64 * 1024];
 
