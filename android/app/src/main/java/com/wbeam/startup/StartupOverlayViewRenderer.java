@@ -119,18 +119,20 @@ public final class StartupOverlayViewRenderer {
             String detail
     ) {
         StartupStepStyler.applyStepState(
-                stepState,
-                preflightAnimTick,
-                StartupOverlayModelBuilder.Model.SS_OK,
-                StartupOverlayModelBuilder.Model.SS_ERROR,
-                StartupOverlayModelBuilder.Model.SS_ACTIVE,
-                stepNumber,
-                stepCard,
-                stepBadge,
-                stepLabel,
-                stepStatus,
-                stepDetail,
-                detail
+                new StartupStepStyler.StepStateConfig(
+                        stepState,
+                        preflightAnimTick,
+                        StartupOverlayModelBuilder.Model.SS_OK,
+                        StartupOverlayModelBuilder.Model.SS_ERROR,
+                        StartupOverlayModelBuilder.Model.SS_ACTIVE,
+                        stepNumber,
+                        stepCard,
+                        stepBadge,
+                        stepLabel,
+                        stepStatus,
+                        stepDetail,
+                        detail
+                )
         );
     }
 }
