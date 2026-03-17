@@ -31,7 +31,7 @@ function updateHudFromProgress(line: string, hudData: Record<string, string>): v
 }
 
 function updateHudFromProtoTrial(line: string, hudData: Record<string, string>): void {
-  const protoTrialRe = /\btrial=([A-Za-z0-9_.:-]+)/;
+  const protoTrialRe = /\btrial=([\w.:-]+)/;
   const protoTrial = protoTrialRe.exec(line);
   if (protoTrial) hudData.trialId = protoTrial[1];
 }
@@ -40,17 +40,22 @@ function updateHudFromProtoDone(
   line: string,
   hudData: Record<string, string>
 ): void {
-  const protoDoneRe =
-    /done trial=([A-Za-z0-9_.:-]+) score=([-0-9.]+).*sender_p50=([-0-9.]+).*pipe_p50=([-0-9.]+).*timeout_mean=([-0-9.]+).*drop=([-0-9.]+)%(?:.*mbps=([-0-9.]+))?/;
-  const protoDone = protoDoneRe.exec(line);
-  if (protoDone) {
-    hudData.trialId = protoDone[1];
-    hudData.score = protoDone[2];
-    hudData.presentFps = protoDone[3];
-    hudData.recvFps = protoDone[4];
-    hudData.e2eP95Ms = protoDone[5];
-    hudData.dropsPerSec = `${protoDone[6]}%`;
-    if (protoDone[7]) hudData.bitrateMbps = protoDone[7];
+  const field = (key: string): string | undefined =>
+    line
+      .split(/\s+/)
+      .find((part) => part.startsWith(`${key}=`))
+      ?.slice(key.length + 1);
+  const trialMatch = /done trial=([\w.:-]+)/.exec(line);
+  if (trialMatch) {
+    hudData.trialId = trialMatch[1];
+    hudData.score = field("score") ?? hudData.score;
+    hudData.presentFps = field("sender_p50") ?? hudData.presentFps;
+    hudData.recvFps = field("pipe_p50") ?? hudData.recvFps;
+    hudData.e2eP95Ms = field("timeout_mean") ?? hudData.e2eP95Ms;
+    const drop = field("drop");
+    if (drop) hudData.dropsPerSec = `${drop}%`;
+    const mbps = field("mbps");
+    if (mbps) hudData.bitrateMbps = mbps;
   }
 }
 
@@ -113,7 +118,7 @@ export function parseHudSeries(lines: string[]): HudSeries {
   const trialScoreRe =
     /^\[(t\d+)] score=([-0-9.]+) present=([-0-9.]+) recv=([-0-9.]+) e2e95=([-0-9.]+)ms drops\/s=([-0-9.]+)/;
   const protoDoneRe =
-    /done trial=([A-Za-z0-9_.:-]+) score=([-0-9.]+).*sender_p50=([-0-9.]+).*pipe_p50=([-0-9.]+).*timeout_mean=([-0-9.]+).*drop=([-0-9.]+)%/;
+    /done trial=([\w.:-]+) score=([-0-9.]+).*sender_p50=([-0-9.]+).*pipe_p50=([-0-9.]+).*timeout_mean=([-0-9.]+).*drop=([-0-9.]+)%/;
   const series: HudSeries = { score: [], present: [], recv: [], drops: [] };
   for (const line of lines) {
     const match = trialScoreRe.exec(line);

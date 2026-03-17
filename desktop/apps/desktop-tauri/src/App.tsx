@@ -771,6 +771,7 @@ function resolveEncoderMode(
             />
             <span>
               Use experimental virtual mirroring (Wayland only)
+              {" "}
               <small>
                 Applies to Wayland connects only. For X11 this option is unavailable.
               </small>
@@ -884,6 +885,7 @@ function resolveEncoderMode(
                     />
                     <span>
                       Virtual monitor (extend host desktop)
+                      {" "}
                       <small>
                         {virtualMonitorHint()}
                       </small>
@@ -898,6 +900,7 @@ function resolveEncoderMode(
                     />
                     <span>
                       Duplicate current screen
+                      {" "}
                       <small>Works with current host backend.</small>
                     </span>
                   </label>

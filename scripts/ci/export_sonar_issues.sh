@@ -7,7 +7,8 @@ SONAR_TOKEN="${SONAR_TOKEN:-}"
 SONAR_STATUSES="${SONAR_STATUSES:-OPEN,CONFIRMED,REOPENED}"
 OUTPUT_FILE="${1:-issues.md}"
 TMP_JSON="$(mktemp)"
-trap 'rm -f "${TMP_JSON}"' EXIT
+NORMALIZED_JSON="$(mktemp)"
+trap 'rm -f "${TMP_JSON}" "${NORMALIZED_JSON}"' EXIT
 
 if [[ -z "${SONAR_TOKEN}" ]]; then
   echo "SONAR_TOKEN is required (export SONAR_TOKEN=...)" >&2
@@ -40,78 +41,72 @@ while true; do
   page=$((page + 1))
 done
 
-python - "${TMP_JSON}" "${OUTPUT_FILE}" <<'PY'
-import json
-import sys
-from collections import Counter, defaultdict
-from datetime import datetime, timezone
+GENERATED_AT="$(date -u '+%Y-%m-%d %H:%M:%S')"
 
-src, out = sys.argv[1], sys.argv[2]
-with open(src, "r", encoding="utf-8") as f:
-    issues = json.load(f)
+jq '
+  map({
+    comp: (
+      (.component // "")
+      | tostring
+      | split(":")
+      | if length > 1 then .[1] else .[0] end
+    ),
+    line,
+    rule: (.rule // ""),
+    sev: (.severity // ""),
+    typ: (.type // ""),
+    status: (.status // ""),
+    msg: (.message // "")
+  })
+' "${TMP_JSON}" > "${NORMALIZED_JSON}"
 
-def esc(text):
-    return str(text).replace("|", "\\|").replace("\n", " ")
-
-by_file = defaultdict(list)
-rule_counts = Counter()
-for item in issues:
-    comp = item.get("component", "")
-    if ":" in comp:
-        comp = comp.split(":", 1)[1]
-    line = item.get("line")
-    rule = item.get("rule", "")
-    msg = item.get("message", "")
-    sev = item.get("severity", "")
-    typ = item.get("type", "")
-    status = item.get("status", "")
-    by_file[comp].append((line, rule, sev, typ, status, msg))
-    rule_counts[rule] += 1
-
-for comp in by_file:
-    by_file[comp].sort(key=lambda x: (x[0] is None, x[0] if x[0] is not None else 10**9, x[1], x[5]))
-
-sorted_files = sorted(by_file.items(), key=lambda kv: (-len(kv[1]), kv[0]))
-
-lines = []
-lines.append("# Sonar Issues Report (live export)")
-lines.append("")
-lines.append(f"- Generated at (UTC): {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}")
-lines.append(f"- Total issues: {len(issues)}")
-lines.append(f"- Total files: {len(sorted_files)}")
-lines.append("")
-lines.append("## Files sorted by number of issues")
-lines.append("")
-lines.append("| File | Issues |")
-lines.append("|---|---:|")
-for comp, rows in sorted_files:
-    lines.append(f"| `{esc(comp)}` | {len(rows)} |")
-lines.append("")
-lines.append("## Issues by file")
-lines.append("")
-
-for comp, rows in sorted_files:
-    lines.append(f"### `{esc(comp)}` ({len(rows)} issues)")
-    lines.append("")
-    lines.append("| Line | Rule | Severity | Type | Status | Message |")
-    lines.append("|---:|---|---|---|---|---|")
-    for line, rule, sev, typ, status, msg in rows:
-        line_txt = str(line) if line is not None else "-"
-        lines.append(
-            f"| {line_txt} | `{esc(rule)}` | {esc(sev)} | {esc(typ)} | {esc(status)} | {esc(msg)} |"
-        )
-    lines.append("")
-
-lines.append("## Rule summary")
-lines.append("")
-lines.append("| Rule | Count |")
-lines.append("|---|---:|")
-for rule, count in sorted(rule_counts.items(), key=lambda kv: (-kv[1], kv[0])):
-    lines.append(f"| `{esc(rule)}` | {count} |")
-lines.append("")
-
-with open(out, "w", encoding="utf-8") as f:
-    f.write("\n".join(lines))
-PY
+{
+  echo "# Sonar Issues Report (live export)"
+  echo
+  echo "- Generated at (UTC): ${GENERATED_AT}"
+  echo "- Total issues: $(jq 'length' "${NORMALIZED_JSON}")"
+  echo "- Total files: $(jq '[.[].comp] | unique | length' "${NORMALIZED_JSON}")"
+  echo
+  echo "## Files sorted by number of issues"
+  echo
+  echo "| File | Issues |"
+  echo "|---|---:|"
+  jq -r '
+    def esc: tostring | gsub("\\|"; "\\\\|") | gsub("\n"; " ");
+    sort_by(.comp)
+    | group_by(.comp)
+    | map({comp: .[0].comp, count: length})
+    | sort_by(-.count, .comp)
+    | .[]
+    | "| `\(.comp | esc)` | \(.count) |"
+  ' "${NORMALIZED_JSON}"
+  echo
+  echo "## Issues by file"
+  echo
+  jq -r '
+    def esc: tostring | gsub("\\|"; "\\\\|") | gsub("\n"; " ");
+    sort_by(.comp, (.line // 1000000000), .rule, .msg)
+    | group_by(.comp)
+    | sort_by(-(length), .[0].comp)
+    | .[]
+    | "### `\(.[0].comp | esc)` (\(length) issues)\n\n| Line | Rule | Severity | Type | Status | Message |\n|---:|---|---|---|---|---|",
+      (.[] | "| \(if .line == null then "-" else (.line | tostring) end) | `\(.rule | esc)` | \(.sev | esc) | \(.typ | esc) | \(.status | esc) | \(.msg | esc) |"),
+      ""
+  ' "${NORMALIZED_JSON}"
+  echo "## Rule summary"
+  echo
+  echo "| Rule | Count |"
+  echo "|---|---:|"
+  jq -r '
+    def esc: tostring | gsub("\\|"; "\\\\|") | gsub("\n"; " ");
+    sort_by(.rule)
+    | group_by(.rule)
+    | map({rule: .[0].rule, count: length})
+    | sort_by(-.count, .rule)
+    | .[]
+    | "| `\(.rule | esc)` | \(.count) |"
+  ' "${NORMALIZED_JSON}"
+  echo
+} > "${OUTPUT_FILE}"
 
 echo "Exported ${total} Sonar issues to ${OUTPUT_FILE}"

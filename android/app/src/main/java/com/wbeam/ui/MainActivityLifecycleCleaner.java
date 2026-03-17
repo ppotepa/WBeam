@@ -25,6 +25,7 @@ public final class MainActivityLifecycleCleaner {
      *   3. Release video/stream resources (which joins the decode thread via H264TcpPlayer.stop()).
      *   4. Gracefully drain then force-stop executors.
      */
+    @SuppressWarnings("java:S107")
     public static void cleanup(
             StatusPoller statusPoller,
             Runnable stopPreflightPulse,

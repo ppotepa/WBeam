@@ -61,14 +61,8 @@ pub async fn ensure_usb_reverse(
             return;
         }
     };
-    let last = USB_REVERSE_LAST_AT.get_or_init(|| StdMutex::new(None));
-    if let Ok(mut slot) = last.lock() {
-        if let Some(prev) = *slot {
-            if prev.elapsed() < Duration::from_millis(800) {
-                return;
-            }
-        }
-        *slot = Some(Instant::now());
+    if refresh_throttled() {
+        return;
     }
 
     tracing::info!(reason, "refreshing adb reverse mappings");
@@ -85,70 +79,89 @@ pub async fn ensure_usb_reverse(
     }
 
     for serial in serials {
-        // Primary mapping for Android client: app dials fixed localhost ports
-        // (5000 stream, 5001 control) and host may run session on per-device ports.
-        match Command::new(&script)
-            .arg(ANDROID_DEVICE_STREAM_PORT.to_string())
-            .arg(stream_port.to_string())
-            .env("WBEAM_ANDROID_SERIAL", &serial)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .await
-        {
-            Ok(s) if s.success() => {}
-            Ok(s) => warn!(reason, %serial, code = ?s.code(), "usb_reverse.sh failed"),
-            Err(e) => warn!(reason, %serial, error = %e, "failed to execute usb_reverse.sh"),
-        }
+        ensure_serial_reverse(&script, &serial, stream_port, control_port, reason).await;
+    }
+}
 
-        // Compatibility mapping for APKs built with per-device stream port.
-        // Keep this as a plain `adb reverse` to avoid extra reconnect churn.
-        if needs_stream_compat_mapping(stream_port) {
-            match Command::new("adb")
-                .arg("-s")
-                .arg(&serial)
-                .arg("reverse")
-                .arg(format!("tcp:{stream_port}"))
-                .arg(format!("tcp:{stream_port}"))
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .await
-            {
-                Ok(s) if s.success() => {}
-                Ok(s) => warn!(
-                    reason,
-                    %serial,
-                    code = ?s.code(),
-                    "compat adb reverse for stream port failed"
-                ),
-                Err(e) => warn!(
-                    reason,
-                    %serial,
-                    error = %e,
-                    "failed to execute compat adb reverse for stream port"
-                ),
+fn refresh_throttled() -> bool {
+    let last = USB_REVERSE_LAST_AT.get_or_init(|| StdMutex::new(None));
+    if let Ok(mut slot) = last.lock() {
+        if let Some(prev) = *slot {
+            if prev.elapsed() < Duration::from_millis(800) {
+                return true;
             }
         }
+        *slot = Some(Instant::now());
+    }
+    false
+}
 
-        match Command::new("adb")
-            .arg("-s")
-            .arg(&serial)
-            .arg("reverse")
-            .arg(format!("tcp:{ANDROID_DEVICE_CONTROL_PORT}"))
-            .arg(format!("tcp:{control_port}"))
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .await
-        {
-            Ok(s) if s.success() => {}
-            Ok(s) => {
-                warn!(reason, %serial, code = ?s.code(), "adb reverse for control port failed")
-            }
-            Err(e) => {
-                warn!(reason, %serial, error = %e, "failed to execute adb reverse for control port")
-            }
+async fn ensure_serial_reverse(
+    script: &Path,
+    serial: &str,
+    stream_port: u16,
+    control_port: u16,
+    reason: &str,
+) {
+    apply_usb_reverse_script(script, serial, stream_port, reason).await;
+    if needs_stream_compat_mapping(stream_port) {
+        apply_adb_reverse(
+            serial,
+            stream_port,
+            stream_port,
+            reason,
+            "compat adb reverse for stream port",
+        )
+        .await;
+    }
+    apply_adb_reverse(
+        serial,
+        ANDROID_DEVICE_CONTROL_PORT,
+        control_port,
+        reason,
+        "adb reverse for control port",
+    )
+    .await;
+}
+
+async fn apply_usb_reverse_script(script: &Path, serial: &str, stream_port: u16, reason: &str) {
+    match Command::new(script)
+        .arg(ANDROID_DEVICE_STREAM_PORT.to_string())
+        .arg(stream_port.to_string())
+        .env("WBEAM_ANDROID_SERIAL", serial)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await
+    {
+        Ok(s) if s.success() => {}
+        Ok(s) => warn!(reason, %serial, code = ?s.code(), "usb_reverse.sh failed"),
+        Err(e) => warn!(reason, %serial, error = %e, "failed to execute usb_reverse.sh"),
+    }
+}
+
+async fn apply_adb_reverse(
+    serial: &str,
+    device_port: u16,
+    host_port: u16,
+    reason: &str,
+    log_label: &'static str,
+) {
+    match Command::new("adb")
+        .arg("-s")
+        .arg(serial)
+        .arg("reverse")
+        .arg(format!("tcp:{device_port}"))
+        .arg(format!("tcp:{host_port}"))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await
+    {
+        Ok(s) if s.success() => {}
+        Ok(s) => warn!(reason, %serial, code = ?s.code(), label = log_label, "adb reverse failed"),
+        Err(e) => {
+            warn!(reason, %serial, error = %e, label = log_label, "failed to execute adb reverse")
         }
     }
 }

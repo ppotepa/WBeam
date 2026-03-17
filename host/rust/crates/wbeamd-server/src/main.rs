@@ -244,8 +244,31 @@ async fn post_start(
 ) -> impl IntoResponse {
     let serial = query.serial.as_deref();
     let core = state.sessions.resolve_core(serial, query.stream_port).await;
-    // display_mode is a sticky session preference. Do not reset it on every /start when the client
-    // doesn't provide the query param (Android client uses POST /start without it).
+    apply_start_overrides(&core, &query, serial).await;
+    let patch = body.map(|Json(v)| v).unwrap_or_default();
+    let host_probe = core.host_probe().await;
+    let selected_backend = selected_capture_backend(&query, host_probe.capture_mode.as_str());
+    let is_wayland_portal = selected_backend == "wayland_portal";
+    let is_evdi = selected_backend == "evdi";
+    let pre_enabled_outputs = pre_enabled_outputs_for_backend(is_wayland_portal, is_evdi);
+    let start_result = run_start_with_portal_gate(&state, &core, patch, is_wayland_portal).await;
+    match start_result {
+        Ok(resp) => {
+            post_start_output_layout(
+                &state,
+                serial,
+                pre_enabled_outputs.as_ref(),
+                is_wayland_portal,
+                is_evdi,
+            )
+            .await;
+            (StatusCode::OK, Json(resp)).into_response()
+        }
+        Err(err) => core_error_response(core, err).await,
+    }
+}
+
+async fn apply_start_overrides(core: &Arc<DaemonCore>, query: &SessionQuery, serial: Option<&str>) {
     if query.display_mode.is_some() {
         tracing::info!(
             serial = serial.unwrap_or("default"),
@@ -255,8 +278,6 @@ async fn post_start(
         );
         core.set_display_mode(query.display_mode.as_deref()).await;
     }
-    // Capture backend is treated as a per-start selection.
-    // Missing query param resets to automatic host-probe routing.
     if let Some(ref backend) = query.capture_backend {
         tracing::info!(
             serial = serial.unwrap_or("default"),
@@ -267,46 +288,61 @@ async fn post_start(
     } else {
         core.set_capture_backend(None).await;
     }
-    let patch = body.map(|Json(v)| v).unwrap_or_default();
-    let host_probe = core.host_probe().await;
-    let selected_backend = query
-        .capture_backend
-        .as_deref()
-        .filter(|v| !v.trim().is_empty())
-        .unwrap_or(host_probe.capture_mode.as_str());
-    let is_wayland_portal = selected_backend == "wayland_portal";
-    let is_evdi = selected_backend == "evdi";
-    let pre_enabled_outputs = if is_wayland_portal || is_evdi {
+}
+
+fn pre_enabled_outputs_for_backend(
+    is_wayland_portal: bool,
+    is_evdi: bool,
+) -> Option<HashSet<String>> {
+    if is_wayland_portal || is_evdi {
         kscreen_layout::kscreen_enabled_output_names().ok()
     } else {
         None
-    };
-    let start_result = if is_wayland_portal {
+    }
+}
+
+async fn run_start_with_portal_gate(
+    state: &AppState,
+    core: &Arc<DaemonCore>,
+    patch: ConfigPatch,
+    is_wayland_portal: bool,
+) -> Result<wbeamd_api::StatusResponse, wbeamd_core::CoreError> {
+    if is_wayland_portal {
         let _guard = state.sessions.portal_start_gate.lock().await;
         core.start(patch).await
     } else {
         core.start(patch).await
-    };
-    match start_result {
-        Ok(resp) => {
-            if is_wayland_portal {
-                if let Err(err) = auto_layout_wayland_portal_outputs(
-                    state.sessions.clone(),
-                    serial,
-                    pre_enabled_outputs.as_ref(),
-                )
+    }
+}
+
+fn selected_capture_backend<'a>(query: &'a SessionQuery, probe_backend: &'a str) -> &'a str {
+    query
+        .capture_backend
+        .as_deref()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or(probe_backend)
+}
+
+async fn post_start_output_layout(
+    state: &AppState,
+    serial: Option<&str>,
+    pre_enabled_outputs: Option<&std::collections::HashSet<String>>,
+    is_wayland_portal: bool,
+    is_evdi: bool,
+) {
+    if is_wayland_portal {
+        if let Err(err) =
+            auto_layout_wayland_portal_outputs(state.sessions.clone(), serial, pre_enabled_outputs)
                 .await
-                {
-                    warn!(error = %err, "wayland portal output auto-layout failed");
-                }
-            } else if is_evdi {
-                if let Err(err) = auto_configure_evdi_outputs(pre_enabled_outputs.as_ref()).await {
-                    warn!(error = %err, "evdi output auto-layout failed");
-                }
-            }
-            (StatusCode::OK, Json(resp)).into_response()
+        {
+            warn!(error = %err, "wayland portal output auto-layout failed");
         }
-        Err(err) => core_error_response(core, err).await,
+        return;
+    }
+    if is_evdi {
+        if let Err(err) = auto_configure_evdi_outputs(pre_enabled_outputs).await {
+            warn!(error = %err, "evdi output auto-layout failed");
+        }
     }
 }
 
@@ -463,10 +499,7 @@ async fn auto_configure_evdi_outputs(
     };
 
     if evdi_auto_mirror_enabled() {
-        let commands = kscreen_layout::build_virtual_replication_commands(
-            &outputs,
-            preferred,
-        );
+        let commands = kscreen_layout::build_virtual_replication_commands(&outputs, preferred);
         if commands.is_empty() {
             return Ok(());
         }
@@ -476,10 +509,7 @@ async fn auto_configure_evdi_outputs(
         return Ok(());
     }
 
-    let unmirror_commands = kscreen_layout::build_virtual_unmirror_commands(
-        &outputs,
-        preferred,
-    );
+    let unmirror_commands = kscreen_layout::build_virtual_unmirror_commands(&outputs, preferred);
     if !unmirror_commands.is_empty() {
         kscreen_layout::apply_kscreen_layout(&unmirror_commands)?;
         info!(commands = ?unmirror_commands, "applied evdi mirror detach");

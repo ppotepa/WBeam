@@ -646,88 +646,51 @@ impl App {
         }
     }
 
-    // NOSONAR S3776 - Probe flow combines host capability and status reconciliation
-    fn run_probe(&mut self) {
-        self.log("probe: checking /v1/health /v1/status /v1/metrics /v1/host-probe");
-        self.probe = ProbeState::default();
-        self.probe.ok_health = self
-            .api
-            .get_json("health")
-            .map(|health| {
-                self.probe.build_revision = health
-                    .get("build_revision")
-                    .and_then(Value::as_str)
-                    .unwrap_or("-")
-                    .to_string();
-            })
-            .is_ok();
-
-        // Refresh backend list from daemon capability probe so the TUI always
-        // reflects what the host can actually do, not a hardcoded fallback.
-        if let Ok(hp) = self.api.get_json("host-probe") {
-            if let Some(backends) = hp.get("available_backends").and_then(|v| v.as_array()) {
-                let live: Vec<&'static str> = backends
-                    .iter()
-                    .filter_map(|b| b.as_str())
-                    .filter_map(|b| match b {
-                        "wayland_portal" => Some("wayland_portal"),
-                        "evdi" => Some("evdi"),
-                        _ => None,
-                    })
-                    .collect();
-                if !live.is_empty() {
-                    self.backends = live;
-                    // Clamp selection index in case the new list is shorter.
-                    if self.selected_backend >= self.backends.len() {
-                        self.selected_backend = 0;
-                    }
-                    self.log(format!("probe: available backends = {:?}", self.backends));
-                }
-            }
+    fn probe_available_backends(&mut self) {
+        let Ok(hp) = self.api.get_json("host-probe") else {
+            return;
+        };
+        let Some(backends) = hp.get("available_backends").and_then(|v| v.as_array()) else {
+            return;
+        };
+        let live = collect_supported_backends(backends);
+        if live.is_empty() {
+            return;
         }
-
-        let mut status_snapshot: Option<ConnectionSnapshot> = None;
-        self.probe.ok_status = self
-            .api
-            .get_json("status")
-            .map(|status| {
-                self.probe.host_state = status
-                    .get("state")
-                    .and_then(Value::as_str)
-                    .unwrap_or("-")
-                    .to_string();
-                self.probe.host_error = status
-                    .get("last_error")
-                    .and_then(Value::as_str)
-                    .unwrap_or("-")
-                    .to_string();
-                self.probe.target_serial = status
-                    .get("target_serial")
-                    .and_then(Value::as_str)
-                    .unwrap_or("-")
-                    .to_string();
-                self.probe.run_id = status.get("run_id").and_then(Value::as_u64).unwrap_or(0);
-                self.probe.stream_port = status
-                    .get("stream_port")
-                    .and_then(Value::as_u64)
-                    .map(|v| v as u16)
-                    .unwrap_or(0);
-                status_snapshot = Some(parse_connection_snapshot(&status));
-            })
-            .is_ok();
-
-        self.probe.ok_metrics = self
-            .api
-            .get_json("metrics")
-            .map(|metrics| {
-                self.connection = Some(parse_connection_snapshot(&metrics));
-            })
-            .is_ok();
-
-        if !self.probe.ok_metrics {
-            self.connection = status_snapshot;
+        self.backends = live;
+        if self.selected_backend >= self.backends.len() {
+            self.selected_backend = 0;
         }
-        self.probe_ran = true;
+        self.log(format!("probe: available backends = {:?}", self.backends));
+    }
+
+    fn probe_status(&mut self) -> Option<ConnectionSnapshot> {
+        let status = self.api.get_json("status").ok()?;
+        self.probe.host_state = status
+            .get("state")
+            .and_then(Value::as_str)
+            .unwrap_or("-")
+            .to_string();
+        self.probe.host_error = status
+            .get("last_error")
+            .and_then(Value::as_str)
+            .unwrap_or("-")
+            .to_string();
+        self.probe.target_serial = status
+            .get("target_serial")
+            .and_then(Value::as_str)
+            .unwrap_or("-")
+            .to_string();
+        self.probe.run_id = status.get("run_id").and_then(Value::as_u64).unwrap_or(0);
+        self.probe.stream_port = status
+            .get("stream_port")
+            .and_then(Value::as_u64)
+            .map(|v| v as u16)
+            .unwrap_or(0);
+        Some(parse_connection_snapshot(&status))
+    }
+
+    fn log_probe_summary(&mut self) {
         if let Some(expected_serial) = self.api.serial.as_deref() {
             if self.probe.target_serial != "-" && self.probe.target_serial != expected_serial {
                 self.log(format!(
@@ -741,6 +704,34 @@ impl App {
         } else {
             self.log("probe: failed (host unavailable or endpoint error)");
         }
+    }
+
+    // NOSONAR S3776 - Probe flow combines host capability and status reconciliation
+    fn run_probe(&mut self) {
+        self.log("probe: checking /v1/health /v1/status /v1/metrics /v1/host-probe");
+        self.probe = ProbeState::default();
+        if let Ok(health) = self.api.get_json("health") {
+            self.probe.ok_health = true;
+            self.probe.build_revision = health
+                .get("build_revision")
+                .and_then(Value::as_str)
+                .unwrap_or("-")
+                .to_string();
+        }
+        self.probe_available_backends();
+
+        let status_snapshot = self.probe_status();
+        self.probe.ok_status = status_snapshot.is_some();
+        if let Ok(metrics) = self.api.get_json("metrics") {
+            self.probe.ok_metrics = true;
+            self.connection = Some(parse_connection_snapshot(&metrics));
+        }
+
+        if !self.probe.ok_metrics {
+            self.connection = status_snapshot;
+        }
+        self.probe_ran = true;
+        self.log_probe_summary();
     }
 
     fn start_evolution(&mut self) {
@@ -1021,131 +1012,134 @@ impl App {
         }
     }
 
-    // NOSONAR S3776 - Keymap dispatch intentionally maps many step-specific controls
-    fn handle_key(&mut self, code: KeyCode) -> bool {
+    fn handle_global_key(&mut self, code: KeyCode) -> Option<bool> {
         match code {
-            KeyCode::Char('q') => return true,
+            KeyCode::Char('q') => Some(true),
             KeyCode::Tab => {
                 self.step = self.step.next();
-                return false;
+                Some(false)
             }
             KeyCode::BackTab | KeyCode::Esc => {
                 self.step = self.step.prev();
-                return false;
+                Some(false)
+            }
+            _ => None,
+        }
+    }
+
+    fn handle_step_key(&mut self, code: KeyCode) -> bool {
+        match self.step {
+            Step::Backend => self.handle_backend_key(code),
+            Step::Target => self.handle_target_key(code),
+            Step::Probe => self.handle_probe_key(code),
+            Step::RunConfig => self.handle_run_config_key(code),
+            Step::Evolution => self.handle_evolution_key(code),
+            Step::Results => self.handle_results_key(code),
+            Step::Finish => matches!(code, KeyCode::Enter | KeyCode::Esc),
+        }
+    }
+
+    fn handle_backend_key(&mut self, code: KeyCode) -> bool {
+        match code {
+            KeyCode::Up => {
+                if self.backend_focus > 0 {
+                    self.backend_focus -= 1;
+                }
+            }
+            KeyCode::Down => {
+                if self.backend_focus + 1 < self.backends.len() {
+                    self.backend_focus += 1;
+                }
+            }
+            KeyCode::Enter => {
+                self.selected_backend = self.backend_focus;
+                self.step = Step::Target;
             }
             _ => {}
         }
+        false
+    }
 
-        match self.step {
-            Step::Backend => match code {
-                KeyCode::Up => {
-                    if self.backend_focus > 0 {
-                        self.backend_focus -= 1;
-                    }
-                }
-                KeyCode::Down => {
-                    if self.backend_focus + 1 < self.backends.len() {
-                        self.backend_focus += 1;
-                    }
-                }
-                KeyCode::Enter => {
-                    self.selected_backend = self.backend_focus;
-                    self.step = Step::Target;
-                }
-                _ => {}
-            },
-            Step::Target => match code {
-                KeyCode::Up => nudge_index(&mut self.target_focus, 4, -1),
-                KeyCode::Down => nudge_index(&mut self.target_focus, 4, 1),
-                KeyCode::Left => self.adjust_target_value(-1),
-                KeyCode::Right => self.adjust_target_value(1),
-                KeyCode::Char('g') => nudge_u32(&mut self.generations, 1, 30, 1),
-                KeyCode::Char('G') => nudge_u32(&mut self.generations, 1, 30, -1),
-                KeyCode::Char('c') => nudge_u32(&mut self.children, 1, 30, 1),
-                KeyCode::Char('C') => nudge_u32(&mut self.children, 1, 30, -1),
-                KeyCode::Char('+') | KeyCode::Char('=') => self.adjust_target_value(1),
-                KeyCode::Char('-') => self.adjust_target_value(-1),
-                KeyCode::Enter => self.activate_target(),
-                _ => {}
-            },
-            Step::Probe => match code {
-                KeyCode::Up => nudge_index(&mut self.probe_focus, 2, -1),
-                KeyCode::Down => nudge_index(&mut self.probe_focus, 2, 1),
-                KeyCode::Char('r') => self.run_probe(),
-                KeyCode::Enter => self.activate_probe(),
-                _ => {}
-            },
-            Step::RunConfig => match code {
-                KeyCode::Up => nudge_index(&mut self.run_focus, 6, -1),
-                KeyCode::Down => nudge_index(&mut self.run_focus, 6, 1),
-                KeyCode::Left => {
-                    if self.run_focus <= 1 {
-                        self.adjust_run_value(-1);
-                    } else if self.run_focus == 3 {
-                        self.adjust_run_timing_value(-1);
-                    }
-                }
-                KeyCode::Right => {
-                    if self.run_focus <= 1 {
-                        self.adjust_run_value(1);
-                    } else if self.run_focus == 3 {
-                        self.adjust_run_timing_value(1);
-                    }
-                }
-                KeyCode::Char('+') | KeyCode::Char('=') => {
-                    if self.run_focus == 3 {
-                        self.adjust_run_timing_value(1);
-                    }
-                }
-                KeyCode::Char('-') => {
-                    if self.run_focus == 3 {
-                        self.adjust_run_timing_value(-1);
-                    }
-                }
-                KeyCode::Backspace => {
-                    if self.run_focus == 4 {
-                        self.edit_profile_name(code);
-                    }
-                }
-                KeyCode::Char(' ') => {
-                    if self.run_focus == 2 {
-                        self.toggle_use_prerendered_scenes();
-                    } else if self.run_focus == 4 {
-                        self.edit_profile_name(code);
-                    }
-                }
-                KeyCode::Char(_) => {
-                    if self.run_focus == 4 {
-                        self.edit_profile_name(code);
-                    }
-                }
-                KeyCode::Enter => self.activate_run_config(),
-                _ => {}
-            },
-            Step::Evolution => match code {
-                KeyCode::Up => nudge_index(&mut self.evolution_focus, 4, -1),
-                KeyCode::Down => nudge_index(&mut self.evolution_focus, 4, 1),
-                KeyCode::Char(' ') => self.toggle_pause(),
-                KeyCode::Char('r') => self.rollback_seed(),
-                KeyCode::Char('s') => self.stop_engine(),
-                KeyCode::Enter => self.activate_evolution(),
-                _ => {}
-            },
-            Step::Results => match code {
-                KeyCode::Up => nudge_index(&mut self.results_focus, 3, -1),
-                KeyCode::Down => nudge_index(&mut self.results_focus, 3, 1),
-                KeyCode::Char('a') => self.apply_best(),
-                KeyCode::Char('e') => self.export_results(),
-                KeyCode::Enter => self.activate_results(),
-                _ => {}
-            },
-            Step::Finish => {
-                if matches!(code, KeyCode::Enter | KeyCode::Esc) {
-                    return true;
-                }
-            }
+    fn handle_target_key(&mut self, code: KeyCode) -> bool {
+        match code {
+            KeyCode::Up => nudge_index(&mut self.target_focus, 4, -1),
+            KeyCode::Down => nudge_index(&mut self.target_focus, 4, 1),
+            KeyCode::Left | KeyCode::Char('-') => self.adjust_target_value(-1),
+            KeyCode::Right | KeyCode::Char('+') | KeyCode::Char('=') => self.adjust_target_value(1),
+            KeyCode::Char('g') => nudge_u32(&mut self.generations, 1, 30, 1),
+            KeyCode::Char('G') => nudge_u32(&mut self.generations, 1, 30, -1),
+            KeyCode::Char('c') => nudge_u32(&mut self.children, 1, 30, 1),
+            KeyCode::Char('C') => nudge_u32(&mut self.children, 1, 30, -1),
+            KeyCode::Enter => self.activate_target(),
+            _ => {}
         }
         false
+    }
+
+    fn handle_probe_key(&mut self, code: KeyCode) -> bool {
+        match code {
+            KeyCode::Up => nudge_index(&mut self.probe_focus, 2, -1),
+            KeyCode::Down => nudge_index(&mut self.probe_focus, 2, 1),
+            KeyCode::Char('r') => self.run_probe(),
+            KeyCode::Enter => self.activate_probe(),
+            _ => {}
+        }
+        false
+    }
+
+    fn handle_run_config_key(&mut self, code: KeyCode) -> bool {
+        match code {
+            KeyCode::Up => nudge_index(&mut self.run_focus, 6, -1),
+            KeyCode::Down => nudge_index(&mut self.run_focus, 6, 1),
+            KeyCode::Left if self.run_focus <= 1 => self.adjust_run_value(-1),
+            KeyCode::Right if self.run_focus <= 1 => self.adjust_run_value(1),
+            KeyCode::Left if self.run_focus == 3 => self.adjust_run_timing_value(-1),
+            KeyCode::Right if self.run_focus == 3 => self.adjust_run_timing_value(1),
+            KeyCode::Char('+') | KeyCode::Char('=') if self.run_focus == 3 => {
+                self.adjust_run_timing_value(1)
+            }
+            KeyCode::Char('-') if self.run_focus == 3 => self.adjust_run_timing_value(-1),
+            KeyCode::Backspace if self.run_focus == 4 => self.edit_profile_name(code),
+            KeyCode::Char(' ') if self.run_focus == 2 => self.toggle_use_prerendered_scenes(),
+            KeyCode::Char(' ') | KeyCode::Char(_) if self.run_focus == 4 => {
+                self.edit_profile_name(code)
+            }
+            KeyCode::Enter => self.activate_run_config(),
+            _ => {}
+        }
+        false
+    }
+
+    fn handle_evolution_key(&mut self, code: KeyCode) -> bool {
+        match code {
+            KeyCode::Up => nudge_index(&mut self.evolution_focus, 4, -1),
+            KeyCode::Down => nudge_index(&mut self.evolution_focus, 4, 1),
+            KeyCode::Char(' ') => self.toggle_pause(),
+            KeyCode::Char('r') => self.rollback_seed(),
+            KeyCode::Char('s') => self.stop_engine(),
+            KeyCode::Enter => self.activate_evolution(),
+            _ => {}
+        }
+        false
+    }
+
+    fn handle_results_key(&mut self, code: KeyCode) -> bool {
+        match code {
+            KeyCode::Up => nudge_index(&mut self.results_focus, 3, -1),
+            KeyCode::Down => nudge_index(&mut self.results_focus, 3, 1),
+            KeyCode::Char('a') => self.apply_best(),
+            KeyCode::Char('e') => self.export_results(),
+            KeyCode::Enter => self.activate_results(),
+            _ => {}
+        }
+        false
+    }
+
+    fn handle_key(&mut self, code: KeyCode) -> bool {
+        if let Some(done) = self.handle_global_key(code) {
+            return done;
+        }
+        self.handle_step_key(code)
     }
 
     fn on_tick(&mut self) {
@@ -1532,7 +1526,492 @@ fn summarize_samples(samples: &[MetricSample]) -> String {
     )
 }
 
-// NOSONAR S3776 - Evolution worker orchestrates staged control/measurement loops
+fn evolution_display_mode(cfg: &EvolutionConfig) -> (&'static str, &'static str) {
+    if cfg.use_prerendered_scenes {
+        ("benchmark_game", "prerendered_scenes")
+    } else {
+        ("virtual_monitor", "virtual_desktop")
+    }
+}
+
+fn send_engine_log(tx: &Sender<EngineEvent>, message: impl Into<String>) {
+    let _ = tx.send(EngineEvent::Log(message.into()));
+}
+
+fn post_tuning_status(
+    api: &ApiClient,
+    cfg: &EvolutionConfig,
+    phase: &str,
+    generation: u32,
+    child: u32,
+    score: Option<f64>,
+    best_score: Option<f64>,
+    note: impl Into<String>,
+) {
+    let mut payload = json!({
+        "active": phase != "done",
+        "codec": cfg.codec,
+        "phase": phase,
+        "generation": generation,
+        "total_generations": cfg.generations,
+        "child": child,
+        "children_per_generation": cfg.children,
+        "note": note.into(),
+    });
+    if let Some(score) = score {
+        payload["score"] = json!(score);
+    }
+    if let Some(best_score) = best_score {
+        payload["best_score"] = json!(best_score);
+    }
+    let _ = api.post_json("tuning", &payload);
+}
+
+fn start_evolution_session(
+    api: &ApiClient,
+    cfg: &EvolutionConfig,
+    tx: &Sender<EngineEvent>,
+    encoder: &str,
+    display_mode: &str,
+    source_name: &str,
+    child_train_time_sec: u64,
+) -> Result<(), ()> {
+    if cfg.codec == "mjpeg" {
+        send_engine_log(
+            tx,
+            "codec=mjpeg not implemented yet on host; falling back to rawpng",
+        );
+    }
+    send_engine_log(
+        tx,
+        format!(
+            "run: codec={} objective={} workload={} source={} display_mode={} child_train={}s sample_interval={}ms",
+            cfg.codec,
+            cfg.objective,
+            cfg.workload,
+            source_name,
+            display_mode,
+            child_train_time_sec,
+            SAMPLE_INTERVAL_MS
+        ),
+    );
+
+    let start_body = json!({
+        "encoder": encoder,
+        "fps": cfg.seed.fps,
+        "bitrate_kbps": cfg.seed.bitrate_kbps,
+        "intra_only": cfg.seed.intra_only
+    });
+    if cfg.use_prerendered_scenes {
+        send_engine_log(
+            tx,
+            "start: benchmark_game source=synthetic-2d timeline=12s scenes=4",
+        );
+    } else {
+        send_engine_log(tx, "start: virtual_monitor source=desktop capture");
+    }
+
+    let start_response = match api.post_json(
+        &format!(
+            "start?display_mode={display_mode}&capture_backend={}",
+            cfg.backend
+        ),
+        &start_body,
+    ) {
+        Ok(response) => response,
+        Err(err) => {
+            let _ = tx.send(EngineEvent::Failed(format!(
+                "start failed ({display_mode}): {err}"
+            )));
+            return Err(());
+        }
+    };
+    let start_snapshot = parse_connection_snapshot(&start_response);
+    let _ = tx.send(EngineEvent::Connection(start_snapshot.clone()));
+    send_engine_log(
+        tx,
+        format!(
+            "start: state={} run={} serial={} port={} recv={:.1} present={:.1}/{:.1} restarts={} reconnects={}",
+            start_snapshot.state,
+            start_snapshot.run_id,
+            start_snapshot.target_serial,
+            start_snapshot.stream_port,
+            start_snapshot.recv_fps,
+            start_snapshot.present_fps,
+            start_snapshot.target_fps,
+            start_snapshot.restart_count,
+            start_snapshot.reconnects
+        ),
+    );
+
+    post_tuning_status(
+        api,
+        cfg,
+        "warmup",
+        0,
+        0,
+        Some(0.0),
+        Some(0.0),
+        "starting run",
+    );
+    Ok(())
+}
+
+fn wait_if_paused(stop: &Arc<AtomicBool>, pause: &Arc<AtomicBool>) -> bool {
+    if stop.load(Ordering::SeqCst) {
+        return true;
+    }
+    while pause.load(Ordering::SeqCst) {
+        if stop.load(Ordering::SeqCst) {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(150));
+    }
+    false
+}
+
+fn apply_candidate_and_log(
+    api: &ApiClient,
+    cfg: &EvolutionConfig,
+    tx: &Sender<EngineEvent>,
+    encoder: &str,
+    generation: u32,
+    child: u32,
+    candidate: &CandidateParams,
+) -> Result<(), CandidateResult> {
+    let apply_body = json!({
+        "encoder": encoder,
+        "bitrate_kbps": candidate.bitrate_kbps,
+        "fps": candidate.fps,
+        "intra_only": candidate.intra_only
+    });
+    let apply_response = match api.post_json("apply", &apply_body) {
+        Ok(response) => response,
+        Err(err) => {
+            return Err(CandidateResult {
+                generation,
+                child,
+                params: candidate.clone(),
+                score: -9_500.0,
+                fail: true,
+                reason: format!("apply failed: {err}"),
+            });
+        }
+    };
+
+    let apply_state = apply_response
+        .get("state")
+        .and_then(Value::as_str)
+        .unwrap_or("-");
+    let apply_run_id = apply_response
+        .get("run_id")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let apply_serial = apply_response
+        .get("target_serial")
+        .and_then(Value::as_str)
+        .unwrap_or("<none>");
+    let apply_stream_port = apply_response
+        .get("stream_port")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let apply_snapshot = parse_connection_snapshot(&apply_response);
+    let _ = tx.send(EngineEvent::Connection(apply_snapshot.clone()));
+    send_engine_log(
+        tx,
+        format!(
+            "apply: g{generation}/c{child} run_id={apply_run_id} state={apply_state} serial={apply_serial} port={apply_stream_port} recv={:.1} present={:.1}/{:.1} restarts={} reconnects={} bitrate={} fps={} intra={}",
+            apply_snapshot.recv_fps,
+            apply_snapshot.present_fps,
+            apply_snapshot.target_fps,
+            apply_snapshot.restart_count,
+            apply_snapshot.reconnects,
+            candidate.bitrate_kbps,
+            candidate.fps,
+            candidate.intra_only
+        ),
+    );
+    post_tuning_status(
+        api,
+        cfg,
+        "measure",
+        generation,
+        child,
+        None,
+        None,
+        format!(
+            "candidate bitrate={} fps={} intra={}",
+            candidate.bitrate_kbps, candidate.fps, candidate.intra_only
+        ),
+    );
+    Ok(())
+}
+
+fn collect_training_samples(
+    api: &ApiClient,
+    tx: &Sender<EngineEvent>,
+    stop: &Arc<AtomicBool>,
+    generation: u32,
+    child: u32,
+    child_train_window_ms: u64,
+) -> Option<Vec<MetricSample>> {
+    let mut samples = Vec::new();
+    let sample_window = Duration::from_millis(child_train_window_ms);
+    let sample_interval = Duration::from_millis(SAMPLE_INTERVAL_MS);
+    let sample_started_at = Instant::now();
+    let mut sample_idx: u32 = 0;
+    let mut next_tick = sample_started_at;
+
+    loop {
+        if stop.load(Ordering::SeqCst) {
+            return None;
+        }
+        sample_idx = sample_idx.saturating_add(1);
+        if let Ok(payload) = api.get_json("metrics") {
+            let snap = parse_connection_snapshot(&payload);
+            let _ = tx.send(EngineEvent::Connection(snap.clone()));
+            if let Some(sample) = parse_metric_sample(&payload) {
+                let elapsed_ms = sample_started_at.elapsed().as_millis() as u64;
+                send_engine_log(
+                    tx,
+                    format!(
+                        "train: g{generation}/c{child} idx={sample_idx} t={elapsed_ms}/{child_train_window_ms}ms state={} run={} recv={:.1} present={:.1}/{:.1} restarts={} reconnects={}",
+                        snap.state,
+                        snap.run_id,
+                        sample.recv_fps,
+                        sample.present_fps,
+                        sample.target_fps,
+                        snap.restart_count,
+                        snap.reconnects
+                    ),
+                );
+                samples.push(sample);
+            }
+        }
+        if sample_started_at.elapsed() >= sample_window {
+            break;
+        }
+        next_tick = next_tick
+            .checked_add(sample_interval)
+            .unwrap_or_else(Instant::now);
+        let now = Instant::now();
+        let sleep_for = next_tick
+            .saturating_duration_since(now)
+            .min(sample_window.saturating_sub(sample_started_at.elapsed()));
+        if !sleep_for.is_zero() {
+            thread::sleep(sleep_for);
+        }
+    }
+
+    Some(samples)
+}
+
+fn record_candidate_result(
+    api: &ApiClient,
+    cfg: &EvolutionConfig,
+    tx: &Sender<EngineEvent>,
+    best: &mut Option<CandidateResult>,
+    candidate_result: CandidateResult,
+) -> CandidateResult {
+    if !candidate_result.fail
+        && best
+            .as_ref()
+            .map(|current| candidate_result.score > current.score)
+            .unwrap_or(true)
+    {
+        *best = Some(candidate_result.clone());
+    }
+    post_tuning_status(
+        api,
+        cfg,
+        "score",
+        candidate_result.generation,
+        candidate_result.child,
+        Some(candidate_result.score),
+        Some(
+            best.as_ref()
+                .map(|b| b.score)
+                .unwrap_or(candidate_result.score),
+        ),
+        candidate_result.reason.clone(),
+    );
+    let _ = tx.send(EngineEvent::Candidate(candidate_result.clone()));
+    candidate_result
+}
+
+fn run_generation_child(
+    api: &ApiClient,
+    cfg: &EvolutionConfig,
+    tx: &Sender<EngineEvent>,
+    stop: &Arc<AtomicBool>,
+    encoder: &str,
+    child_train_window_ms: u64,
+    generation: u32,
+    child: u32,
+    candidate: CandidateParams,
+    best: &mut Option<CandidateResult>,
+) -> Option<CandidateResult> {
+    let _ = tx.send(EngineEvent::Progress {
+        generation,
+        child,
+        params: candidate.clone(),
+    });
+    match apply_candidate_and_log(api, cfg, tx, encoder, generation, child, &candidate) {
+        Ok(()) => {}
+        Err(failed) => return Some(record_candidate_result(api, cfg, tx, best, failed)),
+    }
+
+    let samples =
+        collect_training_samples(api, tx, stop, generation, child, child_train_window_ms)?;
+    send_engine_log(
+        tx,
+        format!(
+            "metrics: g{generation}/c{child} {}",
+            summarize_samples(&samples)
+        ),
+    );
+    let (score, fail, reason) = score_candidate(&samples);
+    let candidate_result = CandidateResult {
+        generation,
+        child,
+        params: candidate,
+        score,
+        fail,
+        reason,
+    };
+    Some(record_candidate_result(
+        api,
+        cfg,
+        tx,
+        best,
+        candidate_result,
+    ))
+}
+
+fn select_generation_parents(
+    cfg: &EvolutionConfig,
+    tx: &Sender<EngineEvent>,
+    generation: u32,
+    generation_results: Vec<CandidateResult>,
+    best: &Option<CandidateResult>,
+) -> Vec<CandidateParams> {
+    let mut generation_winners = generation_results
+        .iter()
+        .filter(|result| !result.fail)
+        .cloned()
+        .collect::<Vec<_>>();
+    generation_winners.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    generation_winners.truncate(3);
+
+    if generation_winners.is_empty() {
+        let parent_pool = best
+            .as_ref()
+            .map(|result| vec![result.params.clone()])
+            .unwrap_or_else(|| vec![cfg.seed.clone()]);
+        send_engine_log(
+            tx,
+            format!(
+                "selection: g{generation} no valid candidates, fallback parents={}",
+                parent_pool.len()
+            ),
+        );
+        return parent_pool;
+    }
+
+    let parent_pool = generation_winners
+        .iter()
+        .map(|result| result.params.clone())
+        .collect::<Vec<_>>();
+    let summary = generation_winners
+        .iter()
+        .map(|result| format!("c{}:{:.2}", result.child, result.score))
+        .collect::<Vec<_>>()
+        .join(", ");
+    send_engine_log(
+        tx,
+        format!(
+            "selection: g{generation} top={} parents={} [{}]",
+            generation_winners.len(),
+            parent_pool.len(),
+            summary
+        ),
+    );
+    parent_pool
+}
+
+fn run_generation(
+    api: &ApiClient,
+    cfg: &EvolutionConfig,
+    tx: &Sender<EngineEvent>,
+    stop: &Arc<AtomicBool>,
+    pause: &Arc<AtomicBool>,
+    rng: &mut StdRng,
+    codec: &str,
+    encoder: &str,
+    child_train_window_ms: u64,
+    generation: u32,
+    parent_pool: &[CandidateParams],
+    best: &mut Option<CandidateResult>,
+) -> Option<Vec<CandidateParams>> {
+    let mut generation_parents = parent_pool.to_vec();
+    if generation_parents.is_empty() {
+        generation_parents.push(cfg.seed.clone());
+    }
+
+    let mut generation_results = Vec::new();
+    for child in 1..=cfg.children {
+        if wait_if_paused(stop, pause) {
+            return None;
+        }
+        let parent_idx = ((child - 1) as usize) % generation_parents.len();
+        let candidate = mutate_candidate(&generation_parents[parent_idx], codec, rng, generation);
+        let result = run_generation_child(
+            api,
+            cfg,
+            tx,
+            stop,
+            encoder,
+            child_train_window_ms,
+            generation,
+            child,
+            candidate,
+            best,
+        )?;
+        generation_results.push(result);
+    }
+
+    Some(select_generation_parents(
+        cfg,
+        tx,
+        generation,
+        generation_results,
+        best,
+    ))
+}
+
+fn finish_evolution_run(
+    api: &ApiClient,
+    cfg: &EvolutionConfig,
+    tx: &Sender<EngineEvent>,
+    best: Option<CandidateResult>,
+) {
+    post_tuning_status(
+        api,
+        cfg,
+        "done",
+        cfg.generations,
+        cfg.children,
+        None,
+        Some(best.as_ref().map(|b| b.score).unwrap_or(0.0)),
+        "run finished",
+    );
+    let _ = tx.send(EngineEvent::Completed { best });
+}
+
 fn run_evolution_worker(
     api: ApiClient,
     cfg: EvolutionConfig,
@@ -1542,329 +2021,49 @@ fn run_evolution_worker(
 ) {
     let mut rng = StdRng::from_entropy();
     let codec = cfg.codec.clone();
-    let mut parent_pool = vec![cfg.seed.clone()];
-    let mut best: Option<CandidateResult> = None;
     let encoder = map_codec_to_encoder(&codec);
     let child_train_time_sec = cfg
         .child_train_time_sec
         .clamp(CHILD_TRAIN_TIME_MIN_SEC, CHILD_TRAIN_TIME_MAX_SEC);
     let child_train_window_ms = child_train_time_sec.saturating_mul(1000);
-    let display_mode = if cfg.use_prerendered_scenes {
-        "benchmark_game"
-    } else {
-        "virtual_monitor"
-    };
-    let source_name = if cfg.use_prerendered_scenes {
-        "prerendered_scenes"
-    } else {
-        "virtual_desktop"
-    };
-
-    if codec == "mjpeg" {
-        let _ = tx.send(EngineEvent::Log(
-            "codec=mjpeg not implemented yet on host; falling back to rawpng".to_string(),
-        ));
-    }
-    let _ = tx.send(EngineEvent::Log(format!(
-        "run: codec={} objective={} workload={} source={} display_mode={} child_train={}s sample_interval={}ms",
-        cfg.codec,
-        cfg.objective,
-        cfg.workload,
-        source_name,
+    let (display_mode, source_name) = evolution_display_mode(&cfg);
+    if start_evolution_session(
+        &api,
+        &cfg,
+        &tx,
+        encoder,
         display_mode,
+        source_name,
         child_train_time_sec,
-        SAMPLE_INTERVAL_MS
-    )));
-
-    let start_body = json!({
-        "encoder": encoder,
-        "fps": cfg.seed.fps,
-        "bitrate_kbps": cfg.seed.bitrate_kbps,
-        "intra_only": cfg.seed.intra_only
-    });
-    if cfg.use_prerendered_scenes {
-        let _ = tx.send(EngineEvent::Log(
-            "start: benchmark_game source=synthetic-2d timeline=12s scenes=4".to_string(),
-        ));
-    } else {
-        let _ = tx.send(EngineEvent::Log(
-            "start: virtual_monitor source=desktop capture".to_string(),
-        ));
+    )
+    .is_err()
+    {
+        return;
     }
-    let start_response =
-        match api.post_json(&format!("start?display_mode={display_mode}&capture_backend={}", cfg.backend), &start_body) {
-            Ok(v) => v,
-            Err(err) => {
-                let _ = tx.send(EngineEvent::Failed(format!(
-                    "start failed ({display_mode}): {err}"
-                )));
-                return;
-            }
+
+    let mut parent_pool = vec![cfg.seed.clone()];
+    let mut best: Option<CandidateResult> = None;
+    for generation in 1..=cfg.generations {
+        let Some(next_parent_pool) = run_generation(
+            &api,
+            &cfg,
+            &tx,
+            &stop,
+            &pause,
+            &mut rng,
+            &codec,
+            encoder,
+            child_train_window_ms,
+            generation,
+            &parent_pool,
+            &mut best,
+        ) else {
+            break;
         };
-    let start_snapshot = parse_connection_snapshot(&start_response);
-    let _ = tx.send(EngineEvent::Connection(start_snapshot.clone()));
-    let _ = tx.send(EngineEvent::Log(format!(
-        "start: state={} run={} serial={} port={} recv={:.1} present={:.1}/{:.1} restarts={} reconnects={}",
-        start_snapshot.state,
-        start_snapshot.run_id,
-        start_snapshot.target_serial,
-        start_snapshot.stream_port,
-        start_snapshot.recv_fps,
-        start_snapshot.present_fps,
-        start_snapshot.target_fps,
-        start_snapshot.restart_count,
-        start_snapshot.reconnects
-    )));
-
-    let _ = api.post_json(
-        "tuning",
-        &json!({
-            "active": true,
-            "codec": cfg.codec,
-            "phase": "warmup",
-            "generation": 0,
-            "total_generations": cfg.generations,
-            "child": 0,
-            "children_per_generation": cfg.children,
-            "score": 0.0,
-            "best_score": 0.0,
-            "note": "starting run"
-        }),
-    );
-
-    'gens: for generation in 1..=cfg.generations {
-        let mut generation_parents = parent_pool.clone();
-        if generation_parents.is_empty() {
-            generation_parents.push(cfg.seed.clone());
-        }
-        let mut generation_results: Vec<CandidateResult> = Vec::new();
-        for child in 1..=cfg.children {
-            if stop.load(Ordering::SeqCst) {
-                break 'gens;
-            }
-            while pause.load(Ordering::SeqCst) {
-                if stop.load(Ordering::SeqCst) {
-                    break 'gens;
-                }
-                thread::sleep(Duration::from_millis(150));
-            }
-
-            let parent_idx = ((child - 1) as usize) % generation_parents.len();
-            let base_parent = &generation_parents[parent_idx];
-            let candidate = mutate_candidate(base_parent, &codec, &mut rng, generation);
-            let _ = tx.send(EngineEvent::Progress {
-                generation,
-                child,
-                params: candidate.clone(),
-            });
-
-            let apply_body = json!({
-                "encoder": encoder,
-                "bitrate_kbps": candidate.bitrate_kbps,
-                "fps": candidate.fps,
-                "intra_only": candidate.intra_only
-            });
-
-            let apply_response = match api.post_json("apply", &apply_body) {
-                Ok(v) => v,
-                Err(err) => {
-                    let failed = CandidateResult {
-                        generation,
-                        child,
-                        params: candidate.clone(),
-                        score: -9_500.0,
-                        fail: true,
-                        reason: format!("apply failed: {err}"),
-                    };
-                    let _ = tx.send(EngineEvent::Candidate(failed));
-                    continue;
-                }
-            };
-            let apply_state = apply_response
-                .get("state")
-                .and_then(Value::as_str)
-                .unwrap_or("-");
-            let apply_run_id = apply_response
-                .get("run_id")
-                .and_then(Value::as_u64)
-                .unwrap_or(0);
-            let apply_serial = apply_response
-                .get("target_serial")
-                .and_then(Value::as_str)
-                .unwrap_or("<none>");
-            let apply_stream_port = apply_response
-                .get("stream_port")
-                .and_then(Value::as_u64)
-                .unwrap_or(0);
-            let apply_snapshot = parse_connection_snapshot(&apply_response);
-            let _ = tx.send(EngineEvent::Connection(apply_snapshot.clone()));
-            let _ = tx.send(EngineEvent::Log(format!(
-                "apply: g{generation}/c{child} run_id={apply_run_id} state={apply_state} serial={apply_serial} port={apply_stream_port} recv={:.1} present={:.1}/{:.1} restarts={} reconnects={} bitrate={} fps={} intra={}",
-                apply_snapshot.recv_fps,
-                apply_snapshot.present_fps,
-                apply_snapshot.target_fps,
-                apply_snapshot.restart_count,
-                apply_snapshot.reconnects,
-                candidate.bitrate_kbps,
-                candidate.fps,
-                candidate.intra_only
-            )));
-
-            let _ = api.post_json(
-                "tuning",
-                &json!({
-                    "active": true,
-                    "codec": cfg.codec,
-                    "phase": "measure",
-                    "generation": generation,
-                    "total_generations": cfg.generations,
-                    "child": child,
-                    "children_per_generation": cfg.children,
-                    "note": format!("candidate bitrate={} fps={} intra={}", candidate.bitrate_kbps, candidate.fps, candidate.intra_only)
-                }),
-            );
-
-            let mut samples = Vec::new();
-            let sample_window = Duration::from_millis(child_train_window_ms);
-            let sample_interval = Duration::from_millis(SAMPLE_INTERVAL_MS);
-            let sample_started_at = Instant::now();
-            let mut sample_idx: u32 = 0;
-            let mut next_tick = sample_started_at;
-            loop {
-                if stop.load(Ordering::SeqCst) {
-                    break 'gens;
-                }
-                sample_idx = sample_idx.saturating_add(1);
-                if let Ok(payload) = api.get_json("metrics") {
-                    let snap = parse_connection_snapshot(&payload);
-                    let _ = tx.send(EngineEvent::Connection(snap.clone()));
-                    if let Some(sample) = parse_metric_sample(&payload) {
-                        let elapsed_ms = sample_started_at.elapsed().as_millis() as u64;
-                        let _ = tx.send(EngineEvent::Log(format!(
-                            "train: g{generation}/c{child} idx={sample_idx} t={elapsed_ms}/{child_train_window_ms}ms state={} run={} recv={:.1} present={:.1}/{:.1} restarts={} reconnects={}",
-                            snap.state,
-                            snap.run_id,
-                            sample.recv_fps,
-                            sample.present_fps,
-                            sample.target_fps,
-                            snap.restart_count,
-                            snap.reconnects
-                        )));
-                        samples.push(sample);
-                    }
-                }
-                if sample_started_at.elapsed() >= sample_window {
-                    break;
-                }
-                next_tick = next_tick
-                    .checked_add(sample_interval)
-                    .unwrap_or_else(Instant::now);
-                let now = Instant::now();
-                let sleep_for = next_tick
-                    .saturating_duration_since(now)
-                    .min(sample_window.saturating_sub(sample_started_at.elapsed()));
-                if !sleep_for.is_zero() {
-                    thread::sleep(sleep_for);
-                }
-            }
-            let _ = tx.send(EngineEvent::Log(format!(
-                "metrics: g{generation}/c{child} {}",
-                summarize_samples(&samples)
-            )));
-
-            let (score, fail, reason) = score_candidate(&samples);
-            let candidate_result = CandidateResult {
-                generation,
-                child,
-                params: candidate.clone(),
-                score,
-                fail,
-                reason,
-            };
-
-            if !candidate_result.fail
-                && best
-                    .as_ref()
-                    .map(|current| candidate_result.score > current.score)
-                    .unwrap_or(true)
-            {
-                best = Some(candidate_result.clone());
-            }
-            generation_results.push(candidate_result.clone());
-
-            let _ = api.post_json(
-                "tuning",
-                &json!({
-                    "active": true,
-                    "codec": cfg.codec,
-                    "phase": "score",
-                    "generation": generation,
-                    "total_generations": cfg.generations,
-                    "child": child,
-                    "children_per_generation": cfg.children,
-                    "score": candidate_result.score,
-                    "best_score": best.as_ref().map(|b| b.score).unwrap_or(candidate_result.score),
-                    "note": candidate_result.reason
-                }),
-            );
-
-            let _ = tx.send(EngineEvent::Candidate(candidate_result));
-        }
-
-        let mut generation_winners = generation_results
-            .iter()
-            .filter(|r| !r.fail)
-            .cloned()
-            .collect::<Vec<_>>();
-        generation_winners.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        generation_winners.truncate(3);
-        if generation_winners.is_empty() {
-            parent_pool = best
-                .as_ref()
-                .map(|r| vec![r.params.clone()])
-                .unwrap_or_else(|| vec![cfg.seed.clone()]);
-            let _ = tx.send(EngineEvent::Log(format!(
-                "selection: g{generation} no valid candidates, fallback parents={}",
-                parent_pool.len()
-            )));
-        } else {
-            parent_pool = generation_winners
-                .iter()
-                .map(|r| r.params.clone())
-                .collect::<Vec<_>>();
-            let summary = generation_winners
-                .iter()
-                .map(|r| format!("c{}:{:.2}", r.child, r.score))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let _ = tx.send(EngineEvent::Log(format!(
-                "selection: g{generation} top={} parents={} [{}]",
-                generation_winners.len(),
-                parent_pool.len(),
-                summary
-            )));
-        }
+        parent_pool = next_parent_pool;
     }
 
-    let _ = api.post_json(
-        "tuning",
-        &json!({
-            "active": false,
-            "codec": cfg.codec,
-            "phase": "done",
-            "generation": cfg.generations,
-            "total_generations": cfg.generations,
-            "child": cfg.children,
-            "children_per_generation": cfg.children,
-            "best_score": best.as_ref().map(|b| b.score).unwrap_or(0.0),
-            "note": "run finished"
-        }),
-    );
-    let _ = tx.send(EngineEvent::Completed { best });
+    finish_evolution_run(&api, &cfg, &tx, best);
 }
 
 fn now_unix_ms() -> u64 {
@@ -1944,7 +2143,9 @@ fn trained_profiles_path(backend: &str) -> Result<PathBuf> {
 }
 
 fn migrate_legacy_profiles_once() {
-    let Ok(base) = user_wbeam_config_dir() else { return };
+    let Ok(base) = user_wbeam_config_dir() else {
+        return;
+    };
     let legacy = base.join("trained_profiles.json");
     let archive = base.join("trained_profiles.legacy.json");
     if legacy.exists() && !archive.exists() {
@@ -2090,6 +2291,100 @@ fn spinner_char(phase: usize) -> &'static str {
     FRAMES[phase % FRAMES.len()]
 }
 
+fn connected_style() -> Style {
+    Style::default()
+        .fg(COLOR_MOCHA_BG)
+        .bg(COLOR_SUCCESS)
+        .add_modifier(Modifier::BOLD)
+}
+
+fn warning_style() -> Style {
+    Style::default()
+        .fg(COLOR_MOCHA_BG)
+        .bg(COLOR_ORANGE)
+        .add_modifier(Modifier::BOLD)
+}
+
+fn danger_style() -> Style {
+    Style::default()
+        .fg(COLOR_MOCHA_BG)
+        .bg(COLOR_DANGER)
+        .add_modifier(Modifier::BOLD)
+}
+
+fn status_from_connection(conn: &ConnectionSnapshot) -> (String, Style) {
+    let connected = is_connected(conn);
+    let connecting = is_connecting(conn);
+    let bytes_no_decode = is_bytes_no_decode(conn);
+    let label = if connected {
+        "CONNECTED".to_string()
+    } else if bytes_no_decode {
+        "BYTES-NO-DECODE".to_string()
+    } else if connecting {
+        "CONNECTING".to_string()
+    } else if conn.recv_fps <= 1.0 {
+        "NO-DATA".to_string()
+    } else {
+        conn.state.to_uppercase()
+    };
+    let style = if connected {
+        connected_style()
+    } else if connecting || bytes_no_decode {
+        warning_style()
+    } else {
+        danger_style()
+    };
+    (label, style)
+}
+
+fn collect_supported_backends(backends: &[Value]) -> Vec<&'static str> {
+    backends
+        .iter()
+        .filter_map(Value::as_str)
+        .filter_map(|backend| match backend {
+            "wayland_portal" => Some("wayland_portal"),
+            "evdi" => Some("evdi"),
+            _ => None,
+        })
+        .collect()
+}
+
+fn is_connecting(conn: &ConnectionSnapshot) -> bool {
+    conn.state.eq_ignore_ascii_case("starting") || conn.state.eq_ignore_ascii_case("reconnecting")
+}
+
+fn is_connected(conn: &ConnectionSnapshot) -> bool {
+    conn.state.eq_ignore_ascii_case("streaming") && conn.recv_fps > 1.0
+}
+
+fn is_bytes_no_decode(conn: &ConnectionSnapshot) -> bool {
+    conn.state.eq_ignore_ascii_case("streaming")
+        && conn.recv_fps <= 1.0
+        && conn.recv_bps > 150_000.0
+}
+
+fn detail_from_connection(conn: &ConnectionSnapshot) -> String {
+    format!(
+        "state={} serial={} port={} run={} recv={:.1} decode={:.1} present={:.1}/{:.1} recv≈{:.2}Mb/s restart={} reconn={} err={}",
+        conn.state,
+        conn.target_serial,
+        conn.stream_port,
+        conn.run_id,
+        conn.recv_fps,
+        conn.decode_fps,
+        conn.present_fps,
+        conn.target_fps,
+        conn.recv_bps / 1_000_000.0,
+        conn.restart_count,
+        conn.reconnects,
+        if conn.last_error.trim().is_empty() {
+            "-"
+        } else {
+            conn.last_error.trim()
+        }
+    )
+}
+
 // NOSONAR S3776 - Status bar state mapping is explicit for operator clarity
 fn draw_status_bar(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app: &App) {
     let spin = if app.evolution_running {
@@ -2101,58 +2396,8 @@ fn draw_status_bar(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app:
     let mut state_style = muted_style();
     let mut detail = "no connection snapshot yet".to_string();
     if let Some(conn) = app.connection.as_ref() {
-        let connecting = conn.state.eq_ignore_ascii_case("starting")
-            || conn.state.eq_ignore_ascii_case("reconnecting");
-        let connected = conn.state.eq_ignore_ascii_case("streaming") && conn.recv_fps > 1.0;
-        let bytes_no_decode = conn.state.eq_ignore_ascii_case("streaming")
-            && conn.recv_fps <= 1.0
-            && conn.recv_bps > 150_000.0;
-        state_label = if connected {
-            "CONNECTED".to_string()
-        } else if bytes_no_decode {
-            "BYTES-NO-DECODE".to_string()
-        } else if connecting {
-            "CONNECTING".to_string()
-        } else if conn.recv_fps <= 1.0 {
-            "NO-DATA".to_string()
-        } else {
-            conn.state.to_uppercase()
-        };
-        state_style = if connected {
-            Style::default()
-                .fg(COLOR_MOCHA_BG)
-                .bg(COLOR_SUCCESS)
-                .add_modifier(Modifier::BOLD)
-        } else if connecting || bytes_no_decode {
-            Style::default()
-                .fg(COLOR_MOCHA_BG)
-                .bg(COLOR_ORANGE)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default()
-                .fg(COLOR_MOCHA_BG)
-                .bg(COLOR_DANGER)
-                .add_modifier(Modifier::BOLD)
-        };
-        detail = format!(
-            "state={} serial={} port={} run={} recv={:.1} decode={:.1} present={:.1}/{:.1} recv≈{:.2}Mb/s restart={} reconn={} err={}",
-            conn.state,
-            conn.target_serial,
-            conn.stream_port,
-            conn.run_id,
-            conn.recv_fps,
-            conn.decode_fps,
-            conn.present_fps,
-            conn.target_fps,
-            conn.recv_bps / 1_000_000.0,
-            conn.restart_count,
-            conn.reconnects,
-            if conn.last_error.trim().is_empty() {
-                "-"
-            } else {
-                conn.last_error.trim()
-            }
-        );
+        (state_label, state_style) = status_from_connection(conn);
+        detail = detail_from_connection(conn);
     }
     let line = Line::from(vec![
         Span::styled(format!(" {spin} "), Style::default().fg(COLOR_ORANGE)),
@@ -2256,12 +2501,11 @@ fn draw_backend(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app: &A
         })
         .collect();
 
-    let list = ratatui::widgets::List::new(items)
-        .block(
-            ratatui::widgets::Block::default()
-                .borders(ratatui::widgets::Borders::ALL)
-                .title(" Capture Backend "),
-        );
+    let list = ratatui::widgets::List::new(items).block(
+        ratatui::widgets::Block::default()
+            .borders(ratatui::widgets::Borders::ALL)
+            .title(" Capture Backend "),
+    );
     frame.render_widget(list, area);
 }
 
@@ -2694,6 +2938,16 @@ fn draw_finish(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app: &Ap
     );
 }
 
+fn should_quit_from_event(app: &mut App, timeout: Duration) -> Result<bool> {
+    if !event::poll(timeout).context("event poll failed")? {
+        return Ok(false);
+    }
+    if let Event::Key(key) = event::read().context("event read failed")? {
+        return Ok(key.kind == KeyEventKind::Press && app.handle_key(key.code));
+    }
+    Ok(false)
+}
+
 // NOSONAR S3776 - TUI runtime loop intentionally handles nested event/tick flow
 fn main() -> Result<()> {
     let args = Args::parse();
@@ -2709,12 +2963,8 @@ fn main() -> Result<()> {
             let timeout = tick_rate
                 .checked_sub(last_tick.elapsed())
                 .unwrap_or(Duration::from_millis(0));
-            if event::poll(timeout).context("event poll failed")? {
-                if let Event::Key(key) = event::read().context("event read failed")? {
-                    if key.kind == KeyEventKind::Press && app.handle_key(key.code) {
-                        break;
-                    }
-                }
+            if should_quit_from_event(&mut app, timeout)? {
+                break;
             }
             if last_tick.elapsed() >= tick_rate {
                 app.on_tick();

@@ -459,7 +459,8 @@ pub fn build_source(cfg: &ResolvedConfig) -> Result<gst::Element> {
                 let frame_idx = callback_counter.fetch_add(1, Ordering::Relaxed);
 
                 // Pace: sleep until this frame is due on wall clock.
-                let due = start_time + Duration::from_nanos(frame_idx.saturating_mul(frame_duration_ns));
+                let due =
+                    start_time + Duration::from_nanos(frame_idx.saturating_mul(frame_duration_ns));
                 let now = Instant::now();
                 if due > now {
                     std::thread::sleep(due - now);

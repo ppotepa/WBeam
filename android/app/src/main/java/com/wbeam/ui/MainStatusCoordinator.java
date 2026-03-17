@@ -63,18 +63,19 @@ public final class MainStatusCoordinator {
             String stateConnecting
     ) {
         MainActivityStatusPresenter.renderStatus(
-                statusText,
-                detailText,
-                bpsText,
-                statusLed,
-                statusState.getUiState(),
-                statusState.getUiInfo(),
-                statusState.getUiBps(),
-                daemonReachable,
-                daemonHostName,
-                effectiveDaemonStateUi,
-                stateStreaming,
-                stateConnecting
+                new MainActivityStatusPresenter.RenderStatusInput()
+                        .setStatusText(statusText)
+                        .setDetailText(detailText)
+                        .setBpsText(bpsText)
+                        .setStatusLed(statusLed)
+                        .setState(statusState.getUiState())
+                        .setInfo(statusState.getUiInfo())
+                        .setBps(statusState.getUiBps())
+                        .setDaemonReachable(daemonReachable)
+                        .setDaemonHostName(daemonHostName)
+                        .setDaemonStateUi(effectiveDaemonStateUi)
+                        .setStreamingState(stateStreaming)
+                        .setConnectingState(stateConnecting)
         );
     }
 

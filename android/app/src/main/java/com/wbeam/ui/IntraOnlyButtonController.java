@@ -18,9 +18,15 @@ public final class IntraOnlyButtonController {
 
         intraOnlyButton.setEnabled(supportsIntra);
         intraOnlyButton.setAlpha(supportsIntra ? 1.0f : 0.45f);
-        intraOnlyButton.setText(enabled
-                ? "All-Intra: ON  \u2014 zero artifacts (HEVC only)"
-                : (supportsIntra ? "All-Intra: OFF" : "All-Intra: N/A"));
+        String buttonText;
+        if (enabled) {
+            buttonText = "All-Intra: ON  \u2014 zero artifacts (HEVC only)";
+        } else if (supportsIntra) {
+            buttonText = "All-Intra: OFF";
+        } else {
+            buttonText = "All-Intra: N/A";
+        }
+        intraOnlyButton.setText(buttonText);
 
         int buttonColor = enabled ? 0xFF16A34A : 0xFF374151;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {

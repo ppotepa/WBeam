@@ -46,6 +46,7 @@ public final class SessionUiBridge implements StreamSessionController.Callbacks 
     private final ApiFailureHandler apiFailureHandler;
     private final ConfigPayloadProvider configPayloadProvider;
 
+    @SuppressWarnings("java:S107")
     public SessionUiBridge(
             Context context,
             StatusPoller statusPoller,

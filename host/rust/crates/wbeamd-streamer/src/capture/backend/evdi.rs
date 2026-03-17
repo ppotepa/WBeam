@@ -86,6 +86,184 @@ fn find_evdi_device() -> Result<i32> {
 
 // ─── EVDI event loop (runs on a dedicated thread) ───────────────────────────
 
+struct EvdiLoopStats {
+    published_frames: u64,
+    pushed_frames: u64,
+    zero_rect_polls: u64,
+    event_poll_timeouts: u64,
+    last_frame_at: Instant,
+    last_wait_log_at: Instant,
+    last_pts_ns: u64,
+    capture_started_at: Instant,
+}
+
+impl EvdiLoopStats {
+    fn new() -> Self {
+        Self {
+            published_frames: 0,
+            pushed_frames: 0,
+            zero_rect_polls: 0,
+            event_poll_timeouts: 0,
+            last_frame_at: Instant::now(),
+            last_wait_log_at: Instant::now(),
+            last_pts_ns: 0,
+            capture_started_at: Instant::now(),
+        }
+    }
+}
+
+fn register_evdi_buffer(
+    handle: *mut c_void,
+    pixels: &mut [u8],
+    rects: &mut [ffi::EvdiRect],
+    width: i32,
+    height: i32,
+) {
+    let evdi_buf = ffi::EvdiBuffer {
+        id: 0,
+        buffer: pixels.as_mut_ptr() as *mut c_void,
+        width,
+        height,
+        stride: width * BYTES_PER_PIXEL as i32,
+        rects: rects.as_mut_ptr(),
+        rect_count: rects.len() as i32,
+    };
+    unsafe { ffi::evdi_register_buffer(handle, evdi_buf) };
+}
+
+fn evdi_event_context() -> ffi::EvdiEventContext {
+    ffi::EvdiEventContext {
+        dpms_handler: None,
+        mode_changed_handler: Some(on_mode_changed),
+        update_ready_handler: Some(on_update_ready),
+        crtc_state_handler: None,
+        cursor_set_handler: None,
+        cursor_move_handler: None,
+        ddcci_data_handler: None,
+        user_data: ptr::null_mut(),
+    }
+}
+
+fn wait_for_frame(
+    handle: *mut c_void,
+    fd: i32,
+    ctx: &mut ffi::EvdiEventContext,
+    stats: &mut EvdiLoopStats,
+    width: i32,
+    height: i32,
+) -> bool {
+    let immediate = unsafe { ffi::evdi_request_update(handle, 0) };
+    if immediate {
+        return true;
+    }
+
+    let mut pollfd = libc::pollfd {
+        fd,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    let polled = unsafe { libc::poll(&mut pollfd as *mut libc::pollfd, 1, 33) };
+    if polled <= 0 {
+        stats.event_poll_timeouts = stats.event_poll_timeouts.saturating_add(1);
+        maybe_log_event_wait(stats, width, height);
+        return false;
+    }
+
+    stats.event_poll_timeouts = 0;
+    unsafe { ffi::evdi_handle_events(handle, ctx) };
+    unsafe { ffi::evdi_request_update(handle, 0) }
+}
+
+fn maybe_log_event_wait(stats: &mut EvdiLoopStats, width: i32, height: i32) {
+    if stats.last_wait_log_at.elapsed() < Duration::from_secs(2) {
+        return;
+    }
+    println!(
+        "[wbeam-evdi] waiting for compositor events: no POLLIN for {} ms (poll_timeouts={}, published_frames={}, configured={}x{})",
+        stats.last_frame_at.elapsed().as_millis(),
+        stats.event_poll_timeouts,
+        stats.published_frames,
+        width,
+        height
+    );
+    stats.last_wait_log_at = Instant::now();
+}
+
+fn maybe_log_zero_rect_wait(stats: &mut EvdiLoopStats, width: i32, height: i32) {
+    if stats.last_wait_log_at.elapsed() < Duration::from_secs(2) {
+        return;
+    }
+    println!(
+        "[wbeam-evdi] waiting for dirty rects: no updates for {} ms (polls={}, published_frames={}, configured={}x{})",
+        stats.last_frame_at.elapsed().as_millis(),
+        stats.zero_rect_polls,
+        stats.published_frames,
+        width,
+        height
+    );
+    stats.last_wait_log_at = Instant::now();
+}
+
+fn push_frame(
+    appsrc: &gst_app::AppSrc,
+    pixels: &[u8],
+    rects: &[ffi::EvdiRect],
+    num_rects: i32,
+    frame_duration_ns: u64,
+    stats: &mut EvdiLoopStats,
+) -> bool {
+    stats.zero_rect_polls = 0;
+    stats.last_frame_at = Instant::now();
+    stats.published_frames = stats.published_frames.saturating_add(1);
+    log_dirty_rect_update(stats, rects, num_rects);
+
+    let mut buf = gst::Buffer::from_slice(pixels.to_vec());
+    if let Some(bm) = buf.get_mut() {
+        let pts_ns = stats.capture_started_at.elapsed().as_nanos() as u64;
+        let dur_ns = if stats.last_pts_ns > 0 {
+            pts_ns.saturating_sub(stats.last_pts_ns).max(1_000_000)
+        } else {
+            frame_duration_ns
+        };
+        stats.last_pts_ns = pts_ns;
+        bm.set_pts(gst::ClockTime::from_nseconds(pts_ns));
+        bm.set_duration(gst::ClockTime::from_nseconds(dur_ns));
+    }
+
+    stats.pushed_frames = stats.pushed_frames.saturating_add(1);
+    let flow = appsrc.push_buffer(buf);
+    if stats.pushed_frames <= 3 || stats.pushed_frames % 120 == 0 {
+        println!(
+            "[wbeam-evdi] appsrc push: pushed_frames={} published_frames={} flow={flow:?}",
+            stats.pushed_frames, stats.published_frames
+        );
+    }
+    if let Err(ref err) = flow {
+        eprintln!(
+            "[wbeam-evdi] ERROR: appsrc push failed at pushed_frames={}: {err:?}",
+            stats.pushed_frames
+        );
+        return false;
+    }
+    true
+}
+
+fn log_dirty_rect_update(stats: &EvdiLoopStats, rects: &[ffi::EvdiRect], num_rects: i32) {
+    if !(stats.published_frames == 1 || stats.published_frames % 120 == 0) {
+        return;
+    }
+    let first = rects[0];
+    println!(
+        "[wbeam-evdi] frame update: rects={} first=({},{} {}x{}) published_frames={}",
+        num_rects,
+        first.x1,
+        first.y1,
+        first.x2.saturating_sub(first.x1),
+        first.y2.saturating_sub(first.y1),
+        stats.published_frames
+    );
+}
+
 fn evdi_loop(
     raw_handle: SendHandle,
     width: i32,
@@ -95,143 +273,41 @@ fn evdi_loop(
     appsrc: gst_app::AppSrc,
 ) {
     let handle = raw_handle.0;
-    let mut published_frames: u64 = 0;
-    let mut pushed_frames: u64 = 0;
-    let mut zero_rect_polls: u64 = 0;
-    let mut event_poll_timeouts: u64 = 0;
-    let mut last_frame_at = Instant::now();
-    let mut last_wait_log_at = Instant::now();
-    let capture_started_at = Instant::now();
-    let mut last_pts_ns: u64 = 0;
+    let mut stats = EvdiLoopStats::new();
+    let mut pixels = vec![0u8; frame_size];
+    let mut rects = vec![ffi::EvdiRect::default(); MAX_RECTS];
 
-    // We own the frame buffer; EVDI writes into it via ioctl.
-    let mut pixels: Vec<u8> = vec![0u8; frame_size];
-    let mut rects: Vec<ffi::EvdiRect> = vec![ffi::EvdiRect::default(); MAX_RECTS];
-
-    let evdi_buf = ffi::EvdiBuffer {
-        id: 0,
-        buffer: pixels.as_mut_ptr() as *mut c_void,
-        width,
-        height,
-        stride: width * BYTES_PER_PIXEL as i32,
-        rects: rects.as_mut_ptr(),
-        rect_count: MAX_RECTS as i32,
-    };
-    unsafe { ffi::evdi_register_buffer(handle, evdi_buf) };
+    register_evdi_buffer(handle, &mut pixels, &mut rects, width, height);
 
     let fd = unsafe { ffi::evdi_get_event_ready(handle) };
-
-    let mut ctx = ffi::EvdiEventContext {
-        dpms_handler: None,
-        mode_changed_handler: Some(on_mode_changed),
-        update_ready_handler: Some(on_update_ready),
-        crtc_state_handler: None,
-        cursor_set_handler: None,
-        cursor_move_handler: None,
-        ddcci_data_handler: None,
-        user_data: ptr::null_mut(),
-    };
+    let mut ctx = evdi_event_context();
 
     loop {
-        let immediate = unsafe { ffi::evdi_request_update(handle, 0) };
-
-        if !immediate {
-            // Wait up to 33 ms for the compositor to push a new frame.
-            let mut pollfd = libc::pollfd {
-                fd,
-                events: libc::POLLIN,
-                revents: 0,
-            };
-            let r = unsafe { libc::poll(&mut pollfd as *mut libc::pollfd, 1, 33) };
-            if r <= 0 {
-                event_poll_timeouts = event_poll_timeouts.saturating_add(1);
-                if last_wait_log_at.elapsed() >= Duration::from_secs(2) {
-                    println!(
-                        "[wbeam-evdi] waiting for compositor events: no POLLIN for {} ms (poll_timeouts={}, published_frames={}, configured={}x{})",
-                        last_frame_at.elapsed().as_millis(),
-                        event_poll_timeouts,
-                        published_frames,
-                        width,
-                        height
-                    );
-                    last_wait_log_at = Instant::now();
-                }
-                continue; // timeout or error — retry
-            }
-            event_poll_timeouts = 0;
-            unsafe { ffi::evdi_handle_events(handle, &mut ctx) };
-            // After handle_events the update_ready callback has fired;
-            // we need another request_update to arm the grab.
-            if !unsafe { ffi::evdi_request_update(handle, 0) } {
-                continue;
-            }
+        if !wait_for_frame(handle, fd, &mut ctx, &mut stats, width, height) {
+            continue;
         }
 
         let mut num_rects = 0i32;
         unsafe { ffi::evdi_grab_pixels(handle, rects.as_mut_ptr(), &mut num_rects) };
 
         if num_rects > 0 {
-            zero_rect_polls = 0;
-            last_frame_at = Instant::now();
-            published_frames = published_frames.saturating_add(1);
-            // Sampled diagnostics (not per-frame spam): confirms EVDI producer is
-            // actually generating dirty-rect updates.
-            if published_frames == 1 || published_frames % 120 == 0 {
-                let first = rects[0];
-                println!(
-                    "[wbeam-evdi] frame update: rects={} first=({},{} {}x{}) published_frames={}",
-                    num_rects,
-                    first.x1,
-                    first.y1,
-                    first.x2.saturating_sub(first.x1),
-                    first.y2.saturating_sub(first.y1),
-                    published_frames
-                );
-            }
-            let frame_copy = pixels.clone();
-
-            let mut buf = gst::Buffer::from_slice(frame_copy);
-            if let Some(bm) = buf.get_mut() {
-                let pts_ns = capture_started_at.elapsed().as_nanos() as u64;
-                let dur_ns = if last_pts_ns > 0 {
-                    pts_ns.saturating_sub(last_pts_ns).max(1_000_000)
-                } else {
-                    frame_duration_ns
-                };
-                last_pts_ns = pts_ns;
-                bm.set_pts(gst::ClockTime::from_nseconds(pts_ns));
-                bm.set_duration(gst::ClockTime::from_nseconds(dur_ns));
-            }
-
-            pushed_frames = pushed_frames.saturating_add(1);
-            let flow = appsrc.push_buffer(buf);
-            if pushed_frames <= 3 || pushed_frames % 120 == 0 {
-                println!(
-                    "[wbeam-evdi] appsrc push: pushed_frames={pushed_frames} published_frames={published_frames} flow={flow:?}"
-                );
-            }
-            if let Err(ref err) = flow {
-                eprintln!(
-                    "[wbeam-evdi] ERROR: appsrc push failed at pushed_frames={pushed_frames}: {err:?}"
-                );
+            if !push_frame(
+                &appsrc,
+                &pixels,
+                &rects,
+                num_rects,
+                frame_duration_ns,
+                &mut stats,
+            ) {
                 break;
             }
-        } else {
-            zero_rect_polls = zero_rect_polls.saturating_add(1);
-            // Low-rate warning for black/stale-screen debugging.
-            if last_wait_log_at.elapsed() >= Duration::from_secs(2) {
-                println!(
-                    "[wbeam-evdi] waiting for dirty rects: no updates for {} ms (polls={zero_rect_polls}, published_frames={published_frames}, configured={}x{})",
-                    last_frame_at.elapsed().as_millis(),
-                    width,
-                    height
-                );
-                last_wait_log_at = Instant::now();
-            }
+            continue;
         }
+
+        stats.zero_rect_polls = stats.zero_rect_polls.saturating_add(1);
+        maybe_log_zero_rect_wait(&mut stats, width, height);
     }
 
-    // Cleanup
     unsafe {
         ffi::evdi_unregister_buffer(handle, 0);
         ffi::evdi_disconnect(handle);
@@ -283,7 +359,10 @@ pub fn build_source(cfg: &ResolvedConfig) -> Result<gst::Element> {
         );
         ffi::evdi_enable_cursor_events(handle, false);
     }
-    println!("[wbeam-evdi] Connected virtual display {}×{} @ {fps} fps", width, height);
+    println!(
+        "[wbeam-evdi] Connected virtual display {}×{} @ {fps} fps",
+        width, height
+    );
 
     // ── 3. Wait for mode negotiation ────────────────────────────────────────
     // Give the compositor ~500 ms to process the new connector and set a mode.

@@ -18,7 +18,7 @@ fi
 
 CONTROL_PORT="${1:-${WBEAM_CONTROL_PORT:-5001}}"
 STREAM_PORT="${2:-${WBEAM_STREAM_PORT:-5000}}"
-DAEMON_IMPL="${WBEAM_DAEMON_IMPL:-auto}" # auto|rust|python
+DAEMON_IMPL="${WBEAM_DAEMON_IMPL:-auto}" # auto|rust
 ANDROID_SERIAL="${WBEAM_ANDROID_SERIAL:-}"
 DEFAULT_LOCK_FILE=""
 if [[ -n "${WBEAM_LOCK_FILE:-}" ]]; then
@@ -248,13 +248,9 @@ run_rust() {
   exit 1
 }
 
-run_python() {
-  exec "$ROOT_DIR/host/daemon/wbeamd.py" --control-port "$CONTROL_PORT" --stream-port "$STREAM_PORT" --root "$ROOT_DIR"
-}
-
 if [[ "$DAEMON_IMPL" == "python" ]]; then
-  echo "[wbeam] daemon impl=python"
-  run_python
+  echo "[wbeam] python daemon mode has been removed; use WBEAM_DAEMON_IMPL=rust or auto" >&2
+  exit 1
 fi
 
 if [[ "$DAEMON_IMPL" == "rust" ]]; then
@@ -266,16 +262,5 @@ if [[ "$DAEMON_IMPL" == "rust" ]]; then
   run_rust
 fi
 
-# auto mode: prefer Rust runtime binary/cargo source, fallback to Python only in repo setups.
-if [[ -x "/usr/local/bin/wbeamd-server" || -x "$ROOT_DIR/host/rust/target/release/wbeamd-server" || ( -n "${WBEAM_DAEMON_BIN:-}" && -x "${WBEAM_DAEMON_BIN}" ) ]]; then
-  echo "[wbeam] daemon impl=auto -> rust"
-  run_rust
-fi
-
-if command -v cargo >/dev/null 2>&1 && [[ -f "$ROOT_DIR/host/rust/Cargo.toml" ]]; then
-  echo "[wbeam] daemon impl=auto -> rust"
-  run_rust
-fi
-
-echo "[wbeam] daemon impl=auto -> python (fallback)"
-run_python
+echo "[wbeam] daemon impl=auto -> rust"
+run_rust

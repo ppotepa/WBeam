@@ -30,7 +30,7 @@ quality_gates:
   stage: quality
   image: alpine:3.21
   script:
-    - apk add --no-cache bash ripgrep python3
+    - apk add --no-cache bash ripgrep
     - ./scripts/ci/check-repo-layout.sh
     - ./scripts/ci/check-boundaries.sh
     - ./scripts/ci/validate-e2e-matrix.sh

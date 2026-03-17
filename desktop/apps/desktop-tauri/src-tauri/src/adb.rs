@@ -602,6 +602,35 @@ pub(crate) fn daemon_stream_state_and_port(
     Some((state.to_string(), resolved_port))
 }
 
+fn wait_for_device_ready(serial: &str, stream_port: u16) -> Result<(), String> {
+    for attempt in 1..=20 {
+        let state_txt = adb_cmd(&["-s", serial, "get-state"]).map_err(|e| {
+            let msg = format!("adb get-state failed: {e}");
+            crate::connect_log(serial, stream_port, &msg);
+            msg
+        })?;
+        crate::connect_log(
+            serial,
+            stream_port,
+            &format!("adb get-state attempt={} state='{}'", attempt, state_txt),
+        );
+        if state_txt.trim() == "device" {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(150));
+    }
+    let msg = "ADB device is not ready after 3s. Reconnect USB / authorize device.".to_string();
+    crate::connect_log(serial, stream_port, &msg);
+    Err(msg)
+}
+
+fn log_reverse_result(serial: &str, stream_port: u16, success_msg: String, failure_msg: String, result: Result<String, String>) {
+    match result {
+        Ok(out) => crate::connect_log(serial, stream_port, &format!("{success_msg} out='{out}'")),
+        Err(err) => crate::connect_log(serial, stream_port, &format!("{failure_msg}: {err}")),
+    }
+}
+
 pub(crate) fn adb_prepare_connect(serial: &str, stream_port: u16) -> Result<(), String> {
     const LEGACY_DEVICE_STREAM_PORT: u16 = 5002;
     let control_port = crate::wbeam_control_port();
@@ -620,29 +649,7 @@ pub(crate) fn adb_prepare_connect(serial: &str, stream_port: u16) -> Result<(), 
 
     // `wait-for-device` can block for a long time and makes UI look frozen.
     // Use short polling with a hard timeout instead.
-    let mut ready = false;
-    for attempt in 1..=20 {
-        let state_txt = adb_cmd(&["-s", serial, "get-state"]).map_err(|e| {
-            let msg = format!("adb get-state failed: {e}");
-            crate::connect_log(serial, stream_port, &msg);
-            msg
-        })?;
-        crate::connect_log(
-            serial,
-            stream_port,
-            &format!("adb get-state attempt={} state='{}'", attempt, state_txt),
-        );
-        if state_txt.trim() == "device" {
-            ready = true;
-            break;
-        }
-        thread::sleep(Duration::from_millis(150));
-    }
-    if !ready {
-        let msg = "ADB device is not ready after 3s. Reconnect USB / authorize device.".to_string();
-        crate::connect_log(serial, stream_port, &msg);
-        return Err(msg);
-    }
+    wait_for_device_ready(serial, stream_port)?;
 
     let rev_stream_primary = adb_cmd(&[
         "-s",
@@ -673,72 +680,49 @@ pub(crate) fn adb_prepare_connect(serial: &str, stream_port: u16) -> Result<(), 
         );
     }
     if stream_port != 5000 {
-        match adb_cmd(&[
+        log_reverse_result(
+            serial,
+            stream_port,
+            format!("adb reverse stream compat ok {stream_port}->{stream_port}"),
+            format!("adb reverse stream compat failed {stream_port}->{stream_port}"),
+            adb_cmd(&[
             "-s",
             serial,
             "reverse",
             &format!("tcp:{stream_port}"),
             &format!("tcp:{stream_port}"),
-        ]) {
-            Ok(out) => crate::connect_log(
-                serial,
-                stream_port,
-                &format!("adb reverse stream compat ok {stream_port}->{stream_port} out='{out}'"),
-            ),
-            Err(err) => crate::connect_log(
-                serial,
-                stream_port,
-                &format!("adb reverse stream compat failed {stream_port}->{stream_port}: {err}"),
-            ),
-        }
+        ]),
+        );
     }
     if stream_port != LEGACY_DEVICE_STREAM_PORT {
-        match adb_cmd(&[
+        log_reverse_result(
+            serial,
+            stream_port,
+            format!("adb reverse stream legacy compat ok {LEGACY_DEVICE_STREAM_PORT}->{stream_port}"),
+            format!("adb reverse stream legacy compat failed {LEGACY_DEVICE_STREAM_PORT}->{stream_port}"),
+            adb_cmd(&[
             "-s",
             serial,
             "reverse",
             &format!("tcp:{LEGACY_DEVICE_STREAM_PORT}"),
             &format!("tcp:{stream_port}"),
-        ]) {
-            Ok(out) => crate::connect_log(
-                serial,
-                stream_port,
-                &format!(
-                    "adb reverse stream legacy compat ok {LEGACY_DEVICE_STREAM_PORT}->{stream_port} out='{out}'"
-                ),
-            ),
-            Err(err) => crate::connect_log(
-                serial,
-                stream_port,
-                &format!(
-                    "adb reverse stream legacy compat failed {LEGACY_DEVICE_STREAM_PORT}->{stream_port}: {err}"
-                ),
-            ),
-        }
+        ]),
+        );
     }
     if control_port != 5001 {
-        match adb_cmd(&[
+        log_reverse_result(
+            serial,
+            stream_port,
+            format!("adb reverse control compat ok {control_port}->{control_port}"),
+            format!("adb reverse control compat failed {control_port}->{control_port}"),
+            adb_cmd(&[
             "-s",
             serial,
             "reverse",
             &format!("tcp:{control_port}"),
             &format!("tcp:{control_port}"),
-        ]) {
-            Ok(out) => crate::connect_log(
-                serial,
-                stream_port,
-                &format!(
-                    "adb reverse control compat ok {control_port}->{control_port} out='{out}'"
-                ),
-            ),
-            Err(err) => crate::connect_log(
-                serial,
-                stream_port,
-                &format!(
-                    "adb reverse control compat failed {control_port}->{control_port}: {err}"
-                ),
-            ),
-        }
+        ]),
+        );
     }
 
     if rev_stream_primary.is_err() || rev_control_primary.is_err() {
@@ -791,17 +775,77 @@ pub(crate) fn adb_api_level(serial: &str) -> Option<u32> {
         .and_then(|v| v.trim().parse::<u32>().ok())
 }
 
+fn cached_devices_basic_response(now: u128) -> Option<DevicesBasicResponse> {
+    let guard = devices_basic_cache().lock().ok()?;
+    let (ts, cached) = guard.as_ref()?;
+    if now.saturating_sub(*ts) < DEVICES_BASIC_CACHE_TTL_MS {
+        crate::ui_service_log("list_devices_basic", "cache-hit", "");
+        return Some(cached.clone());
+    }
+    None
+}
+
+fn remove_stale_port_map_entries(
+    port_map: &mut HashMap<String, u16>,
+    connected: &HashSet<String>,
+) -> bool {
+    let stale = port_map
+        .keys()
+        .filter(|serial| !connected.contains(*serial))
+        .cloned()
+        .collect::<Vec<_>>();
+    if stale.is_empty() {
+        return false;
+    }
+    for serial in stale {
+        port_map.remove(&serial);
+    }
+    true
+}
+
+fn resolve_device_stream(
+    serial: &str,
+    idx: usize,
+    svc_active: bool,
+    base_stream_port: u16,
+    control_port: u16,
+    port_map: &mut HashMap<String, u16>,
+    used_ports: &mut HashSet<u16>,
+) -> (u16, String, bool) {
+    let fallback_port = default_stream_port_for_index(base_stream_port, control_port, idx);
+    let preferred_port = port_map
+        .get(serial)
+        .copied()
+        .filter(|p| *p > 0)
+        .unwrap_or(fallback_port);
+    let mut stream_port = pick_unique_stream_port(preferred_port, control_port, used_ports);
+    used_ports.insert(stream_port);
+
+    if !svc_active {
+        return (stream_port, "unknown".to_string(), false);
+    }
+
+    let (state, resolved_port) = daemon_stream_state_and_port(serial, Some(stream_port))
+        .or_else(|| daemon_stream_state_and_port(serial, None))
+        .unwrap_or_else(|| ("unknown".to_string(), stream_port));
+    if resolved_port > 0 && resolved_port != stream_port {
+        used_ports.remove(&stream_port);
+        stream_port = pick_unique_stream_port(resolved_port, control_port, used_ports);
+        used_ports.insert(stream_port);
+    }
+    let mut port_map_changed = false;
+    if port_map.get(serial).copied() != Some(stream_port) {
+        port_map.insert(serial.to_string(), stream_port);
+        port_map_changed = true;
+    }
+    (stream_port, state, port_map_changed)
+}
+
 #[tauri::command]
 pub(crate) fn list_devices_basic() -> DevicesBasicResponse {
-    // Return the cached result if it's still fresh.
     let now = now_epoch_ms();
-    if let Ok(guard) = devices_basic_cache().lock() {
-        if let Some((ts, ref cached)) = *guard {
-            if now.saturating_sub(ts) < DEVICES_BASIC_CACHE_TTL_MS {
-                crate::ui_service_log("list_devices_basic", "cache-hit", "");
-                return cached.clone();
-            }
-        }
+    if let Some(cached) = cached_devices_basic_response(now) {
+        return cached;
     }
 
     crate::ui_service_log("list_devices_basic", "begin", "");
@@ -822,106 +866,77 @@ pub(crate) fn list_devices_basic() -> DevicesBasicResponse {
     let mut port_map_changed = false;
     let mut used_ports = HashSet::new();
 
-    match adb_devices() {
-        Ok(serials) => {
-            let connected: HashSet<String> = serials.iter().cloned().collect();
-            let stale = port_map
-                .keys()
-                .filter(|serial| !connected.contains(*serial))
-                .cloned()
-                .collect::<Vec<_>>();
-            if !stale.is_empty() {
-                for serial in stale {
-                    port_map.remove(&serial);
-                }
-                port_map_changed = true;
-            }
-            let mut devices = Vec::new();
-            for (idx, serial) in serials.into_iter().enumerate() {
-                let snap = collect_device_snapshot(&serial);
-                let apk_matches_host =
-                    !host_apk_version.is_empty() && snap.apk_version == host_apk_version;
-                let apk_matches_daemon =
-                    !daemon_apk_version.is_empty() && snap.apk_version == daemon_apk_version;
-                let fallback_port =
-                    default_stream_port_for_index(base_stream_port, control_port, idx);
-                let preferred_port = port_map
-                    .get(&serial)
-                    .copied()
-                    .filter(|p| *p > 0)
-                    .unwrap_or(fallback_port);
-                let mut stream_port =
-                    pick_unique_stream_port(preferred_port, control_port, &used_ports);
-                used_ports.insert(stream_port);
-                let stream_state = if svc.active {
-                    let (state, resolved_port) =
-                        daemon_stream_state_and_port(&serial, Some(stream_port))
-                            .or_else(|| daemon_stream_state_and_port(&serial, None))
-                            .unwrap_or_else(|| ("unknown".to_string(), stream_port));
-                    if resolved_port > 0 && resolved_port != stream_port {
-                        used_ports.remove(&stream_port);
-                        stream_port =
-                            pick_unique_stream_port(resolved_port, control_port, &used_ports);
-                        used_ports.insert(stream_port);
-                    }
-                    if port_map.get(&serial).copied() != Some(stream_port) {
-                        port_map.insert(serial.clone(), stream_port);
-                        port_map_changed = true;
-                    }
-                    state
-                } else {
-                    "unknown".to_string()
-                };
-
-                devices.push(DeviceBasic {
-                    serial,
-                    model: snap.model,
-                    platform: snap.platform,
-                    os_version: snap.os_version,
-                    device_class: snap.device_class,
-                    resolution: snap.resolution,
-                    max_resolution: snap.max_resolution,
-                    api_level: snap.api_level,
-                    battery_percent: snap.battery_percent,
-                    battery_level: snap.battery_level,
-                    battery_charging: snap.battery_charging,
-                    apk_installed: snap.apk_installed,
-                    apk_version: snap.apk_version,
-                    apk_matches_host,
-                    apk_matches_daemon,
-                    stream_port,
-                    stream_state,
-                });
-            }
-
-            let response = DevicesBasicResponse {
-                host_apk_version,
-                daemon_apk_version,
-                devices,
-                error: None,
-            };
-            if port_map_changed {
-                let _ = save_device_port_map(&port_map);
-            }
-            crate::ui_service_log(
-                "list_devices_basic",
-                "ok",
-                &format!("devices={}", response.devices.len()),
-            );
-            // Store in cache.
-            if let Ok(mut guard) = devices_basic_cache().lock() {
-                *guard = Some((now_epoch_ms(), response.clone()));
-            }
-            response
-        }
+    let serials = match adb_devices() {
+        Ok(v) => v,
         Err(err) => {
             crate::ui_service_log("list_devices_basic", "error", &err);
-            DevicesBasicResponse {
+            return DevicesBasicResponse {
                 host_apk_version,
                 daemon_apk_version,
                 devices: Vec::new(),
                 error: Some(err),
-            }
+            };
         }
+    };
+    let connected: HashSet<String> = serials.iter().cloned().collect();
+    if remove_stale_port_map_entries(&mut port_map, &connected) {
+        port_map_changed = true;
     }
+
+    let mut devices = Vec::new();
+    for (idx, serial) in serials.into_iter().enumerate() {
+        let snap = collect_device_snapshot(&serial);
+        let apk_matches_host = !host_apk_version.is_empty() && snap.apk_version == host_apk_version;
+        let apk_matches_daemon =
+            !daemon_apk_version.is_empty() && snap.apk_version == daemon_apk_version;
+        let (stream_port, stream_state, did_change) = resolve_device_stream(
+            &serial,
+            idx,
+            svc.active,
+            base_stream_port,
+            control_port,
+            &mut port_map,
+            &mut used_ports,
+        );
+        port_map_changed |= did_change;
+
+        devices.push(DeviceBasic {
+            serial,
+            model: snap.model,
+            platform: snap.platform,
+            os_version: snap.os_version,
+            device_class: snap.device_class,
+            resolution: snap.resolution,
+            max_resolution: snap.max_resolution,
+            api_level: snap.api_level,
+            battery_percent: snap.battery_percent,
+            battery_level: snap.battery_level,
+            battery_charging: snap.battery_charging,
+            apk_installed: snap.apk_installed,
+            apk_version: snap.apk_version,
+            apk_matches_host,
+            apk_matches_daemon,
+            stream_port,
+            stream_state,
+        });
+    }
+
+    let response = DevicesBasicResponse {
+        host_apk_version,
+        daemon_apk_version,
+        devices,
+        error: None,
+    };
+    if port_map_changed {
+        let _ = save_device_port_map(&port_map);
+    }
+    crate::ui_service_log(
+        "list_devices_basic",
+        "ok",
+        &format!("devices={}", response.devices.len()),
+    );
+    if let Ok(mut guard) = devices_basic_cache().lock() {
+        *guard = Some((now_epoch_ms(), response.clone()));
+    }
+    response
 }

@@ -466,17 +466,93 @@ pub fn validate_config_with_presets(
         return Err(ValidationError::InvalidProfile);
     }
 
-    let requested_profile = patch.profile.clone();
-    let mut cfg = if requested_profile.is_some() {
-        preset_map
-            .get(&base_profile)
-            .cloned()
-            .ok_or(ValidationError::InvalidProfile)?
-    } else {
-        current.clone()
-    };
+    let mut cfg = base_config_for_patch(&patch, current, preset_map, &base_profile)?;
     cfg.profile = base_profile;
 
+    apply_patch_values(&mut cfg, patch);
+
+    cfg.encoder = normalize_encoder(cfg.encoder);
+    validate_config_enums(&cfg)?;
+
+    let (w, h) = parse_and_clamp_size(&cfg.size)?;
+
+    cfg.size = format!("{w}x{h}");
+    cfg.fps = cfg.fps.clamp(24, 120);
+    // x265enc rejects values above ~100 Mbps on many hosts; keep config
+    // within backend-safe limits to avoid runtime panics on stream start.
+    let bitrate_max = bitrate_cap_for_encoder(&cfg.encoder);
+    cfg.bitrate_kbps = cfg.bitrate_kbps.clamp(4_000, bitrate_max);
+    cfg.debug_fps = cfg.debug_fps.clamp(0, 10);
+
+    apply_rawpng_limits(&mut cfg, w, h);
+
+    Ok(cfg)
+}
+
+fn base_config_for_patch(
+    patch: &ConfigPatch,
+    current: &ActiveConfig,
+    preset_map: &BTreeMap<String, ActiveConfig>,
+    base_profile: &str,
+) -> Result<ActiveConfig, ValidationError> {
+    if patch.profile.is_some() {
+        return preset_map
+            .get(base_profile)
+            .cloned()
+            .ok_or(ValidationError::InvalidProfile);
+    }
+    Ok(current.clone())
+}
+
+fn bitrate_cap_for_encoder(encoder: &str) -> u32 {
+    if encoder == "h265" {
+        100_000
+    } else {
+        300_000
+    }
+}
+
+fn validate_config_enums(cfg: &ActiveConfig) -> Result<(), ValidationError> {
+    if !VALID_ENCODERS.contains(&cfg.encoder.as_str()) {
+        return Err(ValidationError::InvalidEncoder);
+    }
+    if !VALID_CURSOR_MODES.contains(&cfg.cursor_mode.as_str()) {
+        return Err(ValidationError::InvalidCursorMode);
+    }
+    Ok(())
+}
+
+fn apply_rawpng_limits(cfg: &mut ActiveConfig, width: u32, height: u32) {
+    if cfg.encoder != "rawpng" {
+        return;
+    }
+    cfg.fps = cfg.fps.clamp(5, 20);
+
+    let (rw, rh) = clamp_rawpng_size(width, height);
+    cfg.size = format!("{rw}x{rh}");
+    cfg.intra_only = false;
+}
+
+fn clamp_rawpng_size(width: u32, height: u32) -> (u32, u32) {
+    let max_pixels: u32 = 1280 * 720;
+    let pixels = width.saturating_mul(height);
+    if pixels <= max_pixels {
+        return (width, height);
+    }
+
+    let scale = (max_pixels as f64 / pixels as f64).sqrt();
+    let mut rw = ((width as f64 * scale).floor() as u32).max(640);
+    let mut rh = ((height as f64 * scale).floor() as u32).max(360);
+    if rw % 2 == 1 {
+        rw -= 1;
+    }
+    if rh % 2 == 1 {
+        rh -= 1;
+    }
+    (rw, rh)
+}
+
+fn apply_patch_values(cfg: &mut ActiveConfig, patch: ConfigPatch) {
     if let Some(encoder) = patch.encoder {
         cfg.encoder = encoder;
     }
@@ -498,33 +574,26 @@ pub fn validate_config_with_presets(
     if let Some(intra_only) = patch.intra_only {
         cfg.intra_only = intra_only;
     }
+}
 
-    cfg.encoder = match cfg.encoder.as_str() {
-        "h264" | "h265" | "rawpng" => cfg.encoder,
-        // Backward-compatible migration of old modes to unified h265.
+fn normalize_encoder(encoder: String) -> String {
+    match encoder.as_str() {
         "auto" | "nvenc" | "nvenc265" | "x265" | "openh264" => "h265".to_string(),
-        _ => cfg.encoder,
-    };
-
-    if !VALID_ENCODERS.contains(&cfg.encoder.as_str()) {
-        return Err(ValidationError::InvalidEncoder);
+        _ => encoder,
     }
-    if !VALID_CURSOR_MODES.contains(&cfg.cursor_mode.as_str()) {
-        return Err(ValidationError::InvalidCursorMode);
-    }
+}
 
-    let size = cfg.size.to_lowercase();
+fn parse_and_clamp_size(size: &str) -> Result<(u32, u32), ValidationError> {
+    let size = size.to_lowercase();
     let Some((w_str, h_str)) = size.split_once('x') else {
         return Err(ValidationError::InvalidSize);
     };
-
     let Ok(mut w) = w_str.parse::<u32>() else {
         return Err(ValidationError::InvalidSize);
     };
     let Ok(mut h) = h_str.parse::<u32>() else {
         return Err(ValidationError::InvalidSize);
     };
-
     w = w.clamp(640, 3840);
     h = h.clamp(360, 2160);
     if w % 2 == 1 {
@@ -533,43 +602,7 @@ pub fn validate_config_with_presets(
     if h % 2 == 1 {
         h -= 1;
     }
-
-    cfg.size = format!("{w}x{h}");
-    cfg.fps = cfg.fps.clamp(24, 120);
-    // x265enc rejects values above ~100 Mbps on many hosts; keep config
-    // within backend-safe limits to avoid runtime panics on stream start.
-    let bitrate_max = if cfg.encoder == "h265" {
-        100_000
-    } else {
-        300_000
-    };
-    cfg.bitrate_kbps = cfg.bitrate_kbps.clamp(4_000, bitrate_max);
-    cfg.debug_fps = cfg.debug_fps.clamp(0, 10);
-
-    // RAW PNG is CPU/network heavy. Clamp to a latency-friendly envelope.
-    if cfg.encoder == "rawpng" {
-        cfg.fps = cfg.fps.clamp(5, 20);
-
-        let mut rw = w;
-        let mut rh = h;
-        let max_pixels: u32 = 1280 * 720;
-        let pixels = rw.saturating_mul(rh);
-        if pixels > max_pixels {
-            let scale = (max_pixels as f64 / pixels as f64).sqrt();
-            rw = ((rw as f64 * scale).floor() as u32).max(640);
-            rh = ((rh as f64 * scale).floor() as u32).max(360);
-            if rw % 2 == 1 {
-                rw -= 1;
-            }
-            if rh % 2 == 1 {
-                rh -= 1;
-            }
-        }
-        cfg.size = format!("{rw}x{rh}");
-        cfg.intra_only = false;
-    }
-
-    Ok(cfg)
+    Ok((w, h))
 }
 
 pub fn valid_values() -> ValidValues {

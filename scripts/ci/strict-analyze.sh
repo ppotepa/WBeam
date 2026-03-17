@@ -36,18 +36,3 @@ if [[ -f "${ROOT_DIR}/desktop/apps/desktop-tauri/package.json" ]]; then
     run_if_present npm npm exec tsc --noEmit -p tsconfig.json
   )
 fi
-
-if command -v python >/dev/null 2>&1 || command -v python3 >/dev/null 2>&1; then
-  PYTHON_BIN="$(command -v python || command -v python3)"
-  if "${PYTHON_BIN}" -m ruff --version >/dev/null 2>&1; then
-    "${PYTHON_BIN}" -m ruff check "${ROOT_DIR}/host" "${ROOT_DIR}/scripts"
-    "${PYTHON_BIN}" -m ruff format --check "${ROOT_DIR}/host" "${ROOT_DIR}/scripts"
-  else
-    echo "[strict-analyze] skip: missing ruff"
-  fi
-  if "${PYTHON_BIN}" -m mypy --version >/dev/null 2>&1; then
-    "${PYTHON_BIN}" -m mypy "${ROOT_DIR}/host" "${ROOT_DIR}/scripts" || true
-  else
-    echo "[strict-analyze] skip: missing mypy"
-  fi
-fi

@@ -45,6 +45,7 @@ const NO_PRESENT_RESTART_COOLDOWN: Duration = Duration::from_secs(15);
 const NO_PRESENT_MIN_RECV_FPS: f64 = 10.0;
 const NO_PRESENT_MAX_PRESENT_FPS: f64 = 1.0;
 const REVERSE_REFRESH_BACKSTOP: Duration = Duration::from_secs(120);
+const EFFECTIVE_RUNTIME_PREFIX: &str = "[wbeam-effective]";
 
 fn now_unix_ms() -> u128 {
     match SystemTime::now().duration_since(UNIX_EPOCH) {
@@ -54,92 +55,104 @@ fn now_unix_ms() -> u128 {
 }
 
 fn parse_bool_token(raw: &str) -> bool {
-    matches!(
-        raw.trim().to_ascii_lowercase().as_str(),
-        "1" | "true" | "yes" | "on"
-    )
+    let trimmed = raw.trim();
+    trimmed == "1"
+        || trimmed.eq_ignore_ascii_case("true")
+        || trimmed.eq_ignore_ascii_case("yes")
+        || trimmed.eq_ignore_ascii_case("on")
 }
 
-fn parse_effective_runtime_line(line: &str, reason: &str) -> Option<EffectiveRuntimeConfig> {
-    let prefix = "[wbeam-effective]";
-    let body = line.trim().strip_prefix(prefix)?.trim();
-    let mut map: HashMap<&str, &str> = HashMap::new();
-    for token in body.split_whitespace() {
-        let Some((k, v)) = token.split_once('=') else {
-            continue;
-        };
-        map.insert(k.trim(), v.trim());
+struct EffectiveRuntimeParser<'a> {
+    body: &'a str,
+}
+
+impl<'a> EffectiveRuntimeParser<'a> {
+    fn from_line(line: &'a str) -> Option<Self> {
+        Some(Self {
+            body: line.trim().strip_prefix(EFFECTIVE_RUNTIME_PREFIX)?.trim(),
+        })
     }
-    let parse_u32 = |key: &str, default: u32| -> u32 {
-        map.get(key)
-            .and_then(|v| v.parse::<u32>().ok())
+
+    fn value(&self, key: &str) -> Option<&'a str> {
+        self.body.split_whitespace().find_map(|token| {
+            let (raw_key, raw_value) = token.split_once('=')?;
+            (raw_key.trim() == key).then_some(raw_value.trim())
+        })
+    }
+
+    fn parse_u32(&self, key: &str, default: u32) -> u32 {
+        self.value(key)
+            .and_then(|value| value.parse::<u32>().ok())
             .unwrap_or(default)
-    };
-    let parse_i32 = |key: &str, default: i32| -> i32 {
-        map.get(key)
-            .and_then(|v| v.parse::<i32>().ok())
+    }
+
+    fn parse_i32(&self, key: &str, default: i32) -> i32 {
+        self.value(key)
+            .and_then(|value| value.parse::<i32>().ok())
             .unwrap_or(default)
-    };
-    let parse_string = |key: &str, default: &str| -> String {
-        map.get(key)
-            .map(|v| (*v).to_string())
+    }
+
+    fn parse_bool(&self, key: &str) -> bool {
+        self.value(key).map(parse_bool_token).unwrap_or(false)
+    }
+
+    fn parse_string(&self, key: &str, default: &str) -> String {
+        self.value(key)
+            .map(str::to_owned)
             .unwrap_or_else(|| default.to_string())
-    };
-    let parse_size = || -> String {
-        let w = parse_u32("size", 0);
-        let h = parse_u32("height", 0);
-        if w > 0 && h > 0 {
-            return format!("{w}x{h}");
+    }
+
+    fn parse_size(&self) -> String {
+        let width = self.parse_u32("size", 0);
+        let height = self.parse_u32("height", 0);
+        if width > 0 && height > 0 {
+            return format!("{width}x{height}");
         }
-        if let Some(raw) = map.get("size") {
+        if let Some(raw) = self.value("size") {
             if raw.contains('x') {
-                return (*raw).to_string();
+                return raw.to_string();
             }
         }
         "0x0".to_string()
-    };
+    }
+}
+
+fn parse_effective_runtime_line(line: &str, reason: &str) -> Option<EffectiveRuntimeConfig> {
+    let parser = EffectiveRuntimeParser::from_line(line)?;
 
     Some(EffectiveRuntimeConfig {
-        requested_encoder: parse_string("requested_encoder", "unknown"),
-        resolved_backend: parse_string("resolved_backend", "unknown"),
-        raw_format: parse_string("raw_format", "unknown"),
-        size: parse_size(),
-        fps: parse_u32("fps", 0),
-        bitrate_kbps: parse_u32("bitrate_kbps", 0),
-        cursor_mode: parse_string("cursor_mode", "unknown"),
-        gop: parse_u32("gop", 0),
-        intra_only: map
-            .get("intra_only")
-            .map(|v| parse_bool_token(v))
-            .unwrap_or(false),
-        stream_mode: parse_string("stream_mode", "unknown"),
-        queue_max_buffers: parse_u32("queue_max_buffers", 0),
-        queue_max_time_ms: parse_u32("queue_max_time_ms", 0),
-        appsink_max_buffers: parse_u32("appsink_max_buffers", 0),
-        appsink_drop: map
-            .get("appsink_drop")
-            .map(|v| parse_bool_token(v))
-            .unwrap_or(false),
-        appsink_sync: map
-            .get("appsink_sync")
-            .map(|v| parse_bool_token(v))
-            .unwrap_or(false),
-        capture_backend: parse_string("capture_backend", "unknown"),
-        parse_mode: parse_string("parse_mode", "unknown"),
-        timeout_pull_ms: parse_u32("timeout_pull_ms", 0),
-        timeout_write_ms: parse_u32("timeout_write_ms", 0),
-        timeout_disconnect: map
-            .get("timeout_disconnect")
-            .map(|v| parse_bool_token(v))
-            .unwrap_or(false),
-        videorate_drop_only: map
-            .get("videorate_drop_only")
-            .map(|v| parse_bool_token(v))
-            .unwrap_or(false),
-        pipewire_keepalive_ms: parse_i32("pipewire_keepalive_ms", 0),
-        snapshot_unix_ms: now_unix_ms(),
+        requested_encoder: parser.parse_string("requested_encoder", "unknown"),
+        resolved_backend: parser.parse_string("resolved_backend", "unknown"),
+        raw_format: parser.parse_string("raw_format", "unknown"),
+        size: parser.parse_size(),
+        fps: parser.parse_u32("fps", 0),
+        bitrate_kbps: parser.parse_u32("bitrate_kbps", 0),
+        cursor_mode: parser.parse_string("cursor_mode", "unknown"),
+        gop: parser.parse_u32("gop", 0),
+        intra_only: parser.parse_bool("intra_only"),
+        stream_mode: parser.parse_string("stream_mode", "unknown"),
+        queue_max_buffers: parser.parse_u32("queue_max_buffers", 0),
+        queue_max_time_ms: parser.parse_u32("queue_max_time_ms", 0),
+        appsink_max_buffers: parser.parse_u32("appsink_max_buffers", 0),
+        appsink_drop: parser.parse_bool("appsink_drop"),
+        appsink_sync: parser.parse_bool("appsink_sync"),
+        capture_backend: parser.parse_string("capture_backend", "unknown"),
+        parse_mode: parser.parse_string("parse_mode", "unknown"),
+        timeout_pull_ms: parser.parse_u32("timeout_pull_ms", 0),
+        timeout_write_ms: parser.parse_u32("timeout_write_ms", 0),
+        timeout_disconnect: parser.parse_bool("timeout_disconnect"),
+        videorate_drop_only: parser.parse_bool("videorate_drop_only"),
+        pipewire_keepalive_ms: parser.parse_i32("pipewire_keepalive_ms", 0),
+        snapshot_unix_ms: 0,
         snapshot_reason: reason.to_string(),
     })
+}
+
+fn contains_ascii_case_insensitive(haystack: &str, needle: &str) -> bool {
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
 }
 
 fn user_wbeam_config_path() -> Option<PathBuf> {
@@ -205,32 +218,40 @@ fn load_wbeam_config(root: &Path) -> HashMap<String, String> {
             continue;
         };
         for line in raw.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            let Some((k, v)) = line.split_once('=') else {
+            let Some((key, value)) = parse_wbeam_config_line(line) else {
                 continue;
             };
-            let key = k.trim();
-            if !key.starts_with("WBEAM_") {
-                continue;
-            }
             if map.contains_key(key) {
                 continue;
-            }
-            let mut value = v.trim().to_string();
-            let bytes = value.as_bytes();
-            if bytes.len() >= 2
-                && ((bytes[0] == b'"' && bytes[bytes.len() - 1] == b'"')
-                    || (bytes[0] == b'\'' && bytes[bytes.len() - 1] == b'\''))
-            {
-                value = value[1..value.len() - 1].to_string();
             }
             map.insert(key.to_string(), value);
         }
     }
     map
+}
+
+fn parse_wbeam_config_line(line: &str) -> Option<(&str, String)> {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with('#') {
+        return None;
+    }
+    let (k, v) = line.split_once('=')?;
+    let key = k.trim();
+    if !key.starts_with("WBEAM_") {
+        return None;
+    }
+    Some((key, strip_matching_quotes(v.trim())))
+}
+
+fn strip_matching_quotes(value: &str) -> String {
+    let bytes = value.as_bytes();
+    if bytes.len() >= 2
+        && ((bytes[0] == b'"' && bytes[bytes.len() - 1] == b'"')
+            || (bytes[0] == b'\'' && bytes[bytes.len() - 1] == b'\''))
+    {
+        return value[1..value.len() - 1].to_string();
+    }
+    value.to_string()
 }
 
 fn wbeam_setting(settings: &HashMap<String, String>, key: &str) -> Option<String> {
@@ -277,51 +298,13 @@ fn resolve_xauthority_for_capture() -> Option<PathBuf> {
         }
     }
 
-    if let Ok(entries) = std::fs::read_dir("/tmp") {
-        let mut tmp_candidates: Vec<PathBuf> = entries
-            .flatten()
-            .map(|e| e.path())
-            .filter(|p| {
-                p.is_file()
-                    && p.file_name()
-                        .and_then(|n| n.to_str())
-                        .map(|n| n.starts_with("xauth_"))
-                        .unwrap_or(false)
-            })
-            .collect();
-        tmp_candidates.sort_by_key(|p| {
-            std::fs::metadata(p)
-                .and_then(|m| m.modified())
-                .ok()
-                .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
-        });
-        if let Some(last) = tmp_candidates.pop() {
-            return Some(last);
-        }
+    if let Some(last) = newest_xauth_in_dir(Path::new("/tmp")) {
+        return Some(last);
     }
 
     let run_dir = PathBuf::from(format!("/run/user/{uid}"));
-    if run_dir.exists() {
-        let mut candidates: Vec<PathBuf> = Vec::new();
-        if let Ok(entries) = std::fs::read_dir(&run_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    if name.starts_with("xauth_") && path.is_file() {
-                        candidates.push(path);
-                    }
-                }
-            }
-        }
-        candidates.sort_by_key(|p| {
-            std::fs::metadata(p)
-                .and_then(|m| m.modified())
-                .ok()
-                .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
-        });
-        if let Some(last) = candidates.pop() {
-            return Some(last);
-        }
+    if let Some(last) = newest_xauth_in_dir(&run_dir) {
+        return Some(last);
     }
 
     if let Ok(home) = std::env::var("HOME") {
@@ -331,6 +314,31 @@ fn resolve_xauthority_for_capture() -> Option<PathBuf> {
         }
     }
     None
+}
+
+fn newest_xauth_in_dir(dir: &Path) -> Option<PathBuf> {
+    if !dir.exists() {
+        return None;
+    }
+    let mut candidates: Vec<PathBuf> = std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.is_file()
+                && p.file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| n.starts_with("xauth_"))
+                    .unwrap_or(false)
+        })
+        .collect();
+    candidates.sort_by_key(|p| {
+        std::fs::metadata(p)
+            .and_then(|m| m.modified())
+            .ok()
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+    });
+    candidates.pop()
 }
 
 fn runtime_config_path_for_session(root: &Path, session_label: Option<&str>) -> PathBuf {
@@ -529,7 +537,10 @@ impl DaemonCore {
         if normalized.is_none() {
             if let Some(raw) = backend.map(str::trim).filter(|v| !v.is_empty()) {
                 if !raw.eq_ignore_ascii_case("auto") {
-                    warn!(capture_backend = raw, "ignoring unsupported capture backend override");
+                    warn!(
+                        capture_backend = raw,
+                        "ignoring unsupported capture backend override"
+                    );
                 }
             }
         }
@@ -708,7 +719,12 @@ impl DaemonCore {
             display: self.host_probe.display.clone(),
             wayland_display: self.host_probe.wayland_display.clone(),
             supported: self.host_probe.supports_streaming(),
-            available_backends: self.host_probe.available_backends().iter().map(|s| s.to_string()).collect(),
+            available_backends: self
+                .host_probe
+                .available_backends()
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
             evdi_available,
         }
     }
@@ -954,12 +970,7 @@ impl DaemonCore {
         }
     }
 
-    // NOSONAR S3776 - Metric ingestion applies multi-branch runtime adaptation rules
-    pub async fn ingest_client_metrics(
-        &self,
-        mut client: ClientMetricsRequest,
-    ) -> Result<ClientMetricsResponse, CoreError> {
-        // P2.2: log trace_id so host logs can be correlated with Android logcat
+    fn log_client_metrics(client: &ClientMetricsRequest) {
         info!(
             "client-metrics trace_id={} recv={:.1}fps decode={:.1}fps present={:.1}fps recv≈{:.2}Mb/s decode_p95={:.1}ms e2e_p95={:.1}ms",
             client
@@ -973,229 +984,299 @@ impl DaemonCore {
             client.decode_time_ms_p95,
             client.e2e_latency_ms_p95,
         );
-        if client.timestamp_ms == 0 {
-            client.timestamp_ms = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0);
+    }
+
+    fn fill_client_timestamp(client: &mut ClientMetricsRequest) {
+        if client.timestamp_ms != 0 {
+            return;
+        }
+        client.timestamp_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+    }
+
+    fn can_adapt(inner: &Inner) -> bool {
+        inner.state == STATE_STREAMING
+            && inner.current_pid.is_some()
+            && inner
+                .stream_started_at
+                .map(|started| started.elapsed() >= Duration::from_secs(8))
+                .unwrap_or(false)
+    }
+
+    fn update_client_kpis(inner: &mut Inner, client: &ClientMetricsRequest) {
+        inner.metrics.latest_client_metrics = Some(client.clone());
+        inner.metrics.kpi = KpiSnapshot {
+            target_fps: inner.active_config.fps,
+            recv_fps: client.recv_fps,
+            decode_fps: client.decode_fps,
+            present_fps: client.present_fps,
+            frametime_ms_p95: if client.present_fps > 0.0 {
+                1000.0 / client.present_fps.max(0.1)
+            } else {
+                0.0
+            },
+            e2e_latency_ms_p50: client.e2e_latency_ms_p50,
+            e2e_latency_ms_p95: client.e2e_latency_ms_p95,
+            decode_time_ms_p95: client.decode_time_ms_p95,
+            render_time_ms_p95: client.render_time_ms_p95,
+        };
+        if let Some(started) = inner.stream_started_at {
+            let elapsed = started.elapsed().as_secs_f64().max(1.0);
+            inner.metrics.frame_in = (client.recv_fps * elapsed) as u64;
+            inner.metrics.frame_out = (client.present_fps * elapsed) as u64;
+            inner.metrics.drops = client.dropped_frames.saturating_add(client.too_late_frames);
+        }
+        if client.recv_bps > 0 {
+            inner.metrics.bitrate_actual_bps = client.recv_bps;
+        }
+    }
+
+    fn decode_starved_with_traffic(client: &ClientMetricsRequest) -> bool {
+        client.recv_bps > 150_000 && client.recv_fps <= 0.5 && client.present_fps <= 0.5
+    }
+
+    fn update_decode_starvation(
+        inner: &mut Inner,
+        client: &ClientMetricsRequest,
+        previous_client: Option<&ClientMetricsRequest>,
+    ) {
+        let decode_starved_with_traffic =
+            inner.state == STATE_STREAMING && Self::decode_starved_with_traffic(client);
+        let prev_decode_starved = previous_client
+            .map(Self::decode_starved_with_traffic)
+            .unwrap_or(false);
+        if !decode_starved_with_traffic || prev_decode_starved {
+            return;
         }
 
-        let mut restart_cfg: Option<ActiveConfig> = None;
+        inner.last_error = format!(
+            "decode starvation: recv≈{:.2}Mb/s recv_fps={:.1} decode_fps={:.1} present_fps={:.1}",
+            client.recv_bps as f64 / 1_000_000.0,
+            client.recv_fps,
+            client.decode_fps,
+            client.present_fps
+        );
+        warn!(
+            run_id = inner.run_id,
+            recv_bps = client.recv_bps,
+            recv_fps = client.recv_fps,
+            decode_fps = client.decode_fps,
+            present_fps = client.present_fps,
+            "client has transport traffic but decoder/presenter output is stalled"
+        );
+    }
+
+    fn append_client_telemetry(inner: &mut Inner, client: &ClientMetricsRequest) {
+        let telemetry_run_id = inner.run_id;
+        if let Some(ref mut file) = inner.telemetry_file {
+            let mut rec = serde_json::to_value(client).unwrap_or_default();
+            if let serde_json::Value::Object(ref mut map) = rec {
+                map.insert(
+                    "run_id".to_string(),
+                    serde_json::Value::from(telemetry_run_id),
+                );
+            }
+            let _ = writeln!(file, "{rec}");
+        }
+    }
+
+    fn update_no_present_streak(inner: &mut Inner, client: &ClientMetricsRequest) {
+        let no_present_stream = inner.state == STATE_STREAMING
+            && inner.current_pid.is_some()
+            && client.recv_fps >= NO_PRESENT_MIN_RECV_FPS
+            && client.present_fps <= NO_PRESENT_MAX_PRESENT_FPS;
+        if no_present_stream {
+            inner.no_present_streak = inner.no_present_streak.saturating_add(1);
+        } else {
+            inner.no_present_streak = 0;
+        }
+    }
+
+    fn maybe_schedule_no_present_restart(
+        inner: &mut Inner,
+        client: &ClientMetricsRequest,
+        now: Instant,
+    ) -> Option<ActiveConfig> {
+        let restart_ready = inner
+            .last_no_present_recovery_at
+            .map(|t| now.duration_since(t) >= NO_PRESENT_RESTART_COOLDOWN)
+            .unwrap_or(true);
+        if !restart_ready || inner.no_present_streak < NO_PRESENT_RESTART_STREAK_REQUIRED {
+            return None;
+        }
+
+        inner.no_present_streak = 0;
+        inner.last_no_present_recovery_at = Some(now);
+        inner.metrics.restart_count = inner.metrics.restart_count.saturating_add(1);
+        inner.metrics.adaptive_level = inner.adaptation_level;
+        inner.metrics.adaptive_action = "recover-restart".to_string();
+        inner.metrics.adaptive_reason = format!(
+            "present_fps={:.1} recv_fps={:.1} q={}/{}/{}",
+            client.present_fps,
+            client.recv_fps,
+            client.transport_queue_depth,
+            client.decode_queue_depth,
+            client.render_queue_depth
+        );
+        inner.last_error = format!(
+            "no-present recovery restart (present_fps={:.1}, recv_fps={:.1})",
+            client.present_fps, client.recv_fps
+        );
+        warn!(
+            "triggering no-present recovery restart run_id={} reason={}",
+            inner.run_id, inner.metrics.adaptive_reason
+        );
+        Some(inner.active_config.clone())
+    }
+
+    fn set_warmup_hold(inner: &mut Inner) {
+        inner.high_pressure_streak = 0;
+        inner.low_pressure_streak = 0;
+        inner.metrics.adaptive_level = inner.adaptation_level;
+        inner.metrics.adaptive_action = "hold-warmup".to_string();
+        inner.metrics.adaptive_reason = "waiting for stable STREAMING warmup".to_string();
+    }
+
+    fn update_pressure_streaks(inner: &mut Inner, client: &ClientMetricsRequest) -> (bool, bool) {
+        let high = is_high_pressure(inner.active_config.fps, client);
+        let low = is_low_pressure(inner.active_config.fps, client);
+        if high {
+            inner.high_pressure_streak = inner.high_pressure_streak.saturating_add(1);
+            inner.low_pressure_streak = 0;
+            inner.metrics.backpressure_high_events =
+                inner.metrics.backpressure_high_events.saturating_add(1);
+        } else if low {
+            inner.low_pressure_streak = inner.low_pressure_streak.saturating_add(1);
+            inner.high_pressure_streak = 0;
+            inner.metrics.backpressure_recover_events =
+                inner.metrics.backpressure_recover_events.saturating_add(1);
+        } else {
+            inner.high_pressure_streak = 0;
+            inner.low_pressure_streak = 0;
+        }
+        (high, low)
+    }
+
+    fn apply_adaptation_level(inner: &mut Inner, now: Instant) -> bool {
+        let cooldown_ready = inner
+            .last_adaptation_at
+            .map(|t| now.duration_since(t) >= ADAPTATION_COOLDOWN)
+            .unwrap_or(true);
+        if cooldown_ready && inner.high_pressure_streak >= HIGH_PRESSURE_STREAK_REQUIRED {
+            if inner.adaptation_level < MAX_ADAPTATION_LEVEL {
+                inner.adaptation_level = inner.adaptation_level.saturating_add(1);
+                inner.metrics.adaptive_action = "degrade".to_string();
+                inner.high_pressure_streak = 0;
+                return true;
+            }
+            inner.metrics.adaptive_action = "degrade-clamped".to_string();
+            inner.high_pressure_streak = 0;
+            return false;
+        }
+        if cooldown_ready && inner.low_pressure_streak >= LOW_PRESSURE_STREAK_REQUIRED {
+            if inner.adaptation_level > 0 {
+                inner.adaptation_level = inner.adaptation_level.saturating_sub(1);
+                inner.metrics.adaptive_action = "recover".to_string();
+                inner.low_pressure_streak = 0;
+                return true;
+            }
+            inner.metrics.adaptive_action = "recover-clamped".to_string();
+            inner.low_pressure_streak = 0;
+            return false;
+        }
+        inner.metrics.adaptive_action = "hold".to_string();
+        false
+    }
+
+    fn finalize_adaptation(
+        &self,
+        inner: &mut Inner,
+        client: &ClientMetricsRequest,
+        high: bool,
+        low: bool,
+        now: Instant,
+    ) -> Option<ActiveConfig> {
+        if !Self::apply_adaptation_level(inner, now) {
+            inner.metrics.adaptive_level = inner.adaptation_level;
+            return None;
+        }
+
+        inner.last_adaptation_at = Some(now);
+        inner.metrics.adaptive_events = inner.metrics.adaptive_events.saturating_add(1);
+        inner.metrics.adaptive_level = inner.adaptation_level;
+
+        let reason = adaptation_reason(client, high, low);
+        inner.metrics.adaptive_reason = reason.clone();
+        inner.last_error = format!(
+            "adaptive {} L{} ({})",
+            inner.metrics.adaptive_action, inner.adaptation_level, reason
+        );
+
+        let target_cfg = config_for_level(&inner.baseline_config, inner.adaptation_level);
+        if target_cfg == inner.active_config || inner.current_pid.is_none() {
+            return None;
+        }
+        if self.allow_live_adaptive_restart {
+            inner.active_config = target_cfg.clone();
+            inner.metrics.restart_count = inner.metrics.restart_count.saturating_add(1);
+            return Some(target_cfg);
+        }
+
+        inner.metrics.adaptive_action = format!("{}-pending", inner.metrics.adaptive_action);
+        inner.metrics.adaptive_reason = format!(
+            "{} | pending size={} fps={} bitrate={}",
+            reason, target_cfg.size, target_cfg.fps, target_cfg.bitrate_kbps
+        );
+        inner.last_error = format!(
+            "adaptive pending L{} (live restart disabled)",
+            inner.adaptation_level
+        );
+        None
+    }
+
+    fn adaptive_action(inner: &Inner) -> String {
+        format!(
+            "{}:L{}",
+            inner.metrics.adaptive_action, inner.metrics.adaptive_level
+        )
+    }
+
+    pub async fn ingest_client_metrics(
+        &self,
+        mut client: ClientMetricsRequest,
+    ) -> Result<ClientMetricsResponse, CoreError> {
+        Self::log_client_metrics(&client);
+        Self::fill_client_timestamp(&mut client);
+
+        let restart_cfg;
         let action;
         {
             let mut inner = self.inner.lock().await;
             let now = Instant::now();
-            let can_adapt = inner.state == STATE_STREAMING
-                && inner.current_pid.is_some()
-                && inner
-                    .stream_started_at
-                    .map(|started| started.elapsed() >= Duration::from_secs(8))
-                    .unwrap_or(false);
-
+            let can_adapt = Self::can_adapt(&inner);
             let previous_client = inner.metrics.latest_client_metrics.clone();
-            inner.metrics.latest_client_metrics = Some(client.clone());
-            inner.metrics.kpi = KpiSnapshot {
-                target_fps: inner.active_config.fps,
-                recv_fps: client.recv_fps,
-                decode_fps: client.decode_fps,
-                present_fps: client.present_fps,
-                frametime_ms_p95: if client.present_fps > 0.0 {
-                    1000.0 / client.present_fps.max(0.1)
+
+            Self::update_client_kpis(&mut inner, &client);
+            Self::update_decode_starvation(&mut inner, &client, previous_client.as_ref());
+            Self::append_client_telemetry(&mut inner, &client);
+            Self::update_no_present_streak(&mut inner, &client);
+
+            let mut next_restart_cfg =
+                Self::maybe_schedule_no_present_restart(&mut inner, &client, now);
+            if next_restart_cfg.is_none() {
+                if !can_adapt {
+                    Self::set_warmup_hold(&mut inner);
                 } else {
-                    0.0
-                },
-                e2e_latency_ms_p50: client.e2e_latency_ms_p50,
-                e2e_latency_ms_p95: client.e2e_latency_ms_p95,
-                decode_time_ms_p95: client.decode_time_ms_p95,
-                render_time_ms_p95: client.render_time_ms_p95,
-            };
-            if let Some(started) = inner.stream_started_at {
-                let elapsed = started.elapsed().as_secs_f64().max(1.0);
-                inner.metrics.frame_in = (client.recv_fps * elapsed) as u64;
-                inner.metrics.frame_out = (client.present_fps * elapsed) as u64;
-                inner.metrics.drops = client.dropped_frames.saturating_add(client.too_late_frames);
-            }
-
-            if client.recv_bps > 0 {
-                inner.metrics.bitrate_actual_bps = client.recv_bps;
-            }
-            let decode_starved_with_traffic = inner.state == STATE_STREAMING
-                && client.recv_bps > 150_000
-                && client.recv_fps <= 0.5
-                && client.present_fps <= 0.5;
-            let prev_decode_starved = previous_client
-                .as_ref()
-                .map(|prev| {
-                    prev.recv_bps > 150_000 && prev.recv_fps <= 0.5 && prev.present_fps <= 0.5
-                })
-                .unwrap_or(false);
-            if decode_starved_with_traffic && !prev_decode_starved {
-                inner.last_error = format!(
-                    "decode starvation: recv≈{:.2}Mb/s recv_fps={:.1} decode_fps={:.1} present_fps={:.1}",
-                    client.recv_bps as f64 / 1_000_000.0,
-                    client.recv_fps,
-                    client.decode_fps,
-                    client.present_fps
-                );
-                warn!(
-                    run_id = inner.run_id,
-                    recv_bps = client.recv_bps,
-                    recv_fps = client.recv_fps,
-                    decode_fps = client.decode_fps,
-                    present_fps = client.present_fps,
-                    "client has transport traffic but decoder/presenter output is stalled"
-                );
-            }
-
-            // P2.3: append JSONL telemetry record
-            let telemetry_run_id = inner.run_id; // capture before mutable borrow
-            if let Some(ref mut f) = inner.telemetry_file {
-                let mut rec = serde_json::to_value(&client).unwrap_or_default();
-                if let serde_json::Value::Object(ref mut m) = rec {
-                    m.insert(
-                        "run_id".to_string(),
-                        serde_json::Value::from(telemetry_run_id),
-                    );
-                }
-                let _ = writeln!(f, "{rec}");
-            }
-
-            let no_present_stream = inner.state == STATE_STREAMING
-                && inner.current_pid.is_some()
-                && client.recv_fps >= NO_PRESENT_MIN_RECV_FPS
-                && client.present_fps <= NO_PRESENT_MAX_PRESENT_FPS;
-            if no_present_stream {
-                inner.no_present_streak = inner.no_present_streak.saturating_add(1);
-            } else {
-                inner.no_present_streak = 0;
-            }
-            let no_present_restart_ready = inner
-                .last_no_present_recovery_at
-                .map(|t| now.duration_since(t) >= NO_PRESENT_RESTART_COOLDOWN)
-                .unwrap_or(true);
-            let forced_no_present_restart = no_present_restart_ready
-                && inner.no_present_streak >= NO_PRESENT_RESTART_STREAK_REQUIRED;
-
-            if forced_no_present_restart {
-                inner.no_present_streak = 0;
-                inner.last_no_present_recovery_at = Some(now);
-                inner.metrics.restart_count = inner.metrics.restart_count.saturating_add(1);
-                inner.metrics.adaptive_level = inner.adaptation_level;
-                inner.metrics.adaptive_action = "recover-restart".to_string();
-                inner.metrics.adaptive_reason = format!(
-                    "present_fps={:.1} recv_fps={:.1} q={}/{}/{}",
-                    client.present_fps,
-                    client.recv_fps,
-                    client.transport_queue_depth,
-                    client.decode_queue_depth,
-                    client.render_queue_depth
-                );
-                inner.last_error = format!(
-                    "no-present recovery restart (present_fps={:.1}, recv_fps={:.1})",
-                    client.present_fps, client.recv_fps
-                );
-                warn!(
-                    "triggering no-present recovery restart run_id={} reason={}",
-                    inner.run_id, inner.metrics.adaptive_reason
-                );
-                restart_cfg = Some(inner.active_config.clone());
-            } else if !can_adapt {
-                inner.high_pressure_streak = 0;
-                inner.low_pressure_streak = 0;
-                inner.metrics.adaptive_level = inner.adaptation_level;
-                inner.metrics.adaptive_action = "hold-warmup".to_string();
-                inner.metrics.adaptive_reason = "waiting for stable STREAMING warmup".to_string();
-            } else {
-                let high = is_high_pressure(inner.active_config.fps, &client);
-                let low = is_low_pressure(inner.active_config.fps, &client);
-
-                if high {
-                    inner.high_pressure_streak = inner.high_pressure_streak.saturating_add(1);
-                    inner.low_pressure_streak = 0;
-                    inner.metrics.backpressure_high_events =
-                        inner.metrics.backpressure_high_events.saturating_add(1);
-                } else if low {
-                    inner.low_pressure_streak = inner.low_pressure_streak.saturating_add(1);
-                    inner.high_pressure_streak = 0;
-                    inner.metrics.backpressure_recover_events =
-                        inner.metrics.backpressure_recover_events.saturating_add(1);
-                } else {
-                    inner.high_pressure_streak = 0;
-                    inner.low_pressure_streak = 0;
-                }
-
-                let cooldown_ready = inner
-                    .last_adaptation_at
-                    .map(|t| now.duration_since(t) >= ADAPTATION_COOLDOWN)
-                    .unwrap_or(true);
-
-                let mut adapted = false;
-                if cooldown_ready && inner.high_pressure_streak >= HIGH_PRESSURE_STREAK_REQUIRED {
-                    if inner.adaptation_level < MAX_ADAPTATION_LEVEL {
-                        inner.adaptation_level = inner.adaptation_level.saturating_add(1);
-                        adapted = true;
-                        inner.metrics.adaptive_action = "degrade".to_string();
-                    } else {
-                        inner.metrics.adaptive_action = "degrade-clamped".to_string();
-                    }
-                    inner.high_pressure_streak = 0;
-                } else if cooldown_ready
-                    && inner.low_pressure_streak >= LOW_PRESSURE_STREAK_REQUIRED
-                {
-                    if inner.adaptation_level > 0 {
-                        inner.adaptation_level = inner.adaptation_level.saturating_sub(1);
-                        adapted = true;
-                        inner.metrics.adaptive_action = "recover".to_string();
-                    } else {
-                        inner.metrics.adaptive_action = "recover-clamped".to_string();
-                    }
-                    inner.low_pressure_streak = 0;
-                } else {
-                    inner.metrics.adaptive_action = "hold".to_string();
-                }
-
-                if adapted {
-                    inner.last_adaptation_at = Some(now);
-                    inner.metrics.adaptive_events = inner.metrics.adaptive_events.saturating_add(1);
-                    inner.metrics.adaptive_level = inner.adaptation_level;
-
-                    let reason = adaptation_reason(&client, high, low);
-                    inner.metrics.adaptive_reason = reason.clone();
-                    inner.last_error = format!(
-                        "adaptive {} L{} ({})",
-                        inner.metrics.adaptive_action, inner.adaptation_level, reason
-                    );
-
-                    let target_cfg =
-                        config_for_level(&inner.baseline_config, inner.adaptation_level);
-                    if target_cfg != inner.active_config && inner.current_pid.is_some() {
-                        if self.allow_live_adaptive_restart {
-                            inner.active_config = target_cfg.clone();
-                            inner.metrics.restart_count =
-                                inner.metrics.restart_count.saturating_add(1);
-                            restart_cfg = Some(target_cfg);
-                        } else {
-                            inner.metrics.adaptive_action =
-                                format!("{}-pending", inner.metrics.adaptive_action);
-                            inner.metrics.adaptive_reason = format!(
-                                "{} | pending size={} fps={} bitrate={}",
-                                reason, target_cfg.size, target_cfg.fps, target_cfg.bitrate_kbps
-                            );
-                            inner.last_error = format!(
-                                "adaptive pending L{} (live restart disabled)",
-                                inner.adaptation_level
-                            );
-                        }
-                    }
-                } else {
-                    inner.metrics.adaptive_level = inner.adaptation_level;
+                    let (high, low) = Self::update_pressure_streaks(&mut inner, &client);
+                    next_restart_cfg =
+                        self.finalize_adaptation(&mut inner, &client, high, low, now);
                 }
             }
 
-            action = format!(
-                "{}:L{}",
-                inner.metrics.adaptive_action, inner.metrics.adaptive_level
-            );
+            action = Self::adaptive_action(&inner);
+            restart_cfg = next_restart_cfg;
         }
 
         if let Some(cfg) = restart_cfg {
@@ -1277,8 +1358,9 @@ impl DaemonCore {
         inner.no_present_streak = 0;
     }
 
-    // NOSONAR S3776 - Complex state machine required for config initialization
-    async fn start_with_config(&self, cfg: ActiveConfig, reason: &str) -> Result<(), CoreError> {
+    async fn requested_start_settings(
+        &self,
+    ) -> (String, Option<String>, bool, display_backends::DisplayMode) {
         let (requested_display_mode, capture_backend_override) = {
             let inner = self.inner.lock().await;
             (
@@ -1292,7 +1374,19 @@ impl DaemonCore {
         } else {
             display_backends::normalize_requested_mode(Some(&requested_display_mode))
         };
-        let mut launch_size = cfg.size.clone();
+        (
+            requested_display_mode,
+            capture_backend_override,
+            benchmark_mode,
+            requested_mode,
+        )
+    }
+
+    async fn ensure_start_supported(
+        &self,
+        requested_mode: display_backends::DisplayMode,
+        launch_size: &mut String,
+    ) -> Result<(), CoreError> {
         if !self.host_probe.supports_streaming() {
             let reason = self.host_probe.unsupported_reason();
             {
@@ -1303,93 +1397,101 @@ impl DaemonCore {
             return Err(CoreError::UnsupportedHost(reason));
         }
 
-        if requested_mode.is_virtual() {
-            if let Some(target_size) = adb::device_resolution(self.target_serial.as_deref()).await {
-                if launch_size != target_size {
-                    info!(
-                        serial = self.target_serial.as_deref().unwrap_or("auto"),
-                        from = %launch_size,
-                        to = %target_size,
-                        "virtual mode: overriding stream size to target device resolution"
-                    );
-                    launch_size = target_size;
-                }
-            } else {
-                warn!(
+        if !requested_mode.is_virtual() {
+            return Ok(());
+        }
+
+        if let Some(target_size) = adb::device_resolution(self.target_serial.as_deref()).await {
+            if *launch_size != target_size {
+                info!(
                     serial = self.target_serial.as_deref().unwrap_or("auto"),
-                    configured = %launch_size,
-                    "virtual mode: could not detect target device resolution; using configured size"
+                    from = %launch_size,
+                    to = %target_size,
+                    "virtual mode: overriding stream size to target device resolution"
                 );
+                *launch_size = target_size;
             }
+            return Ok(());
         }
 
-        {
+        warn!(
+            serial = self.target_serial.as_deref().unwrap_or("auto"),
+            configured = %launch_size,
+            "virtual mode: could not detect target device resolution; using configured size"
+        );
+        Ok(())
+    }
+
+    async fn touch_reverse_refresh(&self) {
+        let mut inner = self.inner.lock().await;
+        inner.last_reverse_refresh_at = Some(Instant::now());
+    }
+
+    fn spawn_reverse_refresh(&self) {
+        let root = self.root.clone();
+        let stream_port = self.stream_port;
+        let control_port = self.control_port;
+        let target_serial = self.target_serial.clone();
+        tokio::spawn(async move {
+            adb::ensure_usb_reverse(
+                &root,
+                stream_port,
+                control_port,
+                "start",
+                target_serial.as_deref(),
+            )
+            .await;
+        });
+    }
+
+    async fn should_suppress_duplicate_start(&self, cfg: &ActiveConfig) -> bool {
+        let inner = self.inner.lock().await;
+        let recent_start = inner
+            .run_started_at
+            .map(|started| started.elapsed() < DUPLICATE_START_GUARD)
+            .unwrap_or(false);
+
+        let suppress = inner.current_pid.is_some()
+            && *cfg == inner.active_config
+            && recent_start
+            && matches!(
+                inner.state.as_str(),
+                STATE_STARTING | STATE_STREAMING | STATE_RECONNECTING
+            );
+        if suppress {
+            info!(state = %inner.state, "suppressing duplicate start request");
+        }
+        suppress
+    }
+
+    async fn begin_start_attempt(
+        &self,
+        cfg: &ActiveConfig,
+        launch_size: &str,
+        benchmark_mode: bool,
+        reason: &str,
+    ) -> (u64, Option<u32>) {
+        let (run_id, existing_pid, provisional_effective) = {
             let mut inner = self.inner.lock().await;
-            inner.last_reverse_refresh_at = Some(Instant::now());
-        }
-        // Do not block /start HTTP response on adb reverse, because Android API17
-        // client timeout is short (~1.5s) and reverse may fail/lag on tethered links.
-        {
-            let root = self.root.clone();
-            let stream_port = self.stream_port;
-            let control_port = self.control_port;
-            let target_serial = self.target_serial.clone();
-            tokio::spawn(async move {
-                adb::ensure_usb_reverse(
-                    &root,
-                    stream_port,
-                    control_port,
-                    "start",
-                    target_serial.as_deref(),
-                )
-                .await;
-            });
-        }
-
-        {
-            let inner = self.inner.lock().await;
-            let recent_start = inner
-                .run_started_at
-                .map(|started| started.elapsed() < DUPLICATE_START_GUARD)
-                .unwrap_or(false);
-
-            if inner.current_pid.is_some()
-                && cfg == inner.active_config
-                && recent_start
-                && matches!(
-                    inner.state.as_str(),
-                    STATE_STARTING | STATE_STREAMING | STATE_RECONNECTING
-                )
-            {
-                info!(state = %inner.state, "suppressing duplicate start request");
-                return Ok(());
-            }
-        }
-
-        let run_id;
-        let existing_pid;
-        let provisional_effective;
-        {
-            let mut inner = self.inner.lock().await;
-            existing_pid = inner.current_pid;
+            let existing_pid = inner.current_pid;
             inner.active_config = cfg.clone();
             inner.last_error.clear();
             inner.state = STATE_STARTING.to_string();
             inner.metrics.start_count = inner.metrics.start_count.saturating_add(1);
             inner.run_id = inner.run_id.saturating_add(1);
-            run_id = inner.run_id;
+            let run_id = inner.run_id;
             inner.run_started_at = Some(Instant::now());
             inner.stream_started_at = None;
-            inner.telemetry_file = telemetry::open_telemetry_file(run_id); // P2.3
+            inner.telemetry_file = telemetry::open_telemetry_file(run_id);
             inner.last_output_at = Some(Instant::now());
             inner.last_streaming_line_at = None;
             inner.no_present_streak = 0;
             inner.pending_runtime_snapshot_reason = reason.to_string();
-            provisional_effective = EffectiveRuntimeConfig {
+            let provisional_effective = EffectiveRuntimeConfig {
                 requested_encoder: cfg.encoder.clone(),
                 resolved_backend: "unknown".to_string(),
                 raw_format: "unknown".to_string(),
-                size: launch_size.clone(),
+                size: launch_size.to_string(),
                 fps: cfg.fps,
                 bitrate_kbps: cfg.bitrate_kbps,
                 cursor_mode: cfg.cursor_mode.clone(),
@@ -1408,7 +1510,9 @@ impl DaemonCore {
                 capture_backend: if benchmark_mode {
                     "benchmark_game".to_string()
                 } else {
-                    inner.capture_backend_override.clone()
+                    inner
+                        .capture_backend_override
+                        .clone()
                         .unwrap_or_else(|| self.host_probe.capture_mode_name().to_string())
                 },
                 parse_mode: "unknown".to_string(),
@@ -1421,15 +1525,20 @@ impl DaemonCore {
                 snapshot_reason: format!("{reason}:provisional"),
             };
             inner.effective_runtime_config = Some(provisional_effective.clone());
-        }
+            (run_id, existing_pid, provisional_effective)
+        };
         self.persist_effective_runtime_snapshot(run_id, &provisional_effective);
 
-        {
-            let cfg = { self.inner.lock().await.baseline_config.clone() };
-            let _ = config_store::persist_config(&self.runtime_config_path, &cfg)
-                .map_err(|e| tracing::warn!("persist config: {e}"));
-        }
+        let baseline_cfg = { self.inner.lock().await.baseline_config.clone() };
+        let _ = config_store::persist_config(&self.runtime_config_path, &baseline_cfg)
+            .map_err(|e| tracing::warn!("persist config: {e}"));
+        (run_id, existing_pid)
+    }
 
+    async fn stop_existing_process_and_validate_port(
+        &self,
+        existing_pid: Option<u32>,
+    ) -> Result<(), CoreError> {
         if let Some(pid) = existing_pid {
             proc::terminate_pid(pid).await;
         }
@@ -1438,48 +1547,64 @@ impl DaemonCore {
             self.mark_start_failed(err.to_string()).await;
             return Err(err);
         }
+        Ok(())
+    }
 
-        let use_rust_streamer = wbeam_setting_bool(&self.settings, "WBEAM_USE_RUST_STREAMER", true);
+    fn rust_streamer_bin_path(&self) -> Result<PathBuf, CoreError> {
+        if !wbeam_setting_bool(&self.settings, "WBEAM_USE_RUST_STREAMER", true) {
+            warn!("WBEAM_USE_RUST_STREAMER=false is no longer supported; using Rust streamer");
+        }
         let rust_streamer_bin = wbeam_setting(&self.settings, "WBEAM_RUST_STREAMER_BIN")
             .map(PathBuf::from)
             .unwrap_or_else(|| self.root.join("host/rust/target/release/wbeamd-streamer"));
+        if rust_streamer_bin.exists() {
+            return Ok(rust_streamer_bin);
+        }
 
-        let mut cmd;
-        // Priority: per-session override > WBEAM_CAPTURE_BACKEND env/config > auto-detected probe
+        error!(
+            path = %rust_streamer_bin.display(),
+            "rust streamer binary not found – run `./devtool host build` to build it"
+        );
+        Err(CoreError::Spawn(format!(
+            "rust streamer binary not found: {} (run `./devtool host build`)",
+            rust_streamer_bin.display()
+        )))
+    }
+
+    fn resolve_start_capture_backend(&self, capture_backend_override: Option<&str>) -> String {
         let probed_backend = self.host_probe.capture_mode_name();
         let env_capture_backend = wbeam_setting(&self.settings, "WBEAM_CAPTURE_BACKEND");
-        let capture_backend = Self::normalize_capture_backend(capture_backend_override.as_deref())
+        Self::normalize_capture_backend(capture_backend_override)
             .or_else(|| Self::normalize_capture_backend(env_capture_backend.as_deref()))
             .unwrap_or(probed_backend)
-            .to_string();
-        let capture_backend = capture_backend.as_str();
-        let wayland_virtual_source =
-            !benchmark_mode && capture_backend == "wayland_portal" && requested_mode.is_virtual();
-        self.stop_virtual_display_if_any().await;
+            .to_string()
+    }
+
+    async fn activate_start_display(
+        &self,
+        requested_mode: display_backends::DisplayMode,
+        launch_size: &str,
+        capture_backend: &str,
+        benchmark_mode: bool,
+    ) -> Result<display_backends::Activation, CoreError> {
         let serial_hint = self.target_serial.as_deref().unwrap_or("default");
-        let activation = match display_backends::activate_start(
+        self.stop_virtual_display_if_any().await;
+        let activation = display_backends::activate_start(
             &self.host_probe,
             requested_mode,
             serial_hint,
-            &launch_size,
-        ) {
-            Ok(v) => v,
-            Err(e) => {
-                let err = match e {
-                    display_backends::ActivationError::Unsupported(msg) => {
-                        CoreError::UnsupportedHost(msg)
-                    }
-                    display_backends::ActivationError::Failed(msg) => CoreError::Spawn(msg),
-                };
-                self.mark_start_failed(err.to_string()).await;
-                return Err(err);
-            }
-        };
+            launch_size,
+        )
+        .map_err(|err| match err {
+            display_backends::ActivationError::Unsupported(msg) => CoreError::UnsupportedHost(msg),
+            display_backends::ActivationError::Failed(msg) => CoreError::Spawn(msg),
+        })?;
+
         info!(
             serial = serial_hint,
             requested_mode = requested_mode.as_str(),
             benchmark_mode,
-            capture_backend = capture_backend,
+            capture_backend,
             x11_display = activation.display_override.as_deref().unwrap_or("-"),
             x11_region = activation
                 .capture_region
@@ -1489,14 +1614,17 @@ impl DaemonCore {
             runtime_handle = activation.runtime_handle.is_some(),
             "display backend activation"
         );
-        let x11_display_override = activation.display_override;
-        let x11_capture_region = activation.capture_region;
-        let using_virtual_x11 = activation.using_virtual_x11;
-        if let Some(runtime_handle) = activation.runtime_handle {
+        Ok(activation)
+    }
+
+    async fn store_display_runtime(&self, runtime_handle: Option<display_backends::RuntimeHandle>) {
+        if let Some(runtime_handle) = runtime_handle {
             let mut inner = self.inner.lock().await;
             inner.display_runtime = Some(runtime_handle);
         }
+    }
 
+    fn restore_token_file(&self) -> String {
         let session_suffix = self
             .target_serial
             .as_deref()
@@ -1510,155 +1638,119 @@ impl DaemonCore {
                 }
             })
             .collect::<String>();
-        let restore_token_file = format!(
+        format!(
             "/tmp/wbeam-portal-restore-token-{}-{}",
             session_suffix, self.stream_port
-        );
+        )
+    }
 
-        if use_rust_streamer {
-            if !rust_streamer_bin.exists() {
-                error!(
-                    path = %rust_streamer_bin.display(),
-                    "rust streamer binary not found – run `./devtool host build` to build it \
-                     (set WBEAM_USE_RUST_STREAMER=false to force legacy python streamer)"
-                );
-                let err = CoreError::Spawn(format!(
-                    "rust streamer binary not found: {} \
-                     (run `./devtool host build`; or set WBEAM_USE_RUST_STREAMER=false to use python fallback)",
-                    rust_streamer_bin.display()
-                ));
-                self.mark_start_failed(err.to_string()).await;
-                return Err(err);
-            }
-            cmd = Command::new(rust_streamer_bin);
-            cmd.arg("--capture-backend")
-                .arg(match capture_backend {
-                    "x11_gst" => "x11",
-                    "wayland_portal" => "wayland-portal",
-                    "evdi" => "evdi",
-                    _ => "auto",
-                })
-                .arg("--port")
-                .arg(self.stream_port.to_string())
-                .arg("--encoder")
-                .arg(&cfg.encoder)
-                .arg("--cursor-mode")
-                .arg(&cfg.cursor_mode)
-                .arg("--size")
-                .arg(&launch_size)
-                .arg("--fps")
-                .arg(cfg.fps.to_string())
-                .arg("--bitrate-kbps")
-                .arg(cfg.bitrate_kbps.to_string())
-                .arg("--restore-token-file")
-                .arg(&restore_token_file)
-                .arg("--portal-persist-mode")
-                .arg("2")
-                .arg("--wayland-source-type")
-                .arg(if wayland_virtual_source {
-                    "virtual"
-                } else {
-                    "monitor"
-                })
-                .arg("--debug-dir")
-                .arg("/tmp/wbeam-frames")
-                .arg("--debug-fps")
-                .arg(cfg.debug_fps.to_string());
-            if benchmark_mode {
-                cmd.arg("--benchmark-game");
-            }
-            cmd.env_remove("WBEAM_OVERLAY_TEXT_FILE");
-            if cfg.intra_only {
-                cmd.arg("--intra-only");
-            }
-            if !benchmark_mode && capture_backend == "x11_gst" {
-                if let Some(display) = x11_display_override.as_deref() {
-                    cmd.env("DISPLAY", display);
-                }
-                if let Some((x, y, w, h)) = x11_capture_region {
-                    cmd.env("WBEAM_X11_CAPTURE_X", x.to_string());
-                    cmd.env("WBEAM_X11_CAPTURE_Y", y.to_string());
-                    cmd.env("WBEAM_X11_CAPTURE_W", w.to_string());
-                    cmd.env("WBEAM_X11_CAPTURE_H", h.to_string());
-                } else {
-                    cmd.env_remove("WBEAM_X11_CAPTURE_X");
-                    cmd.env_remove("WBEAM_X11_CAPTURE_Y");
-                    cmd.env_remove("WBEAM_X11_CAPTURE_W");
-                    cmd.env_remove("WBEAM_X11_CAPTURE_H");
-                }
-                if !using_virtual_x11 {
-                    if let Some(xauth) = resolve_xauthority_for_capture() {
-                        cmd.env("XAUTHORITY", xauth);
-                    }
-                } else {
-                    cmd.env_remove("XAUTHORITY");
-                }
-            }
-        } else {
-            if benchmark_mode {
-                let err = CoreError::Spawn(
-                    "benchmark_game mode requires Rust streamer (set WBEAM_USE_RUST_STREAMER=true)"
-                        .to_string(),
-                );
-                self.mark_start_failed(err.to_string()).await;
-                return Err(err);
-            }
-            if capture_backend == "x11_gst" {
-                let err = CoreError::Spawn(
-                    "x11 backend requires Rust streamer (set WBEAM_USE_RUST_STREAMER=true)"
-                        .to_string(),
-                );
-                self.mark_start_failed(err.to_string()).await;
-                return Err(err);
-            }
-            if wayland_virtual_source {
-                let err = CoreError::Spawn(
-                    "wayland virtual_monitor mode requires Rust streamer (set WBEAM_USE_RUST_STREAMER=true)"
-                        .to_string(),
-                );
-                self.mark_start_failed(err.to_string()).await;
-                return Err(err);
-            }
-            warn!("WBEAM_USE_RUST_STREAMER=false – using legacy python streamer");
-            let stream_script = self.root.join("host/scripts/stream_wayland_portal_h264.py");
-            cmd = Command::new("python3");
-            cmd.arg("-u")
-                .arg(stream_script)
-                .arg("--port")
-                .arg(self.stream_port.to_string())
-                .arg("--encoder")
-                .arg(&cfg.encoder)
-                .arg("--cursor-mode")
-                .arg(&cfg.cursor_mode)
-                .arg("--size")
-                .arg(&launch_size)
-                .arg("--fps")
-                .arg(cfg.fps.to_string())
-                .arg("--bitrate-kbps")
-                .arg(cfg.bitrate_kbps.to_string())
-                .arg("--debug-dir")
-                .arg("/tmp/wbeam-frames")
-                .arg("--debug-fps")
-                .arg(cfg.debug_fps.to_string())
-                .arg("--restore-token-file")
-                .arg(restore_token_file)
-                .env("PYTHONUNBUFFERED", "1")
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-            cmd.env_remove("WBEAM_OVERLAY_TEXT_FILE");
-            // C3: framed-only transport (legacy parser disabled on Android path).
-            cmd.arg("--framed");
+    fn build_streamer_command(
+        &self,
+        rust_streamer_bin: PathBuf,
+        cfg: &ActiveConfig,
+        launch_size: &str,
+        benchmark_mode: bool,
+        capture_backend: &str,
+        wayland_virtual_source: bool,
+        restore_token_file: &str,
+        x11_display_override: Option<&str>,
+        x11_capture_region: Option<(i32, i32, u32, u32)>,
+        using_virtual_x11: bool,
+    ) -> Command {
+        let mut cmd = Command::new(rust_streamer_bin);
+        cmd.arg("--capture-backend")
+            .arg(match capture_backend {
+                "x11_gst" => "x11",
+                "wayland_portal" => "wayland-portal",
+                "evdi" => "evdi",
+                _ => "auto",
+            })
+            .arg("--port")
+            .arg(self.stream_port.to_string())
+            .arg("--encoder")
+            .arg(&cfg.encoder)
+            .arg("--cursor-mode")
+            .arg(&cfg.cursor_mode)
+            .arg("--size")
+            .arg(launch_size)
+            .arg("--fps")
+            .arg(cfg.fps.to_string())
+            .arg("--bitrate-kbps")
+            .arg(cfg.bitrate_kbps.to_string())
+            .arg("--restore-token-file")
+            .arg(restore_token_file)
+            .arg("--portal-persist-mode")
+            .arg("2")
+            .arg("--wayland-source-type")
+            .arg(if wayland_virtual_source {
+                "virtual"
+            } else {
+                "monitor"
+            })
+            .arg("--debug-dir")
+            .arg("/tmp/wbeam-frames")
+            .arg("--debug-fps")
+            .arg(cfg.debug_fps.to_string());
+        if benchmark_mode {
+            cmd.arg("--benchmark-game");
         }
-
+        cmd.env_remove("WBEAM_OVERLAY_TEXT_FILE");
+        if cfg.intra_only {
+            cmd.arg("--intra-only");
+        }
+        self.apply_start_x11_environment(
+            &mut cmd,
+            benchmark_mode,
+            capture_backend,
+            x11_display_override,
+            x11_capture_region,
+            using_virtual_x11,
+        );
         cmd.stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        cmd
+    }
 
+    fn apply_start_x11_environment(
+        &self,
+        cmd: &mut Command,
+        benchmark_mode: bool,
+        capture_backend: &str,
+        x11_display_override: Option<&str>,
+        x11_capture_region: Option<(i32, i32, u32, u32)>,
+        using_virtual_x11: bool,
+    ) {
+        if benchmark_mode || capture_backend != "x11_gst" {
+            return;
+        }
+
+        if let Some(display) = x11_display_override {
+            cmd.env("DISPLAY", display);
+        }
+        if let Some((x, y, w, h)) = x11_capture_region {
+            cmd.env("WBEAM_X11_CAPTURE_X", x.to_string());
+            cmd.env("WBEAM_X11_CAPTURE_Y", y.to_string());
+            cmd.env("WBEAM_X11_CAPTURE_W", w.to_string());
+            cmd.env("WBEAM_X11_CAPTURE_H", h.to_string());
+        } else {
+            cmd.env_remove("WBEAM_X11_CAPTURE_X");
+            cmd.env_remove("WBEAM_X11_CAPTURE_Y");
+            cmd.env_remove("WBEAM_X11_CAPTURE_W");
+            cmd.env_remove("WBEAM_X11_CAPTURE_H");
+        }
+        if using_virtual_x11 {
+            cmd.env_remove("XAUTHORITY");
+        } else if let Some(xauth) = resolve_xauthority_for_capture() {
+            cmd.env("XAUTHORITY", xauth);
+        }
+    }
+
+    async fn spawn_stream_child(&self, run_id: u64, mut cmd: Command) -> Result<(), CoreError> {
         let mut child = match cmd.spawn() {
-            Ok(c) => c,
-            Err(e) => {
-                let err = CoreError::Spawn(e.to_string());
+            Ok(child) => child,
+            Err(err) => {
+                let err = CoreError::Spawn(err.to_string());
                 self.mark_start_failed(err.to_string()).await;
                 return Err(err);
             }
@@ -1671,37 +1763,12 @@ impl DaemonCore {
             self.mark_start_failed(err.to_string()).await;
             return Err(err);
         };
-
         info!(run_id, pid, "stream process started");
 
-        let mut pipe_handles: Vec<tokio::task::JoinHandle<()>> = Vec::with_capacity(2);
-
-        if let Some(stdout) = child.stdout.take() {
-            let core = self.clone();
-            pipe_handles.push(tokio::spawn(async move {
-                let mut lines = BufReader::new(stdout).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    info!(run_id, "stream: {line}");
-                    core.on_stream_output(run_id, &line).await;
-                }
-            }));
-        }
-
-        if let Some(stderr) = child.stderr.take() {
-            let core = self.clone();
-            pipe_handles.push(tokio::spawn(async move {
-                let mut lines = BufReader::new(stderr).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    warn!(run_id, "stream: {line}");
-                    core.on_stream_output(run_id, &line).await;
-                }
-            }));
-        }
-
+        let pipe_handles = self.spawn_stream_pipe_readers(run_id, &mut child);
         {
             let mut inner = self.inner.lock().await;
             inner.current_pid = Some(pid);
-            // Track pipe-reader tasks so they can be cancelled on stop/restart.
             inner.pipe_reader_handles = pipe_handles;
         }
 
@@ -1715,100 +1782,200 @@ impl DaemonCore {
                 .unwrap_or(-1);
             let _ = exit_tx.send((run_id, exit_code));
         });
-
         Ok(())
+    }
+
+    fn spawn_stream_pipe_readers(
+        &self,
+        run_id: u64,
+        child: &mut tokio::process::Child,
+    ) -> Vec<tokio::task::JoinHandle<()>> {
+        let mut pipe_handles: Vec<tokio::task::JoinHandle<()>> = Vec::with_capacity(2);
+        if let Some(stdout) = child.stdout.take() {
+            let core = self.clone();
+            pipe_handles.push(tokio::spawn(async move {
+                let mut lines = BufReader::new(stdout).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    info!(run_id, "stream: {line}");
+                    core.on_stream_output(run_id, &line).await;
+                }
+            }));
+        }
+        if let Some(stderr) = child.stderr.take() {
+            let core = self.clone();
+            pipe_handles.push(tokio::spawn(async move {
+                let mut lines = BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    warn!(run_id, "stream: {line}");
+                    core.on_stream_output(run_id, &line).await;
+                }
+            }));
+        }
+        pipe_handles
+    }
+
+    async fn start_with_config(&self, cfg: ActiveConfig, reason: &str) -> Result<(), CoreError> {
+        let (_, capture_backend_override, benchmark_mode, requested_mode) =
+            self.requested_start_settings().await;
+        let mut launch_size = cfg.size.clone();
+        self.ensure_start_supported(requested_mode, &mut launch_size)
+            .await?;
+        self.touch_reverse_refresh().await;
+        // Do not block /start HTTP response on adb reverse, because Android API17
+        // client timeout is short (~1.5s) and reverse may fail/lag on tethered links.
+        self.spawn_reverse_refresh();
+
+        if self.should_suppress_duplicate_start(&cfg).await {
+            return Ok(());
+        }
+
+        let (run_id, existing_pid) = self
+            .begin_start_attempt(&cfg, &launch_size, benchmark_mode, reason)
+            .await;
+        self.stop_existing_process_and_validate_port(existing_pid)
+            .await?;
+
+        let rust_streamer_bin = match self.rust_streamer_bin_path() {
+            Ok(path) => path,
+            Err(err) => {
+                self.mark_start_failed(err.to_string()).await;
+                return Err(err);
+            }
+        };
+        let capture_backend =
+            self.resolve_start_capture_backend(capture_backend_override.as_deref());
+        let wayland_virtual_source =
+            !benchmark_mode && capture_backend == "wayland_portal" && requested_mode.is_virtual();
+        let activation = match self
+            .activate_start_display(
+                requested_mode,
+                &launch_size,
+                &capture_backend,
+                benchmark_mode,
+            )
+            .await
+        {
+            Ok(activation) => activation,
+            Err(err) => {
+                self.mark_start_failed(err.to_string()).await;
+                return Err(err);
+            }
+        };
+        let x11_display_override = activation.display_override.clone();
+        let x11_capture_region = activation.capture_region;
+        let using_virtual_x11 = activation.using_virtual_x11;
+        self.store_display_runtime(activation.runtime_handle).await;
+
+        let restore_token_file = self.restore_token_file();
+        let cmd = self.build_streamer_command(
+            rust_streamer_bin,
+            &cfg,
+            &launch_size,
+            benchmark_mode,
+            &capture_backend,
+            wayland_virtual_source,
+            &restore_token_file,
+            x11_display_override.as_deref(),
+            x11_capture_region,
+            using_virtual_x11,
+        );
+        self.spawn_stream_child(run_id, cmd).await
     }
 
     // NOSONAR S3776 - Event dispatch logic requires conditional branching
     async fn on_stream_output(&self, run_id: u64, line: &str) {
-        let mut effective_snapshot: Option<EffectiveRuntimeConfig> = None;
-        let mut inner = self.inner.lock().await;
-        if inner.run_id != run_id {
-            return;
-        }
-
-        inner.last_output_at = Some(Instant::now());
+        let now = Instant::now();
 
         // ── Structured event dispatch (preferred) ────────────────────────────
         // Lines from the streamer prefixed `WBEAM_EVENT:` carry JSON payloads.
         // Handling these here keeps human-readable log parsing as a fallback only.
         if let Some(json) = line.strip_prefix("WBEAM_EVENT:") {
-            match json.trim() {
-                j if j.contains("\"streaming_started\"") => {
-                    inner.state = STATE_STREAMING.to_string();
-                    inner.last_error.clear();
-                    inner.stream_started_at = Some(Instant::now());
-                    inner.last_streaming_line_at = Some(Instant::now());
-                    inner.metrics.bitrate_actual_bps =
-                        u64::from(inner.active_config.bitrate_kbps) * 1000;
-                    inner.no_present_streak = 0;
-                    info!(run_id, stream_event = "streaming-started");
-                }
-                j if j.contains("\"client_connected\"") => {
-                    info!(run_id, stream_event = "client-connected");
-                    inner.last_error.clear();
-                }
-                j if j.contains("\"client_disconnected\"") => {
-                    warn!(run_id, stream_event = "client-disconnected", detail = j);
-                    inner.last_error = j.to_string();
-                }
-                j if j.contains("\"transport_stats\"") => {
-                    if let Some(transport) = proc::parse_transport_event(j) {
-                        inner.metrics.transport_runtime = transport;
-                    }
-                }
-                _ => {}
+            let mut inner = self.inner.lock().await;
+            if inner.run_id != run_id {
+                return;
             }
+            inner.last_output_at = Some(now);
+            Self::handle_structured_stream_event(&mut inner, run_id, json.trim());
             // Do not fall through to the legacy string-match block for event lines.
-        } else {
-        // ── Legacy string-match fallback (kept for compat) ────────────────────
-        if line.contains("Streaming Wayland screencast")
-            || line.contains("Streaming X11 screencast")
-            || line.contains("Streaming EVDI capture")
-            || line.contains("Streaming benchmark game source")
+            return;
+        }
+
+        let streaming_started = Self::is_streaming_started_line(line);
+        let bitrate_actual_bps = proc::parse_kbps_line_to_bps(line);
+        let transport_runtime = proc::parse_transport_runtime_line(line);
+        let detected_last_error = Self::detect_last_error_from_log_line(line);
+        let needs_effective_runtime_snapshot =
+            line.trim_start().starts_with(EFFECTIVE_RUNTIME_PREFIX);
+        let mut effective_reason: Option<String> = None;
+
         {
-            inner.state = STATE_STREAMING.to_string();
-            inner.last_error.clear();
-            inner.stream_started_at = Some(Instant::now());
-            inner.last_streaming_line_at = Some(Instant::now());
-            inner.metrics.bitrate_actual_bps = u64::from(inner.active_config.bitrate_kbps) * 1000;
-            inner.no_present_streak = 0;
-        }
-
-        if let Some(bps) = proc::parse_kbps_line_to_bps(line) {
-            inner.metrics.bitrate_actual_bps = bps;
-        }
-        // Transport stats are now primarily delivered via structured WBEAM_EVENT;
-        // this call is retained as a belt-and-suspenders fallback for streamer
-        // builds that predate the structured event emission.
-        if let Some(transport) = proc::parse_transport_runtime_line(line) {
-            inner.metrics.transport_runtime = transport;
-        }
-
-        if let Some(mut parsed) =
-            parse_effective_runtime_line(line, &inner.pending_runtime_snapshot_reason)
-        {
-            parsed.snapshot_unix_ms = now_unix_ms();
-            inner.effective_runtime_config = Some(parsed.clone());
-            effective_snapshot = Some(parsed);
-        }
-
-        let trimmed = line.trim();
-        if !trimmed.is_empty() {
-            let lower = trimmed.to_ascii_lowercase();
-            if lower.contains("panic")
-                || lower.contains("error")
-                || lower.contains("failed")
-                || lower.contains("cannot")
-                || lower.contains("property '")
-            {
-                inner.last_error = trimmed.to_string();
+            let mut inner = self.inner.lock().await;
+            if inner.run_id != run_id {
+                return;
             }
-        }
+            inner.last_output_at = Some(now);
+
+            if streaming_started {
+                Self::mark_streaming_started(&mut inner);
+            }
+            if let Some(bps) = bitrate_actual_bps {
+                inner.metrics.bitrate_actual_bps = bps;
+            }
+            // Transport stats are now primarily delivered via structured WBEAM_EVENT;
+            // this call is retained as a belt-and-suspenders fallback for streamer
+            // builds that predate the structured event emission.
+            if let Some(transport) = transport_runtime {
+                inner.metrics.transport_runtime = transport;
+            }
+            if let Some(last_error) = detected_last_error.as_ref() {
+                inner.last_error.clone_from(last_error);
+            }
+            if needs_effective_runtime_snapshot {
+                effective_reason = Some(inner.pending_runtime_snapshot_reason.clone());
+            }
         } // end legacy fallback block
-        drop(inner);
+
+        let mut effective_snapshot = effective_reason
+            .as_deref()
+            .and_then(|reason| parse_effective_runtime_line(line, reason));
+        if let Some(snapshot) = effective_snapshot.as_mut() {
+            snapshot.snapshot_unix_ms = now_unix_ms();
+        }
         if let Some(snapshot) = effective_snapshot {
+            let mut inner = self.inner.lock().await;
+            if inner.run_id != run_id {
+                return;
+            }
+            inner.effective_runtime_config = Some(snapshot.clone());
+            drop(inner);
             self.persist_effective_runtime_snapshot(run_id, &snapshot);
+        }
+    }
+
+    fn handle_structured_stream_event(inner: &mut Inner, run_id: u64, event_json: &str) {
+        if event_json.contains("\"streaming_started\"") {
+            Self::mark_streaming_started(inner);
+            info!(run_id, stream_event = "streaming-started");
+            return;
+        }
+        if event_json.contains("\"client_connected\"") {
+            info!(run_id, stream_event = "client-connected");
+            inner.last_error.clear();
+            return;
+        }
+        if event_json.contains("\"client_disconnected\"") {
+            warn!(
+                run_id,
+                stream_event = "client-disconnected",
+                detail = event_json
+            );
+            inner.last_error = event_json.to_string();
+            return;
+        }
+        if event_json.contains("\"transport_stats\"") {
+            if let Some(transport) = proc::parse_transport_event(event_json) {
+                inner.metrics.transport_runtime = transport;
+            }
         }
     }
 
@@ -1864,13 +2031,7 @@ impl DaemonCore {
                 .map(|until| Instant::now() >= until)
                 .unwrap_or(true);
 
-            if self.auto_start && cooldown_expired {
-                inner.state = STATE_RECONNECTING.to_string();
-                inner.metrics.restart_count = inner.metrics.restart_count.saturating_add(1);
-                (true, Some(inner.active_config.clone()))
-            } else {
-                (false, None)
-            }
+            Self::compute_restart_after_exit(&mut inner, self.auto_start, cooldown_expired)
         };
 
         if should_restart {
@@ -1893,6 +2054,52 @@ impl DaemonCore {
                     }
                 }
             });
+        }
+    }
+
+    fn is_streaming_started_line(line: &str) -> bool {
+        line.contains("Streaming Wayland screencast")
+            || line.contains("Streaming X11 screencast")
+            || line.contains("Streaming EVDI capture")
+            || line.contains("Streaming benchmark game source")
+    }
+
+    fn mark_streaming_started(inner: &mut Inner) {
+        inner.state = STATE_STREAMING.to_string();
+        inner.last_error.clear();
+        inner.stream_started_at = Some(Instant::now());
+        inner.last_streaming_line_at = Some(Instant::now());
+        inner.metrics.bitrate_actual_bps = u64::from(inner.active_config.bitrate_kbps) * 1000;
+        inner.no_present_streak = 0;
+    }
+
+    fn detect_last_error_from_log_line(line: &str) -> Option<String> {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        if contains_ascii_case_insensitive(trimmed, "panic")
+            || contains_ascii_case_insensitive(trimmed, "error")
+            || contains_ascii_case_insensitive(trimmed, "failed")
+            || contains_ascii_case_insensitive(trimmed, "cannot")
+            || contains_ascii_case_insensitive(trimmed, "property '")
+        {
+            return Some(trimmed.to_string());
+        }
+        None
+    }
+
+    fn compute_restart_after_exit(
+        inner: &mut Inner,
+        auto_start: bool,
+        cooldown_expired: bool,
+    ) -> (bool, Option<ActiveConfig>) {
+        if auto_start && cooldown_expired {
+            inner.state = STATE_RECONNECTING.to_string();
+            inner.metrics.restart_count = inner.metrics.restart_count.saturating_add(1);
+            (true, Some(inner.active_config.clone()))
+        } else {
+            (false, None)
         }
     }
 
@@ -2152,6 +2359,48 @@ mod tests {
         let mut c = low_pressure_client();
         c.decode_time_ms_p95 = 0.0;
         assert!(!is_low_pressure(inner.active_config.fps, &c));
+    }
+
+    #[test]
+    fn test_parse_effective_runtime_line_without_hashmap_parser() {
+        let line = "[wbeam-effective] requested_encoder=nvenc264 resolved_backend=wayland_portal raw_format=NV12 size=1920 height=1080 fps=60 bitrate_kbps=12000 cursor_mode=embedded gop=8 intra_only=true stream_mode=ultra queue_max_buffers=6 queue_max_time_ms=10 appsink_max_buffers=3 appsink_drop=yes appsink_sync=off capture_backend=wayland_portal parse_mode=h264_au timeout_pull_ms=12 timeout_write_ms=34 timeout_disconnect=1 videorate_drop_only=false pipewire_keepalive_ms=250";
+        let parsed = parse_effective_runtime_line(line, "runtime_refresh").expect("parsed");
+        assert_eq!(parsed.requested_encoder, "nvenc264");
+        assert_eq!(parsed.resolved_backend, "wayland_portal");
+        assert_eq!(parsed.raw_format, "NV12");
+        assert_eq!(parsed.size, "1920x1080");
+        assert_eq!(parsed.fps, 60);
+        assert_eq!(parsed.bitrate_kbps, 12000);
+        assert_eq!(parsed.cursor_mode, "embedded");
+        assert_eq!(parsed.gop, 8);
+        assert!(parsed.intra_only);
+        assert_eq!(parsed.stream_mode, "ultra");
+        assert_eq!(parsed.queue_max_buffers, 6);
+        assert_eq!(parsed.queue_max_time_ms, 10);
+        assert_eq!(parsed.appsink_max_buffers, 3);
+        assert!(parsed.appsink_drop);
+        assert!(!parsed.appsink_sync);
+        assert_eq!(parsed.capture_backend, "wayland_portal");
+        assert_eq!(parsed.parse_mode, "h264_au");
+        assert_eq!(parsed.timeout_pull_ms, 12);
+        assert_eq!(parsed.timeout_write_ms, 34);
+        assert!(parsed.timeout_disconnect);
+        assert!(!parsed.videorate_drop_only);
+        assert_eq!(parsed.pipewire_keepalive_ms, 250);
+        assert_eq!(parsed.snapshot_unix_ms, 0);
+        assert_eq!(parsed.snapshot_reason, "runtime_refresh");
+    }
+
+    #[test]
+    fn test_detect_last_error_from_log_line_matches_case_insensitively() {
+        assert_eq!(
+            DaemonCore::detect_last_error_from_log_line(" ERROR: property 'foo' failed "),
+            Some("ERROR: property 'foo' failed".to_string())
+        );
+        assert_eq!(
+            DaemonCore::detect_last_error_from_log_line("all good"),
+            None
+        );
     }
 
     // ── adaptation state machine ─────────────────────────────────────────────

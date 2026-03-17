@@ -109,32 +109,15 @@ pub fn config_for_level(base: &ActiveConfig, level: u8) -> ActiveConfig {
     let mut cfg = base.clone();
     let png_profile = base.encoder == "rawpng";
 
-    let (scale_pct, fps_pct, bitrate_pct): (u32, u32, u32) = match level {
-        0 => (100, 100, 100),
-        1 => {
-            if png_profile {
-                (95, 80, 90)
-            } else {
-                (90, 90, 85)
-            }
-        }
-        2 => {
-            if png_profile {
-                (85, 60, 75)
-            } else {
-                (80, 80, 70)
-            }
-        }
-        _ => {
-            if png_profile {
-                (75, 45, 60)
-            } else {
-                (70, 70, 55)
-            }
-        }
-    };
+    let (scale_pct, fps_pct, bitrate_pct) = quality_profile_for_level(level, png_profile);
+    cfg.size = scaled_size_or_original(&cfg.size, scale_pct);
+    cfg.fps = scaled_fps(base.fps, fps_pct, png_profile);
+    cfg.bitrate_kbps = scaled_bitrate(base.bitrate_kbps, bitrate_pct, png_profile, &cfg.encoder);
+    cfg
+}
 
-    if let Some((w, h)) = parse_size(&cfg.size) {
+fn scaled_size_or_original(size: &str, scale_pct: u32) -> String {
+    if let Some((w, h)) = parse_size(size) {
         let mut scaled_w = (w.saturating_mul(scale_pct) / 100).clamp(640, 3840);
         let mut scaled_h = (h.saturating_mul(scale_pct) / 100).clamp(360, 2160);
         if scaled_w % 2 == 1 {
@@ -143,25 +126,38 @@ pub fn config_for_level(base: &ActiveConfig, level: u8) -> ActiveConfig {
         if scaled_h % 2 == 1 {
             scaled_h = scaled_h.saturating_sub(1);
         }
-        cfg.size = format!("{scaled_w}x{scaled_h}");
+        return format!("{scaled_w}x{scaled_h}");
     }
+    size.to_string()
+}
 
-    cfg.fps = if png_profile {
-        (base.fps.saturating_mul(fps_pct as u32) / 100).clamp(5, 20)
+fn scaled_fps(base_fps: u32, fps_pct: u32, png_profile: bool) -> u32 {
+    if png_profile {
+        (base_fps.saturating_mul(fps_pct) / 100).clamp(5, 20)
     } else {
-        (base.fps.saturating_mul(fps_pct as u32) / 100).clamp(30, 120)
-    };
-    let bitrate_max = if cfg.encoder == "h265" {
-        100_000
+        (base_fps.saturating_mul(fps_pct) / 100).clamp(30, 120)
+    }
+}
+
+fn scaled_bitrate(base_bitrate: u32, bitrate_pct: u32, png_profile: bool, encoder: &str) -> u32 {
+    let bitrate_max = if encoder == "h265" { 100_000 } else { 120_000 };
+    if png_profile {
+        (base_bitrate.saturating_mul(bitrate_pct) / 100).clamp(4_000, 80_000)
     } else {
-        120_000
-    };
-    cfg.bitrate_kbps = if png_profile {
-        (base.bitrate_kbps.saturating_mul(bitrate_pct) / 100).clamp(4_000, 80_000)
-    } else {
-        (base.bitrate_kbps.saturating_mul(bitrate_pct) / 100).clamp(4_000, bitrate_max)
-    };
-    cfg
+        (base_bitrate.saturating_mul(bitrate_pct) / 100).clamp(4_000, bitrate_max)
+    }
+}
+
+fn quality_profile_for_level(level: u8, png_profile: bool) -> (u32, u32, u32) {
+    match (level, png_profile) {
+        (0, _) => (100, 100, 100),
+        (1, true) => (95, 80, 90),
+        (1, false) => (90, 90, 85),
+        (2, true) => (85, 60, 75),
+        (2, false) => (80, 80, 70),
+        (_, true) => (75, 45, 60),
+        (_, false) => (70, 70, 55),
+    }
 }
 
 /// Parse `"WxH"` into `(width, height)`.

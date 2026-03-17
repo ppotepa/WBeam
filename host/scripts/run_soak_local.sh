@@ -37,6 +37,11 @@ mkdir -p "$LOG_DIR"
 TS="$(date +%Y%m%d-%H%M%S)"
 DAEMON_LOG="$LOG_DIR/wbeamd-local-$TS.log"
 
+if ! command -v jq >/dev/null 2>&1; then
+  echo "[soak-local] jq is required" >&2
+  exit 1
+fi
+
 started_local_daemon=0
 daemon_pid=""
 
@@ -82,21 +87,18 @@ fi
 
 if [[ "$SOAK_APPLY_CONFIG" == "1" ]]; then
   apply_url="http://127.0.0.1:${CONTROL_PORT}/v1/apply"
-  apply_json="$(python3 - <<PY
-import json
-obj = {}
-size = "${SOAK_SIZE}".strip()
-fps = "${SOAK_FPS}".strip()
-bitrate = "${SOAK_BITRATE_KBPS}".strip()
-if size:
-    obj["size"] = size
-if fps:
-    obj["fps"] = int(fps)
-if bitrate:
-    obj["bitrate_kbps"] = int(bitrate)
-print(json.dumps(obj))
-PY
-)"
+  size="${SOAK_SIZE//[[:space:]]/}"
+  fps="${SOAK_FPS//[[:space:]]/}"
+  bitrate="${SOAK_BITRATE_KBPS//[[:space:]]/}"
+  apply_json="$(jq -nc \
+    --arg size "$size" \
+    --arg fps "$fps" \
+    --arg bitrate "$bitrate" '
+      {}
+      + (if $size != "" then {size: $size} else {} end)
+      + (if $fps != "" then {fps: ($fps | tonumber)} else {} end)
+      + (if $bitrate != "" then {bitrate_kbps: ($bitrate | tonumber)} else {} end)
+    ')"
   if [[ "$apply_json" != "{}" ]]; then
     echo "[soak-local] applying soak config: ${apply_json}"
     curl -fsS --max-time 4 -X POST "$apply_url" \
@@ -107,7 +109,7 @@ fi
 echo "[soak-local] live_adaptive_restart=${SOAK_ENABLE_LIVE_ADAPTIVE_RESTART}"
 
 if [[ "$AUTO_START_STREAM" == "1" ]]; then
-  current_state="$(curl -fsS --max-time 2 "$status_url" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("state",""))' || true)"
+  current_state="$(curl -fsS --max-time 2 "$status_url" | jq -r '.state // empty' || true)"
   case "$current_state" in
     STREAMING|STARTING|RECONNECTING)
       echo "[soak-local] stream state=$current_state (no explicit start needed)"
@@ -122,7 +124,7 @@ fi
 
 ready_stream=0
 for _ in $(seq 1 "$WAIT_STREAM_READY_SEC"); do
-  current_state="$(curl -fsS --max-time 2 "$status_url" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("state",""))' || true)"
+  current_state="$(curl -fsS --max-time 2 "$status_url" | jq -r '.state // empty' || true)"
   if [[ "$current_state" == "STREAMING" || "$current_state" == "STARTING" || "$current_state" == "RECONNECTING" ]]; then
     ready_stream=1
     break

@@ -11,7 +11,7 @@ import type {
 } from "../types";
 
 function normalizeApiError(err: unknown): string {
-  const text = String(err ?? "unknown error");
+  const text = formatUnknownError(err);
   if (text.toLowerCase().includes("timeout")) {
     return "Host API timeout. Check service state and USB connectivity.";
   }
@@ -19,6 +19,22 @@ function normalizeApiError(err: unknown): string {
     return "Host API unreachable. Verify desktop service is running.";
   }
   return text;
+}
+
+function formatUnknownError(err: unknown): string {
+  if (err == null) return "unknown error";
+  if (typeof err === "string") return err;
+  if (err instanceof Error) return err.message;
+  if (typeof err === "number" || typeof err === "boolean" || typeof err === "bigint") return String(err);
+  if (typeof err === "symbol") return err.description ?? err.toString();
+  if (typeof err === "object") {
+    try {
+      return JSON.stringify(err);
+    } catch {
+      return "unknown error";
+    }
+  }
+  return "unknown error";
 }
 
 async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {

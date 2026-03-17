@@ -25,44 +25,59 @@ public final class MainActivityStatusPresenter {
         return line == null || line.trim().isEmpty() ? DEFAULT_STATS_LINE : line;
     }
 
-    public static void renderStatus(
-            TextView statusText,
-            TextView detailText,
-            TextView bpsText,
-            View statusLed,
-            String state,
-            String info,
-            long bps,
-            boolean daemonReachable,
-            String daemonHostName,
-            String daemonStateUi,
-            String streamingState,
-            String connectingState
-    ) {
-        int color = StatusColorResolver.ledColorForState(state, streamingState, connectingState);
-        if (statusText != null) {
-            statusText.setText(state.toUpperCase(Locale.US));
+    public static final class RenderStatusInput {
+        private TextView statusText;
+        private TextView detailText;
+        private TextView bpsText;
+        private View statusLed;
+        private String state;
+        private String info;
+        private long bps;
+        private boolean daemonReachable;
+        private String daemonHostName;
+        private String daemonStateUi;
+        private String streamingState;
+        private String connectingState;
+
+        public RenderStatusInput setStatusText(TextView statusText) { this.statusText = statusText; return this; }
+        public RenderStatusInput setDetailText(TextView detailText) { this.detailText = detailText; return this; }
+        public RenderStatusInput setBpsText(TextView bpsText) { this.bpsText = bpsText; return this; }
+        public RenderStatusInput setStatusLed(View statusLed) { this.statusLed = statusLed; return this; }
+        public RenderStatusInput setState(String state) { this.state = state; return this; }
+        public RenderStatusInput setInfo(String info) { this.info = info; return this; }
+        public RenderStatusInput setBps(long bps) { this.bps = bps; return this; }
+        public RenderStatusInput setDaemonReachable(boolean daemonReachable) { this.daemonReachable = daemonReachable; return this; }
+        public RenderStatusInput setDaemonHostName(String daemonHostName) { this.daemonHostName = daemonHostName; return this; }
+        public RenderStatusInput setDaemonStateUi(String daemonStateUi) { this.daemonStateUi = daemonStateUi; return this; }
+        public RenderStatusInput setStreamingState(String streamingState) { this.streamingState = streamingState; return this; }
+        public RenderStatusInput setConnectingState(String connectingState) { this.connectingState = connectingState; return this; }
+    }
+
+    public static void renderStatus(RenderStatusInput input) {
+        int color = StatusColorResolver.ledColorForState(input.state, input.streamingState, input.connectingState);
+        if (input.statusText != null) {
+            input.statusText.setText(input.state.toUpperCase(Locale.US));
         }
-        if (detailText != null) {
-            detailText.setText(StatusTextFormatter.buildTransportDetail(
-                    info,
-                    daemonReachable,
-                    daemonHostName,
-                    daemonStateUi
+        if (input.detailText != null) {
+            input.detailText.setText(StatusTextFormatter.buildTransportDetail(
+                    input.info,
+                    input.daemonReachable,
+                    input.daemonHostName,
+                    input.daemonStateUi
             ));
         }
-        if (bpsText != null) {
-            bpsText.setText("throughput: " + StatusTextFormatter.formatBps(bps));
+        if (input.bpsText != null) {
+            input.bpsText.setText("throughput: " + StatusTextFormatter.formatBps(input.bps));
         }
 
-        if (statusLed == null) {
+        if (input.statusLed == null) {
             return;
         }
-        if (statusLed.getBackground() instanceof GradientDrawable) {
-            GradientDrawable drawable = (GradientDrawable) statusLed.getBackground().mutate();
+        if (input.statusLed.getBackground() instanceof GradientDrawable) {
+            GradientDrawable drawable = (GradientDrawable) input.statusLed.getBackground().mutate();
             drawable.setColor(color);
         } else {
-            statusLed.setBackgroundColor(color);
+            input.statusLed.setBackgroundColor(color);
         }
     }
 

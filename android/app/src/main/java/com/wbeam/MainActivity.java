@@ -284,10 +284,10 @@ public class MainActivity extends AppCompatActivity {
                         .setSetupSurfaceCallbacksTask(this::setupSurfaceCallbacks)
                         .setSetupButtonsTask(this::setupButtons)
                         .setLoadSavedSettingsTask(this::loadSavedSettings)
-                        .setUpdateIntraOnlyButtonTask(this::updateIntraOnlyButton)
-                        .setUpdateHostHintTask(this::updateHostHint)
-                        .setEnforceCursorOverlayPolicyTask(this::enforceCursorOverlayPolicy)
-                        .setUpdateSettingValueLabelsTask(this::updateSettingValueLabels)
+                        .setUpdateSettingValueLabelsTask(this::updateSettingValueLabels),
+                this::updateIntraOnlyButton,
+                this::updateHostHint,
+                this::enforceCursorOverlayPolicy
         );
     }
 

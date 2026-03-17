@@ -37,27 +37,28 @@ public final class MainUiControlsCoordinator {
             MainActivitySettingsInitializerHooksFactory.SettingsRefreshHandler refreshHandler
     ) {
         MainActivitySettingsInitializer.loadDefaults(
-                profileSpinner,
-                encoderSpinner,
-                cursorSpinner,
-                resolutionSeek,
-                fpsSeek,
-                bitrateSeek,
-                profileOptions,
-                encoderOptions,
-                cursorOptions,
-                defaultProfile,
-                preferredVideo,
-                defaultCursorMode,
-                defaultResScale,
-                defaultFps,
-                defaultBitrateMbps,
-                cursorOverlayController,
-                simpleMenuState,
-                MainActivitySettingsInitializerHooksFactory.create(
-                        persist -> enforceCursorPolicy.run(),
-                        refreshHandler
-                )
+                new MainActivitySettingsInitializer.DefaultsConfig()
+                        .setProfileSpinner(profileSpinner)
+                        .setEncoderSpinner(encoderSpinner)
+                        .setCursorSpinner(cursorSpinner)
+                        .setResolutionSeek(resolutionSeek)
+                        .setFpsSeek(fpsSeek)
+                        .setBitrateSeek(bitrateSeek)
+                        .setProfileOptions(profileOptions)
+                        .setEncoderOptions(encoderOptions)
+                        .setCursorOptions(cursorOptions)
+                        .setDefaultProfile(defaultProfile)
+                        .setPreferredVideo(preferredVideo)
+                        .setDefaultCursorMode(defaultCursorMode)
+                        .setDefaultResScale(defaultResScale)
+                        .setDefaultFps(defaultFps)
+                        .setDefaultBitrateMbps(defaultBitrateMbps)
+                        .setCursorOverlayController(cursorOverlayController)
+                        .setSimpleMenuState(simpleMenuState)
+                        .setHooks(MainActivitySettingsInitializerHooksFactory.create(
+                                persist -> enforceCursorPolicy.run(),
+                                refreshHandler
+                        ))
         );
     }
 

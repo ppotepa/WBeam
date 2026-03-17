@@ -43,9 +43,6 @@ public final class MainInitializationCoordinator {
         private UiTask setupSurfaceCallbacksTask;
         private UiTask setupButtonsTask;
         private UiTask loadSavedSettingsTask;
-        private UiTask updateIntraOnlyButtonTask;
-        private UiTask updateHostHintTask;
-        private CursorPolicyTask enforceCursorOverlayPolicyTask;
         private UiTask updateSettingValueLabelsTask;
 
         public UiBindingsConfig setLogTag(String logTag) {
@@ -98,21 +95,6 @@ public final class MainInitializationCoordinator {
             return this;
         }
 
-        public UiBindingsConfig setUpdateIntraOnlyButtonTask(UiTask updateIntraOnlyButtonTask) {
-            this.updateIntraOnlyButtonTask = updateIntraOnlyButtonTask;
-            return this;
-        }
-
-        public UiBindingsConfig setUpdateHostHintTask(UiTask updateHostHintTask) {
-            this.updateHostHintTask = updateHostHintTask;
-            return this;
-        }
-
-        public UiBindingsConfig setEnforceCursorOverlayPolicyTask(CursorPolicyTask enforceCursorOverlayPolicyTask) {
-            this.enforceCursorOverlayPolicyTask = enforceCursorOverlayPolicyTask;
-            return this;
-        }
-
         public UiBindingsConfig setUpdateSettingValueLabelsTask(UiTask updateSettingValueLabelsTask) {
             this.updateSettingValueLabelsTask = updateSettingValueLabelsTask;
             return this;
@@ -123,7 +105,12 @@ public final class MainInitializationCoordinator {
     }
 
     @SuppressWarnings("java:S1172")
-    public static boolean initializeUiBindings(UiBindingsConfig config) {
+    public static boolean initializeUiBindings(
+            UiBindingsConfig config,
+            UiTask updateIntraOnlyButtonTask,
+            UiTask updateHostHintTask,
+            CursorPolicyTask enforceCursorOverlayPolicyTask
+    ) {
         config.bindViewsTask.run();
         config.setScreenAlwaysOnTask.run();
 
@@ -137,21 +124,22 @@ public final class MainInitializationCoordinator {
 
         StartupBuildVersionPresenter.apply(startupBuildVersionText, BuildConfig.WBEAM_BUILD_REV);
         MainActivitySpinnersSetup.setup(
-                config.activity,
-                profileSpinner,
-                encoderSpinner,
-                cursorSpinner,
-                config.profileOptions,
-                config.encoderOptions,
-                config.cursorOptions,
-                () -> {
-                    config.updateIntraOnlyButtonTask.run();
-                    config.updateHostHintTask.run();
-                },
-                () -> {
-                    config.enforceCursorOverlayPolicyTask.apply(false);
-                    config.updateHostHintTask.run();
-                }
+                new MainActivitySpinnersSetup.SetupConfig()
+                        .setActivity(config.activity)
+                        .setProfileSpinner(profileSpinner)
+                        .setEncoderSpinner(encoderSpinner)
+                        .setCursorSpinner(cursorSpinner)
+                        .setProfileOptions(config.profileOptions)
+                        .setEncoderOptions(config.encoderOptions)
+                        .setCursorOptions(config.cursorOptions)
+                        .setOnProfileOrEncoderChange(() -> {
+                            updateIntraOnlyButtonTask.run();
+                            updateHostHintTask.run();
+                        })
+                        .setOnCursorChange(() -> {
+                            enforceCursorOverlayPolicyTask.apply(false);
+                            updateHostHintTask.run();
+                        })
         );
         MainActivityUiBinder.setupSeekbars(
                 resolutionSeek,

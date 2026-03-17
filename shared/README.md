@@ -7,7 +7,6 @@ Canonical shared domain boundary.
 `shared/` contains reusable cross-domain contracts:
 
 - protocol crates and scripts,
-- compatibility layers,
 - stable schemas and shared definitions.
 
 ## Migration Status
@@ -15,7 +14,6 @@ Canonical shared domain boundary.
 Active implementation lives in:
 
 - `shared/protocol`
-- `shared/compat`
 
 ## Contract
 

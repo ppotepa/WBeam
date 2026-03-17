@@ -21,8 +21,7 @@ use wbeamd_api::TransportRuntimeSnapshot;
 
 /// Build the command to launch the streamer for `cfg`.
 ///
-/// Prefers the compiled Rust binary at `<root>/host/rust/target/release/wbeamd-streamer`.
-/// Falls back to the Python helper when the binary is absent.
+/// Uses the compiled Rust binary at `<root>/host/rust/target/release/wbeamd-streamer`.
 pub fn build_streamer_command(
     root: &Path,
     cfg: &ActiveConfig,
@@ -32,65 +31,30 @@ pub fn build_streamer_command(
     let rust_bin = root.join("host/rust/target/release/wbeamd-streamer.exe");
     #[cfg(not(windows))]
     let rust_bin = root.join("host/rust/target/release/wbeamd-streamer");
-    let use_rust = rust_bin.exists();
-
-    let mut cmd = if use_rust {
-        let mut c = Command::new(&rust_bin);
-        c.arg("--port")
-            .arg(stream_port.to_string())
-            .arg("--encoder")
-            .arg(&cfg.encoder)
-            .arg("--cursor-mode")
-            .arg(&cfg.cursor_mode)
-            .arg("--size")
-            .arg(&cfg.size)
-            .arg("--fps")
-            .arg(cfg.fps.to_string())
-            .arg("--bitrate-kbps")
-            .arg(cfg.bitrate_kbps.to_string())
-            .arg("--debug-fps")
-            .arg(cfg.debug_fps.to_string());
-        if cfg.intra_only {
-            c.arg("--intra-only");
-        }
-        c
-    } else {
-        let script = root.join("host/scripts/stream_wayland_portal_h264.py");
-        let mut c = if cfg!(windows) {
-            let mut py = Command::new("py");
-            py.arg("-3");
-            py
-        } else {
-            Command::new("python3")
-        };
-        c.arg("-u")
-            .arg(script)
-            .arg("--port")
-            .arg(stream_port.to_string())
-            .arg("--encoder")
-            .arg(&cfg.encoder)
-            .arg("--cursor-mode")
-            .arg(&cfg.cursor_mode)
-            .arg("--size")
-            .arg(&cfg.size)
-            .arg("--fps")
-            .arg(cfg.fps.to_string())
-            .arg("--bitrate-kbps")
-            .arg(cfg.bitrate_kbps.to_string())
-            .arg("--debug-dir")
-            .arg("/tmp/wbeam-frames")
-            .arg("--debug-fps")
-            .arg(cfg.debug_fps.to_string())
-            .arg("--framed")
-            .env("PYTHONUNBUFFERED", "1");
-        c
-    };
+    let mut cmd = Command::new(&rust_bin);
+    cmd.arg("--port")
+        .arg(stream_port.to_string())
+        .arg("--encoder")
+        .arg(&cfg.encoder)
+        .arg("--cursor-mode")
+        .arg(&cfg.cursor_mode)
+        .arg("--size")
+        .arg(&cfg.size)
+        .arg("--fps")
+        .arg(cfg.fps.to_string())
+        .arg("--bitrate-kbps")
+        .arg(cfg.bitrate_kbps.to_string())
+        .arg("--debug-fps")
+        .arg(cfg.debug_fps.to_string());
+    if cfg.intra_only {
+        cmd.arg("--intra-only");
+    }
 
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    (cmd, use_rust)
+    (cmd, true)
 }
 
 /// Send SIGTERM then SIGKILL to `pid` with a short delay in between.
@@ -193,7 +157,6 @@ pub fn parse_transport_event(json: &str) -> Option<TransportRuntimeSnapshot> {
     }
     Some(out)
 }
-
 
 /// compile time, or a default placeholder).
 pub fn build_revision() -> String {

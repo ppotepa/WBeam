@@ -10,54 +10,69 @@ pub(super) struct BufferProfile {
     pub(super) queue_time_ns: u64,
 }
 
+fn profile_with_buffers(
+    frame_ns: u64,
+    queue_buffers: u32,
+    appsink_buffers: u32,
+    queue_leaky: &'static str,
+    appsink_drop: bool,
+    use_videorate: bool,
+) -> BufferProfile {
+    BufferProfile {
+        queue_buffers,
+        appsink_buffers,
+        queue_leaky,
+        appsink_drop,
+        appsink_sync: false,
+        use_videorate,
+        queue_time_ns: frame_ns.saturating_mul(queue_buffers as u64),
+    }
+}
+
 pub(super) fn buffer_profile(mode: StreamMode, fps: u32, mode_png: bool) -> BufferProfile {
     let frame_ns = (1_000_000_000u64 / fps.max(1) as u64).max(1);
     match mode {
-        StreamMode::Ultra => {
-            let queue_buffers = if mode_png { 4 } else { 3 };
-            let appsink_buffers = if mode_png { 2 } else { 1 };
-            BufferProfile {
-                queue_buffers,
-                appsink_buffers,
-                queue_leaky: "downstream",
-                appsink_drop: true,
-                appsink_sync: false,
-                use_videorate: !mode_png,
-                queue_time_ns: frame_ns.saturating_mul(queue_buffers as u64),
-            }
-        }
-        StreamMode::Stable => {
-            let queue_buffers = if mode_png { 12 } else { 10 };
-            let appsink_buffers = if mode_png { 10 } else { 8 };
-            BufferProfile {
-                queue_buffers,
-                appsink_buffers,
-                queue_leaky: "upstream",
-                appsink_drop: false,
-                appsink_sync: false,
-                use_videorate: false,
-                queue_time_ns: frame_ns.saturating_mul(queue_buffers as u64),
-            }
-        }
-        StreamMode::Quality => {
-            let queue_buffers = if mode_png { 20 } else { 24 };
-            let appsink_buffers = if mode_png { 16 } else { 20 };
-            BufferProfile {
-                queue_buffers,
-                appsink_buffers,
-                queue_leaky: "upstream",
-                // drop=true: allow bounded frame loss under backpressure rather
-                // than blocking the whole GStreamer pipeline.  Quality mode still
-                // uses the deepest queues, so in normal operation nothing is
-                // dropped; the setting only fires when the network or sender
-                // cannot keep pace — exactly when stalling would be worse.
-                appsink_drop: true,
-                // sync=false: appsink must not block waiting for the clock when
-                // drop is enabled (sync+no-drop would stall on a full queue).
-                appsink_sync: false,
-                use_videorate: false,
-                queue_time_ns: frame_ns.saturating_mul(queue_buffers as u64),
-            }
-        }
+        StreamMode::Ultra => build_ultra_profile(frame_ns, mode_png),
+        StreamMode::Stable => build_stable_profile(frame_ns, mode_png),
+        StreamMode::Quality => build_quality_profile(frame_ns, mode_png),
     }
+}
+
+fn build_ultra_profile(frame_ns: u64, mode_png: bool) -> BufferProfile {
+    let queue_buffers = if mode_png { 4 } else { 3 };
+    let appsink_buffers = if mode_png { 2 } else { 1 };
+    profile_with_buffers(
+        frame_ns,
+        queue_buffers,
+        appsink_buffers,
+        "downstream",
+        true,
+        !mode_png,
+    )
+}
+
+fn build_stable_profile(frame_ns: u64, mode_png: bool) -> BufferProfile {
+    let queue_buffers = if mode_png { 12 } else { 10 };
+    let appsink_buffers = if mode_png { 10 } else { 8 };
+    profile_with_buffers(
+        frame_ns,
+        queue_buffers,
+        appsink_buffers,
+        "upstream",
+        false,
+        false,
+    )
+}
+
+fn build_quality_profile(frame_ns: u64, mode_png: bool) -> BufferProfile {
+    let queue_buffers = if mode_png { 20 } else { 24 };
+    let appsink_buffers = if mode_png { 16 } else { 20 };
+    profile_with_buffers(
+        frame_ns,
+        queue_buffers,
+        appsink_buffers,
+        "upstream",
+        true,
+        false,
+    )
 }

@@ -42,6 +42,36 @@ pub(crate) struct SessionRegistry {
 }
 
 impl SessionRegistry {
+    fn single_serial_core(guard: &SessionMaps) -> Option<Arc<DaemonCore>> {
+        (guard.by_serial.len() == 1)
+            .then(|| guard.by_serial.iter().next().map(|(_, s)| s.core.clone()))
+            .flatten()
+    }
+
+    fn should_reuse_serial_binding(
+        requested_stream_port: Option<u16>,
+        existing_stream_port: u16,
+        legacy_android_port: u16,
+    ) -> bool {
+        requested_stream_port
+            .map(|p| p == existing_stream_port || p == legacy_android_port)
+            .unwrap_or(true)
+    }
+
+    fn normalize_requested_port(&self, requested_stream_port: Option<u16>) -> Option<u16> {
+        requested_stream_port.filter(|p| *p > 0).map(|port| {
+            if port == self.control_port {
+                port.saturating_add(1)
+            } else {
+                port
+            }
+        })
+    }
+
+    fn serial_key(serial: Option<&str>) -> Option<&str> {
+        serial.map(str::trim).filter(|s| !s.is_empty())
+    }
+
     pub(crate) fn new(
         root: PathBuf,
         base_stream_port: u16,
@@ -62,136 +92,80 @@ impl SessionRegistry {
         }
     }
 
-    // NOSONAR S3776 - Multi-level session routing requires nested conditionals
     pub(crate) async fn resolve_core(
         &self,
         serial: Option<&str>,
         requested_stream_port: Option<u16>,
     ) -> Arc<DaemonCore> {
         let legacy_android_port = self.base_stream_port.saturating_add(2);
-        let requested_stream_port = requested_stream_port.filter(|p| *p > 0).map(|port| {
-            if port == self.control_port {
-                port.saturating_add(1)
-            } else {
-                port
-            }
-        });
+        let requested_stream_port = self.normalize_requested_port(requested_stream_port);
 
-        if let Some(raw) = serial {
-            let normalized = raw.trim();
-            if !normalized.is_empty() {
-                // Collect the mismatched entry (if any) before acquiring the
-                // lock to call stop() — stop() is async and must not be called
-                // while holding the sessions lock.
-                let mismatched = {
-                    let guard = self.sessions.lock().await;
-                    guard.by_serial.get(normalized).and_then(|existing| {
-                        let port_matches = requested_stream_port
-                            .map(|p| p == existing.stream_port)
-                            .unwrap_or(true);
-                        let is_legacy_alias = requested_stream_port
-                            .map(|p| p == legacy_android_port)
-                            .unwrap_or(false);
-                        if port_matches {
-                            return None; // fast path: already registered with matching port
-                        }
-                        if is_legacy_alias {
-                            info!(
-                                serial = normalized,
-                                requested_stream_port = legacy_android_port,
-                                bound_stream_port = existing.stream_port,
-                                "legacy stream_port alias query; keeping existing serial-bound core"
-                            );
-                            return None;
-                        }
-                        Some(existing.clone())
-                    })
-                };
+        if let Some(normalized) = Self::serial_key(serial) {
+            return self
+                .resolve_core_with_serial(normalized, requested_stream_port, legacy_android_port)
+                .await;
+        }
 
-                // Fast path: serial already registered with matching port (or alias).
-                // Re-acquire to return the core now that we've dropped the lock.
-                if mismatched.is_none() {
-                    let guard = self.sessions.lock().await;
-                    if let Some(existing) = guard.by_serial.get(normalized) {
-                        let port_matches = requested_stream_port
-                            .map(|p| p == existing.stream_port || p == legacy_android_port)
-                            .unwrap_or(true);
-                        if port_matches {
-                            return existing.core.clone();
-                        }
-                    }
-                }
+        self.resolve_core_without_serial(requested_stream_port)
+            .await
+    }
 
-                if let Some(existing) = mismatched {
-                    info!(
-                        serial = normalized,
-                        from_stream_port = existing.stream_port,
-                        requested_stream_port =
-                            requested_stream_port.unwrap_or(existing.stream_port),
-                        "releasing mismatched daemon session core for serial"
-                    );
-                    self.forget_core(&existing.core).await;
-                    let _ = existing.core.stop().await;
-                }
+    async fn resolve_core_with_serial(
+        &self,
+        normalized: &str,
+        requested_stream_port: Option<u16>,
+        legacy_android_port: u16,
+    ) -> Arc<DaemonCore> {
+        let mismatched = {
+            let guard = self.sessions.lock().await;
+            self.find_serial_mismatch(
+                &guard,
+                normalized,
+                requested_stream_port,
+                legacy_android_port,
+            )
+        };
 
-                // Single lock acquisition for the rest of the resolve logic.
-                let mut guard = self.sessions.lock().await;
-
-                // Re-check after the mismatch cleanup.
-                if let Some(existing) = guard.by_serial.get(normalized) {
-                    if requested_stream_port
-                        .map(|p| p == existing.stream_port)
-                        .unwrap_or(true)
-                    {
-                        return existing.core.clone();
-                    }
-                }
-
-                // Bind to an existing port-keyed core if the requested port is known.
-                if let Some(stream_port) = requested_stream_port {
-                    if let Some(existing) = guard.by_port.get(&stream_port).cloned() {
-                        guard
-                            .by_serial
-                            .insert(normalized.to_string(), existing.clone());
-                        info!(
-                            serial = normalized,
-                            stream_port,
-                            "bound serial to existing daemon session core by requested stream port"
-                        );
-                        return existing.core.clone();
-                    }
-                }
-
-                // Create a new core for this serial.
-                let stream_port = requested_stream_port.unwrap_or_else(|| {
-                    self.base_stream_port
-                        .saturating_add(2 + guard.by_serial.len() as u16)
-                });
-                let core = Arc::new(DaemonCore::new_for_session(
-                    self.root.clone(),
-                    stream_port,
-                    self.control_port,
-                    Some(format!("serial-{normalized}")),
-                    Some(normalized.to_string()),
-                ));
-                let entry = SessionCore {
-                    core: core.clone(),
-                    stream_port,
-                };
-                guard.by_serial.insert(normalized.to_string(), entry.clone());
-                guard.by_port.insert(stream_port, entry);
-                info!(serial = normalized, stream_port, "created daemon session core");
+        if mismatched.is_none() {
+            if let Some(core) = self
+                .reuse_serial_core(normalized, requested_stream_port, legacy_android_port)
+                .await
+            {
                 return core;
             }
         }
 
-        // Serial unknown/empty on some Android builds — use stream_port as key.
+        if let Some(existing) = mismatched {
+            self.release_mismatched_serial_core(normalized, requested_stream_port, existing)
+                .await;
+        }
+
+        let mut guard = self.sessions.lock().await;
+        if let Some(core) = Self::reuse_serial_core_from_guard(
+            &guard,
+            normalized,
+            requested_stream_port,
+            legacy_android_port,
+        ) {
+            return core;
+        }
+        if let Some(core) =
+            Self::bind_serial_to_requested_port(&mut guard, normalized, requested_stream_port)
+        {
+            return core;
+        }
+
+        self.create_serial_core(&mut guard, normalized, requested_stream_port)
+    }
+
+    async fn resolve_core_without_serial(
+        &self,
+        requested_stream_port: Option<u16>,
+    ) -> Arc<DaemonCore> {
         {
             let guard = self.sessions.lock().await;
-            if guard.by_serial.len() == 1 {
-                if let Some((_, session)) = guard.by_serial.iter().next() {
-                    return session.core.clone();
-                }
+            if let Some(core) = Self::single_serial_core(&guard) {
+                return core;
             }
         }
 
@@ -201,10 +175,12 @@ impl SessionRegistry {
         if stream_port == self.base_stream_port {
             return self.default_core.clone();
         }
+
         let mut guard = self.sessions.lock().await;
         if let Some(existing) = guard.by_port.get(&stream_port) {
             return existing.core.clone();
         }
+
         let core = Arc::new(DaemonCore::new_for_session(
             self.root.clone(),
             stream_port,
@@ -223,69 +199,192 @@ impl SessionRegistry {
         core
     }
 
+    fn find_serial_mismatch(
+        &self,
+        guard: &SessionMaps,
+        normalized: &str,
+        requested_stream_port: Option<u16>,
+        legacy_android_port: u16,
+    ) -> Option<SessionCore> {
+        guard.by_serial.get(normalized).and_then(|existing| {
+            let port_matches = requested_stream_port
+                .map(|p| p == existing.stream_port)
+                .unwrap_or(true);
+            if port_matches {
+                return None;
+            }
+            if requested_stream_port == Some(legacy_android_port) {
+                info!(
+                    serial = normalized,
+                    requested_stream_port = legacy_android_port,
+                    bound_stream_port = existing.stream_port,
+                    "legacy stream_port alias query; keeping existing serial-bound core"
+                );
+                return None;
+            }
+            Some(existing.clone())
+        })
+    }
+
+    async fn reuse_serial_core(
+        &self,
+        normalized: &str,
+        requested_stream_port: Option<u16>,
+        legacy_android_port: u16,
+    ) -> Option<Arc<DaemonCore>> {
+        let guard = self.sessions.lock().await;
+        Self::reuse_serial_core_from_guard(
+            &guard,
+            normalized,
+            requested_stream_port,
+            legacy_android_port,
+        )
+    }
+
+    fn reuse_serial_core_from_guard(
+        guard: &SessionMaps,
+        normalized: &str,
+        requested_stream_port: Option<u16>,
+        legacy_android_port: u16,
+    ) -> Option<Arc<DaemonCore>> {
+        let existing = guard.by_serial.get(normalized)?;
+        Self::should_reuse_serial_binding(
+            requested_stream_port,
+            existing.stream_port,
+            legacy_android_port,
+        )
+        .then(|| existing.core.clone())
+    }
+
+    async fn release_mismatched_serial_core(
+        &self,
+        normalized: &str,
+        requested_stream_port: Option<u16>,
+        existing: SessionCore,
+    ) {
+        info!(
+            serial = normalized,
+            from_stream_port = existing.stream_port,
+            requested_stream_port = requested_stream_port.unwrap_or(existing.stream_port),
+            "releasing mismatched daemon session core for serial"
+        );
+        self.forget_core(&existing.core).await;
+        let _ = existing.core.stop().await;
+    }
+
+    fn bind_serial_to_requested_port(
+        guard: &mut SessionMaps,
+        normalized: &str,
+        requested_stream_port: Option<u16>,
+    ) -> Option<Arc<DaemonCore>> {
+        let stream_port = requested_stream_port?;
+        let existing = guard.by_port.get(&stream_port).cloned()?;
+        guard
+            .by_serial
+            .insert(normalized.to_string(), existing.clone());
+        info!(
+            serial = normalized,
+            stream_port, "bound serial to existing daemon session core by requested stream port"
+        );
+        Some(existing.core)
+    }
+
+    fn create_serial_core(
+        &self,
+        guard: &mut SessionMaps,
+        normalized: &str,
+        requested_stream_port: Option<u16>,
+    ) -> Arc<DaemonCore> {
+        let stream_port = requested_stream_port.unwrap_or_else(|| {
+            self.base_stream_port
+                .saturating_add(2 + guard.by_serial.len() as u16)
+        });
+        let core = Arc::new(DaemonCore::new_for_session(
+            self.root.clone(),
+            stream_port,
+            self.control_port,
+            Some(format!("serial-{normalized}")),
+            Some(normalized.to_string()),
+        ));
+        let entry = SessionCore {
+            core: core.clone(),
+            stream_port,
+        };
+        guard
+            .by_serial
+            .insert(normalized.to_string(), entry.clone());
+        guard.by_port.insert(stream_port, entry);
+        info!(
+            serial = normalized,
+            stream_port, "created daemon session core"
+        );
+        core
+    }
+
     // NOSONAR S3776 - Session lookup logic requires nested conditionals
     pub(crate) async fn resolve_core_readonly(
         &self,
         serial: Option<&str>,
         requested_stream_port: Option<u16>,
     ) -> Option<Arc<DaemonCore>> {
-        let requested_stream_port = requested_stream_port.filter(|p| *p > 0).map(|port| {
-            if port == self.control_port {
-                port.saturating_add(1)
-            } else {
-                port
-            }
-        });
+        let requested_stream_port = self.normalize_requested_port(requested_stream_port);
 
-        if let Some(raw) = serial {
-            let normalized = raw.trim();
-            if !normalized.is_empty() {
-                let guard = self.sessions.lock().await;
-                if let Some(existing) = guard.by_serial.get(normalized) {
-                    if let Some(port) = requested_stream_port {
-                        if port != existing.stream_port {
-                            info!(
-                                serial = normalized,
-                                requested_stream_port = port,
-                                bound_stream_port = existing.stream_port,
-                                "readonly session query stream_port mismatch; using serial-bound core"
-                            );
-                        }
-                    }
-                    return Some(existing.core.clone());
-                }
-                if let Some(stream_port) = requested_stream_port {
-                    if stream_port == self.base_stream_port {
-                        return Some(self.default_core.clone());
-                    }
-                    if let Some(existing) = guard.by_port.get(&stream_port) {
-                        return Some(existing.core.clone());
-                    }
-                }
-                return None;
-            }
+        if let Some(normalized) = Self::serial_key(serial) {
+            return self
+                .resolve_core_readonly_by_serial(normalized, requested_stream_port)
+                .await;
         }
 
-        // Single-device shortcut for serial-less APK builds.
-        {
-            let guard = self.sessions.lock().await;
-            if guard.by_serial.len() == 1 {
-                if let Some((_, session)) = guard.by_serial.iter().next() {
-                    return Some(session.core.clone());
-                }
-            }
-            if let Some(stream_port) = requested_stream_port {
-                if stream_port == self.base_stream_port {
-                    return Some(self.default_core.clone());
-                }
-                if let Some(existing) = guard.by_port.get(&stream_port) {
-                    return Some(existing.core.clone());
-                }
-                return None;
-            }
-        }
+        self.resolve_core_readonly_without_serial(requested_stream_port)
+            .await
+    }
 
+    async fn resolve_core_readonly_without_serial(
+        &self,
+        requested_stream_port: Option<u16>,
+    ) -> Option<Arc<DaemonCore>> {
+        let guard = self.sessions.lock().await;
+        if let Some(core) = Self::single_serial_core(&guard) {
+            return Some(core);
+        }
+        if let Some(stream_port) = requested_stream_port {
+            return self.lookup_by_port_or_default(&guard, stream_port);
+        }
         Some(self.default_core.clone())
+    }
+
+    async fn resolve_core_readonly_by_serial(
+        &self,
+        normalized: &str,
+        requested_stream_port: Option<u16>,
+    ) -> Option<Arc<DaemonCore>> {
+        let guard = self.sessions.lock().await;
+        if let Some(existing) = guard.by_serial.get(normalized) {
+            if let Some(port) = requested_stream_port.filter(|p| *p != existing.stream_port) {
+                info!(
+                    serial = normalized,
+                    requested_stream_port = port,
+                    bound_stream_port = existing.stream_port,
+                    "readonly session query stream_port mismatch; using serial-bound core"
+                );
+            }
+            return Some(existing.core.clone());
+        }
+        requested_stream_port.and_then(|port| self.lookup_by_port_or_default(&guard, port))
+    }
+
+    fn lookup_by_port_or_default(
+        &self,
+        guard: &SessionMaps,
+        stream_port: u16,
+    ) -> Option<Arc<DaemonCore>> {
+        if stream_port == self.base_stream_port {
+            return Some(self.default_core.clone());
+        }
+        guard
+            .by_port
+            .get(&stream_port)
+            .map(|existing| existing.core.clone())
     }
 
     pub(crate) fn default_core(&self) -> Arc<DaemonCore> {

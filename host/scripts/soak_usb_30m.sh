@@ -34,6 +34,11 @@ mkdir -p "$LOG_DIR"
 TS="$(date +%Y%m%d-%H%M%S)"
 LOG_FILE="$LOG_DIR/soak-usb-$TS.log"
 
+if ! command -v jq >/dev/null 2>&1; then
+  echo "[soak] jq is required" | tee -a "$LOG_FILE"
+  exit 1
+fi
+
 echo "[soak] started at $(date -Iseconds)" | tee -a "$LOG_FILE"
 echo "[soak] duration=${DURATION_SEC}s poll=${POLL_SEC}s max_no_present=${MAX_NO_PRESENT_SEC}s" | tee -a "$LOG_FILE"
 echo "[soak] thresholds: min_recv_fps=${MIN_RECV_FPS} max_present_fps=${MAX_PRESENT_FPS}" | tee -a "$LOG_FILE"
@@ -81,24 +86,20 @@ while [[ "$(date +%s)" -lt "$deadline" ]]; do
   metrics_missing_streak=0
 
   read -r state run_id cfg_size cfg_fps cfg_bitrate recv_fps present_fps recv_bps reconnects drops <<<"$(
-    python3 - "$raw" <<'PY'
-import json, sys
-d = json.loads(sys.argv[1])
-m = d.get("metrics", {})
-k = m.get("kpi", {})
-state = d.get("state", "")
-run_id = d.get("run_id", 0)
-cfg = d.get("active_config", {})
-cfg_size = str(cfg.get("size", "-"))
-cfg_fps = str(cfg.get("fps", "-"))
-cfg_bitrate = str(cfg.get("bitrate_kbps", "-"))
-recv_fps = float(k.get("recv_fps", 0.0))
-present_fps = float(k.get("present_fps", 0.0))
-recv_bps = int(m.get("bitrate_actual_bps", 0))
-reconnects = int(m.get("reconnects", 0))
-drops = int(m.get("drops", 0))
-print(state, run_id, cfg_size, cfg_fps, cfg_bitrate, f"{recv_fps:.2f}", f"{present_fps:.2f}", recv_bps, reconnects, drops)
-PY
+    jq -r '
+      [
+        (.state // ""),
+        ((.run_id // 0) | tostring),
+        (.active_config.size // "-"),
+        ((.active_config.fps // "-") | tostring),
+        ((.active_config.bitrate_kbps // "-") | tostring),
+        ((.metrics.kpi.recv_fps // 0) | tonumber | tostring),
+        ((.metrics.kpi.present_fps // 0) | tonumber | tostring),
+        ((.metrics.bitrate_actual_bps // 0) | tostring),
+        ((.metrics.reconnects // 0) | tostring),
+        ((.metrics.drops // 0) | tostring)
+      ] | @tsv
+    ' <<<"$raw"
   )"
 
   samples=$((samples + 1))

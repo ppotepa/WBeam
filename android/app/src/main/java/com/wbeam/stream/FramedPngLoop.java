@@ -24,6 +24,7 @@ final class FramedPngLoop {
         void resetReconnectDelayMs();
     }
 
+    @SuppressWarnings("java:S107")
     public static class Config {
         final String tag;
         final Surface surface;

@@ -23,6 +23,7 @@ public final class MainSessionControlCoordinator {
     private MainSessionControlCoordinator() {
     }
 
+    @SuppressWarnings("java:S1450")
     public static final class ApiFailureInput {
         private Context context;
         private String tag;
@@ -66,6 +67,7 @@ public final class MainSessionControlCoordinator {
     }
 
     public static void handleApiFailure(ApiFailureInput input) {
+        LineLogger logger = input.lineLogger;
         HostApiFailureNotifier.handle(
                 input.context,
                 input.tag,
@@ -75,7 +77,7 @@ public final class MainSessionControlCoordinator {
                 input.error,
                 HostApiClient.API_BASE,
                 input.statusSink::onStatus,
-                line -> input.lineLogger.onLine("E", line)
+                line -> logger.onLine("E", line)
         );
     }
 

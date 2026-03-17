@@ -63,7 +63,10 @@ impl PreparedCapture {
             PreparedCapture::BenchmarkGame => "benchmark_game",
         };
         // Machine-readable event — consumed by wbeamd-core to transition to STATE_STREAMING.
-        emit_event("streaming_started", &format!("\"backend\":\"{backend}\",\"port\":{port}"));
+        emit_event(
+            "streaming_started",
+            &format!("\"backend\":\"{backend}\",\"port\":{port}"),
+        );
         // Human-readable log line (kept for backwards compat and log readability).
         match self {
             PreparedCapture::Wayland(_) => {

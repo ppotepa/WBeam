@@ -8,14 +8,14 @@ cd "$ROOT_DIR"
 
 rm -f "$OUT_FILE"
 {
-  echo "# WBeam clean concat (android + rust + python)"
+  echo "# WBeam clean concat (android + rust)"
   echo "# Generated: $(date -Iseconds)"
   echo
 } >> "$OUT_FILE"
 
 find . -type f \
   \( -path './android/*' -o -path './host/*' -o -path './shared/protocol/*' \) \
-  \( -name '*.rs' -o -name '*.toml' -o -name '*.py' -o -name '*.java' -o -name '*.kt' -o -name '*.kts' -o -name '*.xml' -o -name '*.gradle' -o -name '*.properties' -o -name '*.pro' \) \
+  \( -name '*.rs' -o -name '*.toml' -o -name '*.java' -o -name '*.kt' -o -name '*.kts' -o -name '*.xml' -o -name '*.gradle' -o -name '*.properties' -o -name '*.pro' \) \
   ! -path '*/build/*' \
   ! -path '*/target/*' \
   ! -path '*/.gradle/*' \

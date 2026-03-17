@@ -134,6 +134,27 @@ pub(crate) fn daemon_lock_hint() -> Option<String> {
     None
 }
 
+fn terminate_and_cleanup_lock(lock_path: &PathBuf, pid: u32) {
+    let pid_s = pid.to_string();
+    let _ = Command::new("kill").args(["-TERM", &pid_s]).status();
+    for _ in 0..10 {
+        if !process_exists(pid) {
+            let _ = fs::remove_file(lock_path);
+            return;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+
+    let _ = Command::new("kill").args(["-KILL", &pid_s]).status();
+    for _ in 0..10 {
+        if !process_exists(pid) {
+            let _ = fs::remove_file(lock_path);
+            return;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
 pub(crate) fn stop_conflicting_lock_holder() {
     for lock in ["/tmp/wbeamd.lock", "/tmp/wbeamd-service-5001.lock"] {
         let lock_path = PathBuf::from(lock);
@@ -146,26 +167,7 @@ pub(crate) fn stop_conflicting_lock_holder() {
         if !process_name_matches(pid, "wbeamd-server") {
             continue;
         }
-
-        let pid_s = pid.to_string();
-        let _ = Command::new("kill").args(["-TERM", &pid_s]).status();
-        for _ in 0..10 {
-            if !process_exists(pid) {
-                let _ = fs::remove_file(&lock_path);
-                break;
-            }
-            thread::sleep(Duration::from_millis(100));
-        }
-        if process_exists(pid) {
-            let _ = Command::new("kill").args(["-KILL", &pid_s]).status();
-            for _ in 0..10 {
-                if !process_exists(pid) {
-                    let _ = fs::remove_file(&lock_path);
-                    break;
-                }
-                thread::sleep(Duration::from_millis(100));
-            }
-        }
+        terminate_and_cleanup_lock(&lock_path, pid);
     }
 }
 

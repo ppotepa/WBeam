@@ -14,50 +14,71 @@ public final class MainActivitySettingsInitializer {
     private MainActivitySettingsInitializer() {
     }
 
-    public static void loadDefaults(
-            Spinner profileSpinner,
-            Spinner encoderSpinner,
-            Spinner cursorSpinner,
-            SeekBar resolutionSeek,
-            SeekBar fpsSeek,
-            SeekBar bitrateSeek,
-            String[] profileOptions,
-            String[] encoderOptions,
-            String[] cursorOptions,
-            String defaultProfile,
-            String preferredVideo,
-            String defaultCursorMode,
-            int defaultResScale,
-            int defaultFps,
-            int defaultBitrateMbps,
-            CursorOverlayController cursorOverlayController,
-            MainActivitySimpleMenuCoordinator.State simpleMenuState,
-            Hooks hooks
-    ) {
+    public static final class DefaultsConfig {
+        private Spinner profileSpinner;
+        private Spinner encoderSpinner;
+        private Spinner cursorSpinner;
+        private SeekBar resolutionSeek;
+        private SeekBar fpsSeek;
+        private SeekBar bitrateSeek;
+        private String[] profileOptions;
+        private String[] encoderOptions;
+        private String[] cursorOptions;
+        private String defaultProfile;
+        private String preferredVideo;
+        private String defaultCursorMode;
+        private int defaultResScale;
+        private int defaultFps;
+        private int defaultBitrateMbps;
+        private CursorOverlayController cursorOverlayController;
+        private MainActivitySimpleMenuCoordinator.State simpleMenuState;
+        private Hooks hooks;
+
+        public DefaultsConfig setProfileSpinner(Spinner profileSpinner) { this.profileSpinner = profileSpinner; return this; }
+        public DefaultsConfig setEncoderSpinner(Spinner encoderSpinner) { this.encoderSpinner = encoderSpinner; return this; }
+        public DefaultsConfig setCursorSpinner(Spinner cursorSpinner) { this.cursorSpinner = cursorSpinner; return this; }
+        public DefaultsConfig setResolutionSeek(SeekBar resolutionSeek) { this.resolutionSeek = resolutionSeek; return this; }
+        public DefaultsConfig setFpsSeek(SeekBar fpsSeek) { this.fpsSeek = fpsSeek; return this; }
+        public DefaultsConfig setBitrateSeek(SeekBar bitrateSeek) { this.bitrateSeek = bitrateSeek; return this; }
+        public DefaultsConfig setProfileOptions(String[] profileOptions) { this.profileOptions = profileOptions; return this; }
+        public DefaultsConfig setEncoderOptions(String[] encoderOptions) { this.encoderOptions = encoderOptions; return this; }
+        public DefaultsConfig setCursorOptions(String[] cursorOptions) { this.cursorOptions = cursorOptions; return this; }
+        public DefaultsConfig setDefaultProfile(String defaultProfile) { this.defaultProfile = defaultProfile; return this; }
+        public DefaultsConfig setPreferredVideo(String preferredVideo) { this.preferredVideo = preferredVideo; return this; }
+        public DefaultsConfig setDefaultCursorMode(String defaultCursorMode) { this.defaultCursorMode = defaultCursorMode; return this; }
+        public DefaultsConfig setDefaultResScale(int defaultResScale) { this.defaultResScale = defaultResScale; return this; }
+        public DefaultsConfig setDefaultFps(int defaultFps) { this.defaultFps = defaultFps; return this; }
+        public DefaultsConfig setDefaultBitrateMbps(int defaultBitrateMbps) { this.defaultBitrateMbps = defaultBitrateMbps; return this; }
+        public DefaultsConfig setCursorOverlayController(CursorOverlayController cursorOverlayController) { this.cursorOverlayController = cursorOverlayController; return this; }
+        public DefaultsConfig setSimpleMenuState(MainActivitySimpleMenuCoordinator.State simpleMenuState) { this.simpleMenuState = simpleMenuState; return this; }
+        public DefaultsConfig setHooks(Hooks hooks) { this.hooks = hooks; return this; }
+    }
+
+    public static void loadDefaults(DefaultsConfig config) {
         MainActivitySettingsPresenter.applyDefaultSettings(
-                profileSpinner,
-                encoderSpinner,
-                cursorSpinner,
-                resolutionSeek,
-                fpsSeek,
-                bitrateSeek,
-                profileOptions,
-                encoderOptions,
-                cursorOptions,
-                defaultProfile,
-                preferredVideo,
-                defaultCursorMode,
-                defaultResScale,
-                defaultFps,
-                defaultBitrateMbps
+                config.profileSpinner,
+                config.encoderSpinner,
+                config.cursorSpinner,
+                config.resolutionSeek,
+                config.fpsSeek,
+                config.bitrateSeek,
+                config.profileOptions,
+                config.encoderOptions,
+                config.cursorOptions,
+                config.defaultProfile,
+                config.preferredVideo,
+                config.defaultCursorMode,
+                config.defaultResScale,
+                config.defaultFps,
+                config.defaultBitrateMbps
         );
-        if (cursorOverlayController != null) {
-            cursorOverlayController.resetEnabledDefault();
+        if (config.cursorOverlayController != null) {
+            config.cursorOverlayController.resetEnabledDefault();
         }
-        hooks.enforceCursorOverlayPolicy(false);
-        simpleMenuState.setMode(preferredVideo);
-        simpleMenuState.setFps(defaultFps);
-        simpleMenuState.setVisible(false);
-        hooks.refreshSettingsUi(true);
+        config.hooks.enforceCursorOverlayPolicy(false);
+        config.simpleMenuState.setMode(config.preferredVideo);
+        config.simpleMenuState.setFps(config.defaultFps);
+        config.simpleMenuState.setVisible(false);
+        config.hooks.refreshSettingsUi(true);
     }
 }

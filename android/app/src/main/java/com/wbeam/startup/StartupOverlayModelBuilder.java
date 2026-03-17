@@ -13,6 +13,7 @@ public final class StartupOverlayModelBuilder {
     private static final String STREAM_START_ABORTED = "stream start aborted";
     private static final String SEPARATOR = " · ";
     private static final String SERVICE_PREFIX = "service=";
+    private static final String HOST_SERVICE_RUNNING_HINT = "ensure desktop service is running";
 
     private StartupOverlayModelBuilder() {}
 
@@ -277,8 +278,8 @@ public final class StartupOverlayModelBuilder {
             return new Step2State(Model.SS_ACTIVE, "resolving service / api version\u2026");
         }
         if (in.isBuildMismatch()) {
-            String detail = "build mismatch · app=" + safe(in.getAppBuildRevision())
-                    + " · host=" + safe(in.getDaemonBuildRevision());
+            String detail = "build mismatch" + SEPARATOR + "app=" + safe(in.getAppBuildRevision())
+                    + SEPARATOR + "host=" + safe(in.getDaemonBuildRevision());
             return new Step2State(Model.SS_ERROR, detail);
         }
         String detail = buildStep2OkDetail(in);
@@ -288,14 +289,14 @@ public final class StartupOverlayModelBuilder {
     private static String buildStep2OkDetail(Input in) {
         if (in.isRequiresTransportProbe()) {
             if (in.isProbeOk()) {
-                return SERVICE_PREFIX + safe(in.getDaemonService()) + " · transport test OK";
+                return SERVICE_PREFIX + safe(in.getDaemonService()) + SEPARATOR + "transport test OK";
             } else if (in.isProbeInFlight()) {
-                return SERVICE_PREFIX + safe(in.getDaemonService()) + " · transport test in progress…";
+                return SERVICE_PREFIX + safe(in.getDaemonService()) + SEPARATOR + "transport test in progress…";
             } else {
-                return SERVICE_PREFIX + safe(in.getDaemonService()) + " · transport test pending";
+                return SERVICE_PREFIX + safe(in.getDaemonService()) + SEPARATOR + "transport test pending";
             }
         }
-        return SERVICE_PREFIX + safe(in.getDaemonService()) + " · " + safe(in.getApiImpl());
+        return SERVICE_PREFIX + safe(in.getDaemonService()) + SEPARATOR + safe(in.getApiImpl());
     }
 
     private static Step3Context createStep3Context(Input in, long elapsedMs) {
@@ -307,8 +308,8 @@ public final class StartupOverlayModelBuilder {
                 .contains(STREAM_START_ABORTED);
         boolean streamIsLoopback = isLoopbackHost(in.getStreamHost());
         String streamFixHint = streamIsLoopback
-                ? "check ADB reverse for stream/control ports \u00b7 ensure desktop service is running"
-                : "check USB tethering / host IP / LAN \u00b7 ensure desktop service is running";
+                ? "check ADB reverse for stream/control ports" + SEPARATOR + HOST_SERVICE_RUNNING_HINT
+                : "check USB tethering / host IP / LAN" + SEPARATOR + HOST_SERVICE_RUNNING_HINT;
         Step3Context ctx = new Step3Context(streamFlowing, streamReconnects, streamAddr, daemonStartFailure, streamFixHint);
         ctx.elapsedMs = elapsedMs;
         return ctx;
@@ -329,8 +330,8 @@ public final class StartupOverlayModelBuilder {
             return new Step3State(state, detail);
         }
         if (ctx.streamFlowing) {
-            String detail = "live \u00b7 fps=" + String.format(Locale.US, "%.0f", in.getLatestPresentFps())
-                    + " \u00b7 " + safe(in.getEffectiveDaemonState()).toLowerCase(Locale.US);
+            String detail = "live" + SEPARATOR + "fps=" + String.format(Locale.US, "%.0f", in.getLatestPresentFps())
+                    + SEPARATOR + safe(in.getEffectiveDaemonState()).toLowerCase(Locale.US);
             return new Step3State(Model.SS_OK, detail);
         }
         return buildStep3Active(in, ctx);
@@ -339,7 +340,7 @@ public final class StartupOverlayModelBuilder {
     private static Step3State buildStep3Active(Input in, Step3Context ctx) {
         boolean hasWaited = ctx.elapsedMs > 5_000L;
         if (ctx.daemonStartFailure && hasWaited) {
-            return new Step3State(Model.SS_ERROR, "host stream start failed \u00b7 " + safe(in.getDaemonErrCompact()));
+            return new Step3State(Model.SS_ERROR, "host stream start failed" + SEPARATOR + safe(in.getDaemonErrCompact()));
         }
         String detail = buildStep3ActiveDetail(in, ctx, hasWaited);
         return new Step3State(Model.SS_ACTIVE, detail);
@@ -348,19 +349,19 @@ public final class StartupOverlayModelBuilder {
     private static String buildStep3ActiveDetail(Input in, Step3Context ctx, boolean hasWaited) {
         if (ctx.streamReconnects > 0 && hasWaited) {
             return "retry #" + ctx.streamReconnects
-                    + " \u00b7 " + ctx.streamAddr + ":" + in.getStreamPort()
-                    + " unreachable \u00b7 " + ctx.streamFixHint
-                    + (safe(in.getDaemonErrCompact()).isEmpty() ? "" : " \u00b7 host error: " + safe(in.getDaemonErrCompact()));
+                    + SEPARATOR + ctx.streamAddr + ":" + in.getStreamPort()
+                    + " unreachable" + SEPARATOR + ctx.streamFixHint
+                    + (safe(in.getDaemonErrCompact()).isEmpty() ? "" : SEPARATOR + "host error: " + safe(in.getDaemonErrCompact()));
         }
         if (ctx.streamReconnects > 0) {
-            return "reconnecting \u00b7 " + ATTEMPT_PREFIX + ctx.streamReconnects + " \u00b7 awaiting frames\u2026";
+            return "reconnecting" + SEPARATOR + ATTEMPT_PREFIX + ctx.streamReconnects + SEPARATOR + "awaiting frames\u2026";
         }
         if (hasWaited) {
             return "connecting to " + ctx.streamAddr + ":" + in.getStreamPort()
-                    + " \u00b7 " + ctx.streamFixHint
-                    + (safe(in.getDaemonErrCompact()).isEmpty() ? "" : " \u00b7 host error: " + safe(in.getDaemonErrCompact()));
+                    + SEPARATOR + ctx.streamFixHint
+                    + (safe(in.getDaemonErrCompact()).isEmpty() ? "" : SEPARATOR + "host error: " + safe(in.getDaemonErrCompact()));
         }
-        return "decoder started \u00b7 awaiting frames\u2026";
+        return "decoder started" + SEPARATOR + "awaiting frames\u2026";
     }
 
     private static String buildSubtitle(Input in, int step1State, int step2State, int step3State,
