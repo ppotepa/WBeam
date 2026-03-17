@@ -4,6 +4,7 @@ import android.view.View;
 
 import com.wbeam.stream.VideoTestController;
 
+@SuppressWarnings("java:S107")
 public final class StartupOverlayHooksFactory {
     public interface ProbeHooks {
         boolean requiresTransportProbe();

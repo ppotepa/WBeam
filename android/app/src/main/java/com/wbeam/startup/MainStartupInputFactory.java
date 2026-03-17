@@ -7,6 +7,7 @@ import com.wbeam.stream.VideoTestController;
 
 import java.util.concurrent.ExecutorService;
 
+@SuppressWarnings("java:S107")
 public final class MainStartupInputFactory {
     private MainStartupInputFactory() {
     }

@@ -1,5 +1,6 @@
 package com.wbeam.startup;
 
+@SuppressWarnings("java:S107")
 public final class StartupOverlayInputFactory {
     public static final class State {
         private boolean daemonReachable;
