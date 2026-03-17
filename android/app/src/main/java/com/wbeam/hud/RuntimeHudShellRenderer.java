@@ -17,6 +17,7 @@ public final class RuntimeHudShellRenderer {
     private static final String BG_NAVY_MEDIUM = "rgba(2,10,14,.45)";
     private static final String BG_NAVY_DARK = "rgba(2,10,14,.35)";
 
+    @SuppressWarnings("java:S1104")
     public static final class HtmlContent {
         private String chipsHtml;
         private String cardsHtml;

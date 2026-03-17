@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.Locale;
 
+@SuppressWarnings("java:S6541")
 final class FramedVideoDecodeLoop {
 
     private static final String SEP_SPS = " sps=";

@@ -12,6 +12,11 @@ public final class SettingsRepository {
 
     private static final String PREFS = "wbeam_settings";
     private static final String PROFILE_DEFAULT = "default";
+    private static final String ENCODER_H264 = "h264";
+    private static final String ENCODER_H265 = "h265";
+    private static final String ENCODER_RAW_PNG = "raw-png";
+    private static final String ENCODER_RAWPNG = "rawpng";
+    private static final String CURSOR_EMBEDDED = "embedded";
 
     public static final String PREF_PROFILE          = "profile";
     public static final String PREF_ENCODER          = "encoder";
@@ -34,8 +39,8 @@ public final class SettingsRepository {
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
 
         String profile = prefs.getString(PREF_PROFILE, PROFILE_DEFAULT);
-        String encoder = prefs.getString(PREF_ENCODER, "h265");
-        String cursor  = prefs.getString(PREF_CURSOR, "embedded");
+        String encoder = prefs.getString(PREF_ENCODER, ENCODER_H265);
+        String cursor  = prefs.getString(PREF_CURSOR, CURSOR_EMBEDDED);
 
         if (!PROFILE_DEFAULT.equals(profile)) {
             profile = PROFILE_DEFAULT;
@@ -44,15 +49,15 @@ public final class SettingsRepository {
 
         // Migration v3: collapse legacy encoder names to h265/rawpng.
         // h264 is a valid first-class encoder — pass through without migration.
-        if (!"h264".equals(encoder) && !"h265".equals(encoder)
-                && !"raw-png".equals(encoder) && !"rawpng".equals(encoder)) {
-            encoder = "h265";
+        if (!ENCODER_H264.equals(encoder) && !ENCODER_H265.equals(encoder)
+                && !ENCODER_RAW_PNG.equals(encoder) && !ENCODER_RAWPNG.equals(encoder)) {
+            encoder = ENCODER_H265;
             prefs.edit().putString(PREF_ENCODER, encoder).apply();
         }
 
         // Migration v2: rename "hidden" cursor to "embedded"
         if (!prefs.getBoolean(PREF_CURSOR_MIGRATED_V2, false) && "hidden".equals(cursor)) {
-            cursor = "embedded";
+            cursor = CURSOR_EMBEDDED;
             prefs.edit()
                     .putString(PREF_CURSOR, cursor)
                     .putBoolean(PREF_CURSOR_MIGRATED_V2, true)

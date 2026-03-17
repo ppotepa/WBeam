@@ -2,6 +2,7 @@ package com.wbeam.ui;
 
 import android.view.KeyEvent;
 
+@SuppressWarnings("java:S1104")
 public final class MainActivityInteractionPolicy {
     @SuppressWarnings("java:S1104")
     public static final class ToggleState {
