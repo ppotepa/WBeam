@@ -9,6 +9,7 @@ public final class MainActivitySettingsPresenter {
     private MainActivitySettingsPresenter() {
     }
 
+    @SuppressWarnings("java:S107")
     public static void applySettingValueLabels(
             TextView resValueText,
             TextView fpsValueText,
@@ -25,6 +26,7 @@ public final class MainActivitySettingsPresenter {
         bitrateValueText.setText(SettingsUiSupport.bitrateValueLabel(bitrateMbps));
     }
 
+    @SuppressWarnings("java:S107")
     public static void applyDefaultSettings(
             Spinner profileSpinner,
             Spinner encoderSpinner,
@@ -72,6 +74,7 @@ public final class MainActivitySettingsPresenter {
         return SimpleMenuUi.clampSimpleFps(selectedFps);
     }
 
+    @SuppressWarnings("java:S107")
     public static void applySimpleMenuButtons(
             Button simpleModePreferredButton,
             Button simpleModeRawButton,
@@ -102,6 +105,7 @@ public final class MainActivitySettingsPresenter {
         );
     }
 
+    @SuppressWarnings("java:S107")
     public static String buildHostHint(
             boolean daemonReachable,
             String apiBase,
