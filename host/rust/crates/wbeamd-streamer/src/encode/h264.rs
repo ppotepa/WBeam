@@ -11,6 +11,12 @@ fn set_gop_key_int_max(enc: &gst::Element, gop_value: u32) {
     let _ = enc.set_property("key-int-max", gop_value);
 }
 
+fn set_min_force_key_unit_interval(enc: &gst::Element, interval_ns: u64) {
+    if enc.find_property("min-force-key-unit-interval").is_some() {
+        let _ = enc.set_property("min-force-key-unit-interval", interval_ns);
+    }
+}
+
 pub(super) fn configure(
     enc: &gst::Element,
     backend: &str,
@@ -29,6 +35,7 @@ pub(super) fn configure(
         let _ = enc.set_property("zerolatency", true);
         let _ = enc.set_property("aud", true);
         let _ = enc.set_property("repeat-sequence-header", true);
+        set_min_force_key_unit_interval(enc, 100_000_000);
         return;
     }
 
@@ -41,6 +48,7 @@ pub(super) fn configure(
         "[wbeam] x264 config: speed-preset=ultrafast tune=zerolatency bframes=0 cabac=0 ref=1"
     );
     set_gop_key_int_max(enc, gop);
+    set_min_force_key_unit_interval(enc, 100_000_000);
     let option_str = if intra_only {
         "bframes=0:cabac=0:ref=1:8x8dct=0:no-open-gop=1:scenecut=0"
     } else {

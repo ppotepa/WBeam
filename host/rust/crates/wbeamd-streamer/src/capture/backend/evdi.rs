@@ -32,6 +32,9 @@ const EDID_HEIGHT: i32 = 1080;
 
 /// Maximum dirty rectangles EVDI reports per frame.
 const MAX_RECTS: usize = 16;
+/// If the screen stayed static for this long, mark the first returning frame
+/// as DISCONT so downstream can request an IDR on wake-up.
+const WAKE_DISCONT_THRESHOLD_MS: u128 = 120;
 
 /// Hard-wired EDID advertising 1920×1080 @ 60 Hz (DVI-D).
 /// Sourced from the EVDI kernel test suite (evdi_fake_user_client.c).
@@ -89,6 +92,7 @@ fn find_evdi_device() -> Result<i32> {
 struct EvdiLoopStats {
     published_frames: u64,
     pushed_frames: u64,
+    wake_discont_marks: u64,
     zero_rect_polls: u64,
     event_poll_timeouts: u64,
     last_frame_at: Instant,
@@ -102,6 +106,7 @@ impl EvdiLoopStats {
         Self {
             published_frames: 0,
             pushed_frames: 0,
+            wake_discont_marks: 0,
             zero_rect_polls: 0,
             event_poll_timeouts: 0,
             last_frame_at: Instant::now(),
@@ -213,6 +218,9 @@ fn push_frame(
     frame_duration_ns: u64,
     stats: &mut EvdiLoopStats,
 ) -> bool {
+    let idle_before_frame_ms = stats.last_frame_at.elapsed().as_millis();
+    let wake_discont = stats.published_frames > 0 && idle_before_frame_ms >= WAKE_DISCONT_THRESHOLD_MS;
+
     stats.zero_rect_polls = 0;
     stats.last_frame_at = Instant::now();
     stats.published_frames = stats.published_frames.saturating_add(1);
@@ -227,6 +235,16 @@ fn push_frame(
             frame_duration_ns
         };
         stats.last_pts_ns = pts_ns;
+        if wake_discont {
+            bm.set_flags(gst::BufferFlags::DISCONT);
+            stats.wake_discont_marks = stats.wake_discont_marks.saturating_add(1);
+            if stats.wake_discont_marks <= 3 || stats.wake_discont_marks % 60 == 0 {
+                println!(
+                    "[wbeam-evdi] wake-discont mark: idle={}ms marks={} frame={}",
+                    idle_before_frame_ms, stats.wake_discont_marks, stats.published_frames
+                );
+            }
+        }
         bm.set_pts(gst::ClockTime::from_nseconds(pts_ns));
         bm.set_duration(gst::ClockTime::from_nseconds(dur_ns));
     }

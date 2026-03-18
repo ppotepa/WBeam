@@ -167,12 +167,10 @@ final class FramedVideoDecodeLoop {
         long lastPresentedPtsUs = -1L;
         boolean flushIssued = false;
         boolean waitForKeyframe = false;
-        // True when the very first frame of a burst was just queued to an
-        // otherwise-idle decoder.  In ultra mode (dropLateOutput) we must NOT
-        // drop this frame even if a second frame arrives before it is decoded,
-        // otherwise the first character typed after a static screen is always
-        // silently lost.
-        boolean idleBurstProtect = false;
+        // Number of next rendered frames that must not use drop-late policy
+        // after an idle->active transition. This protects the first typed
+        // character from being dropped on static terminal scenes.
+        int wakeBurstProtectRenders = 0;
         MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
         MediaCodecBridge.DrainStats drainStats = new MediaCodecBridge.DrainStats();
         int pendingDecodeQueue = 0;
@@ -188,6 +186,8 @@ final class FramedVideoDecodeLoop {
         // Update every 64 queued frames to amortise the percentile cost.
         long nextAdaptiveUpdateAt = 64L;
         final long frameBudgetMs = Math.max(1L, frameUs / 1_000L);
+        final long wakeBurstIdleThresholdMs = Math.max(120L, frameBudgetMs * 4L);
+        final int wakeBurstProtectRenderCount = 2;
 
         final boolean isPng = (helloFlags & helloCodecPng) != 0;
         final boolean isHevc = !isPng && (helloFlags & helloCodecHevc) != 0;
@@ -301,16 +301,15 @@ final class FramedVideoDecodeLoop {
                 if (shouldDrain) {
                     // Use a longer first-frame timeout so the decoder has time
                     // to finish the current frame before we declare it late.
-                    // idleBurstProtect suppresses drop-latest for the first
-                    // frame queued after a period of no decode activity — this
-                    // prevents the first character typed on a static screen
-                    // from being silently discarded in ultra mode.
+                    // wakeBurstProtectRenders temporarily suppresses drop-late
+                    // after idle->active transitions so first terminal
+                    // keystrokes are rendered instead of discarded.
                     long drainTimeoutUs = pendingDecodeQueue >= decodeQueueMaxFrames ? 16_000 : 12_000;
                     MediaCodecBridge.drainLatestFrame(
                             codec,
                             bufferInfo,
                             drainStats,
-                            dropLateOutput && !idleBurstProtect,
+                            dropLateOutput && wakeBurstProtectRenders <= 0,
                             drainTimeoutUs
                     );
                     lastDrainAttemptMs = nowAfterDrain;
@@ -330,7 +329,7 @@ final class FramedVideoDecodeLoop {
                     lastPresentMs = nowAfterDrain;
                     totalInSincePresent = 0;
                     flushIssued = false;
-                    idleBurstProtect = false;
+                    wakeBurstProtectRenders = Math.max(0, wakeBurstProtectRenders - drainStats.renderedCount);
                     if (drainStats.lastRenderedPtsUs > 0) {
                         lastPresentedPtsUs = drainStats.lastRenderedPtsUs;
                     }
@@ -361,7 +360,13 @@ final class FramedVideoDecodeLoop {
                         inFrames++;
                         totalInSincePresent++;
                         if (pendingDecodeQueue == 0) {
-                            idleBurstProtect = true;
+                            long idleGapMs = Math.max(0L, nowAfterDrain - lastPresentMs);
+                            if (idleGapMs >= wakeBurstIdleThresholdMs) {
+                                wakeBurstProtectRenders = Math.max(
+                                        wakeBurstProtectRenders,
+                                        wakeBurstProtectRenderCount
+                                );
+                            }
                         }
                         pendingDecodeQueue = Math.min(decodeQueueMaxFrames, pendingDecodeQueue + 1);
                         lastDecodeProgressMs = nowAfterDrain;
@@ -462,7 +467,13 @@ final class FramedVideoDecodeLoop {
                             inFrames++;
                             totalInSincePresent++;
                             if (pendingDecodeQueue == 0) {
-                                idleBurstProtect = true;
+                                long idleGapMs = Math.max(0L, nowAfterDrain - lastPresentMs);
+                                if (idleGapMs >= wakeBurstIdleThresholdMs) {
+                                    wakeBurstProtectRenders = Math.max(
+                                            wakeBurstProtectRenders,
+                                            wakeBurstProtectRenderCount
+                                    );
+                                }
                             }
                             pendingDecodeQueue = Math.min(decodeQueueMaxFrames, pendingDecodeQueue + 1);
                             lastDecodeProgressMs = nowAfterDrain;
@@ -583,13 +594,13 @@ final class FramedVideoDecodeLoop {
                     Log.d(tag, String.format(Locale.US,
                             "[decode/framed] in=%d out=%d drop=%d late=%d"
                                     + " qD=%d/%d qR=%d dec_p95=%.1fms ren_p95=%.1fms"
-                                    + " maxPayload=%d grow=%d flush=%d unlock=%d waitDrop=%d"
+                                    + " maxPayload=%d grow=%d flush=%d unlock=%d waitDrop=%d wakeProtect=%d"
                                     + " resync_ok=%d noPresent=%d reconn=%d",
                             inFrames, outFrames, droppedSec, tooLateSec,
                             queueDecodeDepth, decodeQueueMaxFrames,
                             drainStats.renderedCount > 0 ? 1 : 0,
                             decodeMsP95, renderMsP95,
-                            maxPayloadSeen, payloadGrowEvents, flushCountSec, recoveryUnlockSec, waitGateDropsSec,
+                            maxPayloadSeen, payloadGrowEvents, flushCountSec, recoveryUnlockSec, waitGateDropsSec, wakeBurstProtectRenders,
                             resyncSuccessSec, totalInSincePresent, runtimeState.getReconnects()));
                 }
                 bytes = 0;

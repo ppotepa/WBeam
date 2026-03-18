@@ -10,13 +10,15 @@ mod runtime;
 
 use std::sync::{
     atomic::{AtomicU64, Ordering},
-    Arc,
+    Arc, Mutex,
 };
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
+use gstreamer_video as gst_video;
 
 use crate::capture::PreparedCapture;
 use crate::cli::ResolvedConfig;
@@ -294,6 +296,53 @@ fn attach_fps_probe(sink: &gst::Element) -> Arc<AtomicU64> {
     fps_counter
 }
 
+fn attach_wake_discont_force_key_probe(
+    elements: &PipelineElements,
+    runtime: &PipelineRuntime,
+    cfg: &ResolvedConfig,
+) {
+    if runtime.mode_png || cfg.intra_only {
+        return;
+    }
+    let Some(probe_pad) = elements.caps1.static_pad("src") else {
+        return;
+    };
+    let Some(upstream_event_pad) = elements.sink.static_pad("sink") else {
+        return;
+    };
+
+    let min_interval = Duration::from_millis(80);
+    let last_request_at = Arc::new(Mutex::new(Instant::now() - min_interval));
+    let encoder_backend = runtime.encoder_name.to_string();
+    let capture_backend = runtime.capture_backend_name.to_string();
+    let _ = probe_pad.add_probe(gst::PadProbeType::BUFFER, move |_pad, info| {
+        let Some(buffer) = info.buffer() else {
+            return gst::PadProbeReturn::Ok;
+        };
+        if !buffer.flags().contains(gst::BufferFlags::DISCONT) {
+            return gst::PadProbeReturn::Ok;
+        }
+        let mut should_request = false;
+        if let Ok(mut guard) = last_request_at.lock() {
+            if guard.elapsed() >= min_interval {
+                *guard = Instant::now();
+                should_request = true;
+            }
+        }
+        if should_request {
+            let event = gst_video::UpstreamForceKeyUnitEvent::builder()
+                .all_headers(true)
+                .build();
+            let sent = upstream_event_pad.send_event(event);
+            println!(
+                "[wbeam] wake-discont => force-key-unit request sent={} encoder={} capture={}",
+                sent, encoder_backend, capture_backend
+            );
+        }
+        gst::PadProbeReturn::Ok
+    });
+}
+
 fn log_encoder_selection(cfg: &ResolvedConfig, runtime: &PipelineRuntime) {
     if runtime.mode_png {
         println!(
@@ -373,6 +422,7 @@ pub fn make_pipeline(
         )?;
     }
 
+    attach_wake_discont_force_key_probe(&elements, &runtime, cfg);
     let fps_counter = attach_fps_probe(&elements.sink);
     Ok((pipeline, appsink, fps_counter))
 }

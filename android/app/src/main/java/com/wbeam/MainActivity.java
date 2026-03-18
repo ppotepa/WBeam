@@ -95,7 +95,7 @@ public class MainActivity extends AppCompatActivity {
     private static final long HUD_ADB_LOG_INTERVAL_MS = 1000;
     private static final int TRANSPORT_QUEUE_MAX_FRAMES = 3;
     private static final int DECODE_QUEUE_MAX_FRAMES = 2;
-    private static final int RENDER_QUEUE_MAX_FRAMES = 1;
+    private static final int RENDER_QUEUE_MAX_FRAMES = 2;
 
     private static final String DEFAULT_PROFILE = "default";
     private static final String ADAPTIVE_PROFILE = "adaptive";

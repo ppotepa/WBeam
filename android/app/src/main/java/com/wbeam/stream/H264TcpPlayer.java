@@ -58,7 +58,7 @@ public final class H264TcpPlayer {
 
     // ── Decode pipeline limits ────────────────────────────────────────────────
     private static final int  DECODE_QUEUE_MAX_FRAMES = 2;
-    private static final int  RENDER_QUEUE_MAX_FRAMES = 1;
+    private static final int  RENDER_QUEUE_MAX_FRAMES = 2;
 
     // ── Black-screen watchdog (C5 ladder) ─────────────────────────────────────
     private static final long NO_PRESENT_FLUSH_MS      = 1_500L;
