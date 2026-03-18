@@ -12,11 +12,15 @@ import com.wbeam.api.StatusListener;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.util.Locale;
 
 @SuppressWarnings("java:S6541")
 final class FramedVideoDecodeLoop {
     private static final long DRAIN_IDLE_CHECK_MS = 33L;
+    private static final int HEADER_READ_TIMEOUT_MS = 25;
+    private static final int PAYLOAD_READ_TIMEOUT_MS = 5_000;
 
     private static final String SEP_SPS = " sps=";
     private static final String SEP_PPS = " pps=";
@@ -135,6 +139,7 @@ final class FramedVideoDecodeLoop {
     })
     void run(
             InputStream input,
+            Socket streamSocket,
             MediaCodec[] codecRef,
             int helloFlags,
             long streamSessionId,
@@ -253,14 +258,60 @@ final class FramedVideoDecodeLoop {
         }
 
         while (runtimeState.isRunning()) {
-            WbtpProtocol.FrameHeader frameHeader = WbtpProtocol.readFrameHeader(
-                    input,
-                    hdrBuf,
-                    frameHeaderSize,
-                    frameMagic,
-                    frameResyncScanLimit,
-                    frameFlagKeyframe
-            );
+            WbtpProtocol.FrameHeader frameHeader;
+            try {
+                streamSocket.setSoTimeout(HEADER_READ_TIMEOUT_MS);
+                frameHeader = WbtpProtocol.readFrameHeader(
+                        input,
+                        hdrBuf,
+                        frameHeaderSize,
+                        frameMagic,
+                        frameResyncScanLimit,
+                        frameFlagKeyframe
+                );
+            } catch (SocketTimeoutException timeout) {
+                long nowAfterDrain = SystemClock.elapsedRealtime();
+                if (codec != null) {
+                    boolean shouldDrain = pendingDecodeQueue > 0
+                            || lastDrainAttemptMs == 0L
+                            || (nowAfterDrain - lastDrainAttemptMs) >= DRAIN_IDLE_CHECK_MS;
+                    if (shouldDrain) {
+                        long drainTimeoutUs = pendingDecodeQueue >= decodeQueueMaxFrames ? 16_000 : 12_000;
+                        MediaCodecBridge.drainLatestFrame(
+                                codec,
+                                bufferInfo,
+                                drainStats,
+                                dropLateOutput && wakeBurstProtectRenders <= 0,
+                                drainTimeoutUs
+                        );
+                        lastDrainAttemptMs = nowAfterDrain;
+                        nowAfterDrain = SystemClock.elapsedRealtime();
+                    } else {
+                        drainStats.reset();
+                    }
+                    pendingDecodeQueue = Math.max(0, pendingDecodeQueue - drainStats.releasedCount);
+                    if (drainStats.releasedCount > 0) {
+                        lastDecodeProgressMs = nowAfterDrain;
+                    } else if (pendingDecodeQueue >= decodeQueueMaxFrames
+                            && (nowAfterDrain - lastDecodeProgressMs) > 300) {
+                        pendingDecodeQueue = decodeQueueMaxFrames - 1;
+                    }
+                    if (drainStats.renderedCount > 0) {
+                        outFrames += drainStats.renderedCount;
+                        lastPresentMs = nowAfterDrain;
+                        totalInSincePresent = 0;
+                        flushIssued = false;
+                        wakeBurstProtectRenders = Math.max(0, wakeBurstProtectRenders - drainStats.renderedCount);
+                        if (drainStats.lastRenderedPtsUs > 0) {
+                            lastPresentedPtsUs = drainStats.lastRenderedPtsUs;
+                        }
+                    }
+                    tooLateSec += drainStats.droppedLateCount;
+                    renderNsMax = Math.max(renderNsMax, drainStats.renderNsMax);
+                }
+                continue;
+            }
+            streamSocket.setSoTimeout(PAYLOAD_READ_TIMEOUT_MS);
             if (frameHeader.resynced) {
                 resyncSuccessSec++;
             }

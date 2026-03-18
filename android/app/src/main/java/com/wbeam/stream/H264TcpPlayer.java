@@ -253,7 +253,7 @@ public final class H264TcpPlayer {
                 NO_PRESENT_MIN_IN_FRAMES_HARD,
                 STATE_CONNECTING,
                 STATE_STREAMING
-        ).run(input, codecRef, helloFlags, streamSessionId, hdrBuf, payloadBuf);
+        ).run(input, socket, codecRef, helloFlags, streamSessionId, hdrBuf, payloadBuf);
     }
 
     private static int resolveDimension(int helloDimension, int fallbackDimension) {
