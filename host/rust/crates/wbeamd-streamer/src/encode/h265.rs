@@ -49,7 +49,10 @@ pub(super) fn configure(
     let option_str = if intra_only {
         "bframes=0:no-open-gop=1:scenecut=0:strong-intra-smoothing=0"
     } else {
-        "bframes=0:no-open-gop=1:strong-intra-smoothing=0:scenecut=40"
+        // scenecut=10: more sensitive to scene changes (text on static bg),
+        // ensuring the encoder emits an IDR quickly rather than buffering
+        // the change until the next GOP boundary.
+        "bframes=0:no-open-gop=1:strong-intra-smoothing=0:scenecut=10"
     };
     let _ = enc.set_property("option-string", option_str);
 }

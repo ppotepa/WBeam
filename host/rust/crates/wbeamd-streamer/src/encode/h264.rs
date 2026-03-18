@@ -44,7 +44,10 @@ pub(super) fn configure(
     let option_str = if intra_only {
         "bframes=0:cabac=0:ref=1:8x8dct=0:no-open-gop=1:scenecut=0"
     } else {
-        "bframes=0:cabac=0:ref=1:8x8dct=0:no-open-gop=1:scenecut=40"
+        // scenecut=10: more sensitive to scene changes (text on static bg),
+        // ensuring the encoder emits an IDR quickly rather than buffering
+        // the change until the next GOP boundary.
+        "bframes=0:cabac=0:ref=1:8x8dct=0:no-open-gop=1:scenecut=10"
     };
     let _ = enc.set_property("option-string", option_str);
 }

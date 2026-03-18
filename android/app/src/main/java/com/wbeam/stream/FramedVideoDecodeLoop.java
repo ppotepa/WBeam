@@ -167,6 +167,12 @@ final class FramedVideoDecodeLoop {
         long lastPresentedPtsUs = -1L;
         boolean flushIssued = false;
         boolean waitForKeyframe = false;
+        // True when the very first frame of a burst was just queued to an
+        // otherwise-idle decoder.  In ultra mode (dropLateOutput) we must NOT
+        // drop this frame even if a second frame arrives before it is decoded,
+        // otherwise the first character typed after a static screen is always
+        // silently lost.
+        boolean idleBurstProtect = false;
         MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
         MediaCodecBridge.DrainStats drainStats = new MediaCodecBridge.DrainStats();
         int pendingDecodeQueue = 0;
@@ -293,12 +299,19 @@ final class FramedVideoDecodeLoop {
                         || lastDrainAttemptMs == 0L
                         || (nowAfterDrain - lastDrainAttemptMs) >= DRAIN_IDLE_CHECK_MS;
                 if (shouldDrain) {
+                    // Use a longer first-frame timeout so the decoder has time
+                    // to finish the current frame before we declare it late.
+                    // idleBurstProtect suppresses drop-latest for the first
+                    // frame queued after a period of no decode activity — this
+                    // prevents the first character typed on a static screen
+                    // from being silently discarded in ultra mode.
+                    long drainTimeoutUs = pendingDecodeQueue >= decodeQueueMaxFrames ? 16_000 : 12_000;
                     MediaCodecBridge.drainLatestFrame(
                             codec,
                             bufferInfo,
                             drainStats,
-                            dropLateOutput,
-                            pendingDecodeQueue >= decodeQueueMaxFrames ? 16_000 : 5_000
+                            dropLateOutput && !idleBurstProtect,
+                            drainTimeoutUs
                     );
                     lastDrainAttemptMs = nowAfterDrain;
                     nowAfterDrain = SystemClock.elapsedRealtime();
@@ -317,6 +330,7 @@ final class FramedVideoDecodeLoop {
                     lastPresentMs = nowAfterDrain;
                     totalInSincePresent = 0;
                     flushIssued = false;
+                    idleBurstProtect = false;
                     if (drainStats.lastRenderedPtsUs > 0) {
                         lastPresentedPtsUs = drainStats.lastRenderedPtsUs;
                     }
@@ -346,6 +360,9 @@ final class FramedVideoDecodeLoop {
                         decodeNsBuf[(decodeNsBufN++) & 127] = dn;
                         inFrames++;
                         totalInSincePresent++;
+                        if (pendingDecodeQueue == 0) {
+                            idleBurstProtect = true;
+                        }
                         pendingDecodeQueue = Math.min(decodeQueueMaxFrames, pendingDecodeQueue + 1);
                         lastDecodeProgressMs = nowAfterDrain;
                         lastQueuedPtsUs = ptsUs;
@@ -444,6 +461,9 @@ final class FramedVideoDecodeLoop {
                             decodeNsBuf[(decodeNsBufN++) & 127] = dn;
                             inFrames++;
                             totalInSincePresent++;
+                            if (pendingDecodeQueue == 0) {
+                                idleBurstProtect = true;
+                            }
                             pendingDecodeQueue = Math.min(decodeQueueMaxFrames, pendingDecodeQueue + 1);
                             lastDecodeProgressMs = nowAfterDrain;
                             lastQueuedPtsUs = ptsUs;
