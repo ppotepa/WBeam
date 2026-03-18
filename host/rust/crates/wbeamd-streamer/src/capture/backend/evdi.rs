@@ -35,6 +35,9 @@ const MAX_RECTS: usize = 16;
 /// If the screen stayed static for this long, mark the first returning frame
 /// as DISCONT so downstream can request an IDR on wake-up.
 const WAKE_DISCONT_THRESHOLD_MS: u128 = 120;
+/// Send a periodic keepalive frame even when idle to prevent Android decoder
+/// from stalling and to keep the stream fresh after long inactivity.
+const IDLE_KEEPALIVE_INTERVAL_MS: u128 = 2_000;
 
 /// Hard-wired EDID advertising 1920×1080 @ 60 Hz (DVI-D).
 /// Sourced from the EVDI kernel test suite (evdi_fake_user_client.c).
@@ -95,6 +98,7 @@ struct EvdiLoopStats {
     wake_discont_marks: u64,
     zero_rect_polls: u64,
     event_poll_timeouts: u64,
+    idle_keepalive_frames: u64,
     last_frame_at: Instant,
     last_wait_log_at: Instant,
     last_pts_ns: u64,
@@ -109,6 +113,7 @@ impl EvdiLoopStats {
             wake_discont_marks: 0,
             zero_rect_polls: 0,
             event_poll_timeouts: 0,
+            idle_keepalive_frames: 0,
             last_frame_at: Instant::now(),
             last_wait_log_at: Instant::now(),
             last_pts_ns: 0,
@@ -334,6 +339,29 @@ fn evdi_loop(
 
         stats.zero_rect_polls = stats.zero_rect_polls.saturating_add(1);
         maybe_log_zero_rect_wait(&mut stats, width, height);
+
+        // Push periodic keepalive frames during idle to prevent Android decoder
+        // stall and maintain stream freshness after long inactivity.
+        if stats.last_frame_at.elapsed().as_millis() >= IDLE_KEEPALIVE_INTERVAL_MS {
+            let idle_ms = stats.last_frame_at.elapsed().as_millis();
+            stats.idle_keepalive_frames = stats.idle_keepalive_frames.saturating_add(1);
+            if stats.idle_keepalive_frames <= 3 || stats.idle_keepalive_frames % 30 == 0 {
+                println!(
+                    "[wbeam-evdi] idle keepalive: idle={}ms keepalives={} published={}",
+                    idle_ms, stats.idle_keepalive_frames, stats.published_frames
+                );
+            }
+            if !push_frame(
+                &appsrc,
+                &pixels,
+                &rects,
+                0,
+                frame_duration_ns,
+                &mut stats,
+            ) {
+                break;
+            }
+        }
     }
 
     unsafe {
