@@ -198,14 +198,16 @@ build_windows_server:
             [System.Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
           }
         }
-      if (Test-Path "C:\Users\ppotepa\.cargo\bin\cargo.exe") {
-        $env:Path = "C:\Users\ppotepa\.cargo\bin;$env:Path"
+      $cargoBase = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { "$env:USERPROFILE\.cargo" }
+      $rustupBase = if ($env:RUSTUP_HOME) { $env:RUSTUP_HOME } else { "$env:USERPROFILE\.rustup" }
+      if (Test-Path "$cargoBase\bin\cargo.exe") {
+        $env:Path = "$cargoBase\bin;$env:Path"
       }
-      if (Test-Path "C:\Users\ppotepa\.rustup") {
-        $env:RUSTUP_HOME = "C:\Users\ppotepa\.rustup"
+      if (Test-Path $rustupBase) {
+        $env:RUSTUP_HOME = $rustupBase
       }
-      if (Test-Path "C:\Users\ppotepa\.cargo") {
-        $env:CARGO_HOME = "C:\Users\ppotepa\.cargo"
+      if (Test-Path $cargoBase) {
+        $env:CARGO_HOME = $cargoBase
       }
       rustup default stable | Out-Null
       cargo --version
@@ -257,14 +259,16 @@ build_windows_server:
             [System.Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
           }
         }
-      if (Test-Path "C:\Users\ppotepa\.cargo\bin\cargo.exe") {
-        $env:Path = "C:\Users\ppotepa\.cargo\bin;$env:Path"
+      $cargoBase = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { "$env:USERPROFILE\.cargo" }
+      $rustupBase = if ($env:RUSTUP_HOME) { $env:RUSTUP_HOME } else { "$env:USERPROFILE\.rustup" }
+      if (Test-Path "$cargoBase\bin\cargo.exe") {
+        $env:Path = "$cargoBase\bin;$env:Path"
       }
-      if (Test-Path "C:\Users\ppotepa\.rustup") {
-        $env:RUSTUP_HOME = "C:\Users\ppotepa\.rustup"
+      if (Test-Path $rustupBase) {
+        $env:RUSTUP_HOME = $rustupBase
       }
-      if (Test-Path "C:\Users\ppotepa\.cargo") {
-        $env:CARGO_HOME = "C:\Users\ppotepa\.cargo"
+      if (Test-Path $cargoBase) {
+        $env:CARGO_HOME = $cargoBase
       }
       rustup default stable | Out-Null
       cargo --version

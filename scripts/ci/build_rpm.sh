@@ -69,7 +69,7 @@ Version:        ${RPM_VERSION}
 Release:        ${RPM_RELEASE}%{?dist}
 Summary:        WBeam host tools and daemon binaries
 License:        MIT
-URL:            https://github.com/ppotepa/WBeam
+URL:            https://github.com/WBeam/WBeam
 Source0:        %{name}-%{version}.tar.gz
 BuildArch:      %{_arch}
 Requires:       gtk3
