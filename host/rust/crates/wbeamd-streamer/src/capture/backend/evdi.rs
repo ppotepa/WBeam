@@ -11,7 +11,6 @@
 /// or run:
 ///   scripts/set-capture-mode.sh evdi
 use std::ffi::c_void;
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use std::{ptr, thread};
 
@@ -28,6 +27,8 @@ use super::evdi_ffi as ffi;
 
 /// EVDI outputs XRGB8888 (4 bytes per pixel, X=padding).
 const BYTES_PER_PIXEL: usize = 4;
+const EDID_WIDTH: i32 = 1920;
+const EDID_HEIGHT: i32 = 1080;
 
 /// Maximum dirty rectangles EVDI reports per frame.
 const MAX_RECTS: usize = 16;
@@ -38,101 +39,18 @@ const WAKE_DISCONT_THRESHOLD_MS: u128 = 120;
 /// from stalling and to keep the stream fresh after long inactivity.
 const IDLE_KEEPALIVE_INTERVAL_MS: u128 = 5_000;
 
-// ─── Dynamic EDID generation ───────────────────────────────────────────────
-
-/// Build a 128-byte EDID block for the requested resolution and refresh rate.
-/// Uses CVT Reduced-Blanking (v1) timings so the compositor creates a virtual
-/// display mode that matches the stream output exactly — no videoscale needed.
-fn generate_edid(width: u32, height: u32, refresh_hz: u32) -> [u8; 128] {
-    // CVT-RB blanking intervals
-    let h_blank: u32 = 160;
-    let h_front: u32 = 48;
-    let h_sync: u32 = 32;
-    let v_blank: u32 = 30;
-    let v_front: u32 = 3;
-    let v_sync: u32 = 5;
-
-    let h_total = width + h_blank;
-    let v_total = height + v_blank;
-    let pixel_clock_hz: u64 = h_total as u64 * v_total as u64 * refresh_hz as u64;
-    let pixel_clock_10khz = (pixel_clock_hz / 10_000).min(65535) as u16;
-
-    // Approximate physical size at ~100 DPI → mm → cm for EDID fields.
-    let h_mm = (width * 254 + 500) / 1000;
-    let v_mm = (height * 254 + 500) / 1000;
-
-    let mut edid = [0u8; 128];
-
-    // Header
-    edid[0..8].copy_from_slice(&[0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00]);
-    // Manufacturer "WBM" (5-bit packed: W=23 B=2 M=13)
-    edid[8] = 0x5C;
-    edid[9] = 0x4D;
-    // Product code
-    edid[10] = 0x01;
-    // Week 1, year 2026
-    edid[16] = 0x01;
-    edid[17] = 0x24;
-    // EDID 1.4
-    edid[18] = 0x01;
-    edid[19] = 0x04;
-    // Digital input, 8 bpc, DisplayPort-compatible
-    edid[20] = 0xA5;
-    edid[21] = (h_mm / 10).min(255) as u8;
-    edid[22] = (v_mm / 10).min(255) as u8;
-    edid[23] = 0x78; // gamma 2.2
-    edid[24] = 0x0A; // RGB, preferred timing in DTD1
-
-    // Standard timings (unused: 0x0101 pairs)
-    for i in (38..54).step_by(2) {
-        edid[i] = 0x01;
-        edid[i + 1] = 0x01;
-    }
-
-    // ── Detailed Timing Descriptor (bytes 54-71) ────────────────────────────
-    edid[54] = (pixel_clock_10khz & 0xFF) as u8;
-    edid[55] = (pixel_clock_10khz >> 8) as u8;
-    edid[56] = (width & 0xFF) as u8;
-    edid[57] = (h_blank & 0xFF) as u8;
-    edid[58] = (((width >> 8) & 0xF) << 4 | ((h_blank >> 8) & 0xF)) as u8;
-    edid[59] = (height & 0xFF) as u8;
-    edid[60] = (v_blank & 0xFF) as u8;
-    edid[61] = (((height >> 8) & 0xF) << 4 | ((v_blank >> 8) & 0xF)) as u8;
-    edid[62] = (h_front & 0xFF) as u8;
-    edid[63] = (h_sync & 0xFF) as u8;
-    edid[64] = ((v_front & 0xF) << 4 | (v_sync & 0xF)) as u8;
-    edid[66] = (h_mm & 0xFF) as u8;
-    edid[67] = (v_mm & 0xFF) as u8;
-    edid[68] = (((h_mm >> 8) & 0xF) << 4 | ((v_mm >> 8) & 0xF)) as u8;
-    edid[71] = 0x1E; // non-interlaced, digital separate, H+V positive
-
-    // ── Monitor Name (bytes 72-89) ──────────────────────────────────────────
-    edid[75] = 0xFC;
-    edid[77..91].copy_from_slice(b"WBeam EVDI\n   ");
-
-    // ── Monitor Range Limits (bytes 90-107) ─────────────────────────────────
-    let max_pclk_mhz_div10 = ((pixel_clock_hz / 1_000_000 + 9) / 10).max(1).min(255) as u8;
-    let max_h_freq_khz = ((pixel_clock_hz / h_total as u64 + 999) / 1000).min(255) as u8;
-    edid[93] = 0xFD; // range-limits tag
-    edid[95] = 24;   // min V freq Hz
-    edid[96] = refresh_hz.min(255) as u8; // max V freq Hz
-    edid[97] = 30;   // min H freq kHz
-    edid[98] = max_h_freq_khz;
-    edid[99] = max_pclk_mhz_div10;
-    edid[101] = 0x0A;
-    for i in 102..108 {
-        edid[i] = 0x20;
-    }
-
-    // ── Dummy Descriptor (bytes 108-125) ────────────────────────────────────
-    edid[111] = 0x10;
-
-    // ── Checksum (sum of all 128 bytes ≡ 0 mod 256) ────────────────────────
-    let sum: u8 = edid[..127].iter().copied().fold(0u8, |a, b| a.wrapping_add(b));
-    edid[127] = 0u8.wrapping_sub(sum);
-
-    edid
-}
+/// Hard-wired EDID advertising 1920×1080 @ 60 Hz (DVI-D).
+/// Sourced from the EVDI kernel test suite (evdi_fake_user_client.c).
+const EDID_1920X1080: [u8; 128] = [
+    0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x31, 0xd8, 0x2a, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x21, 0x01, 0x03, 0x81, 0xa0, 0x5a, 0x78, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x02, 0x3a, 0x80, 0x18, 0x71, 0x38, 0x2d, 0x40, 0x58, 0x2c,
+    0x45, 0x00, 0x40, 0x84, 0x63, 0x00, 0x00, 0x1e, 0x00, 0x00, 0x00, 0xfc, 0x00, 0x54, 0x65, 0x73,
+    0x74, 0x20, 0x45, 0x44, 0x49, 0x44, 0x0a, 0x20, 0x20, 0x20, 0x00, 0x00, 0x00, 0xfd, 0x00, 0x32,
+    0x46, 0x1e, 0x46, 0x0f, 0x00, 0x0a, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x00, 0x00, 0x00, 0x10,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xab,
+];
 
 // ─── Wrapper so we can send the opaque EVDI handle across threads ───────────
 
@@ -147,27 +65,8 @@ unsafe extern "C" fn on_update_ready(_buf_id: i32, _user_data: *mut c_void) {
     // rather than in the callback, so nothing needs to happen here.
 }
 
-/// Shared state written by `on_mode_changed` callback during init negotiation.
-struct NegotiatedMode {
-    width: i32,
-    height: i32,
-}
-
-unsafe extern "C" fn on_mode_changed(mode: ffi::EvdiMode, user_data: *mut c_void) {
-    if user_data.is_null() {
-        return;
-    }
-    let state = &*(user_data as *const Mutex<Option<NegotiatedMode>>);
-    if let Ok(mut guard) = state.lock() {
-        println!(
-            "[wbeam-evdi] compositor mode: {}×{} @ {}Hz bpp={}",
-            mode.width, mode.height, mode.refresh_rate, mode.bits_per_pixel
-        );
-        *guard = Some(NegotiatedMode {
-            width: mode.width,
-            height: mode.height,
-        });
-    }
+unsafe extern "C" fn on_mode_changed(_mode: ffi::EvdiMode, _user_data: *mut c_void) {
+    // Mode negotiation happens at init time; ignore subsequent changes.
 }
 
 // ─── Device discovery ───────────────────────────────────────────────────────
@@ -512,9 +411,21 @@ pub fn build_source(cfg: &ResolvedConfig) -> Result<gst::Element> {
     let fps = cfg.fps.max(1);
     let requested_width = cfg.width as i32;
     let requested_height = cfg.height as i32;
+    // Important: libevdi expects the registered grab buffer geometry to match
+    // the negotiated mode from EDID. We currently ship only a 1920x1080 EDID,
+    // so forcing capture buffers to EDID size avoids grabpix EINVAL failures
+    // when requested stream size is portrait (e.g. 1200x2000). Downstream
+    // videoscale/capsfilter still reshape to cfg.width x cfg.height.
+    let width = EDID_WIDTH;
+    let height = EDID_HEIGHT;
+    if requested_width != width || requested_height != height {
+        eprintln!(
+            "[wbeam-evdi] WARN: requested stream {}×{} but EVDI capture is fixed at EDID {}×{}; scaling downstream.",
+            requested_width, requested_height, width, height
+        );
+    }
+    let frame_size = width as usize * height as usize * BYTES_PER_PIXEL;
     let frame_duration_ns = 1_000_000_000u64 / fps as u64;
-
-    let edid = generate_edid(cfg.width, cfg.height, cfg.fps);
 
     // ── 1. Find/open EVDI device ────────────────────────────────────────────
     let device_idx = find_evdi_device()?;
@@ -527,28 +438,24 @@ pub fn build_source(cfg: &ResolvedConfig) -> Result<gst::Element> {
     }
     println!("[wbeam-evdi] Opened /dev/dri/card{device_idx}");
 
-    // ── 2. Connect with dynamic EDID matching requested resolution + fps ────
+    // ── 2. Connect with 1920×1080 EDID — cursor events disabled ────────────
     unsafe {
         ffi::evdi_connect2(
             handle,
-            edid.as_ptr(),
-            edid.len() as u32,
-            (requested_width * requested_height) as u32,
-            (requested_width as u64 * requested_height as u64 * fps as u64)
-                .min(u32::MAX as u64) as u32,
+            EDID_1920X1080.as_ptr(),
+            EDID_1920X1080.len() as u32,
+            (width * height) as u32,
+            (width * height * fps as i32) as u32,
         );
         ffi::evdi_enable_cursor_events(handle, false);
     }
     println!(
-        "[wbeam-evdi] Requested virtual display {}×{} @ {fps} fps",
-        requested_width, requested_height
+        "[wbeam-evdi] Connected virtual display {}×{} @ {fps} fps",
+        width, height
     );
 
     // ── 3. Wait for mode negotiation ────────────────────────────────────────
-    // The compositor reads our EDID and may pick a different mode.  Capture
-    // the actual negotiated dimensions via the on_mode_changed callback so the
-    // grab buffer matches what the compositor renders.
-    let negotiated = Mutex::new(None::<NegotiatedMode>);
+    // Give the compositor ~500 ms to process the new connector and set a mode.
     let fd = unsafe { ffi::evdi_get_event_ready(handle) };
     let mut ctx = ffi::EvdiEventContext {
         dpms_handler: None,
@@ -558,7 +465,7 @@ pub fn build_source(cfg: &ResolvedConfig) -> Result<gst::Element> {
         cursor_set_handler: None,
         cursor_move_handler: None,
         ddcci_data_handler: None,
-        user_data: &negotiated as *const Mutex<Option<NegotiatedMode>> as *mut c_void,
+        user_data: ptr::null_mut(),
     };
     let deadline = std::time::Instant::now() + Duration::from_millis(1500);
     while std::time::Instant::now() < deadline {
@@ -572,29 +479,6 @@ pub fn build_source(cfg: &ResolvedConfig) -> Result<gst::Element> {
             unsafe { ffi::evdi_handle_events(handle, &mut ctx) };
         }
     }
-
-    // Use actual compositor mode; fall back to requested if negotiation silent.
-    let (width, height) = if let Some(mode) = negotiated.lock().unwrap().as_ref() {
-        if mode.width != requested_width || mode.height != requested_height {
-            eprintln!(
-                "[wbeam-evdi] WARN: compositor chose {}×{} (requested {}×{}); adapting grab buffer",
-                mode.width, mode.height, requested_width, requested_height
-            );
-        }
-        (mode.width, mode.height)
-    } else {
-        eprintln!(
-            "[wbeam-evdi] WARN: no mode_changed event; assuming {}×{}",
-            requested_width, requested_height
-        );
-        (requested_width, requested_height)
-    };
-
-    let frame_size = width as usize * height as usize * BYTES_PER_PIXEL;
-    println!(
-        "[wbeam-evdi] Capture geometry {}×{} @ {fps} fps (frame_size={})",
-        width, height, frame_size
-    );
 
     // ── 4. Build appsrc (EVDI thread pushes frames directly) ────────────────
     let appsrc_el = gst::ElementFactory::make("appsrc")
@@ -643,50 +527,4 @@ pub fn build_source(cfg: &ResolvedConfig) -> Result<gst::Element> {
     }
 
     Ok(appsrc_el)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn edid_checksum_valid() {
-        let edid = generate_edid(1920, 1080, 60);
-        let sum: u8 = edid.iter().copied().fold(0u8, |a, b| a.wrapping_add(b));
-        assert_eq!(sum, 0, "EDID checksum must make byte-sum ≡ 0 mod 256");
-    }
-
-    #[test]
-    fn edid_header_and_version() {
-        let edid = generate_edid(2560, 1600, 120);
-        assert_eq!(&edid[0..8], &[0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00]);
-        assert_eq!(edid[18], 0x01); // EDID v1
-        assert_eq!(edid[19], 0x04); // .4
-    }
-
-    #[test]
-    fn edid_resolution_encoded_correctly() {
-        let edid = generate_edid(1920, 1080, 120);
-        // Detailed timing: h_active
-        let h_lo = edid[56] as u32;
-        let h_hi = ((edid[58] >> 4) & 0xF) as u32;
-        assert_eq!((h_hi << 8) | h_lo, 1920);
-        // v_active
-        let v_lo = edid[59] as u32;
-        let v_hi = ((edid[61] >> 4) & 0xF) as u32;
-        assert_eq!((v_hi << 8) | v_lo, 1080);
-        // Max V freq in range limits matches requested
-        assert_eq!(edid[96], 120);
-    }
-
-    #[test]
-    fn edid_high_res_120hz() {
-        let edid = generate_edid(2560, 1600, 120);
-        let sum: u8 = edid.iter().copied().fold(0u8, |a, b| a.wrapping_add(b));
-        assert_eq!(sum, 0);
-        let h_lo = edid[56] as u32;
-        let h_hi = ((edid[58] >> 4) & 0xF) as u32;
-        assert_eq!((h_hi << 8) | h_lo, 2560);
-        assert_eq!(edid[96], 120);
-    }
 }
