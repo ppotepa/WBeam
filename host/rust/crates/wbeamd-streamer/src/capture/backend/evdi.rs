@@ -11,6 +11,7 @@
 /// or run:
 ///   scripts/set-capture-mode.sh evdi
 use std::ffi::c_void;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use std::{ptr, thread};
 
@@ -146,8 +147,27 @@ unsafe extern "C" fn on_update_ready(_buf_id: i32, _user_data: *mut c_void) {
     // rather than in the callback, so nothing needs to happen here.
 }
 
-unsafe extern "C" fn on_mode_changed(_mode: ffi::EvdiMode, _user_data: *mut c_void) {
-    // Mode negotiation happens at init time; ignore subsequent changes.
+/// Shared state written by `on_mode_changed` callback during init negotiation.
+struct NegotiatedMode {
+    width: i32,
+    height: i32,
+}
+
+unsafe extern "C" fn on_mode_changed(mode: ffi::EvdiMode, user_data: *mut c_void) {
+    if user_data.is_null() {
+        return;
+    }
+    let state = &*(user_data as *const Mutex<Option<NegotiatedMode>>);
+    if let Ok(mut guard) = state.lock() {
+        println!(
+            "[wbeam-evdi] compositor mode: {}×{} @ {}Hz bpp={}",
+            mode.width, mode.height, mode.refresh_rate, mode.bits_per_pixel
+        );
+        *guard = Some(NegotiatedMode {
+            width: mode.width,
+            height: mode.height,
+        });
+    }
 }
 
 // ─── Device discovery ───────────────────────────────────────────────────────
@@ -490,9 +510,8 @@ fn evdi_loop(
 
 pub fn build_source(cfg: &ResolvedConfig) -> Result<gst::Element> {
     let fps = cfg.fps.max(1);
-    let width = cfg.width as i32;
-    let height = cfg.height as i32;
-    let frame_size = width as usize * height as usize * BYTES_PER_PIXEL;
+    let requested_width = cfg.width as i32;
+    let requested_height = cfg.height as i32;
     let frame_duration_ns = 1_000_000_000u64 / fps as u64;
 
     let edid = generate_edid(cfg.width, cfg.height, cfg.fps);
@@ -514,18 +533,22 @@ pub fn build_source(cfg: &ResolvedConfig) -> Result<gst::Element> {
             handle,
             edid.as_ptr(),
             edid.len() as u32,
-            (width * height) as u32,
-            (width as u64 * height as u64 * fps as u64).min(u32::MAX as u64) as u32,
+            (requested_width * requested_height) as u32,
+            (requested_width as u64 * requested_height as u64 * fps as u64)
+                .min(u32::MAX as u64) as u32,
         );
         ffi::evdi_enable_cursor_events(handle, false);
     }
     println!(
-        "[wbeam-evdi] Connected virtual display {}×{} @ {fps} fps (dynamic EDID)",
-        width, height
+        "[wbeam-evdi] Requested virtual display {}×{} @ {fps} fps",
+        requested_width, requested_height
     );
 
     // ── 3. Wait for mode negotiation ────────────────────────────────────────
-    // Give the compositor ~500 ms to process the new connector and set a mode.
+    // The compositor reads our EDID and may pick a different mode.  Capture
+    // the actual negotiated dimensions via the on_mode_changed callback so the
+    // grab buffer matches what the compositor renders.
+    let negotiated = Mutex::new(None::<NegotiatedMode>);
     let fd = unsafe { ffi::evdi_get_event_ready(handle) };
     let mut ctx = ffi::EvdiEventContext {
         dpms_handler: None,
@@ -535,7 +558,7 @@ pub fn build_source(cfg: &ResolvedConfig) -> Result<gst::Element> {
         cursor_set_handler: None,
         cursor_move_handler: None,
         ddcci_data_handler: None,
-        user_data: ptr::null_mut(),
+        user_data: &negotiated as *const Mutex<Option<NegotiatedMode>> as *mut c_void,
     };
     let deadline = std::time::Instant::now() + Duration::from_millis(1500);
     while std::time::Instant::now() < deadline {
@@ -549,6 +572,29 @@ pub fn build_source(cfg: &ResolvedConfig) -> Result<gst::Element> {
             unsafe { ffi::evdi_handle_events(handle, &mut ctx) };
         }
     }
+
+    // Use actual compositor mode; fall back to requested if negotiation silent.
+    let (width, height) = if let Some(mode) = negotiated.lock().unwrap().as_ref() {
+        if mode.width != requested_width || mode.height != requested_height {
+            eprintln!(
+                "[wbeam-evdi] WARN: compositor chose {}×{} (requested {}×{}); adapting grab buffer",
+                mode.width, mode.height, requested_width, requested_height
+            );
+        }
+        (mode.width, mode.height)
+    } else {
+        eprintln!(
+            "[wbeam-evdi] WARN: no mode_changed event; assuming {}×{}",
+            requested_width, requested_height
+        );
+        (requested_width, requested_height)
+    };
+
+    let frame_size = width as usize * height as usize * BYTES_PER_PIXEL;
+    println!(
+        "[wbeam-evdi] Capture geometry {}×{} @ {fps} fps (frame_size={})",
+        width, height, frame_size
+    );
 
     // ── 4. Build appsrc (EVDI thread pushes frames directly) ────────────────
     let appsrc_el = gst::ElementFactory::make("appsrc")
