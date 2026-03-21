@@ -29,7 +29,7 @@ pub(super) fn configure(
 ) {
     if backend == "nvenc265" {
         let _ = enc.set_property("bitrate", bitrate_kbps);
-        let _ = enc.set_property("max-bitrate", bitrate_kbps * 3);
+        let _ = enc.set_property("max-bitrate", bitrate_kbps * 3 / 2);
         let _ = enc.set_property_from_str("rc-mode", "vbr");
         let _ = enc.set_property_from_str("preset", nv_preset);
         let _ = enc.set_property("gop-size", gop as i32);
@@ -37,7 +37,7 @@ pub(super) fn configure(
         let _ = enc.set_property("zerolatency", true);
         let _ = enc.set_property("aud", true);
         let _ = enc.set_property("repeat-sequence-header", true);
-        set_min_force_key_unit_interval(enc, 100_000_000);
+        set_min_force_key_unit_interval(enc, 1_000_000_000);
         return;
     }
 
@@ -53,7 +53,7 @@ pub(super) fn configure(
     let _ = enc.set_property_from_str("speed-preset", "ultrafast");
     let _ = enc.set_property_from_str("tune", "zerolatency");
     set_gop_key_int_max(enc, gop);
-    set_min_force_key_unit_interval(enc, 100_000_000);
+    set_min_force_key_unit_interval(enc, 1_000_000_000);
     let option_str = if intra_only {
         "bframes=0:no-open-gop=1:scenecut=0:strong-intra-smoothing=0"
     } else {

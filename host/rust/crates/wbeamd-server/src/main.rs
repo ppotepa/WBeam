@@ -254,14 +254,19 @@ async fn post_start(
     let start_result = run_start_with_portal_gate(&state, &core, patch, is_wayland_portal).await;
     match start_result {
         Ok(resp) => {
-            post_start_output_layout(
-                &state,
-                serial,
-                pre_enabled_outputs.as_ref(),
-                is_wayland_portal,
-                is_evdi,
-            )
-            .await;
+            // Run layout configuration in background — don't block the HTTP response.
+            let state_bg = state.clone();
+            let serial_bg = serial.map(|s| s.to_string());
+            tokio::spawn(async move {
+                post_start_output_layout(
+                    &state_bg,
+                    serial_bg.as_deref(),
+                    pre_enabled_outputs.as_ref(),
+                    is_wayland_portal,
+                    is_evdi,
+                )
+                .await;
+            });
             (StatusCode::OK, Json(resp)).into_response()
         }
         Err(err) => core_error_response(core, err).await,

@@ -64,12 +64,16 @@ export type ConnectEncoderMode = "h264" | "h265" | "rawpng";
 
 export type CaptureBackend = "auto" | "wayland_portal" | "evdi";
 
+export type QualityMode = "adaptive" | "manual" | "profile";
+
 export type ConnectSessionConfig = {
   encoder?: "h264" | "h265" | "rawpng";
   size?: string;
   profileName?: string;
   runtimeProfile?: "adaptive" | "default";
   captureBackend?: CaptureBackend;
+  manualFps?: number;
+  manualBitrateKbps?: number;
 };
 
 export type TrainedProfile = {

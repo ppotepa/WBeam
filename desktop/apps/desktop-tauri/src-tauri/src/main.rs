@@ -720,6 +720,8 @@ fn device_connect(
     connect_profile_name: Option<String>,
     connect_runtime_profile: Option<String>,
     connect_capture_backend: Option<String>,
+    connect_manual_fps: Option<u32>,
+    connect_manual_bitrate_kbps: Option<u32>,
 ) -> Result<String, String> {
     service_ready_for_device_actions()?;
     crate::adb::invalidate_devices_cache();
@@ -742,8 +744,8 @@ fn device_connect(
         profile: normalize_runtime_profile(connect_runtime_profile),
         encoder: normalize_encoder_name(connect_encoder),
         size: normalize_size_name(connect_size),
-        fps: None,
-        bitrate_kbps: None,
+        fps: connect_manual_fps.map(|f| f.clamp(24, 120)),
+        bitrate_kbps: connect_manual_bitrate_kbps.map(|b| b.clamp(1_000, 300_000)),
         intra_only: None,
     };
     if start_patch.profile.is_none() {

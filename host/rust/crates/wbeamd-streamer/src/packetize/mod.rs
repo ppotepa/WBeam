@@ -73,7 +73,50 @@ pub(crate) fn build_hello_v1(session_id: u64, codec_flags: u8) -> [u8; 16] {
 }
 
 /// Write `header` followed by `payload` with vectored I/O until complete.
+/// Uses TCP_CORK to coalesce the header and payload into a single TCP segment.
 pub(crate) fn send_all_vectored(
+    stream: &mut TcpStream,
+    header: &[u8],
+    payload: &[u8],
+) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        let fd = stream.as_raw_fd();
+        let one: libc::c_int = 1;
+        unsafe {
+            libc::setsockopt(
+                fd,
+                libc::IPPROTO_TCP,
+                libc::TCP_CORK,
+                &one as *const _ as *const libc::c_void,
+                std::mem::size_of_val(&one) as libc::socklen_t,
+            );
+        }
+    }
+
+    let result = send_all_vectored_inner(stream, header, payload);
+
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        let fd = stream.as_raw_fd();
+        let zero: libc::c_int = 0;
+        unsafe {
+            libc::setsockopt(
+                fd,
+                libc::IPPROTO_TCP,
+                libc::TCP_CORK,
+                &zero as *const _ as *const libc::c_void,
+                std::mem::size_of_val(&zero) as libc::socklen_t,
+            );
+        }
+    }
+
+    result
+}
+
+fn send_all_vectored_inner(
     stream: &mut TcpStream,
     header: &[u8],
     payload: &[u8],

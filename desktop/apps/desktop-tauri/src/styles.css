@@ -542,6 +542,65 @@ h1 {
   opacity: 0.62;
 }
 
+.quality-mode-radios {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+  border: 1px solid #2f445a;
+  border-radius: 8px;
+  background: #132338;
+  padding: 0.45rem 0.55rem;
+}
+
+.quality-mode-radios.disabled {
+  opacity: 0.62;
+  pointer-events: none;
+}
+
+.quality-mode-label {
+  font-size: 0.72rem;
+  color: #a3b7cd;
+  margin-right: 0.3rem;
+}
+
+.radio-option {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.74rem;
+  cursor: pointer;
+  padding: 0.22rem 0.5rem;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.radio-option.selected {
+  background: #1b3b5a;
+  border-color: #3890d8;
+}
+
+.radio-option.disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.radio-option input {
+  margin: 0;
+}
+
+.quality-mode-hint {
+  font-size: 0.72rem;
+  color: #a3b7cd;
+  margin: 0;
+  padding: 0.25rem 0;
+}
+
+.connect-config-field input[type="range"] {
+  width: 100%;
+  accent-color: #3890d8;
+}
+
 .connect-config-field.field-locked {
   opacity: 0.46;
   pointer-events: none;

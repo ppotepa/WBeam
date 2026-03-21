@@ -28,13 +28,13 @@ use super::HELLO_CODEC_PNG;
 #[derive(Clone)]
 struct CachedKeyframe {
     pts_us: u64,
-    buffer: gst::Buffer,
+    buffer: Arc<gst::Buffer>,
 }
 
 struct EncodedFrame {
     pts_us: u64,
     is_key: bool,
-    buffer: gst::Buffer,
+    buffer: Arc<gst::Buffer>,
 }
 
 fn sender_queue_capacity(mode: StreamMode) -> usize {
@@ -264,12 +264,12 @@ fn producer_frame(
     });
     let is_key =
         (codec_flags & HELLO_CODEC_PNG) != 0 || !buf.flags().contains(gst::BufferFlags::DELTA_UNIT);
-    let buffer = buf.to_owned();
+    let buffer = Arc::new(buf.to_owned());
     if is_key {
         if let Ok(mut guard) = last_keyframe.lock() {
             *guard = Some(CachedKeyframe {
                 pts_us,
-                buffer: buffer.clone(),
+                buffer: Arc::clone(&buffer),
             });
         }
     }
@@ -410,6 +410,21 @@ fn accept_client(
         Ok((stream, addr)) => {
             let _ = stream.set_nodelay(true);
             let _ = stream.set_nonblocking(false);
+            #[cfg(unix)]
+            {
+                use std::os::fd::AsRawFd;
+                let fd = stream.as_raw_fd();
+                let sndbuf: libc::c_int = 4 * 1024 * 1024;
+                unsafe {
+                    libc::setsockopt(
+                        fd,
+                        libc::SOL_SOCKET,
+                        libc::SO_SNDBUF,
+                        &sndbuf as *const _ as *const libc::c_void,
+                        std::mem::size_of_val(&sndbuf) as libc::socklen_t,
+                    );
+                }
+            }
             let _ = stream.set_write_timeout(
                 runtime
                     .write_timeout_ms(configured_write_timeout_ms)
@@ -603,7 +618,10 @@ fn run_client_session(
         runtime.height,
         runtime.fps,
     );
-    let _ = conn.write_all(&hello);
+    if let Err(e) = conn.write_all(&hello) {
+        println!("[wbeam-framed] HELLO handshake failed: {e}");
+        return;
+    }
     println!("[wbeam-framed] session_id=0x{session_id:016x}");
 
     drain_ultra_reconnect_queue(runtime, rx, queue_stats);
@@ -735,12 +753,12 @@ mod tests {
         let frame = EncodedFrame {
             pts_us: 1,
             is_key: false,
-            buffer: gst::Buffer::from_slice(vec![1u8, 2, 3]),
+            buffer: Arc::new(gst::Buffer::from_slice(vec![1u8, 2, 3])),
         };
         let another = EncodedFrame {
             pts_us: 2,
             is_key: false,
-            buffer: gst::Buffer::from_slice(vec![4u8, 5, 6]),
+            buffer: Arc::new(gst::Buffer::from_slice(vec![4u8, 5, 6])),
         };
 
         assert!(enqueue_frame(
@@ -772,12 +790,12 @@ mod tests {
         let first = EncodedFrame {
             pts_us: 1,
             is_key: false,
-            buffer: gst::Buffer::from_slice(vec![1u8]),
+            buffer: Arc::new(gst::Buffer::from_slice(vec![1u8])),
         };
         let second = EncodedFrame {
             pts_us: 2,
             is_key: false,
-            buffer: gst::Buffer::from_slice(vec![2u8]),
+            buffer: Arc::new(gst::Buffer::from_slice(vec![2u8])),
         };
 
         assert!(enqueue_frame(

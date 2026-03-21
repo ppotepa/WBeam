@@ -125,7 +125,7 @@ fn defaults() -> ProfileDefaults {
         size: "1280x800",
         fps: 60,
         bitrate_kbps: 10_000,
-        nv_preset: "p4",
+        nv_preset: "p2",
         stream_mode: StreamMode::Ultra,
         queue_max_buffers: 1,
         queue_max_time_ms: 8,

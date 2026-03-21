@@ -22,6 +22,7 @@ public final class StatusPoller {
 
     // Keep reconnect/startup fast, but use battery-friendlier cadence otherwise.
     private static final long STATUS_POLL_RECONNECT_MS          = 200L;
+    private static final long STATUS_POLL_RECONNECT_MAX_MS      = 2_000L;
     private static final long STATUS_POLL_STREAMING_VISIBLE_MS  = 800L;
     private static final long STATUS_POLL_STREAMING_HIDDEN_MS   = 1_200L;
     private static final long STATUS_POLL_IDLE_MS               = 3_000L;
@@ -32,7 +33,8 @@ public final class StatusPoller {
     private static final int  METRICS_POLL_EVERY_STREAMING_HIDDEN = 2;
     private static final long STATUS_UI_HEARTBEAT_MS   = 2_000L;
     private static final long ENSURE_DECODER_INTERVAL_MS = 1_000L;
-    private static final long AUTO_START_COOLDOWN_MS   = 4_000L;
+    private static final long AUTO_START_COOLDOWN_BASE_MS = 4_000L;
+    private static final long AUTO_START_COOLDOWN_MAX_MS  = 30_000L;
 
     // ── Daemon state constants ─────────────────────────────────────────────────
     private static final String STATE_IDLE          = "IDLE";
@@ -74,6 +76,8 @@ public final class StatusPoller {
     private long    suppressAutoStartUntil = 0L;
     private boolean autoStartPending       = false;
     private long    lastAutoStartAt        = 0L;
+    private int     autoStartFailCount     = 0;
+    private int     reconnectPollCount     = 0;
 
     // ── Infrastructure ────────────────────────────────────────────────────────
     private final Handler         uiHandler;
@@ -263,6 +267,7 @@ public final class StatusPoller {
 
         if (STATE_STREAMING.equals(daemonState)) {
             autoStartPending = false;
+            autoStartFailCount = 0;
             if (statusChanged || (nowMs - lastEnsureDecoderAtMs) >= ENSURE_DECODER_INTERVAL_MS) {
                 lastEnsureDecoderAtMs = nowMs;
                 callbacks.ensureDecoderRunning();
@@ -272,6 +277,7 @@ public final class StatusPoller {
 
         if (autoStartPending && STATE_IDLE.equals(daemonState) && !isAutoStartSuppressed()) {
             autoStartPending = false;
+            autoStartFailCount++;
             permanentlySuppressAutoStart();
             callbacks.onAutoStartFailed();
         }
@@ -331,8 +337,14 @@ public final class StatusPoller {
                 || STATE_CONNECTING.equals(daemonState)
                 || STATE_STARTING.equals(daemonState)
                 || STATE_RECONNECTING.equals(daemonState)) {
-            return STATUS_POLL_RECONNECT_MS;
+            // Exponential backoff: 200 → 400 → 800 → 1600 → 2000 (capped)
+            long delay = Math.min(
+                    STATUS_POLL_RECONNECT_MS << Math.min(reconnectPollCount, 4),
+                    STATUS_POLL_RECONNECT_MAX_MS);
+            reconnectPollCount++;
+            return delay;
         }
+        reconnectPollCount = 0;
         if (STATE_STREAMING.equals(daemonState)) {
             return isMetricsVisible() ? STATUS_POLL_STREAMING_VISIBLE_MS : STATUS_POLL_STREAMING_HIDDEN_MS;
         }
@@ -390,8 +402,11 @@ public final class StatusPoller {
 
     private boolean isAutoStartSuppressed() {
         long nowMs = SystemClock.elapsedRealtime();
+        long cooldown = Math.min(
+                AUTO_START_COOLDOWN_BASE_MS << Math.min(autoStartFailCount, 3),
+                AUTO_START_COOLDOWN_MAX_MS);
         return nowMs < suppressAutoStartUntil
-                || (nowMs - lastAutoStartAt) < AUTO_START_COOLDOWN_MS;
+                || (nowMs - lastAutoStartAt) < cooldown;
     }
 
     private static void putQuietly(JSONObject obj, String key, Object value) {

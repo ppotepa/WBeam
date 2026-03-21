@@ -37,7 +37,7 @@ const MAX_RECTS: usize = 16;
 const WAKE_DISCONT_THRESHOLD_MS: u128 = 120;
 /// Send a periodic keepalive frame even when idle to prevent Android decoder
 /// from stalling and to keep the stream fresh after long inactivity.
-const IDLE_KEEPALIVE_INTERVAL_MS: u128 = 2_000;
+const IDLE_KEEPALIVE_INTERVAL_MS: u128 = 5_000;
 
 /// Hard-wired EDID advertising 1920×1080 @ 60 Hz (DVI-D).
 /// Sourced from the EVDI kernel test suite (evdi_fake_user_client.c).
@@ -215,6 +215,16 @@ fn maybe_log_zero_rect_wait(stats: &mut EvdiLoopStats, width: i32, height: i32) 
     stats.last_wait_log_at = Instant::now();
 }
 
+fn acquire_pooled_buffer(pool: &gst::BufferPool, pixels: &[u8]) -> Option<gst::Buffer> {
+    let mut buf = pool.acquire_buffer(None).ok()?;
+    {
+        let bm = buf.get_mut()?;
+        let mut map = bm.map_writable().ok()?;
+        map.as_mut_slice()[..pixels.len()].copy_from_slice(pixels);
+    }
+    Some(buf)
+}
+
 fn push_frame(
     appsrc: &gst_app::AppSrc,
     pixels: &[u8],
@@ -222,6 +232,7 @@ fn push_frame(
     num_rects: i32,
     frame_duration_ns: u64,
     stats: &mut EvdiLoopStats,
+    pool: &gst::BufferPool,
 ) -> bool {
     let idle_before_frame_ms = stats.last_frame_at.elapsed().as_millis();
     let wake_discont = stats.published_frames > 0 && idle_before_frame_ms >= WAKE_DISCONT_THRESHOLD_MS;
@@ -231,7 +242,10 @@ fn push_frame(
     stats.published_frames = stats.published_frames.saturating_add(1);
     log_dirty_rect_update(stats, rects, num_rects);
 
-    let mut buf = gst::Buffer::from_slice(pixels.to_vec());
+    let mut buf = match acquire_pooled_buffer(pool, pixels) {
+        Some(b) => b,
+        None => gst::Buffer::from_slice(pixels.to_vec()),
+    };
     if let Some(bm) = buf.get_mut() {
         let pts_ns = stats.capture_started_at.elapsed().as_nanos() as u64;
         let dur_ns = if stats.last_pts_ns > 0 {
@@ -276,6 +290,13 @@ fn log_dirty_rect_update(stats: &EvdiLoopStats, rects: &[ffi::EvdiRect], num_rec
     if !(stats.published_frames == 1 || stats.published_frames % 120 == 0) {
         return;
     }
+    if num_rects <= 0 || rects.is_empty() {
+        println!(
+            "[wbeam-evdi] frame update: rects=0 (keepalive) published_frames={}",
+            stats.published_frames
+        );
+        return;
+    }
     let first = rects[0];
     println!(
         "[wbeam-evdi] frame update: rects={} first=({},{} {}x{}) published_frames={}",
@@ -301,6 +322,15 @@ fn evdi_loop(
     let mut pixels = vec![0u8; frame_size];
     let mut rects = vec![ffi::EvdiRect::default(); MAX_RECTS];
     let poll_timeout_ms = ((frame_duration_ns / 1_000_000) as i32).clamp(4, 16);
+
+    // Pre-allocate a GStreamer buffer pool to avoid per-frame malloc/free of 8MB buffers.
+    let pool = gst::BufferPool::new();
+    {
+        let mut config = pool.config();
+        config.set_params(None, frame_size as u32, 2, 8);
+        pool.set_config(config).expect("EVDI buffer pool config");
+    }
+    pool.set_active(true).expect("EVDI buffer pool activate");
 
     register_evdi_buffer(handle, &mut pixels, &mut rects, width, height);
 
@@ -331,6 +361,7 @@ fn evdi_loop(
                 num_rects,
                 frame_duration_ns,
                 &mut stats,
+                &pool,
             ) {
                 break;
             }
@@ -358,11 +389,14 @@ fn evdi_loop(
                 0,
                 frame_duration_ns,
                 &mut stats,
+                &pool,
             ) {
                 break;
             }
         }
     }
+
+    let _ = pool.set_active(false);
 
     unsafe {
         ffi::evdi_unregister_buffer(handle, 0);

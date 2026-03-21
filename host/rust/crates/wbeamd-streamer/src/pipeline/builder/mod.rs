@@ -130,7 +130,9 @@ fn create_scale_element(cfg: &ResolvedConfig) -> Result<gst::Element> {
     }
 
     let scale = build_element("videoscale", "scale")?;
-    let _ = scale.set_property_from_str("method", "lanczos");
+    // Use bilinear for streaming — lanczos (13-tap) wastes 15-25% CPU for
+    // negligible visual difference at typical 1280×800 / 1920×1080 output.
+    let _ = scale.set_property_from_str("method", "bilinear");
     Ok(scale)
 }
 
@@ -185,7 +187,7 @@ fn create_pipeline_elements(
 
 fn configure_queue(q: &gst::Element, profile: &BufferProfile) {
     let _ = q.set_property("max-size-buffers", profile.queue_buffers);
-    let _ = q.set_property("max-size-bytes", 0u32);
+    let _ = q.set_property("max-size-bytes", 50u32 * 1024 * 1024);
     let _ = q.set_property("flush-on-eos", true);
     let _ = q.set_property("silent", true);
     let _ = q.set_property("max-size-time", profile.queue_time_ns);
@@ -207,7 +209,7 @@ fn configure_videorate(rate: &gst::Element, fps: u32, drop_only: bool) {
 
 fn configure_parse(parse: &gst::Element) {
     parse.set_property("disable-passthrough", true);
-    parse.set_property("config-interval", -1i32);
+    parse.set_property("config-interval", 60i32);
 }
 
 fn configure_encoder_path(

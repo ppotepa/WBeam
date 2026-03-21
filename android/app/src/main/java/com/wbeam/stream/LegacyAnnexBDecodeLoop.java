@@ -12,7 +12,7 @@ import java.io.InputStream;
 import java.util.Locale;
 
 final class LegacyAnnexBDecodeLoop {
-    private static final long DRAIN_IDLE_CHECK_MS = 33L;
+    private static final long DRAIN_IDLE_CHECK_MS = 50L;
 
     interface RuntimeState {
         boolean isRunning();

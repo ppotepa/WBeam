@@ -1265,6 +1265,7 @@ impl DaemonCore {
 
         let restart_cfg;
         let action;
+        let base;
         {
             let mut inner = self.inner.lock().await;
             let now = Instant::now();
@@ -1289,6 +1290,7 @@ impl DaemonCore {
             }
 
             action = Self::adaptive_action(&inner);
+            base = self.base_from_inner(&inner);
             restart_cfg = next_restart_cfg;
         }
 
@@ -1297,7 +1299,7 @@ impl DaemonCore {
         }
 
         Ok(ClientMetricsResponse {
-            base: self.base_response().await,
+            base,
             ok: true,
             action,
         })
@@ -2043,20 +2045,22 @@ impl DaemonCore {
         let trimmed = line.trim_start();
         let streaming_started = Self::is_streaming_started_line(line);
         let needs_effective_runtime_snapshot = trimmed.starts_with(EFFECTIVE_RUNTIME_PREFIX);
-        let bitrate_actual_bps = line
+
+        // Single-pass: lowercase once, then scan for all patterns.
+        let lower = line.to_ascii_lowercase();
+        let bitrate_actual_bps = lower
             .contains("kb/s:")
             .then(|| proc::parse_kbps_line_to_bps(line))
             .flatten();
-        let transport_runtime = (line.contains("pipeline_fps=") && line.contains("[wbeam-framed]"))
-            .then(|| proc::parse_transport_runtime_line(line))
-            .flatten();
-        let maybe_error_line = line.contains("ERROR")
-            || line.contains("error")
-            || line.contains("failed")
-            || line.contains("Failed")
-            || line.contains("panic")
-            || line.contains("cannot")
-            || line.contains("property '");
+        let transport_runtime = (lower.contains("pipeline_fps=")
+            && lower.contains("[wbeam-framed]"))
+        .then(|| proc::parse_transport_runtime_line(line))
+        .flatten();
+        let maybe_error_line = lower.contains("error")
+            || lower.contains("failed")
+            || lower.contains("panic")
+            || lower.contains("cannot")
+            || lower.contains("property '");
         let detected_last_error = maybe_error_line
             .then(|| Self::detect_last_error_from_log_line(line))
             .flatten();

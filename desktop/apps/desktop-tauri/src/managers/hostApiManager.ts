@@ -102,6 +102,8 @@ export class HostApiManager {
           connectProfileName: connectConfig?.profileName,
           connectRuntimeProfile: connectConfig?.runtimeProfile,
           connectCaptureBackend: connectConfig?.captureBackend,
+          connectManualFps: connectConfig?.manualFps,
+          connectManualBitrateKbps: connectConfig?.manualBitrateKbps,
         }),
         10000,
         "device_connect",

@@ -54,14 +54,18 @@ final class StreamNalUtils {
         if (start < 0) {
             if (size > 0) {
                 int type = data[0] & 0x1F;
-                if (type == 7) sps = Arrays.copyOf(data, size);
-                if (type == 8) pps = Arrays.copyOf(data, size);
+                // Copy only the NAL unit, not the entire payload buffer.
+                int nalEnd = findStartCode(data, 1, size);
+                int copyLen = (nalEnd >= 0) ? nalEnd : size;
+                if (type == 7) sps = Arrays.copyOf(data, copyLen);
+                if (type == 8) pps = Arrays.copyOf(data, copyLen);
             }
             return new AvcCsd(sps, pps);
         }
 
         while (start >= 0 && start < size) {
             int nalHdrOff = (start + 2 < size && data[start + 2] == 1) ? (start + 3) : (start + 4);
+            if (nalHdrOff >= size) break;
             int next = findStartCode(data, nalHdrOff + 1, size);
             if (next < 0) next = size;
             int nalType = data[nalHdrOff] & 0x1F;

@@ -18,8 +18,8 @@ import java.util.Locale;
 
 @SuppressWarnings("java:S6541")
 final class FramedVideoDecodeLoop {
-    private static final long DRAIN_IDLE_CHECK_MS = 33L;
-    private static final int HEADER_READ_TIMEOUT_MS = 25;
+    private static final long DRAIN_IDLE_CHECK_MS = 50L;
+    private static final int HEADER_READ_TIMEOUT_MS = 50;
     private static final int PAYLOAD_READ_TIMEOUT_MS = 5_000;
 
     private static final String SEP_SPS = " sps=";
@@ -68,6 +68,11 @@ final class FramedVideoDecodeLoop {
     private final int noPresentMinInFramesHard;
     private final String stateConnecting;
     private final String stateStreaming;
+
+    // Reusable scratch buffers — avoid per-frame allocations and GC pressure.
+    private final byte[] streamReadScratch = new byte[16 * 1024];
+    private final long[] decodeNsBuf = new long[128];
+    private final long[] decodeNsScratch = new long[128];
 
     @SuppressWarnings("java:S107")
     FramedVideoDecodeLoop(
@@ -146,6 +151,8 @@ final class FramedVideoDecodeLoop {
             byte[] hdrBuf,
             byte[] payloadBuf
     ) throws IOException {
+        android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DISPLAY);
+
         long bytes = 0L;
         long inFrames = 0L;
         long outFrames = 0L;
@@ -157,10 +164,7 @@ final class FramedVideoDecodeLoop {
         long flushCountSec = 0L;
         long recoveryUnlockSec = 0L;
         long waitGateDropsSec = 0L;
-        byte[] streamReadScratch = new byte[16 * 1024];
         long decodeNsTotal = 0L;
-        long[] decodeNsBuf = new long[128];
-        long[] decodeNsScratch = new long[128];
         int decodeNsBufN = 0;
         long renderNsMax = 0L;
         long lastLog = SystemClock.elapsedRealtime();

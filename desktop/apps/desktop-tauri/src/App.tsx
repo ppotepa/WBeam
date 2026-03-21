@@ -25,6 +25,7 @@ import type {
   ConnectEncoderMode,
   ConnectSessionConfig,
   DeviceBasic,
+  QualityMode,
   TrainedProfile,
   VirtualDepsInstallStatus,
   VirtualDoctor,
@@ -264,7 +265,9 @@ export default function App() {
   const [connectDialogMode, setConnectDialogMode] = createSignal<DisplayMode>("virtual_monitor");
   const [connectDialogResolutionPresetId, setConnectDialogResolutionPresetId] = createSignal<string>(RESOLUTION_PRESET_DEFAULT_ID);
   const [connectDialogEncoderMode, setConnectDialogEncoderMode] = createSignal<ConnectEncoderMode | "">("");
-  const [connectDialogAdaptive, setConnectDialogAdaptive] = createSignal(false);
+  const [connectDialogQualityMode, setConnectDialogQualityMode] = createSignal<QualityMode>("manual");
+  const [connectDialogManualFps, setConnectDialogManualFps] = createSignal(60);
+  const [connectDialogManualMbps, setConnectDialogManualMbps] = createSignal(10);
   const [connectDialogProfileKey, setConnectDialogProfileKey] = createSignal<string>("");
   const [connectDialogCaptureBackend, setConnectDialogCaptureBackend] = createSignal<CaptureBackend | "">("");
   const [trainedProfiles, setTrainedProfiles] = createSignal<TrainedProfile[]>([]);
@@ -371,7 +374,9 @@ export default function App() {
     setConnectDialogMode(saved);
     setConnectDialogResolutionPresetId(RESOLUTION_PRESET_DEFAULT_ID);
     setConnectDialogEncoderMode("");
-    setConnectDialogAdaptive(false);
+    setConnectDialogQualityMode("manual");
+    setConnectDialogManualFps(60);
+    setConnectDialogManualMbps(10);
     setConnectDialogProfileKey("");
     setConnectDialogCaptureBackend("");
     void refreshTrainedProfiles();
@@ -453,21 +458,25 @@ function resolveEncoderMode(
       const backendMode = await resolveBackendMode(device, waylandHost);
       if (!backendMode) return;
 
-      const adaptiveEnabled = connectDialogAdaptive();
-      const resolvedSize = adaptiveEnabled
+      const qualityMode = connectDialogQualityMode();
+      const isAdaptive = qualityMode === "adaptive";
+      const isManual = qualityMode === "manual";
+      const resolvedSize = isAdaptive
         ? undefined
         : resolveSessionSizeForPreset(device, connectDialogResolutionPresetId());
       const encoderValue = connectDialogEncoderMode();
-      const profilesForEncoder = adaptiveEnabled
+      const profilesForEncoder = (isAdaptive || isManual)
         ? []
         : trainedProfiles().filter((p) => p.encoder === encoderValue);
       const selectedProfile = profilesForEncoder.find((p) => p.key === connectDialogProfileKey()) ?? null;
       const connectConfig: ConnectSessionConfig = {
-        runtimeProfile: adaptiveEnabled ? "adaptive" : undefined,
-        profileName: selectedProfile?.key,
+        runtimeProfile: isAdaptive ? "adaptive" : undefined,
+        profileName: (!isAdaptive && !isManual) ? selectedProfile?.key : undefined,
         encoder: resolveEncoderMode(selectedProfile, encoderValue),
         size: resolvedSize,
         captureBackend: resolveCaptureBackend(),
+        manualFps: isManual ? connectDialogManualFps() : undefined,
+        manualBitrateKbps: isManual ? connectDialogManualMbps() * 1000 : undefined,
       };
 
       closeConnectDialog();
@@ -861,9 +870,12 @@ function resolveEncoderMode(
             }
             return "Creates real additional monitor space on host desktop.";
           };
-          const adaptiveEnabled = () => connectDialogAdaptive();
+          const qualityMode = () => connectDialogQualityMode();
+          const isAdaptive = () => qualityMode() === "adaptive";
+          const isManual = () => qualityMode() === "manual";
+          const isProfile = () => qualityMode() === "profile";
           const selectedSize = () => {
-            if (adaptiveEnabled()) return "auto (adaptive)";
+            if (isAdaptive()) return "auto (adaptive)";
             return resolveSessionSizeForPreset(device, connectDialogResolutionPresetId()) ?? "auto";
           };
           const backendChosen = () => connectDialogCaptureBackend() !== "";
@@ -964,59 +976,113 @@ function resolveEncoderMode(
                     <small>{codecChosen() ? `Selected: ${connectDialogEncoderMode()}` : "Choose backend first"}</small>
                   </label>
 
-                  <div class={`mode-option-check${codecChosen() ? "" : " disabled"}`}>
-                    <label class={`checkbox-option${codecChosen() ? "" : " disabled"}`}>
+                  <div class={`quality-mode-radios${codecChosen() ? "" : " disabled"}`}>
+                    <span class="quality-mode-label">Quality mode</span>
+                    <label class={`radio-option${isManual() ? " selected" : ""}${!codecChosen() ? " disabled" : ""}`}>
                       <input
-                        type="checkbox"
-                        checked={adaptiveEnabled()}
+                        type="radio"
+                        name="quality-mode"
+                        value="manual"
+                        checked={isManual()}
                         disabled={!codecChosen()}
-                        onChange={(event) => setConnectDialogAdaptive(event.currentTarget.checked)}
+                        onChange={() => setConnectDialogQualityMode("manual")}
                       />
-                      <span>
-                        Adaptive mode
-                        <small>Use profile=adaptive and let host tune quality dynamically. Resolution/profile overrides are skipped.</small>
-                      </span>
+                      <span>Manual</span>
+                    </label>
+                    <label class={`radio-option${isAdaptive() ? " selected" : ""}${!codecChosen() ? " disabled" : ""}`}>
+                      <input
+                        type="radio"
+                        name="quality-mode"
+                        value="adaptive"
+                        checked={isAdaptive()}
+                        disabled={!codecChosen()}
+                        onChange={() => setConnectDialogQualityMode("adaptive")}
+                      />
+                      <span>Adaptive</span>
+                    </label>
+                    <label class={`radio-option${isProfile() ? " selected" : ""}${!codecChosen() ? " disabled" : ""}`}>
+                      <input
+                        type="radio"
+                        name="quality-mode"
+                        value="profile"
+                        checked={isProfile()}
+                        disabled={!codecChosen()}
+                        onChange={() => setConnectDialogQualityMode("profile")}
+                      />
+                      <span>Profile</span>
                     </label>
                   </div>
 
-                  <label class={`connect-config-field${(codecChosen() && concreteBackendChosen() && !adaptiveEnabled()) ? "" : " field-locked"}`}>
-                    <span>Profile</span>
-                    <select
-                      value={connectDialogProfileKey()}
-                      aria-label="Profile"
-                      disabled={!codecChosen() || !concreteBackendChosen() || adaptiveEnabled()}
-                      onChange={(event) => setConnectDialogProfileKey(event.currentTarget.value)}
-                    >
-                      <option value="">None (manual settings)</option>
-                      <For each={profilesForCodec()}>
-                        {(profile) => (
-                          <option value={profile.key}>
-                            {`${profile.name} (${profile.fps}fps, ${profile.bitrateKbps}kbps, ${profile.workload})`}
-                          </option>
-                        )}
-                      </For>
-                    </select>
-                    <small>
-                      {(() => {
-                        const profile = selectedProfile();
-                        if (profile) {
-                          const p = profile;
-                          return `${p.fps}fps ${p.bitrateKbps}kbps — ${p.objective}, ${p.workload}`;
-                        }
-                        if (adaptiveEnabled()) return "Adaptive mode enabled — trained profile selection is skipped";
-                        if (!backendChosen()) return "Choose backend first";
-                        if (!concreteBackendChosen()) return "Select a specific backend (not Auto) to use profiles";
-                        if (!codecChosen()) return "Choose codec first";
-                        return "Optional: use manual settings without a profile";
-                      })()}
-                    </small>
-                  </label>
+                  <Show when={isManual()}>
+                    <label class="connect-config-field">
+                      <span>Target FPS: {connectDialogManualFps()}</span>
+                      <input
+                        type="range"
+                        min="24"
+                        max="120"
+                        step="1"
+                        value={connectDialogManualFps()}
+                        onInput={(event) => setConnectDialogManualFps(Number(event.currentTarget.value))}
+                      />
+                      <small>Range: 24–120 fps</small>
+                    </label>
+                    <label class="connect-config-field">
+                      <span>Target bitrate: {connectDialogManualMbps()} Mbps</span>
+                      <input
+                        type="range"
+                        min="1"
+                        max="200"
+                        step="1"
+                        value={connectDialogManualMbps()}
+                        onInput={(event) => setConnectDialogManualMbps(Number(event.currentTarget.value))}
+                      />
+                      <small>Range: 1–200 Mbps (VBR — encoder uses up to this target)</small>
+                    </label>
+                  </Show>
 
-                  <label class={`connect-config-field${adaptiveEnabled() ? " field-locked" : ""}`}>
+                  <Show when={isAdaptive()}>
+                    <p class="quality-mode-hint">Host daemon tunes FPS and bitrate dynamically based on device feedback.</p>
+                  </Show>
+
+                  <Show when={isProfile()}>
+                    <label class={`connect-config-field${(codecChosen() && concreteBackendChosen()) ? "" : " field-locked"}`}>
+                      <span>Profile</span>
+                      <select
+                        value={connectDialogProfileKey()}
+                        aria-label="Profile"
+                        disabled={!codecChosen() || !concreteBackendChosen()}
+                        onChange={(event) => setConnectDialogProfileKey(event.currentTarget.value)}
+                      >
+                        <option value="">Select a profile...</option>
+                        <For each={profilesForCodec()}>
+                          {(profile) => (
+                            <option value={profile.key}>
+                              {`${profile.name} (${profile.fps}fps, ${profile.bitrateKbps}kbps, ${profile.workload})`}
+                            </option>
+                          )}
+                        </For>
+                      </select>
+                      <small>
+                        {(() => {
+                          const profile = selectedProfile();
+                          if (profile) {
+                            const p = profile;
+                            return `${p.fps}fps ${p.bitrateKbps}kbps — ${p.objective}, ${p.workload}`;
+                          }
+                          if (!backendChosen()) return "Choose backend first";
+                          if (!concreteBackendChosen()) return "Select a specific backend (not Auto) to use profiles";
+                          if (!codecChosen()) return "Choose codec first";
+                          return "Pick a trained profile";
+                        })()}
+                      </small>
+                    </label>
+                  </Show>
+
+                  <label class={`connect-config-field${isAdaptive() ? " field-locked" : ""}`}>
                     <span>Resolution preset</span>
                     <select
                       value={connectDialogResolutionPresetId()}
-                      disabled={adaptiveEnabled()}
+                      disabled={isAdaptive()}
                       onChange={(event) => setConnectDialogResolutionPresetId(event.currentTarget.value)}
                     >
                       <For each={RESOLUTION_PRESET_OPTIONS}>

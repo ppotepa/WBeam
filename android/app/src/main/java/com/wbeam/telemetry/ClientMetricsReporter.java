@@ -15,8 +15,8 @@ import java.util.concurrent.ExecutorService;
 public final class ClientMetricsReporter {
 
     private static final String TAG                        = "WBeamMetrics";
-    // 5 Hz client-metrics cadence to match HUD telemetry refresh.
-    private static final long   CLIENT_METRICS_INTERVAL_MS = 200L;
+    // 2 Hz client-metrics cadence — balances HUD telemetry refresh with battery.
+    private static final long   CLIENT_METRICS_INTERVAL_MS = 500L;
 
     private final ExecutorService ioExecutor;
     private final WarnLogger      warnLogger;

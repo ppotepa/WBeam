@@ -91,9 +91,9 @@ public class StreamService extends Service {
                         bytes += read;
 
                         long now = System.currentTimeMillis();
-                        if (now - lastLog >= 1000) {
-                            Log.i(TAG, "receiving h264 bytes/s ~ " + bytes);
-                            emitStatus(STATE_STREAMING, "receiving stream", bytes);
+                        if (now - lastLog >= 5000) {
+                            Log.i(TAG, "receiving h264 bytes/s ~ " + (bytes * 1000 / (now - lastLog)));
+                            emitStatus(STATE_STREAMING, "receiving stream", bytes * 1000 / (now - lastLog));
                             bytes = 0;
                             lastLog = now;
                         }

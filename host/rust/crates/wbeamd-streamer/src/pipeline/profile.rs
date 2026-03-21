@@ -47,7 +47,7 @@ fn build_ultra_profile(frame_ns: u64, mode_png: bool) -> BufferProfile {
         appsink_buffers,
         "downstream",
         true,
-        !mode_png,
+        false, // videorate adds ~16ms latency in Ultra; capture timestamps suffice
     )
 }
 
