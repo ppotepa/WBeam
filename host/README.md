@@ -15,9 +15,8 @@ Canonical host domain boundary.
 
 Active implementation lives in:
 
-- `host/rust`
-- `host/scripts`
-- `host/daemon`
+- `host/rust` — Rust crates (daemon, streamer, tuner, API, core)
+- `host/scripts` — shell helpers for config loading, debug, soak tests
 
 ## Contract
 

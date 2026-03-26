@@ -1,18 +1,16 @@
 # WBeam Telemetry Schema v1
 
-Task-ID: A3
-
 ## Per-Frame Timestamps
 
 Every frame in the pipeline carries these timestamps (microseconds, monotonic clock):
 
 | Field | Type | Set by | Description |
 |-------|------|--------|-------------|
-| `frame_seq` | u64 | host encoder | Monotonic frame counter, resets on stream start |
+| `frame_seq` | u64 | host streamer | Monotonic frame counter, resets on stream start |
 | `run_id` | u64 | host daemon | Session identifier, changes on each `/v1/start` |
-| `capture_ts_us` | u64 | host Python | Timestamp when GStreamer src buffer is acquired |
-| `encode_ts_us` | u64 | host Python | Timestamp after encoder outputs the NAL/AU |
-| `send_ts_us` | u64 | host Python | Timestamp when `tcpserversink` pushes bytes |
+| `capture_ts_us` | u64 | host streamer | Timestamp when GStreamer src buffer is acquired |
+| `encode_ts_us` | u64 | host streamer | Timestamp after encoder outputs the NAL/AU |
+| `send_ts_us` | u64 | host streamer | Timestamp when transport pushes bytes |
 | `recv_ts_us` | u64 | Android | Timestamp when last byte of frame arrives in `readBuf` |
 | `decode_ts_us` | u64 | Android | Timestamp after `codec.queueInputBuffer()` returns |
 | `present_ts_us` | u64 | Android | Timestamp after `releaseOutputBuffer(render=true)` |
@@ -80,6 +78,8 @@ Sent by Android every 1000 ms:
   "reason": "ok"
 }
 ```
+
+**Unit note:** `recv_bps` carries **bytes/sec** despite the name. Host core normalizes to bits/sec via `recv_bps * 8` for `metrics.bitrate_actual_bps`.
 
 ## C3 Frame Packet Header (planned, not yet implemented)
 

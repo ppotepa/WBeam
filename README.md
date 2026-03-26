@@ -1,329 +1,13 @@
 # WBeam
 
-**Turn your Android phone or tablet into a wireless external display for Linux.**
+USB display streaming from Linux to Android over ADB.
 
-WBeam enables high-performance streaming from a Linux host to Android devices over USB/ADB, providing a second screen with minimal latency and maximum quality. Perfect for productivity, streaming, or extending your workspace.
-
-![WBeam Desktop UI](docs/screenshot.png)
-
----
-
-## Overview
-
-WBeam has two main components working in concert:
-
-| Component | Role | Details |
-|-----------|------|---------|
-| **Host (Linux)** | Server & capture | Daemon + desktop control app, manages display capture and streaming |
-| **Android Client** | Display sink | APK running on phone/tablet, receives and displays video stream |
-
-Data flows over USB via ADB, requiring no network configuration or wireless setup.
-
-> [!TIP]
-> **Current best practice:**
-> - **EVDI capture backend** is the recommended path, providing ~60 FPS with low latency
-> - **Wayland portal** fallback available, though less stable on some desktop configurations
-> - For optimal results, ensure EVDI module is loaded: `sudo modprobe evdi`
+Captures a virtual display on the host, encodes H.264/H.265, and pushes
+frames to an Android device connected via USB. No Wi-Fi, no network config.
 
 ---
 
-## Getting Started (5-10 minutes)
-
-### Prerequisites
-- Linux host with USB port
-- Android phone or tablet (API 17+)
-- USB cable for ADB connection
-- EVDI capture backend installed (see below)
-
-### Quick Start
-
-1. **Clone repository and enter directory:**
-   ```bash
-   git clone <repo> && cd WBeam
-   ```
-
-2. **Connect Android device via USB:**
-   - Ensure ADB shows device in `device` state: `adb devices`
-   - Enable USB debugging in Android settings if needed
-
-3. **Build and deploy everything:**
-   ```bash
-   ./redeploy-local
-   ```
-   This automatically:
-   - Builds host daemon and desktop UI
-   - Compiles and installs Android APK
-   - Verifies version compatibility
-   - Launches desktop control application
-
-4. **Start the service (if not already running):**
-   ```bash
-   ./wbeam service install
-   ./wbeam service start
-   ```
-
-5. **Connect in desktop UI:**
-   - Click **Connect** button in the WBeam desktop application
-   - Observe video stream appearing on Android device
-
-6. **Verify EVDI capture:**
-   ```bash
-   sudo modprobe evdi initial_device_count=1
-   ```
-
-### Troubleshooting EVDI
-
-If EVDI isn't working, use the diagnostic tool:
-
-```bash
-bash scripts/evdi-diagnose.sh
-```
-
-For automated setup across any major Linux distribution (Arch, Debian, Ubuntu, Fedora, RHEL):
-
-```bash
-sudo bash scripts/evdi-setup.sh
-```
-
-See `EVDI_SETUP_INDEX.md` and `docs/EVDI_SETUP_GUIDE.md` for complete troubleshooting guidance.
-
-### Android Debug Menu
-
-To access debug options in the APK:
-- Hold **VOL+** and **VOL-** buttons simultaneously for ~2 seconds
-- Debug menu appears with streaming diagnostics and settings
-
----
-
-## Common Commands Reference
-
-| Command | Purpose |
-|---------|---------|
-| `./wbeam --help` | Show all available commands |
-| `./wbeam host build` | Build host daemon and streamer |
-| `./wbeam android deploy-all` | Build and deploy APK to all connected devices |
-| `./desktop.sh` | Launch desktop control application |
-| `./redeploy-local` | Full rebuild + deploy + launch (recommended for development) |
-| `./wbeam service install` | Install systemd service (user-level) |
-| `./wbeam service start` | Start the daemon service |
-| `./wbeam service status` | Check if daemon is running |
-| `./wbgui` | Terminal UI wrapper around core workflows |
-| `./devtool` | Developer convenience wrapper |
-
-### Quick Reference
-
-For a complete development workflow:
-```bash
-# One-command full setup (build, deploy, run)
-./redeploy-local
-
-# If desktop closes, restart it
-./desktop.sh
-
-# Manual service control
-./wbeam service install && ./wbeam service start
-
-# Check EVDI is loaded
-sudo modprobe evdi initial_device_count=1
-```
-
----
-
-## Performance Tuning with Trainer (Autotune)
-
-WBeam includes an interactive tuner to benchmark different encoding profiles and automatically generate optimized configurations for your specific hardware and network conditions.
-
-### Quick Start with Trainer
-
-```bash
-./wbeam host tuner
-```
-
-This launches an interactive GUI where you can:
-
-### Configuration Options
-
-| Setting | Purpose | Default |
-|---------|---------|---------|
-| **Objective** | What to optimize for | FPS (frames per second) |
-| **Workload** | Scene complexity to test | Mixed (varies) |
-| **Training Mode** | Prerendered scenes vs. virtual desktop | Prerendered (deterministic) |
-| **Child Train Time** | Seconds per test run | 5s |
-
-### Training Modes Explained
-
-- **Prerendered scenes** (recommended)
-  - Uses deterministic synthetic test scenes
-  - Consistent, reproducible results
-  - No compositor overhead
-  - Useful for maximum frame rate tuning (>60 FPS)
-
-- **Virtual desktop mode**
-  - Captures from your live desktop
-  - Real-world testing
-  - Limited by Wayland/X11 compositor cap (~60 FPS on many systems)
-
-### Generated Profiles
-
-After training completes, the tuner displays:
-- Final score and performance metrics
-- Winning bitrate/FPS/intra-frame settings
-- Details about the run configuration
-
-Profiles are automatically saved to:
-```
-~/.config/wbeam/trained_profiles.json
-```
-
-Example trained profiles are available in:
-```
-config/trainer-profiles/examples/
-```
-
----
-
-## Repository Structure
-
-The repository is organized by domain boundaries:
-
-```
-WBeam/
-├── android/         # Android client (APK source code)
-├── host/           # Linux host daemon and streamer
-├── desktop/        # Desktop UI applications
-├── shared/         # Shared protocol and contracts
-├── scripts/        # Utility and setup scripts
-├── config/         # Configuration templates and profiles
-├── docs/           # Documentation and guides
-└── logs/           # Runtime logs and diagnostics
-```
-
-### Key Documentation
-
-- **`docs/repo-structure.md`** - Detailed repository layout and module organization
-- **`docs/EVDI_SETUP_GUIDE.md`** - Complete EVDI installation and troubleshooting
-- **`EVDI_SETUP_INDEX.md`** - EVDI quick reference and support matrix
-- **`docs/agents.workflow.md`** - Development workflow and best practices
-
----
-
-## Main Entrypoints
-
-| Tool | Purpose | Usage |
-|------|---------|-------|
-| `./wbeam` | **Main CLI** - all operations | `./wbeam --help` |
-| `./wbgui` | Terminal UI wrapper | Interactive menu-driven interface |
-| `./devtool` | Developer convenience | Common dev tasks shortcut |
-| `./desktop.sh` | Launch desktop app | Desktop control UI |
-| `./trainer.sh` | Launch trainer GUI | Interactive performance tuner |
-| `./start-remote` | Remote setup & bootstrap | Remote host initialization |
-| `./runas-remote` | Remote command execution | Run commands in active session |
-
----
-
-## Capture Backends
-
-WBeam supports multiple capture methods to match your desktop environment:
-
-### EVDI (Recommended)
-
-- **Platform:** Linux with kernel module support
-- **Performance:** ~60 FPS, low latency, high quality
-- **Setup:** `sudo bash scripts/evdi-setup.sh`
-- **Use:** Explicitly specify via `?capture_backend=evdi` parameter
-- **Advantages:** Direct kernel capture, bypasses compositor, best quality
-
-### Wayland Portal
-
-- **Platform:** Wayland sessions (GNOME, KDE, etc.)
-- **Performance:** ~30-60 FPS (depends on compositor)
-- **Fallback:** Automatic if EVDI unavailable
-- **Limitations:** May be less stable on some configurations
-
-### X11 Server
-
-- **Platform:** X11 sessions
-- **Performance:** Variable based on system load
-- **Note:** Slower than Wayland portal in most cases
-
----
-
-## Supported Devices
-
-| Requirement | Min Version | Notes |
-|------------|-------------|-------|
-| **Android** | API 17 (4.2) | Supports legacy devices |
-| **Linux** | Kernel 5.10+ | For EVDI support |
-| **USB** | USB 2.0+ | ADB over USB required |
-
----
-
-## Performance Tips
-
-### For Best Quality
-
-1. **Use EVDI capture:** Provides native resolution and 120 FPS capability
-2. **Configure adaptive quality:** Let WBeam adjust bitrate based on network
-3. **Use prerendered scenes for tuning:** More consistent profile generation
-4. **Monitor bandwidth:** Adjust target bitrate to match your USB link speed
-
-### For Lower Latency
-
-1. **Reduce resolution on Android:** Lower resolution = less network traffic
-2. **Increase frame rate:** WBeam adapts encode quality to maintain FPS
-3. **Use EVDI backend:** Eliminates compositor delay
-4. **Check USB cable quality:** Loose connections cause lag
-
-### For Mobile Devices
-
-1. **Reduce resolution:** Better battery life and thermal performance
-2. **Lower frame rate:** Battery consumption scales with FPS
-3. **Use adaptive profile:** Automatically balances quality vs. power
-
----
-
-## Troubleshooting
-
-### Stream won't connect
-
-1. Verify ADB sees device: `adb devices`
-2. Check service is running: `./wbeam service status`
-3. Look at logs: `tail -f logs/*.log`
-4. Verify APK version matches host: `./wbeam version doctor`
-
-### EVDI not working
-
-```bash
-# Diagnose
-bash scripts/evdi-diagnose.sh --verbose
-
-# Automated setup
-sudo bash scripts/evdi-setup.sh
-
-# Manual load
-sudo modprobe evdi initial_device_count=1
-```
-
-### Low frame rate or stuttering
-
-1. Try EVDI backend: `?capture_backend=evdi`
-2. Run adaptive tuning: `./wbeam host tuner`
-3. Monitor bandwidth: Check USB connection quality
-4. Verify CPU load: Both host and device should have headroom
-
-### Desktop UI issues on Wayland
-
-```bash
-# Use Wayland-aware launcher
-./desktop.sh
-
-# Or use xwayland wrapper if needed
-XDG_SESSION_TYPE=x11 ./desktop.sh
-```
-
----
-
-## Architecture Overview
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -358,38 +42,143 @@ XDG_SESSION_TYPE=x11 ./desktop.sh
 
 ---
 
-## Development
+## Getting Started
 
-For development workflow details, see:
-- `docs/agents.workflow.md` - Team workflow and PR process
-- `docs/repo-structure.md` - Detailed codebase organization
-- `EVDI_SETUP_INDEX.md` - Setup troubleshooting guide
+Prerequisites: Linux host, Android device (API 17+), USB cable, ADB.
 
-Quick dev setup:
 ```bash
 git clone <repo> && cd WBeam
-./redeploy-local  # One-command setup
-./wbgui          # Use terminal UI for common tasks
+
+# Build host daemon, build+install APK, launch desktop UI
+./redeploy-local
+
+# Verify everything matches
+./wbeam version doctor
 ```
+
+For EVDI capture (recommended), load the kernel module:
+
+```bash
+sudo modprobe evdi initial_device_count=1
+```
+
+If EVDI gives trouble, run the setup script:
+
+```bash
+sudo bash scripts/evdi-setup.sh
+```
+
+See `EVDI_SETUP_INDEX.md` and `docs/EVDI_SETUP_GUIDE.md` for details.
 
 ---
 
-## Contributing
+## Capture Backends
 
-WBeam is under active development. See workflow documentation for:
-- Issue/branch naming conventions
-- PR review process
-- Commit message format
-- Testing requirements
+**EVDI** (recommended) -- Kernel-level virtual display. 1920x1080 fixed EDID,
+low latency, bypasses compositor. Setup: `sudo bash scripts/evdi-setup.sh`.
+
+**Wayland portal** -- Fallback for Wayland sessions. Compositor-dependent
+performance (~30-60 FPS). Automatic if EVDI is unavailable.
+
+**X11** -- Fallback for X11 sessions. Variable performance.
+
+---
+
+## Commands
+
+### `./wbeam` subcommands
+
+```
+host      build | run | debug | status | down/stop | probe | tuner
+android   build | install | launch | deploy | deploy-all
+          build-release | install-release | deploy-release
+version   new | current | doctor
+watch     tui | devices | connections | streaming | service
+          logs | status | health | doctor
+debug     up/start | watch/logs
+logs      live | host | adb (start|stop|status|tail)
+deps      virtual (check | install)
+ip        up | down | status
+```
+
+The daemon runs via `./wbeam host run` (foreground) or `./wbeam host debug`
+(debug mode). For persistent operation, manage the systemd user service
+(`~/.config/systemd/user/wbeam-daemon.service`) directly with `systemctl --user`.
+
+`./wbeam host tuner` launches the interactive Rust TUI autotuner for
+benchmarking encoding profiles against your hardware.
+
+### Other entrypoints
+
+| Script | What it does |
+|--------|-------------|
+| `./wbeam` | Main CLI |
+| `./wbgui` | Interactive TUI menu |
+| `./devtool` | Dev convenience (gui, deps install) |
+| `./desktop.sh` | Desktop app launcher |
+| `./redeploy-local` | Full rebuild + deploy + launch |
+| `./start-remote` | Remote session bootstrap |
+| `./runas-remote` | Run command as another desktop user |
+
+The trainer GUI is the desktop trainer-tauri app (`desktop/apps/trainer-tauri`).
+
+---
+
+## Repository Layout
+
+```
+WBeam/
+  android/       Android client (APK)
+  host/          Linux daemon, streamer, training
+  desktop/       Tauri desktop apps (control + trainer)
+  shared/        Shared protocol definitions
+  config/        Configuration templates and profiles
+  scripts/       Setup and utility scripts
+  docs/          Documentation
+  logs/          Runtime logs (gitignored)
+```
+
+Key docs: `docs/repo-structure.md`, `docs/agents.workflow.md`,
+`docs/EVDI_SETUP_GUIDE.md`.
+
+---
+
+## Troubleshooting
+
+**No stream** -- Check `adb devices` shows your device. Check daemon is
+running (`./wbeam host status`). Check version parity (`./wbeam version doctor`).
+Inspect `logs/` and `desktop-connect.log`.
+
+**EVDI not loading** -- Run `bash scripts/evdi-diagnose.sh`. Try the automated
+setup: `sudo bash scripts/evdi-setup.sh`.
+
+**Low FPS** -- Switch to EVDI backend. Run `./wbeam host tuner` to find
+optimal encoding settings for your hardware.
+
+**Desktop UI issues on Wayland** -- Launch via `./desktop.sh`. If that fails,
+try `XDG_SESSION_TYPE=x11 ./desktop.sh`.
+
+---
+
+## Supported Platforms
+
+- **Linux:** Arch, Debian, Ubuntu, Fedora, RHEL (kernel 5.10+ for EVDI)
+- **Android:** API 17+ (Android 4.2+), USB 2.0+
+
+---
+
+## Development
+
+```bash
+./redeploy-local   # build everything, deploy, launch
+./wbgui            # interactive menu for common tasks
+./devtool          # dev shortcuts
+```
+
+See `docs/agents.workflow.md` for branch/PR conventions and commit format.
 
 ---
 
 ## License
 
 See LICENSE file in repository root.
-
----
-
-**Last Updated:** March 2026  
-**Status:** Production Ready  
-**Supported Platforms:** Linux (Arch, Debian, Ubuntu, Fedora, RHEL), Android 4.2+
