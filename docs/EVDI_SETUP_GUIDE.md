@@ -81,8 +81,8 @@ sudo dkms add . && sudo dkms build -m evdi -v $(cat VERSION.txt) && sudo dkms in
 
 ```bash
 sudo modprobe -r evdi 2>/dev/null || true
-sudo modprobe evdi initial_device_count=1
-echo "options evdi initial_device_count=1" | sudo tee /etc/modprobe.d/evdi.conf
+sudo modprobe evdi initial_device_count=4
+echo "options evdi initial_device_count=4" | sudo tee /etc/modprobe.d/evdi.conf
 ```
 
 ### User Permissions
@@ -130,8 +130,8 @@ modprobe: ERROR: could not insert 'evdi': No such file or directory
 
 ```bash
 lsmod | grep evdi                    # confirm module loaded
-cat /sys/module/evdi/parameters/initial_device_count   # should be 1
-sudo modprobe evdi initial_device_count=1              # reload if needed
+cat /sys/module/evdi/parameters/initial_device_count   # should be 4
+sudo modprobe evdi initial_device_count=4              # reload if needed
 dmesg | tail -50 | grep -i evdi                        # check for errors
 sudo udevadm trigger                                   # force device creation
 ```

@@ -59,7 +59,7 @@ git clone <repo> && cd WBeam
 For EVDI capture (recommended), load the kernel module:
 
 ```bash
-sudo modprobe evdi initial_device_count=1
+sudo modprobe evdi initial_device_count=4
 ```
 
 If EVDI gives trouble, run the setup script:

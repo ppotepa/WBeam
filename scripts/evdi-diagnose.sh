@@ -213,10 +213,10 @@ else
     if [[ $FIX_RECOMMENDATIONS == 1 ]]; then
         echo ""
         echo "  🔧 To load EVDI module:"
-        echo "    sudo modprobe evdi initial_device_count=1"
+        echo "    sudo modprobe evdi initial_device_count=4"
         echo ""
         echo "  🔧 To make it persistent across reboots:"
-        echo "    echo 'options evdi initial_device_count=1' | sudo tee /etc/modprobe.d/evdi.conf"
+        echo "    echo 'options evdi initial_device_count=4' | sudo tee /etc/modprobe.d/evdi.conf"
     fi
 fi
 

@@ -43,7 +43,7 @@ echo "Capture mode set to: $MODE"
 
 if [ "$MODE" = "evdi" ]; then
     echo "Loading EVDI kernel module..."
-    if sudo modprobe evdi initial_device_count=1; then
+    if sudo modprobe evdi initial_device_count=4; then
         echo "EVDI module loaded OK"
     else
         echo "WARNING: modprobe evdi failed — ensure the evdi DKMS package is installed." >&2

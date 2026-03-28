@@ -514,7 +514,10 @@ async fn auto_configure_evdi_outputs(
         return Ok(());
     }
 
-    let unmirror_commands = kscreen_layout::build_virtual_unmirror_commands(&outputs, preferred);
+    // Unmirror and extend ALL virtual outputs, not just newly-appeared ones.
+    // KDE may re-mirror previously-configured virtual outputs when a new
+    // display appears, so we must always fix the full set.
+    let unmirror_commands = kscreen_layout::build_virtual_unmirror_commands(&outputs, None);
     if !unmirror_commands.is_empty() {
         kscreen_layout::apply_kscreen_layout(&unmirror_commands)?;
         info!(commands = ?unmirror_commands, "applied evdi mirror detach");
@@ -527,11 +530,7 @@ async fn auto_configure_evdi_outputs(
     };
     let extend_commands = kscreen_layout::build_virtual_extend_commands(
         &latest_outputs,
-        if preferred_targets.is_empty() {
-            None
-        } else {
-            Some(&preferred_targets)
-        },
+        None,
     );
     if extend_commands.is_empty() {
         return Ok(());

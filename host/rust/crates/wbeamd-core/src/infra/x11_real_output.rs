@@ -166,7 +166,7 @@ fn pick_source_provider<'a>(
     if evdi.available && !evdi.loaded {
         warn!("x11 real-output probe: evdi installed but module not loaded");
         return Err(unsupported_probe(
-            "evdi module is installed but not loaded (run: sudo modprobe evdi initial_device_count=1)",
+            "evdi module is installed but not loaded (run: sudo modprobe evdi initial_device_count=4)",
             vec!["evdi-module-loaded".to_string()],
         ));
     }

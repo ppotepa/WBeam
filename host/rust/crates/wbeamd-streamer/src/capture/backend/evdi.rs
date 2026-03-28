@@ -7,7 +7,7 @@
 /// no IPC, no 60 Hz compositor cap.
 ///
 /// Prerequisites (one-time setup):
-///   sudo modprobe evdi initial_device_count=1
+///   sudo modprobe evdi initial_device_count=4
 /// or run:
 ///   scripts/set-capture-mode.sh evdi
 use std::ffi::c_void;
@@ -27,8 +27,6 @@ use super::evdi_ffi as ffi;
 
 /// EVDI outputs XRGB8888 (4 bytes per pixel, X=padding).
 const BYTES_PER_PIXEL: usize = 4;
-const EDID_WIDTH: i32 = 1920;
-const EDID_HEIGHT: i32 = 1080;
 
 /// Maximum dirty rectangles EVDI reports per frame.
 const MAX_RECTS: usize = 16;
@@ -39,18 +37,154 @@ const WAKE_DISCONT_THRESHOLD_MS: u128 = 120;
 /// from stalling and to keep the stream fresh after long inactivity.
 const IDLE_KEEPALIVE_INTERVAL_MS: u128 = 5_000;
 
-/// Hard-wired EDID advertising 1920×1080 @ 60 Hz (DVI-D).
-/// Sourced from the EVDI kernel test suite (evdi_fake_user_client.c).
-const EDID_1920X1080: [u8; 128] = [
-    0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x31, 0xd8, 0x2a, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x21, 0x01, 0x03, 0x81, 0xa0, 0x5a, 0x78, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
-    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x02, 0x3a, 0x80, 0x18, 0x71, 0x38, 0x2d, 0x40, 0x58, 0x2c,
-    0x45, 0x00, 0x40, 0x84, 0x63, 0x00, 0x00, 0x1e, 0x00, 0x00, 0x00, 0xfc, 0x00, 0x54, 0x65, 0x73,
-    0x74, 0x20, 0x45, 0x44, 0x49, 0x44, 0x0a, 0x20, 0x20, 0x20, 0x00, 0x00, 0x00, 0xfd, 0x00, 0x32,
-    0x46, 0x1e, 0x46, 0x0f, 0x00, 0x0a, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x00, 0x00, 0x00, 0x10,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xab,
-];
+// ─── Dynamic EDID generation ────────────────────────────────────────────────
+
+/// Build a minimal 128-byte EDID block advertising `width`×`height` @ `fps` Hz.
+/// The EDID is a base block only (no extensions) with a single Detailed Timing
+/// Descriptor.  This is enough for EVDI to expose the desired mode to the
+/// compositor.
+fn generate_edid(width: i32, height: i32, fps: i32) -> [u8; 128] {
+    let mut edid = [0u8; 128];
+
+    // Fixed header
+    edid[0..8].copy_from_slice(&[0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00]);
+
+    // Manufacturer ID "WBM" (W=0x17, B=0x02, M=0x0D → 0x5C 0x2D)
+    edid[8] = 0x5C;
+    edid[9] = 0x2D;
+    // Product code
+    edid[10] = 0x01;
+    edid[11] = 0x00;
+    // Serial
+    edid[12..16].copy_from_slice(&[0x01, 0x00, 0x00, 0x00]);
+    // Week / Year of manufacture (week 1, 2025)
+    edid[16] = 0x01;
+    edid[17] = 35; // 2025 - 1990
+    // EDID version 1.3
+    edid[18] = 0x01;
+    edid[19] = 0x03;
+    // Digital input, 8 bits per color
+    edid[20] = 0x80;
+    // Screen size cm (approximate from pixels at ~4 dpi)
+    edid[21] = ((width as u32 * 254 / 960).min(255)) as u8;
+    edid[22] = ((height as u32 * 254 / 960).min(255)) as u8;
+    // Gamma 2.2
+    edid[23] = 120; // (gamma * 100) - 100
+    // Feature support: RGB color, preferred timing in DTD1
+    edid[24] = 0x0A;
+
+    // Chromaticity (sRGB defaults, compact)
+    edid[25..35].copy_from_slice(&[
+        0xEE, 0x91, 0xA3, 0x54, 0x4C, 0x99, 0x26, 0x0F, 0x50, 0x54,
+    ]);
+
+    // Established timings — none
+    edid[35] = 0x00;
+    edid[36] = 0x00;
+    edid[37] = 0x00;
+
+    // Standard timings — unused (0x0101 = not used)
+    for i in (38..54).step_by(2) {
+        edid[i] = 0x01;
+        edid[i + 1] = 0x01;
+    }
+
+    // ── Detailed Timing Descriptor (18 bytes at offset 54) ──────────────
+    let w = width as u32;
+    let h = height as u32;
+    let f = fps as u32;
+
+    // Typical blanking for a flat-panel display
+    let h_blank: u32 = if w > 1920 { 280 } else { 160 };
+    let v_blank: u32 = if h > 1080 { 60 } else { 45 };
+
+    let h_total = w + h_blank;
+    let v_total = h + v_blank;
+    let pixel_clock_khz = h_total * v_total * f / 1000;
+    let pixel_clock_10k = pixel_clock_khz / 10;
+
+    // Sync pulse / porch (reasonable defaults)
+    let h_sync_offset: u32 = 48;
+    let h_sync_width: u32 = 32;
+    let v_sync_offset: u32 = 3;
+    let v_sync_width: u32 = 5;
+
+    let dtd = &mut edid[54..72];
+    dtd[0] = (pixel_clock_10k & 0xFF) as u8;
+    dtd[1] = ((pixel_clock_10k >> 8) & 0xFF) as u8;
+    dtd[2] = (w & 0xFF) as u8;
+    dtd[3] = (h_blank & 0xFF) as u8;
+    dtd[4] = (((w >> 8) & 0x0F) << 4 | ((h_blank >> 8) & 0x0F)) as u8;
+    dtd[5] = (h & 0xFF) as u8;
+    dtd[6] = (v_blank & 0xFF) as u8;
+    dtd[7] = (((h >> 8) & 0x0F) << 4 | ((v_blank >> 8) & 0x0F)) as u8;
+    dtd[8] = (h_sync_offset & 0xFF) as u8;
+    dtd[9] = (h_sync_width & 0xFF) as u8;
+    dtd[10] = ((v_sync_offset & 0x0F) << 4 | (v_sync_width & 0x0F)) as u8;
+    dtd[11] = (((h_sync_offset >> 8) & 0x03) << 6
+        | ((h_sync_width >> 8) & 0x03) << 4
+        | ((v_sync_offset >> 4) & 0x03) << 2
+        | ((v_sync_width >> 4) & 0x03)) as u8;
+    // Physical image size mm (approximate)
+    let h_mm = w * 254 / 960;
+    let v_mm = h * 254 / 960;
+    dtd[12] = (h_mm & 0xFF) as u8;
+    dtd[13] = (v_mm & 0xFF) as u8;
+    dtd[14] = (((h_mm >> 8) & 0x0F) << 4 | ((v_mm >> 8) & 0x0F)) as u8;
+    dtd[15] = 0; // border pixels H
+    dtd[16] = 0; // border pixels V
+    dtd[17] = 0x18; // non-interlaced, digital separate sync
+
+    // ── Descriptor 2: Monitor name "WBeam" ──────────────────────────────
+    let name_desc = &mut edid[72..90];
+    name_desc[0] = 0x00;
+    name_desc[1] = 0x00;
+    name_desc[2] = 0x00;
+    name_desc[3] = 0xFC; // tag: monitor name
+    name_desc[4] = 0x00;
+    let name_bytes = b"WBeam\n";
+    name_desc[5..5 + name_bytes.len()].copy_from_slice(name_bytes);
+    for b in &mut name_desc[5 + name_bytes.len()..18] {
+        *b = 0x20; // pad with spaces
+    }
+
+    // ── Descriptor 3: Monitor range limits ──────────────────────────────
+    let range_desc = &mut edid[90..108];
+    range_desc[0] = 0x00;
+    range_desc[1] = 0x00;
+    range_desc[2] = 0x00;
+    range_desc[3] = 0xFD; // tag: range limits
+    range_desc[4] = 0x00;
+    range_desc[5] = 50;  // min V Hz
+    range_desc[6] = (fps.max(60) as u8).min(120).max(60); // max V Hz
+    range_desc[7] = 30;  // min H kHz
+    range_desc[8] = ((pixel_clock_khz / h_total + 5) as u8).max(70); // max H kHz
+    range_desc[9] = ((pixel_clock_10k / 1000 + 1) as u8).max(15); // max pixel clock / 10 MHz
+    range_desc[10] = 0x00; // GTF
+    for b in &mut range_desc[11..18] {
+        *b = 0x0A;
+    }
+
+    // ── Descriptor 4: Dummy ─────────────────────────────────────────────
+    let dummy = &mut edid[108..126];
+    dummy[0] = 0x00;
+    dummy[1] = 0x00;
+    dummy[2] = 0x00;
+    dummy[3] = 0x10; // tag: dummy
+    dummy[4] = 0x00;
+    for b in &mut dummy[5..18] {
+        *b = 0x00;
+    }
+
+    // Extension count
+    edid[126] = 0;
+
+    // Checksum: make all 128 bytes sum to 0 mod 256
+    let sum: u32 = edid[0..127].iter().map(|&b| b as u32).sum();
+    edid[127] = (256 - (sum % 256)) as u8;
+
+    edid
+}
 
 // ─── Wrapper so we can send the opaque EVDI handle across threads ───────────
 
@@ -71,22 +205,125 @@ unsafe extern "C" fn on_mode_changed(_mode: ffi::EvdiMode, _user_data: *mut c_vo
 
 // ─── Device discovery ───────────────────────────────────────────────────────
 
-fn find_evdi_device() -> Result<i32> {
-    for idx in 0..16i32 {
-        let status = unsafe { ffi::evdi_check_device(idx) };
-        if status == ffi::EvdiDeviceStatus::Available {
-            return Ok(idx);
+/// Lock file path used to coordinate EVDI device allocation across streamer
+/// processes.  Each streamer holds an exclusive (LOCK_EX | LOCK_NB) flock on
+/// its claimed device file so concurrent streamers skip already-taken indices.
+fn evdi_lock_path(idx: i32) -> String {
+    format!("/tmp/wbeam-evdi-{idx}.lock")
+}
+
+/// Try to acquire an exclusive, non-blocking flock.  Returns the open File on
+/// success (caller must keep it alive for the duration of capture).
+fn try_evdi_lock(idx: i32) -> Option<std::fs::File> {
+    use std::fs::OpenOptions;
+    let path = evdi_lock_path(idx);
+    let file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&path)
+        .ok()?;
+    let fd = std::os::unix::io::AsRawFd::as_raw_fd(&file);
+    let rc = unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) };
+    if rc == 0 {
+        Some(file)
+    } else {
+        None
+    }
+}
+
+/// Verify that `idx` is genuinely an EVDI device (not a GPU or phantom index).
+fn is_confirmed_evdi(idx: i32) -> bool {
+    let status = unsafe { ffi::evdi_check_device(idx) };
+    status == ffi::EvdiDeviceStatus::Available
+}
+
+/// Check whether /dev/dri/card{idx} already has a DRM connector in "connected"
+/// state (e.g. Xwayland already drives it).
+///
+/// EVDI connector names vary by kernel version (DVI-I-N, Virtual-N, etc.)
+/// so we scan all `/sys/class/drm/card{idx}-*/status` entries.
+fn is_evdi_card_in_use_by_others(idx: i32) -> bool {
+    let prefix = format!("card{idx}-");
+    let drm_dir = match std::fs::read_dir("/sys/class/drm") {
+        Ok(d) => d,
+        Err(_) => return false,
+    };
+    for entry in drm_dir.flatten() {
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if !name_str.starts_with(&prefix) {
+            continue;
+        }
+        let status_path = entry.path().join("status");
+        if let Ok(status) = std::fs::read_to_string(&status_path) {
+            if status.trim() == "connected" {
+                eprintln!(
+                    "[wbeam-evdi] card{idx} connector {name_str} status='connected' — already in use"
+                );
+                return true;
+            }
         }
     }
-    // Try to create a new EVDI device (requires the evdi module loaded
-    // with at least initial_device_count=1, or root for sysfs write).
-    let new_idx = unsafe { ffi::evdi_add_device() };
-    if new_idx >= 0 {
-        return Ok(new_idx);
+    false
+}
+
+/// Try to claim EVDI device `idx`:
+/// 1. Must be a confirmed EVDI device
+/// 2. Must not already be connected by another DRM client
+/// 3. Must win the flock race against other WBeam streamers
+fn try_claim_evdi(idx: i32) -> Option<std::fs::File> {
+    if !is_confirmed_evdi(idx) {
+        return None;
     }
+    if is_evdi_card_in_use_by_others(idx) {
+        return None;
+    }
+    try_evdi_lock(idx)
+}
+
+fn find_evdi_device() -> Result<(i32, Option<std::fs::File>)> {
+    // 1. Try creating a brand-new EVDI device (requires root / sysfs write).
+    //    evdi_add_device() can return 0 instead of -1 on permission-denied,
+    //    so we verify the returned index is actually EVDI before trusting it.
+    let new_idx = unsafe { ffi::evdi_add_device() };
+    if new_idx >= 0 && is_confirmed_evdi(new_idx) {
+        eprintln!("[wbeam-evdi] evdi_add_device created new device at index {new_idx}");
+        if let Some(lock) = try_evdi_lock(new_idx) {
+            return Ok((new_idx, Some(lock)));
+        }
+        eprintln!("[wbeam-evdi] WARNING: newly created EVDI {new_idx} already locked; scanning");
+    }
+    if new_idx >= 0 {
+        eprintln!(
+            "[wbeam-evdi] evdi_add_device returned {new_idx} but it is not a free EVDI device; ignoring"
+        );
+    }
+
+    // 2. Scan existing devices — skip non-EVDI, already-connected, and locked.
+    for idx in 0..16i32 {
+        if let Some(lock) = try_claim_evdi(idx) {
+            eprintln!("[wbeam-evdi] claimed free EVDI device at index {idx}");
+            return Ok((idx, Some(lock)));
+        }
+    }
+
+    // 3. Last resort — try add_device once more (module may have been
+    //    loaded between first attempt and now).
+    let retry = unsafe { ffi::evdi_add_device() };
+    if retry >= 0 && is_confirmed_evdi(retry) {
+        eprintln!("[wbeam-evdi] evdi_add_device retry created device at index {retry}");
+        if let Some(lock) = try_evdi_lock(retry) {
+            return Ok((retry, Some(lock)));
+        }
+        eprintln!("[wbeam-evdi] WARNING: retry EVDI {retry} lock failed");
+    }
+
     Err(anyhow::anyhow!(
-        "No EVDI device found. Run: sudo modprobe evdi initial_device_count=1\n\
-         or: scripts/set-capture-mode.sh evdi"
+        "No free EVDI device found (all locked by other streamers or in use by compositor). \
+         Ensure enough EVDI devices are available: \
+         sudo modprobe -r evdi && sudo modprobe evdi initial_device_count=4\n\
+         or add more at runtime: echo 1 | sudo tee /sys/devices/evdi/add"
     ))
 }
 
@@ -411,24 +648,21 @@ pub fn build_source(cfg: &ResolvedConfig) -> Result<gst::Element> {
     let fps = cfg.fps.max(1);
     let requested_width = cfg.width as i32;
     let requested_height = cfg.height as i32;
-    // Important: libevdi expects the registered grab buffer geometry to match
-    // the negotiated mode from EDID. We currently ship only a 1920x1080 EDID,
-    // so forcing capture buffers to EDID size avoids grabpix EINVAL failures
-    // when requested stream size is portrait (e.g. 1200x2000). Downstream
-    // videoscale/capsfilter still reshape to cfg.width x cfg.height.
-    let width = EDID_WIDTH;
-    let height = EDID_HEIGHT;
-    if requested_width != width || requested_height != height {
-        eprintln!(
-            "[wbeam-evdi] WARN: requested stream {}×{} but EVDI capture is fixed at EDID {}×{}; scaling downstream.",
-            requested_width, requested_height, width, height
-        );
-    }
+    // Ensure landscape orientation and even dimensions for encoder compat.
+    let width = std::cmp::max(requested_width, requested_height);
+    let height = std::cmp::min(requested_width, requested_height);
+    let width = if width % 2 != 0 { width - 1 } else { width };
+    let height = if height % 2 != 0 { height - 1 } else { height };
+    eprintln!(
+        "[wbeam-evdi] EDID target: {}×{} @ {} fps (requested {}×{})",
+        width, height, fps, requested_width, requested_height
+    );
     let frame_size = width as usize * height as usize * BYTES_PER_PIXEL;
     let frame_duration_ns = 1_000_000_000u64 / fps as u64;
+    let edid = generate_edid(width, height, fps as i32);
 
     // ── 1. Find/open EVDI device ────────────────────────────────────────────
-    let device_idx = find_evdi_device()?;
+    let (device_idx, evdi_lock) = find_evdi_device()?;
     let handle = unsafe { ffi::evdi_open(device_idx) };
     if handle.is_null() {
         return Err(anyhow::anyhow!(
@@ -438,12 +672,12 @@ pub fn build_source(cfg: &ResolvedConfig) -> Result<gst::Element> {
     }
     println!("[wbeam-evdi] Opened /dev/dri/card{device_idx}");
 
-    // ── 2. Connect with 1920×1080 EDID — cursor events disabled ────────────
+    // ── 2. Connect with dynamic EDID — cursor events disabled ─────────────
     unsafe {
         ffi::evdi_connect2(
             handle,
-            EDID_1920X1080.as_ptr(),
-            EDID_1920X1080.len() as u32,
+            edid.as_ptr(),
+            edid.len() as u32,
             (width * height) as u32,
             (width * height * fps as i32) as u32,
         );
@@ -514,6 +748,9 @@ pub fn build_source(cfg: &ResolvedConfig) -> Result<gst::Element> {
         thread::Builder::new()
             .name("wbeam-evdi".into())
             .spawn(move || {
+                // Hold the lock file open for the lifetime of the capture
+                // thread so other streamers skip this EVDI device index.
+                let _evdi_lock_guard = evdi_lock;
                 evdi_loop(
                     raw,
                     width,

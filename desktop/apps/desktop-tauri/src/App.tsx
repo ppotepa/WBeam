@@ -274,6 +274,7 @@ export default function App() {
   const [connectDialogDoctor, setConnectDialogDoctor] = createSignal<VirtualDoctor | null>(null);
   const [connectDialogDoctorLoading, setConnectDialogDoctorLoading] = createSignal(false);
   const [connectDialogBlockReason, setConnectDialogBlockReason] = createSignal("");
+  const [autoConnectBusy, setAutoConnectBusy] = createSignal(false);
   const [waylandExperimentalDuplication, setWaylandExperimentalDuplication] = createSignal(
     loadWaylandExperimentalDuplication(),
   );
@@ -289,6 +290,7 @@ export default function App() {
     logs: [],
   });
   let virtualInstallPollTimer: number | null = null;
+  const [evdiWizardVisible, setEvdiWizardVisible] = createSignal(false);
   const upgradeAvailable = () =>
     session.service().active
     && session.service().installed
@@ -311,6 +313,48 @@ export default function App() {
 
   function disconnectDisabledReason(device: DeviceBasic): string {
     return resolveDisconnectDisabledReason(device, isDeviceBusy(device), session.service().active);
+  }
+
+  function autoConnectDisabledReason(): string {
+    if (!session.service().active) return "Desktop service must be running";
+    if (session.devices().length === 0) return "No connected devices";
+    const hasConnectable = session.devices().some((device) => connectDisabledReason(device).length === 0);
+    if (!hasConnectable) return "No devices eligible for connect";
+    return "";
+  }
+
+  async function autoConnectAll(): Promise<void> {
+    if (autoConnectBusy()) return;
+    const blocked = autoConnectDisabledReason();
+    if (blocked.length > 0) {
+      session.setError(blocked);
+      return;
+    }
+
+    setAutoConnectBusy(true);
+    session.setError("");
+    const errors: string[] = [];
+    for (const device of session.devices()) {
+      const reason = connectDisabledReason(device);
+      if (reason.length > 0) continue;
+      const size = resolveSessionSizeForPreset(device, "device_max");
+      const connectConfig: ConnectSessionConfig = {
+        captureBackend: "evdi",
+        manualFps: 60,
+        manualBitrateKbps: 20000,
+        size,
+      };
+      try {
+        await session.connectDevice(device, "virtual_monitor", connectConfig);
+      } catch (err) {
+        errors.push(`${device.serial}: ${String(err)}`);
+      }
+    }
+    if (errors.length > 0) {
+      session.setError(`Auto-connect issues: ${errors.join("; ")}`);
+    }
+    await session.refreshSnapshot({ silent: true, forceDevices: true });
+    setAutoConnectBusy(false);
   }
 
   function modeLabel(): "Basic" | "Advanced" {
@@ -652,6 +696,36 @@ function resolveEncoderMode(
             {emptyDevicesMessage()}
           </p>
         </Show>
+
+        <section class="toolbar">
+          <div class="toolbar-row">
+            <button
+              class="toolbar-btn toolbar-btn-primary"
+              title="Connect all devices using EVDI at native resolution, 60 fps, 20 Mbps"
+              disabled={autoConnectBusy() || autoConnectDisabledReason().length > 0}
+              onClick={() => void autoConnectAll()}
+            >
+              <Show when={autoConnectBusy()} fallback={<Link2 size={14} />}>
+                <Loader2 size={14} class="spinning" />
+              </Show>
+              <span>{autoConnectBusy() ? "Connecting…" : "Autoconnect all"}</span>
+            </button>
+            <button
+              class="toolbar-btn"
+              onClick={() => setEvdiWizardVisible(true)}
+              title="Guide to enable EVDI virtual monitors (multiple devices)"
+            >
+              <Settings size={14} />
+              <span>EVDI setup</span>
+            </button>
+          </div>
+          <Show when={!autoConnectBusy() && autoConnectDisabledReason().length > 0}>
+            <p class="toolbar-hint toolbar-hint-warn">{autoConnectDisabledReason()}</p>
+          </Show>
+          <Show when={isWaylandPortalHost()}>
+            <p class="toolbar-hint">Wayland host — auto-connect uses EVDI. Ensure EVDI module is loaded.</p>
+          </Show>
+        </section>
 
         <ul class="device-list" aria-label="Connected devices">
           <For each={session.devices()}>
@@ -1168,6 +1242,41 @@ function resolveEncoderMode(
               <button class="device-btn" disabled={!virtualInstallStatus().done} onClick={() => void session.refreshSnapshot()}>
                 Refresh
               </button>
+            </div>
+          </section>
+        </dialog>
+      </Show>
+      <Show when={evdiWizardVisible()}>
+        <dialog open class="modal-backdrop" aria-label="EVDI setup wizard">
+          <section class="connect-modal setup-modal">
+            <h3>EVDI setup wizard</h3>
+            <p class="connect-modal-subtitle">Enable multiple virtual monitors via EVDI (X11 backend).</p>
+            <ol class="setup-list">
+              <li>
+                <strong>Load EVDI with multiple devices (run in terminal):</strong>
+                <pre class="setup-hint code-block">sudo modprobe -r evdi
+sudo modprobe evdi initial_device_count=4</pre>
+              </li>
+              <li>
+                <strong>Persist across reboots:</strong>
+                <pre class="setup-hint code-block">echo "options evdi initial_device_count=4" | sudo tee /etc/modprobe.d/evdi.conf</pre>
+              </li>
+              <li>
+                <strong>Restart WBeam service and reconnect devices:</strong>
+                <pre class="setup-hint code-block">./wbeam host stop
+./wbeam host start</pre>
+              </li>
+              <li>
+                <strong>Verify:</strong>
+                <pre class="setup-hint code-block">cat /sys/module/evdi/parameters/initial_device_count
+ls /dev/dri/card*</pre>
+              </li>
+            </ol>
+            <p class="setup-message">
+              After reloading EVDI, use “Autoconnect all (EVDI 20 Mbps)” to start all devices in virtual monitor mode.
+            </p>
+            <div class="connect-modal-actions">
+              <button class="device-btn" onClick={() => setEvdiWizardVisible(false)}>Close</button>
             </div>
           </section>
         </dialog>

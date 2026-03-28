@@ -238,7 +238,7 @@ if grep -q "^evdi " /proc/modules 2>/dev/null; then
     exec_cmd "Unload EVDI module" modprobe -r evdi
 fi
 
-exec_cmd "Load EVDI module with devices" modprobe evdi initial_device_count=1 || {
+exec_cmd "Load EVDI module with devices" modprobe evdi initial_device_count=4 || {
     echo -e "${RED}✗ Failed to load EVDI module${NC}"
     echo ""
     echo "Possible causes:"
@@ -274,7 +274,7 @@ if [[ $DRY_RUN == 1 ]]; then
 else
     cat > "$MODPROBE_CONF" << 'MODEOF'
 # EVDI kernel module options
-options evdi initial_device_count=1
+options evdi initial_device_count=4
 MODEOF
     echo -e "${GREEN}✓${NC} Created $MODPROBE_CONF"
 fi
