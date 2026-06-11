@@ -34,7 +34,7 @@ sudo dnf install -y \
   gcc gcc-c++ make cmake clang openssl-devel \
   rust cargo \
   nodejs npm \
-  java-17-openjdk-devel \
+  java-21-openjdk-devel \
   android-tools \
   glib2-devel \
   gstreamer1-devel gstreamer1-plugins-base-devel \
@@ -158,11 +158,24 @@ Run the normal local redeploy flow:
 ```
 
 On Fedora, `redeploy-local` automatically runs `scripts/fedora-setup.sh --yes`
-when native host build dependencies are missing. If `libevdi.so` is missing, it
-also tries the Fedora EVDI package install path. To disable this behavior:
+when native host build dependencies are missing. EVDI is optional in the default
+flow; without `libevdi.so`, the streamer is built for Wayland/X11 fallback only.
+To disable auto dependency installation:
 
 ```bash
 ./redeploy-local --no-auto-deps
+```
+
+To require EVDI during redeploy:
+
+```bash
+WBEAM_REDEPLOY_WITH_EVDI=1 ./redeploy-local
+```
+
+If EVDI must come from the DisplayLink COPR:
+
+```bash
+WBEAM_REDEPLOY_ENABLE_EVDI_COPR=1 ./redeploy-local
 ```
 
 Useful variants:

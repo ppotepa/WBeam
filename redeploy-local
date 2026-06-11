@@ -37,8 +37,9 @@ Notes:
   - By default this script does NOT start host daemon; use --host-restart only for diagnostics.
   - On Fedora, missing host build packages are installed automatically before build.
     Use --no-auto-deps or WBEAM_REDEPLOY_AUTO_DEPS=0 to disable this.
-  - EVDI COPR is not enabled automatically. Set WBEAM_REDEPLOY_ENABLE_EVDI_COPR=1
-    if this machine should use displaylink-rpm/displaylink.
+  - EVDI is optional for the default local flow. Set WBEAM_REDEPLOY_WITH_EVDI=1
+    to install/build it. Set WBEAM_REDEPLOY_ENABLE_EVDI_COPR=1 if this machine
+    should use displaylink-rpm/displaylink.
 USAGE
 }
 
@@ -154,16 +155,21 @@ ensure_host_build_deps() {
     return 0
   fi
 
-  local linux_id missing_pkg missing_evdi setup_script
+  local linux_id missing_pkg missing_evdi setup_script want_evdi
   linux_id="$(detect_linux_id)"
   setup_script="$ROOT_DIR/scripts/fedora-setup.sh"
   missing_pkg="$(host_pkg_config_missing | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
   missing_evdi=0
+  want_evdi=0
+  if [[ "${WBEAM_REDEPLOY_WITH_EVDI:-0}" =~ ^(1|true|TRUE|yes|on)$ ]] || \
+     [[ "${WBEAM_REDEPLOY_ENABLE_EVDI_COPR:-0}" =~ ^(1|true|TRUE|yes|on)$ ]]; then
+    want_evdi=1
+  fi
   if host_libevdi_missing; then
     missing_evdi=1
   fi
 
-  if [[ -z "$missing_pkg" && "$missing_evdi" -eq 0 ]]; then
+  if [[ -z "$missing_pkg" && ( "$missing_evdi" -eq 0 || "$want_evdi" -eq 0 ) ]]; then
     return 0
   fi
 
@@ -177,7 +183,7 @@ ensure_host_build_deps() {
       fi
 
       local -a setup_args=(--yes)
-      if [[ "$missing_evdi" -eq 1 ]]; then
+      if [[ "$missing_evdi" -eq 1 && "$want_evdi" -eq 1 ]]; then
         setup_args+=(--with-evdi)
         if [[ "${WBEAM_REDEPLOY_ENABLE_EVDI_COPR:-0}" =~ ^(1|true|TRUE|yes|on)$ ]]; then
           setup_args=(--yes --enable-evdi-copr)
@@ -187,7 +193,7 @@ ensure_host_build_deps() {
       echo "[redeploy-local] Fedora auto deps install: scripts/fedora-setup.sh ${setup_args[*]}"
       if ! "$setup_script" "${setup_args[@]}"; then
         echo "[redeploy-local] ERROR: automatic Fedora dependency install failed." >&2
-        if [[ "$missing_evdi" -eq 1 && ! "${WBEAM_REDEPLOY_ENABLE_EVDI_COPR:-0}" =~ ^(1|true|TRUE|yes|on)$ ]]; then
+        if [[ "$missing_evdi" -eq 1 && "$want_evdi" -eq 1 && ! "${WBEAM_REDEPLOY_ENABLE_EVDI_COPR:-0}" =~ ^(1|true|TRUE|yes|on)$ ]]; then
           echo "[redeploy-local] If EVDI is only available through COPR on this machine, rerun:" >&2
           echo "[redeploy-local]   WBEAM_REDEPLOY_ENABLE_EVDI_COPR=1 ./redeploy-local" >&2
         fi

@@ -157,7 +157,7 @@ BASE_PACKAGES=(
   gcc gcc-c++ make cmake clang openssl-devel
   rust cargo
   nodejs npm
-  java-17-openjdk-devel
+  java-21-openjdk-devel
   android-tools
   glib2-devel
   gstreamer1-devel

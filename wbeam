@@ -56,7 +56,7 @@ Groups:
 
 Examples:
   ./wbgui
-  ./wbeam host build             # build wbeamd-server + wbeamd-streamer (evdi)
+  ./wbeam host build             # build wbeamd-server + wbeamd-streamer
   ./wbeam host run               # release binary, foreground
   ./wbeam host debug             # debug build + coloured logs + ADB sidecar
   ./wbeam host probe             # host fingerprint JSON (os/session/display/providers/tools)
@@ -764,7 +764,7 @@ host_evdi_link_preflight() {
     return 0
   fi
 
-  echo "[host] ERROR: libevdi.so not found; streamer is built with EVDI support by default." >&2
+  echo "[host] ERROR: libevdi.so not found; cannot build streamer with EVDI support." >&2
   case "$(detect_linux_id)" in
     fedora)
       echo "[host] Fedora fix:" >&2
@@ -791,7 +791,19 @@ host_evdi_link_preflight() {
 
 host_build_preflight() {
   host_pkg_config_preflight
-  host_evdi_link_preflight
+}
+
+host_can_build_evdi() {
+  if [[ "${WBEAM_HOST_STREAMER_EVDI:-auto}" =~ ^(0|false|FALSE|no|off)$ ]]; then
+    return 1
+  fi
+  if ldconfig -p 2>/dev/null | grep -q 'libevdi\.so'; then
+    return 0
+  fi
+  if compgen -G "/usr/lib*/libevdi.so*" >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
 }
 
 host_build() {
@@ -802,9 +814,19 @@ host_build() {
   build_version="$(build_version_for_build)"
   echo "[host] Build version: $build_version"
   echo "[host] Building Rust backend (release)…"
-  cd "$rust_dir" && \
-    WBEAM_BUILD_REV="$build_version" cargo build --release -p wbeamd-server && \
-    WBEAM_BUILD_REV="$build_version" cargo build --release -p wbeamd-streamer --no-default-features --features evdi
+  cd "$rust_dir" && WBEAM_BUILD_REV="$build_version" cargo build --release -p wbeamd-server
+  if host_can_build_evdi; then
+    echo "[host] Building streamer with EVDI support"
+    cd "$rust_dir" && WBEAM_BUILD_REV="$build_version" cargo build --release -p wbeamd-streamer --no-default-features --features evdi
+  else
+    if [[ "${WBEAM_HOST_STREAMER_EVDI:-auto}" =~ ^(1|true|TRUE|yes|on)$ ]]; then
+      host_evdi_link_preflight
+      return 1
+    fi
+    echo "[host] libevdi.so not found; building streamer without EVDI support (Wayland/X11 fallback only)"
+    echo "[host] To enable EVDI later on Fedora: scripts/fedora-setup.sh --yes --enable-evdi-copr"
+    cd "$rust_dir" && WBEAM_BUILD_REV="$build_version" cargo build --release -p wbeamd-streamer --no-default-features
+  fi
   echo "[host] Build OK → $DAEMON_BIN"
 }
 
@@ -815,7 +837,7 @@ ensure_daemon_binary() {
   echo "Daemon binary missing: $DAEMON_BIN" >&2
   echo "Build it first:" >&2
   echo "  cd $ROOT_DIR/host/rust && cargo build --release -p wbeamd-server" >&2
-  echo "  cd $ROOT_DIR/host/rust && cargo build --release -p wbeamd-streamer --no-default-features --features evdi" >&2
+  echo "  cd $ROOT_DIR/host/rust && cargo build --release -p wbeamd-streamer --no-default-features" >&2
   echo "or install package providing /usr/local/bin/wbeamd-server" >&2
   exit 1
 }
