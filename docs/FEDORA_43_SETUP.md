@@ -157,6 +157,14 @@ Run the normal local redeploy flow:
 ./redeploy-local
 ```
 
+On Fedora, `redeploy-local` automatically runs `scripts/fedora-setup.sh --yes`
+when native host build dependencies are missing. If `libevdi.so` is missing, it
+also tries the Fedora EVDI package install path. To disable this behavior:
+
+```bash
+./redeploy-local --no-auto-deps
+```
+
 Useful variants:
 
 ```bash
