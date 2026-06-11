@@ -158,6 +158,12 @@ sudo reboot
 sudo dkms autoinstall
 ```
 
+`scripts/fedora-setup.sh --with-evdi` detects this state and, when run from an
+interactive terminal, queues `mokutil --import /var/lib/dkms/mok.pub`
+automatically. You still must reboot and complete the firmware MOK manager
+screen manually: `Enroll MOK -> Continue -> Yes`, then enter the temporary
+password you chose.
+
 If `modprobe evdi` reports `Module evdi not found`, also check that the running
 kernel matches installed kernel headers:
 

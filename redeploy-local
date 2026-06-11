@@ -157,6 +157,21 @@ host_running_kernel_devel_missing() {
   [[ ! -e "${build_dir}/Makefile" ]]
 }
 
+host_secureboot_mok_not_enrolled() {
+  local out
+  if ! command -v mokutil >/dev/null 2>&1; then
+    return 1
+  fi
+  if ! mokutil --sb-state 2>/dev/null | grep -qi enabled; then
+    return 1
+  fi
+  if [[ ! -f /var/lib/dkms/mok.pub ]]; then
+    return 1
+  fi
+  out="$(mokutil --test-key /var/lib/dkms/mok.pub 2>&1 || true)"
+  printf '%s\n' "$out" | grep -qi 'not enrolled'
+}
+
 host_evdi_status_summary() {
   local issues=()
   if host_libevdi_missing; then
@@ -169,6 +184,9 @@ host_evdi_status_summary() {
     issues+=("module-unavailable")
   elif ! grep -q "^evdi " /proc/modules 2>/dev/null; then
     issues+=("module-not-loaded")
+    if host_secureboot_mok_not_enrolled; then
+      issues+=("secureboot-mok-not-enrolled")
+    fi
   fi
   if ! id -nG | tr ' ' '\n' | grep -qx video; then
     issues+=("user-not-in-video")
@@ -249,6 +267,7 @@ ensure_host_build_deps() {
           echo "[redeploy-local] ERROR: EVDI setup ran but EVDI is still not ready: ${new_evdi_status}" >&2
           echo "[redeploy-local] If status includes user-not-in-video, log out and back in, then rerun ./redeploy-local." >&2
           echo "[redeploy-local] If status includes kernel-devel-mismatch, reboot into the installed kernel that has matching kernel-devel, then rerun ./redeploy-local." >&2
+          echo "[redeploy-local] If status includes secureboot-mok-not-enrolled, complete MOK enrollment on reboot, then rerun ./redeploy-local." >&2
           echo "[redeploy-local] If Secure Boot blocked the module, enroll the DKMS MOK key and reboot:" >&2
           echo "[redeploy-local]   sudo mokutil --import /var/lib/dkms/mok.pub" >&2
           echo "[redeploy-local]   sudo reboot" >&2

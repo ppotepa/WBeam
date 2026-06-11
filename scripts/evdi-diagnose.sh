@@ -313,10 +313,30 @@ fi
 
 if command -v mokutil >/dev/null 2>&1; then
     print_check "Secure Boot state"
+    SECURE_BOOT_ENABLED=0
     if mokutil --sb-state 2>/dev/null | grep -qi enabled; then
+        SECURE_BOOT_ENABLED=1
         warn "Secure Boot is enabled; unsigned DKMS/akmods EVDI modules may be blocked by kernel lockdown"
     else
         pass "Secure Boot is not enabled"
+    fi
+
+    if [[ "$SECURE_BOOT_ENABLED" -eq 1 && -f /var/lib/dkms/mok.pub ]]; then
+        print_check "DKMS MOK key enrolled"
+        MOK_TEST_OUTPUT="$(mokutil --test-key /var/lib/dkms/mok.pub 2>&1 || true)"
+        if printf '%s\n' "$MOK_TEST_OUTPUT" | grep -qi "not enrolled"; then
+            fail "/var/lib/dkms/mok.pub is not enrolled; Secure Boot will reject the evdi module"
+            if [[ $FIX_RECOMMENDATIONS == 1 ]]; then
+                echo ""
+                echo "  🔧 Queue DKMS MOK enrollment, then reboot and enroll it in firmware:"
+                echo "    sudo mokutil --import /var/lib/dkms/mok.pub"
+                echo "    sudo reboot"
+                echo ""
+                echo "  ℹ️  On reboot choose: Enroll MOK -> Continue -> Yes, then enter the password you set."
+            fi
+        else
+            pass "DKMS MOK key appears enrolled"
+        fi
     fi
 fi
 

@@ -488,6 +488,58 @@ build_evdi_for_running_kernel() {
   with_sudo dkms install -m evdi -v "$version" -k "$running_kernel"
 }
 
+secure_boot_enabled() {
+  command_exists mokutil && mokutil --sb-state 2>/dev/null | grep -qi enabled
+}
+
+dkms_mok_key_enrolled() {
+  local mok_pub="${1:-/var/lib/dkms/mok.pub}" out
+  [[ -f "$mok_pub" ]] || return 1
+  out="$(mokutil --test-key "$mok_pub" 2>&1 || true)"
+  if printf '%s\n' "$out" | grep -qi 'not enrolled'; then
+    return 1
+  fi
+  printf '%s\n' "$out" | grep -Eqi 'already enrolled|is enrolled'
+}
+
+ensure_dkms_mok_enrolled() {
+  local mok_pub="/var/lib/dkms/mok.pub"
+  if ! secure_boot_enabled; then
+    return 0
+  fi
+  if [[ ! -f "$mok_pub" ]]; then
+    echo "[fedora-setup] WARN: Secure Boot is enabled, but DKMS MOK public key was not found at $mok_pub." >&2
+    echo "[fedora-setup] EVDI may fail to load until the DKMS signing key is generated and enrolled." >&2
+    return 1
+  fi
+  if dkms_mok_key_enrolled "$mok_pub"; then
+    return 0
+  fi
+
+  echo "[fedora-setup] Secure Boot is enabled and the DKMS MOK key is not enrolled." >&2
+  echo "[fedora-setup] EVDI is built, but the kernel will reject it until this key is enrolled." >&2
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "[fedora-setup] DRY-RUN: sudo mokutil --import $mok_pub"
+    echo "[fedora-setup] DRY-RUN: reboot and enroll the key in the MOK manager"
+    return 0
+  fi
+  if [[ -t 0 && -t 1 ]]; then
+    echo "[fedora-setup] Starting MOK enrollment. Choose a temporary password when prompted." >&2
+    echo "[fedora-setup] After reboot, choose: Enroll MOK -> Continue -> Yes, then enter that password." >&2
+    with_sudo mokutil --import "$mok_pub" || {
+      echo "[fedora-setup] ERROR: failed to queue DKMS MOK enrollment." >&2
+      return 1
+    }
+  else
+    echo "[fedora-setup] Non-interactive terminal; cannot run mokutil --import automatically." >&2
+    echo "[fedora-setup] Run manually:" >&2
+    echo "[fedora-setup]   sudo mokutil --import $mok_pub" >&2
+  fi
+  echo "[fedora-setup] Reboot is required before EVDI can load:" >&2
+  echo "[fedora-setup]   sudo reboot" >&2
+  return 1
+}
+
 install_evdi_packages() {
   if [[ "$DRY_RUN" -eq 1 ]]; then
     dnf_install akmod-evdi
@@ -588,6 +640,7 @@ if [[ "$WITH_EVDI" -eq 1 ]]; then
   fi
 
   build_evdi_for_running_kernel
+  ensure_dkms_mok_enrolled
 
   if [[ "$LOAD_EVDI" -eq 1 ]]; then
     with_sudo modprobe evdi initial_device_count=4 || {
