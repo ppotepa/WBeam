@@ -31,8 +31,8 @@ Options:
   --with-android-sdk    install Android command-line tools and SDK packages (default)
   --no-android-sdk      skip Android SDK bootstrap
   --android-sdk-root P  install/use Android SDK root P (default: ~/Android/Sdk)
-  --with-evdi           also try to install akmod-evdi or evdi-dkms
-  --enable-evdi-copr    enable displaylink-rpm/displaylink COPR before EVDI install
+  --with-evdi           also try to install EVDI/displaylink packages
+  --enable-evdi-copr    try displaylink-rpm/displaylink COPR before GitHub RPM fallback
   --no-evdi-load        do not run modprobe evdi after EVDI install
   --no-group            skip "c-development" group install
   -h, --help            show this help
@@ -253,6 +253,16 @@ detect_fedora() {
   [[ "${ID:-}" == "fedora" ]]
 }
 
+fedora_version_id() {
+  if [[ -f /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    echo "${VERSION_ID:-unknown}"
+    return 0
+  fi
+  echo "unknown"
+}
+
 print_post_check() {
   echo
   echo "[fedora-setup] Post-install checks:"
@@ -301,6 +311,120 @@ verify_gstreamer_encoders() {
   fi
 }
 
+enable_evdi_copr() {
+  local copr_args=()
+  mapfile -t copr_args < <(dnf_args)
+  dnf_install dnf-plugins-core || true
+
+  if with_sudo dnf copr enable "${copr_args[@]}" displaylink-rpm/displaylink; then
+    return 0
+  fi
+
+  local version_id
+  version_id="$(fedora_version_id)"
+  echo "[fedora-setup] ERROR: displaylink-rpm/displaylink COPR is not available for Fedora ${version_id}." >&2
+  echo "[fedora-setup] Fedora returned 404 for the COPR repo, so akmod-evdi/evdi-dkms cannot be installed automatically from that source." >&2
+  echo "[fedora-setup] Falling back to displaylink-rpm/displaylink-rpm GitHub Releases." >&2
+  return 1
+}
+
+rpm_arch() {
+  case "$(uname -m)" in
+    x86_64) echo "x86_64" ;;
+    aarch64|arm64) echo "aarch64" ;;
+    *)
+      echo "[fedora-setup] ERROR: unsupported architecture for DisplayLink RPM: $(uname -m)" >&2
+      return 1
+      ;;
+  esac
+}
+
+github_evdi_release_rpm_url() {
+  local version_id arch api_url
+  version_id="$(fedora_version_id)"
+  arch="$(rpm_arch)"
+  api_url="${WBEAM_EVDI_GITHUB_RELEASE_API:-https://api.github.com/repos/displaylink-rpm/displaylink-rpm/releases/latest}"
+
+  python3 - "$version_id" "$arch" "$api_url" <<'PY'
+import json
+import sys
+import urllib.request
+
+version_id, arch, api_url = sys.argv[1:]
+request = urllib.request.Request(
+    api_url,
+    headers={
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "WBeam-fedora-setup",
+    },
+)
+
+with urllib.request.urlopen(request, timeout=30) as response:
+    release = json.load(response)
+
+prefix = f"fedora-{version_id}-displaylink-"
+suffix = f".{arch}.rpm"
+for asset in release.get("assets", []):
+    name = asset.get("name", "")
+    if name.startswith(prefix) and name.endswith(suffix) and ".src." not in name:
+        print(asset["browser_download_url"])
+        raise SystemExit(0)
+
+tag = release.get("tag_name", "latest")
+print(
+    f"No displaylink-rpm asset found for Fedora {version_id} {arch} in release {tag}",
+    file=sys.stderr,
+)
+raise SystemExit(1)
+PY
+}
+
+install_evdi_from_github_release() {
+  local version_id arch rpm_url yes_args
+  version_id="$(fedora_version_id)"
+  arch="$(rpm_arch)"
+
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    yes_args="$(dnf_args | tr '\n' ' ')"
+    echo "[fedora-setup] DRY-RUN: resolve displaylink-rpm GitHub Release asset for Fedora ${version_id} ${arch}"
+    echo "[fedora-setup] DRY-RUN: sudo dnf install ${yes_args}https://github.com/displaylink-rpm/displaylink-rpm/releases/download/<latest>/fedora-${version_id}-displaylink-*.${arch}.rpm"
+    return 0
+  fi
+
+  echo "[fedora-setup] Resolving DisplayLink/EVDI RPM from GitHub Releases for Fedora ${version_id} ${arch}"
+  if ! rpm_url="$(github_evdi_release_rpm_url)"; then
+    echo "[fedora-setup] ERROR: no compatible DisplayLink/EVDI RPM found in GitHub Releases." >&2
+    echo "[fedora-setup] EVDI mode will not work until a Fedora ${version_id} package exists or EVDI is installed manually." >&2
+    return 1
+  fi
+
+  echo "[fedora-setup] Installing DisplayLink/EVDI RPM: $rpm_url"
+  dnf_install "$rpm_url"
+}
+
+install_evdi_packages() {
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    dnf_install akmod-evdi
+    echo "[fedora-setup] DRY-RUN: if akmod-evdi is unavailable, try evdi-dkms"
+    dnf_install evdi-dkms
+    echo "[fedora-setup] DRY-RUN: if evdi-dkms is unavailable, try displaylink-rpm GitHub Release RPM"
+    install_evdi_from_github_release
+    return 0
+  fi
+
+  if dnf_install akmod-evdi; then
+    return 0
+  fi
+
+  echo "[fedora-setup] akmod-evdi install failed; trying evdi-dkms"
+  if dnf_install evdi-dkms; then
+    return 0
+  fi
+
+  echo "[fedora-setup] evdi-dkms install failed; trying displaylink-rpm GitHub Release RPM"
+  install_evdi_from_github_release
+}
+
 if ! detect_fedora; then
   echo "[fedora-setup] ERROR: this script is intended for Fedora." >&2
   echo "[fedora-setup] Detected /etc/os-release:" >&2
@@ -319,8 +443,10 @@ BASE_PACKAGES=(
   gcc gcc-c++ make cmake clang openssl-devel
   rust cargo
   nodejs npm
+  python3
   java-21-openjdk-devel
   android-tools
+  mokutil
   glib2-devel
   gstreamer1-devel
   gstreamer1-plugins-base-devel
@@ -360,16 +486,10 @@ if [[ "$WITH_EVDI" -eq 1 ]]; then
   dnf_install akmods dkms kernel-devel kernel-headers
 
   if [[ "$ENABLE_EVDI_COPR" -eq 1 ]]; then
-    copr_args=()
-    mapfile -t copr_args < <(dnf_args)
-    dnf_install dnf-plugins-core || true
-    with_sudo dnf copr enable "${copr_args[@]}" displaylink-rpm/displaylink
+    enable_evdi_copr || true
   fi
 
-  if ! dnf_install akmod-evdi; then
-    echo "[fedora-setup] akmod-evdi install failed; trying evdi-dkms"
-    dnf_install evdi-dkms
-  fi
+  install_evdi_packages
 
   if ! groups "${SUDO_USER:-$(whoami)}" | grep -qw video; then
     with_sudo usermod -a -G video "${SUDO_USER:-$(whoami)}" || true
@@ -386,6 +506,10 @@ if [[ "$WITH_EVDI" -eq 1 ]]; then
       echo "[fedora-setup] Check Secure Boot, dkms/akmods status, and kernel-devel matching uname -r." >&2
       if command_exists mokutil && mokutil --sb-state 2>/dev/null | grep -qi enabled; then
         echo "[fedora-setup] Secure Boot is enabled; unsigned EVDI kernel modules may be blocked until MOK signing is configured or Secure Boot is disabled." >&2
+        echo "[fedora-setup] If DKMS generated a MOK key, enroll it and reboot:" >&2
+        echo "[fedora-setup]   sudo mokutil --import /var/lib/dkms/mok.pub" >&2
+        echo "[fedora-setup]   sudo reboot" >&2
+        echo "[fedora-setup]   sudo dkms autoinstall" >&2
       fi
     }
   fi

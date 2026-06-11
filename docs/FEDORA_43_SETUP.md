@@ -114,14 +114,20 @@ First try the repo helper:
 scripts/fedora-setup.sh --yes --with-evdi
 ```
 
-If that cannot install EVDI and you want the DisplayLink RPM COPR path, run:
+If repo packages are unavailable, the Fedora setup script falls back to the
+matching DisplayLink/EVDI RPM published by `displaylink-rpm/displaylink-rpm` in
+GitHub Releases:
 
 ```bash
 scripts/fedora-setup.sh --yes --enable-evdi-copr
 ```
 
-Or enable the DisplayLink/EVDI package source you use on this machine, then
-install one of:
+`--enable-evdi-copr` first tries the historical COPR path. On Fedora 43 that
+COPR may return 404; in that case the script resolves and installs the
+`fedora-43-displaylink-*.rpm` release asset automatically.
+
+Alternatively, enable the DisplayLink/EVDI package source you use on this
+machine, then install one of:
 
 ```bash
 sudo dnf install -y akmod-evdi
@@ -143,8 +149,14 @@ bash scripts/evdi-diagnose.sh --verbose
 ```
 
 If Secure Boot is enabled, Fedora may refuse to load unsigned DKMS/akmod kernel
-modules. Either sign the module for Secure Boot or disable Secure Boot for this
-dev machine.
+modules. Enroll the DKMS MOK key and reboot, or disable Secure Boot for this dev
+machine:
+
+```bash
+sudo mokutil --import /var/lib/dkms/mok.pub
+sudo reboot
+sudo dkms autoinstall
+```
 
 The older distro-neutral EVDI helper is still available:
 
