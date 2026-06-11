@@ -75,6 +75,7 @@ Desktop apps are clients of the host daemon API — no stream/session logic live
 
 | Script | Purpose |
 |--------|---------|
+| `fedora-setup.sh` | Fedora 43 build, Android SDK, GStreamer, and EVDI/DisplayLink bootstrap |
 | `evdi-setup.sh` | Automated EVDI installation |
 | `evdi-diagnose.sh` | EVDI diagnostic checks |
 | `virtual-deps-check.sh` | Check virtual display dependencies |
