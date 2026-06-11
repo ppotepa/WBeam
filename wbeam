@@ -1093,7 +1093,11 @@ android_install_with_signature_recover() {
   local rc=1
   local install_ok=0
 
-  out="$(adb_device_cmd install -r "$apk_path" 2>&1)" || rc=$?
+  if out="$(adb_device_cmd install -r "$apk_path" 2>&1)"; then
+    rc=0
+  else
+    rc=$?
+  fi
   if [[ "$rc" -eq 0 ]] && ! printf '%s' "$out" | grep -q "Failure \["; then
     install_ok=1
   fi
@@ -1110,7 +1114,11 @@ android_install_with_signature_recover() {
 
     rc=1
     install_ok=0
-    out="$(adb_device_cmd install -r "$apk_path" 2>&1)" || rc=$?
+    if out="$(adb_device_cmd install -r "$apk_path" 2>&1)"; then
+      rc=0
+    else
+      rc=$?
+    fi
     if [[ "$rc" -eq 0 ]] && ! printf '%s' "$out" | grep -q "Failure \["; then
       install_ok=1
     fi
@@ -1119,6 +1127,12 @@ android_install_with_signature_recover() {
       return 0
     fi
     [[ -n "$out" ]] && printf '%s\n' "$out" >&2
+  fi
+
+  if printf '%s' "$out" | grep -q "INSTALL_FAILED_USER_RESTRICTED"; then
+    echo "[android] ERROR: device blocked APK install over USB (INSTALL_FAILED_USER_RESTRICTED)." >&2
+    echo "[android] Fix on the device: unlock it, accept the install prompt, and enable USB install / Install via USB in Developer options." >&2
+    echo "[android] On Xiaomi/HyperOS/MIUI this is usually Developer options -> Install via USB, plus disabling USB install monitoring if present." >&2
   fi
 
   if [[ "$rc" -eq 0 ]]; then
