@@ -162,7 +162,9 @@ sudo dkms autoinstall
 interactive terminal, queues `mokutil --import /var/lib/dkms/mok.pub`
 automatically. You still must reboot and complete the firmware MOK manager
 screen manually: `Enroll MOK -> Continue -> Yes`, then enter the temporary
-password you chose.
+password you chose. After the import is queued, `redeploy-local` records this
+as `secureboot-mok-pending-reboot` and stops early until you reboot and finish
+the firmware enrollment.
 
 If `modprobe evdi` reports `Module evdi not found`, also check that the running
 kernel matches installed kernel headers:

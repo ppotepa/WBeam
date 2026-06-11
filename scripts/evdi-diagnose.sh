@@ -22,6 +22,8 @@ VERBOSE=0
 FIX_RECOMMENDATIONS=0
 ERRORS=0
 WARNINGS=0
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -31,6 +33,22 @@ while [[ $# -gt 0 ]]; do
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
+
+evdi_mok_pending_file() {
+    echo "$ROOT_DIR/.cache/evdi-mok-import-pending"
+}
+
+evdi_mok_key_sha256() {
+    sha256sum "$1" | awk '{print $1}'
+}
+
+evdi_mok_import_pending() {
+    local mok_pub="$1" marker current_sha
+    marker="$(evdi_mok_pending_file)"
+    [[ -f "$mok_pub" && -f "$marker" ]] || return 1
+    current_sha="$(evdi_mok_key_sha256 "$mok_pub")"
+    grep -qx "sha256=${current_sha}" "$marker"
+}
 
 print_header() {
     echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
@@ -325,11 +343,19 @@ if command -v mokutil >/dev/null 2>&1; then
         print_check "DKMS MOK key enrolled"
         MOK_TEST_OUTPUT="$(mokutil --test-key /var/lib/dkms/mok.pub 2>&1 || true)"
         if printf '%s\n' "$MOK_TEST_OUTPUT" | grep -qi "not enrolled"; then
-            fail "/var/lib/dkms/mok.pub is not enrolled; Secure Boot will reject the evdi module"
+            if evdi_mok_import_pending /var/lib/dkms/mok.pub; then
+                fail "DKMS MOK enrollment is queued but not completed; reboot and enroll it in firmware"
+            else
+                fail "/var/lib/dkms/mok.pub is not enrolled; Secure Boot will reject the evdi module"
+            fi
             if [[ $FIX_RECOMMENDATIONS == 1 ]]; then
                 echo ""
-                echo "  🔧 Queue DKMS MOK enrollment, then reboot and enroll it in firmware:"
-                echo "    sudo mokutil --import /var/lib/dkms/mok.pub"
+                if evdi_mok_import_pending /var/lib/dkms/mok.pub; then
+                    echo "  🔧 MOK enrollment is already queued. Reboot and finish the firmware prompt:"
+                else
+                    echo "  🔧 Queue DKMS MOK enrollment, then reboot and enroll it in firmware:"
+                    echo "    sudo mokutil --import /var/lib/dkms/mok.pub"
+                fi
                 echo "    sudo reboot"
                 echo ""
                 echo "  ℹ️  On reboot choose: Enroll MOK -> Continue -> Yes, then enter the password you set."

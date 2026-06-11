@@ -502,6 +502,39 @@ dkms_mok_key_enrolled() {
   printf '%s\n' "$out" | grep -Eqi 'already enrolled|is enrolled'
 }
 
+evdi_mok_pending_file() {
+  echo "$ROOT_DIR/.cache/evdi-mok-import-pending"
+}
+
+evdi_mok_key_sha256() {
+  sha256sum "$1" | awk '{print $1}'
+}
+
+evdi_mok_import_pending() {
+  local mok_pub="$1" marker current_sha
+  marker="$(evdi_mok_pending_file)"
+  [[ -f "$mok_pub" && -f "$marker" ]] || return 1
+  current_sha="$(evdi_mok_key_sha256 "$mok_pub")"
+  grep -qx "sha256=${current_sha}" "$marker"
+}
+
+write_evdi_mok_import_pending() {
+  local mok_pub="$1" marker marker_dir current_sha
+  marker="$(evdi_mok_pending_file)"
+  marker_dir="$(dirname "$marker")"
+  current_sha="$(evdi_mok_key_sha256 "$mok_pub")"
+  mkdir -p "$marker_dir"
+  {
+    echo "mok_pub=$mok_pub"
+    echo "sha256=$current_sha"
+    date -u '+created_at=%Y-%m-%dT%H:%M:%SZ'
+  } > "$marker"
+}
+
+clear_evdi_mok_import_pending() {
+  rm -f "$(evdi_mok_pending_file)" 2>/dev/null || true
+}
+
 ensure_dkms_mok_enrolled() {
   local mok_pub="/var/lib/dkms/mok.pub"
   if ! secure_boot_enabled; then
@@ -513,7 +546,14 @@ ensure_dkms_mok_enrolled() {
     return 1
   fi
   if dkms_mok_key_enrolled "$mok_pub"; then
+    clear_evdi_mok_import_pending
     return 0
+  fi
+  if evdi_mok_import_pending "$mok_pub"; then
+    echo "[fedora-setup] DKMS MOK enrollment is already queued for this key." >&2
+    echo "[fedora-setup] Reboot and complete firmware MOK enrollment before rerunning redeploy-local." >&2
+    echo "[fedora-setup] On reboot choose: Enroll MOK -> Continue -> Yes, then enter the password you set." >&2
+    return 1
   fi
 
   echo "[fedora-setup] Secure Boot is enabled and the DKMS MOK key is not enrolled." >&2
@@ -530,6 +570,7 @@ ensure_dkms_mok_enrolled() {
       echo "[fedora-setup] ERROR: failed to queue DKMS MOK enrollment." >&2
       return 1
     }
+    write_evdi_mok_import_pending "$mok_pub"
   else
     echo "[fedora-setup] Non-interactive terminal; cannot run mokutil --import automatically." >&2
     echo "[fedora-setup] Run manually:" >&2
