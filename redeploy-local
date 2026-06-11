@@ -232,11 +232,37 @@ ensure_android_build_deps() {
   if android_sdk_present; then
     return 0
   fi
-  echo "[redeploy-local] ERROR: Android deploy is enabled, but Android SDK was not found." >&2
-  echo "[redeploy-local] Install Android Studio or command-line tools with SDK Platform 35 and Build-Tools 35.0.0." >&2
-  echo "[redeploy-local] Then export ANDROID_HOME or set android/local.properties sdk.dir." >&2
-  echo "[redeploy-local] To continue without Android deploy: ./redeploy-local --no-android" >&2
-  return 1
+
+  if [[ "$AUTO_DEPS" =~ ^(0|false|FALSE|no|off)$ ]]; then
+    echo "[redeploy-local] ERROR: Android deploy is enabled, but Android SDK was not found." >&2
+    echo "[redeploy-local] Auto deps are disabled. Run scripts/fedora-setup.sh --yes --with-android-sdk or use --no-android." >&2
+    return 1
+  fi
+
+  local linux_id setup_script
+  linux_id="$(detect_linux_id)"
+  setup_script="$ROOT_DIR/scripts/fedora-setup.sh"
+  case "$linux_id" in
+    fedora)
+      if [[ ! -x "$setup_script" ]]; then
+        echo "[redeploy-local] ERROR: Fedora setup script missing or not executable: $setup_script" >&2
+        return 1
+      fi
+      echo "[redeploy-local] Android SDK missing; installing via scripts/fedora-setup.sh --yes --with-android-sdk"
+      "$setup_script" --yes --with-android-sdk
+      ;;
+    *)
+      echo "[redeploy-local] ERROR: Android deploy is enabled, but Android SDK was not found." >&2
+      echo "[redeploy-local] Install SDK Platform 35 and Build-Tools 35.0.0, then set ANDROID_HOME or android/local.properties sdk.dir." >&2
+      echo "[redeploy-local] To continue without Android deploy: ./redeploy-local --no-android" >&2
+      return 1
+      ;;
+  esac
+
+  if ! android_sdk_present; then
+    echo "[redeploy-local] ERROR: Android SDK still not found after setup." >&2
+    return 1
+  fi
 }
 
 compat_state_read() {

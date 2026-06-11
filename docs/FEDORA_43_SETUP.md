@@ -16,8 +16,8 @@ WBeam has four moving parts on Fedora:
 
 ## 1. Install Fedora Packages
 
-Install the base build, Tauri, GStreamer, Android, and virtual-display tools
-with the repo helper:
+Install the base build, Tauri, GStreamer, Android SDK, and virtual-display
+tools with the repo helper:
 
 ```bash
 scripts/fedora-setup.sh --dry-run
@@ -51,8 +51,8 @@ Notes:
   `glib-2.0.pc` or `gobject-2.0.pc`.
 - `webkit2gtk4.1-devel`, `libappindicator-gtk3-devel`, `librsvg2-devel`, and
   `libxdo-devel` are the Fedora Tauri desktop build dependencies.
-- `android-tools` provides Fedora's `adb`. Android SDK platform/build packages
-  are still needed for Gradle, covered below.
+- `android-tools` provides Fedora's system `adb`. The setup script also
+  installs Google's Android command-line SDK under `~/Android/Sdk` by default.
 - If Fedora has installed a new kernel, reboot before building EVDI so
   `kernel-devel` matches `uname -r`.
 
@@ -61,7 +61,23 @@ Notes:
 The Gradle project uses Android Gradle Plugin `8.5.2`, `compileSdk = 35`, and
 `buildToolsVersion = "35.0.0"`.
 
-The simplest setup is Android Studio:
+`scripts/fedora-setup.sh --yes` installs the command-line SDK by default:
+
+```bash
+scripts/fedora-setup.sh --yes
+```
+
+It downloads Android command-line tools into `~/Android/Sdk`, accepts SDK
+licenses, installs `platform-tools`, `platforms;android-35`, and
+`build-tools;35.0.0`, then writes `android/local.properties`.
+
+To skip SDK bootstrap for host/desktop-only work:
+
+```bash
+scripts/fedora-setup.sh --yes --no-android-sdk
+```
+
+Android Studio is also fine:
 
 1. Install Android Studio.
 2. Open SDK Manager.
@@ -160,6 +176,8 @@ Run the normal local redeploy flow:
 On Fedora, `redeploy-local` automatically runs `scripts/fedora-setup.sh --yes`
 when native host build dependencies are missing. EVDI is optional in the default
 flow; without `libevdi.so`, the streamer is built for Wayland/X11 fallback only.
+If Android deploy is enabled and the SDK is missing, `redeploy-local`
+automatically runs `scripts/fedora-setup.sh --yes --with-android-sdk`.
 To disable auto dependency installation:
 
 ```bash
@@ -233,7 +251,13 @@ debugging prompt.
 ### Gradle Cannot Find SDK Platform 35 or Build Tools 35.0.0
 
 `./wbeam android build` checks the Android SDK before invoking Gradle. Install
-the SDK with Android Studio SDK Manager, or use `sdkmanager`:
+or repair the SDK with:
+
+```bash
+scripts/fedora-setup.sh --yes --with-android-sdk
+```
+
+If you already have command-line tools, you can use `sdkmanager` directly:
 
 ```bash
 sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
