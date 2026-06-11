@@ -177,6 +177,14 @@ Check the final state:
 
 ### `glib-2.0.pc` or `gobject-2.0.pc` Missing
 
+`./wbeam host build` runs a preflight for these native libraries before Cargo
+starts compiling the streamer. If it reports missing `glib-2.0`,
+`gstreamer-1.0`, or related modules, run the Fedora setup script:
+
+```bash
+scripts/fedora-setup.sh --yes
+```
+
 Install:
 
 ```bash

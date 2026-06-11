@@ -694,8 +694,109 @@ require_cmd() {
   fi
 }
 
+detect_linux_id() {
+  if [[ -f /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    echo "${ID:-unknown}"
+    return 0
+  fi
+  echo "unknown"
+}
+
+host_pkg_config_preflight() {
+  require_cmd pkg-config
+
+  local missing=()
+  local module
+  for module in \
+    glib-2.0 \
+    gobject-2.0 \
+    gio-2.0 \
+    gstreamer-1.0 \
+    gstreamer-base-1.0 \
+    gstreamer-app-1.0 \
+    gstreamer-video-1.0; do
+    if ! pkg-config --exists "$module"; then
+      missing+=("$module")
+    fi
+  done
+
+  if [[ "${#missing[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  echo "[host] ERROR: missing host build system libraries:" >&2
+  printf '[host]   - %s\n' "${missing[@]}" >&2
+  echo "[host] These are native packages, not Rust crates. Install the distro dev packages and retry." >&2
+
+  case "$(detect_linux_id)" in
+    fedora)
+      echo "[host] Fedora fix:" >&2
+      echo "[host]   scripts/fedora-setup.sh --yes" >&2
+      echo "[host] or minimally:" >&2
+      echo "[host]   sudo dnf install -y glib2-devel gstreamer1-devel gstreamer1-plugins-base-devel pkgconf-pkg-config" >&2
+      ;;
+    arch|cachyos)
+      echo "[host] Arch/CachyOS fix:" >&2
+      echo "[host]   sudo pacman -S --needed glib2 gstreamer gst-plugins-base pkgconf" >&2
+      ;;
+    debian|ubuntu)
+      echo "[host] Debian/Ubuntu fix:" >&2
+      echo "[host]   sudo apt-get install -y libglib2.0-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev pkg-config" >&2
+      ;;
+    *)
+      echo "[host] Generic fix: install GLib/GObject/GIO and GStreamer development packages plus pkg-config." >&2
+      ;;
+  esac
+  return 1
+}
+
+host_evdi_link_preflight() {
+  if [[ "${WBEAM_HOST_SKIP_EVDI_PREFLIGHT:-0}" == "1" ]]; then
+    return 0
+  fi
+
+  if ldconfig -p 2>/dev/null | grep -q 'libevdi\.so'; then
+    return 0
+  fi
+  if compgen -G "/usr/lib*/libevdi.so*" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "[host] ERROR: libevdi.so not found; streamer is built with EVDI support by default." >&2
+  case "$(detect_linux_id)" in
+    fedora)
+      echo "[host] Fedora fix:" >&2
+      echo "[host]   scripts/fedora-setup.sh --yes --with-evdi" >&2
+      echo "[host] If EVDI comes from COPR on this machine:" >&2
+      echo "[host]   scripts/fedora-setup.sh --yes --enable-evdi-copr" >&2
+      ;;
+    arch|cachyos)
+      echo "[host] Arch/CachyOS fix:" >&2
+      echo "[host]   sudo pacman -S --needed evdi-dkms" >&2
+      echo "[host] or install evdi-dkms from AUR." >&2
+      ;;
+    debian|ubuntu)
+      echo "[host] Debian/Ubuntu fix:" >&2
+      echo "[host]   sudo apt-get install -y evdi-dkms" >&2
+      ;;
+    *)
+      echo "[host] Generic fix: install EVDI development/runtime package that provides libevdi.so." >&2
+      ;;
+  esac
+  echo "[host] To bypass only this preflight, set WBEAM_HOST_SKIP_EVDI_PREFLIGHT=1." >&2
+  return 1
+}
+
+host_build_preflight() {
+  host_pkg_config_preflight
+  host_evdi_link_preflight
+}
+
 host_build() {
   require_cmd cargo
+  host_build_preflight
   local rust_dir="$ROOT_DIR/host/rust"
   local build_version
   build_version="$(build_version_for_build)"
