@@ -152,7 +152,10 @@ first_installed_package() {
 
 find_libevdi() {
     local candidate
-    for candidate in /usr/lib/libevdi.so /usr/lib64/libevdi.so /usr/lib/libevdi.so.* /usr/lib64/libevdi.so.*; do
+    for candidate in \
+        /usr/lib/libevdi.so /usr/lib64/libevdi.so \
+        /usr/lib/libevdi.so.* /usr/lib64/libevdi.so.* \
+        /usr/libexec/displaylink/libevdi.so /usr/libexec/displaylink/libevdi.so.*; do
         if [ -e "$candidate" ]; then
             echo "$candidate"
             return 0
@@ -184,7 +187,7 @@ echo ""
 print_header "1. EVDI Module Installation"
 
 print_check "EVDI module package installed"
-if EVDI_PACKAGE=$(first_installed_package "$PM" evdi-dkms akmod-evdi evdi libevdi); then
+if EVDI_PACKAGE=$(first_installed_package "$PM" evdi-dkms akmod-evdi evdi libevdi displaylink); then
     case "$PM" in
         pacman) EVDI_VERSION=$(pacman -Q "$EVDI_PACKAGE" 2>/dev/null | awk '{print $2}' || echo "unknown") ;;
         apt) EVDI_VERSION=$(dpkg-query -W -f='${Version}' "$EVDI_PACKAGE" 2>/dev/null || echo "unknown") ;;
@@ -193,7 +196,7 @@ if EVDI_PACKAGE=$(first_installed_package "$PM" evdi-dkms akmod-evdi evdi libevd
     esac
     pass "$EVDI_PACKAGE installed ($EVDI_VERSION)"
 else
-    fail "EVDI package not installed (checked evdi-dkms, akmod-evdi, evdi, libevdi)"
+    fail "EVDI package not installed (checked evdi-dkms, akmod-evdi, evdi, libevdi, displaylink)"
     if [[ $FIX_RECOMMENDATIONS == 1 ]]; then
         echo ""
         echo "  📦 To install EVDI:"
@@ -226,6 +229,23 @@ case "$PM" in
         fi
         ;;
 esac
+
+print_check "Linux headers match running kernel"
+RUNNING_KERNEL=$(uname -r)
+if [ -e "/lib/modules/$RUNNING_KERNEL/build/Makefile" ]; then
+    pass "/lib/modules/$RUNNING_KERNEL/build"
+else
+    fail "kernel-devel for running kernel $RUNNING_KERNEL is not installed or incomplete"
+    if [[ $FIX_RECOMMENDATIONS == 1 ]]; then
+        echo ""
+        echo "  🔧 Fedora usually fixes this by rebooting into the installed kernel that has matching kernel-devel:"
+        echo "    sudo reboot"
+        echo "    ./redeploy-local"
+        echo ""
+        echo "  🔧 Or update kernel packages together before rebooting:"
+        echo "    sudo dnf upgrade --refresh kernel kernel-core kernel-modules kernel-devel"
+    fi
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. Module Loading Check
@@ -308,10 +328,14 @@ print_header "4. User Permissions"
 
 CURRENT_USER=$(whoami)
 print_check "User in 'video' group"
-if groups "$CURRENT_USER" | grep -q "\bvideo\b"; then
-    pass "User '$CURRENT_USER' is in video group"
+if id -nG | tr ' ' '\n' | grep -qx video; then
+    pass "Current session for '$CURRENT_USER' has video group"
 else
-    fail "User '$CURRENT_USER' is NOT in video group"
+    if groups "$CURRENT_USER" | grep -q "\bvideo\b"; then
+        fail "User '$CURRENT_USER' is in video group in account database, but this login session has not picked it up"
+    else
+        fail "User '$CURRENT_USER' is NOT in video group"
+    fi
     if [[ $FIX_RECOMMENDATIONS == 1 ]]; then
         echo ""
         echo "  🔧 To add user to video group:"

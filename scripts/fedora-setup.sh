@@ -402,6 +402,92 @@ install_evdi_from_github_release() {
   dnf_install "$rpm_url"
 }
 
+running_kernel_devel_ready() {
+  local running_kernel build_dir
+  running_kernel="$(uname -r)"
+  build_dir="/lib/modules/${running_kernel}/build"
+  [[ -e "${build_dir}/Makefile" ]]
+}
+
+ensure_running_kernel_devel() {
+  local running_kernel
+  running_kernel="$(uname -r)"
+  if running_kernel_devel_ready; then
+    return 0
+  fi
+
+  echo "[fedora-setup] WARN: kernel-devel for the running kernel is not available: ${running_kernel}" >&2
+  echo "[fedora-setup] Missing build tree: /lib/modules/${running_kernel}/build" >&2
+  dnf_install "kernel-devel-${running_kernel}" || true
+  if running_kernel_devel_ready; then
+    return 0
+  fi
+
+  echo "[fedora-setup] ERROR: cannot build EVDI for running kernel ${running_kernel}." >&2
+  echo "[fedora-setup] Installed kernels/kernel-devel:" >&2
+  rpm -q kernel-core kernel-devel 2>/dev/null | sed 's/^/[fedora-setup]   /' >&2 || true
+  echo "[fedora-setup] Fix: reboot into a kernel that has matching kernel-devel installed, then rerun:" >&2
+  echo "[fedora-setup]   sudo reboot" >&2
+  echo "[fedora-setup]   ./redeploy-local" >&2
+  echo "[fedora-setup] Or update kernel packages together before rebooting:" >&2
+  echo "[fedora-setup]   sudo dnf upgrade --refresh kernel kernel-core kernel-modules kernel-devel" >&2
+  return 1
+}
+
+latest_evdi_source_version() {
+  local dir version best=""
+  for dir in /usr/src/evdi-*; do
+    [[ -d "$dir" ]] || continue
+    version="${dir##*/evdi-}"
+    if [[ -z "$best" ]] || [[ "$(printf '%s\n%s\n' "$best" "$version" | sort -V | tail -n 1)" == "$version" ]]; then
+      best="$version"
+    fi
+  done
+  [[ -n "$best" ]] && echo "$best"
+}
+
+ensure_displaylink_libevdi_ldconfig() {
+  if [[ ! -e /usr/libexec/displaylink/libevdi.so ]]; then
+    return 0
+  fi
+  if ldconfig -p 2>/dev/null | grep -q 'libevdi\.so'; then
+    return 0
+  fi
+
+  echo "[fedora-setup] Registering /usr/libexec/displaylink for libevdi runtime/linker lookup"
+  if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+    run_shell "printf '%s\n' /usr/libexec/displaylink > /etc/ld.so.conf.d/displaylink-evdi.conf"
+    run_cmd ldconfig
+  else
+    run_shell "printf '%s\n' /usr/libexec/displaylink | sudo tee /etc/ld.so.conf.d/displaylink-evdi.conf >/dev/null"
+    with_sudo ldconfig
+  fi
+}
+
+build_evdi_for_running_kernel() {
+  local version running_kernel
+  running_kernel="$(uname -r)"
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "[fedora-setup] DRY-RUN: verify matching kernel-devel for ${running_kernel}"
+    echo "[fedora-setup] DRY-RUN: sudo dkms build/install evdi for ${running_kernel}"
+    return 0
+  fi
+  if command_exists modinfo && modinfo evdi >/dev/null 2>&1; then
+    return 0
+  fi
+
+  ensure_running_kernel_devel
+  version="$(latest_evdi_source_version || true)"
+  if [[ -z "$version" ]]; then
+    echo "[fedora-setup] ERROR: EVDI source not found under /usr/src/evdi-*." >&2
+    return 1
+  fi
+
+  echo "[fedora-setup] Building EVDI ${version} for running kernel ${running_kernel}"
+  with_sudo dkms build -m evdi -v "$version" -k "$running_kernel"
+  with_sudo dkms install -m evdi -v "$version" -k "$running_kernel"
+}
+
 install_evdi_packages() {
   if [[ "$DRY_RUN" -eq 1 ]]; then
     dnf_install akmod-evdi
@@ -490,6 +576,7 @@ if [[ "$WITH_EVDI" -eq 1 ]]; then
   fi
 
   install_evdi_packages
+  ensure_displaylink_libevdi_ldconfig
 
   if ! groups "${SUDO_USER:-$(whoami)}" | grep -qw video; then
     with_sudo usermod -a -G video "${SUDO_USER:-$(whoami)}" || true
@@ -499,6 +586,8 @@ if [[ "$WITH_EVDI" -eq 1 ]]; then
       echo "[fedora-setup] Added ${SUDO_USER:-$(whoami)} to video group. Log out and back in for this to apply."
     fi
   fi
+
+  build_evdi_for_running_kernel
 
   if [[ "$LOAD_EVDI" -eq 1 ]]; then
     with_sudo modprobe evdi initial_device_count=4 || {

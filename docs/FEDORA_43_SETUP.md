@@ -158,6 +158,19 @@ sudo reboot
 sudo dkms autoinstall
 ```
 
+If `modprobe evdi` reports `Module evdi not found`, also check that the running
+kernel matches installed kernel headers:
+
+```bash
+uname -r
+ls -l /lib/modules/$(uname -r)/build
+rpm -q kernel-core kernel-devel
+```
+
+When the running kernel is older than the installed `kernel-devel`, reboot into
+the newer installed kernel and rerun `./redeploy-local`. On this class of
+failure DKMS shows `evdi/<version>: added`, but no module is built yet.
+
 The older distro-neutral EVDI helper is still available:
 
 ```bash
