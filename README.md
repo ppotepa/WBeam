@@ -56,6 +56,9 @@ git clone <repo> && cd WBeam
 ./wbeam version doctor
 ```
 
+On Fedora 43, use the distro-specific bootstrap notes first:
+`docs/FEDORA_43_SETUP.md`.
+
 For EVDI capture (recommended), load the kernel module:
 
 ```bash
