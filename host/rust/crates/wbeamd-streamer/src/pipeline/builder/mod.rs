@@ -346,6 +346,13 @@ fn attach_wake_discont_force_key_probe(
 }
 
 fn log_encoder_selection(cfg: &ResolvedConfig, runtime: &PipelineRuntime) {
+    if cfg.encoder == "h265" && !runtime.hevc {
+        eprintln!(
+            "[wbeam] WARN: H.265 encoder unavailable (nvh265enc/x265enc); falling back to H.264 backend={}",
+            runtime.encoder_name
+        );
+    }
+
     if runtime.mode_png {
         println!(
             "[wbeam] encoder-select requested={} backend={} raw_format={} fps={} bitrate={}kbps",

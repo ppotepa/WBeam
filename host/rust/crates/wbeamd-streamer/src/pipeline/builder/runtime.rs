@@ -2,7 +2,7 @@ use anyhow::Result;
 
 use crate::capture::PreparedCapture;
 use crate::cli::ResolvedConfig;
-use crate::encode::{effective_gop, is_hevc, is_png, pick_encoder};
+use crate::encode::{backend_is_hevc, effective_gop, is_png, pick_encoder};
 
 use super::super::profile::{buffer_profile, BufferProfile};
 
@@ -28,7 +28,7 @@ impl PipelineRuntime {
     ) -> Result<Self> {
         let mode_png = is_png(&cfg.encoder);
         let encoder_name = pick_encoder(&cfg.encoder)?;
-        let hevc = is_hevc(&cfg.encoder);
+        let hevc = backend_is_hevc(encoder_name);
         Ok(Self {
             mode_png,
             encoder_name,

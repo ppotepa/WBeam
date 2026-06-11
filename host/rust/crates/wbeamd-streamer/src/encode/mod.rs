@@ -11,9 +11,9 @@ mod h265;
 mod rawpng;
 mod selector;
 
-/// Returns `true` when the requested encoder mode is HEVC/H.265.
-pub fn is_hevc(encoder: &str) -> bool {
-    encoder == "h265"
+/// Returns `true` when the resolved concrete encoder backend emits HEVC/H.265.
+pub fn backend_is_hevc(encoder: &str) -> bool {
+    matches!(encoder, "nvenc265" | "x265")
 }
 
 /// Returns `true` when the requested encoder mode is PNG frames.
@@ -24,10 +24,11 @@ pub fn is_png(encoder: &str) -> bool {
 /// Resolve concrete GStreamer encoder backend from requested mode.
 ///
 /// `h264`   -> `nvenc264` if available, else `x264`, else `openh264`
-/// `h265`   -> `nvenc265` if available, else `x265`
+/// `h265`   -> `nvenc265` if available, else `x265`, else H.264 fallback
 /// `rawpng` -> `rawpng`
 ///
-/// Legacy aliases: `auto`, `nvenc`, `nvenc265`, `x265`, `openh264` map to `h265`.
+/// Legacy aliases: `auto`, `nvenc`, `nvenc265`, and `x265` map to `h265`.
+/// Legacy `openh264` maps to the H.264 encoder family.
 pub fn pick_encoder(requested: &str) -> Result<&'static str> {
     selector::pick_encoder(requested)
 }
@@ -60,7 +61,7 @@ pub fn configure_encoder(
     }
 
     match encoder {
-        "nvenc264" | "x264" => {
+        "nvenc264" | "x264" | "openh264" => {
             h264::configure(enc, encoder, bitrate_kbps, nv_preset, intra_only, gop)
         }
         "nvenc265" | "x265" => {
@@ -73,7 +74,7 @@ pub fn configure_encoder(
 
 #[cfg(test)]
 mod tests {
-    use super::effective_gop;
+    use super::{backend_is_hevc, effective_gop};
 
     #[test]
     fn effective_gop_prefers_intra_only() {
@@ -89,5 +90,14 @@ mod tests {
     fn effective_gop_falls_back_to_fps_based_default() {
         assert_eq!(effective_gop(60, false, 0), 7);
         assert_eq!(effective_gop(30, false, 0), 6);
+    }
+
+    #[test]
+    fn backend_hevc_detection_uses_resolved_backend() {
+        assert!(backend_is_hevc("nvenc265"));
+        assert!(backend_is_hevc("x265"));
+        assert!(!backend_is_hevc("openh264"));
+        assert!(!backend_is_hevc("x264"));
+        assert!(!backend_is_hevc("nvenc264"));
     }
 }

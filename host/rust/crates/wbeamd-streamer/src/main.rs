@@ -18,7 +18,7 @@ use gstreamer as gst;
 
 use capture::prepare_capture;
 use cli::{resolve_profile, Args};
-use encode::{is_hevc, is_png};
+use encode::{backend_is_hevc, is_png, pick_encoder};
 use pipeline::make_pipeline;
 use transport::{hello_mode_bits, spawn_sender, HELLO_CODEC_HEVC, HELLO_CODEC_PNG};
 
@@ -51,9 +51,10 @@ async fn main() -> Result<()> {
     let bus = pipeline.bus().context("pipeline bus")?;
 
     let stop_flag = Arc::new(AtomicBool::new(false));
+    let selected_encoder = pick_encoder(&cfg.encoder)?;
     let codec_bits = if is_png(&cfg.encoder) {
         HELLO_CODEC_PNG
-    } else if is_hevc(&cfg.encoder) {
+    } else if backend_is_hevc(selected_encoder) {
         HELLO_CODEC_HEVC
     } else {
         0x00
