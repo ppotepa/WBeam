@@ -1401,7 +1401,11 @@ impl DaemonCore {
         &self,
         requested_mode: display_backends::DisplayMode,
         launch_size: &mut String,
+        benchmark_mode: bool,
     ) -> Result<(), CoreError> {
+        if benchmark_mode {
+            return Ok(());
+        }
         if !self.host_probe.supports_streaming() {
             let reason = self.host_probe.unsupported_reason();
             {
@@ -1948,7 +1952,7 @@ impl DaemonCore {
         let (_, capture_backend_override, benchmark_mode, requested_mode) =
             self.requested_start_settings().await;
         let mut launch_size = cfg.size.clone();
-        self.ensure_start_supported(requested_mode, &mut launch_size)
+        self.ensure_start_supported(requested_mode, &mut launch_size, benchmark_mode)
             .await?;
         self.touch_reverse_refresh().await;
         // Do not block /start HTTP response on adb reverse, because Android API17

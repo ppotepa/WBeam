@@ -1,0 +1,201 @@
+{
+  "schema": 1,
+  "defaults": {
+    "hypervisor": "qemu-kvm",
+    "arch": "x86_64",
+    "cpu": 4,
+    "memory_mib": 8192,
+    "disk_gib": 48,
+    "control_port": 5001,
+    "stream_port": 5000,
+    "stream_duration_sec": 60,
+    "encoder": "h264",
+    "size": "1280x800",
+    "fps": 30,
+    "bitrate_kbps": 10000
+  },
+  "distros": [
+    {
+      "id": "fedora-43",
+      "family": "fedora",
+      "iso_env": "WBEAM_E2E_ISO_FEDORA_43",
+      "installer": "kickstart",
+      "desktop": "gnome",
+      "ssh_user": "wbeam",
+      "seed_kind": "fedora-kickstart",
+      "install_timeout_sec": 5400,
+      "boot_timeout_sec": 900,
+      "shutdown_timeout_sec": 180
+    },
+    {
+      "id": "ubuntu-24.04",
+      "family": "ubuntu",
+      "iso_env": "WBEAM_E2E_ISO_UBUNTU_24_04",
+      "installer": "autoinstall",
+      "desktop": "gnome",
+      "ssh_user": "wbeam",
+      "seed_kind": "ubuntu-nocloud",
+      "install_timeout_sec": 5400,
+      "boot_timeout_sec": 900,
+      "shutdown_timeout_sec": 180
+    },
+    {
+      "id": "debian-12",
+      "family": "debian",
+      "iso_env": "WBEAM_E2E_ISO_DEBIAN_12",
+      "installer": "preseed",
+      "desktop": "gnome",
+      "ssh_user": "wbeam",
+      "seed_kind": "debian-preseed",
+      "install_timeout_sec": 5400,
+      "boot_timeout_sec": 900,
+      "shutdown_timeout_sec": 180
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "fedora43-headless-benchmark-h264",
+      "distro": "fedora-43",
+      "session": "headless",
+      "backend": "benchmark_game",
+      "display_mode": "benchmark_game",
+      "tier": "smoke",
+      "requires_desktop": false,
+      "requires_evdi": false,
+      "requires_portal": false,
+      "tags": ["fedora", "smoke", "benchmark"]
+    },
+    {
+      "id": "fedora43-gnome-wayland-portal-h264",
+      "distro": "fedora-43",
+      "session": "gnome-wayland",
+      "backend": "wayland_portal",
+      "display_mode": "duplicate",
+      "tier": "backend",
+      "requires_desktop": true,
+      "requires_evdi": false,
+      "requires_portal": true,
+      "tags": ["fedora", "wayland", "portal"]
+    },
+    {
+      "id": "fedora43-gnome-wayland-evdi-h264",
+      "distro": "fedora-43",
+      "session": "gnome-wayland",
+      "backend": "evdi",
+      "display_mode": "duplicate",
+      "tier": "backend",
+      "requires_desktop": true,
+      "requires_evdi": true,
+      "requires_portal": false,
+      "tags": ["fedora", "wayland", "evdi"]
+    },
+    {
+      "id": "fedora43-gnome-xorg-x11-h264",
+      "distro": "fedora-43",
+      "session": "gnome-xorg",
+      "backend": "x11_gst",
+      "display_mode": "duplicate",
+      "tier": "backend",
+      "requires_desktop": true,
+      "requires_evdi": false,
+      "requires_portal": false,
+      "tags": ["fedora", "x11"]
+    },
+    {
+      "id": "ubuntu2404-headless-benchmark-h264",
+      "distro": "ubuntu-24.04",
+      "session": "headless",
+      "backend": "benchmark_game",
+      "display_mode": "benchmark_game",
+      "tier": "smoke",
+      "requires_desktop": false,
+      "requires_evdi": false,
+      "requires_portal": false,
+      "tags": ["ubuntu", "smoke", "benchmark"]
+    },
+    {
+      "id": "ubuntu2404-gnome-wayland-portal-h264",
+      "distro": "ubuntu-24.04",
+      "session": "gnome-wayland",
+      "backend": "wayland_portal",
+      "display_mode": "duplicate",
+      "tier": "backend",
+      "requires_desktop": true,
+      "requires_evdi": false,
+      "requires_portal": true,
+      "tags": ["ubuntu", "wayland", "portal"]
+    },
+    {
+      "id": "ubuntu2404-gnome-wayland-evdi-h264",
+      "distro": "ubuntu-24.04",
+      "session": "gnome-wayland",
+      "backend": "evdi",
+      "display_mode": "duplicate",
+      "tier": "backend",
+      "requires_desktop": true,
+      "requires_evdi": true,
+      "requires_portal": false,
+      "tags": ["ubuntu", "wayland", "evdi"]
+    },
+    {
+      "id": "ubuntu2404-gnome-xorg-x11-h264",
+      "distro": "ubuntu-24.04",
+      "session": "gnome-xorg",
+      "backend": "x11_gst",
+      "display_mode": "duplicate",
+      "tier": "backend",
+      "requires_desktop": true,
+      "requires_evdi": false,
+      "requires_portal": false,
+      "tags": ["ubuntu", "x11"]
+    },
+    {
+      "id": "debian12-headless-benchmark-h264",
+      "distro": "debian-12",
+      "session": "headless",
+      "backend": "benchmark_game",
+      "display_mode": "benchmark_game",
+      "tier": "smoke",
+      "requires_desktop": false,
+      "requires_evdi": false,
+      "requires_portal": false,
+      "tags": ["debian", "smoke", "benchmark"]
+    },
+    {
+      "id": "debian12-gnome-wayland-portal-h264",
+      "distro": "debian-12",
+      "session": "gnome-wayland",
+      "backend": "wayland_portal",
+      "display_mode": "duplicate",
+      "tier": "backend",
+      "requires_desktop": true,
+      "requires_evdi": false,
+      "requires_portal": true,
+      "tags": ["debian", "wayland", "portal"]
+    },
+    {
+      "id": "debian12-gnome-wayland-evdi-h264",
+      "distro": "debian-12",
+      "session": "gnome-wayland",
+      "backend": "evdi",
+      "display_mode": "duplicate",
+      "tier": "backend",
+      "requires_desktop": true,
+      "requires_evdi": true,
+      "requires_portal": false,
+      "tags": ["debian", "wayland", "evdi"]
+    },
+    {
+      "id": "debian12-gnome-xorg-x11-h264",
+      "distro": "debian-12",
+      "session": "gnome-xorg",
+      "backend": "x11_gst",
+      "display_mode": "duplicate",
+      "tier": "backend",
+      "requires_desktop": true,
+      "requires_evdi": false,
+      "requires_portal": false,
+      "tags": ["debian", "x11"]
+    }
+  ]
+}

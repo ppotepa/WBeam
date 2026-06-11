@@ -1,0 +1,13 @@
+work/
+reports/*
+!reports/.gitkeep
+isos/
+images/base/
+images/build/
+scripts/__pycache__/
+tests/__pycache__/
+*.pyc
+*.qcow2
+*.img
+*.log
+env.local
