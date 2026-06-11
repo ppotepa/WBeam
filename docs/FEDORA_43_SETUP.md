@@ -357,6 +357,17 @@ dmesg | tail -80 | grep -i evdi
 If `kernel-devel` does not match `uname -r`, update/reboot and rebuild the
 module.
 
+### Streamer Linker Cannot Find libevdi
+
+The DisplayLink RPM installs `libevdi.so` under `/usr/libexec/displaylink`.
+WBeam's streamer build script detects that path automatically. If a custom EVDI
+package installs it elsewhere and the build fails with `cannot find -levdi`,
+point the build at that directory:
+
+```bash
+WBEAM_EVDI_LIB_DIR=/path/to/libevdi-dir ./wbeam host build
+```
+
 ### Wayland Fallback
 
 If EVDI is not ready yet, WBeam can still use the Wayland portal fallback. It is
