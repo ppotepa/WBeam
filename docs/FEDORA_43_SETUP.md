@@ -1,11 +1,13 @@
 # Fedora 43 Local Setup
 
-This guide is for a Fedora 43 Workstation dev machine running WBeam from this
-repo with the usual local flow:
+This guide is for a Fedora 43 Workstation machine running WBeam from this repo.
+For a fresh machine, start with the installer wizard:
 
 ```bash
-./redeploy-local
+./install-wbeam
 ```
+
+For the developer rebuild/deploy loop, use `./redeploy-local`.
 
 WBeam has four moving parts on Fedora:
 
@@ -16,17 +18,38 @@ WBeam has four moving parts on Fedora:
 
 ## 0. Fresh Clone Flow
 
-On Fedora 43, a clean workstation should start with the same command used on
-the original dev machine:
+On Fedora 43, a clean workstation should start with the installer wizard:
 
 ```bash
 git clone <repo> WBeam
 cd WBeam
-./redeploy-local
+./install-wbeam
 ```
 
-`redeploy-local` performs the normal local loop and bootstraps missing Fedora
-dependencies as needed:
+`install-wbeam` probes the machine, asks for the capture backend, bootstraps
+Fedora dependencies, builds the host from this checkout, installs the systemd
+user service, then runs Android phone onboarding.
+
+The recommended backend is Wayland/X11 fallback:
+
+```bash
+./install-wbeam --backend wayland
+```
+
+EVDI is available as an advanced/risky option:
+
+```bash
+./install-wbeam --backend evdi
+```
+
+For a dry-run preview:
+
+```bash
+./install-wbeam --dry-run
+```
+
+`redeploy-local` remains the normal dev loop and bootstraps missing Fedora
+dependencies as needed while rebuilding/redeploying:
 
 1. stops old host/desktop service state,
 2. runs `scripts/fedora-setup.sh --yes` when native build packages or Android
@@ -46,8 +69,12 @@ action:
 - Logging out and back in after being added to the `video` group.
 - Accepting Android USB debugging and allowing APK installs on the device.
 
-Rerun `./redeploy-local` after completing any required reboot, login, or device
-prompt.
+Rerun `./install-wbeam` or `./redeploy-local` after completing any required
+reboot, login, or device prompt. To rerun only phone onboarding:
+
+```bash
+./wbeam device setup
+```
 
 ### Current Fedora Bootstrap Coverage
 
@@ -265,7 +292,13 @@ Connect an Android device with USB debugging enabled:
 adb devices
 ```
 
-Run the normal local redeploy flow:
+Run the installer wizard or the normal local redeploy flow:
+
+```bash
+./install-wbeam
+```
+
+For development:
 
 ```bash
 ./redeploy-local

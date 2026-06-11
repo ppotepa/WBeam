@@ -5,6 +5,7 @@
 ```
 WBeam/
 ├── wbeam                  # main CLI entrypoint
+├── install-wbeam          # fresh-machine installer wizard
 ├── wbgui                  # interactive TUI menu
 ├── devtool                # dev convenience wrapper
 ├── desktop.sh             # desktop app launcher

@@ -44,9 +44,11 @@ Usage:
   ./wbgui                        # interactive TUI menu (arrow keys)
 
 Groups:
+  install   [--backend wayland|evdi] [--yes] [--dry-run]
   ip        up | down | status
   host      build | run | debug | status | down | probe | tuner
   daemon    up | down | status   (alias for host)
+  device    setup                 (Android phone onboarding wizard)
   android   build | install | launch | deploy | deploy-all | build-release | install-release | deploy-release
   deps      virtual check [--json] | virtual install [--dry-run] [--yes]
   version   new | current | doctor
@@ -56,6 +58,9 @@ Groups:
 
 Examples:
   ./wbgui
+  ./wbeam install --dry-run       # show installer wizard probe + plan
+  ./wbeam install                 # install host, service, and onboard phone
+  ./wbeam device setup            # rerun only Android phone onboarding
   ./wbeam host build             # build wbeamd-server + wbeamd-streamer
   ./wbeam host run               # release binary, foreground
   ./wbeam host debug             # debug build + coloured logs + ADB sidecar
@@ -2273,6 +2278,10 @@ deps_virtual_install() {
   "$ROOT_DIR/scripts/virtual-deps-install.sh" "$@"
 }
 
+install_wizard() {
+  "$ROOT_DIR/scripts/install-wizard.sh" "$@"
+}
+
 group="${1:-}"
 cmd="${2:-}"
 
@@ -2282,6 +2291,19 @@ if [[ -z "$group" ]]; then
 fi
 
 case "$group" in
+  install)
+    shift
+    install_wizard "$@"
+    ;;
+  device)
+    case "$cmd" in
+      setup|onboard|onboarding)
+        shift 2
+        install_wizard --device-only "$@"
+        ;;
+      *)              print_help; exit 1 ;;
+    esac
+    ;;
   ip)
     case "$cmd" in
       up)             ip_up ;;

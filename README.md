@@ -46,6 +46,21 @@ frames to an Android device connected via USB. No Wi-Fi, no network config.
 
 Prerequisites: Linux host, Android device (API 17+), USB cable, ADB.
 
+Fresh machine wizard:
+
+```bash
+git clone <repo> && cd WBeam
+
+# Probe the machine, choose Wayland/X11 or EVDI, install deps, build host,
+# install the user service, then onboard the Android phone.
+./install-wbeam
+
+# Preview first if needed
+./install-wbeam --dry-run
+```
+
+Developer rebuild/deploy flow:
+
 ```bash
 git clone <repo> && cd WBeam
 
@@ -58,10 +73,10 @@ git clone <repo> && cd WBeam
 ./wbeam version doctor
 ```
 
-On Fedora 43, the expected fresh-clone flow is still `./redeploy-local`.
-It calls `scripts/fedora-setup.sh --yes` automatically when native packages,
-Android SDK components, or EVDI/DisplayLink pieces are missing. Some system
-states still require manual confirmation outside the repo:
+On Fedora 43, both `./install-wbeam` and `./redeploy-local` call
+`scripts/fedora-setup.sh --yes` when native packages, Android SDK components,
+or EVDI/DisplayLink pieces are missing. Some system states still require manual
+confirmation outside the repo:
 
 - Secure Boot MOK enrollment for DKMS EVDI modules requires a reboot and the
   firmware MOK screen.
@@ -71,7 +86,8 @@ states still require manual confirmation outside the repo:
   `WBEAM_REDEPLOY_WITH_EVDI=0 ./redeploy-local` to use Wayland/X11 fallback.
 
 Fedora details are in `docs/FEDORA_43_SETUP.md`. General EVDI diagnostics are
-in `EVDI_SETUP_INDEX.md` and `docs/EVDI_SETUP_GUIDE.md`.
+in `EVDI_SETUP_INDEX.md` and `docs/EVDI_SETUP_GUIDE.md`. The installer wizard
+design is tracked in `docs/INSTALLER_WIZARD.md`.
 
 ---
 
@@ -117,6 +133,7 @@ benchmarking encoding profiles against your hardware.
 | Script | What it does |
 |--------|-------------|
 | `./wbeam` | Main CLI |
+| `./install-wbeam` | Fresh-machine installer wizard |
 | `./wbgui` | Interactive TUI menu |
 | `./devtool` | Dev convenience (gui, deps install) |
 | `./desktop.sh` | Desktop app launcher |
