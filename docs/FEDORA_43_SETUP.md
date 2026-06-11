@@ -186,8 +186,9 @@ Run the normal local redeploy flow:
 ```
 
 On Fedora, `redeploy-local` automatically runs `scripts/fedora-setup.sh --yes`
-when native host build dependencies are missing. EVDI is optional in the default
-flow; without `libevdi.so`, the streamer is built for Wayland/X11 fallback only.
+when native host build dependencies are missing. It also tries to make EVDI
+ready automatically, using distro packages first and the Fedora DisplayLink/EVDI
+GitHub Release RPM if needed.
 If Android deploy is enabled and the SDK is missing, `redeploy-local`
 automatically runs `scripts/fedora-setup.sh --yes --with-android-sdk`.
 To disable auto dependency installation:
@@ -196,16 +197,10 @@ To disable auto dependency installation:
 ./redeploy-local --no-auto-deps
 ```
 
-To require EVDI during redeploy:
+To skip EVDI and force Wayland/X11 fallback only:
 
 ```bash
-WBEAM_REDEPLOY_WITH_EVDI=1 ./redeploy-local
-```
-
-If EVDI must come from the DisplayLink COPR:
-
-```bash
-WBEAM_REDEPLOY_ENABLE_EVDI_COPR=1 ./redeploy-local
+WBEAM_REDEPLOY_WITH_EVDI=0 ./redeploy-local
 ```
 
 Useful variants:

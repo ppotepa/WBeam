@@ -200,7 +200,7 @@ else
         case "$PM" in
             pacman) echo "    sudo pacman -S --noconfirm evdi-dkms" ;;
             apt) echo "    sudo apt install -y evdi-dkms dkms linux-headers-\$(uname -r)" ;;
-            dnf) echo "    scripts/fedora-setup.sh --yes --enable-evdi-copr" ;;
+            dnf) echo "    scripts/fedora-setup.sh --yes --with-evdi" ;;
             yum) echo "    sudo yum install -y evdi-dkms dkms kernel-devel" ;;
         esac
     fi
