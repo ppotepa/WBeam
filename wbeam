@@ -1310,14 +1310,146 @@ android_rotate_gradle_workspace_cache() {
   fi
 }
 
+android_sdk_root_from_local_properties() {
+  local props="$ANDROID_DIR/local.properties"
+  if [[ ! -f "$props" ]]; then
+    return 1
+  fi
+  awk -F= '$1 == "sdk.dir" { print substr($0, index($0, "=") + 1); exit }' "$props"
+}
+
+android_resolve_sdk_root() {
+  local candidate
+  for candidate in \
+    "${ANDROID_HOME:-}" \
+    "${ANDROID_SDK_ROOT:-}" \
+    "$(android_sdk_root_from_local_properties || true)" \
+    "$HOME/Android/Sdk" \
+    "/opt/android-sdk"; do
+    [[ -n "$candidate" ]] || continue
+    if [[ -d "$candidate" ]]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+android_sdkmanager_path() {
+  local sdk_root="$1"
+  local candidate
+  for candidate in \
+    "$sdk_root/cmdline-tools/latest/bin/sdkmanager" \
+    "$sdk_root/cmdline-tools/bin/sdkmanager" \
+    "$sdk_root/tools/bin/sdkmanager"; do
+    if [[ -x "$candidate" ]]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+  if command -v sdkmanager >/dev/null 2>&1; then
+    command -v sdkmanager
+    return 0
+  fi
+  return 1
+}
+
+android_write_local_properties() {
+  local sdk_root="$1"
+  local props="$ANDROID_DIR/local.properties"
+  local current=""
+  if [[ -f "$props" ]]; then
+    current="$(android_sdk_root_from_local_properties || true)"
+  fi
+  if [[ "$current" == "$sdk_root" ]]; then
+    return 0
+  fi
+  printf 'sdk.dir=%s\n' "$sdk_root" > "$props"
+  echo "[android] wrote $props (sdk.dir=$sdk_root)" >&2
+}
+
+android_print_sdk_install_hint() {
+  cat >&2 <<'EOF'
+[android] ERROR: Android SDK not found.
+[android] Install Android Studio or Android command-line tools, then install:
+[android]   - Android SDK Platform 35
+[android]   - Android SDK Build-Tools 35.0.0
+[android]   - Android SDK Platform-Tools
+[android]
+[android] Expected SDK root examples:
+[android]   $HOME/Android/Sdk
+[android]   /opt/android-sdk
+[android]
+[android] Then export:
+[android]   export ANDROID_HOME="$HOME/Android/Sdk"
+[android]   export ANDROID_SDK_ROOT="$ANDROID_HOME"
+[android]   export PATH="$ANDROID_HOME/platform-tools:$PATH"
+EOF
+}
+
+android_ensure_sdk() {
+  local sdk_root sdkmanager
+  local -a missing=()
+  if ! sdk_root="$(android_resolve_sdk_root)"; then
+    android_print_sdk_install_hint
+    exit 1
+  fi
+
+  android_write_local_properties "$sdk_root"
+
+  [[ -d "$sdk_root/platforms/android-35" ]] || missing+=("platforms;android-35")
+  [[ -d "$sdk_root/build-tools/35.0.0" ]] || missing+=("build-tools;35.0.0")
+  [[ -x "$sdk_root/platform-tools/adb" || -x "$sdk_root/platform-tools/adb.exe" ]] || missing+=("platform-tools")
+
+  if [[ "${#missing[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  if sdkmanager="$(android_sdkmanager_path "$sdk_root")"; then
+    echo "[android] Installing missing Android SDK components into $sdk_root: ${missing[*]}" >&2
+    yes | "$sdkmanager" --sdk_root="$sdk_root" "${missing[@]}"
+    android_write_local_properties "$sdk_root"
+    return 0
+  fi
+
+  echo "[android] ERROR: Android SDK is present at $sdk_root, but required components are missing:" >&2
+  printf '[android]   - %s\n' "${missing[@]}" >&2
+  echo "[android] sdkmanager was not found. Install Android SDK Command-line Tools in Android Studio, then retry." >&2
+  exit 1
+}
+
 android_select_java_home() {
+  local candidate version
   if [[ -n "${WBEAM_ANDROID_JAVA_HOME:-}" ]]; then
     echo "$WBEAM_ANDROID_JAVA_HOME"
     return 0
   fi
-  if [[ -d "/usr/lib/jvm/java-17-openjdk" ]]; then
-    echo "/usr/lib/jvm/java-17-openjdk"
-    return 0
+
+  for candidate in \
+    /usr/lib/jvm/java-21-openjdk \
+    /usr/lib/jvm/java-21 \
+    /usr/lib/jvm/jre-21-openjdk \
+    /usr/lib/jvm/jre-21 \
+    /usr/lib/jvm/java-17-openjdk \
+    /usr/lib/jvm/java-17 \
+    /usr/lib/jvm/jre-17-openjdk \
+    /usr/lib/jvm/jre-17; do
+    if [[ -x "$candidate/bin/java" ]]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+
+  if command -v java >/dev/null 2>&1; then
+    version="$(java -version 2>&1 | awk -F '[ ".]' '/version/ {print $2; exit}')"
+    if [[ "$version" =~ ^[0-9]+$ ]] && (( version >= 17 && version <= 21 )); then
+      return 1
+    fi
+    echo "[android] ERROR: Gradle is using unsupported Java $(java -version 2>&1 | head -n 1)." >&2
+    echo "[android] Install Java 21 and retry:" >&2
+    echo "[android]   sudo dnf install -y java-21-openjdk-devel" >&2
+    echo "[android] or set WBEAM_ANDROID_JAVA_HOME=/usr/lib/jvm/java-21-openjdk" >&2
+    exit 1
   fi
   return 1
 }
@@ -1336,6 +1468,7 @@ android_gradle_build_retry_once() {
   local tmp_log
   local extra_args=()
   tmp_log="$(mktemp "$ROOT_DIR/.gradle-build.XXXXXX.log")"
+  android_ensure_sdk
   gradle_java_home="$(android_select_java_home || true)"
   gradle_env=(GRADLE_USER_HOME="$gradle_user_home")
   if [[ -n "$gradle_java_home" ]]; then

@@ -232,13 +232,29 @@ debugging prompt.
 
 ### Gradle Cannot Find SDK Platform 35 or Build Tools 35.0.0
 
-Install those packages from Android Studio SDK Manager, or use `sdkmanager`:
+`./wbeam android build` checks the Android SDK before invoking Gradle. Install
+the SDK with Android Studio SDK Manager, or use `sdkmanager`:
 
 ```bash
 sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 ```
 
 Make sure `ANDROID_HOME` points at the SDK root.
+
+### Gradle Fails with `Unsupported class file major version 69`
+
+That means Gradle was launched with Java 25. WBeam selects Java 21
+automatically when `/usr/lib/jvm/java-21-openjdk` is installed:
+
+```bash
+sudo dnf install -y java-21-openjdk-devel
+```
+
+To override explicitly:
+
+```bash
+export WBEAM_ANDROID_JAVA_HOME=/usr/lib/jvm/java-21-openjdk
+```
 
 ### Tauri Desktop Build Fails on WebKit/AppIndicator
 
