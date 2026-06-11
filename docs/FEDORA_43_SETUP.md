@@ -294,6 +294,26 @@ Then rebuild:
 npm --prefix desktop/apps/desktop-tauri run build
 ```
 
+### No Supported Encoder Found
+
+The host streamer needs at least one supported H.264 encoder. On Fedora, the
+normal fallback is `openh264enc` from `gstreamer1-plugin-openh264`.
+
+Check encoders:
+
+```bash
+gst-inspect-1.0 openh264enc x264enc nvh264enc
+```
+
+Repair the Fedora install:
+
+```bash
+scripts/fedora-setup.sh --yes --no-android-sdk
+```
+
+H.265 is optional. If `nvh265enc` or `x265enc` is unavailable, use H.264 in the
+Android app or desktop UI.
+
 ### EVDI Builds but Does Not Load
 
 Check the kernel/module state:

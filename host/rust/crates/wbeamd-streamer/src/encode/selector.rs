@@ -16,7 +16,10 @@ pub(super) fn pick_encoder(requested: &str) -> Result<&'static str> {
             if present("x264enc") {
                 return Ok("x264");
             }
-            anyhow::bail!("No supported H264 encoder found (nvh264enc/x264enc)");
+            if present("openh264enc") {
+                return Ok("openh264");
+            }
+            anyhow::bail!("No supported H264 encoder found (nvh264enc/x264enc/openh264enc)");
         }
         "h265" | "auto" | "nvenc" | "nvenc265" | "x265" | "openh264" => {
             if present("nvh265enc") {

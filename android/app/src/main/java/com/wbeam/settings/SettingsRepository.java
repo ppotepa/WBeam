@@ -41,7 +41,7 @@ public final class SettingsRepository {
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
 
         String profile = prefs.getString(PREF_PROFILE, PROFILE_DEFAULT);
-        String encoder = prefs.getString(PREF_ENCODER, ENCODER_H265);
+        String encoder = prefs.getString(PREF_ENCODER, ENCODER_H264);
         String cursor  = prefs.getString(PREF_CURSOR, CURSOR_EMBEDDED);
 
         if (!PROFILE_DEFAULT.equals(profile) && !PROFILE_ADAPTIVE.equals(profile)) {
@@ -53,7 +53,7 @@ public final class SettingsRepository {
         // h264 is a valid first-class encoder — pass through without migration.
         if (!ENCODER_H264.equals(encoder) && !ENCODER_H265.equals(encoder)
                 && !ENCODER_RAW_PNG.equals(encoder) && !ENCODER_RAWPNG.equals(encoder)) {
-            encoder = ENCODER_H265;
+            encoder = ENCODER_H264;
             prefs.edit().putString(PREF_ENCODER, encoder).apply();
         }
 

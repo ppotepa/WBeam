@@ -263,6 +263,44 @@ print_post_check() {
   echo "  ./wbeam android build"
 }
 
+gst_element_present() {
+  local element="$1"
+  command_exists gst-inspect-1.0 && gst-inspect-1.0 "$element" >/dev/null 2>&1
+}
+
+verify_gstreamer_encoders() {
+  local h264_ok=0
+  local h265_ok=0
+
+  for element in nvh264enc x264enc openh264enc; do
+    if gst_element_present "$element"; then
+      h264_ok=1
+      echo "[fedora-setup] H.264 encoder available: $element"
+      break
+    fi
+  done
+
+  for element in nvh265enc x265enc; do
+    if gst_element_present "$element"; then
+      h265_ok=1
+      echo "[fedora-setup] H.265 encoder available: $element"
+      break
+    fi
+  done
+
+  if [[ "$h264_ok" -ne 1 ]]; then
+    echo "[fedora-setup] ERROR: no supported H.264 GStreamer encoder found." >&2
+    echo "[fedora-setup] Expected one of: nvh264enc, x264enc, openh264enc." >&2
+    echo "[fedora-setup] Try: sudo dnf install -y gstreamer1-plugin-openh264 gstreamer1-plugins-bad-free" >&2
+    return 1
+  fi
+
+  if [[ "$h265_ok" -ne 1 ]]; then
+    echo "[fedora-setup] WARN: no supported H.265 GStreamer encoder found (nvh265enc/x265enc)." >&2
+    echo "[fedora-setup] WBeam will use H.264 unless H.265 support is installed separately." >&2
+  fi
+}
+
 if ! detect_fedora; then
   echo "[fedora-setup] ERROR: this script is intended for Fedora." >&2
   echo "[fedora-setup] Detected /etc/os-release:" >&2
@@ -308,6 +346,8 @@ if [[ "$INSTALL_GROUP" -eq 1 ]]; then
 fi
 
 dnf_install "${BASE_PACKAGES[@]}"
+
+verify_gstreamer_encoders
 
 if [[ "$WITH_ANDROID_SDK" -eq 1 ]]; then
   ensure_android_sdk

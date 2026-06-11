@@ -23,7 +23,7 @@ pub fn is_png(encoder: &str) -> bool {
 
 /// Resolve concrete GStreamer encoder backend from requested mode.
 ///
-/// `h264`   -> `nvenc264` if available, else `x264`
+/// `h264`   -> `nvenc264` if available, else `x264`, else `openh264`
 /// `h265`   -> `nvenc265` if available, else `x265`
 /// `rawpng` -> `rawpng`
 ///

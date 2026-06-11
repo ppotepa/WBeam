@@ -47,6 +47,7 @@ impl PipelineRuntime {
         match self.encoder_name {
             "nvenc264" => "nvh264enc",
             "x264" => "x264enc",
+            "openh264" => "openh264enc",
             "nvenc265" => "nvh265enc",
             "x265" => "x265enc",
             "rawpng" => "pngenc",
