@@ -334,6 +334,7 @@ BASE_PACKAGES=(
   libxdo-devel
   xrandr
   xorg-x11-server-Xvfb
+  akmods
   dkms
   kernel-devel
   kernel-headers
@@ -356,6 +357,8 @@ else
 fi
 
 if [[ "$WITH_EVDI" -eq 1 ]]; then
+  dnf_install akmods dkms kernel-devel kernel-headers
+
   if [[ "$ENABLE_EVDI_COPR" -eq 1 ]]; then
     copr_args=()
     mapfile -t copr_args < <(dnf_args)
@@ -368,10 +371,22 @@ if [[ "$WITH_EVDI" -eq 1 ]]; then
     dnf_install evdi-dkms
   fi
 
+  if ! groups "${SUDO_USER:-$(whoami)}" | grep -qw video; then
+    with_sudo usermod -a -G video "${SUDO_USER:-$(whoami)}" || true
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      echo "[fedora-setup] Would add ${SUDO_USER:-$(whoami)} to video group."
+    else
+      echo "[fedora-setup] Added ${SUDO_USER:-$(whoami)} to video group. Log out and back in for this to apply."
+    fi
+  fi
+
   if [[ "$LOAD_EVDI" -eq 1 ]]; then
     with_sudo modprobe evdi initial_device_count=4 || {
       echo "[fedora-setup] WARN: evdi module did not load." >&2
       echo "[fedora-setup] Check Secure Boot, dkms/akmods status, and kernel-devel matching uname -r." >&2
+      if command_exists mokutil && mokutil --sb-state 2>/dev/null | grep -qi enabled; then
+        echo "[fedora-setup] Secure Boot is enabled; unsigned EVDI kernel modules may be blocked until MOK signing is configured or Secure Boot is disabled." >&2
+      fi
     }
   fi
 else
