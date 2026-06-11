@@ -16,7 +16,15 @@ WBeam has four moving parts on Fedora:
 
 ## 1. Install Fedora Packages
 
-Install the base build, Tauri, GStreamer, Android, and virtual-display tools:
+Install the base build, Tauri, GStreamer, Android, and virtual-display tools
+with the repo helper:
+
+```bash
+scripts/fedora-setup.sh --dry-run
+scripts/fedora-setup.sh --yes
+```
+
+The equivalent manual command is:
 
 ```bash
 sudo dnf group install -y "c-development"
@@ -87,11 +95,17 @@ First try the repo helper:
 
 ```bash
 ./wbeam deps virtual check
-sudo bash scripts/evdi-setup.sh
+scripts/fedora-setup.sh --yes --with-evdi
 ```
 
-If that cannot install EVDI, enable the DisplayLink/EVDI package source you use
-on this machine, then install one of:
+If that cannot install EVDI and you want the DisplayLink RPM COPR path, run:
+
+```bash
+scripts/fedora-setup.sh --yes --enable-evdi-copr
+```
+
+Or enable the DisplayLink/EVDI package source you use on this machine, then
+install one of:
 
 ```bash
 sudo dnf install -y akmod-evdi
@@ -115,6 +129,12 @@ bash scripts/evdi-diagnose.sh --verbose
 If Secure Boot is enabled, Fedora may refuse to load unsigned DKMS/akmod kernel
 modules. Either sign the module for Secure Boot or disable Secure Boot for this
 dev machine.
+
+The older distro-neutral EVDI helper is still available:
+
+```bash
+sudo bash scripts/evdi-setup.sh
+```
 
 ## 4. Build and Run
 
