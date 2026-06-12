@@ -31,8 +31,8 @@ Options:
   --with-android-sdk    install Android command-line tools and SDK packages (default)
   --no-android-sdk      skip Android SDK bootstrap
   --android-sdk-root P  install/use Android SDK root P (default: ~/Android/Sdk)
-  --with-evdi           also try to install akmod-evdi or evdi-dkms
-  --enable-evdi-copr    enable displaylink-rpm/displaylink COPR before EVDI install
+  --with-evdi           also try to install EVDI/displaylink packages
+  --enable-evdi-copr    try displaylink-rpm/displaylink COPR before GitHub RPM fallback
   --no-evdi-load        do not run modprobe evdi after EVDI install
   --no-group            skip "c-development" group install
   -h, --help            show this help
@@ -253,6 +253,16 @@ detect_fedora() {
   [[ "${ID:-}" == "fedora" ]]
 }
 
+fedora_version_id() {
+  if [[ -f /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    echo "${VERSION_ID:-unknown}"
+    return 0
+  fi
+  echo "unknown"
+}
+
 print_post_check() {
   echo
   echo "[fedora-setup] Post-install checks:"
@@ -261,6 +271,337 @@ print_post_check() {
   echo "  ./wbeam deps virtual check"
   echo "  ./wbeam host build"
   echo "  ./wbeam android build"
+}
+
+gst_element_present() {
+  local element="$1"
+  command_exists gst-inspect-1.0 && gst-inspect-1.0 "$element" >/dev/null 2>&1
+}
+
+verify_gstreamer_encoders() {
+  local h264_ok=0
+  local h265_ok=0
+
+  for element in nvh264enc x264enc openh264enc; do
+    if gst_element_present "$element"; then
+      h264_ok=1
+      echo "[fedora-setup] H.264 encoder available: $element"
+      break
+    fi
+  done
+
+  for element in nvh265enc x265enc; do
+    if gst_element_present "$element"; then
+      h265_ok=1
+      echo "[fedora-setup] H.265 encoder available: $element"
+      break
+    fi
+  done
+
+  if [[ "$h264_ok" -ne 1 ]]; then
+    echo "[fedora-setup] ERROR: no supported H.264 GStreamer encoder found." >&2
+    echo "[fedora-setup] Expected one of: nvh264enc, x264enc, openh264enc." >&2
+    echo "[fedora-setup] Try: sudo dnf install -y gstreamer1-plugin-openh264 gstreamer1-plugins-bad-free" >&2
+    return 1
+  fi
+
+  if [[ "$h265_ok" -ne 1 ]]; then
+    echo "[fedora-setup] WARN: no supported H.265 GStreamer encoder found (nvh265enc/x265enc)." >&2
+    echo "[fedora-setup] WBeam will use H.264 unless H.265 support is installed separately." >&2
+  fi
+}
+
+enable_evdi_copr() {
+  local copr_args=()
+  mapfile -t copr_args < <(dnf_args)
+  dnf_install dnf-plugins-core || true
+
+  if with_sudo dnf copr enable "${copr_args[@]}" displaylink-rpm/displaylink; then
+    return 0
+  fi
+
+  local version_id
+  version_id="$(fedora_version_id)"
+  echo "[fedora-setup] ERROR: displaylink-rpm/displaylink COPR is not available for Fedora ${version_id}." >&2
+  echo "[fedora-setup] Fedora returned 404 for the COPR repo, so akmod-evdi/evdi-dkms cannot be installed automatically from that source." >&2
+  echo "[fedora-setup] Falling back to displaylink-rpm/displaylink-rpm GitHub Releases." >&2
+  return 1
+}
+
+rpm_arch() {
+  case "$(uname -m)" in
+    x86_64) echo "x86_64" ;;
+    aarch64|arm64) echo "aarch64" ;;
+    *)
+      echo "[fedora-setup] ERROR: unsupported architecture for DisplayLink RPM: $(uname -m)" >&2
+      return 1
+      ;;
+  esac
+}
+
+github_evdi_release_rpm_url() {
+  local version_id arch api_url
+  version_id="$(fedora_version_id)"
+  arch="$(rpm_arch)"
+  api_url="${WBEAM_EVDI_GITHUB_RELEASE_API:-https://api.github.com/repos/displaylink-rpm/displaylink-rpm/releases/latest}"
+
+  python3 - "$version_id" "$arch" "$api_url" <<'PY'
+import json
+import sys
+import urllib.request
+
+version_id, arch, api_url = sys.argv[1:]
+request = urllib.request.Request(
+    api_url,
+    headers={
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "WBeam-fedora-setup",
+    },
+)
+
+with urllib.request.urlopen(request, timeout=30) as response:
+    release = json.load(response)
+
+prefix = f"fedora-{version_id}-displaylink-"
+suffix = f".{arch}.rpm"
+for asset in release.get("assets", []):
+    name = asset.get("name", "")
+    if name.startswith(prefix) and name.endswith(suffix) and ".src." not in name:
+        print(asset["browser_download_url"])
+        raise SystemExit(0)
+
+tag = release.get("tag_name", "latest")
+print(
+    f"No displaylink-rpm asset found for Fedora {version_id} {arch} in release {tag}",
+    file=sys.stderr,
+)
+raise SystemExit(1)
+PY
+}
+
+install_evdi_from_github_release() {
+  local version_id arch rpm_url yes_args
+  version_id="$(fedora_version_id)"
+  arch="$(rpm_arch)"
+
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    yes_args="$(dnf_args | tr '\n' ' ')"
+    echo "[fedora-setup] DRY-RUN: resolve displaylink-rpm GitHub Release asset for Fedora ${version_id} ${arch}"
+    echo "[fedora-setup] DRY-RUN: sudo dnf install ${yes_args}https://github.com/displaylink-rpm/displaylink-rpm/releases/download/<latest>/fedora-${version_id}-displaylink-*.${arch}.rpm"
+    return 0
+  fi
+
+  echo "[fedora-setup] Resolving DisplayLink/EVDI RPM from GitHub Releases for Fedora ${version_id} ${arch}"
+  if ! rpm_url="$(github_evdi_release_rpm_url)"; then
+    echo "[fedora-setup] ERROR: no compatible DisplayLink/EVDI RPM found in GitHub Releases." >&2
+    echo "[fedora-setup] EVDI mode will not work until a Fedora ${version_id} package exists or EVDI is installed manually." >&2
+    return 1
+  fi
+
+  echo "[fedora-setup] Installing DisplayLink/EVDI RPM: $rpm_url"
+  dnf_install "$rpm_url"
+}
+
+running_kernel_devel_ready() {
+  local running_kernel build_dir
+  running_kernel="$(uname -r)"
+  build_dir="/lib/modules/${running_kernel}/build"
+  [[ -e "${build_dir}/Makefile" ]]
+}
+
+ensure_running_kernel_devel() {
+  local running_kernel
+  running_kernel="$(uname -r)"
+  if running_kernel_devel_ready; then
+    return 0
+  fi
+
+  echo "[fedora-setup] WARN: kernel-devel for the running kernel is not available: ${running_kernel}" >&2
+  echo "[fedora-setup] Missing build tree: /lib/modules/${running_kernel}/build" >&2
+  dnf_install "kernel-devel-${running_kernel}" || true
+  if running_kernel_devel_ready; then
+    return 0
+  fi
+
+  echo "[fedora-setup] ERROR: cannot build EVDI for running kernel ${running_kernel}." >&2
+  echo "[fedora-setup] Installed kernels/kernel-devel:" >&2
+  rpm -q kernel-core kernel-devel 2>/dev/null | sed 's/^/[fedora-setup]   /' >&2 || true
+  echo "[fedora-setup] Fix: reboot into a kernel that has matching kernel-devel installed, then rerun:" >&2
+  echo "[fedora-setup]   sudo reboot" >&2
+  echo "[fedora-setup]   ./redeploy-local" >&2
+  echo "[fedora-setup] Or update kernel packages together before rebooting:" >&2
+  echo "[fedora-setup]   sudo dnf upgrade --refresh kernel kernel-core kernel-modules kernel-devel" >&2
+  return 1
+}
+
+latest_evdi_source_version() {
+  local dir version best=""
+  for dir in /usr/src/evdi-*; do
+    [[ -d "$dir" ]] || continue
+    version="${dir##*/evdi-}"
+    if [[ -z "$best" ]] || [[ "$(printf '%s\n%s\n' "$best" "$version" | sort -V | tail -n 1)" == "$version" ]]; then
+      best="$version"
+    fi
+  done
+  [[ -n "$best" ]] && echo "$best"
+}
+
+ensure_displaylink_libevdi_ldconfig() {
+  if [[ ! -e /usr/libexec/displaylink/libevdi.so ]]; then
+    return 0
+  fi
+  if ldconfig -p 2>/dev/null | grep -q 'libevdi\.so'; then
+    return 0
+  fi
+
+  echo "[fedora-setup] Registering /usr/libexec/displaylink for libevdi runtime/linker lookup"
+  if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+    run_shell "printf '%s\n' /usr/libexec/displaylink > /etc/ld.so.conf.d/displaylink-evdi.conf"
+    run_cmd ldconfig
+  else
+    run_shell "printf '%s\n' /usr/libexec/displaylink | sudo tee /etc/ld.so.conf.d/displaylink-evdi.conf >/dev/null"
+    with_sudo ldconfig
+  fi
+}
+
+build_evdi_for_running_kernel() {
+  local version running_kernel
+  running_kernel="$(uname -r)"
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "[fedora-setup] DRY-RUN: verify matching kernel-devel for ${running_kernel}"
+    echo "[fedora-setup] DRY-RUN: sudo dkms build/install evdi for ${running_kernel}"
+    return 0
+  fi
+  if command_exists modinfo && modinfo evdi >/dev/null 2>&1; then
+    return 0
+  fi
+
+  ensure_running_kernel_devel
+  version="$(latest_evdi_source_version || true)"
+  if [[ -z "$version" ]]; then
+    echo "[fedora-setup] ERROR: EVDI source not found under /usr/src/evdi-*." >&2
+    return 1
+  fi
+
+  echo "[fedora-setup] Building EVDI ${version} for running kernel ${running_kernel}"
+  with_sudo dkms build -m evdi -v "$version" -k "$running_kernel"
+  with_sudo dkms install -m evdi -v "$version" -k "$running_kernel"
+}
+
+secure_boot_enabled() {
+  command_exists mokutil && mokutil --sb-state 2>/dev/null | grep -qi enabled
+}
+
+dkms_mok_key_enrolled() {
+  local mok_pub="${1:-/var/lib/dkms/mok.pub}" out
+  [[ -f "$mok_pub" ]] || return 1
+  out="$(mokutil --test-key "$mok_pub" 2>&1 || true)"
+  if printf '%s\n' "$out" | grep -qi 'not enrolled'; then
+    return 1
+  fi
+  printf '%s\n' "$out" | grep -Eqi 'already enrolled|is enrolled'
+}
+
+evdi_mok_pending_file() {
+  echo "$ROOT_DIR/.cache/evdi-mok-import-pending"
+}
+
+evdi_mok_key_sha256() {
+  sha256sum "$1" | awk '{print $1}'
+}
+
+evdi_mok_import_pending() {
+  local mok_pub="$1" marker current_sha
+  marker="$(evdi_mok_pending_file)"
+  [[ -f "$mok_pub" && -f "$marker" ]] || return 1
+  current_sha="$(evdi_mok_key_sha256 "$mok_pub")"
+  grep -qx "sha256=${current_sha}" "$marker"
+}
+
+write_evdi_mok_import_pending() {
+  local mok_pub="$1" marker marker_dir current_sha
+  marker="$(evdi_mok_pending_file)"
+  marker_dir="$(dirname "$marker")"
+  current_sha="$(evdi_mok_key_sha256 "$mok_pub")"
+  mkdir -p "$marker_dir"
+  {
+    echo "mok_pub=$mok_pub"
+    echo "sha256=$current_sha"
+    date -u '+created_at=%Y-%m-%dT%H:%M:%SZ'
+  } > "$marker"
+}
+
+clear_evdi_mok_import_pending() {
+  rm -f "$(evdi_mok_pending_file)" 2>/dev/null || true
+}
+
+ensure_dkms_mok_enrolled() {
+  local mok_pub="/var/lib/dkms/mok.pub"
+  if ! secure_boot_enabled; then
+    return 0
+  fi
+  if [[ ! -f "$mok_pub" ]]; then
+    echo "[fedora-setup] WARN: Secure Boot is enabled, but DKMS MOK public key was not found at $mok_pub." >&2
+    echo "[fedora-setup] EVDI may fail to load until the DKMS signing key is generated and enrolled." >&2
+    return 1
+  fi
+  if dkms_mok_key_enrolled "$mok_pub"; then
+    clear_evdi_mok_import_pending
+    return 0
+  fi
+  if evdi_mok_import_pending "$mok_pub"; then
+    echo "[fedora-setup] DKMS MOK enrollment is already queued for this key." >&2
+    echo "[fedora-setup] Reboot and complete firmware MOK enrollment before rerunning redeploy-local." >&2
+    echo "[fedora-setup] On reboot choose: Enroll MOK -> Continue -> Yes, then enter the password you set." >&2
+    return 1
+  fi
+
+  echo "[fedora-setup] Secure Boot is enabled and the DKMS MOK key is not enrolled." >&2
+  echo "[fedora-setup] EVDI is built, but the kernel will reject it until this key is enrolled." >&2
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "[fedora-setup] DRY-RUN: sudo mokutil --import $mok_pub"
+    echo "[fedora-setup] DRY-RUN: reboot and enroll the key in the MOK manager"
+    return 0
+  fi
+  if [[ -t 0 && -t 1 ]]; then
+    echo "[fedora-setup] Starting MOK enrollment. Choose a temporary password when prompted." >&2
+    echo "[fedora-setup] After reboot, choose: Enroll MOK -> Continue -> Yes, then enter that password." >&2
+    with_sudo mokutil --import "$mok_pub" || {
+      echo "[fedora-setup] ERROR: failed to queue DKMS MOK enrollment." >&2
+      return 1
+    }
+    write_evdi_mok_import_pending "$mok_pub"
+  else
+    echo "[fedora-setup] Non-interactive terminal; cannot run mokutil --import automatically." >&2
+    echo "[fedora-setup] Run manually:" >&2
+    echo "[fedora-setup]   sudo mokutil --import $mok_pub" >&2
+  fi
+  echo "[fedora-setup] Reboot is required before EVDI can load:" >&2
+  echo "[fedora-setup]   sudo reboot" >&2
+  return 1
+}
+
+install_evdi_packages() {
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    dnf_install akmod-evdi
+    echo "[fedora-setup] DRY-RUN: if akmod-evdi is unavailable, try evdi-dkms"
+    dnf_install evdi-dkms
+    echo "[fedora-setup] DRY-RUN: if evdi-dkms is unavailable, try displaylink-rpm GitHub Release RPM"
+    install_evdi_from_github_release
+    return 0
+  fi
+
+  if dnf_install akmod-evdi; then
+    return 0
+  fi
+
+  echo "[fedora-setup] akmod-evdi install failed; trying evdi-dkms"
+  if dnf_install evdi-dkms; then
+    return 0
+  fi
+
+  echo "[fedora-setup] evdi-dkms install failed; trying displaylink-rpm GitHub Release RPM"
+  install_evdi_from_github_release
 }
 
 if ! detect_fedora; then
@@ -281,8 +622,10 @@ BASE_PACKAGES=(
   gcc gcc-c++ make cmake clang openssl-devel
   rust cargo
   nodejs npm
+  python3
   java-21-openjdk-devel
   android-tools
+  mokutil
   glib2-devel
   gstreamer1-devel
   gstreamer1-plugins-base-devel
@@ -296,6 +639,7 @@ BASE_PACKAGES=(
   libxdo-devel
   xrandr
   xorg-x11-server-Xvfb
+  akmods
   dkms
   kernel-devel
   kernel-headers
@@ -309,6 +653,8 @@ fi
 
 dnf_install "${BASE_PACKAGES[@]}"
 
+verify_gstreamer_encoders
+
 if [[ "$WITH_ANDROID_SDK" -eq 1 ]]; then
   ensure_android_sdk
 else
@@ -316,22 +662,38 @@ else
 fi
 
 if [[ "$WITH_EVDI" -eq 1 ]]; then
+  dnf_install akmods dkms kernel-devel kernel-headers
+
   if [[ "$ENABLE_EVDI_COPR" -eq 1 ]]; then
-    copr_args=()
-    mapfile -t copr_args < <(dnf_args)
-    dnf_install dnf-plugins-core || true
-    with_sudo dnf copr enable "${copr_args[@]}" displaylink-rpm/displaylink
+    enable_evdi_copr || true
   fi
 
-  if ! dnf_install akmod-evdi; then
-    echo "[fedora-setup] akmod-evdi install failed; trying evdi-dkms"
-    dnf_install evdi-dkms
+  install_evdi_packages
+  ensure_displaylink_libevdi_ldconfig
+
+  if ! groups "${SUDO_USER:-$(whoami)}" | grep -qw video; then
+    with_sudo usermod -a -G video "${SUDO_USER:-$(whoami)}" || true
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      echo "[fedora-setup] Would add ${SUDO_USER:-$(whoami)} to video group."
+    else
+      echo "[fedora-setup] Added ${SUDO_USER:-$(whoami)} to video group. Log out and back in for this to apply."
+    fi
   fi
+
+  build_evdi_for_running_kernel
+  ensure_dkms_mok_enrolled
 
   if [[ "$LOAD_EVDI" -eq 1 ]]; then
     with_sudo modprobe evdi initial_device_count=4 || {
       echo "[fedora-setup] WARN: evdi module did not load." >&2
       echo "[fedora-setup] Check Secure Boot, dkms/akmods status, and kernel-devel matching uname -r." >&2
+      if command_exists mokutil && mokutil --sb-state 2>/dev/null | grep -qi enabled; then
+        echo "[fedora-setup] Secure Boot is enabled; unsigned EVDI kernel modules may be blocked until MOK signing is configured or Secure Boot is disabled." >&2
+        echo "[fedora-setup] If DKMS generated a MOK key, enroll it and reboot:" >&2
+        echo "[fedora-setup]   sudo mokutil --import /var/lib/dkms/mok.pub" >&2
+        echo "[fedora-setup]   sudo reboot" >&2
+        echo "[fedora-setup]   sudo dkms autoinstall" >&2
+      fi
     }
   fi
 else

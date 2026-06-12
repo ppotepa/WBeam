@@ -35,11 +35,12 @@ Flow (default):
 Notes:
   - Service is intentionally removed here; desktop UI should own service lifecycle.
   - By default this script does NOT start host daemon; use --host-restart only for diagnostics.
-  - On Fedora, missing host build packages are installed automatically before build.
+  - On Fedora, missing host build packages and EVDI/displaylink dependencies
+    are installed automatically before build.
     Use --no-auto-deps or WBEAM_REDEPLOY_AUTO_DEPS=0 to disable this.
-  - EVDI is optional for the default local flow. Set WBEAM_REDEPLOY_WITH_EVDI=1
-    to install/build it. Set WBEAM_REDEPLOY_ENABLE_EVDI_COPR=1 if this machine
-    should use displaylink-rpm/displaylink.
+  - Fedora EVDI setup tries distro packages first, then the matching
+    displaylink-rpm GitHub Release RPM. Set WBEAM_REDEPLOY_WITH_EVDI=0 to skip
+    EVDI and use Wayland/X11 fallback only.
 USAGE
 }
 
@@ -143,7 +144,78 @@ host_libevdi_missing() {
   if compgen -G "/usr/lib*/libevdi.so*" >/dev/null 2>&1; then
     return 1
   fi
+  if compgen -G "/usr/libexec/displaylink/libevdi.so*" >/dev/null 2>&1; then
+    return 1
+  fi
   return 0
+}
+
+host_running_kernel_devel_missing() {
+  local running_kernel build_dir
+  running_kernel="$(uname -r)"
+  build_dir="/lib/modules/${running_kernel}/build"
+  [[ ! -e "${build_dir}/Makefile" ]]
+}
+
+host_secureboot_mok_not_enrolled() {
+  local out
+  if ! command -v mokutil >/dev/null 2>&1; then
+    return 1
+  fi
+  if ! mokutil --sb-state 2>/dev/null | grep -qi enabled; then
+    return 1
+  fi
+  if [[ ! -f /var/lib/dkms/mok.pub ]]; then
+    return 1
+  fi
+  out="$(mokutil --test-key /var/lib/dkms/mok.pub 2>&1 || true)"
+  printf '%s\n' "$out" | grep -qi 'not enrolled'
+}
+
+evdi_mok_pending_file() {
+  echo "$ROOT_DIR/.cache/evdi-mok-import-pending"
+}
+
+evdi_mok_key_sha256() {
+  sha256sum "$1" | awk '{print $1}'
+}
+
+host_secureboot_mok_pending_reboot() {
+  local marker current_sha
+  host_secureboot_mok_not_enrolled || return 1
+  marker="$(evdi_mok_pending_file)"
+  [[ -f /var/lib/dkms/mok.pub && -f "$marker" ]] || return 1
+  current_sha="$(evdi_mok_key_sha256 /var/lib/dkms/mok.pub)"
+  grep -qx "sha256=${current_sha}" "$marker"
+}
+
+host_evdi_status_summary() {
+  local issues=()
+  if host_libevdi_missing; then
+    issues+=("libevdi-missing")
+  fi
+  if host_running_kernel_devel_missing; then
+    issues+=("kernel-devel-mismatch")
+  fi
+  if ! command -v modinfo >/dev/null 2>&1 || ! modinfo evdi >/dev/null 2>&1; then
+    issues+=("module-unavailable")
+  elif ! grep -q "^evdi " /proc/modules 2>/dev/null; then
+    issues+=("module-not-loaded")
+    if host_secureboot_mok_pending_reboot; then
+      issues+=("secureboot-mok-pending-reboot")
+    elif host_secureboot_mok_not_enrolled; then
+      issues+=("secureboot-mok-not-enrolled")
+    fi
+  fi
+  if ! id -nG | tr ' ' '\n' | grep -qx video; then
+    issues+=("user-not-in-video")
+  fi
+
+  if [[ "${#issues[@]}" -gt 0 ]]; then
+    printf '%s ' "${issues[@]}" | sed 's/[[:space:]]*$//'
+  else
+    echo "ok"
+  fi
 }
 
 ensure_host_build_deps() {
@@ -155,25 +227,40 @@ ensure_host_build_deps() {
     return 0
   fi
 
-  local linux_id missing_pkg missing_evdi setup_script want_evdi
+  local linux_id missing_pkg evdi_status setup_script want_evdi evdi_policy
   linux_id="$(detect_linux_id)"
   setup_script="$ROOT_DIR/scripts/fedora-setup.sh"
   missing_pkg="$(host_pkg_config_missing | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
-  missing_evdi=0
+  evdi_policy="${WBEAM_REDEPLOY_WITH_EVDI:-auto}"
   want_evdi=0
-  if [[ "${WBEAM_REDEPLOY_WITH_EVDI:-0}" =~ ^(1|true|TRUE|yes|on)$ ]] || \
-     [[ "${WBEAM_REDEPLOY_ENABLE_EVDI_COPR:-0}" =~ ^(1|true|TRUE|yes|on)$ ]]; then
+  if [[ "$evdi_policy" =~ ^(0|false|FALSE|no|off)$ ]]; then
+    want_evdi=0
+  elif [[ "$evdi_policy" =~ ^(1|true|TRUE|yes|on)$ ]]; then
+    want_evdi=1
+  elif [[ "$linux_id" == "fedora" && "$evdi_policy" == "auto" ]]; then
     want_evdi=1
   fi
-  if host_libevdi_missing; then
-    missing_evdi=1
+  if [[ "${WBEAM_REDEPLOY_ENABLE_EVDI_COPR:-0}" =~ ^(1|true|TRUE|yes|on)$ ]]; then
+    want_evdi=1
   fi
+  evdi_status="$(host_evdi_status_summary)"
 
-  if [[ -z "$missing_pkg" && ( "$missing_evdi" -eq 0 || "$want_evdi" -eq 0 ) ]]; then
+  if [[ -z "$missing_pkg" && ( "$evdi_status" == "ok" || "$want_evdi" -eq 0 ) ]]; then
+    if [[ "$evdi_status" != "ok" && "$want_evdi" -eq 0 ]]; then
+      echo "[redeploy-local] EVDI not ready (${evdi_status}); continuing with Wayland/X11 fallback because WBEAM_REDEPLOY_WITH_EVDI=0"
+    fi
     return 0
   fi
 
-  echo "[redeploy-local] host build deps missing: pkg_config=${missing_pkg:-ok} libevdi=$([[ "$missing_evdi" -eq 1 ]] && echo missing || echo ok)"
+  echo "[redeploy-local] host build deps missing: pkg_config=${missing_pkg:-ok} evdi=${evdi_status}"
+  if [[ "$evdi_status" == *secureboot-mok-pending-reboot* ]]; then
+    echo "[redeploy-local] ERROR: EVDI MOK enrollment is already queued; reboot is required before EVDI can load." >&2
+    echo "[redeploy-local] On reboot choose: Enroll MOK -> Continue -> Yes, then enter the password set during mokutil import." >&2
+    echo "[redeploy-local] After logging back in, rerun ./redeploy-local." >&2
+    echo "[redeploy-local] To bypass EVDI and use Wayland/X11 fallback only:" >&2
+    echo "[redeploy-local]   WBEAM_REDEPLOY_WITH_EVDI=0 ./redeploy-local" >&2
+    return 1
+  fi
 
   case "$linux_id" in
     fedora)
@@ -183,7 +270,7 @@ ensure_host_build_deps() {
       fi
 
       local -a setup_args=(--yes)
-      if [[ "$missing_evdi" -eq 1 && "$want_evdi" -eq 1 ]]; then
+      if [[ "$evdi_status" != "ok" && "$want_evdi" -eq 1 ]]; then
         setup_args+=(--with-evdi)
         if [[ "${WBEAM_REDEPLOY_ENABLE_EVDI_COPR:-0}" =~ ^(1|true|TRUE|yes|on)$ ]]; then
           setup_args=(--yes --enable-evdi-copr)
@@ -192,12 +279,39 @@ ensure_host_build_deps() {
 
       echo "[redeploy-local] Fedora auto deps install: scripts/fedora-setup.sh ${setup_args[*]}"
       if ! "$setup_script" "${setup_args[@]}"; then
-        echo "[redeploy-local] ERROR: automatic Fedora dependency install failed." >&2
-        if [[ "$missing_evdi" -eq 1 && "$want_evdi" -eq 1 && ! "${WBEAM_REDEPLOY_ENABLE_EVDI_COPR:-0}" =~ ^(1|true|TRUE|yes|on)$ ]]; then
-          echo "[redeploy-local] If EVDI is only available through COPR on this machine, rerun:" >&2
-          echo "[redeploy-local]   WBEAM_REDEPLOY_ENABLE_EVDI_COPR=1 ./redeploy-local" >&2
+        local failed_evdi_status
+        failed_evdi_status="$(host_evdi_status_summary)"
+        if [[ "$failed_evdi_status" == *secureboot-mok-pending-reboot* ]]; then
+          echo "[redeploy-local] ERROR: EVDI MOK enrollment is queued; reboot is required before continuing." >&2
+          echo "[redeploy-local] On reboot choose: Enroll MOK -> Continue -> Yes, then enter the password set during mokutil import." >&2
+          echo "[redeploy-local] After logging back in, rerun ./redeploy-local." >&2
+        else
+          echo "[redeploy-local] ERROR: automatic Fedora dependency install failed." >&2
+        fi
+        if [[ "$failed_evdi_status" != "ok" ]]; then
+          echo "[redeploy-local] For detailed EVDI diagnostics, run:" >&2
+          echo "[redeploy-local]   scripts/evdi-diagnose.sh --verbose --fix" >&2
         fi
         return 1
+      fi
+
+      if [[ "$evdi_status" != "ok" && "$want_evdi" -eq 1 ]]; then
+        local new_evdi_status
+        new_evdi_status="$(host_evdi_status_summary)"
+        if [[ "$new_evdi_status" != "ok" ]]; then
+          echo "[redeploy-local] ERROR: EVDI setup ran but EVDI is still not ready: ${new_evdi_status}" >&2
+          echo "[redeploy-local] If status includes user-not-in-video, log out and back in, then rerun ./redeploy-local." >&2
+          echo "[redeploy-local] If status includes kernel-devel-mismatch, reboot into the installed kernel that has matching kernel-devel, then rerun ./redeploy-local." >&2
+          echo "[redeploy-local] If status includes secureboot-mok-pending-reboot, complete MOK enrollment on reboot, then rerun ./redeploy-local." >&2
+          echo "[redeploy-local] If status includes secureboot-mok-not-enrolled, complete MOK enrollment on reboot, then rerun ./redeploy-local." >&2
+          echo "[redeploy-local] If Secure Boot blocked the module, enroll the DKMS MOK key and reboot:" >&2
+          echo "[redeploy-local]   sudo mokutil --import /var/lib/dkms/mok.pub" >&2
+          echo "[redeploy-local]   sudo reboot" >&2
+          echo "[redeploy-local]   sudo dkms autoinstall" >&2
+          echo "[redeploy-local] To bypass EVDI and use Wayland/X11 fallback only:" >&2
+          echo "[redeploy-local]   WBEAM_REDEPLOY_WITH_EVDI=0 ./redeploy-local" >&2
+          return 1
+        fi
       fi
       ;;
     *)

@@ -47,7 +47,6 @@ import com.wbeam.stream.SessionUiBridge;
 import com.wbeam.stream.SessionUiBridgeFactory;
 import com.wbeam.stream.VideoTestController;
 import com.wbeam.stream.StreamSessionController;
-import com.wbeam.stream.DecoderCapabilityInspector;
 import com.wbeam.stream.VideoTestCallbacksFactory;
 import com.wbeam.ui.state.MainDaemonState;
 import com.wbeam.ui.state.MainUiState;
@@ -102,10 +101,11 @@ public class MainActivity extends AppCompatActivity {
     private static final String DEFAULT_CURSOR_MODE = "embedded";
     private static final String[] PROFILE_OPTIONS = {ADAPTIVE_PROFILE, DEFAULT_PROFILE};
     /**
-     * Preferred video encoder for this device.
+     * Default to H.264 because fresh Fedora installs provide OpenH264, while H.265
+     * host encoders are optional.
      */
-    static final String PREFERRED_VIDEO = DecoderCapabilityInspector.preferredVideoEncoder();
-    private static final String[] ENCODER_OPTIONS = {PREFERRED_VIDEO, "raw-png"};
+    static final String PREFERRED_VIDEO = "h264";
+    private static final String[] ENCODER_OPTIONS = {"h264", "h265", "raw-png"};
     private static final String[] CURSOR_OPTIONS = {DEFAULT_CURSOR_MODE, "hidden", "metadata"};
     private static final int DEFAULT_RES_SCALE = 100;
     private static final int DEFAULT_FPS = 60;

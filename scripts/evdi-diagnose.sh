@@ -22,6 +22,8 @@ VERBOSE=0
 FIX_RECOMMENDATIONS=0
 ERRORS=0
 WARNINGS=0
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -31,6 +33,22 @@ while [[ $# -gt 0 ]]; do
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
+
+evdi_mok_pending_file() {
+    echo "$ROOT_DIR/.cache/evdi-mok-import-pending"
+}
+
+evdi_mok_key_sha256() {
+    sha256sum "$1" | awk '{print $1}'
+}
+
+evdi_mok_import_pending() {
+    local mok_pub="$1" marker current_sha
+    marker="$(evdi_mok_pending_file)"
+    [[ -f "$mok_pub" && -f "$marker" ]] || return 1
+    current_sha="$(evdi_mok_key_sha256 "$mok_pub")"
+    grep -qx "sha256=${current_sha}" "$marker"
+}
 
 print_header() {
     echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
@@ -137,6 +155,35 @@ is_package_installed() {
     esac
 }
 
+first_installed_package() {
+    local pm=$1
+    shift
+    local pkg
+    for pkg in "$@"; do
+        if is_package_installed "$pkg" "$pm"; then
+            echo "$pkg"
+            return 0
+        fi
+    done
+    return 1
+}
+
+find_libevdi() {
+    local candidate
+    for candidate in \
+        /usr/lib/libevdi.so /usr/lib64/libevdi.so \
+        /usr/lib/libevdi.so.* /usr/lib64/libevdi.so.* \
+        /usr/libexec/displaylink/libevdi.so /usr/libexec/displaylink/libevdi.so.*; do
+        if [ -e "$candidate" ]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    if command -v ldconfig >/dev/null 2>&1; then
+        ldconfig -p 2>/dev/null | awk '/libevdi\.so/ {print $NF; exit}'
+    fi
+}
+
 # Main diagnostic flow
 print_header "WBeam EVDI Capture Backend Diagnostics"
 
@@ -158,20 +205,23 @@ echo ""
 print_header "1. EVDI Module Installation"
 
 print_check "EVDI module package installed"
-if is_package_installed "evdi-dkms" "$PM"; then
-    EVDI_VERSION=$(pacman -Q evdi-dkms 2>/dev/null | awk '{print $2}' || \
-                   dpkg -l | grep evdi-dkms | awk '{print $3}' || \
-                   rpm -q evdi-dkms 2>/dev/null | sed 's/.*-//' || echo "unknown")
-    pass "EVDI DKMS version $EVDI_VERSION"
+if EVDI_PACKAGE=$(first_installed_package "$PM" evdi-dkms akmod-evdi evdi libevdi displaylink); then
+    case "$PM" in
+        pacman) EVDI_VERSION=$(pacman -Q "$EVDI_PACKAGE" 2>/dev/null | awk '{print $2}' || echo "unknown") ;;
+        apt) EVDI_VERSION=$(dpkg-query -W -f='${Version}' "$EVDI_PACKAGE" 2>/dev/null || echo "unknown") ;;
+        dnf|yum) EVDI_VERSION=$(rpm -q "$EVDI_PACKAGE" 2>/dev/null || echo "unknown") ;;
+        *) EVDI_VERSION="unknown" ;;
+    esac
+    pass "$EVDI_PACKAGE installed ($EVDI_VERSION)"
 else
-    fail "EVDI DKMS package not installed"
+    fail "EVDI package not installed (checked evdi-dkms, akmod-evdi, evdi, libevdi, displaylink)"
     if [[ $FIX_RECOMMENDATIONS == 1 ]]; then
         echo ""
-        echo "  📦 To install EVDI DKMS:"
+        echo "  📦 To install EVDI:"
         case "$PM" in
             pacman) echo "    sudo pacman -S --noconfirm evdi-dkms" ;;
             apt) echo "    sudo apt install -y evdi-dkms dkms linux-headers-\$(uname -r)" ;;
-            dnf) echo "    sudo dnf install -y evdi-dkms dkms kernel-devel" ;;
+            dnf) echo "    scripts/fedora-setup.sh --yes --with-evdi" ;;
             yum) echo "    sudo yum install -y evdi-dkms dkms kernel-devel" ;;
         esac
     fi
@@ -197,6 +247,23 @@ case "$PM" in
         fi
         ;;
 esac
+
+print_check "Linux headers match running kernel"
+RUNNING_KERNEL=$(uname -r)
+if [ -e "/lib/modules/$RUNNING_KERNEL/build/Makefile" ]; then
+    pass "/lib/modules/$RUNNING_KERNEL/build"
+else
+    fail "kernel-devel for running kernel $RUNNING_KERNEL is not installed or incomplete"
+    if [[ $FIX_RECOMMENDATIONS == 1 ]]; then
+        echo ""
+        echo "  🔧 Fedora usually fixes this by rebooting into the installed kernel that has matching kernel-devel:"
+        echo "    sudo reboot"
+        echo "    ./redeploy-local"
+        echo ""
+        echo "  🔧 Or update kernel packages together before rebooting:"
+        echo "    sudo dnf upgrade --refresh kernel kernel-core kernel-modules kernel-devel"
+    fi
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. Module Loading Check
@@ -245,18 +312,58 @@ fi
 print_header "3. EVDI Library Check"
 
 print_check "libevdi library installed"
-if [ -f /usr/lib/libevdi.so ] || [ -f /usr/lib64/libevdi.so ]; then
-    LIBEVDI_VERSION=$(strings /usr/lib/libevdi.so 2>/dev/null | grep "^1\." | head -1 || strings /usr/lib64/libevdi.so 2>/dev/null | grep "^1\." | head -1 || echo "unknown")
-    pass "libevdi $LIBEVDI_VERSION"
+LIBEVDI_PATH=$(find_libevdi || true)
+if [ -n "$LIBEVDI_PATH" ]; then
+    LIBEVDI_VERSION=$(strings "$LIBEVDI_PATH" 2>/dev/null | grep "^1\." | head -1 || echo "unknown")
+    pass "$LIBEVDI_PATH ($LIBEVDI_VERSION)"
 else
     fail "libevdi.so not found"
 fi
 
 print_check "libevdi can be loaded"
-if LD_LIBRARY_PATH=/usr/lib:/usr/lib64 ldd /usr/lib/libevdi.so 2>/dev/null | grep -q "not found"; then
+if [ -z "$LIBEVDI_PATH" ]; then
+    fail "Cannot load libevdi because libevdi.so is not installed"
+elif LD_LIBRARY_PATH=/usr/lib:/usr/lib64 ldd "$LIBEVDI_PATH" 2>/dev/null | grep -q "not found"; then
     fail "libevdi has unresolved dependencies"
 else
     pass "All dependencies satisfied"
+fi
+
+if command -v mokutil >/dev/null 2>&1; then
+    print_check "Secure Boot state"
+    SECURE_BOOT_ENABLED=0
+    if mokutil --sb-state 2>/dev/null | grep -qi enabled; then
+        SECURE_BOOT_ENABLED=1
+        warn "Secure Boot is enabled; unsigned DKMS/akmods EVDI modules may be blocked by kernel lockdown"
+    else
+        pass "Secure Boot is not enabled"
+    fi
+
+    if [[ "$SECURE_BOOT_ENABLED" -eq 1 && -f /var/lib/dkms/mok.pub ]]; then
+        print_check "DKMS MOK key enrolled"
+        MOK_TEST_OUTPUT="$(mokutil --test-key /var/lib/dkms/mok.pub 2>&1 || true)"
+        if printf '%s\n' "$MOK_TEST_OUTPUT" | grep -qi "not enrolled"; then
+            if evdi_mok_import_pending /var/lib/dkms/mok.pub; then
+                fail "DKMS MOK enrollment is queued but not completed; reboot and enroll it in firmware"
+            else
+                fail "/var/lib/dkms/mok.pub is not enrolled; Secure Boot will reject the evdi module"
+            fi
+            if [[ $FIX_RECOMMENDATIONS == 1 ]]; then
+                echo ""
+                if evdi_mok_import_pending /var/lib/dkms/mok.pub; then
+                    echo "  🔧 MOK enrollment is already queued. Reboot and finish the firmware prompt:"
+                else
+                    echo "  🔧 Queue DKMS MOK enrollment, then reboot and enroll it in firmware:"
+                    echo "    sudo mokutil --import /var/lib/dkms/mok.pub"
+                fi
+                echo "    sudo reboot"
+                echo ""
+                echo "  ℹ️  On reboot choose: Enroll MOK -> Continue -> Yes, then enter the password you set."
+            fi
+        else
+            pass "DKMS MOK key appears enrolled"
+        fi
+    fi
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -267,10 +374,14 @@ print_header "4. User Permissions"
 
 CURRENT_USER=$(whoami)
 print_check "User in 'video' group"
-if groups "$CURRENT_USER" | grep -q "\bvideo\b"; then
-    pass "User '$CURRENT_USER' is in video group"
+if id -nG | tr ' ' '\n' | grep -qx video; then
+    pass "Current session for '$CURRENT_USER' has video group"
 else
-    fail "User '$CURRENT_USER' is NOT in video group"
+    if groups "$CURRENT_USER" | grep -q "\bvideo\b"; then
+        fail "User '$CURRENT_USER' is in video group in account database, but this login session has not picked it up"
+    else
+        fail "User '$CURRENT_USER' is NOT in video group"
+    fi
     if [[ $FIX_RECOMMENDATIONS == 1 ]]; then
         echo ""
         echo "  🔧 To add user to video group:"
@@ -319,7 +430,7 @@ else
 fi
 
 print_check "Test with libevdi directly"
-if [ -f /usr/lib/libevdi.so ] || [ -f /usr/lib64/libevdi.so ]; then
+if [ -n "$LIBEVDI_PATH" ]; then
     # Try to compile and run test
     cat > /tmp/test_evdi_minimal.c << 'CEOF'
 #include <evdi_lib.h>

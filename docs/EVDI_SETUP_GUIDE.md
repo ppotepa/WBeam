@@ -4,7 +4,8 @@
 
 ```bash
 cd ~/git/WBeam
-sudo bash scripts/evdi-setup.sh    # install (requires sudo)
+scripts/fedora-setup.sh --yes --with-evdi  # Fedora 43
+# or: sudo bash scripts/evdi-setup.sh      # distro-neutral legacy helper
 bash scripts/evdi-diagnose.sh      # verify
 ./wbeam host run                   # start daemon
 curl -X POST "http://localhost:5001/v1/start?capture_backend=evdi"
@@ -16,12 +17,26 @@ curl -X POST "http://localhost:5001/v1/start?capture_backend=evdi"
 |---|---|---|
 | Arch Linux | pacman | Official repos or AUR (`yay -S evdi-dkms`) |
 | Debian 11+ / Ubuntu 20.04+ | apt | May require universe repo |
-| Fedora 38+ | dnf | Via COPR (`displaylink-rpm/displaylink`) |
+| Fedora 43 | dnf | Prefer `scripts/fedora-setup.sh --yes --with-evdi`; falls back to DisplayLink RPM release assets |
+| Fedora 38-42 | dnf | COPR or DisplayLink RPMs may be available |
 | RHEL 8+ / CentOS 8+ | yum | COPR or source build; may need `epel-release` |
 
 Requirements: x86_64, kernel 4.14+, sudo access, ~500 MB disk.
 
 ## Automated Setup
+
+On Fedora 43, prefer the distro-specific helper because it understands the
+current DisplayLink RPM fallback, Secure Boot MOK enrollment state, and
+`libevdi` linker path:
+
+```bash
+scripts/fedora-setup.sh --yes --with-evdi
+```
+
+The normal Fedora fresh-clone command, `./redeploy-local`, calls that helper
+automatically when EVDI is missing.
+
+For other distros, or as a lower-level EVDI-only helper:
 
 ```bash
 sudo bash scripts/evdi-setup.sh                # standard install
@@ -55,11 +70,19 @@ sudo apt-get install -y linux-headers-$(uname -r) build-essential dkms evdi-dkms
 ### Fedora
 
 ```bash
-sudo dnf check-update
-sudo dnf install -y kernel-devel gcc make dkms
-sudo dnf copr enable displaylink-rpm/displaylink
-sudo dnf install -y evdi-dkms
+scripts/fedora-setup.sh --yes --with-evdi
 ```
+
+That command first tries `akmod-evdi` and `evdi-dkms`. If they are unavailable,
+it resolves the matching `fedora-<version>-displaylink-*.rpm` asset from
+`displaylink-rpm/displaylink-rpm` GitHub Releases. To explicitly try the
+historical COPR path before falling back:
+
+```bash
+scripts/fedora-setup.sh --yes --enable-evdi-copr
+```
+
+On Fedora 43, COPR may return 404; the GitHub Release RPM fallback is expected.
 
 ### RHEL / CentOS
 
@@ -124,7 +147,10 @@ modprobe: ERROR: could not insert 'evdi': No such file or directory
    ```
 3. Build failure -- verify headers match running kernel:
    `uname -r` vs `dpkg -l | grep linux-headers-$(uname -r)` (Debian) or `rpm -q kernel-devel-$(uname -r)` (RPM).
-4. Secure Boot may block unsigned modules. Disable it or sign the module.
+4. Secure Boot may block unsigned modules. Enroll the DKMS MOK key or disable
+   Secure Boot. On Fedora, `scripts/fedora-setup.sh --yes --with-evdi` can
+   queue `mokutil --import /var/lib/dkms/mok.pub`; you must still reboot and
+   complete `Enroll MOK -> Continue -> Yes` in firmware.
 
 ### Device not created
 
@@ -152,7 +178,29 @@ find /usr -name "libevdi.so*" 2>/dev/null   # locate library
 sudo ldconfig                                # refresh cache
 ```
 
-If missing, reinstall the EVDI package for your distro.
+If missing, reinstall the EVDI package for your distro. Fedora DisplayLink RPMs
+install `libevdi.so` under `/usr/libexec/displaylink`; WBeam's streamer build
+detects that path automatically. For a custom location:
+
+```bash
+WBEAM_EVDI_LIB_DIR=/path/to/libevdi-dir ./wbeam host build
+```
+
+### No supported encoder found
+
+The streamer needs at least one H.264 encoder. H.265 is optional.
+
+```bash
+gst-inspect-1.0 openh264enc x264enc nvh264enc nvh265enc x265enc
+```
+
+If H.265 is requested but unavailable, WBeam falls back to H.264 when
+`openh264enc`, `x264enc`, or `nvh264enc` exists. On Fedora, repair the common
+H.264 fallback package with:
+
+```bash
+scripts/fedora-setup.sh --yes --no-android-sdk
+```
 
 ### Stream starts but no video
 

@@ -46,40 +46,56 @@ frames to an Android device connected via USB. No Wi-Fi, no network config.
 
 Prerequisites: Linux host, Android device (API 17+), USB cable, ADB.
 
+Fresh machine wizard:
+
 ```bash
 git clone <repo> && cd WBeam
 
-# Build host daemon, build+install APK, launch desktop UI
+# Probe the machine, choose Wayland/X11 or EVDI, install deps, build host,
+# install the user service, then onboard the Android phone.
+./install-wbeam
+
+# Preview first if needed
+./install-wbeam --dry-run
+```
+
+Developer rebuild/deploy flow:
+
+```bash
+git clone <repo> && cd WBeam
+
+# Build host daemon, build+install APK, launch desktop UI.
+# On Fedora this also bootstraps missing build, Android SDK, GStreamer,
+# and EVDI/DisplayLink dependencies when possible.
 ./redeploy-local
 
 # Verify everything matches
 ./wbeam version doctor
 ```
 
-On Fedora 43, use the distro-specific bootstrap notes first:
-`docs/FEDORA_43_SETUP.md`. The Fedora package bootstrap script is
-`scripts/fedora-setup.sh`.
+On Fedora 43, both `./install-wbeam` and `./redeploy-local` call
+`scripts/fedora-setup.sh --yes` when native packages, Android SDK components,
+or EVDI/DisplayLink pieces are missing. Some system states still require manual
+confirmation outside the repo:
 
-For EVDI capture (recommended), load the kernel module:
+- Secure Boot MOK enrollment for DKMS EVDI modules requires a reboot and the
+  firmware MOK screen.
+- Android install may require accepting USB debugging and allowing APK installs
+  on the device.
+- If EVDI is intentionally skipped, run with
+  `WBEAM_REDEPLOY_WITH_EVDI=0 ./redeploy-local` to use Wayland/X11 fallback.
 
-```bash
-sudo modprobe evdi initial_device_count=4
-```
-
-If EVDI gives trouble, run the setup script:
-
-```bash
-sudo bash scripts/evdi-setup.sh
-```
-
-See `EVDI_SETUP_INDEX.md` and `docs/EVDI_SETUP_GUIDE.md` for details.
+Fedora details are in `docs/FEDORA_43_SETUP.md`. General EVDI diagnostics are
+in `EVDI_SETUP_INDEX.md` and `docs/EVDI_SETUP_GUIDE.md`. The installer wizard
+design is tracked in `docs/INSTALLER_WIZARD.md`.
 
 ---
 
 ## Capture Backends
 
 **EVDI** (recommended) -- Kernel-level virtual display. 1920x1080 fixed EDID,
-low latency, bypasses compositor. Setup: `sudo bash scripts/evdi-setup.sh`.
+low latency, bypasses compositor. On Fedora, `./redeploy-local` attempts this
+automatically through `scripts/fedora-setup.sh --yes --with-evdi`.
 
 **Wayland portal** -- Fallback for Wayland sessions. Compositor-dependent
 performance (~30-60 FPS). Automatic if EVDI is unavailable.
@@ -117,6 +133,7 @@ benchmarking encoding profiles against your hardware.
 | Script | What it does |
 |--------|-------------|
 | `./wbeam` | Main CLI |
+| `./install-wbeam` | Fresh-machine installer wizard |
 | `./wbgui` | Interactive TUI menu |
 | `./devtool` | Dev convenience (gui, deps install) |
 | `./desktop.sh` | Desktop app launcher |
@@ -143,7 +160,7 @@ WBeam/
 ```
 
 Key docs: `docs/repo-structure.md`, `docs/agents.workflow.md`,
-`docs/EVDI_SETUP_GUIDE.md`.
+`docs/FEDORA_43_SETUP.md`, `docs/EVDI_SETUP_GUIDE.md`.
 
 ---
 
@@ -153,8 +170,13 @@ Key docs: `docs/repo-structure.md`, `docs/agents.workflow.md`,
 running (`./wbeam host status`). Check version parity (`./wbeam version doctor`).
 Inspect `logs/` and `desktop-connect.log`.
 
-**EVDI not loading** -- Run `bash scripts/evdi-diagnose.sh`. Try the automated
-setup: `sudo bash scripts/evdi-setup.sh`.
+**EVDI not loading** -- Run `bash scripts/evdi-diagnose.sh --verbose --fix`.
+On Fedora, rerun `./redeploy-local`; it will retry EVDI setup unless
+`WBEAM_REDEPLOY_WITH_EVDI=0` is set.
+
+**No supported encoder** -- Fedora may lack H.265 encoders. WBeam falls back to
+H.264 when `openh264enc`, `x264enc`, or `nvh264enc` is available. Run
+`scripts/fedora-setup.sh --yes --no-android-sdk` to repair GStreamer packages.
 
 **Low FPS** -- Switch to EVDI backend. Run `./wbeam host tuner` to find
 optimal encoding settings for your hardware.

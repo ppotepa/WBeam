@@ -39,6 +39,21 @@ pub(super) fn configure(
         return;
     }
 
+    if backend == "openh264" {
+        let _ = enc.set_property("bitrate", bitrate_kbps * 1000);
+        let _ = enc.set_property("max-bitrate", bitrate_kbps * 1500);
+        let _ = enc.set_property_from_str("rate-control", "bitrate");
+        let _ = enc.set_property_from_str("usage-type", "screen");
+        let _ = enc.set_property_from_str("complexity", "low");
+        let _ = enc.set_property("enable-frame-skip", true);
+        let _ = enc.set_property("gop-size", gop);
+        set_min_force_key_unit_interval(enc, 1_000_000_000);
+        println!(
+            "[wbeam] openh264 config: rate-control=bitrate usage-type=screen complexity=low"
+        );
+        return;
+    }
+
     // x264 software fallback.
     let _ = enc.set_property("bitrate", bitrate_kbps);
     let _ = enc.set_property_from_str("speed-preset", "ultrafast");
