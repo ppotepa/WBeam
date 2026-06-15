@@ -4,4 +4,18 @@ set -euo pipefail
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 
-exec "$ROOT_DIR/scripts/install-wizard.sh" "$@"
+args=()
+legacy=0
+for arg in "$@"; do
+  if [[ "$arg" == "--legacy" ]]; then
+    legacy=1
+  else
+    args+=("$arg")
+  fi
+done
+
+if [[ "$legacy" -eq 1 ]]; then
+  exec "$ROOT_DIR/scripts/install-wizard.sh" "${args[@]}"
+fi
+
+exec python3 "$ROOT_DIR/scripts/wizard/run.py" "${args[@]}"

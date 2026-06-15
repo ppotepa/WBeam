@@ -114,6 +114,17 @@ agents.md
 docs/24fps.mp4
 /src/
 
+# E2E generated artifacts
+e2e/env.local
+e2e/work/
+e2e/reports/
+e2e/images/base/
+e2e/images/build/
+e2e/images/iso/
+e2e/isos/
+*.qcow2
+*.img
+
 # Runtime per-device state (written by daemon, not source)
 host/rust/config/runtime_state*.json
 

@@ -10,6 +10,29 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+# Force unbuffered output for the entire project
+def print(*args, **kwargs):
+    kwargs["flush"] = True
+    import builtins
+    builtins.print(*args, **kwargs)
+
+
+RSYNC_EXCLUDES = (
+    ".git/",
+    ".pytest_cache/",
+    "__pycache__/",
+    "target/",
+    "node_modules/",
+    "desktop/node_modules/",
+    "desktop/apps/desktop-tauri/node_modules/",
+    "android/.gradle/",
+    "android/app/build/",
+    "e2e/images/",
+    "e2e/work/",
+    "e2e/reports/",
+    "e2e/*.qcow2",
+    "e2e/*.iso",
+)
 
 def require_tool(name: str) -> str:
     path = shutil.which(name)
@@ -24,14 +47,32 @@ def run_cmd(
     cwd: Path | None = None,
     log: Path | None = None,
     check: bool = True,
+    live: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     if log:
         log.parent.mkdir(parents=True, exist_ok=True)
         with log.open("a", encoding="utf-8") as fh:
-            fh.write(f"$ {shlex.join(cmd)}\n")
-            proc = subprocess.run(cmd, cwd=cwd, text=True, stdout=fh, stderr=subprocess.STDOUT)
+            fh.write(f"--- {time.ctime()} EXEC: {shlex.join(cmd)}\n")
+            fh.flush()
+            if live:
+                proc_live = subprocess.Popen(
+                    cmd,
+                    cwd=cwd,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                )
+                assert proc_live.stdout is not None
+                for line in proc_live.stdout:
+                    fh.write(line)
+                    fh.flush()
+                    print(line, end="")
+                returncode = proc_live.wait()
+                proc = subprocess.CompletedProcess(cmd, returncode)
+            else:
+                proc = subprocess.run(cmd, cwd=cwd, text=True, stdout=fh, stderr=subprocess.STDOUT)
     else:
-        proc = subprocess.run(cmd, cwd=cwd, text=True, capture_output=True)
+        proc = subprocess.run(cmd, cwd=cwd, text=True, capture_output=not live)
     if check and proc.returncode != 0:
         if not log:
             if proc.stdout:
@@ -99,19 +140,17 @@ def ensure_ssh_key(path: Path) -> Path:
             "",
             "-f",
             str(private_key),
-            "-C",
-            "wbeam-e2e",
         ]
     )
     return private_key
 
 
-def read_public_key(private_key: Path) -> str:
-    public_key = Path(f"{private_key}.pub")
+def read_public_key(path: Path) -> str:
+    public_key = Path(f"{path}.pub")
     return public_key.read_text(encoding="utf-8").strip()
 
 
-@dataclass(frozen=True)
+@dataclass
 class QemuSpec:
     name: str
     disk: Path
@@ -121,62 +160,62 @@ class QemuSpec:
     memory_mib: int = 8192
     iso: Path | None = None
     seed_iso: Path | None = None
-    boot_from_iso: bool = False
-    display: str = "none"
     kernel: Path | None = None
     initrd: Path | None = None
     append: str | None = None
     extra_args: tuple[str, ...] = ()
+    display: str = "none"
+    host_forwards: tuple[tuple[int, int], ...] = ()
 
 
 def qemu_command(spec: QemuSpec) -> list[str]:
-    qemu = require_tool("qemu-system-x86_64")
-    args = [
-        qemu,
+    hostfwds = [f"hostfwd=tcp:127.0.0.1:{spec.ssh_port}-:22"]
+    for host_port, guest_port in spec.host_forwards:
+        hostfwds.append(f"hostfwd=tcp:127.0.0.1:{host_port}-:{guest_port}")
+    cmd = [
+        require_tool("qemu-system-x86_64"),
         "-name",
         spec.name,
-        "-machine",
-        "accel=kvm:tcg",
-        "-cpu",
-        "host",
-        "-smp",
-        str(spec.cpu),
         "-m",
         str(spec.memory_mib),
+        "-smp",
+        str(spec.cpu),
+        "-enable-kvm",
+        "-cpu",
+        "host",
         "-drive",
-        f"file={spec.disk},if=virtio,format=qcow2",
+        f"file={spec.disk},format=qcow2,if=virtio",
         "-netdev",
-        f"user,id=n0,hostfwd=tcp:127.0.0.1:{spec.ssh_port}-:22",
+        "user,id=n1," + ",".join(hostfwds),
         "-device",
-        "virtio-net-pci,netdev=n0",
-        "-serial",
-        f"file:{spec.run_dir / 'serial.log'}",
-        "-monitor",
-        f"unix:{spec.run_dir / 'qemu-monitor.sock'},server,nowait",
+        "virtio-net-pci,netdev=n1",
         "-display",
         spec.display,
+        "-serial",
+        f"file:{spec.run_dir / 'serial.log'}",
     ]
     if spec.iso:
-        args.extend(["-cdrom", str(spec.iso)])
+        cmd += ["-cdrom", str(spec.iso)]
     if spec.seed_iso:
-        args.extend(["-drive", f"file={spec.seed_iso},media=cdrom,readonly=on"])
+        cmd += [
+            "-drive",
+            f"file={spec.seed_iso},format=raw,if=virtio,readonly=on",
+        ]
     if spec.kernel:
-        args.extend(["-kernel", str(spec.kernel)])
+        cmd += ["-kernel", str(spec.kernel)]
     if spec.initrd:
-        args.extend(["-initrd", str(spec.initrd)])
+        cmd += ["-initrd", str(spec.initrd)]
     if spec.append:
-        args.extend(["-append", spec.append])
-    if spec.boot_from_iso:
-        args.extend(["-boot", "d"])
-    args.extend(spec.extra_args)
-    return args
+        cmd += ["-append", spec.append]
+    cmd += list(spec.extra_args)
+    return cmd
 
 
 def start_qemu(spec: QemuSpec) -> subprocess.Popen[str]:
     spec.run_dir.mkdir(parents=True, exist_ok=True)
     log_path = spec.run_dir / "qemu.log"
     log = log_path.open("a", encoding="utf-8")
-    log.write(f"$ {shlex.join(qemu_command(spec))}\n")
+    log.write(f"--- {time.ctime()} START: {shlex.join(qemu_command(spec))}\n")
     log.flush()
     return subprocess.Popen(qemu_command(spec), stdout=log, stderr=subprocess.STDOUT, text=True)
 
@@ -194,39 +233,31 @@ def wait_process(proc: subprocess.Popen[str], timeout_sec: int, *, name: str) ->
         raise TimeoutError(f"{name} did not exit within {timeout_sec}s") from exc
 
 
-def ssh_base_cmd(user: str, port: int, key: Path) -> list[str]:
-    return [
+def wait_for_ssh(user: str, port: int, key: Path, timeout_sec: int) -> None:
+    start = time.time()
+    cmd = [
         require_tool("ssh"),
-        "-i",
-        str(key),
         "-p",
         str(port),
+        "-i",
+        str(key),
         "-o",
         "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
         "-o",
         "StrictHostKeyChecking=no",
         "-o",
         "UserKnownHostsFile=/dev/null",
-        "-o",
-        "ConnectTimeout=5",
         f"{user}@127.0.0.1",
+        "exit 0",
     ]
-
-
-def wait_for_ssh(user: str, port: int, key: Path, timeout_sec: int) -> None:
-    deadline = time.time() + timeout_sec
-    last_error = "ssh not attempted"
-    while time.time() < deadline:
-        proc = subprocess.run(
-            ssh_base_cmd(user, port, key) + ["true"],
-            text=True,
-            capture_output=True,
-        )
+    while time.time() - start < timeout_sec:
+        proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode == 0:
             return
-        last_error = (proc.stderr or proc.stdout or f"exit {proc.returncode}").strip()
-        time.sleep(2)
-    raise TimeoutError(f"SSH did not become ready on port {port}: {last_error}")
+        time.sleep(5)
+    raise TimeoutError(f"SSH did not become available at 127.0.0.1:{port} within {timeout_sec}s")
 
 
 def ssh(
@@ -237,55 +268,69 @@ def ssh(
     *,
     log: Path | None = None,
     check: bool = True,
+    live: bool = False,
 ) -> subprocess.CompletedProcess[str]:
-    return run_cmd(ssh_base_cmd(user, port, key) + [command], log=log, check=check)
+    cmd = [
+        require_tool("ssh"),
+        "-p",
+        str(port),
+        "-i",
+        str(key),
+        "-o",
+        "StrictHostKeyChecking=no",
+        "-o",
+        "UserKnownHostsFile=/dev/null",
+        f"{user}@127.0.0.1",
+        command,
+    ]
+    return run_cmd(cmd, log=log, check=check, live=live)
 
 
 def rsync_to_guest(
-    source: Path,
-    dest: str,
-    *,
     user: str,
     port: int,
     key: Path,
+    src: Path,
+    dest_str: str,
+    *,
     log: Path | None = None,
-    excludes: list[str] | None = None,
-) -> None:
-    rsync = require_tool("rsync")
+    check: bool = True,
+    live: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    src_arg = f"{src}/" if src.is_dir() else str(src)
     cmd = [
-        rsync,
-        "-a",
-        "--delete",
+        require_tool("rsync"),
+        "-avz",
+        *(f"--exclude={pattern}" for pattern in RSYNC_EXCLUDES),
         "-e",
-        " ".join(shlex.quote(x) for x in ssh_base_cmd(user, port, key)[:-1]),
+        f"ssh -p {port} -i {key} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null",
+        src_arg,
+        f"{user}@127.0.0.1:{dest_str}",
     ]
-    for pattern in excludes or []:
-        cmd.extend(["--exclude", pattern])
-    cmd.extend([f"{source}/", f"{user}@127.0.0.1:{dest}"])
-    run_cmd(cmd, log=log)
+    return run_cmd(cmd, log=log, check=check, live=live)
 
 
 def rsync_from_guest(
-    source: str,
-    dest: Path,
-    *,
     user: str,
     port: int,
     key: Path,
+    src_str: str,
+    dest: Path,
+    *,
     log: Path | None = None,
-) -> None:
-    dest.mkdir(parents=True, exist_ok=True)
-    rsync = require_tool("rsync")
+    check: bool = True,
+    live: bool = False,
+) -> subprocess.CompletedProcess[str]:
     cmd = [
-        rsync,
-        "-a",
+        require_tool("rsync"),
+        "-avz",
         "-e",
-        " ".join(shlex.quote(x) for x in ssh_base_cmd(user, port, key)[:-1]),
-        f"{user}@127.0.0.1:{source.rstrip('/')}/",
-        f"{dest}/",
+        f"ssh -p {port} -i {key} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null",
+        f"{user}@127.0.0.1:{src_str}",
+        str(dest),
     ]
-    run_cmd(cmd, log=log, check=False)
+    return run_cmd(cmd, log=log, check=check, live=live)
 
 
-def shutdown_guest(user: str, port: int, key: Path, *, log: Path | None = None) -> None:
-    ssh(user, port, key, "sudo -n systemctl poweroff --no-wall || sudo -n poweroff -f", log=log, check=False)
+def shutdown_guest(user: str, port: int, key: Path, *, log: Path | None = None, live: bool = False) -> None:
+    ssh(user, port, key, "sudo -n systemctl poweroff --no-wall || sudo -n poweroff -f", log=log, check=False, live=live)

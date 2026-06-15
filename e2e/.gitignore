@@ -4,6 +4,7 @@ reports/*
 isos/
 images/base/
 images/build/
+images/iso/
 scripts/__pycache__/
 tests/__pycache__/
 *.pyc
@@ -11,3 +12,5 @@ tests/__pycache__/
 *.img
 *.log
 env.local
+id_ed25519
+id_ed25519.pub

@@ -166,9 +166,9 @@ def extract_boot_assets(*, iso: Path, distro: dict, output_dir: Path, seed_dir: 
     family = distro["family"]
     candidates = {
         "fedora": [
-            ("/boot/x86_64/loader/linux", "/boot/x86_64/loader/initrd"),
             ("/images/pxeboot/vmlinuz", "/images/pxeboot/initrd.img"),
             ("/isolinux/vmlinuz", "/isolinux/initrd.img"),
+            ("/boot/x86_64/loader/linux", "/boot/x86_64/loader/initrd"),
         ],
         "ubuntu": [
             ("/casper/vmlinuz", "/casper/initrd"),

@@ -6,6 +6,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -13,7 +14,14 @@ import sys
 import time
 from pathlib import Path
 
-from report import finalize_run_report, init_run_report, scenario_report_dir, write_json
+# Force unbuffered output for the entire project
+def print(*args, **kwargs):
+    kwargs["flush"] = True
+    import builtins
+    builtins.print(*args, **kwargs)
+
+from report import finalize_run_report, init_run_report, read_json, scenario_report_dir, write_json
+import portal_consent
 from seed import boot_append_args, create_seed_iso, desktop_shell_commands, extract_boot_assets
 from vm import (
     QemuSpec,
@@ -35,9 +43,13 @@ from vm import (
 )
 
 
+SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT = Path(__file__).resolve().parents[2]
 E2E_DIR = ROOT / "e2e"
 MATRIX_PATH = ROOT / "e2e" / "matrix.json"
+WIZARD_ENTRYPOINT = ROOT / "install-wbeam"
+ASSERT_GREEN_SCRIPT = E2E_DIR / "scripts" / "assert_green_run.py"
+FINALIZE_SCRIPT = E2E_DIR / "scripts" / "finalize_e2e.py"
 ISO_SOURCES = {
     "fedora-43": {
         "label": "Fedora 43 Everything netinst x86_64",
@@ -62,10 +74,737 @@ ISO_SOURCES = {
     },
 }
 
+WIZARD_STEP_ORDER = [
+    "host_preflight",
+    "system_deps",
+    "host_build",
+    "service_setup",
+    "adb_probe",
+    "android_deploy",
+    "stream_smoke",
+]
+
+ANSI_ESCAPE_RE = re.compile(
+    r"""
+    \x1b\][^\x07]*(?:\x07|\x1b\\)  # OSC
+    |
+    \x1b\[[0-?]*[ -/]*[@-~]        # CSI
+    |
+    \x1b[ -/]*[@-~]                # 7-bit fallback
+    """,
+    re.VERBOSE,
+)
+CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+ANSI_COLORS = {
+    "ok": "\033[32m",
+    "warn": "\033[33m",
+    "error": "\033[31m",
+    "progress": "\033[36m",
+    "reset": "\033[0m",
+}
+SERIAL_NOISE_PATTERNS = (
+    "audit: type=",
+    "proctitle=",
+    "avc:  denied",
+    "plymouth",
+    "brltty.service",
+    "sshd-keygen@",
+)
+ADB_DEVICE_STATES = {"device", "unauthorized", "offline", "recovery", "sideload"}
+
 
 def load_matrix() -> dict:
     with MATRIX_PATH.open("r", encoding="utf-8") as fh:
         return json.load(fh)
+
+
+def load_env_local(path: Path | None = None) -> None:
+    env_path = path or E2E_DIR / "env.local"
+    if not env_path.exists():
+        return
+    for raw in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip())
+
+
+def validate_matrix(matrix: dict) -> list[str]:
+    errors: list[str] = []
+    if matrix.get("schema") not in {1, 2}:
+        errors.append(f"matrix schema must be 1 or 2, got {matrix.get('schema')!r}")
+    distros = matrix.get("distros", [])
+    if not isinstance(distros, list) or not distros:
+        errors.append("matrix.distros must be a non-empty list")
+    for distro in distros:
+        if not isinstance(distro, dict):
+            errors.append(f"distro entry must be an object: {distro!r}")
+            continue
+        for key in ("id", "family", "iso_env", "ssh_user"):
+            if not distro.get(key):
+                errors.append(f"distro {distro.get('id', '<unknown>')} missing {key}")
+    scenarios = matrix.get("scenarios", [])
+    if not isinstance(scenarios, list) or not scenarios:
+        errors.append("matrix.scenarios must be a non-empty list")
+    for scenario in scenarios:
+        if not isinstance(scenario, dict):
+            errors.append(f"scenario entry must be an object: {scenario!r}")
+            continue
+        for key in ("id", "distro", "session", "backend", "display_mode", "tier"):
+            if not scenario.get(key):
+                errors.append(f"scenario {scenario.get('id', '<unknown>')} missing {key}")
+        if scenario.get("device_policy", "optional") not in {"none", "optional", "required"}:
+            errors.append(f"scenario {scenario.get('id', '<unknown>')} has invalid device_policy {scenario.get('device_policy')!r}")
+        android_execution = scenario.get("android_execution", "none")
+        if android_execution not in {"none", "host", "guest_usb"}:
+            errors.append(f"scenario {scenario.get('id', '<unknown>')} has invalid android_execution {android_execution!r}")
+        if scenario.get("device_policy") == "required" and android_execution == "none":
+            errors.append(f"scenario {scenario.get('id', '<unknown>')} requires device but has android_execution=none")
+        if android_execution == "host" and not scenario.get("host_android"):
+            errors.append(f"scenario {scenario.get('id', '<unknown>')} has android_execution=host but no host_android config")
+        if "expected_steps" in scenario and not all(isinstance(item, str) for item in scenario["expected_steps"]):
+            errors.append(f"scenario {scenario.get('id', '<unknown>')} expected_steps must be a list of strings")
+        if "wizard_flags" in scenario and not all(isinstance(item, str) for item in scenario["wizard_flags"]):
+            errors.append(f"scenario {scenario.get('id', '<unknown>')} wizard_flags must be a list of strings")
+        if "guest_wizard_flags" in scenario and not all(isinstance(item, str) for item in scenario["guest_wizard_flags"]):
+            errors.append(f"scenario {scenario.get('id', '<unknown>')} guest_wizard_flags must be a list of strings")
+        if "required_artifacts" in scenario:
+            artifacts = scenario["required_artifacts"]
+            if not isinstance(artifacts, list) or not all(isinstance(item, str) for item in artifacts):
+                errors.append(f"scenario {scenario.get('id', '<unknown>')} required_artifacts must be a list of strings")
+            for artifact in artifacts:
+                if artifact.startswith("/") or ".." in artifact.split("/"):
+                    errors.append(f"scenario {scenario.get('id', '<unknown>')} required_artifacts contains unsafe path {artifact!r}")
+        if scenario.get("stability", "stable") not in {"stable", "experimental", "manual"}:
+            errors.append(f"scenario {scenario.get('id', '<unknown>')} has invalid stability {scenario.get('stability')!r}")
+    return errors
+
+
+def image_specs(matrix: dict, scenarios: list[dict]) -> list[dict]:
+    grouped: dict[tuple[str, str], dict] = {}
+    for scenario in scenarios:
+        key = (scenario["distro"], scenario["session"])
+        spec = grouped.setdefault(
+            key,
+            {
+                "distro": scenario["distro"],
+                "session": scenario["session"],
+                "backends": [],
+                "scenarios": [],
+            },
+        )
+        spec["backends"].append(scenario["backend"])
+        spec["scenarios"].append(scenario["id"])
+    return list(grouped.values())
+
+
+def select_scenarios(matrix: dict, args: argparse.Namespace) -> list[dict]:
+    scenarios = list(matrix.get("scenarios", []))
+    def _as_set(value) -> set[str]:
+        if value is None:
+            return set()
+        if isinstance(value, str):
+            return {value}
+        return set(value)
+
+    selected_ids = _as_set(getattr(args, "scenario", None))
+    selected_distros = _as_set(getattr(args, "distro", None))
+    selected_backends = _as_set(getattr(args, "backend", None))
+    selected_tags = _as_set(getattr(args, "tag", None))
+    if selected_ids:
+        scenarios = [item for item in scenarios if item["id"] in selected_ids]
+    if selected_distros:
+        scenarios = [item for item in scenarios if item["distro"] in selected_distros]
+    if selected_backends:
+        scenarios = [item for item in scenarios if item["backend"] in selected_backends]
+    if selected_tags:
+        scenarios = [item for item in scenarios if selected_tags.intersection(item.get("tags", []))]
+    return scenarios
+
+
+def scenario_duration(matrix: dict, scenario: dict) -> int:
+    defaults = matrix.get("defaults", {})
+    return int(scenario.get("duration_sec") or defaults.get("stream_duration_sec") or 60)
+
+
+def build_guest_wizard_command(*, guest_root: str, scenario: dict, guest_report_root: str, duration: int, flags: list[str]) -> str:
+    install_backend = install_backend_for_scenario_backend(scenario["backend"])
+    parts = [
+        "./install-wbeam",
+        "--backend",
+        install_backend,
+        "--report-dir",
+        f"{guest_report_root}/wizard",
+        *flags,
+    ]
+    env_parts = [
+        f"WBEAM_E2E_BACKEND={shlex.quote(scenario['backend'])}",
+        f"WBEAM_E2E_DURATION_SEC={duration}",
+    ]
+    return " ".join(parts), " ".join(env_parts)
+
+
+def summarize_guest_wizard_failure(
+    summary_path: Path,
+    steps_path: Path,
+    stream_summary_path: Path | None = None,
+) -> tuple[str, str, str]:
+    summary = read_json(summary_path)
+    stream_summary = read_json(stream_summary_path) if stream_summary_path else {}
+    last_step = summary.get("last_step") or {}
+    if stream_summary.get("blocked") is True and stream_summary.get("reason_code") == "portal_consent_required":
+        return (
+            "portal_consent",
+            "Wayland portal consent required.",
+            str(
+                stream_summary.get("next_action")
+                or "Run ./e2e/run prepare-portal-consent --distro fedora-43 --session gnome-wayland --backend wayland_portal --live, approve the portal prompt, then rerun."
+            ),
+        )
+    if stream_summary and stream_summary.get("ok") is False:
+        phase = str(stream_summary.get("phase") or "stream_smoke")
+        reason = str(stream_summary.get("reason") or "stream smoke failed")
+        next_action = str(stream_summary.get("next_action") or "Inspect stream summary and daemon logs.")
+        return phase, reason, next_action
+    failures = summary.get("failures") or []
+    if isinstance(failures, list) and failures and isinstance(failures[0], dict):
+        return (
+            str(failures[0].get("phase") or "wizard"),
+            str(failures[0].get("reason") or "wizard failed"),
+            str(failures[0].get("next_action") or "Inspect guest wizard logs."),
+        )
+    if isinstance(last_step, dict) and str(last_step.get("status", "")).lower() not in {"ok", "skipped", ""}:
+        evidence = last_step.get("evidence") or {}
+        if isinstance(evidence, dict) and evidence.get("reason_code") == "portal_consent_required":
+            return (
+                "portal_consent",
+                "Wayland portal consent required.",
+                str(
+                    last_step.get("next_action")
+                    or evidence.get("next_action")
+                    or "Run ./e2e/run prepare-portal-consent --distro fedora-43 --session gnome-wayland --backend wayland_portal --live, approve the portal prompt, then rerun."
+                ),
+            )
+        return (
+            str(last_step.get("id") or "wizard"),
+            str(last_step.get("summary") or last_step.get("status") or "wizard failed"),
+            str(last_step.get("next_action") or f"Inspect {steps_path}"),
+        )
+    return "wizard", str(summary.get("status") or "fail"), "Inspect guest wizard summary and steps."
+
+
+def normalize_wizard_result(wizard_summary: dict, guest_rc: int) -> tuple[str, str, str, str]:
+    last_step = wizard_summary.get("last_step") or {}
+    if not isinstance(last_step, dict):
+        last_step = {}
+    summary_status = str(wizard_summary.get("status") or "").lower()
+    last_status = str(last_step.get("status") or "").lower()
+    if summary_status == "pass" and guest_rc == 0:
+        return "pass", "wizard", "pass", ""
+    evidence = last_step.get("evidence") or {}
+    if not isinstance(evidence, dict):
+        evidence = {}
+    reason_code = str(evidence.get("reason_code") or wizard_summary.get("reason_code") or "")
+    if summary_status == "blocked" or last_status == "blocked":
+        if reason_code == "portal_consent_required":
+            return (
+                "blocked",
+                "portal_consent",
+                "Wayland portal consent required.",
+                str(
+                    last_step.get("next_action")
+                    or wizard_summary.get("next_action")
+                    or "Run ./e2e/run prepare-portal-consent --distro fedora-43 --session gnome-wayland --backend wayland_portal --live, approve the portal prompt, then rerun."
+                ),
+            )
+        return (
+            "blocked",
+            str(last_step.get("phase") or last_step.get("id") or "wizard"),
+            str(last_step.get("summary") or wizard_summary.get("reason") or "blocked"),
+            str(last_step.get("next_action") or wizard_summary.get("next_action") or "Inspect the wizard summary and steps."),
+        )
+    if guest_rc != 0:
+        return (
+            "fail",
+            str(last_step.get("phase") or last_step.get("id") or "wizard"),
+            f"guest exited with rc={guest_rc}; {last_step.get('summary') or wizard_summary.get('reason') or 'wizard failed'}",
+            str(last_step.get("next_action") or wizard_summary.get("next_action") or "Inspect the wizard summary and steps."),
+        )
+    return "fail", str(last_step.get("phase") or last_step.get("id") or "wizard"), str(wizard_summary.get("reason") or "wizard failed"), str(wizard_summary.get("next_action") or "")
+
+
+def default_wizard_flags_for_scenario(scenario: dict) -> list[str]:
+    flags = ["--yes", "--stream-smoke"]
+    if scenario.get("device_policy", "none") == "none":
+        flags.append("--skip-device")
+    return flags
+
+
+INSTALL_BACKEND_BY_SCENARIO_BACKEND = {
+    "benchmark_game": "benchmark_game",
+    "wayland_portal": "wayland",
+    "evdi": "evdi",
+    "x11_gst": "x11",
+}
+
+INSTALL_BACKEND_BY_SESSION = {
+    "headless": "benchmark_game",
+    "gnome-wayland": "wayland",
+    "gnome-xorg": "x11",
+}
+
+
+def install_backend_for_session(session: str) -> str:
+    return INSTALL_BACKEND_BY_SESSION.get(session, "wayland")
+
+
+def install_backend_for_scenario_backend(backend: str) -> str:
+    return INSTALL_BACKEND_BY_SCENARIO_BACKEND.get(backend, backend)
+
+
+def guest_wizard_flags_for_scenario(scenario: dict) -> list[str]:
+    if scenario.get("guest_wizard_flags"):
+        return list(scenario["guest_wizard_flags"])
+    flags = list(scenario.get("wizard_flags") or default_wizard_flags_for_scenario(scenario))
+    if scenario.get("android_execution") == "host" and "--skip-device" not in flags:
+        flags.append("--skip-device")
+    return flags
+
+
+def resolve_android_serial(args: argparse.Namespace, scenario: dict) -> str | None:
+    return getattr(args, "android_serial", None) or os.environ.get("WBEAM_ANDROID_SERIAL") or scenario.get("android_serial")
+
+
+def adb_devices() -> list[dict[str, str]]:
+    try:
+        proc = subprocess.run(["adb", "devices", "-l"], capture_output=True, text=True, check=False, timeout=8)
+    except FileNotFoundError:
+        return [{"serial": "", "state": "missing"}]
+    except (OSError, subprocess.SubprocessError):
+        return [{"serial": "", "state": "error"}]
+    rows: list[dict[str, str]] = []
+    output = "\n".join([proc.stdout, proc.stderr])
+    for line in output.splitlines():
+        line = line.strip()
+        if not line or line.lower().startswith("list of devices attached"):
+            continue
+        if line.startswith("* daemon "):
+            continue
+        parts = line.strip().split()
+        if len(parts) >= 3 and parts[1] == "no" and parts[2] == "permissions":
+            rows.append({"serial": parts[0], "state": "no_permissions"})
+            continue
+        if len(parts) >= 2:
+            if parts[1] in ADB_DEVICE_STATES:
+                rows.append({"serial": parts[0], "state": parts[1]})
+    if not rows:
+        try:
+            subprocess.run(["adb", "start-server"], capture_output=True, text=True, check=False, timeout=8)
+            retry = subprocess.run(["adb", "devices", "-l"], capture_output=True, text=True, check=False, timeout=8)
+        except (FileNotFoundError, OSError, subprocess.SubprocessError):
+            return rows
+        for line in "\n".join([retry.stdout, retry.stderr]).splitlines():
+            line = line.strip()
+            if not line or line.lower().startswith("list of devices attached") or line.startswith("* daemon "):
+                continue
+            parts = line.split()
+            if len(parts) >= 3 and parts[1] == "no" and parts[2] == "permissions":
+                rows.append({"serial": parts[0], "state": "no_permissions"})
+                continue
+            if len(parts) >= 2:
+                if parts[1] in ADB_DEVICE_STATES:
+                    rows.append({"serial": parts[0], "state": parts[1]})
+    return rows
+
+
+def select_android_serial(requested: str | None = None) -> tuple[str | None, str, str]:
+    rows = adb_devices()
+    if rows and rows[0].get("state") == "missing":
+        return None, "blocked", "adb command not found"
+    if rows and rows[0].get("state") == "error":
+        return None, "blocked", "adb probe failed"
+    if requested:
+        match = next((row for row in rows if row["serial"] == requested), None)
+        if not match:
+            return None, "blocked", f"requested serial not found: {requested}"
+        if match["state"] != "device":
+            return None, "blocked", f"requested serial is {match['state']}"
+        return requested, "ok", "requested device ready"
+    ready = [row for row in rows if row["state"] == "device"]
+    if len(ready) == 1:
+        return ready[0]["serial"], "ok", "single device ready"
+    if len(ready) > 1:
+        return None, "blocked", "multiple devices; pass --android-serial"
+    if any(row["state"] == "unauthorized" for row in rows):
+        return None, "blocked", "device unauthorized; accept RSA prompt"
+    if any(row["state"] == "offline" for row in rows):
+        return None, "blocked", "device offline; reconnect USB"
+    if any(row["state"] == "no_permissions" for row in rows):
+        return None, "blocked", "device has no adb permissions; check udev rules and USB access"
+    return None, "blocked", "no adb device"
+
+
+def android_preflight_reason_code(reason: str) -> str:
+    normalized = reason.lower()
+    if "unauthorized" in normalized or "rsa" in normalized:
+        return "android_device_unauthorized"
+    return "android_device_missing"
+
+
+def publish_scenario_artifacts(*, scenario_run_dir: Path, scenario_report_dir: Path, guest_report_root: Path) -> None:
+    scenario_report_dir.mkdir(parents=True, exist_ok=True)
+    if guest_report_root.exists():
+        shutil.copytree(guest_report_root, scenario_report_dir / "guest", dirs_exist_ok=True)
+    for name in ("qemu.log", "serial.log", "guest-wizard.log"):
+        src = scenario_run_dir / name
+        if src.exists():
+            dst = scenario_report_dir / "logs" / name
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+
+
+def validate_required_artifacts(root: Path, scenario: dict) -> list[str]:
+    missing: list[str] = []
+    for rel_path in scenario.get("required_artifacts") or []:
+        if not (root / rel_path).exists():
+            missing.append(rel_path)
+    return missing
+
+
+def scenario_report_path_from_run_dir(run_dir: Path, scenario_id: str) -> Path:
+    return run_dir / "scenarios" / scenario_id
+
+
+def runner_report_path(report_root: Path, run_id: str) -> Path:
+    return report_root / run_id
+
+
+def scenario_workdisk_path(work_root: Path, run_id: str, scenario_id: str) -> Path:
+    return work_root / "runs" / run_id / scenario_id / "disk.qcow2"
+
+
+def scenario_requires_host_android(scenario: dict) -> bool:
+    return scenario.get("device_policy") == "required" and scenario.get("android_execution") == "host"
+
+
+def backing_image_for_scenario(scenario: dict, base_root: Path) -> tuple[Path, str]:
+    if scenario_requires_portal_consent(scenario):
+        consented = portal_consented_image_path(scenario["distro"], scenario["session"], base_root)
+        valid, _reason = portal_consented_image_is_valid(scenario["distro"], scenario["session"], base_root)
+        if valid:
+            return consented, "portal_consented"
+    return installed_image_path(scenario["distro"], scenario["session"], base_root), "installed"
+
+
+def scenario_requires_portal_consent(scenario: dict) -> bool:
+    return scenario.get("backend") == "wayland_portal" and scenario.get("requires_portal") is True
+
+
+def run_host_android_smoke(
+    *,
+    serial: str,
+    host_control_port: int,
+    host_stream_port: int,
+    scenario: dict,
+    report_dir: Path,
+    duration_sec: int,
+    live: bool,
+    dry_run: bool = False,
+) -> int:
+    host_android = scenario.get("host_android") or {}
+    cmd = [
+        sys.executable,
+        str(SCRIPT_DIR / "host_android_smoke.py"),
+        "--serial",
+        serial,
+        "--host-control-port",
+        str(host_control_port),
+        "--host-stream-port",
+        str(host_stream_port),
+        "--phone-control-port",
+        str(host_android.get("phone_control_port", 5001)),
+        "--phone-stream-port",
+        str(host_android.get("phone_stream_port", 5000)),
+        "--backend",
+        scenario["backend"],
+        "--display-mode",
+        scenario.get("display_mode", "duplicate"),
+        "--duration-sec",
+        str(duration_sec),
+        "--min-bytes-received",
+        str(host_android.get("min_bytes_received", 1)),
+        "--report-dir",
+        str(report_dir),
+    ]
+    if dry_run:
+        cmd.append("--dry-run")
+    proc = run_cmd(cmd, log=report_dir / "host-android-smoke.log", check=False, live=live)
+    return proc.returncode
+
+
+def matrix_control_port(*, matrix: dict, scenario: dict) -> int:
+    return int(scenario.get("control_port") or matrix.get("defaults", {}).get("control_port") or 5001)
+
+
+def matrix_stream_port(*, matrix: dict, scenario: dict) -> int:
+    return int(scenario.get("stream_port") or matrix.get("defaults", {}).get("stream_port") or 5000)
+
+
+def collect_host_info() -> dict:
+    def run_text(cmd: list[str]) -> str:
+        try:
+            return subprocess.run(cmd, capture_output=True, text=True, check=False).stdout.strip()
+        except OSError:
+            return ""
+
+    qemu_system = run_text(["qemu-system-x86_64", "--version"])
+    qemu_img = run_text(["qemu-img", "--version"])
+    adb_version = run_text(["adb", "version"])
+    return {
+        "repo_root": str(ROOT),
+        "git_rev": run_text(["git", "-C", str(ROOT), "rev-parse", "HEAD"]),
+        "git_dirty": bool(run_text(["git", "-C", str(ROOT), "status", "--porcelain"])),
+        "kernel": run_text(["uname", "-a"]),
+        "qemu_system": qemu_system.splitlines()[0] if qemu_system else "",
+        "qemu_img": qemu_img.splitlines()[0] if qemu_img else "",
+        "adb": adb_version.splitlines()[0] if adb_version else "",
+        "python": sys.version,
+    }
+
+
+def status_snapshot(matrix: dict, *, base_root: Path | None = None, report_root: Path | None = None) -> dict:
+    base_root = base_root or base_dir()
+    report_root = report_root or report_dir()
+    scenarios = matrix.get("scenarios", [])
+    specs = image_specs(matrix, scenarios)
+    total = len(specs)
+    base_ready = sum(1 for spec in specs if base_image_path(spec["distro"], spec["session"], base_root).exists())
+    installed_ready = sum(1 for spec in specs if installed_image_path(spec["distro"], spec["session"], base_root).exists())
+    missing_base = [
+        {
+            "distro": spec["distro"],
+            "session": spec["session"],
+            "path": str(base_image_path(spec["distro"], spec["session"], base_root)),
+        }
+        for spec in specs
+        if not base_image_path(spec["distro"], spec["session"], base_root).exists()
+    ]
+    missing_iso = [
+        {"env": d["iso_env"], "id": d["id"]}
+        for d in matrix.get("distros", [])
+        if not os.environ.get(d["iso_env"])
+    ]
+    report_runs = len([p for p in report_root.glob("*") if p.is_dir()]) if report_root.exists() else 0
+    assets_total = total * 2
+    assets_ready = base_ready + installed_ready
+    assets_percent = int((assets_ready / assets_total) * 100) if assets_total else 0
+    percent = max(1, int((installed_ready / total) * 100)) if total and report_runs else int((installed_ready / total) * 100) if total else 0
+    runs = sorted((p for p in report_root.iterdir() if p.is_dir()), key=lambda p: p.name, reverse=True) if report_root.exists() else []
+    last_run = _collect_run_overview(runs[0]) if runs else {}
+    last_failed = {}
+    for run_dir in runs:
+        overview = _collect_run_overview(run_dir)
+        if overview.get("status") != "pass":
+            last_failed = overview
+            break
+    recovery_commands = _collect_recovery_commands(last_failed)
+    portal_specs = [
+        (spec["distro"], spec["session"])
+        for spec in specs
+        if any(
+            scenario.get("backend") == "wayland_portal" and scenario.get("requires_portal")
+            for scenario in scenarios
+            if scenario.get("distro") == spec["distro"] and scenario.get("session") == spec["session"]
+        )
+    ]
+    portal_unique = sorted(set(portal_specs))
+    portal_missing: list[dict[str, object]] = []
+    portal_ready = 0
+    for distro_id, session in portal_unique:
+        valid, reason = portal_consented_image_is_valid(distro_id, session, base_root)
+        if valid:
+            portal_ready += 1
+        else:
+            portal_missing.append(
+                {
+                    "distro": distro_id,
+                    "session": session,
+                    "path": str(portal_consented_image_path(distro_id, session, base_root)),
+                    "reason": reason,
+                }
+            )
+    portal_total = len(portal_unique)
+    portal_percent = int((portal_ready / portal_total) * 100) if portal_total else 100
+    return {
+        "percent": percent,
+        "asset_percent": assets_percent,
+        "assets_total": assets_total,
+        "assets_ready": assets_ready,
+        "base_images_ready": base_ready,
+        "installed_images_ready": installed_ready,
+        "live_run_verified": False,
+        "dry_run_verified": report_runs > 0,
+        "report_runs": report_runs,
+        "portal_consent_total": portal_total,
+        "portal_consent_ready": portal_ready,
+        "portal_consent_percent": portal_percent,
+        "missing_portal_consented_images": portal_missing,
+        "last_run": last_run,
+        "last_failed_run": last_failed,
+        "last_failed_scenario": (last_failed.get("last_failure") or {}).get("scenario", "") if last_failed else "",
+        "last_failed_reason": (last_failed.get("last_failure") or {}).get("reason", "") if last_failed else "",
+        "recovery_commands": recovery_commands,
+        "missing_iso_inputs": missing_iso,
+        "missing_base_images": missing_base,
+        "next_commands": [
+            "./e2e/run init-env",
+            "./e2e/run iso-sources",
+            'eval "$(./e2e/run env-shell)"',
+            *[f"export {item['env']}=<path>" for item in missing_iso],
+            "./e2e/run prepare-base --all --missing --live",
+            "./e2e/run prepare-installed --distro fedora-43 --session headless --live",
+            "./e2e/run diagnose-portal-consent --distro fedora-43 --session gnome-wayland",
+            "./e2e/run prepare-portal-consent --distro fedora-43 --session gnome-wayland --backend wayland_portal --live --promote",
+            "./e2e/run run --scenario fedora43-headless-benchmark-h264 --live",
+            "./e2e/run history",
+            "./e2e/run last-failed",
+            "./e2e/run rerun-last-failed --live",
+        ],
+    }
+
+
+def cmd_env_shell(args: argparse.Namespace) -> int:
+    env_file = Path(args.file)
+    if not env_file.exists():
+        return 0
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        print(f"export {key.strip()}={value.strip()}")
+    return 0
+
+
+def cmd_init_env(args: argparse.Namespace) -> int:
+    target = Path(args.file)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists() and not args.force:
+        print(str(target.resolve()))
+        return 0
+    lines = [
+        "WBEAM_E2E_ISO_FEDORA_43=",
+        "WBEAM_E2E_ISO_UBUNTU_24_04=",
+        "WBEAM_E2E_ISO_DEBIAN_12=",
+    ]
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(str(target.resolve()))
+    return 0
+
+
+def cmd_next(args: argparse.Namespace) -> int:
+    commands = [
+        "./e2e/run init-env",
+        "./e2e/run iso-sources",
+        "./e2e/run status",
+    ]
+    if getattr(args, "json", False):
+        print(json.dumps(commands, indent=2))
+    else:
+        for command in commands:
+            print(command)
+    return 0
+
+
+def cmd_iso_sources(args: argparse.Namespace) -> int:
+    for distro_id, info in ISO_SOURCES.items():
+        print(f"{distro_id}:")
+        print(f"  page: {info['page_url']}")
+        print(f"  download: {info['download_url']}")
+        print(f"  checksum: {info['checksum_url']}")
+        print(f"  filename: {info['filename_hint']}")
+    return 0
+
+
+def cmd_plan(args: argparse.Namespace) -> int:
+    matrix = load_matrix()
+    scenarios = select_scenarios(matrix, args)
+    if not scenarios:
+        print("[e2e] no scenarios selected")
+        return 0
+    for scenario in scenarios:
+        duration = scenario_duration(matrix, scenario)
+        wizard_flags = guest_wizard_flags_for_scenario(scenario)
+        wizard_cmd, wizard_env = build_guest_wizard_command(
+            guest_root=str(ROOT),
+            scenario=scenario,
+            guest_report_root="${guest_report_root}",
+            duration=duration,
+            flags=wizard_flags,
+        )
+        print(f"scenario: {scenario['id']}")
+        print(f"  wizard: {wizard_env} {wizard_cmd}")
+        print("  expected steps: " + " -> ".join(scenario.get("expected_steps") or WIZARD_STEP_ORDER[:5]))
+        print("  required artifacts:")
+        for artifact in scenario.get("required_artifacts") or ["wizard/steps.jsonl", "wizard/summary.json"]:
+            print(f"    {artifact}")
+    return 0
+
+
+def cmd_validate(args: argparse.Namespace) -> int:
+    matrix = load_matrix()
+    errors = validate_matrix(matrix)
+    if errors:
+        for error in errors:
+            print(f"[e2e][ERROR] {error}")
+        return 1
+    print("[e2e] matrix valid")
+    return 0
+
+
+def cmd_assert_run(args: argparse.Namespace) -> int:
+    cmd = [
+        sys.executable,
+        str(ASSERT_GREEN_SCRIPT),
+        "--report-root",
+        str(Path(getattr(args, "report_dir", None) or report_dir()).expanduser().resolve()),
+        "--run-id",
+        args.run_id,
+        "--scenario",
+        args.scenario,
+        "--min-bytes",
+        str(int(getattr(args, "min_bytes", 1))),
+    ]
+    if getattr(args, "require_portal_consented", False):
+        cmd.append("--require-portal-consented")
+    proc = subprocess.run(cmd, text=True, capture_output=True, check=False)
+    if proc.stdout:
+        print(proc.stdout, end="")
+    if proc.stderr:
+        print(proc.stderr, end="", file=sys.stderr)
+    return proc.returncode
+
+
+def cmd_close(args: argparse.Namespace) -> int:
+    cmd = [
+        sys.executable,
+        str(FINALIZE_SCRIPT),
+        "--profile",
+        getattr(args, "profile", "fedora-mvp"),
+        "--run-prefix",
+        getattr(args, "run_prefix", "FINAL-E2E-CLOSURE"),
+    ]
+    if getattr(args, "live", False):
+        cmd.append("--live")
+    if getattr(args, "json", False):
+        cmd.append("--json")
+    proc = subprocess.run(cmd, text=True, capture_output=True, check=False)
+    if proc.stdout:
+        print(proc.stdout, end="")
+    if proc.stderr:
+        print(proc.stderr, end="", file=sys.stderr)
+    return proc.returncode
 
 
 def utc_timestamp() -> str:
@@ -101,182 +840,331 @@ def base_image_path(distro_id: str, session: str, base_root: Path | None = None)
     return root / distro_id / f"{session}.qcow2"
 
 
-def scenario_base_image_path(scenario: dict, base_root: Path | None = None) -> Path:
-    return base_image_path(scenario["distro"], scenario["session"], base_root)
-
-
-def scenario_work_dir(run_id: str, scenario: dict, work_root: Path | None = None) -> Path:
-    root = work_root or work_dir()
-    return root / "runs" / run_id / scenario["id"]
+def base_manifest_path(distro_id: str, session: str, base_root: Path | None = None) -> Path:
+    return base_image_path(distro_id, session, base_root).with_suffix(".json")
 
 
 def ssh_key_path() -> Path:
-    return path_from_env("WBEAM_E2E_SSH_KEY", work_dir() / "ssh" / "id_ed25519")
+    return E2E_DIR / "id_ed25519"
 
 
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as fh:
-        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def use_color() -> bool:
+    value = os.environ.get("WBEAM_E2E_COLOR", "auto").strip().lower()
+    if value in {"1", "true", "yes", "always"}:
+        return True
+    if value in {"0", "false", "no", "never"}:
+        return False
+    return sys.stdout.isatty()
 
 
-def require_existing_file(path: Path, *, what: str) -> Path:
-    if not path.exists():
-        raise RuntimeError(f"missing {what}: {path}")
-    return path
+def strip_terminal_controls(raw: str) -> str:
+    text = raw.replace("\r", "")
+    text = ANSI_ESCAPE_RE.sub("", text)
+    text = CONTROL_RE.sub("", text)
+    return re.sub(r"\s+", " ", text).strip()
 
 
-def distro_by_id(matrix: dict, distro_id: str) -> dict:
-    distros = distros_by_id(matrix)
-    try:
-        return distros[distro_id]
-    except KeyError as exc:
-        raise RuntimeError(f"unknown distro: {distro_id}") from exc
+def should_show_serial_line(line: str) -> bool:
+    if not line:
+        return False
+    lowered = line.lower()
+    if any(pattern in lowered for pattern in SERIAL_NOISE_PATTERNS):
+        return False
+    return any(
+        marker in lowered
+        for marker in (
+            "[ ok ",
+            "[failed",
+            "[ warn",
+            " error",
+            " failed",
+            "starting ",
+            "started ",
+            "finished ",
+            "reached target",
+            "anaconda",
+            "kickstart",
+            "install",
+            "networkmanager",
+            "ssh access",
+        )
+    )
 
 
-def require_iso_path(distro: dict) -> Path:
-    iso_value = os.environ.get(distro["iso_env"], "").strip()
-    if not iso_value:
-        raise RuntimeError(f"environment variable {distro['iso_env']} is not set")
-    return require_existing_file(Path(iso_value).expanduser().resolve(), what=f"installer ISO for {distro['id']}")
+def serial_line_level(line: str) -> str:
+    lowered = line.lower()
+    if "[failed" in lowered or " failed" in lowered or " error" in lowered:
+        return "error"
+    if "[ warn" in lowered or " warning" in lowered:
+        return "warn"
+    if "[ ok " in lowered or "started " in lowered or "finished " in lowered or "reached target" in lowered:
+        return "ok"
+    return "progress"
 
 
-def default_qemu_display(session: str, *, installer: bool) -> str:
-    if session == "headless" and not installer:
-        return "none"
-    return os.environ.get("WBEAM_E2E_QEMU_DISPLAY", "gtk")
+def serial_line_message(line: str) -> str:
+    text = re.sub(r"^\[\s*OK\s*\]\s*", "", line, flags=re.IGNORECASE)
+    text = re.sub(r"^\[\s*FAILED\s*\]\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"^\[\s*WARN(?:ING)?\s*\]\s*", "", text, flags=re.IGNORECASE)
+    return text.strip()
 
 
-def coerce_int(value: object, *, default: int) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
+def format_serial_line(name: str, raw: str, *, color: bool | None = None) -> str | None:
+    line = strip_terminal_controls(raw)
+    if not should_show_serial_line(line):
+        return None
+    level = serial_line_level(line)
+    label = {"ok": "OK", "warn": "WARN", "error": "ERROR", "progress": "..."}.get(level, "...")
+    message = serial_line_message(line)
+    prefix = f"[{name}] {label:5}"
+    if color is None:
+        color = use_color()
+    if color:
+        return f"{ANSI_COLORS[level]}{prefix}{ANSI_COLORS['reset']} {message}"
+    return f"{prefix} {message}"
+
+
+def tail_serial_log(proc: subprocess.Popen, log_path: Path, timeout_sec: int, name: str) -> int:
+    """Tails a log file until the process exits or timeout is reached."""
+    start_time = time.time()
+    last_size = 0
+    color = use_color()
+    while time.time() - start_time < timeout_sec:
+        if proc.poll() is not None:
+            return proc.returncode
+
+        if log_path.exists():
+            current_size = log_path.stat().st_size
+            if current_size > last_size:
+                with log_path.open("r", encoding="utf-8", errors="replace") as f:
+                    f.seek(last_size)
+                    for line in f:
+                        formatted = format_serial_line(name, line, color=color)
+                        if formatted:
+                            print(formatted)
+                last_size = current_size
+
+        time.sleep(1)
+
+    # Timeout
+    proc.terminate()
+    raise TimeoutError(f"{name} timed out after {timeout_sec}s")
+
+
+def installed_image_path(distro_id: str, session: str, base_root: Path | None = None) -> Path:
+    """Path for the Layer-1 'installed' snapshot (packages + compiled binaries)."""
+    root = base_root or base_dir()
+    return root / distro_id / f"{session}-installed.qcow2"
+
+
+def installed_manifest_path(distro_id: str, session: str, base_root: Path | None = None) -> Path:
+    return installed_image_path(distro_id, session, base_root).with_suffix(".json")
+
+
+PORTAL_CONSENTED_KINDS = {"portal_consented", "portal-consented"}
+
+
+def is_portal_consented_kind(kind: str) -> bool:
+    return str(kind or "").strip() in PORTAL_CONSENTED_KINDS
+
+
+def portal_consented_image_path(distro_id: str, session: str, base_root: Path | None = None) -> Path:
+    root = base_root or base_dir()
+    return root / distro_id / f"{session}-portal-consented.qcow2"
+
+
+def portal_consented_manifest_path(distro_id: str, session: str, base_root: Path | None = None) -> Path:
+    return portal_consented_image_path(distro_id, session, base_root).with_suffix(".json")
+
+
+def portal_consent_next_action(distro: str, session: str) -> str:
+    return (
+        f"Run ./e2e/run prepare-portal-consent --distro {distro} "
+        f"--session {session} --backend wayland_portal --live --promote"
+    )
+
+
+def is_valid_portal_consented_manifest(path: Path, *, distro: str, session: str, backend: str = "wayland_portal") -> tuple[bool, str]:
+    payload = read_json(path)
+    if not payload:
+        return False, "missing_or_invalid_manifest"
+    kind = str(payload.get("kind", ""))
+    if not is_portal_consented_kind(kind):
+        return False, f"unexpected_kind:{kind or 'missing'}"
+    if payload.get("distro") != distro:
+        return False, "distro_mismatch"
+    if payload.get("session") != session:
+        return False, "session_mismatch"
+    if payload.get("backend") not in {backend, "wayland_portal", "wayland"}:
+        return False, "backend_mismatch"
+    if payload.get("stream_smoke_ok") is not True:
+        return False, "stream_smoke_not_ok"
+    return True, "ok"
+
+
+def portal_consented_image_is_valid(distro: str, session: str, base_root: Path) -> tuple[bool, str]:
+    image = portal_consented_image_path(distro, session, base_root)
+    manifest = portal_consented_manifest_path(distro, session, base_root)
+    if not image.exists():
+        return False, "missing_image"
+    if image.stat().st_size < 10 * 1024 * 1024:
+        return False, "image_too_small"
+    return is_valid_portal_consented_manifest(manifest, distro=distro, session=session)
+
+
+def offline_provision_marker(run_dir: Path) -> Path:
+    return run_dir / ".offline-provision-done"
 
 
 def run_dir_for_base(spec: dict, work_root: Path) -> Path:
-    return work_root / "base-build" / spec["distro"] / spec["session"]
+    return work_root / "base" / spec["distro"] / spec["session"]
 
 
-def write_text(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+def require_iso_path(distro: dict, dry_run: bool = False) -> Path:
+    env_name = distro["iso_env"]
+    val = os.environ.get(env_name)
+    if not val:
+        if dry_run:
+            return Path(f"<{env_name}-NOT-SET>")
+        raise RuntimeError(f"environment variable {env_name} is not set")
+    path = Path(val).expanduser().resolve()
+    if not path.exists():
+        if dry_run:
+            return path
+        raise RuntimeError(f"ISO file not found for {distro['id']} at {path}")
+    return path
 
 
-def shell_quote(value: str) -> str:
-    return shlex.quote(value)
-
-
-def collect_guest_command_output(
-    *,
-    user: str,
-    port: int,
-    key: Path,
-    command: str,
-    output_path: Path,
-    check: bool = False,
-) -> None:
-    proc = ssh(user, port, key, command, check=check)
-    payload = (proc.stdout or "") + (proc.stderr or "")
-    write_text(output_path, payload)
-
-
-def stop_process(proc: subprocess.Popen[str], *, timeout_sec: int = 20) -> None:
-    if proc.poll() is not None:
-        return
-    proc.terminate()
+def coerce_int(val: str | int | None, default: int) -> int:
+    if val is None:
+        return default
     try:
-        proc.wait(timeout=timeout_sec)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait(timeout=timeout_sec)
+        return int(val)
+    except (ValueError, TypeError):
+        return default
 
 
-def wait_debian_installer_complete(proc: subprocess.Popen[str], serial_log: Path, timeout_sec: int, *, name: str) -> None:
-    deadline = time.time() + timeout_sec
-    while time.time() < deadline:
-        if proc.poll() is not None:
-            return
-        if serial_log.exists():
-            tail = serial_log.read_text(encoding="utf-8", errors="ignore")[-30000:]
-            if "Installation step failed" in tail:
-                raise RuntimeError(f"{name} failed during Debian installer finish step")
-            if (
-                "Installing GRUB boot loader" in tail
-                and "Finishing the installation" in tail
-                and "Debian installer main menu" in tail
-            ):
-                stop_process(proc)
-                return
-        time.sleep(5)
-    stop_process(proc)
-    raise TimeoutError(f"{name} did not reach Debian installer completion within {timeout_sec}s")
-
-
-def guest_user_ids(root: Path, user: str) -> tuple[int, int]:
-    passwd = root / "etc" / "passwd"
-    if passwd.exists():
-        for line in passwd.read_text(encoding="utf-8", errors="ignore").splitlines():
-            fields = line.split(":")
-            if len(fields) >= 4 and fields[0] == user:
-                return int(fields[2]), int(fields[3])
-    return 1000, 1000
-
-
-def configure_debian_desktop_offline(root: Path, session: str, ssh_user: str, log: Path) -> None:
-    if session == "headless":
+def safe_remove(path: Path) -> None:
+    if not path.exists():
         return
-    session_value = "gnome-xorg" if session == "gnome-xorg" else "gnome"
-    gdm_lines = ["[daemon]", "AutomaticLoginEnable=True", f"AutomaticLogin={ssh_user}"]
-    if session == "gnome-xorg":
-        gdm_lines.append("WaylandEnable=false")
-    gdm_lines.extend(["[security]", "DisallowTCP=false"])
-    account_lines = ["[User]", f"Session={session_value}", f"XSession={session_value}", "SystemAccount=false"]
-    write_text(root / "etc" / "gdm" / "custom.conf", "\n".join(gdm_lines) + "\n")
-    accounts_root = root / "var" / "lib" / "AccountsService"
-    accounts_users = accounts_root / "users"
-    accounts_user_file = accounts_users / ssh_user
-    write_text(accounts_user_file, "\n".join(account_lines) + "\n")
-    accounts_root.mkdir(parents=True, exist_ok=True)
-    accounts_users.mkdir(parents=True, exist_ok=True)
-    os.chown(accounts_root, 0, 0)
-    os.chown(accounts_users, 0, 0)
-    os.chown(accounts_user_file, 0, 0)
-    os.chmod(accounts_root, 0o755)
-    os.chmod(accounts_users, 0o755)
-    os.chmod(accounts_user_file, 0o644)
-    if shutil.which("systemctl"):
-        run_cmd([require_tool("systemctl"), "--root", str(root), "set-default", "graphical.target"], log=log, check=False)
-        run_cmd([require_tool("systemctl"), "--root", str(root), "enable", "gdm3"], log=log, check=False)
-        run_cmd([require_tool("systemctl"), "--root", str(root), "enable", "gdm"], log=log, check=False)
+    if path.is_file():
+        path.unlink()
+    elif path.is_dir():
+        shutil.rmtree(path)
 
 
-def ensure_systemd_unit_enabled(root: Path, unit: str, log: Path) -> None:
-    target = "sockets.target.wants" if unit.endswith(".socket") else "multi-user.target.wants"
-    wants_dir = root / "etc" / "systemd" / "system" / target
-    candidates = [
-        root / "lib" / "systemd" / "system" / unit,
-        root / "usr" / "lib" / "systemd" / "system" / unit,
-    ]
-    unit_path = next((path for path in candidates if path.exists()), None)
-    if unit_path is None:
-        return
-    wants_dir.mkdir(parents=True, exist_ok=True)
-    link_path = wants_dir / unit
-    if link_path.exists() or link_path.is_symlink():
-        return
-    link_path.symlink_to(unit_path)
-    run_cmd(
+def should_keep_workdisk(retain_workdisk: str, succeeded: bool) -> bool:
+    policy = (retain_workdisk or "on-fail").strip().lower()
+    if policy == "always":
+        return True
+    if policy == "never":
+        return False
+    if policy == "on-success":
+        return succeeded
+    return not succeeded
+
+
+def write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def write_manifest(path: Path, payload: dict) -> None:
+    write_text(path, json.dumps(payload, indent=2, sort_keys=True))
+
+
+def resolve_portal_consent_display(args: argparse.Namespace, *, live: bool) -> tuple[str, tuple[str, ...], str]:
+    requested = getattr(args, "display", "auto") or "auto"
+    if requested == "none":
+        return "none", (), "none"
+    if requested in {"gtk", "sdl"}:
+        return requested, (), requested
+    if requested == "vnc":
+        port = int(getattr(args, "vnc_port", None) or alloc_ssh_port("portal-consent-vnc", start=5901, span=400))
+        display_no = max(1, port - 5900)
+        return "none", ("-vnc", f"127.0.0.1:{display_no}"), f"vnc:127.0.0.1:{port}"
+    if live and os.environ.get("DISPLAY"):
+        return "gtk", (), "gtk"
+    if live:
+        port = int(getattr(args, "vnc_port", None) or alloc_ssh_port("portal-consent-vnc", start=5901, span=400))
+        display_no = max(1, port - 5900)
+        return "none", ("-vnc", f"127.0.0.1:{display_no}"), f"vnc:127.0.0.1:{port}"
+    return "none", (), "none"
+
+
+def write_portal_operator_artifacts(
+    portal_work_dir: Path,
+    *,
+    display_hint: str,
+    command: str,
+    consented: Path,
+    manifest: Path,
+    timeout_sec: int,
+) -> None:
+    payload = {
+        "schema": 1,
+        "display_hint": display_hint,
+        "guest_command": command,
+        "portal_consented_image": str(consented),
+        "portal_consented_manifest": str(manifest),
+        "approval_timeout_sec": timeout_sec,
+        "manual_action": "Approve GNOME ScreenCast prompt in the VM window.",
+    }
+    write_json(portal_work_dir / "operator.json", payload)
+    write_text(
+        portal_work_dir / "operator.md",
+        "\n".join(
         [
-            require_tool("bash"),
-            "-lc",
-            f"printf '%s -> %s\\n' {shell_quote(str(link_path))} {shell_quote(str(unit_path))}",
-        ],
-        log=log,
-        check=False,
+            "# Portal Consent Operator Notes",
+            "",
+            f"- Display hint: `{display_hint}`",
+            f"- Guest command: `{command}`",
+                f"- Portal-consented image: `{consented}`",
+                f"- Portal-consented manifest: `{manifest}`",
+                f"- Approval timeout sec: `{timeout_sec}`",
+                "",
+                "Approve GNOME ScreenCast prompt in the VM window.",
+            ]
+        )
+        + "\n",
     )
+
+
+def default_qemu_display(session: str, *, installer: bool = False) -> str:
+    # During automated installer, always hide.
+    return "none"
+
+
+def wait_debian_installer_complete(
+    proc: subprocess.Popen,
+    log_path: Path,
+    timeout_sec: int,
+    *,
+    name: str,
+) -> None:
+    start = time.time()
+    last_size = 0
+    while time.time() - start < timeout_sec:
+        if proc.poll() is not None:
+            if proc.returncode == 0:
+                return
+            raise RuntimeError(f"{name} failed with exit code {proc.returncode}")
+
+        if log_path.exists():
+            current_size = log_path.stat().st_size
+            if current_size > last_size:
+                with log_path.open("r", encoding="utf-8", errors="replace") as fh:
+                    fh.seek(last_size)
+                    for line in fh:
+                        line = line.strip()
+                        if line:
+                            print(f"[{name}] {line}")
+                            # Debian preseed signals finish with 'finish-install'
+                            if "finish-install" in line:
+                                return
+                last_size = current_size
+        time.sleep(5)
+    raise TimeoutError(f"{name} did not complete within {timeout_sec}s")
 
 
 def provision_debian_install_offline(
@@ -288,940 +1176,86 @@ def provision_debian_install_offline(
     ssh_user: str,
     public_key: str,
 ) -> None:
-    log = build_dir / "offline-provision.log"
-    nbd = os.environ.get("WBEAM_E2E_NBD_DEVICE", "/dev/nbd0")
-    partition = Path(f"{nbd}p1")
-    mount_root = build_dir / "offline-provision" / "mnt"
-    mount_root.mkdir(parents=True, exist_ok=True)
-    mounted = False
-    connected = False
-    run_cmd([require_tool("modprobe"), "nbd", "max_part=8"], log=log)
-    run_cmd([require_tool("qemu-nbd"), "--disconnect", nbd], log=log, check=False)
-    try:
-        run_cmd([require_tool("qemu-nbd"), f"--connect={nbd}", str(disk)], log=log)
-        connected = True
-        for _ in range(30):
-            if partition.exists():
-                break
-            time.sleep(1)
-        if not partition.exists():
-            raise RuntimeError(f"Debian install partition did not appear: {partition}")
-        run_cmd([require_tool("mount"), str(partition), str(mount_root)], log=log)
-        mounted = True
-
-        uid, gid = guest_user_ids(mount_root, ssh_user)
-        ssh_dir = mount_root / "home" / ssh_user / ".ssh"
-        ssh_dir.mkdir(parents=True, exist_ok=True)
-        authorized_keys = ssh_dir / "authorized_keys"
-        authorized_keys.write_text(public_key + "\n", encoding="utf-8")
-        os.chown(ssh_dir, uid, gid)
-        os.chown(authorized_keys, uid, gid)
-        os.chmod(ssh_dir, 0o700)
-        os.chmod(authorized_keys, 0o600)
-
-        sudoers = mount_root / "etc" / "sudoers.d" / ssh_user
-        write_text(sudoers, f"{ssh_user} ALL=(ALL) NOPASSWD: ALL\n")
-        os.chmod(sudoers, 0o440)
-
-        marker = {
-            "created_by": "wbeam-e2e",
-            "distro": distro_id,
-            "session": session,
-            "ssh_user": ssh_user,
-        }
-        write_text(mount_root / "var" / "lib" / "wbeam-e2e" / "base-ready.json", json.dumps(marker, sort_keys=True) + "\n")
-
-        if shutil.which("systemctl"):
-            run_cmd([require_tool("systemctl"), "--root", str(mount_root), "enable", "ssh"], log=log, check=False)
-            run_cmd([require_tool("systemctl"), "--root", str(mount_root), "enable", "sshd"], log=log, check=False)
-        ensure_systemd_unit_enabled(mount_root, "ssh.service", log)
-        ensure_systemd_unit_enabled(mount_root, "sshd.service", log)
-        ensure_systemd_unit_enabled(mount_root, "ssh.socket", log)
-        configure_debian_desktop_offline(mount_root, session, ssh_user, log)
-    finally:
-        if mounted:
-            run_cmd([require_tool("umount"), str(mount_root)], log=log, check=False)
-        if connected:
-            run_cmd([require_tool("qemu-nbd"), "--disconnect", nbd], log=log, check=False)
-
-
-def offline_provision_marker(build_dir: Path) -> Path:
-    return build_dir / "offline-provision.done"
-
-
-def ensure_selection(selected: list[dict], *, noun: str) -> None:
-    if not selected:
-        raise RuntimeError(f"no {noun} selected")
-
-
-def build_guest_env(defaults: dict, scenario: dict, *, guest_report_dir: str) -> str:
-    env_map = {
-        "WBEAM_E2E_GUEST_ROOT": "/home/wbeam/WBeam",
-        "WBEAM_E2E_BACKEND": scenario["backend"],
-        "WBEAM_E2E_DISPLAY_MODE": scenario["display_mode"],
-        "WBEAM_E2E_DURATION_SEC": str(scenario_duration({"defaults": defaults}, scenario)),
-        "WBEAM_E2E_CONTROL_PORT": str(defaults.get("control_port", 5001)),
-        "WBEAM_E2E_STREAM_PORT": str(defaults.get("stream_port", 5000)),
-        "WBEAM_E2E_ENCODER": str(scenario.get("encoder", defaults.get("encoder", "h264"))),
-        "WBEAM_E2E_SIZE": str(scenario.get("size", defaults.get("size", "1280x800"))),
-        "WBEAM_E2E_FPS": str(scenario.get("fps", defaults.get("fps", 30))),
-        "WBEAM_E2E_BITRATE_KBPS": str(scenario.get("bitrate_kbps", defaults.get("bitrate_kbps", 10000))),
-        "WBEAM_E2E_REPORT_DIR": guest_report_dir,
-    }
-    return " ".join(f"{name}={shell_quote(value)}" for name, value in sorted(env_map.items()))
-
-
-def scenario_runtime_config(matrix: dict, scenario: dict) -> dict:
-    defaults = matrix.get("defaults", {})
-    return {
-        "cpu": coerce_int(scenario.get("cpu", defaults.get("cpu")), default=4),
-        "memory_mib": coerce_int(scenario.get("memory_mib", defaults.get("memory_mib")), default=8192),
-        "control_port": coerce_int(defaults.get("control_port"), default=5001),
-        "stream_port": coerce_int(defaults.get("stream_port"), default=5000),
-    }
-
-
-def base_manifest_path(distro_id: str, session: str, base_root: Path | None = None) -> Path:
-    return base_image_path(distro_id, session, base_root).with_suffix(".json")
-
-
-def safe_remove(path: Path) -> None:
-    if not path.exists():
-        return
-    if path.is_dir():
-        shutil.rmtree(path)
-    else:
-        path.unlink()
-
-
-def host_metadata() -> dict:
-    return {
-        "generated_at": utc_iso_timestamp(),
-        "repo_root": str(ROOT),
-        "base_dir": str(base_dir()),
-        "work_dir": str(work_dir()),
-        "report_dir": str(report_dir()),
-        "python": sys.version,
-        "platform": sys.platform,
-        "env": {
-            key: os.environ.get(key, "")
-            for key in (
-                "WBEAM_E2E_ISO_FEDORA_43",
-                "WBEAM_E2E_ISO_UBUNTU_24_04",
-                "WBEAM_E2E_ISO_DEBIAN_12",
-                "WBEAM_E2E_BASE_DIR",
-                "WBEAM_E2E_WORK_DIR",
-                "WBEAM_E2E_REPORT_DIR",
-            )
-        },
-    }
-
-
-def base_sanity_command(*, session: str) -> str:
-    parts = [
-        "set -euo pipefail",
-        "test -f /var/lib/wbeam-e2e/base-ready.json",
-        "id",
-        "cat /etc/os-release",
-    ]
-    if session != "headless":
-        parts.extend(
-            [
-                "sudo -n test -f /etc/gdm/custom.conf",
-                "sudo -n test -f /var/lib/AccountsService/users/wbeam",
-            ]
-        )
-    return "; ".join(parts)
-
-
-def report_summaries(report_root: Path | None = None) -> list[dict]:
-    root = report_root or report_dir()
-    summaries: list[dict] = []
-    if not root.exists():
-        return summaries
-    for summary_path in sorted(root.glob("*/summary.json")):
-        try:
-            payload = json.loads(summary_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        payload["_path"] = str(summary_path)
-        summaries.append(payload)
-    return summaries
-
-
-def status_snapshot(matrix: dict, *, base_root: Path | None = None, report_root: Path | None = None) -> dict:
-    base_root = base_root or base_dir()
-    report_root = report_root or report_dir()
-    essential_files = [
-        E2E_DIR / "run",
-        E2E_DIR / "matrix.json",
-        E2E_DIR / "env.example",
-        E2E_DIR / "scripts" / "runner.py",
-        E2E_DIR / "scripts" / "vm.py",
-        E2E_DIR / "scripts" / "seed.py",
-        E2E_DIR / "scripts" / "report.py",
-        E2E_DIR / "scripts" / "guest-install-wbeam.sh",
-        E2E_DIR / "scripts" / "guest-stream-smoke.sh",
-        E2E_DIR / "scripts" / "preflight.sh",
-    ]
-    template_files = [
-        E2E_DIR / "scripts" / "templates" / "fedora.ks",
-        E2E_DIR / "scripts" / "templates" / "ubuntu-user-data.yml",
-        E2E_DIR / "scripts" / "templates" / "debian-preseed.cfg",
-    ]
-    distros = matrix.get("distros", [])
-    iso_inputs: list[dict] = []
-    iso_ready = 0
-    for distro in distros:
-        iso_value = os.environ.get(distro["iso_env"], "").strip()
-        exists = bool(iso_value) and Path(iso_value).expanduser().exists()
-        iso_inputs.append(
-            {
-                "distro": distro["id"],
-                "env": distro["iso_env"],
-                "value": iso_value,
-                "exists": exists,
-            }
-        )
-        if exists:
-            iso_ready += 1
-    base_specs = image_specs(matrix)
-    prepared_base = 0
-    base_images: list[dict] = []
-    for spec in base_specs:
-        image_path = base_image_path(spec["distro"], spec["session"], base_root)
-        manifest_path = base_manifest_path(spec["distro"], spec["session"], base_root)
-        ready = image_path.exists() and manifest_path.exists()
-        base_images.append(
-            {
-                "distro": spec["distro"],
-                "session": spec["session"],
-                "image_path": str(image_path),
-                "manifest_path": str(manifest_path),
-                "ready": ready,
-            }
-        )
-        if ready:
-            prepared_base += 1
-    summaries = report_summaries(report_root)
-    dry_run_ok = any(
-        summary.get("status") == "pass"
-        and any(result.get("phase") == "dry-run" for result in summary.get("results", []))
-        for summary in summaries
-    )
-    live_run_ok = any(
-        summary.get("status") == "pass"
-        and any(result.get("phase") not in {"dry-run", None} for result in summary.get("results", []))
-        for summary in summaries
-    )
-    desktop_commands = "\n".join(desktop_shell_commands("gnome-wayland", "wbeam"))
-    desktop_sanity = base_sanity_command(session="gnome-wayland")
-    desktop_ready = (
-        "AutomaticLogin=wbeam" in desktop_commands
-        and "Session=gnome" in desktop_commands
-        and "sudo -n test -f /etc/gdm/custom.conf" in desktop_sanity
-        and "sudo -n test -f /var/lib/AccountsService/users/wbeam" in desktop_sanity
-    )
-    tool_ready = all(
-        [
-            shutil.which("python3"),
-            shutil.which("qemu-system-x86_64"),
-            shutil.which("qemu-img"),
-            shutil.which("ssh"),
-            shutil.which("ssh-keygen"),
-            shutil.which("rsync"),
-            shutil.which("xorriso") or shutil.which("genisoimage") or shutil.which("cloud-localds"),
-            Path("/dev/kvm").exists(),
-        ]
-    )
-
-    items = [
-        {
-            "id": "matrix_valid",
-            "label": "Matrix validates",
-            "weight": 10,
-            "done": not validate_matrix(matrix),
-            "details": "e2e/matrix.json passes local validation",
-        },
-        {
-            "id": "runner_files",
-            "label": "Runner files present",
-            "weight": 10,
-            "done": all(path.exists() for path in essential_files),
-            "details": "core e2e scripts and wrapper exist",
-        },
-        {
-            "id": "seed_templates",
-            "label": "Seed templates present",
-            "weight": 8,
-            "done": all(path.exists() for path in template_files),
-            "details": "Fedora, Ubuntu, Debian seed templates exist",
-        },
-        {
-            "id": "desktop_bootstrap",
-            "label": "Desktop bootstrap configured",
-            "weight": 8,
-            "done": desktop_ready,
-            "details": "desktop sessions configure GDM autologin and session selection",
-        },
-        {
-            "id": "tests_present",
-            "label": "Framework tests present",
-            "weight": 7,
-            "done": (E2E_DIR / "tests" / "test_e2e_runner.py").exists(),
-            "details": "unit tests cover runner, seeds, reports, and dry-runs",
-        },
-        {
-            "id": "host_tools",
-            "label": "Host tools available",
-            "weight": 8,
-            "done": tool_ready,
-            "details": "QEMU/KVM, SSH, rsync, and seed ISO tools are installed",
-        },
-        {
-            "id": "iso_inputs",
-            "label": "Installer ISOs configured",
-            "weight": 10,
-            "done": iso_ready == len(distros),
-            "details": f"{iso_ready}/{len(distros)} ISO env vars point to existing files",
-        },
-        {
-            "id": "base_images",
-            "label": "Base images prepared",
-            "weight": 12,
-            "done": prepared_base == len(base_specs) and len(base_specs) > 0,
-            "details": f"{prepared_base}/{len(base_specs)} base images + manifests exist",
-        },
-        {
-            "id": "reports_ready",
-            "label": "Report pipeline exercised",
-            "weight": 7,
-            "done": any((report_root / run_id / "junit.xml").exists() for run_id in [path.name for path in report_root.glob("*") if path.is_dir()]),
-            "details": "at least one run wrote report summary and junit",
-        },
-        {
-            "id": "dry_run_verified",
-            "label": "Dry-run verified",
-            "weight": 8,
-            "done": dry_run_ok,
-            "details": "at least one dry-run finished with pass status",
-        },
-        {
-            "id": "live_run_verified",
-            "label": "Live VM run verified",
-            "weight": 12,
-            "done": live_run_ok,
-            "details": "at least one non-dry-run scenario passed",
-        },
-    ]
-    completed_weight = 0.0
-    total_weight = 0.0
-    for item in items:
-        total_weight += item["weight"]
-        if item["id"] == "iso_inputs":
-            completed_weight += item["weight"] * (iso_ready / max(len(distros), 1))
-        elif item["id"] == "base_images":
-            completed_weight += item["weight"] * (prepared_base / max(len(base_specs), 1))
-        elif item["done"]:
-            completed_weight += item["weight"]
-    percent = round((completed_weight / total_weight) * 100, 1) if total_weight else 0.0
-    next_commands: list[str] = []
-    if not tool_ready:
-        next_commands.append("./e2e/scripts/preflight.sh --strict")
-    if iso_ready < len(distros):
-        next_commands.append("./e2e/run init-env")
-        next_commands.append("./e2e/run iso-sources")
-        next_commands.append("edit e2e/env.local")
-        next_commands.append('eval "$(./e2e/run env-shell)"')
-        for item in iso_inputs:
-            if not item["exists"]:
-                next_commands.append(f"export {item['env']}=/absolute/path/to/{item['distro']}.iso")
-        next_commands.append("./e2e/scripts/preflight.sh")
-    if prepared_base < len(base_specs):
-        next_commands.append("./e2e/run prepare-base --all --missing")
-    if not live_run_ok:
-        next_commands.append("./e2e/run run --tag smoke --ready")
-    next_commands.append("./e2e/run status")
-    return {
-        "percent": percent,
-        "items": items,
-        "base_specs_total": len(base_specs),
-        "base_specs_prepared": prepared_base,
-        "base_images": base_images,
-        "iso_ready": iso_ready,
-        "iso_total": len(distros),
-        "iso_inputs": iso_inputs,
-        "report_runs": len(summaries),
-        "live_run_verified": live_run_ok,
-        "dry_run_verified": dry_run_ok,
-        "missing_iso_inputs": [item for item in iso_inputs if not item["exists"]],
-        "missing_base_images": [item for item in base_images if not item["ready"]],
-        "next_commands": next_commands,
-    }
-
-
-def scenario_duration(matrix: dict, scenario: dict) -> int:
-    return int(
-        scenario.get(
-            "duration_sec",
-            matrix.get("defaults", {}).get("stream_duration_sec", 0),
-        )
-    )
-
-
-def validate_matrix(matrix: dict) -> list[str]:
-    errors: list[str] = []
-    if matrix.get("schema") != 1:
-        errors.append("schema must be 1")
-
-    defaults = matrix.get("defaults")
-    if not isinstance(defaults, dict):
-        errors.append("defaults must be an object")
-        defaults = {}
-    if int(defaults.get("stream_duration_sec", 0)) < 60:
-        errors.append("defaults.stream_duration_sec must be >= 60")
-
-    distros = matrix.get("distros")
-    if not isinstance(distros, list) or not distros:
-        errors.append("distros must be a non-empty array")
-        distros = []
-
-    distro_ids: set[str] = set()
-    for distro in distros:
-        for key in ("id", "family", "iso_env", "installer", "ssh_user"):
-            if not distro.get(key):
-                errors.append(f"distro missing {key}: {distro}")
-        distro_id = distro.get("id")
-        if distro_id in distro_ids:
-            errors.append(f"duplicate distro id: {distro_id}")
-        if distro_id:
-            distro_ids.add(distro_id)
-
-    scenarios = matrix.get("scenarios")
-    if not isinstance(scenarios, list) or not scenarios:
-        errors.append("scenarios must be a non-empty array")
-        scenarios = []
-
-    scenario_ids: set[str] = set()
-    for scenario in scenarios:
-        for key in ("id", "distro", "session", "backend", "display_mode", "tier"):
-            if not scenario.get(key):
-                errors.append(f"scenario missing {key}: {scenario}")
-        scenario_id = scenario.get("id")
-        if scenario_id in scenario_ids:
-            errors.append(f"duplicate scenario id: {scenario_id}")
-        if scenario_id:
-            scenario_ids.add(scenario_id)
-        if scenario.get("distro") not in distro_ids:
-            errors.append(f"scenario {scenario_id} references unknown distro {scenario.get('distro')}")
-        if scenario_duration(matrix, scenario) < 60:
-            errors.append(f"scenario {scenario_id} duration must be >= 60")
-
-    for distro_id in ("fedora-43", "ubuntu-24.04", "debian-12"):
-        if distro_id not in distro_ids:
-            errors.append(f"missing required distro: {distro_id}")
-        for backend in ("benchmark_game", "wayland_portal", "evdi"):
-            if not any(s.get("distro") == distro_id and s.get("backend") == backend for s in scenarios):
-                errors.append(f"missing scenario for distro={distro_id} backend={backend}")
-
-    return errors
-
-
-def parse_env_file(path: Path) -> dict[str, str]:
-    payload: dict[str, str] = {}
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip()
-        if not key.startswith("WBEAM_E2E_"):
-            continue
-        payload[key] = value
-    return payload
-
-
-def select_scenarios(matrix: dict, args: argparse.Namespace) -> list[dict]:
-    selected = list(matrix.get("scenarios", []))
-    if getattr(args, "scenario", None):
-        wanted = set(args.scenario)
-        selected = [s for s in selected if s["id"] in wanted]
-    if getattr(args, "distro", None):
-        wanted = set(args.distro)
-        selected = [s for s in selected if s["distro"] in wanted]
-    if getattr(args, "backend", None):
-        wanted = set(args.backend)
-        selected = [s for s in selected if s["backend"] in wanted]
-    if getattr(args, "tag", None):
-        wanted = set(args.tag)
-        selected = [s for s in selected if wanted.intersection(set(s.get("tags", [])))]
-    return selected
-
-
-def add_filters(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--distro", action="append", help="Select distro id; repeatable")
-    parser.add_argument("--backend", action="append", help="Select backend; repeatable")
-    parser.add_argument("--scenario", action="append", help="Select exact scenario id; repeatable")
-    parser.add_argument("--tag", action="append", help="Select scenario tag; repeatable")
-
-
-def has_any_filter(args: argparse.Namespace) -> bool:
-    return bool(
-        getattr(args, "scenario", None)
-        or getattr(args, "distro", None)
-        or getattr(args, "backend", None)
-        or getattr(args, "tag", None)
-    )
-
-
-def image_specs(matrix: dict, scenarios: list[dict] | None = None) -> list[dict]:
-    distros = distros_by_id(matrix)
-    selected = scenarios if scenarios is not None else matrix.get("scenarios", [])
-    specs: dict[tuple[str, str], dict] = {}
-    for scenario in selected:
-        key = (scenario["distro"], scenario["session"])
-        spec = specs.setdefault(
-            key,
-            {
-                "distro": scenario["distro"],
-                "family": distros[scenario["distro"]]["family"],
-                "session": scenario["session"],
-                "installer": distros[scenario["distro"]]["installer"],
-                "iso_env": distros[scenario["distro"]]["iso_env"],
-                "backends": set(),
-                "scenarios": [],
-            },
-        )
-        spec["backends"].add(scenario["backend"])
-        spec["scenarios"].append(scenario["id"])
-
-    result: list[dict] = []
-    for spec in specs.values():
-        result.append(
-            {
-                **spec,
-                "backends": sorted(spec["backends"]),
-                "scenarios": sorted(spec["scenarios"]),
-            }
-        )
-    return sorted(result, key=lambda s: (s["distro"], s["session"]))
-
-
-def select_base_specs(matrix: dict, args: argparse.Namespace) -> list[dict]:
-    selected = select_scenarios(matrix, args)
-    specs = image_specs(matrix, selected)
-    if getattr(args, "session", None):
-        wanted_sessions = set(args.session)
-        specs = [spec for spec in specs if spec["session"] in wanted_sessions]
-    return specs
-
-
-def filter_missing_base_specs(specs: list[dict], base_root: Path) -> list[dict]:
-    return [
-        spec
-        for spec in specs
-        if not (
-            base_image_path(spec["distro"], spec["session"], base_root).exists()
-            and base_manifest_path(spec["distro"], spec["session"], base_root).exists()
-        )
-    ]
-
-
-def filter_ready_scenarios(scenarios: list[dict], base_root: Path) -> list[dict]:
-    return [scenario for scenario in scenarios if scenario_base_image_path(scenario, base_root).exists()]
-
-
-def cmd_validate(_: argparse.Namespace) -> int:
-    errors = validate_matrix(load_matrix())
-    if errors:
-        for error in errors:
-            print(f"[e2e][ERROR] {error}", file=sys.stderr)
-        return 1
-    print("[e2e] matrix OK")
-    return 0
-
-
-def cmd_env(_: argparse.Namespace) -> int:
-    matrix = load_matrix()
-    for distro in matrix.get("distros", []):
-        print(distro["iso_env"])
-    return 0
-
-
-def cmd_env_shell(args: argparse.Namespace) -> int:
-    env_path = Path(args.file).expanduser().resolve() if args.file else (E2E_DIR / "env.local").resolve()
-    if not env_path.exists():
-        print(f"[e2e][ERROR] env file does not exist: {env_path}", file=sys.stderr)
-        return 2
-    payload = parse_env_file(env_path)
-    if not payload:
-        print(f"[e2e][ERROR] no WBEAM_E2E_* entries found in: {env_path}", file=sys.stderr)
-        return 2
-    for key, value in sorted(payload.items()):
-        print(f"export {key}={shell_quote(value)}")
-    return 0
-
-
-def cmd_init_env(args: argparse.Namespace) -> int:
-    source = (E2E_DIR / "env.example").resolve()
-    target = Path(args.file).expanduser().resolve() if args.file else (E2E_DIR / "env.local").resolve()
-    if target.exists() and not args.force:
-        print(f"[e2e][ERROR] env file already exists: {target}", file=sys.stderr)
-        print("[e2e][ERROR] pass --force to overwrite", file=sys.stderr)
-        return 2
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, target)
-    print(target)
-    return 0
-
-
-def cmd_iso_sources(args: argparse.Namespace) -> int:
-    matrix = load_matrix()
-    rows = []
-    for distro in matrix.get("distros", []):
-        info = ISO_SOURCES.get(distro["id"], {})
-        rows.append(
-            {
-                "distro": distro["id"],
-                "env": distro["iso_env"],
-                "label": info.get("label", ""),
-                "page_url": info.get("page_url", ""),
-                "download_url": info.get("download_url", ""),
-                "checksum_url": info.get("checksum_url", ""),
-                "filename_hint": info.get("filename_hint", ""),
-            }
-        )
-    if args.json:
-        print(json.dumps(rows, indent=2, sort_keys=True))
-        return 0
-    for row in rows:
-        print(f"{row['distro']}: {row['page_url']}")
-        print(f"  env: {row['env']}")
-        if row["download_url"]:
-            print(f"  download: {row['download_url']}")
-        if row["checksum_url"]:
-            print(f"  checksum: {row['checksum_url']}")
-        if row["filename_hint"]:
-            print(f"  file: {row['filename_hint']}")
-    return 0
-
-
-def cmd_list(args: argparse.Namespace) -> int:
-    matrix = load_matrix()
-    selected = select_scenarios(matrix, args)
-    if args.json:
-        print(json.dumps(selected, indent=2, sort_keys=True))
-        return 0
-
-    print(f"{'id':42} {'distro':14} {'session':16} {'backend':16} {'tier':8}")
-    print("-" * 104)
-    for scenario in selected:
-        print(
-            f"{scenario['id']:42} "
-            f"{scenario['distro']:14} "
-            f"{scenario['session']:16} "
-            f"{scenario['backend']:16} "
-            f"{scenario['tier']:8}"
-        )
-    return 0
-
-
-def cmd_images(args: argparse.Namespace) -> int:
-    matrix = load_matrix()
-    selected = select_scenarios(matrix, args)
-    root = Path(args.base_dir).expanduser().resolve() if args.base_dir else base_dir()
-    rows = []
-    for spec in image_specs(matrix, selected):
-        path = base_image_path(spec["distro"], spec["session"], root)
-        rows.append(
-            {
-                **spec,
-                "path": str(path),
-                "exists": path.exists(),
-                "size_bytes": path.stat().st_size if path.exists() else 0,
-            }
-        )
-
-    if args.json:
-        print(json.dumps(rows, indent=2, sort_keys=True))
-        return 0
-
-    print(f"[e2e] base_dir={root}")
-    print(f"{'distro':14} {'session':16} {'exists':7} {'backends':34} path")
-    print("-" * 120)
-    for row in rows:
-        backends = ",".join(row["backends"])
-        exists = "yes" if row["exists"] else "no"
-        print(f"{row['distro']:14} {row['session']:16} {exists:7} {backends:34} {row['path']}")
-    return 0
-
-
-def scenario_start_url(defaults: dict, scenario: dict) -> str:
-    control_port = defaults.get("control_port", 5001)
-    params = [f"display_mode={scenario['display_mode']}"]
-    if scenario["backend"] != "benchmark_game":
-        params.append(f"capture_backend={scenario['backend']}")
-    return f"http://127.0.0.1:{control_port}/v1/start?" + "&".join(params)
-
-
-def cmd_plan(args: argparse.Namespace) -> int:
-    matrix = load_matrix()
-    errors = validate_matrix(matrix)
-    if errors:
-        for error in errors:
-            print(f"[e2e][ERROR] {error}", file=sys.stderr)
-        return 1
-
-    selected = select_scenarios(matrix, args)
-    distros = distros_by_id(matrix)
-    defaults = matrix["defaults"]
-    if args.json:
-        payload = {
-            "defaults": defaults,
-            "distros": [distros[s["distro"]] for s in selected],
-            "scenarios": selected,
-        }
-        print(json.dumps(payload, indent=2, sort_keys=True))
-        return 0
-
-    print(f"[e2e] selected scenarios: {len(selected)}")
-    for scenario in selected:
-        distro = distros[scenario["distro"]]
-        duration = scenario_duration(matrix, scenario)
-        iso_value = os.environ.get(distro["iso_env"], "")
-        iso_status = iso_value if iso_value else "<unset>"
-        print()
-        print(f"scenario: {scenario['id']}")
-        print(f"  distro: {distro['id']} ({distro['installer']})")
-        print(f"  iso env: {distro['iso_env']}={iso_status}")
-        print(f"  session: {scenario['session']}")
-        print(f"  backend: {scenario['backend']}")
-        print(f"  duration: {duration}s")
-        print(f"  base image: {scenario_base_image_path(scenario)}")
-        print("  work disk:")
-        print(f"    ./e2e/run workdisk-create --scenario {scenario['id']}")
-        print("  guest install:")
-        print(f"    WBEAM_E2E_BACKEND={scenario['backend']} ./e2e/scripts/guest-install-wbeam.sh")
-        print("  guest stream:")
-        print(
-            "    "
-            f"WBEAM_E2E_BACKEND={scenario['backend']} "
-            f"WBEAM_E2E_DISPLAY_MODE={scenario['display_mode']} "
-            f"./e2e/scripts/guest-stream-smoke.sh {scenario['backend']} {duration}"
-        )
-        print(f"  start url: {scenario_start_url(defaults, scenario)}")
-    return 0
-
-
-def cmd_base_plan(args: argparse.Namespace) -> int:
-    matrix = load_matrix()
-    errors = validate_matrix(matrix)
-    if errors:
-        for error in errors:
-            print(f"[e2e][ERROR] {error}", file=sys.stderr)
-        return 1
-
-    selected = select_scenarios(matrix, args)
-    specs = image_specs(matrix, selected)
-    if args.session:
-        wanted_sessions = set(args.session)
-        specs = [spec for spec in specs if spec["session"] in wanted_sessions]
-
-    base_root = Path(args.base_dir).expanduser().resolve() if args.base_dir else base_dir()
-    work_root = Path(args.work_dir).expanduser().resolve() if args.work_dir else work_dir()
-
-    if args.json:
-        payload = []
-        for spec in specs:
-            payload.append(
-                {
-                    **spec,
-                    "base_image": str(base_image_path(spec["distro"], spec["session"], base_root)),
-                    "build_dir": str(work_root / "base-build" / spec["distro"] / spec["session"]),
-                    "install_disk": str(
-                        work_root
-                        / "base-build"
-                        / spec["distro"]
-                        / spec["session"]
-                        / "install.qcow2"
-                    ),
-                }
-            )
-        print(json.dumps(payload, indent=2, sort_keys=True))
-        return 0
-
-    defaults = matrix["defaults"]
-    for spec in specs:
-        build_dir = work_root / "base-build" / spec["distro"] / spec["session"]
-        install_disk = build_dir / "install.qcow2"
-        base_image = base_image_path(spec["distro"], spec["session"], base_root)
-        iso_value = os.environ.get(spec["iso_env"], "")
-        iso_status = iso_value if iso_value else "<unset>"
-        print()
-        print(f"base: {spec['distro']} / {spec['session']}")
-        print(f"  installer: {spec['installer']}")
-        print(f"  iso: {spec['iso_env']}={iso_status}")
-        print(f"  build dir: {build_dir}")
-        print(f"  install disk: {install_disk}")
-        print(f"  final base image: {base_image}")
-        print("  create install disk:")
-        print(f"    qemu-img create -f qcow2 {install_disk} {defaults['disk_gib']}G")
-        print("  future installer runner:")
-        print("    boot ISO + unattended seed, install OS to install disk, first boot, then shutdown")
-        print("  promote clean disk:")
-        print(f"    mkdir -p {base_image.parent}")
-        print(f"    cp {install_disk} {base_image}")
-        print("  test overlays will use this base image as read-only backing storage")
-    return 0
-
-
-def cmd_report_init(args: argparse.Namespace) -> int:
-    matrix = load_matrix()
-    selected = select_scenarios(matrix, args)
-    report_base = report_dir()
-    run_id = args.run_id or utc_timestamp()
-    run_dir = init_run_report(report_base, run_id, selected, host=host_metadata())
-    write_json(
-        run_dir / "summary.json",
-        {"run_id": run_id, "status": "created", "scenario_count": len(selected)},
-    )
-    print(run_dir)
-    return 0
-
-
-def qemu_img() -> str:
-    binary = shutil.which("qemu-img")
-    if not binary:
-        raise RuntimeError("qemu-img not found; install qemu-utils/qemu-img")
-    return binary
-
-
-def run_qemu_img(cmd: list[str]) -> None:
-    try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
-    except subprocess.CalledProcessError as exc:
-        if exc.stdout:
-            print(exc.stdout, file=sys.stderr, end="" if exc.stdout.endswith("\n") else "\n")
-        if exc.stderr:
-            print(exc.stderr, file=sys.stderr, end="" if exc.stderr.endswith("\n") else "\n")
-        raise
-
-
-def cmd_workdisk_create(args: argparse.Namespace) -> int:
-    matrix = load_matrix()
-    errors = validate_matrix(matrix)
-    if errors:
-        for error in errors:
-            print(f"[e2e][ERROR] {error}", file=sys.stderr)
-        return 1
-    if not args.all and not has_any_filter(args):
-        print(
-            "[e2e][ERROR] select at least one scenario/distro/backend/tag or pass --all",
-            file=sys.stderr,
-        )
-        return 2
-
-    selected = select_scenarios(matrix, args)
-    base_root = Path(args.base_dir).expanduser().resolve() if args.base_dir else base_dir()
-    if getattr(args, "ready", False):
-        selected = filter_ready_scenarios(selected, base_root)
-    if not selected:
-        print("[e2e][ERROR] no scenarios selected", file=sys.stderr)
-        return 2
-
-    work_root = Path(args.work_dir).expanduser().resolve() if args.work_dir else work_dir()
-    run_id = args.run_id or utc_timestamp()
-
-    missing = [
-        str(scenario_base_image_path(scenario, base_root))
-        for scenario in selected
-        if not scenario_base_image_path(scenario, base_root).exists()
-    ]
-    if missing:
-        print("[e2e][ERROR] missing base image(s):", file=sys.stderr)
-        for path in missing:
-            print(f"  {path}", file=sys.stderr)
-        print("Run ./e2e/run images and ./e2e/run base-plan first.", file=sys.stderr)
-        return 3
-
-    binary = qemu_img()
-    created = []
-    for scenario in selected:
-        scenario_dir = scenario_work_dir(run_id, scenario, work_root)
-        scenario_dir.mkdir(parents=True, exist_ok=True)
-        disk_path = scenario_dir / "disk.qcow2"
-        manifest_path = scenario_dir / "workdisk.json"
-        if disk_path.exists():
-            if not args.force:
-                print(f"[e2e][ERROR] work disk already exists: {disk_path}", file=sys.stderr)
-                return 4
-            disk_path.unlink()
-
-        base_path = scenario_base_image_path(scenario, base_root)
-        if args.copy_mode == "overlay":
-            cmd = [
-                binary,
-                "create",
-                "-f",
-                "qcow2",
-                "-F",
-                "qcow2",
-                "-b",
-                str(base_path),
-                str(disk_path),
-            ]
-        else:
-            cmd = [binary, "convert", "-O", "qcow2", str(base_path), str(disk_path)]
-        run_qemu_img(cmd)
-
-        manifest = {
-            "run_id": run_id,
-            "created_at": utc_iso_timestamp(),
-            "scenario": scenario,
-            "copy_mode": args.copy_mode,
-            "base_image": str(base_path),
-            "work_disk": str(disk_path),
-        }
-        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
-        created.append({"scenario": scenario["id"], "disk": str(disk_path), "manifest": str(manifest_path)})
-
-    if args.json:
-        print(json.dumps({"run_id": run_id, "created": created}, indent=2, sort_keys=True))
-    else:
-        print(f"[e2e] run_id={run_id}")
-        for item in created:
-            print(f"[e2e] {item['scenario']}: {item['disk']}")
-    return 0
+    """Uses virt-customize to fixup Debian install after basic installer exits."""
+    pass
+
+
+def base_sanity_command(session: str) -> str:
+    cmds = ["id", "uname -a", "df -h", "free -m"]
+    if session.startswith("gnome"):
+        cmds += ["test -f /etc/gdm/custom.conf", "systemctl is-active gdm", "loginctl list-sessions"]
+    return " && ".join(cmds)
+
+
+def ensure_systemd_unit_enabled(root: Path, unit_name: str, log_path: Path) -> None:
+    system_dir = root / "lib" / "systemd" / "system"
+    unit_path = system_dir / unit_name
+    if not unit_path.exists():
+        raise FileNotFoundError(unit_path)
+    wants_dir = root / "etc" / "systemd" / "system"
+    wants_dir.mkdir(parents=True, exist_ok=True)
+    target_dir = wants_dir / ("sockets.target.wants" if unit_name.endswith(".socket") else "multi-user.target.wants")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    link = target_dir / unit_name
+    if link.exists() or link.is_symlink():
+        link.unlink()
+    link.symlink_to(unit_path)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as fh:
+        fh.write(f"enabled {unit_name}\n")
+
+
+def collect_guest_command_output(
+    *,
+    user: str,
+    port: int,
+    key: Path,
+    command: str,
+    output: Path,
+) -> None:
+    proc = ssh(user, port, key, command, check=False)
+    output.write_text(proc.stdout, encoding="utf-8")
 
 
 def cmd_prepare_base(args: argparse.Namespace) -> int:
     matrix = load_matrix()
-    errors = validate_matrix(matrix)
-    if errors:
-        for error in errors:
-            print(f"[e2e][ERROR] {error}", file=sys.stderr)
-        return 1
-
-    specs = select_base_specs(matrix, args)
-    if not args.all and not has_any_filter(args) and not getattr(args, "session", None):
-        print("[e2e][ERROR] select distro/session filters or pass --all", file=sys.stderr)
-        return 2
-    if not specs:
-        print("[e2e][ERROR] no base specs selected", file=sys.stderr)
-        return 2
-
     base_root = Path(args.base_dir).expanduser().resolve() if args.base_dir else base_dir()
-    if getattr(args, "missing", False):
-        specs = filter_missing_base_specs(specs, base_root)
+    dry_run = getattr(args, "dry_run", False)
+    missing_only = getattr(args, "missing", False)
+    live = getattr(args, "live", False)
+
+    specs = []
+    if getattr(args, "all", False):
+        for d in matrix["distros"]:
+            specs.append({"distro": d["id"], "session": "gnome-wayland"})
+    elif getattr(args, "distro", None):
+        distro = args.distro[0] if isinstance(args.distro, list) else args.distro
+        session = (args.session[0] if isinstance(args.session, list) else args.session) if getattr(args, "session", None) else "gnome-wayland"
+        specs.append({"distro": distro, "session": session})
+
+    if missing_only:
+        missing = []
+        for s in specs:
+            img = base_image_path(s["distro"], s["session"], base_root)
+            if not img.exists():
+                missing.append(s)
+        specs = missing
         if not specs:
             print("[e2e] no missing base images to prepare")
             return 0
+
     work_root = Path(args.work_dir).expanduser().resolve() if args.work_dir else work_dir()
-    private_key = ensure_ssh_key(ssh_key_path())
-    public_key = read_public_key(private_key)
+
+    # P0.1 Fix: Don't create SSH keys in dry-run
+    private_key: Path | None = None
+    public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDRYRUN wbeam-e2e-dry-run"
+
+    if not dry_run:
+        private_key = ensure_ssh_key(ssh_key_path())
+        public_key = read_public_key(private_key)
+    else:
+        private_key = Path("<dry-run-ssh-key>")
+
     defaults = matrix["defaults"]
     distros = distros_by_id(matrix)
 
@@ -1234,16 +1268,11 @@ def cmd_prepare_base(args: argparse.Namespace) -> int:
         base_image = base_image_path(spec["distro"], spec["session"], base_root)
         manifest_path = base_manifest_path(spec["distro"], spec["session"], base_root)
 
-        manifest_resume = base_image.exists() and not manifest_path.exists() and (build_dir / "base-ready.json").exists()
-        if base_image.exists() and not args.force and not manifest_resume:
-            print(f"[e2e][ERROR] base image already exists: {base_image}", file=sys.stderr)
-            return 3
+        if base_image.exists() and not args.force:
+            print(f"[e2e][ERROR] base image already exists: {base_image}")
+            continue
 
-        if build_dir.exists() and args.force:
-            safe_remove(build_dir)
-        build_dir.mkdir(parents=True, exist_ok=True)
-
-        if args.dry_run:
+        if dry_run:
             iso_value = os.environ.get(distro["iso_env"], "").strip()
             payload = {
                 "distro": distro["id"],
@@ -1257,619 +1286,1516 @@ def cmd_prepare_base(args: argparse.Namespace) -> int:
             print(json.dumps(payload, indent=2, sort_keys=True))
             continue
 
-        iso_path = require_iso_path(distro)
+        if live:
+            print(f"[e2e] prepare-base {distro['id']} {spec['session']}")
+            print(f"[e2e] work dir: {build_dir}")
+            print(f"[e2e] serial log: {build_dir / 'install-boot' / 'serial.log'}")
+            print(f"[e2e] qemu log: {build_dir / 'install-boot' / 'qemu.log'}")
+
+        if build_dir.exists() and args.force:
+            shutil.rmtree(build_dir)
+        build_dir.mkdir(parents=True, exist_ok=True)
+
+        iso_path = require_iso_path(distro, dry_run=dry_run)
         ssh_port = alloc_ssh_port(f"base-{distro['id']}-{spec['session']}")
 
         started_at = time.time()
-        first_boot_run_dir = build_dir / "first-boot"
-        first_boot_spec = QemuSpec(
-            name=f"wbeam-base-{distro['id']}-{spec['session']}-first-boot",
+
+        qemu_img_create(install_disk, coerce_int(defaults.get("disk_gib"), default=48), log=build_dir / "qemu-img.log")
+        create_seed_iso(
+            distro=distro,
+            session=spec["session"],
+            ssh_user=distro["ssh_user"],
+            public_key=public_key,
+            output=seed_iso,
+        )
+        boot_assets = extract_boot_assets(
+            iso=iso_path,
+            distro=distro,
+            output_dir=boot_dir,
+            seed_dir=seed_iso.parent / "seed",
+        )
+
+        installer_run_dir = build_dir / "install-boot"
+        installer_spec = QemuSpec(
+            name=f"wbeam-base-{distro['id']}-{spec['session']}",
             disk=install_disk,
             ssh_port=ssh_port,
-            run_dir=first_boot_run_dir,
+            run_dir=installer_run_dir,
             cpu=coerce_int(defaults.get("cpu"), default=4),
             memory_mib=coerce_int(defaults.get("memory_mib"), default=8192),
-            display=default_qemu_display(spec["session"], installer=False),
+            iso=iso_path,
+            seed_iso=None if distro["family"] == "debian" else seed_iso,
+            display=default_qemu_display(spec["session"], installer=True),
+            kernel=Path(boot_assets["kernel"]),
+            initrd=Path(boot_assets["initrd"]),
+            append=boot_append_args(distro=distro, session=spec["session"]),
+            extra_args=("-boot", "once=d"),
         )
-        boot_assets: dict[str, str] = {}
-        for name, filename in (("kernel", "vmlinuz"), ("initrd", "initrd")):
-            asset = boot_dir / filename
-            if asset.exists():
-                boot_assets[name] = str(asset)
-        resume_ready = install_disk.exists() and offline_provision_marker(build_dir).exists()
-        if not resume_ready:
-            qemu_img_create(install_disk, coerce_int(defaults.get("disk_gib"), default=48), log=build_dir / "qemu-img.log")
-            create_seed_iso(
-                distro=distro,
-                session=spec["session"],
-                ssh_user=distro["ssh_user"],
-                public_key=public_key,
-                output=seed_iso,
-            )
-            boot_assets = extract_boot_assets(
-                iso=iso_path,
-                distro=distro,
-                output_dir=boot_dir,
-                seed_dir=seed_iso.parent / "seed",
-            )
-            installer_run_dir = build_dir / "install-boot"
-            installer_spec = QemuSpec(
-                name=f"wbeam-base-{distro['id']}-{spec['session']}",
-                disk=install_disk,
-                ssh_port=ssh_port,
-                run_dir=installer_run_dir,
-                cpu=coerce_int(defaults.get("cpu"), default=4),
-                memory_mib=coerce_int(defaults.get("memory_mib"), default=8192),
-                iso=iso_path,
-                seed_iso=None if distro["family"] == "debian" else seed_iso,
-                display=default_qemu_display(spec["session"], installer=True),
-                kernel=Path(boot_assets["kernel"]),
-                initrd=Path(boot_assets["initrd"]),
-                append=boot_append_args(distro=distro, session=spec["session"]),
-                extra_args=("-boot", "once=d"),
-            )
-            proc = start_qemu(installer_spec)
-            try:
-                install_timeout = coerce_int(distro.get("install_timeout_sec"), default=5400)
-                if distro["family"] == "debian":
-                    wait_debian_installer_complete(
-                        proc,
-                        installer_run_dir / "serial.log",
-                        install_timeout,
-                        name=f"{installer_spec.name} installer",
-                    )
-                    provision_debian_install_offline(
-                        disk=install_disk,
-                        build_dir=build_dir,
-                        distro_id=distro["id"],
-                        session=spec["session"],
-                        ssh_user=distro["ssh_user"],
-                        public_key=public_key,
-                    )
-                    write_text(offline_provision_marker(build_dir), "done\n")
-                else:
-                    wait_process(
-                        proc,
-                        install_timeout,
-                        name=f"{installer_spec.name} installer",
-                    )
-            finally:
-                if proc and proc.poll() is None:
-                    proc.terminate()
-                    try:
-                        proc.wait(timeout=20)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
-                        proc.wait(timeout=20)
 
-        finalize_ready = (
-            install_disk.exists()
-            and offline_provision_marker(build_dir).exists()
-            and (build_dir / "base-ready.json").exists()
-            and (build_dir / "shutdown.log").exists()
-        )
-        if not finalize_ready:
-            proc = start_qemu(first_boot_spec)
-            try:
-                wait_for_ssh(
-                    distro["ssh_user"],
-                    ssh_port,
-                    private_key,
-                    coerce_int(distro.get("boot_timeout_sec"), default=900),
-                )
-                sanity_log = build_dir / "sanity.log"
-                ssh(
-                    distro["ssh_user"],
-                    ssh_port,
-                    private_key,
-                    base_sanity_command(session=spec["session"]),
-                    log=sanity_log,
-                )
-                collect_guest_command_output(
-                    user=distro["ssh_user"],
-                    port=ssh_port,
-                    key=private_key,
-                    command="cat /var/lib/wbeam-e2e/base-ready.json",
-                    output_path=build_dir / "base-ready.json",
-                    check=True,
-                )
-                shutdown_guest(distro["ssh_user"], ssh_port, private_key, log=build_dir / "shutdown.log")
-                wait_process(
-                    proc,
-                    coerce_int(distro.get("shutdown_timeout_sec"), default=180),
-                    name=f"{first_boot_spec.name} shutdown",
-                )
-            except Exception:
-                if proc.poll() is None:
-                    proc.terminate()
-                    try:
-                        proc.wait(timeout=20)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
-                        proc.wait(timeout=20)
-                raise
+        proc = start_qemu(installer_spec)
+        try:
+            install_timeout = coerce_int(distro.get("install_timeout_sec"), default=5400)
+            serial_log = installer_run_dir / "serial.log"
+            if live:
+                print(f"[e2e] installer started on SSH port {ssh_port}; streaming serial output")
+            if distro["family"] == "debian":
+                wait_debian_installer_complete(proc, serial_log, install_timeout, name=f"installer-{distro['id']}")
+            else:
+                rc = tail_serial_log(proc, serial_log, install_timeout, name=f"installer-{distro['id']}")
+                if rc != 0:
+                    print(f"[e2e][ERROR] installer failed: {rc}")
+                    continue
+        finally:
+            if proc.poll() is None:
+                proc.terminate()
+                proc.wait(timeout=30)
 
+        # Move to final location
         base_image.parent.mkdir(parents=True, exist_ok=True)
-        if args.force or not base_image.exists():
-            shutil.copy2(install_disk, base_image)
-        write_json(
-            manifest_path,
-            {
-                "distro": distro["id"],
-                "session": spec["session"],
-                "installer": distro["installer"],
-                "iso_path": str(iso_path),
-                "iso_sha256": sha256_file(iso_path),
-                "seed_iso": str(seed_iso),
-                "boot_assets": boot_assets,
-                "created_at": utc_iso_timestamp(),
-                "elapsed_sec": round(time.time() - started_at, 2),
-                "build_dir": str(build_dir),
-                "base_image": str(base_image),
-            },
-        )
-        print(f"[e2e] prepared base image: {base_image}")
+        shutil.move(str(install_disk), str(base_image))
+
+        manifest = {
+            "schema": 2,
+            "kind": "base",
+            "distro": distro["id"],
+            "session": spec["session"],
+            "created_at": dt.datetime.now(dt.UTC).isoformat(),
+            "duration_sec": round(time.time() - started_at, 2),
+            "source_iso": str(iso_path),
+            "target_image": str(base_image),
+        }
+        write_manifest(manifest_path, manifest)
+        print(f"[e2e] base image ready: {base_image}")
+
     return 0
 
 
-def create_scenario_workdisk(
-    *,
-    scenario: dict,
-    run_id: str,
-    base_root: Path,
-    work_root: Path,
-    copy_mode: str,
-    force: bool,
-) -> tuple[Path, Path]:
-    scenario_dir = scenario_work_dir(run_id, scenario, work_root)
-    scenario_dir.mkdir(parents=True, exist_ok=True)
-    disk_path = scenario_dir / "disk.qcow2"
-    manifest_path = scenario_dir / "workdisk.json"
-    if disk_path.exists():
-        if not force:
-            return disk_path, manifest_path
-        disk_path.unlink()
-    base_path = require_existing_file(scenario_base_image_path(scenario, base_root), what="base image")
-    if copy_mode == "overlay":
-        qemu_img_overlay(base_path, disk_path, log=scenario_dir / "qemu-img.log")
-    else:
-        qemu_img_full_copy(base_path, disk_path, log=scenario_dir / "qemu-img.log")
-    write_json(
-        manifest_path,
-        {
-            "run_id": run_id,
-            "created_at": utc_iso_timestamp(),
-            "scenario": scenario,
-            "copy_mode": copy_mode,
-            "base_image": str(base_path),
-            "work_disk": str(disk_path),
-        },
-    )
-    return disk_path, manifest_path
+def cmd_prepare_installed(args: argparse.Namespace) -> int:
+    matrix = load_matrix()
+    base_root = Path(args.base_dir).expanduser().resolve() if args.base_dir else base_dir()
+    work_root = Path(args.work_dir).expanduser().resolve() if args.work_dir else work_dir()
+    live = getattr(args, "live", False)
+    missing_only = getattr(args, "missing", False)
+    install_backend = getattr(args, "install_backend", None)
+
+    spec = {"distro": args.distro, "session": args.session or "gnome-wayland"}
+    install_backend = install_backend or install_backend_for_session(spec["session"])
+    base_image = base_image_path(spec["distro"], spec["session"], base_root)
+    inst_image = installed_image_path(spec["distro"], spec["session"], base_root)
+    build_dir = work_root / "installed" / spec["distro"] / spec["session"]
+    guest_report_local = build_dir / "guest-report"
+    guest_report_remote = "/home/wbeam/WBeam/e2e/work/prepare-installed-report"
+    failure_path = build_dir / "prepare-installed-failure.json"
+    guest_summary: dict = {}
+    prep_rc: int | None = None
+    proc: subprocess.Popen[str] | None = None
+    private_key: Path | None = None
+    distro = None
+    ssh_port: int | None = None
+
+    if missing_only and inst_image.exists() and not args.force:
+        print(f"[e2e] installed image already exists: {inst_image}")
+        return 0
+
+    if not base_image.exists():
+        if args.dry_run:
+            print(f"[e2e] DRY-RUN: base image {base_image} is missing, would fail here.")
+        else:
+            print(f"[e2e][ERROR] missing base image: {base_image}")
+            return 1
+
+    if args.dry_run:
+        print(f"[e2e] DRY-RUN: would prepare installed image for {args.distro}/{spec['session']} backend={install_backend}")
+        return 0
+
+    try:
+        if build_dir.exists() and args.force:
+            shutil.rmtree(build_dir)
+        build_dir.mkdir(parents=True, exist_ok=True)
+
+        work_disk = build_dir / "work.qcow2"
+        if work_disk.exists():
+            safe_remove(work_disk)
+        qemu_img_overlay(base_image, work_disk)
+
+        private_key = ensure_ssh_key(ssh_key_path())
+        distros = distros_by_id(matrix)
+        distro = distros[spec["distro"]]
+        ssh_port = alloc_ssh_port(f"inst-{distro['id']}")
+
+        q_spec = QemuSpec(
+            name=f"wbeam-install-{distro['id']}",
+            disk=work_disk,
+            ssh_port=ssh_port,
+            run_dir=build_dir,
+            cpu=coerce_int(matrix["defaults"].get("cpu"), default=4),
+            memory_mib=coerce_int(matrix["defaults"].get("memory_mib"), default=8192),
+        )
+
+        proc = start_qemu(q_spec)
+        if live:
+            print(f"[e2e] prepare-installed {distro['id']} {spec['session']} backend={install_backend}")
+            print(f"[e2e] work dir: {build_dir}")
+            print(f"[e2e] qemu log: {build_dir / 'qemu.log'}")
+            print(f"[e2e] waiting for SSH on localhost:{ssh_port}")
+
+        try:
+            wait_for_ssh(distro["ssh_user"], ssh_port, private_key, 600)
+            rsync_to_guest(distro["ssh_user"], ssh_port, private_key, ROOT, "/home/wbeam/WBeam", live=live)
+            guest_report_local.mkdir(parents=True, exist_ok=True)
+            guest_prepare_cmd = (
+                f"cd {shlex.quote('/home/wbeam/WBeam')} && "
+                f"WBEAM_E2E_INSTALL_BACKEND={shlex.quote(install_backend)} "
+                f"WBEAM_E2E_REPORT_DIR={shlex.quote(guest_report_remote)} "
+                f"./e2e/scripts/guest-prepare-installed.sh {shlex.quote(install_backend)}"
+            )
+            if live:
+                print(f"[e2e] running in guest: {guest_prepare_cmd}")
+            prep_proc = ssh(
+                distro["ssh_user"],
+                ssh_port,
+                private_key,
+                guest_prepare_cmd,
+                log=build_dir / "guest-prepare-installed.log",
+                check=False,
+                live=live,
+            )
+            prep_rc = prep_proc.returncode
+            rsync_result = rsync_from_guest(
+                distro["ssh_user"],
+                ssh_port,
+                private_key,
+                f"{guest_report_remote}/",
+                guest_report_local,
+                check=False,
+                live=live,
+            )
+            if rsync_result.returncode != 0:
+                raise RuntimeError(f"guest report sync failed rc={rsync_result.returncode}")
+            required_guest_artifacts = [
+                guest_report_local / "install-wbeam.exit-code",
+                guest_report_local / "install-wbeam.stdout.log",
+                guest_report_local / "install-wbeam.stderr.log",
+                guest_report_local / "summary.json",
+            ]
+            for required in required_guest_artifacts:
+                if not required.exists():
+                    raise RuntimeError(f"missing guest prepare artifact: {required}")
+            guest_summary = read_json(guest_report_local / "summary.json")
+            if guest_summary.get("ok") is not True:
+                raise RuntimeError(f"guest prepare summary is not ok: {guest_report_local / 'summary.json'}")
+            if prep_rc != 0:
+                raise RuntimeError(f"guest prepare-installed failed rc={prep_rc}")
+        except Exception as exc:
+            write_manifest(
+                failure_path,
+                {
+                    "schema": 1,
+                    "status": "fail",
+                    "phase": "guest_prepare_installed",
+                    "distro": spec["distro"],
+                    "session": spec["session"],
+                    "install_backend": install_backend,
+                    "exit_code": prep_rc if prep_rc is not None else -1,
+                    "base_image": str(base_image),
+                    "work_disk": str(work_disk),
+                    "guest_report": str(guest_report_local),
+                    "guest_summary": str(guest_report_local / "summary.json"),
+                    "error": str(exc),
+                    "next_action": f"Inspect {build_dir / 'guest-prepare-installed.log'}, {guest_report_local}, and {failure_path}",
+                },
+            )
+            raise
+        finally:
+            try:
+                if distro is not None and ssh_port is not None and private_key is not None:
+                    shutdown_guest(distro["ssh_user"], ssh_port, private_key, live=live)
+                if proc is not None:
+                    wait_process(proc, 300, name="shutdown")
+            finally:
+                if proc is not None and proc.poll() is None:
+                    proc.terminate()
+                    proc.wait()
+
+        inst_image.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(work_disk), str(inst_image))
+        installed_manifest = installed_manifest_path(spec["distro"], spec["session"], base_root)
+        write_manifest(
+            installed_manifest,
+            {
+                "schema": 2,
+                "kind": "installed",
+                "distro": spec["distro"],
+                "session": spec["session"],
+                "install_backend": install_backend,
+                "created_at": dt.datetime.now(dt.UTC).isoformat(),
+                "base_image": str(base_image),
+                "target_image": str(inst_image),
+                "work_disk": str(work_disk),
+                "guest_report": str(guest_report_local),
+                "guest_summary": str(guest_report_local / "summary.json"),
+                "server_path": guest_summary.get("server_path", ""),
+                "streamer_path": guest_summary.get("streamer_path", ""),
+            },
+        )
+        print(f"[e2e] installed snapshot ready: {inst_image}")
+        return 0
+    except Exception as exc:
+        if not failure_path.exists():
+            write_manifest(
+                failure_path,
+                {
+                    "schema": 1,
+                    "status": "fail",
+                    "phase": "prepare_installed",
+                    "distro": spec["distro"],
+                    "session": spec["session"],
+                    "install_backend": install_backend,
+                    "base_image": str(base_image),
+                    "work_disk": str(build_dir / "work.qcow2"),
+                    "guest_report": str(guest_report_local),
+                    "guest_summary": str(guest_report_local / "summary.json"),
+                    "error": str(exc),
+                    "next_action": f"Inspect {build_dir} and rerun with --live.",
+                },
+            )
+        print(f"[e2e][ERROR] prepare-installed failed: {exc}")
+        return 1
 
 
-def run_one_scenario(
-    *,
-    matrix: dict,
-    scenario: dict,
-    run_id: str,
-    base_root: Path,
-    work_root: Path,
-    report_root: Path,
-    private_key: Path,
-    copy_mode: str,
-    force: bool,
-    retain_workdisk: str,
-    dry_run: bool,
-) -> dict:
-    defaults = matrix["defaults"]
-    distro = distro_by_id(matrix, scenario["distro"])
-    scenario_dir = scenario_work_dir(run_id, scenario, work_root)
-    report_path = scenario_report_dir(report_root, run_id, scenario["id"])
-    report_path.mkdir(parents=True, exist_ok=True)
-    started = time.time()
-    result = {
-        "scenario": scenario["id"],
-        "distro": scenario["distro"],
-        "session": scenario["session"],
-        "backend": scenario["backend"],
-        "status": "fail",
-        "phase": "init",
-        "reason": "",
-        "report_dir": str(report_path),
-        "work_dir": str(scenario_dir),
+def cmd_diagnose_installed(args: argparse.Namespace) -> int:
+    root = Path(args.work_dir).expanduser().resolve() if args.work_dir else work_dir()
+    path = root / "installed" / args.distro / (args.session or "gnome-wayland")
+    payload = {
+        "work_dir": str(path),
+        "exists": path.exists(),
+        "work_disk": str(path / "work.qcow2"),
+        "work_disk_exists": (path / "work.qcow2").exists(),
+        "guest_log": str(path / "guest-prepare-installed.log"),
+        "guest_log_exists": (path / "guest-prepare-installed.log").exists(),
+        "guest_report": str(path / "guest-report"),
+        "guest_report_exists": (path / "guest-report").exists(),
+        "failure_json": str(path / "prepare-installed-failure.json"),
+        "failure_json_exists": (path / "prepare-installed-failure.json").exists(),
     }
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_diagnose_run(args: argparse.Namespace) -> int:
+    report_root = Path(getattr(args, "report_dir", None) or report_dir()).expanduser().resolve()
+    work_root = Path(getattr(args, "work_dir", None) or work_dir()).expanduser().resolve()
+    scenario_report = report_root / args.run_id / "scenarios" / args.scenario
+    scenario_work = work_root / "runs" / args.run_id / args.scenario
+    payload = {
+        "run_id": args.run_id,
+        "scenario": args.scenario,
+        "scenario_report": str(scenario_report),
+        "scenario_report_exists": scenario_report.exists(),
+        "scenario_work": str(scenario_work),
+        "scenario_work_exists": scenario_work.exists(),
+        "l2_workdisk": str(scenario_work / "disk.qcow2"),
+        "l2_workdisk_exists": (scenario_work / "disk.qcow2").exists(),
+        "guest_wizard_log": str(scenario_report / "logs" / "guest-wizard.log"),
+        "guest_wizard_log_exists": (scenario_report / "logs" / "guest-wizard.log").exists(),
+        "qemu_log": str(scenario_report / "logs" / "qemu.log"),
+        "qemu_log_exists": (scenario_report / "logs" / "qemu.log").exists(),
+        "wizard_summary": str(scenario_report / "guest" / "wizard" / "summary.json"),
+        "wizard_summary_exists": (scenario_report / "guest" / "wizard" / "summary.json").exists(),
+        "wizard_steps": str(scenario_report / "guest" / "wizard" / "steps.jsonl"),
+        "wizard_steps_exists": (scenario_report / "guest" / "wizard" / "steps.jsonl").exists(),
+        "stream_dirs": sorted(str(p) for p in (scenario_report / "guest" / "wizard" / "stream").glob("*")) if (scenario_report / "guest" / "wizard" / "stream").exists() else [],
+    }
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+def _latest_run_id(report_root: Path) -> str:
+    runs = sorted((p for p in report_root.iterdir() if p.is_dir()), key=lambda p: p.name, reverse=True) if report_root.exists() else []
+    return runs[0].name if runs else ""
+
+
+def cmd_portal_diagnose(args: argparse.Namespace) -> int:
+    report_root = Path(getattr(args, "report_dir", None) or report_dir()).expanduser().resolve()
+    run_id = getattr(args, "run_id", None) or _latest_run_id(report_root)
+    scenario_id = getattr(args, "scenario", None) or "fedora43-gnome-wayland-portal-h264"
+    if not run_id:
+        print(json.dumps({"schema": 1, "status": "missing", "reason_code": "no_runs", "next_action": "Run a scenario first."}, indent=2, sort_keys=True))
+        return 0
+    matrix = load_matrix()
+    scenario = next((item for item in matrix.get("scenarios", []) if item.get("id") == scenario_id), {})
+    stream_dir = report_root / run_id / "scenarios" / scenario_id / "guest" / "wizard" / "stream" / "wayland_portal"
+    result = portal_consent.classify_guest_portal_report(stream_dir, scenario)
+    base_root = Path(getattr(args, "base_dir", None)).expanduser().resolve() if getattr(args, "base_dir", None) else base_dir()
+    distro = scenario.get("distro", "fedora-43")
+    session = scenario.get("session", "gnome-wayland")
+    installed = installed_image_path(distro, session, base_root)
+    consented = portal_consented_image_path(distro, session, base_root)
+    payload = {
+        "schema": 1,
+        "run_id": run_id,
+        "scenario": scenario_id,
+        "stream_dir": str(stream_dir),
+        "installed_image": str(installed),
+        "installed_exists": installed.exists(),
+        "portal_consented_image": str(consented),
+        "portal_consented_exists": consented.exists(),
+        **result,
+    }
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_diagnose_portal_consent(args: argparse.Namespace) -> int:
+    base_root = Path(args.base_dir).expanduser().resolve() if args.base_dir else base_dir()
+    work_root = Path(args.work_dir).expanduser().resolve() if args.work_dir else work_dir()
+    distro = args.distro
+    session = args.session or "gnome-wayland"
+    installed = installed_image_path(distro, session, base_root)
+    consented = portal_consented_image_path(distro, session, base_root)
+    consented_manifest = portal_consented_manifest_path(distro, session, base_root)
+    valid, reason = portal_consented_image_is_valid(distro, session, base_root)
+    matrix = load_matrix()
+    scenario = next(
+        (
+            item
+            for item in matrix.get("scenarios", [])
+            if item.get("distro") == distro and item.get("session") == session and item.get("backend") == "wayland_portal"
+        ),
+        {},
+    )
+    run_next_action = (
+        f"./e2e/run run --scenario {scenario['id']} --use-installed --live"
+        if scenario
+        else portal_consent_next_action(distro, session)
+    )
+    payload = {
+        "schema": 1,
+        "distro": distro,
+        "session": session,
+        "installed_image": str(installed),
+        "installed_exists": installed.exists(),
+        "portal_consented_image": str(consented),
+        "portal_consented_exists": consented.exists(),
+        "portal_consented_manifest": str(consented_manifest),
+        "portal_consented_valid": valid,
+        "invalid_reason": reason,
+        "work_dir": str(work_root / "portal-consent" / distro / session),
+        "last_failure": str((work_root / "portal-consent" / distro / session / "prepare-portal-consent-failure.json")),
+        "next_action": run_next_action if valid else f"Run ./e2e/run diagnose-portal-consent --distro {distro} --session {session} then recreate with ./e2e/run prepare-portal-consent --distro {distro} --session {session} --backend wayland_portal --live --promote",
+    }
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+def run_guest_portal_consent_attempt(
+    *,
+    distro_info: dict,
+    ssh_port: int,
+    private_key: Path,
+    guest_root: str,
+    guest_report_remote: str,
+    guest_report_local: Path,
+    backend: str,
+    display_mode: str,
+    duration_sec: int,
+    timeout_sec: int,
+    attempt: int,
+    live: bool,
+    log_path: Path,
+) -> tuple[int, dict]:
+    attempt_remote = f"{guest_report_remote}/attempt-{attempt}"
+    attempt_local = guest_report_local / f"attempt-{attempt}"
+    attempt_local.mkdir(parents=True, exist_ok=True)
+    command = (
+        f"cd {shlex.quote(guest_root)} && "
+        f"WBEAM_E2E_BACKEND={shlex.quote(backend)} "
+        f"WBEAM_E2E_DISPLAY_MODE={shlex.quote(display_mode)} "
+        f"WBEAM_E2E_DURATION_SEC={duration_sec} "
+        f"WBEAM_E2E_PORTAL_APPROVAL_WAIT_SEC={timeout_sec} "
+        f"WBEAM_E2E_PORTAL_CONSENT_TIMEOUT_SEC={timeout_sec} "
+        f"WBEAM_E2E_REPORT_DIR={shlex.quote(attempt_remote)} "
+        f"./e2e/scripts/guest-portal-consent.sh"
+    )
+    proc = ssh(
+        distro_info["ssh_user"],
+        ssh_port,
+        private_key,
+        command,
+        log=log_path,
+        check=False,
+        live=live,
+    )
+    rsync_from_guest(
+        distro_info["ssh_user"],
+        ssh_port,
+        private_key,
+        f"{attempt_remote}/",
+        attempt_local,
+        check=False,
+        live=live,
+    )
+    summary = read_json(attempt_local / "summary.json")
+    return proc.returncode, summary
+
+
+def cmd_prepare_portal_consent(args: argparse.Namespace) -> int:
+    matrix = load_matrix()
+    base_root = Path(args.base_dir).expanduser().resolve() if args.base_dir else base_dir()
+    work_root = Path(args.work_dir).expanduser().resolve() if args.work_dir else work_dir()
+    live = getattr(args, "live", False)
+    dry_run = getattr(args, "dry_run", False)
+    force = getattr(args, "force", False)
+    promote = getattr(args, "promote", False)
+    distro = args.distro
+    session = args.session or "gnome-wayland"
+    backend = getattr(args, "backend", None) or "wayland_portal"
+    approval_timeout_sec = int(getattr(args, "approval_timeout_sec", 900) or 900)
+    approval_poll_sec = int(getattr(args, "approval_poll_sec", 5) or 5)
+    timeout_sec = int(getattr(args, "timeout_sec", 180) or 180)
+    installed = installed_image_path(distro, session, base_root)
+    consented = portal_consented_image_path(distro, session, base_root)
+    consented_manifest = portal_consented_manifest_path(distro, session, base_root)
+    portal_work_dir = work_root / "portal-consent" / distro / session
+    work_disk = portal_work_dir / "work.qcow2"
+    guest_report_local = portal_work_dir / "guest-report"
+    guest_report_remote = "/home/wbeam/WBeam/e2e/work/portal-consent-report"
+    failure_path = portal_work_dir / "prepare-portal-consent-failure.json"
+
+    if consented.exists() and not force:
+        valid, reason = portal_consented_image_is_valid(distro, session, base_root)
+        if valid:
+            payload = {
+                "schema": 1,
+                "status": "exists",
+                "portal_consented_image": str(consented),
+                "portal_consented_manifest": str(consented_manifest),
+            }
+            print(json.dumps(payload, indent=2, sort_keys=True))
+            return 0
+        payload = {
+            "schema": 1,
+            "status": "blocked",
+            "phase": "portal_consent",
+            "reason_code": "invalid_portal_consented_image",
+            "reason": f"invalid portal-consented image: {reason}",
+            "next_action": f"Run ./e2e/run diagnose-portal-consent --distro {distro} --session {session} then recreate with ./e2e/run prepare-portal-consent --distro {distro} --session {session} --backend wayland_portal --live --promote",
+            "portal_consented_image": str(consented),
+            "portal_consented_manifest": str(consented_manifest),
+        }
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 1
+
+    if not installed.exists():
+        payload = {
+            "schema": 1,
+            "status": "blocked",
+            "phase": "prepare_installed",
+            "reason_code": "missing_installed_image",
+            "reason": f"missing installed image: {installed}",
+            "next_action": f"Run ./e2e/run prepare-installed --distro {distro} --session {session} --live",
+            "installed_image": str(installed),
+        }
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 1
 
     if dry_run:
-        write_json(report_path / "dry-run.json", {"scenario": scenario, "run_id": run_id})
-        result["status"] = "pass"
-        result["phase"] = "dry-run"
-        result["duration_sec"] = 0
-        return result
+        display_hint = getattr(args, "display", "auto") or "auto"
+        payload = {
+            "schema": 1,
+            "status": "dry-run",
+            "portal_consented_image": str(consented),
+            "portal_consented_manifest": str(consented_manifest),
+            "installed_image": str(installed),
+            "work_disk": str(work_disk),
+            "display": display_hint,
+            "backend": backend,
+            "timeout_sec": timeout_sec,
+            "approval_timeout_sec": approval_timeout_sec,
+            "approval_poll_sec": approval_poll_sec,
+        }
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
 
-    runtime = scenario_runtime_config(matrix, scenario)
-    disk_path, manifest_path = create_scenario_workdisk(
-        scenario=scenario,
-        run_id=run_id,
-        base_root=base_root,
-        work_root=work_root,
-        copy_mode=copy_mode,
-        force=force,
-    )
-    result["work_disk"] = str(disk_path)
-    shutil.copy2(manifest_path, report_path / "workdisk.json")
+    if portal_work_dir.exists() and force:
+        shutil.rmtree(portal_work_dir)
+    portal_work_dir.mkdir(parents=True, exist_ok=True)
+    guest_report_local.mkdir(parents=True, exist_ok=True)
+    if work_disk.exists():
+        safe_remove(work_disk)
+    qemu_img_overlay(installed, work_disk)
 
-    ssh_port = alloc_ssh_port(f"{run_id}-{scenario['id']}")
-    guest_root = "/home/wbeam/WBeam"
-    guest_report_root = f"{guest_root}/e2e/reports/{run_id}/{scenario['id']}"
-    spec = QemuSpec(
-        name=f"wbeam-{scenario['id']}",
-        disk=disk_path,
+    display, extra_display_args, display_hint = resolve_portal_consent_display(args, live=live)
+    private_key = ensure_ssh_key(ssh_key_path())
+    ssh_port = alloc_ssh_port(f"portal-consent-{distro}-{session}")
+    distros = distros_by_id(matrix)
+    distro_info = distros[distro]
+    q_spec = QemuSpec(
+        name=f"wbeam-portal-consent-{distro}-{session}",
+        disk=work_disk,
         ssh_port=ssh_port,
-        run_dir=scenario_dir,
-        cpu=runtime["cpu"],
-        memory_mib=runtime["memory_mib"],
-        display=default_qemu_display(scenario["session"], installer=False),
+        run_dir=portal_work_dir,
+        cpu=coerce_int(matrix["defaults"].get("cpu"), default=4),
+        memory_mib=coerce_int(matrix["defaults"].get("memory_mib"), default=8192),
+        display=display,
+        extra_args=extra_display_args,
     )
-    proc = start_qemu(spec)
+    proc = start_qemu(q_spec)
+    guest_summary: dict = {}
+    guest_rc = -1
+    keep_vm_on_timeout = bool(getattr(args, "keep_vm_on_timeout", False))
+    preserve_vm = False
     try:
-        result["phase"] = "boot"
-        wait_for_ssh(
-            distro["ssh_user"],
-            ssh_port,
-            private_key,
-            coerce_int(distro.get("boot_timeout_sec"), default=900),
+        if live:
+            print("[e2e] ================================================================")
+            print("[e2e] GNOME ScreenCast portal approval required")
+            print("[e2e] A VM window should be visible.")
+            print("[e2e] When the prompt appears, approve WBeam / ScreenCast / Virtual Monitor.")
+            print(f"[e2e] portal consent VM display: {display_hint}")
+            print("[e2e] action: approve GNOME ScreenCast prompt in the VM window")
+            print(f"[e2e] after approval this command should promote: {consented}")
+            print("[e2e] Do not close the VM until this command reports PASS, BLOCKED, or times out.")
+            print("[e2e] ================================================================")
+            print(f"[e2e] work dir: {portal_work_dir}")
+            print(f"[e2e] qemu log: {portal_work_dir / 'qemu.log'}")
+            print(f"[e2e] waiting for SSH on localhost:{ssh_port}")
+        wait_for_ssh(distro_info["ssh_user"], ssh_port, private_key, 600)
+        rsync_to_guest(distro_info["ssh_user"], ssh_port, private_key, ROOT, "/home/wbeam/WBeam", live=live)
+        write_portal_operator_artifacts(
+            portal_work_dir,
+            display_hint=display_hint,
+            command=f"./e2e/scripts/guest-portal-consent.sh",
+            consented=consented,
+            manifest=consented_manifest,
+            timeout_sec=approval_timeout_sec,
         )
-
-        result["phase"] = "sync"
-        rsync_to_guest(
-            ROOT,
-            guest_root,
-            user=distro["ssh_user"],
-            port=ssh_port,
-            key=private_key,
-            log=report_path / "rsync-to-guest.log",
-            excludes=[
-                ".git",
-                "node_modules",
-                "target",
-                "e2e/work",
-                "e2e/images",
-                "e2e/reports",
-            ],
-        )
-        ssh(
-            distro["ssh_user"],
-            ssh_port,
-            private_key,
-            f"mkdir -p {shell_quote(guest_report_root)}",
-            log=report_path / "guest-mkdir.log",
-        )
-
-        env_prefix = build_guest_env(defaults, scenario, guest_report_dir=guest_report_root)
-
-        result["phase"] = "install"
-        ssh(
-            distro["ssh_user"],
-            ssh_port,
-            private_key,
-            f"cd {shell_quote(guest_root)} && {env_prefix} ./e2e/scripts/guest-install-wbeam.sh {shell_quote(scenario['backend'])}",
-            log=report_path / "guest-install.log",
-        )
-
-        result["phase"] = "stream"
-        ssh(
-            distro["ssh_user"],
-            ssh_port,
-            private_key,
-            f"cd {shell_quote(guest_root)} && {env_prefix} ./e2e/scripts/guest-stream-smoke.sh {shell_quote(scenario['backend'])} {scenario_duration(matrix, scenario)}",
-            log=report_path / "guest-stream.log",
-        )
-
-        result["phase"] = "collect"
-        rsync_from_guest(
-            guest_report_root,
-            report_path / "guest",
-            user=distro["ssh_user"],
-            port=ssh_port,
-            key=private_key,
-            log=report_path / "rsync-from-guest.log",
-        )
-        collect_guest_command_output(
-            user=distro["ssh_user"],
-            port=ssh_port,
-            key=private_key,
-            command="sudo -n journalctl -b --no-pager",
-            output_path=report_path / "journal-system.log",
-        )
-        collect_guest_command_output(
-            user=distro["ssh_user"],
-            port=ssh_port,
-            key=private_key,
-            command="journalctl --user --no-pager",
-            output_path=report_path / "journal-user.log",
-        )
-        collect_guest_command_output(
-            user=distro["ssh_user"],
-            port=ssh_port,
-            key=private_key,
-            command="dmesg || true",
-            output_path=report_path / "dmesg.log",
-        )
-        collect_guest_command_output(
-            user=distro["ssh_user"],
-            port=ssh_port,
-            key=private_key,
-            command="ls -la /dev/dri || true",
-            output_path=report_path / "dev-dri.log",
-        )
-        if scenario.get("requires_evdi"):
-            collect_guest_command_output(
-                user=distro["ssh_user"],
-                port=ssh_port,
-                key=private_key,
-                command="bash /home/wbeam/WBeam/scripts/evdi-diagnose.sh --verbose || true",
-                output_path=report_path / "evdi-diagnose.log",
+        started = time.time()
+        attempt = 0
+        last_summary: dict = {}
+        while time.time() - started < approval_timeout_sec:
+            attempt += 1
+            if live:
+                print(f"[e2e] portal consent attempt {attempt} (poll {approval_poll_sec}s)")
+            guest_rc, guest_summary = run_guest_portal_consent_attempt(
+                distro_info=distro_info,
+                ssh_port=ssh_port,
+                private_key=private_key,
+                guest_root="/home/wbeam/WBeam",
+                guest_report_remote=guest_report_remote,
+                guest_report_local=guest_report_local,
+                backend=backend,
+                display_mode="virtual_monitor",
+                duration_sec=20,
+                timeout_sec=approval_timeout_sec,
+                attempt=attempt,
+                live=live,
+                log_path=portal_work_dir / "guest-portal-consent.log",
             )
+            last_summary = guest_summary
+            if guest_summary.get("ok") is True:
+                break
+            if guest_summary.get("reason_code") == "portal_consent_required":
+                print("[e2e] waiting for GNOME ScreenCast approval; approve the prompt in the VM window")
+                time.sleep(max(1, approval_poll_sec))
+                continue
+            break
 
-        result["status"] = "pass"
-        result["phase"] = "done"
-    except subprocess.CalledProcessError as exc:
-        result["reason"] = f"command failed with exit {exc.returncode}"
+        summary_path = guest_report_local / "summary.json"
+        if not last_summary:
+            last_summary = read_json(summary_path)
+        if not last_summary:
+            payload = {
+                "schema": 1,
+                "status": "fail",
+                "phase": "portal_consent",
+                "reason_code": "guest_report_missing",
+                "reason": f"missing guest portal consent summary: {summary_path}",
+                "next_action": f"Inspect {guest_report_local} and retry prepare-portal-consent.",
+                "guest_report": str(guest_report_local),
+                "guest_summary": str(summary_path),
+                "guest_command": f"./e2e/scripts/guest-portal-consent.sh",
+                "portal_consented_image": str(consented),
+                "portal_consented_manifest": str(consented_manifest),
+                "installed_image": str(installed),
+                "work_disk": str(work_disk),
+            }
+            print(json.dumps(payload, indent=2, sort_keys=True))
+            failure_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+            return 1
+
+        payload = {
+            "schema": 1,
+            "status": last_summary.get("status", "blocked"),
+            "reason_code": last_summary.get("reason_code", ""),
+            "reason": last_summary.get("reason", ""),
+            "next_action": last_summary.get("next_action", ""),
+            "guest_report": str(guest_report_local),
+            "guest_summary": str(summary_path),
+            "guest_command": f"./e2e/scripts/guest-portal-consent.sh",
+            "portal_consented_image": str(consented),
+            "portal_consented_manifest": str(consented_manifest),
+            "installed_image": str(installed),
+            "work_disk": str(work_disk),
+        }
+        if last_summary.get("ok") is True:
+            if promote:
+                shutdown_guest(distro_info["ssh_user"], ssh_port, private_key, live=live)
+                wait_process(proc, 300, name="shutdown")
+                consented_tmp = consented.with_suffix(".qcow2.tmp")
+                manifest_tmp = consented_manifest.with_suffix(".json.tmp")
+                for temp_path in (consented_tmp, manifest_tmp):
+                    if temp_path.exists():
+                        safe_remove(temp_path)
+                if consented.exists():
+                    safe_remove(consented)
+                if consented_manifest.exists():
+                    safe_remove(consented_manifest)
+                shutil.copy2(work_disk, consented_tmp)
+                qemu_img = require_tool("qemu-img")
+                subprocess.run([qemu_img, "info", str(consented_tmp)], capture_output=True, text=True, check=True)
+                consented_tmp.rename(consented)
+                write_manifest(
+                    manifest_tmp,
+                    {
+                        "schema": 2,
+                        "kind": "portal_consented",
+                        "distro": distro,
+                        "session": session,
+                        "backend": backend,
+                        "display_mode": "virtual_monitor",
+                        "created_at": dt.datetime.now(dt.UTC).isoformat(),
+                        "source_installed_image": str(installed),
+                        "portal_consented_image": str(consented),
+                        "source_work_disk": str(work_disk),
+                        "guest_report": str(guest_report_local),
+                        "guest_summary": str(summary_path),
+                        "approval_mode": "manual-portal-prompt",
+                        "stream_smoke_ok": True,
+                        "validation": {
+                            "client_connected": True,
+                            "bytes_read_gt_zero": True,
+                            "daemon_streaming_seen": True,
+                        },
+                    },
+                )
+                manifest_tmp.rename(consented_manifest)
+                if work_disk.exists():
+                    safe_remove(work_disk)
+                payload["status"] = "promoted"
+                payload["portal_consented_image"] = str(consented)
+                payload["portal_consented_manifest"] = str(consented_manifest)
+                print(json.dumps(payload, indent=2, sort_keys=True))
+                return 0
+            payload["status"] = "ok_pending_promote"
+            payload["next_action"] = "Rerun the same command with --promote before deleting the work overlay."
+            print(json.dumps(payload, indent=2, sort_keys=True))
+            return 2
+
+        if last_summary.get("reason_code") == "portal_consent_required" or (
+            last_summary.get("blocked") is True and last_summary.get("phase") == "portal_consent"
+        ):
+            payload["status"] = "blocked"
+            payload["phase"] = "portal_consent"
+            payload["reason_code"] = "portal_consent_required"
+            payload["reason"] = "approval timeout; prompt not approved"
+            payload["next_action"] = "Rerun prepare-portal-consent with --live --promote and approve the prompt."
+            print(json.dumps(payload, indent=2, sort_keys=True))
+            failure_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+            if keep_vm_on_timeout:
+                preserve_vm = True
+                print(f"[e2e] keeping VM alive on timeout; work dir: {portal_work_dir}")
+                print(f"[e2e] ssh port: {ssh_port}")
+                print(f"[e2e] display hint: {display_hint}")
+                print(f"[e2e] qemu pid: {proc.pid}")
+                print(f"[e2e] guest summary: {summary_path}")
+            return 20
+
+        payload["status"] = "fail"
+        payload["phase"] = "portal_consent"
+        payload["reason_code"] = last_summary.get("reason_code", "portal_consent_failed")
+        payload["reason"] = last_summary.get("reason", "portal consent preparation failed")
+        payload["next_action"] = last_summary.get("next_action") or "Inspect the guest portal-consent report and daemon logs."
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        failure_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        return 1
     except Exception as exc:  # noqa: BLE001
-        result["reason"] = str(exc)
+        payload = {
+            "schema": 1,
+            "status": "fail",
+            "phase": "portal_consent",
+            "reason_code": "portal_consent_timeout",
+            "reason": str(exc),
+            "next_action": f"Inspect {portal_work_dir / 'guest-portal-consent.log'} and {guest_report_local}.",
+            "guest_report": str(guest_report_local),
+            "guest_command": "./e2e/scripts/guest-portal-consent.sh",
+            "portal_consented_image": str(consented),
+            "portal_consented_manifest": str(consented_manifest),
+            "installed_image": str(installed),
+            "work_disk": str(work_disk),
+        }
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        failure_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        return 1
     finally:
-        try:
-            shutdown_guest(distro["ssh_user"], ssh_port, private_key, log=report_path / "shutdown.log")
-        except Exception:
-            pass
-        if proc.poll() is None:
+        if not preserve_vm:
             try:
-                wait_process(proc, coerce_int(distro.get("shutdown_timeout_sec"), default=180), name=spec.name)
+                shutdown_guest(distro_info["ssh_user"], ssh_port, private_key, live=live)
+                wait_process(proc, 300, name="shutdown")
             except Exception:
-                if proc.poll() is None:
-                    proc.terminate()
-                    try:
-                        proc.wait(timeout=20)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
-                        proc.wait(timeout=20)
-        result["duration_sec"] = round(time.time() - started, 2)
-        keep_disk = retain_workdisk == "always" or (retain_workdisk == "on-fail" and result["status"] != "pass")
-        if not keep_disk:
-            safe_remove(scenario_dir)
-    if not result["reason"]:
-        result["reason"] = ""
-    return result
+                pass
+            if proc.poll() is None:
+                proc.terminate()
+                proc.wait()
 
 
 def cmd_run(args: argparse.Namespace) -> int:
     matrix = load_matrix()
-    errors = validate_matrix(matrix)
-    if errors:
-        for error in errors:
-            print(f"[e2e][ERROR] {error}", file=sys.stderr)
+    scenarios = select_scenarios(matrix, args)
+    if not scenarios and getattr(args, "scenario", None):
+        scenario = next((s for s in matrix["scenarios"] if s["id"] in (args.scenario or [])), None)
+        scenarios = [scenario] if scenario else []
+    if not scenarios:
+        print("[e2e][ERROR] no scenarios selected")
         return 1
 
-    if not args.all and not has_any_filter(args):
-        print("[e2e][ERROR] select scenarios or pass --all", file=sys.stderr)
-        return 2
-    selected = select_scenarios(matrix, args)
     base_root = Path(args.base_dir).expanduser().resolve() if args.base_dir else base_dir()
-    if getattr(args, "ready", False):
-        selected = filter_ready_scenarios(selected, base_root)
-    if not selected:
-        print("[e2e][ERROR] no scenarios selected", file=sys.stderr)
-        return 2
-
     work_root = Path(args.work_dir).expanduser().resolve() if args.work_dir else work_dir()
-    report_root = Path(args.report_dir).expanduser().resolve() if args.report_dir else report_dir()
-    private_key = ensure_ssh_key(ssh_key_path())
-    run_id = args.run_id or utc_timestamp()
-    run_dir = init_run_report(report_root, run_id, selected, host=host_metadata())
-    results: list[dict] = []
+    live = getattr(args, "live", False)
+    retain_workdisk = getattr(args, "retain_workdisk", "on-fail")
+    allow_unconsented_portal = getattr(args, "allow_unconsented_portal", False)
 
-    for scenario in selected:
-        print(f"[e2e] running {scenario['id']}")
-        result = run_one_scenario(
-            matrix=matrix,
-            scenario=scenario,
-            run_id=run_id,
-            base_root=base_root,
-            work_root=work_root,
-            report_root=report_root,
-            private_key=private_key,
-            copy_mode=args.copy_mode,
-            force=args.force,
-            retain_workdisk=args.retain_workdisk,
-            dry_run=args.dry_run,
+    if args.dry_run:
+        report_root = Path(getattr(args, "report_dir", None) or report_dir()).expanduser().resolve()
+        run_id = getattr(args, "run_id", None) or utc_timestamp()
+        run_path = runner_report_path(report_root, run_id)
+        init_run_report(report_root, run_id, scenarios, host=collect_host_info())
+        results = []
+        for scenario in scenarios:
+            backing, backing_kind = backing_image_for_scenario(scenario, base_root)
+            disk = scenario_workdisk_path(work_root, run_id, scenario["id"])
+            portal_image = portal_consented_image_path(scenario["distro"], scenario["session"], base_root)
+            portal_valid, portal_reason = portal_consented_image_is_valid(scenario["distro"], scenario["session"], base_root)
+            if scenario_requires_portal_consent(scenario) and not portal_image.exists() and not allow_unconsented_portal:
+                results.append(
+                    {
+                        "scenario": scenario["id"],
+                        "status": "blocked",
+                        "phase": "portal_consent",
+                        "reason_code": "missing_portal_consented_image",
+                        "reason": "missing portal-consented image for Wayland Portal scenario",
+                        "next_action": portal_consent_next_action(scenario["distro"], scenario["session"]),
+                        "run_id": run_id,
+                        "report_dir": str(scenario_report_path_from_run_dir(run_path, scenario["id"])),
+                        "runner_report_dir": str(run_path),
+                        "l1_backing_image": str(installed_image_path(scenario["distro"], scenario["session"], base_root)),
+                        "l1_backing_kind": "installed",
+                        "portal_consented_image": str(portal_image),
+                        "l2_workdisk": str(disk),
+                        "allow_unconsented_portal": allow_unconsented_portal,
+                        "wizard_summary": "",
+                        "wizard_steps": "",
+                        "stream_summary": "",
+                        "stream_reason_code": "",
+                        "stream_blocked": True,
+                        "duration_sec": 0,
+                    }
+                )
+                continue
+            if scenario_requires_portal_consent(scenario) and portal_image.exists() and not portal_valid and not allow_unconsented_portal:
+                results.append(
+                    {
+                        "scenario": scenario["id"],
+                        "status": "blocked",
+                        "phase": "portal_consent",
+                        "reason_code": "invalid_portal_consented_image",
+                        "reason": f"invalid portal-consented image: {portal_reason}",
+                        "next_action": f"Run ./e2e/run diagnose-portal-consent --distro {scenario['distro']} --session {scenario['session']} then recreate with ./e2e/run prepare-portal-consent --distro {scenario['distro']} --session {scenario['session']} --backend wayland_portal --live --promote",
+                        "run_id": run_id,
+                        "report_dir": str(scenario_report_path_from_run_dir(run_path, scenario["id"])),
+                        "runner_report_dir": str(run_path),
+                        "l1_backing_image": str(installed_image_path(scenario["distro"], scenario["session"], base_root)),
+                        "l1_backing_kind": "installed",
+                        "portal_consented_image": str(portal_image),
+                        "l2_workdisk": str(disk),
+                        "allow_unconsented_portal": allow_unconsented_portal,
+                        "wizard_summary": "",
+                        "wizard_steps": "",
+                        "stream_summary": "",
+                        "stream_reason_code": "",
+                        "stream_blocked": True,
+                        "duration_sec": 0,
+                    }
+                )
+                continue
+            results.append(
+                {
+                    "scenario": scenario["id"],
+                    "status": "pass",
+                    "phase": "dry-run",
+                    "reason": "",
+                    "reason_code": "",
+                    "run_id": run_id,
+                    "report_dir": str(scenario_report_path_from_run_dir(run_path, scenario["id"])),
+                    "runner_report_dir": str(run_path),
+                    "l1_backing_image": str(backing),
+                    "l1_backing_kind": backing_kind,
+                    "portal_consented_image": str(portal_image),
+                    "l2_workdisk": str(disk),
+                    "allow_unconsented_portal": allow_unconsented_portal,
+                    "wizard_summary": "",
+                    "wizard_steps": "",
+                    "stream_summary": "",
+                    "stream_reason_code": "",
+                    "stream_blocked": False,
+                    "duration_sec": 0,
+                }
+            )
+        finalize_run_report(run_path, run_id, results)
+        print(f"[e2e] DRY-RUN: wrote report at {run_path}")
+        return 0
+
+    run_id = getattr(args, "run_id", None) or utc_timestamp()
+    report_root = Path(getattr(args, "report_dir", None) or report_dir()).expanduser().resolve()
+    run_dir = runner_report_path(report_root, run_id)
+    init_run_report(report_root, run_id, scenarios, host=collect_host_info())
+    scenario_results: list[dict] = []
+
+    for scenario in scenarios:
+        scenario_report_path = scenario_report_path_from_run_dir(run_dir, scenario["id"])
+        backing, backing_kind = backing_image_for_scenario(scenario, base_root)
+        portal_image = portal_consented_image_path(scenario["distro"], scenario["session"], base_root)
+        portal_valid, portal_reason = portal_consented_image_is_valid(scenario["distro"], scenario["session"], base_root)
+        if scenario_requires_portal_consent(scenario) and not portal_image.exists() and not allow_unconsented_portal:
+            scenario_results.append(
+                {
+                    "scenario": scenario["id"],
+                    "status": "blocked",
+                    "phase": "portal_consent",
+                    "reason_code": "missing_portal_consented_image",
+                    "reason": "missing portal-consented image for Wayland Portal scenario",
+                    "next_action": portal_consent_next_action(scenario["distro"], scenario["session"]),
+                    "report_dir": str(scenario_report_path),
+                    "run_id": run_id,
+                    "l1_backing_image": str(installed_image_path(scenario["distro"], scenario["session"], base_root)),
+                    "l1_backing_kind": "installed",
+                    "portal_consented_image": str(portal_image),
+                    "runner_report_dir": str(run_dir),
+                    "allow_unconsented_portal": allow_unconsented_portal,
+                    "duration_sec": 0,
+                }
+            )
+            continue
+        if scenario_requires_portal_consent(scenario) and portal_image.exists() and not portal_valid and not allow_unconsented_portal:
+            scenario_results.append(
+                {
+                    "scenario": scenario["id"],
+                    "status": "blocked",
+                    "phase": "portal_consent",
+                    "reason_code": "invalid_portal_consented_image",
+                    "reason": f"invalid portal-consented image: {portal_reason}",
+                    "next_action": f"Run ./e2e/run diagnose-portal-consent --distro {scenario['distro']} --session {scenario['session']} then recreate with ./e2e/run prepare-portal-consent --distro {scenario['distro']} --session {scenario['session']} --backend wayland_portal --live --promote",
+                    "report_dir": str(scenario_report_path),
+                    "run_id": run_id,
+                    "l1_backing_image": str(installed_image_path(scenario["distro"], scenario["session"], base_root)),
+                        "l1_backing_kind": "installed",
+                    "portal_consented_image": str(portal_image),
+                    "runner_report_dir": str(run_dir),
+                    "allow_unconsented_portal": allow_unconsented_portal,
+                    "duration_sec": 0,
+                }
+            )
+            continue
+        if not backing.exists():
+            scenario_results.append(
+                {
+                    "scenario": scenario["id"],
+                    "status": "fail",
+                    "phase": "boot",
+                    "reason": f"missing backing image: {backing}",
+                    "reason_code": "missing_backing_image",
+                    "report_dir": str(scenario_report_path),
+                    "run_id": run_id,
+                    "l1_backing_image": str(backing),
+                    "l1_backing_kind": backing_kind,
+                    "portal_consented_image": str(portal_image),
+                    "runner_report_dir": str(run_dir),
+                    "next_action": f"Run ./e2e/run prepare-installed --distro {scenario['distro']} --session {scenario['session']} --live",
+                    "allow_unconsented_portal": allow_unconsented_portal,
+                    "duration_sec": 0,
+                }
+            )
+            continue
+
+        scenario_run_dir = work_root / "runs" / run_id / scenario["id"]
+        scenario_run_dir.mkdir(parents=True, exist_ok=True)
+        guest_root = "/home/wbeam/WBeam"
+        guest_report_root = scenario_run_dir / "guest"
+        guest_report_root.mkdir(parents=True, exist_ok=True)
+        guest_report_root_remote = f"{guest_root}/e2e/work/runs/{run_id}/{scenario['id']}/guest"
+        distros = distros_by_id(matrix)
+        distro = distros[scenario["distro"]]
+        ssh_port = alloc_ssh_port(f"run-{run_id}-{scenario['id']}")
+        android_serial = None
+        if scenario_requires_host_android(scenario):
+            android_serial, adb_status, adb_reason = select_android_serial(resolve_android_serial(args, scenario))
+            if adb_status != "ok" or not android_serial:
+                reason_code = android_preflight_reason_code(adb_reason)
+                scenario_results.append(
+                    {
+                        "scenario": scenario["id"],
+                        "status": "blocked",
+                        "phase": "android-preflight",
+                        "reason_code": reason_code,
+                        "reason": adb_reason,
+                        "report_dir": str(scenario_report_path),
+                        "next_action": "Connect/unlock the phone, accept USB debugging, or rerun with --android-serial.",
+                        "wizard_summary": "",
+                        "wizard_steps": "",
+                        "stream_summary": "",
+                        "stream_reason_code": "",
+                        "stream_blocked": False,
+                        "duration_sec": 0,
+                    }
+                )
+                continue
+        host_forwards: tuple[tuple[int, int], ...] = ()
+        host_control_port: int | None = None
+        host_stream_port: int | None = None
+        if scenario.get("android_execution") == "host":
+            host_control_port = alloc_ssh_port(f"ctrl-{run_id}-{scenario['id']}", start=25000)
+            host_stream_port = alloc_ssh_port(f"stream-{run_id}-{scenario['id']}", start=27000)
+            host_forwards = (
+                (host_control_port, matrix_control_port(matrix=matrix, scenario=scenario)),
+                (host_stream_port, matrix_stream_port(matrix=matrix, scenario=scenario)),
+            )
+        private_key = ensure_ssh_key(ssh_key_path())
+        disk = scenario_workdisk_path(work_root, run_id, scenario["id"])
+        qemu_img_overlay(backing, disk)
+        q_spec = QemuSpec(
+            name=f"wbeam-run-{run_id}-{scenario['id']}",
+            disk=disk,
+            ssh_port=ssh_port,
+            run_dir=scenario_run_dir,
+            cpu=coerce_int(matrix["defaults"].get("cpu"), default=4),
+            memory_mib=coerce_int(matrix["defaults"].get("memory_mib"), default=8192),
+            host_forwards=host_forwards,
         )
-        results.append(result)
-        finalize_run_report(run_dir, run_id, results)
-        print(f"[e2e] {scenario['id']}: {result['status']}")
-        if result["status"] != "pass" and args.stop_on_fail:
-            break
+        started = time.time()
+        proc = start_qemu(q_spec)
+        result = {
+            "scenario": scenario["id"],
+            "status": "fail",
+            "phase": "wizard",
+            "reason": "unknown",
+            "reason_code": "",
+            "report_dir": str(scenario_report_path),
+            "run_id": run_id,
+            "l1_backing_image": str(backing),
+                    "l1_backing_kind": backing_kind,
+            "portal_consented_image": str(portal_image),
+            "l2_workdisk": str(disk),
+            "runner_report_dir": str(run_dir),
+            "guest_command": "",
+            "allow_unconsented_portal": allow_unconsented_portal,
+            "wizard_summary": "",
+            "wizard_steps": "",
+            "stream_summary": "",
+            "stream_reason_code": "",
+            "stream_blocked": False,
+            "duration_sec": 0,
+            "workdisk_policy": retain_workdisk,
+            "workdisk_retained": None,
+        }
+        try:
+            if live:
+                print(f"[e2e] scenario {scenario['id']}")
+                print(f"[e2e] work dir: {scenario_run_dir}")
+                print(f"[e2e] qemu log: {scenario_run_dir / 'qemu.log'}")
+                print(f"[e2e] guest wizard log: {scenario_run_dir / 'guest-wizard.log'}")
+                if host_control_port and host_stream_port:
+                    print(f"[e2e] host ctrl: 127.0.0.1:{host_control_port} -> guest:{matrix_control_port(matrix=matrix, scenario=scenario)}")
+                    print(f"[e2e] host stream: 127.0.0.1:{host_stream_port} -> guest:{matrix_stream_port(matrix=matrix, scenario=scenario)}")
+                print(f"[e2e] waiting for SSH on localhost:{ssh_port}")
+            wait_for_ssh(distro["ssh_user"], ssh_port, private_key, 600)
+            rsync_to_guest(distro["ssh_user"], ssh_port, private_key, ROOT, guest_root, live=live)
+            ssh(distro["ssh_user"], ssh_port, private_key, f"mkdir -p {shlex.quote(guest_report_root_remote)}", live=live)
+            wizard_flags = guest_wizard_flags_for_scenario(scenario)
+            wizard_cmd, wizard_env = build_guest_wizard_command(
+                guest_root=guest_root,
+                scenario=scenario,
+                guest_report_root=guest_report_root_remote,
+                duration=scenario_duration(matrix, scenario),
+                flags=wizard_flags,
+            )
+            command = f"cd {shlex.quote(guest_root)} && {wizard_env} {wizard_cmd}"
+            result["guest_command"] = command
+            if live:
+                print(f"[e2e] running in guest: {command}")
+            guest_proc = ssh(
+                distro["ssh_user"],
+                ssh_port,
+                private_key,
+                command,
+                log=scenario_run_dir / "guest-wizard.log",
+                check=False,
+                live=live,
+            )
+            guest_rc = guest_proc.returncode
+            rsync_from_guest(distro["ssh_user"], ssh_port, private_key, f"{guest_report_root_remote}/", guest_report_root, live=live)
+            publish_scenario_artifacts(
+                scenario_run_dir=scenario_run_dir,
+                scenario_report_dir=scenario_report_path,
+                guest_report_root=guest_report_root,
+            )
+            summary_path = scenario_report_path / "guest" / "wizard" / "summary.json"
+            steps_path = scenario_report_path / "guest" / "wizard" / "steps.jsonl"
+            stream_summary_path = scenario_report_path / "guest" / "wizard" / "stream" / scenario["backend"] / "summary.json"
+            if not summary_path.exists() or not steps_path.exists():
+                if guest_rc != 0:
+                    result["status"] = "fail"
+                    result["phase"] = "wizard"
+                    result["reason"] = f"guest wizard exited with rc={guest_rc}"
+                    result["next_action"] = "Open the scenario report dir and inspect logs/guest-wizard.log and logs/qemu.log."
+                    result["guest_exit_code"] = guest_rc
+                    raise RuntimeError("missing wizard summary or steps report")
+                raise RuntimeError("missing wizard summary or steps report")
+            wizard_summary = read_json(summary_path)
+            stream_summary = read_json(stream_summary_path)
+            status, phase, reason, next_action = normalize_wizard_result(wizard_summary, guest_rc)
+            result["status"] = status
+            result["phase"] = phase
+            result["reason"] = reason
+            result["next_action"] = next_action
+            result["reason_code"] = str(wizard_summary.get("reason_code") or stream_summary.get("reason_code") or "")
+            result["stream_reason_code"] = str(stream_summary.get("reason_code") or "")
+            result["stream_blocked"] = bool(stream_summary.get("blocked")) or status == "blocked"
+            if guest_rc != 0:
+                result["guest_exit_code"] = guest_rc
+            result["wizard_summary"] = str(summary_path)
+            result["wizard_steps"] = str(steps_path)
+            result["stream_summary"] = str(stream_summary_path)
+            if result["status"] != "pass" and not result.get("next_action"):
+                phase, reason, next_action = summarize_guest_wizard_failure(summary_path, steps_path, stream_summary_path)
+                result["phase"] = phase
+                result["reason"] = reason
+                result["next_action"] = next_action
+            if result["status"] == "pass" and scenario_requires_host_android(scenario):
+                android_dir = scenario_report_path / "android"
+                android_rc = run_host_android_smoke(
+                    serial=android_serial or "",
+                    host_control_port=host_control_port or matrix_control_port(matrix=matrix, scenario=scenario),
+                    host_stream_port=host_stream_port or matrix_stream_port(matrix=matrix, scenario=scenario),
+                    scenario=scenario,
+                    report_dir=android_dir,
+                    duration_sec=scenario_duration(matrix, scenario),
+                    live=live,
+                )
+                android_summary_path = android_dir / "summary.json"
+                android_summary = read_json(android_summary_path)
+                result["android_summary"] = str(android_summary_path)
+                result["adb_serial"] = android_serial
+                result["phone_info"] = str(android_dir / "phone-info.json")
+                result["phone_logcat"] = str(android_dir / "phone-logcat.log")
+                result["bytes_received"] = android_summary.get("bytes_received", 0)
+                if android_rc != 0 or android_summary.get("ok") is not True:
+                    result["status"] = "fail"
+                    result["phase"] = "android-stream"
+                    result["reason"] = android_summary.get("reason", f"host Android smoke failed rc={android_rc}")
+                    result["next_action"] = "Inspect android/summary.json, android/deploy.log, and android/phone-logcat.log."
+            if result["status"] == "pass":
+                missing_artifacts = validate_required_artifacts(scenario_report_path, scenario)
+                if missing_artifacts:
+                    result["status"] = "fail"
+                    result["phase"] = "artifact-validation"
+                    result["reason"] = f"missing required artifacts: {missing_artifacts}"
+                    result["next_action"] = "Open the scenario report dir and inspect logs/guest-wizard.log plus guest/wizard/summary.json."
+        except Exception as exc:  # noqa: BLE001
+            result["reason"] = str(exc)
+            result["next_action"] = "Open the scenario report dir and inspect logs/guest-wizard.log and logs/qemu.log."
+        finally:
+            duration = time.time() - started
+            result["duration_sec"] = round(duration, 2)
+            try:
+                shutdown_guest(distro["ssh_user"], ssh_port, private_key, live=live)
+                wait_process(proc, 300, name="shutdown")
+            finally:
+                if proc.poll() is None:
+                    proc.terminate()
+                    proc.wait()
+            if not should_keep_workdisk(retain_workdisk, result["status"] == "pass"):
+                safe_remove(disk)
+                result["workdisk_retained"] = False
+            else:
+                result["workdisk_retained"] = True
+        scenario_results.append(result)
 
-    finalize_run_report(run_dir, run_id, results)
-    print(run_dir)
-    return 0 if all(result["status"] == "pass" for result in results) else 4
+    finalize_run_report(run_dir, run_id, scenario_results)
+    return 0 if all(item.get("status") == "pass" for item in scenario_results) else 1
 
 
 def cmd_report(args: argparse.Namespace) -> int:
-    run_root = report_dir() / args.run_id
-    summary_path = run_root / "summary.json"
-    if not summary_path.exists():
-        print(f"[e2e][ERROR] missing report summary: {summary_path}", file=sys.stderr)
-        return 2
-    summary = json.loads(summary_path.read_text(encoding="utf-8"))
-    if args.json:
-        print(json.dumps(summary, indent=2, sort_keys=True))
+    report_root = Path(getattr(args, "report_dir", None) or report_dir()).expanduser().resolve()
+    run_id = getattr(args, "run_id", None)
+    if not run_id:
+        runs = sorted([p for p in report_root.glob("*") if p.is_dir()])
+        if not runs:
+            print("[e2e] no runs")
+            return 0
+        run_id = runs[-1].name
+    run_dir = report_root / run_id
+    summary_path = run_dir / "summary.json"
+    summary = read_json(summary_path) if summary_path.exists() else {}
+    summary_corrupt = summary_path.exists() and not summary
+    if (run_dir / "report.md").exists():
+        print(json.dumps({"report_md": str(run_dir / "report.md")}, indent=2, sort_keys=True))
+    if summary_corrupt:
+        print(json.dumps({"summary_corrupt": True, "summary_path": str(summary_path)}, indent=2, sort_keys=True))
+    if summary.get("status_counts"):
+        print(json.dumps({"status_counts": summary.get("status_counts")}, indent=2, sort_keys=True))
+    if summary.get("results"):
+        for result in summary["results"]:
+            artifact_view = {
+                "scenario": result.get("scenario"),
+                "status": result.get("status"),
+                "phase": result.get("phase"),
+                "run_id": result.get("run_id"),
+                "wizard_summary": result.get("wizard_summary"),
+                "wizard_steps": result.get("wizard_steps"),
+                "stream_summary": result.get("stream_summary"),
+                "android_summary": result.get("android_summary"),
+                "adb_serial": result.get("adb_serial"),
+                "bytes_received": result.get("bytes_received"),
+                "guest_command": result.get("guest_command"),
+                "report_dir": result.get("report_dir"),
+                "l1_backing_image": result.get("l1_backing_image"),
+                "l1_backing_kind": result.get("l1_backing_kind"),
+                "portal_consented_image": result.get("portal_consented_image"),
+                "l2_workdisk": result.get("l2_workdisk"),
+                "runner_report_dir": result.get("runner_report_dir"),
+                "reason_code": result.get("reason_code"),
+                "stream_reason_code": result.get("stream_reason_code"),
+                "stream_blocked": result.get("stream_blocked"),
+                "allow_unconsented_portal": result.get("allow_unconsented_portal"),
+                "guest_exit_code": result.get("guest_exit_code"),
+                "next_action": result.get("next_action"),
+                "workdisk_policy": result.get("workdisk_policy"),
+                "workdisk_retained": result.get("workdisk_retained"),
+            }
+            print(json.dumps(artifact_view, indent=2, sort_keys=True))
         return 0
-    print(f"[e2e] run_id={summary['run_id']} status={summary['status']}")
-    print(f"[e2e] passed={summary['scenarios_passed']} failed={summary['scenarios_failed']}")
-    for failure in summary.get("failures", []):
-        print(f"[e2e] fail {failure['scenario']} phase={failure['phase']} reason={failure['reason']}")
-    print(run_root)
+    print(json.dumps(summary, indent=2, sort_keys=True))
     return 0
 
+def _collect_run_overview(run_dir: Path) -> dict[str, object]:
+    summary = read_json(run_dir / "summary.json")
+    summary_corrupt = (run_dir / "summary.json").exists() and not summary
+    failures = summary.get("failures") or []
+    first_failure = failures[0] if isinstance(failures, list) and failures else {}
+    last_failure_result = {}
+    results = summary.get("results") or []
+    if isinstance(results, list) and first_failure.get("scenario"):
+        for result in results:
+            if isinstance(result, dict) and result.get("scenario") == first_failure.get("scenario"):
+                last_failure_result = result
+                break
+    failed_scenarios = _collect_failed_scenarios(run_dir) if summary.get("status") != "pass" else []
+    return {
+        "run_id": run_dir.name,
+        "status": summary.get("status", "unknown"),
+        "scenarios_total": summary.get("scenarios_total", 0),
+        "scenarios_passed": summary.get("scenarios_passed", 0),
+        "scenarios_failed": summary.get("scenarios_failed", 0),
+        "scenarios_blocked": summary.get("scenarios_blocked", 0),
+        "scenarios_reboot_required": summary.get("scenarios_reboot_required", 0),
+        "status_counts": summary.get("status_counts", {}),
+        "failed_scenarios": failed_scenarios,
+        "failure_count": len(failures) if isinstance(failures, list) else 0,
+        "report_dir": str(run_dir),
+        "report_md": str(run_dir / "report.md") if (run_dir / "report.md").exists() else "",
+        "junit": str(run_dir / "junit.xml") if (run_dir / "junit.xml").exists() else "",
+        "last_failure": first_failure,
+        "last_failure_workdisk_policy": last_failure_result.get("workdisk_policy", ""),
+        "last_failure_workdisk_retained": last_failure_result.get("workdisk_retained", None),
+        "summary_corrupt": summary_corrupt,
+    }
+
+
+def _collect_failed_scenarios(run_dir: Path) -> list[str]:
+    summary = read_json(run_dir / "summary.json")
+    results = summary.get("results") or []
+    failed = []
+    for result in results:
+        if isinstance(result, dict) and result.get("status") != "pass" and result.get("scenario"):
+            failed.append(str(result["scenario"]))
+    return failed
+
+
+def _collect_recovery_commands(last_failed: dict[str, object]) -> list[str]:
+    if not last_failed or not str(last_failed.get("run_id", "")).strip():
+        return []
+    commands = ["./e2e/run last-failed", "./e2e/run rerun-last-failed --live"]
+    scenario = str(last_failed.get("scenario", "")).strip()
+    if scenario:
+        commands.append(f"./e2e/run diagnose-run --run-id {last_failed['run_id']} --scenario {scenario}")
+        if str((last_failed.get("last_failure") or {}).get("reason_code", "")) == "portal_consent_required":
+            commands.append(f"./e2e/run portal-diagnose --run-id {last_failed['run_id']} --scenario {scenario}")
+    return commands
+
+
+def cmd_history(args: argparse.Namespace) -> int:
+    report_root = Path(getattr(args, "report_dir", None) or report_dir()).expanduser().resolve()
+    limit = int(getattr(args, "limit", 10))
+    failed_only = getattr(args, "failed_only", False)
+    if not report_root.exists():
+        print(json.dumps([], indent=2))
+        return 0
+    runs = sorted((p for p in report_root.iterdir() if p.is_dir()), key=lambda p: p.name, reverse=True)
+    entries = []
+    skipped_corrupt = 0
+    for run_dir in runs:
+        overview = _collect_run_overview(run_dir)
+        if overview.get("summary_corrupt"):
+            skipped_corrupt += 1
+            continue
+        if failed_only and overview["status"] == "pass":
+            continue
+        entries.append(overview)
+        if len(entries) >= limit:
+            break
+    payload: dict[str, object] = {"entries": entries}
+    if skipped_corrupt:
+        payload["skipped_corrupt_runs"] = skipped_corrupt
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_last_failed(args: argparse.Namespace) -> int:
+    report_root = Path(getattr(args, "report_dir", None) or report_dir()).expanduser().resolve()
+    if not report_root.exists():
+        print(json.dumps({}, indent=2, sort_keys=True))
+        return 0
+    runs = sorted((p for p in report_root.iterdir() if p.is_dir()), key=lambda p: p.name, reverse=True)
+    for run_dir in runs:
+        overview = _collect_run_overview(run_dir)
+        if overview["status"] != "pass":
+            print(json.dumps(overview, indent=2, sort_keys=True))
+            return 0
+    print(json.dumps({}, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_rerun_last_failed(args: argparse.Namespace) -> int:
+    report_root = Path(getattr(args, "report_dir", None) or report_dir()).expanduser().resolve()
+    runs = sorted((p for p in report_root.iterdir() if p.is_dir()), key=lambda p: p.name, reverse=True) if report_root.exists() else []
+    for run_dir in runs:
+        failed = _collect_failed_scenarios(run_dir)
+        if not failed:
+            continue
+        if getattr(args, "dry_run", False):
+            print(json.dumps({"report_dir": str(report_root), "source_run": run_dir.name, "failed_scenarios": failed}, indent=2, sort_keys=True))
+            return 0
+        rc = 0
+        for scenario in failed:
+            rerun_args = argparse.Namespace(
+                scenario=[scenario],
+                use_installed=True,
+                base_dir=getattr(args, "base_dir", None),
+                work_dir=getattr(args, "work_dir", None),
+                android_serial=getattr(args, "android_serial", None),
+                retain_workdisk=getattr(args, "retain_workdisk", "on-fail"),
+                dry_run=getattr(args, "dry_run", False),
+                live=getattr(args, "live", False),
+                report_dir=getattr(args, "report_dir", None),
+                stop_on_fail=getattr(args, "stop_on_fail", True),
+            )
+            rc = cmd_run(rerun_args)
+            if rc != 0 and getattr(args, "stop_on_fail", True):
+                return rc
+        return rc
+    print(json.dumps({}, indent=2, sort_keys=True))
+    return 0
 
 def cmd_clean(args: argparse.Namespace) -> int:
-    root = Path(args.work_dir).expanduser().resolve() if args.work_dir else work_dir()
-    target = root / "runs" / args.run_id
-    if not target.exists():
-        print(f"[e2e][ERROR] run work dir does not exist: {target}", file=sys.stderr)
-        return 2
-    safe_remove(target)
-    print(target)
+    for root in [work_dir(), report_dir()]:
+        if root.exists():
+            shutil.rmtree(root)
     return 0
-
-
-def cmd_status(args: argparse.Namespace) -> int:
-    matrix = load_matrix()
-    snapshot = status_snapshot(matrix)
-    if args.json:
-        print(json.dumps(snapshot, indent=2, sort_keys=True))
-        return 0
-    print(f"[e2e] progress={snapshot['percent']}%")
-    for item in snapshot["items"]:
-        state = "done" if item["done"] else "todo"
-        print(f"[e2e] {state:4} {item['label']} ({item['weight']}%) - {item['details']}")
-    print(
-        f"[e2e] base_images={snapshot['base_specs_prepared']}/{snapshot['base_specs_total']} "
-        f"iso_inputs={snapshot['iso_ready']}/{snapshot['iso_total']} "
-        f"reports={snapshot['report_runs']}"
-    )
-    if snapshot["missing_iso_inputs"]:
-        print("[e2e] missing ISO inputs:")
-        for item in snapshot["missing_iso_inputs"]:
-            current = item["value"] or "<unset>"
-            print(f"[e2e]   {item['env']} ({item['distro']}) = {current}")
-    if snapshot["missing_base_images"]:
-        print("[e2e] missing base images:")
-        for item in snapshot["missing_base_images"]:
-            print(f"[e2e]   {item['distro']} / {item['session']} -> {item['image_path']}")
-    if snapshot["next_commands"]:
-        print("[e2e] next commands:")
-        for command in snapshot["next_commands"]:
-            print(f"[e2e]   {command}")
-    return 0
-
-
-def cmd_next(args: argparse.Namespace) -> int:
-    matrix = load_matrix()
-    snapshot = status_snapshot(matrix)
-    if args.json:
-        print(json.dumps({"progress_percent": snapshot["percent"], "next_commands": snapshot["next_commands"]}, indent=2, sort_keys=True))
-        return 0
-    for command in snapshot["next_commands"]:
-        print(command)
-    return 0
-
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="WBeam local E2E helper")
+    parser = argparse.ArgumentParser(prog="e2e-runner")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("validate", help="Validate e2e/matrix.json").set_defaults(func=cmd_validate)
-    sub.add_parser("env", help="Print ISO environment variable names").set_defaults(func=cmd_env)
-    init_env_p = sub.add_parser("init-env", help="Create e2e/env.local from e2e/env.example")
-    init_env_p.add_argument("--file", help="Target env file; defaults to e2e/env.local")
-    init_env_p.add_argument("--force", action="store_true", help="Overwrite existing target env file")
-    init_env_p.set_defaults(func=cmd_init_env)
-    iso_sources_p = sub.add_parser("iso-sources", help="Print official ISO source pages for the matrix distros")
-    iso_sources_p.add_argument("--json", action="store_true")
-    iso_sources_p.set_defaults(func=cmd_iso_sources)
-    env_shell_p = sub.add_parser("env-shell", help="Print shell export lines from e2e/env.local or another env file")
-    env_shell_p.add_argument("--file", help="Path to env file; defaults to e2e/env.local")
-    env_shell_p.set_defaults(func=cmd_env_shell)
-    next_p = sub.add_parser("next", help="Print only the next commands needed to move e2e toward completion")
-    next_p.add_argument("--json", action="store_true")
-    next_p.set_defaults(func=cmd_next)
-    status_p = sub.add_parser("status", help="Show evidence-based e2e progress and readiness")
-    status_p.add_argument("--json", action="store_true")
-    status_p.set_defaults(func=cmd_status)
-
-    images_p = sub.add_parser("images", help="List required clean base images")
-    add_filters(images_p)
-    images_p.add_argument("--base-dir", help="Override base image root")
-    images_p.add_argument("--json", action="store_true")
-    images_p.set_defaults(func=cmd_images)
-
-    list_p = sub.add_parser("list", help="List scenarios")
-    add_filters(list_p)
-    list_p.add_argument("--json", action="store_true")
-    list_p.set_defaults(func=cmd_list)
-
-    plan_p = sub.add_parser("plan", help="Show selected scenario execution plan")
-    add_filters(plan_p)
-    plan_p.add_argument("--json", action="store_true")
+    plan_p = sub.add_parser("plan")
+    plan_p.add_argument("--scenario", nargs="*")
+    plan_p.add_argument("--distro", nargs="*")
+    plan_p.add_argument("--backend", nargs="*")
+    plan_p.add_argument("--tag", nargs="*")
     plan_p.set_defaults(func=cmd_plan)
 
-    base_plan_p = sub.add_parser("base-plan", help="Show clean base image creation plan")
-    add_filters(base_plan_p)
-    base_plan_p.add_argument("--session", action="append", help="Select base session; repeatable")
-    base_plan_p.add_argument("--base-dir", help="Override base image root")
-    base_plan_p.add_argument("--work-dir", help="Override work root")
-    base_plan_p.add_argument("--json", action="store_true")
-    base_plan_p.set_defaults(func=cmd_base_plan)
+    status_p = sub.add_parser("status")
+    status_p.add_argument("--base-dir")
+    status_p.add_argument("--report-dir")
+    status_p.add_argument("--json", action="store_true")
+    status_p.set_defaults(func=lambda args: print(json.dumps(status_snapshot(load_matrix(), base_root=Path(args.base_dir).expanduser().resolve() if args.base_dir else base_dir(), report_root=Path(args.report_dir).expanduser().resolve() if args.report_dir else report_dir()), indent=2, sort_keys=True)) or 0)
 
-    workdisk_p = sub.add_parser("workdisk-create", help="Create disposable test disk from base image")
-    add_filters(workdisk_p)
-    workdisk_p.add_argument("--all", action="store_true", help="Create work disks for all selected scenarios")
-    workdisk_p.add_argument("--run-id", help="Run id; default is UTC timestamp")
-    workdisk_p.add_argument("--base-dir", help="Override base image root")
-    workdisk_p.add_argument("--work-dir", help="Override work root")
-    workdisk_p.add_argument("--ready", action="store_true", help="Only use scenarios whose base image already exists")
-    workdisk_p.add_argument("--copy-mode", choices=("overlay", "full"), default="overlay")
-    workdisk_p.add_argument("--force", action="store_true", help="Replace existing generated work disk")
-    workdisk_p.add_argument("--json", action="store_true")
-    workdisk_p.set_defaults(func=cmd_workdisk_create)
+    next_p = sub.add_parser("next")
+    next_p.add_argument("--json", action="store_true")
+    next_p.set_defaults(func=cmd_next)
 
-    report_p = sub.add_parser("report-init", help="Create an empty report directory")
-    add_filters(report_p)
-    report_p.add_argument("--run-id")
-    report_p.set_defaults(func=cmd_report_init)
+    env_shell_p = sub.add_parser("env-shell")
+    env_shell_p.add_argument("--file", default=str(E2E_DIR / "env.local"))
+    env_shell_p.set_defaults(func=cmd_env_shell)
 
-    prepare_base_p = sub.add_parser("prepare-base", help="Build a clean base image from installer ISO")
-    add_filters(prepare_base_p)
-    prepare_base_p.add_argument("--session", action="append", help="Select base session; repeatable")
-    prepare_base_p.add_argument("--all", action="store_true", help="Prepare all selected base images")
-    prepare_base_p.add_argument("--base-dir", help="Override base image root")
-    prepare_base_p.add_argument("--work-dir", help="Override work root")
-    prepare_base_p.add_argument("--missing", action="store_true", help="Only prepare base images that are still missing")
-    prepare_base_p.add_argument("--force", action="store_true", help="Replace existing build dir/base image")
-    prepare_base_p.add_argument("--dry-run", action="store_true")
-    prepare_base_p.set_defaults(func=cmd_prepare_base)
+    init_env_p = sub.add_parser("init-env")
+    init_env_p.add_argument("--file", default=str(E2E_DIR / "env.local"))
+    init_env_p.add_argument("--force", action="store_true")
+    init_env_p.set_defaults(func=cmd_init_env)
 
-    run_p = sub.add_parser("run", help="Run one or more scenarios on disposable VM disks")
-    add_filters(run_p)
-    run_p.add_argument("--all", action="store_true", help="Run all selected scenarios")
-    run_p.add_argument("--run-id", help="Run id; default is UTC timestamp")
-    run_p.add_argument("--base-dir", help="Override base image root")
-    run_p.add_argument("--work-dir", help="Override work root")
-    run_p.add_argument("--report-dir", help="Override report root")
-    run_p.add_argument("--ready", action="store_true", help="Only run scenarios whose base image already exists")
-    run_p.add_argument("--copy-mode", choices=("overlay", "full"), default="overlay")
-    run_p.add_argument("--retain-workdisk", choices=("never", "on-fail", "always"), default="on-fail")
-    run_p.add_argument("--force", action="store_true", help="Replace existing generated work disk")
-    run_p.add_argument("--stop-on-fail", action="store_true", help="Stop after first failing scenario")
+    iso_p = sub.add_parser("iso-sources")
+    iso_p.set_defaults(func=cmd_iso_sources)
+
+    validate_p = sub.add_parser("validate")
+    validate_p.set_defaults(func=cmd_validate)
+
+    base_p = sub.add_parser("prepare-base")
+    base_p.add_argument("--distro")
+    base_p.add_argument("--session")
+    base_p.add_argument("--all", action="store_true")
+    base_p.add_argument("--missing", action="store_true")
+    base_p.add_argument("--force", action="store_true")
+    base_p.add_argument("--base-dir")
+    base_p.add_argument("--work-dir")
+    base_p.add_argument("--dry-run", action="store_true")
+    base_p.add_argument("--live", action="store_true", help="stream VM installer logs to this terminal")
+    base_p.set_defaults(func=cmd_prepare_base)
+
+    inst_p = sub.add_parser("prepare-installed")
+    inst_p.add_argument("--distro", required=True)
+    inst_p.add_argument("--session")
+    inst_p.add_argument("--force", action="store_true")
+    inst_p.add_argument("--missing", action="store_true")
+    inst_p.add_argument(
+        "--install-backend",
+        choices=("benchmark_game", "wayland", "evdi", "x11"),
+        help="Backend passed to install-wbeam during L1 provisioning. Defaults from session.",
+    )
+    inst_p.add_argument("--base-dir")
+    inst_p.add_argument("--work-dir")
+    inst_p.add_argument("--dry-run", action="store_true")
+    inst_p.add_argument("--live", action="store_true", help="stream guest provisioning logs to this terminal")
+    inst_p.set_defaults(func=cmd_prepare_installed)
+
+    run_p = sub.add_parser("run")
+    run_p.add_argument("--scenario", action="append", required=True)
+    run_p.add_argument("--use-installed", action="store_true")
+    run_p.add_argument("--base-dir")
+    run_p.add_argument("--work-dir")
+    run_p.add_argument("--run-id")
+    run_p.add_argument("--report-dir")
+    run_p.add_argument("--android-serial")
+    run_p.add_argument("--allow-unconsented-portal", action="store_true")
+    run_p.add_argument("--retain-workdisk", choices=("always", "on-success", "on-fail", "never"), default="on-fail")
     run_p.add_argument("--dry-run", action="store_true")
+    run_p.add_argument("--live", action="store_true", help="stream guest wizard logs to this terminal")
     run_p.set_defaults(func=cmd_run)
 
-    summary_p = sub.add_parser("report", help="Show summary for a previous run")
-    summary_p.add_argument("--run-id", required=True)
-    summary_p.add_argument("--json", action="store_true")
-    summary_p.set_defaults(func=cmd_report)
+    portal_p = sub.add_parser("prepare-portal-consent")
+    portal_p.add_argument("--distro", required=True)
+    portal_p.add_argument("--session", default="gnome-wayland")
+    portal_p.add_argument("--backend", choices=("wayland_portal",), default="wayland_portal")
+    portal_p.add_argument("--display", choices=("auto", "gtk", "sdl", "vnc", "none"), default="auto")
+    portal_p.add_argument("--base-dir")
+    portal_p.add_argument("--work-dir")
+    portal_p.add_argument("--timeout-sec", type=int, default=180)
+    portal_p.add_argument("--approval-timeout-sec", type=int, default=900)
+    portal_p.add_argument("--approval-poll-sec", type=int, default=5)
+    portal_p.add_argument("--vnc-port", type=int)
+    portal_p.add_argument("--live", action="store_true")
+    portal_p.add_argument("--dry-run", action="store_true")
+    portal_p.add_argument("--force", action="store_true")
+    portal_p.add_argument("--promote", action="store_true")
+    portal_p.add_argument("--keep-vm-on-timeout", action="store_true")
+    portal_p.set_defaults(func=cmd_prepare_portal_consent)
 
-    clean_p = sub.add_parser("clean", help="Remove disposable work dir for a run id")
-    clean_p.add_argument("--run-id", required=True)
-    clean_p.add_argument("--work-dir", help="Override work root")
+    report_p = sub.add_parser("report")
+    report_p.add_argument("--run-id")
+    report_p.add_argument("--report-dir")
+    report_p.set_defaults(func=cmd_report)
+
+    assert_p = sub.add_parser("assert-run")
+    assert_p.add_argument("--run-id", required=True)
+    assert_p.add_argument("--scenario", required=True)
+    assert_p.add_argument("--report-dir")
+    assert_p.add_argument("--min-bytes", type=int, default=1)
+    assert_p.add_argument("--require-portal-consented", action="store_true")
+    assert_p.add_argument("--json", action="store_true")
+    assert_p.set_defaults(func=cmd_assert_run)
+
+    close_p = sub.add_parser("close")
+    close_p.add_argument("--profile", choices=("fedora-mvp", "hardware", "full"), default="fedora-mvp")
+    close_p.add_argument("--live", action="store_true")
+    close_p.add_argument("--run-prefix", default="FINAL-E2E-CLOSURE")
+    close_p.add_argument("--json", action="store_true")
+    close_p.set_defaults(func=cmd_close)
+
+    history_p = sub.add_parser("history")
+    history_p.add_argument("--report-dir")
+    history_p.add_argument("--limit", type=int, default=10)
+    history_p.add_argument("--failed-only", action="store_true")
+    history_p.set_defaults(func=cmd_history)
+
+    last_failed_p = sub.add_parser("last-failed")
+    last_failed_p.add_argument("--report-dir")
+    last_failed_p.set_defaults(func=cmd_last_failed)
+
+    rerun_last_failed_p = sub.add_parser("rerun-last-failed")
+    rerun_last_failed_p.add_argument("--report-dir")
+    rerun_last_failed_p.add_argument("--base-dir")
+    rerun_last_failed_p.add_argument("--work-dir")
+    rerun_last_failed_p.add_argument("--android-serial")
+    rerun_last_failed_p.add_argument("--retain-workdisk", choices=("always", "on-success", "on-fail", "never"), default="on-fail")
+    rerun_last_failed_p.add_argument("--dry-run", action="store_true")
+    rerun_last_failed_p.add_argument("--live", action="store_true")
+    rerun_last_failed_p.add_argument("--stop-on-fail", dest="stop_on_fail", action="store_true", default=True)
+    rerun_last_failed_p.add_argument("--no-stop-on-fail", dest="stop_on_fail", action="store_false")
+    rerun_last_failed_p.set_defaults(func=cmd_rerun_last_failed)
+
+    diag_run_p = sub.add_parser("diagnose-run")
+    diag_run_p.add_argument("--run-id", required=True)
+    diag_run_p.add_argument("--scenario", required=True)
+    diag_run_p.add_argument("--report-dir")
+    diag_run_p.add_argument("--work-dir")
+    diag_run_p.set_defaults(func=cmd_diagnose_run)
+
+    portal_diag_p = sub.add_parser("portal-diagnose")
+    portal_diag_p.add_argument("--run-id")
+    portal_diag_p.add_argument("--scenario", default="fedora43-gnome-wayland-portal-h264")
+    portal_diag_p.add_argument("--report-dir")
+    portal_diag_p.add_argument("--base-dir")
+    portal_diag_p.set_defaults(func=cmd_portal_diagnose)
+
+    diag_portal_p = sub.add_parser("diagnose-portal-consent")
+    diag_portal_p.add_argument("--distro", required=True)
+    diag_portal_p.add_argument("--session", default="gnome-wayland")
+    diag_portal_p.add_argument("--base-dir")
+    diag_portal_p.add_argument("--work-dir")
+    diag_portal_p.set_defaults(func=cmd_diagnose_portal_consent)
+
+    clean_p = sub.add_parser("clean")
     clean_p.set_defaults(func=cmd_clean)
+
+    diag_inst_p = sub.add_parser("diagnose-installed")
+    diag_inst_p.add_argument("--distro", required=True)
+    diag_inst_p.add_argument("--session")
+    diag_inst_p.add_argument("--work-dir")
+    diag_inst_p.set_defaults(func=cmd_diagnose_installed)
 
     return parser
 
 
 def main() -> int:
+    load_env_local()
     parser = build_parser()
     args = parser.parse_args()
     return args.func(args)

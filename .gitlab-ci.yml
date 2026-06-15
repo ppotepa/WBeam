@@ -34,6 +34,7 @@ quality_gates:
     - ./scripts/ci/check-repo-layout.sh
     - ./scripts/ci/check-boundaries.sh
     - ./scripts/ci/validate-e2e-matrix.sh
+    - PYTHONPATH=. ./e2e/scripts/validate-final-e2e.sh
   rules:
     - if: $CI_COMMIT_TAG
     - if: $CI_COMMIT_BRANCH

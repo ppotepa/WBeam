@@ -14,11 +14,26 @@ def write_json(path: Path, payload: dict) -> None:
 def read_json(path: Path) -> dict:
     if not path.exists():
         return {}
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
 
 
 def scenario_report_dir(report_root: Path, run_id: str, scenario_id: str) -> Path:
     return report_root / run_id / "scenarios" / scenario_id
+
+
+def aggregate_run_status(status_counts: dict[str, int], failures: list[dict]) -> str:
+    if not failures:
+        return "pass"
+    if status_counts.get("fail", 0) > 0:
+        return "fail"
+    if status_counts.get("blocked", 0) > 0:
+        return "blocked"
+    if status_counts.get("reboot_required", 0) > 0:
+        return "reboot_required"
+    return "fail"
 
 
 def init_run_report(
@@ -68,25 +83,114 @@ def write_junit(run_dir: Path, scenario_results: list[dict]) -> None:
 
 
 def finalize_run_report(run_dir: Path, run_id: str, scenario_results: list[dict]) -> None:
+    status_counts = {"pass": 0, "fail": 0, "blocked": 0, "reboot_required": 0}
+    failed_count = 0
     failures = [
         {
             "scenario": result["scenario"],
+            "status": result.get("status", "fail"),
             "phase": result.get("phase", "unknown"),
             "reason": result.get("reason", "unknown failure"),
+            "reason_code": result.get("reason_code", ""),
+            "next_action": result.get("next_action", ""),
+            "stream_reason_code": result.get("stream_reason_code", ""),
+            "stream_blocked": result.get("stream_blocked", False),
+            "l1_backing_kind": result.get("l1_backing_kind", ""),
+            "portal_consented_image": result.get("portal_consented_image", ""),
+            "allow_unconsented_portal": result.get("allow_unconsented_portal", False),
+            "guest_exit_code": result.get("guest_exit_code", None),
         }
         for result in scenario_results
         if result.get("status") != "pass"
     ]
+    for result in scenario_results:
+        status = str(result.get("status", "fail"))
+        if status in status_counts:
+            status_counts[status] += 1
+        elif status != "pass":
+            status_counts["fail"] += 1
+        if status == "fail":
+            failed_count += 1
+    aggregate_status = aggregate_run_status(status_counts, failures)
     write_json(
         run_dir / "summary.json",
         {
             "run_id": run_id,
-            "status": "pass" if not failures else "fail",
+            "status": aggregate_status,
             "scenarios_total": len(scenario_results),
-            "scenarios_passed": len(scenario_results) - len(failures),
-            "scenarios_failed": len(failures),
+            "scenarios_passed": status_counts["pass"],
+            "scenarios_failed": failed_count,
+            "scenarios_blocked": status_counts["blocked"],
+            "scenarios_reboot_required": status_counts["reboot_required"],
+            "status_counts": status_counts,
             "failures": failures,
             "results": scenario_results,
         },
     )
     write_junit(run_dir, scenario_results)
+    status_lines = [f"- {name.replace('_', ' ').title()}: {count}" for name, count in status_counts.items() if count]
+    report_lines = [
+        "# WBeam E2E Run Report",
+        "",
+        f"- Run ID: `{run_id}`",
+        f"- Status: `{aggregate_status}`",
+        f"- Summary: `{run_dir / 'summary.json'}`",
+        f"- JUnit: `{run_dir / 'junit.xml'}`",
+    ]
+    if status_lines:
+        report_lines.extend(["", "## Status Counts", ""])
+        report_lines.extend(status_lines)
+    report_lines.extend(["", "## Scenarios", ""])
+    for result in scenario_results:
+        report_lines.append(f"- `{result['scenario']}`: `{result.get('status', 'unknown')}`")
+        if result.get("run_id"):
+            report_lines.append(f"  - Run ID: `{result['run_id']}`")
+        if result.get("wizard_summary"):
+            report_lines.append(f"  - Wizard summary: `{result['wizard_summary']}`")
+        if result.get("wizard_steps"):
+            report_lines.append(f"  - Wizard steps: `{result['wizard_steps']}`")
+        if result.get("stream_summary"):
+            report_lines.append(f"  - Stream summary: `{result['stream_summary']}`")
+        if result.get("android_summary"):
+            report_lines.append(f"  - Android summary: `{result['android_summary']}`")
+        if result.get("phone_info"):
+            report_lines.append(f"  - Phone info: `{result['phone_info']}`")
+        if result.get("phone_logcat"):
+            report_lines.append(f"  - Phone logcat: `{result['phone_logcat']}`")
+        if result.get("guest_command"):
+            report_lines.append(f"  - Guest command: `{result['guest_command']}`")
+        if result.get("l1_backing_image"):
+            report_lines.append(f"  - L1 backing image: `{result['l1_backing_image']}`")
+        if result.get("l1_backing_kind"):
+            report_lines.append(f"  - L1 backing kind: `{result['l1_backing_kind']}`")
+        if result.get("portal_consented_image"):
+            report_lines.append(f"  - Portal consent image: `{result['portal_consented_image']}`")
+        if result.get("l2_workdisk"):
+            report_lines.append(f"  - L2 workdisk: `{result['l2_workdisk']}`")
+        if result.get("runner_report_dir"):
+            report_lines.append(f"  - Runner report dir: `{result['runner_report_dir']}`")
+        if result.get("reason_code"):
+            report_lines.append(f"  - Reason code: `{result['reason_code']}`")
+        if result.get("phase"):
+            report_lines.append(f"  - Phase: `{result['phase']}`")
+        if result.get("stream_reason_code"):
+            report_lines.append(f"  - Stream reason code: `{result['stream_reason_code']}`")
+        if result.get("stream_blocked") is not None:
+            report_lines.append(f"  - Stream blocked: `{result['stream_blocked']}`")
+        if result.get("allow_unconsented_portal") is not None:
+            report_lines.append(f"  - Allow unconsented portal: `{result['allow_unconsented_portal']}`")
+        if result.get("guest_exit_code") is not None:
+            report_lines.append(f"  - Guest exit code: `{result['guest_exit_code']}`")
+        if result.get("bytes_received") is not None:
+            report_lines.append(f"  - Android bytes received: `{result['bytes_received']}`")
+        if result.get("reason"):
+            report_lines.append(f"  - Reason: {result['reason']}")
+        if result.get("next_action"):
+            report_lines.append(f"  - Next action: {result['next_action']}")
+        if result.get("phase") == "portal_consent":
+            report_lines.append(f"  - Portal consent command: `{result.get('next_action', '')}`")
+        if result.get("workdisk_policy"):
+            report_lines.append(f"  - Workdisk policy: `{result['workdisk_policy']}`")
+        if result.get("workdisk_retained") is not None:
+            report_lines.append(f"  - Workdisk retained: `{result['workdisk_retained']}`")
+    (run_dir / "report.md").write_text("\n".join(report_lines) + "\n", encoding="utf-8")
