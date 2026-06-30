@@ -227,10 +227,16 @@ else
     fi
 fi
 
+RUNNING_KERNEL=$(uname -r)
+
 print_check "Linux headers installed (needed for DKMS build)"
 case "$PM" in
     pacman)
-        is_package_installed "linux-headers" "$PM" && pass "linux-headers" || warn "linux-headers not installed"
+        if [ -e "/lib/modules/$RUNNING_KERNEL/build/Makefile" ]; then
+            pass "/lib/modules/$RUNNING_KERNEL/build"
+        else
+            warn "headers for running kernel $RUNNING_KERNEL not installed"
+        fi
         ;;
     apt)
         if dpkg -l | grep -q "^ii.*linux-headers"; then
@@ -249,7 +255,6 @@ case "$PM" in
 esac
 
 print_check "Linux headers match running kernel"
-RUNNING_KERNEL=$(uname -r)
 if [ -e "/lib/modules/$RUNNING_KERNEL/build/Makefile" ]; then
     pass "/lib/modules/$RUNNING_KERNEL/build"
 else
