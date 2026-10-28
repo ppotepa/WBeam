@@ -105,3 +105,42 @@ stable signoff and branch review.
 artifacts were built in this session, no physical QA report exists, and a root
 `LICENSE` file is not present in the audited repository. These are blockers,
 not completed tasks. Refer to epic #101 and tasks #114–#120.
+
+
+## Lokalna weryfikacja, gdy GitHub Actions nie przydziela runnerów
+
+Nie zastępuje to odbioru na sprzęcie ani podpisywania APK, ale pozwala
+**wykonać kod**, a nie polegać na pustych statusach GitHub Actions (#142).
+
+Z katalogu głównego WBeam:
+
+```bash
+# Bez instalowania narzędzi ani instalacji kernela:
+bash scripts/ci/run-local-verification.sh --list
+
+# Bash, Python/E2E unit i desktop Node/TypeScript:
+bash scripts/ci/run-local-verification.sh --quick
+
+# Dodatkowo host/Tauri Cargo i Android Gradle (Rust/SDK wymagane):
+bash scripts/ci/run-local-verification.sh --full
+
+# Własne miejsce zapisu:
+bash scripts/ci/run-local-verification.sh --full --report-dir ~/wbeam-qa
+```
+
+Raport trafia domyślnie do
+`$XDG_STATE_HOME/wbeam/verification/<UTC timestamp>/`
+(lub `~/.local/state/wbeam/verification/...`), w plikach
+`summary.tsv`, `metadata.txt` (w tym commit SHA) i oddzielnych logach.
+
+`PASS` oznacza wykonany test, `FAIL` błąd wykonania, `BLOCKED` brak
+wymaganego narzędzia/katalogu. Skrypt zwraca kod `0` tylko gdy wszystkie
+wybrane testy przeszły; `1` gdy któryś nie przeszedł i `2` przy samych
+brakujących prerekwizytach. Nie podaje fałszywego „PASS” na brak `cargo`,
+Android SDK albo nieskuteczne `npm ci`.
+
+**Przed umieszczeniem logów w publicznym issue:** usuń numery seryjne ADB,
+identyfikatory urządzeń, adresy sieciowe, dane użytkowników oraz wszelkie
+sekrety. W #116 i #101 podaj wynik `summary.tsv`, commit SHA oraz
+niesensytywne fragmenty logów. Po zaliczeniu tych testów nadal wykonaj
+physical hardware matrix i sprawdzenie podpisanych artefaktów.
