@@ -106,7 +106,7 @@ python3 "${ROOT_DIR}/e2e/scripts/validate_hardware_acceptance.py" \
 
 # Validate package set before contacting GitHub. Always generate a manifest
 # with checksums of immutable artifacts and the exact build version.
-"${ROOT_DIR}/scripts/ci/check-release-artifacts.sh"
+bash "${ROOT_DIR}/scripts/ci/check-release-artifacts.sh"
 require_env GH_TOKEN
 require_env GH_OWNER
 require_env GH_REPO
