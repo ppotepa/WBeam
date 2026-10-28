@@ -2,8 +2,19 @@
 set -euo pipefail
 
 JSON=0
-if [[ "${1:-}" == "--json" ]]; then
-  JSON=1
+BACKEND="evdi"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --json) JSON=1; shift ;;
+    --backend)
+      [[ $# -ge 2 ]] || { echo "[virtual-deps] --backend requires a value" >&2; exit 2; }
+      BACKEND="$2"; shift 2 ;;
+    *) echo "[virtual-deps] unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+if [[ "$BACKEND" != "evdi" && "$BACKEND" != "wayland_portal" ]]; then
+  echo "[virtual-deps] supported backends: evdi, wayland_portal" >&2
+  exit 2
 fi
 
 command_exists() {
@@ -114,43 +125,37 @@ fi
 
 manager="$(detect_linux_manager)"
 missing=()
-if ! command_exists xrandr; then
-  missing+=("xrandr")
-fi
-if ! command_exists Xvfb; then
-  missing+=("Xvfb")
-fi
-if ! command_exists modinfo || ! modinfo evdi >/dev/null 2>&1; then
-  missing+=("evdi")
-fi
-if command_exists modinfo && modinfo evdi >/dev/null 2>&1; then
-  if ! command_exists lsmod || ! lsmod | grep -q '^evdi '; then
+install_cmd=""
+
+if [[ "$BACKEND" == "evdi" ]]; then
+  # Kernel DRM EVDI capture does NOT require Xvfb or xrandr.
+  # Check the actual running kernel instead of a hardcoded headers package.
+  kernel="$(uname -r)"
+  if [[ ! -e "/lib/modules/${kernel}/build/Makefile" ]]; then
+    missing+=("kernel-headers-for-${kernel}")
+  fi
+  if ! command_exists modinfo || ! modinfo evdi >/dev/null 2>&1; then
+    missing+=("evdi-kernel-module")
+  elif ! command_exists lsmod || ! lsmod | grep -q '^evdi '; then
     missing+=("evdi-module-loaded")
   fi
-fi
-
-# For real X11 virtual-monitor mode we also need an EVDI-backed xrandr provider
-# visible in the current GUI session.
-if command_exists xrandr && command_exists modinfo && modinfo evdi >/dev/null 2>&1; then
-  if [[ -n "${DISPLAY:-}" ]]; then
-    providers_out="$(xrandr --listproviders 2>/dev/null || true)"
-    if [[ -z "$providers_out" ]]; then
-      missing+=("x11-display-access")
-    elif ! printf '%s\n' "$providers_out" | grep -Eqi 'evdi|displaylink'; then
-      missing+=("evdi-provider")
-    fi
+  case "$manager" in
+    deb) install_cmd="Install matching Linux kernel headers and evdi-dkms; then load: sudo modprobe evdi initial_device_count=4" ;;
+    rpm-dnf) install_cmd="Install matching kernel-devel and compatible evdi-dkms/akmod-evdi; then load: sudo modprobe evdi initial_device_count=4" ;;
+    rpm-yum|rpm-zypper) install_cmd="Install matching kernel-devel and evdi-dkms, then load EVDI for this kernel" ;;
+    arch) install_cmd="$(arch_evdi_install_hint) ; install headers for ${kernel}; sudo modprobe evdi initial_device_count=4" ;;
+    *) install_cmd="Install EVDI and matching kernel headers manually, then load the evdi module" ;;
+  esac
+else
+  # Portal is a user-session service with no X11, Xvfb or EVDI requirement.
+  if ! command_exists pipewire; then
+    missing+=("pipewire")
   fi
+  if ! command_exists xdg-desktop-portal && [[ ! -x /usr/libexec/xdg-desktop-portal && ! -x /usr/lib/xdg-desktop-portal ]]; then
+    missing+=("xdg-desktop-portal")
+  fi
+  install_cmd="Install PipeWire and the XDG desktop portal for your compositor, then log back into the Wayland session"
 fi
-
-install_cmd=""
-case "$manager" in
-  deb) install_cmd="sudo apt-get update && sudo apt-get install -y dkms linux-headers-generic evdi-dkms xvfb x11-xserver-utils && sudo modprobe evdi initial_device_count=4" ;;
-  rpm-dnf) install_cmd="sudo dnf install -y xorg-x11-server-Xvfb xrandr dkms kernel-devel akmod-evdi || sudo dnf install -y xorg-x11-server-Xvfb xrandr dkms kernel-devel evdi-dkms; sudo modprobe evdi initial_device_count=4" ;;
-  rpm-yum) install_cmd="sudo yum install -y xorg-x11-server-Xvfb xrandr dkms kernel-devel evdi-dkms && sudo modprobe evdi initial_device_count=4" ;;
-  rpm-zypper) install_cmd="sudo zypper install -y xorg-x11-server-Xvfb xrandr dkms kernel-default-devel evdi-dkms && sudo modprobe evdi initial_device_count=4" ;;
-  arch) install_cmd="sudo pacman -S --noconfirm xorg-server-xvfb xorg-xrandr dkms linux-headers && $(arch_evdi_install_hint) && sudo modprobe evdi initial_device_count=4" ;;
-  *) install_cmd="install package manager dependencies manually: evdi (kernel module), Xvfb, xrandr; then load module: sudo modprobe evdi initial_device_count=4" ;;
-esac
 
 ok=true
 if [[ "${#missing[@]}" -gt 0 ]]; then
@@ -162,9 +167,10 @@ if [[ "$JSON" -eq 1 ]]; then
 else
   echo "[virtual-deps] platform=linux"
   echo "[virtual-deps] manager=$manager"
+  echo "[virtual-deps] backend=$BACKEND"
   if [[ "$ok" == true ]]; then
     echo "[virtual-deps] status=ok"
-    echo "[virtual-deps] all required dependencies present (evdi, Xvfb, xrandr, evdi-provider)"
+    echo "[virtual-deps] all required dependencies present for $BACKEND"
   else
     echo "[virtual-deps] status=missing"
     echo "[virtual-deps] missing=${missing[*]}"
