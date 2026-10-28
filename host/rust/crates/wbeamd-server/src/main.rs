@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -27,6 +27,14 @@ use server::session_registry::{SessionQuery, SessionRegistry};
 struct Args {
     #[arg(long, default_value_t = 5001)]
     control_port: u16,
+    // ADB reverse connects from Android to 127.0.0.1 on the host, so a
+    // public listener is unnecessary for the supported USB workflow.
+    #[arg(long, default_value = "127.0.0.1")]
+    control_bind_address: IpAddr,
+    // There is no authentication layer on /v1/start, /v1/stop or /v1/apply.
+    // A non-loopback listener therefore requires deliberately opting in.
+    #[arg(long, default_value_t = false)]
+    allow_unauthenticated_lan_control: bool,
     #[arg(long, default_value_t = 5000)]
     stream_port: u16,
     #[arg(long, default_value = "/tmp/wbeamd.lock")]
@@ -35,6 +43,55 @@ struct Args {
     root: Option<String>,
     #[arg(long)]
     log_dir: Option<String>,
+}
+
+fn validate_control_bind_address(
+    address: IpAddr,
+    allow_unauthenticated_lan_control: bool,
+) -> Result<IpAddr, &'static str> {
+    if !address.is_loopback() && !allow_unauthenticated_lan_control {
+        return Err(
+            "Refusing to expose the unauthenticated control API beyond localhost. \
+             For an explicitly trusted LAN only, pass both --control-bind-address IP \
+             and --allow-unauthenticated-lan-control.",
+        );
+    }
+    Ok(address)
+}
+
+#[cfg(test)]
+mod control_bind_policy_tests {
+    use super::validate_control_bind_address;
+    use std::net::IpAddr;
+
+    fn ip(raw: &str) -> IpAddr {
+        raw.parse().expect("valid test IP")
+    }
+
+    #[test]
+    fn ipv4_and_ipv6_loopback_are_safe_by_default() {
+        assert_eq!(validate_control_bind_address(ip("127.0.0.1"), false), Ok(ip("127.0.0.1")));
+        assert_eq!(validate_control_bind_address(ip("::1"), false), Ok(ip("::1")));
+    }
+
+    #[test]
+    fn remote_ipv4_and_ipv6_require_explicit_acknowledgement() {
+        for candidate in ["0.0.0.0", "192.168.1.10", "10.0.0.2", "::", "2001:db8::1"] {
+            assert!(validate_control_bind_address(ip(candidate), false).is_err(), "{candidate}");
+        }
+    }
+
+    #[test]
+    fn non_loopback_is_allowed_only_after_explicit_opt_in() {
+        assert_eq!(
+            validate_control_bind_address(ip("0.0.0.0"), true),
+            Ok(ip("0.0.0.0"))
+        );
+        assert_eq!(
+            validate_control_bind_address(ip("192.168.1.10"), true),
+            Ok(ip("192.168.1.10"))
+        );
+    }
 }
 
 #[derive(Clone)]
@@ -96,7 +153,23 @@ async fn main() {
 
     let app = build_router(app_state.clone());
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], args.control_port));
+    let bind_ip = match validate_control_bind_address(
+        args.control_bind_address,
+        args.allow_unauthenticated_lan_control,
+    ) {
+        Ok(ip) => ip,
+        Err(message) => {
+            error!(requested_bind_address = %args.control_bind_address, "{message}");
+            std::process::exit(2);
+        }
+    };
+    if !bind_ip.is_loopback() {
+        warn!(
+            bind_address = %bind_ip,
+            "INSECURE LAN CONTROL: WBeam HTTP start/stop/apply endpoints have no authentication or TLS; restrict access with a firewall and use only on a trusted network"
+        );
+    }
+    let addr = SocketAddr::new(bind_ip, args.control_port);
     let listener = match tokio::net::TcpListener::bind(addr).await {
         Ok(listener) => listener,
         Err(err) => {
@@ -107,6 +180,7 @@ async fn main() {
 
     info!(
         control_port = args.control_port,
+        control_bind_address = %bind_ip,
         stream_port = args.stream_port,
         root = %root.display(),
         "wbeamd-rust started"
