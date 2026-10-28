@@ -22,6 +22,7 @@ if [[ "$WBEAM_DEB_TARGET" != "$detected_target" ]]; then
   exit 2
 fi
 EVDI_RUNTIME_PKG="$(wbeam_deb_evdi_runtime_package "$WBEAM_DEB_TARGET")"
+EXPECTED_EVDI_SONAME="$(wbeam_deb_evdi_soname "$WBEAM_DEB_TARGET")"
 DEB_VERSION="$(wbeam_deb_package_version "$WBEAM_VERSION" "$WBEAM_DEB_TARGET")"
 ARCH="$(dpkg --print-architecture)"
 PKG_NAME="wbeam"
@@ -41,12 +42,22 @@ if printf '%s\n' "$streamer_links" | grep -Fq 'not found'; then
   echo "$streamer_links" >&2
   exit 1
 fi
-if ! printf '%s\n' "$streamer_links" | grep -Eq 'libevdi[.]so[.][0-9]+'; then
-  echo "[build_deb] EVDI shared-library dependency not found in streamer; verify dynamic ABI" >&2
+if ! dynamic_deps="$(readelf -d "$streamer_bin" 2>&1)"; then
+  echo "[build_deb] Cannot inspect streamer ELF NEEDED entries" >&2
+  echo "$dynamic_deps" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$dynamic_deps" | grep -Fq "Shared library: [$EXPECTED_EVDI_SONAME]"; then
+  echo "[build_deb] WRONG EVDI ABI: expected ELF NEEDED $EXPECTED_EVDI_SONAME on $WBEAM_DEB_TARGET" >&2
+  echo "$dynamic_deps" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$streamer_links" | grep -Fq "$EXPECTED_EVDI_SONAME"; then
+  echo "[build_deb] Runtime loader did not resolve required $EXPECTED_EVDI_SONAME" >&2
   echo "$streamer_links" >&2
   exit 1
 fi
-echo "[build_deb] Streamer linked libraries resolved on $WBEAM_DEB_TARGET"
+echo "[build_deb] Streamer ELF and runtime match $EXPECTED_EVDI_SONAME on $WBEAM_DEB_TARGET"
 echo "[build_deb] Building desktop Tauri app..."
 (
   cd "${ROOT_DIR}/desktop/apps/desktop-tauri"
