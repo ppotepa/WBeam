@@ -31,6 +31,7 @@ import { resolveSupportedBackend, type SupportedCaptureBackend } from "./manager
 import { createPollingLoop } from "./managers/pollingLoop";
 import { validateConnectForm } from "./managers/connectValidation";
 import { BatteryIcon, DeviceTypeIcon } from "./components/DeviceIndicators";
+import { ServiceControls } from "./components/ServiceControls";
 import { decideAutoConnectBackend } from "./managers/autoconnectPolicy";
 import connectResolutionPresets from "./config/connect-resolution-presets.json";
 import connectEncoderOptions from "./config/connect-encoder-options.json";
@@ -1057,7 +1058,7 @@ function resolveEncoderMode(
               Use experimental virtual mirroring (Wayland only)
               {" "}
               <small>
-                Applies to Wayland connects only. For X11 this option is unavailable.
+                Applies only to Wayland Portal connections. Other backends ignore this setting.
               </small>
             </span>
           </label>
@@ -1065,48 +1066,15 @@ function resolveEncoderMode(
         </Show>
 
         <Show when={mode() === "advanced"}>
-          <section class="service-controls">
-          <button
-            class={`svc-btn ${upgradeAvailable() ? "svc-upgrade" : ""}`}
-            disabled={
-              session.serviceBusy()
-              || !session.service().available
-              || (!upgradeAvailable() && session.service().installed)
-            }
-            onClick={() => installServiceOrUpgrade()}
-            title={upgradeAvailable() ? "Upgrade service to current host build" : "Install user service"}
-          >
-            <Download size={14} />
-            <span>{upgradeAvailable() ? "Upgrade" : "Install service"}</span>
-          </button>
-          <button
-            class="svc-btn"
-            disabled={session.serviceBusy() || !session.service().available || !session.service().installed}
-            onClick={() => session.callServiceAction("service_uninstall")}
-            title="Uninstall user service"
-          >
-            <Trash2 size={14} />
-            <span>Uninstall</span>
-          </button>
-          <button
-            class="svc-btn"
-            disabled={session.serviceBusy() || !session.service().available || !session.service().installed || session.service().active}
-            onClick={() => session.callServiceAction("service_start")}
-            title="Start service"
-          >
-            <Play size={14} />
-            <span>Start</span>
-          </button>
-          <button
-            class="svc-btn"
-            disabled={session.serviceBusy() || !session.service().available || !session.service().installed || !session.service().active}
-            onClick={() => session.callServiceAction("service_stop")}
-            title="Stop service"
-          >
-            <Square size={14} />
-            <span>Stop</span>
-          </button>
-          </section>
+          <ServiceControls
+            service={session.service()}
+            busy={session.serviceBusy()}
+            upgradeAvailable={upgradeAvailable()}
+            onInstall={() => installServiceOrUpgrade()}
+            onUninstall={() => session.callServiceAction("service_uninstall")}
+            onStart={() => session.callServiceAction("service_start")}
+            onStop={() => session.callServiceAction("service_stop")}
+          />
         </Show>
 
         <footer class="status-bar" title={session.service().summary}>
