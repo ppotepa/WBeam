@@ -34,6 +34,7 @@ import { HostApiManager } from "./managers/hostApiManager";
 import { createSessionManager } from "./managers/sessionManager";
 import { resolveSupportedBackend, type SupportedCaptureBackend } from "./managers/backendPolicy";
 import { createPollingLoop } from "./managers/pollingLoop";
+import { validateConnectForm } from "./managers/connectValidation";
 import connectResolutionPresets from "./config/connect-resolution-presets.json";
 import connectEncoderOptions from "./config/connect-encoder-options.json";
 
@@ -312,6 +313,17 @@ export default function App() {
   const selectedCaptureBackend = () => resolveSupportedBackend(
     connectDialogCaptureBackend(), session.hostProbe(),
   );
+  const connectFormErrors = () => validateConnectForm({
+    captureBackend: selectedCaptureBackend(),
+    encoder: connectDialogEncoderMode(),
+    qualityMode: connectDialogQualityMode(),
+    profileKey: connectDialogProfileKey(),
+    profiles: trainedProfiles(),
+    manualFps: connectDialogManualFps(),
+    manualMbps: connectDialogManualMbps(),
+  });
+  let profilesRequestId = 0;
+  let connectDialogRequestId = 0;
   let virtualInstallPollTimer: number | null = null;
   let installPollingGeneration = 0;
   let installPollingActive = false;
@@ -415,8 +427,9 @@ export default function App() {
   }
 
   async function refreshTrainedProfiles(): Promise<void> {
+    const requestId = ++profilesRequestId;
     const backend = connectDialogCaptureBackend();
-    // Profiles are backend-scoped; abstract selection cannot determine a namespace.
+    // Profiles are backend-scoped; a concrete backend is required.
     if (!backend || backend === "auto") {
       setTrainedProfiles([]);
       setConnectDialogProfileKey("");
@@ -424,18 +437,23 @@ export default function App() {
     }
     try {
       const profiles = await api.listTrainedProfiles(backend);
+      if (requestId !== profilesRequestId || !connectDialogDevice()) return;
       setTrainedProfiles(profiles);
       const selected = connectDialogProfileKey();
-      const selectedExists = profiles.some((profile) => profile.key === selected);
-      if (selected.length > 0 && !selectedExists) {
+      if (selected.length > 0 && !profiles.some((profile) => profile.key === selected)) {
         setConnectDialogProfileKey("");
       }
-    } catch {
+    } catch (err) {
+      if (requestId !== profilesRequestId || !connectDialogDevice()) return;
       setTrainedProfiles([]);
+      session.setError(`Unable to load profiles for ${backend}: ${String(err)}`);
     }
   }
 
   function openConnectDialog(device: DeviceBasic): void {
+    const requestId = ++connectDialogRequestId;
+    profilesRequestId += 1;
+    setTrainedProfiles([]);
     const isWaylandHost = isWaylandPortalHost();
     let saved: DisplayMode = "virtual_monitor";
     if (!isWaylandHost) {
@@ -449,7 +467,6 @@ export default function App() {
     setConnectDialogManualMbps(10);
     setConnectDialogProfileKey("");
     setConnectDialogCaptureBackend("");
-    void refreshTrainedProfiles();
     setConnectDialogDoctor(null);
     setConnectDialogDoctorLoading(!isWaylandHost);
     setConnectDialogBlockReason(connectDisabledReason(device));
@@ -460,17 +477,19 @@ export default function App() {
     void api
       .getVirtualDoctor(device)
       .then((doctor) => {
-        setConnectDialogDoctor(doctor);
+        if (requestId === connectDialogRequestId) setConnectDialogDoctor(doctor);
       })
       .catch(() => {
-        setConnectDialogDoctor(null);
+        if (requestId === connectDialogRequestId) setConnectDialogDoctor(null);
       })
       .finally(() => {
-        setConnectDialogDoctorLoading(false);
+        if (requestId === connectDialogRequestId) setConnectDialogDoctorLoading(false);
       });
   }
 
   function closeConnectDialog(): void {
+    connectDialogRequestId += 1;
+    profilesRequestId += 1;
     setConnectDialogDevice(null);
     setConnectDialogDoctor(null);
     setConnectDialogDoctorLoading(false);
@@ -511,8 +530,18 @@ function resolveEncoderMode(
   }
 
   async function confirmConnect(): Promise<void> {
-    const device = connectDialogDevice();
-    if (!device) return;
+    const selectedDevice = connectDialogDevice();
+    if (!selectedDevice) return;
+    const device = session.devices().find((candidate) => candidate.serial === selectedDevice.serial);
+    if (!device) {
+      session.setError("Device disconnected while configuring the session. Refresh devices and retry.");
+      return;
+    }
+    const errors = connectFormErrors();
+    if (errors.length > 0) {
+      session.setError(errors.join("; "));
+      return;
+    }
     const captureBackend = resolveCaptureBackend();
     if (!captureBackend) {
       session.setError("Selected capture backend is unavailable. Choose EVDI or Wayland Portal.");
@@ -1072,6 +1101,7 @@ function resolveEncoderMode(
                         setConnectDialogCaptureBackend(event.currentTarget.value as CaptureBackend | "");
                         setConnectDialogEncoderMode("");
                         setConnectDialogProfileKey("");
+                        setTrainedProfiles([]);
                         void refreshTrainedProfiles();
                       }}
                     >
@@ -1233,6 +1263,9 @@ function resolveEncoderMode(
                 <Show when={connectDialogBlockReason()}>
                   {(msg) => <p class="setup-missing">Connect blocked: {safeUiText(msg())}</p>}
                 </Show>
+                <Show when={connectFormErrors().length > 0}>
+                  <p class="setup-missing" role="status">{connectFormErrors()[0]}</p>
+                </Show>
                 <Show when={session.deviceActionErrors()[device.serial]}>
                   {(msg) => <p class="setup-missing" role="alert">{safeUiText(msg())}</p>}
                 </Show>
@@ -1241,7 +1274,7 @@ function resolveEncoderMode(
                 </Show>
                 <div class="connect-modal-actions">
                   <button class="device-btn" onClick={closeConnectDialog}>Cancel</button>
-                  <button class="device-btn" onClick={() => void confirmConnect()} disabled={connectDialogBlockReason().length > 0 || !backendChosen() || !codecChosen()}>
+                  <button class="device-btn" onClick={() => void confirmConnect()} disabled={connectDialogBlockReason().length > 0 || connectFormErrors().length > 0}>
                     Connect
                   </button>
                 </div>
