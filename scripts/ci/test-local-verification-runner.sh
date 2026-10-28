@@ -15,6 +15,7 @@ if grep -Fxq 'host_rust' <<<"$quick"; then
   exit 1
 fi
 grep -Fxq 'host_rust' <<<"$full"
+grep -Fxq 'host_streamer' <<<"$full"
 grep -Fxq 'tauri_check' <<<"$full"
 grep -Fxq 'android_debug' <<<"$full"
 echo '[verify][PASS] local QA runner commands and modes'

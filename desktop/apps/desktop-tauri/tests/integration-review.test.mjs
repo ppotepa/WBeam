@@ -43,7 +43,7 @@ test("signed APK CI job explicitly waits for every release quality gate", () => 
   const section = gitlab.split("build_apk_release:")[1].split("build_windows_server:")[0];
   for (const job of [
     "quality_gates", "quality_frontend", "quality_rust_host",
-    "quality_tauri_native", "quality_android_unit", "quality_e2e_runner",
+    "quality_rust_streamer", "quality_tauri_native", "quality_android_unit", "quality_e2e_runner",
   ]) {
     assert.match(section, new RegExp(`job: ${job}\\b`));
   }

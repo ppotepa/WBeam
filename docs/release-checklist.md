@@ -144,3 +144,28 @@ identyfikatory urządzeń, adresy sieciowe, dane użytkowników oraz wszelkie
 sekrety. W #116 i #101 podaj wynik `summary.tsv`, commit SHA oraz
 niesensytywne fragmenty logów. Po zaliczeniu tych testów nadal wykonaj
 physical hardware matrix i sprawdzenie podpisanych artefaktów.
+
+## Bramka kompilacji EVDI streamera
+
+Jakość hosta Rust nie może być oceniana wyłącznie przez testy
+`wbeamd-api` i `wbeamd-core`. Natywny streamer ma zależności
+`gstreamer` i `libevdi.so` oraz oddzielne FFI/linker, dlatego
+GitLab wymaga jobu **`quality_rust_streamer`** przed
+`build_apk_release` i pakietami. GitHub Actions wykonuje oba polecenia
+w jobie Rust host; lokalny `run-local-verification.sh --full` zapisuje
+oddzielny `host_streamer.log`.
+
+```bash
+cargo check --locked --manifest-path host/rust/Cargo.toml \
+  -p wbeamd-streamer --no-default-features --features evdi
+cargo test --locked --manifest-path host/rust/Cargo.toml \
+  -p wbeamd-streamer --no-default-features --features evdi
+```
+
+Na Debianie potrzebne są kompatybilne pakiety deweloperskie GStreamera
+i `libevdi0-dev`. Na Ubuntu Noble budować przeciwko właściwemu ABI
+`libevdi1`/`libevdi-dev` (zob. #144). Zielony
+`cargo check` nie potwierdza jeszcze działania DKMS/Fedora kernel
+6.19 ani faktycznej transmisji EVDI do Androida: sprzętowe DoD
+#117/#120 pozostają obowiązkowe.
+
