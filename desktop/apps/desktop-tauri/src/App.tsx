@@ -1040,7 +1040,7 @@ function resolveEncoderMode(
                     <small>
                       {connectDialogCaptureBackend() === "evdi"
                         ? "Requires: sudo modprobe evdi initial_device_count=1"
-                        : `Host detected: ${session.hostProbe().captureMode}`}
+                        : `Host detected: ${supportedCaptureLabel(session.hostProbe().captureMode)}`}
                     </small>
                   </label>
 
