@@ -1,17 +1,12 @@
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import AlertTriangle from "lucide-solid/icons/alert-triangle";
-import BatteryCharging from "lucide-solid/icons/battery-charging";
-import BatteryFull from "lucide-solid/icons/battery-full";
-import BatteryLow from "lucide-solid/icons/battery-low";
-import BatteryMedium from "lucide-solid/icons/battery-medium";
 import Cpu from "lucide-solid/icons/cpu";
 import MonitorSmartphone from "lucide-solid/icons/monitor-smartphone";
 import Package from "lucide-solid/icons/package";
 import Settings from "lucide-solid/icons/settings";
 import ShieldCheck from "lucide-solid/icons/shield-check";
 import Smartphone from "lucide-solid/icons/smartphone";
-import Tablet from "lucide-solid/icons/tablet";
 import Play from "lucide-solid/icons/play";
 import Square from "lucide-solid/icons/square";
 import Download from "lucide-solid/icons/download";
@@ -35,21 +30,10 @@ import { createSessionManager } from "./managers/sessionManager";
 import { resolveSupportedBackend, type SupportedCaptureBackend } from "./managers/backendPolicy";
 import { createPollingLoop } from "./managers/pollingLoop";
 import { validateConnectForm } from "./managers/connectValidation";
+import { BatteryIcon, DeviceTypeIcon } from "./components/DeviceIndicators";
 import { decideAutoConnectBackend } from "./managers/autoconnectPolicy";
 import connectResolutionPresets from "./config/connect-resolution-presets.json";
 import connectEncoderOptions from "./config/connect-encoder-options.json";
-
-function BatteryIcon(props: { readonly level: number | null; readonly charging: boolean }) {
-  if (props.charging) return <BatteryCharging size={14} />;
-  if (props.level === null) return <BatteryMedium size={14} />;
-  if (props.level >= 80) return <BatteryFull size={14} />;
-  if (props.level >= 30) return <BatteryMedium size={14} />;
-  return <BatteryLow size={14} />;
-}
-
-function DeviceTypeIcon(props: { readonly type: string }) {
-  return props.type === "Tablet" ? <Tablet size={16} /> : <Smartphone size={16} />;
-}
 
 type DisplayMode = "virtual_monitor" | "duplicate";
 const CONNECT_MODE_STORAGE_KEY = "wbeam.connect.mode.by.serial";
@@ -423,6 +407,43 @@ export default function App() {
     } finally {
       setAutoConnectBusy(false);
     }
+  }
+
+  async function basicConnect(device: DeviceBasic): Promise<void> {
+    if (session.deviceSnapshotStale()) {
+      session.setError("Device status is outdated. Refresh before connecting.");
+      return;
+    }
+    const blocked = connectDisabledReason(device);
+    if (blocked) {
+      session.setError(blocked);
+      return;
+    }
+    const backend = resolveSupportedBackend("auto", session.hostProbe());
+    if (!backend) {
+      session.setError("No supported backend available. Configure EVDI or Wayland Portal.");
+      return;
+    }
+    await session.connectDevice(device, "virtual_monitor", {
+      captureBackend: backend,
+      encoder: "h264",
+      runtimeProfile: "adaptive",
+    });
+    await session.refreshSnapshot({ silent: true, forceDevices: true });
+  }
+
+  async function ensureBasicServiceReady(): Promise<void> {
+    if (!session.service().available) {
+      session.setError("Systemd user service is unavailable on this host.");
+      return;
+    }
+    if (!session.service().installed) {
+      await session.callServiceAction("service_install");
+    }
+    if (session.service().installed && !session.service().active) {
+      await session.callServiceAction("service_start");
+    }
+    await session.refreshSnapshot({ silent: true, forceDevices: true });
   }
 
   function modeLabel(): "Basic" | "Advanced" {
@@ -825,7 +846,9 @@ function resolveEncoderMode(
           </div>
         </header>
 
-        <p class="meta-line">Daemon APK: <strong>{session.daemonVersion() || session.hostVersion() || "not set"}</strong></p>
+        <Show when={mode() === "advanced"}>
+          <p class="meta-line">Daemon APK: <strong>{session.daemonVersion() || session.hostVersion() || "not set"}</strong></p>
+        </Show>
 
         <Show when={session.error()}>
           <p class="error-line" role="alert">{safeUiText(session.error())}</p>
@@ -844,7 +867,8 @@ function resolveEncoderMode(
 
         <section class="toolbar">
           <div class="toolbar-row">
-            <button
+            <Show when={mode() === "advanced"}>
+              <button
               class="toolbar-btn toolbar-btn-primary"
               title="Connect eligible devices using available supported backends. Multi-device requires EVDI."
               disabled={autoConnectBusy() || autoConnectDisabledReason().length > 0}
@@ -854,7 +878,8 @@ function resolveEncoderMode(
                 <Loader2 size={14} class="spinning" />
               </Show>
               <span>{autoConnectBusy() ? "Connecting…" : "Autoconnect all"}</span>
-            </button>
+              </button>
+            </Show>
             <button
               class="toolbar-btn"
               onClick={() => void openVirtualSetup()}
@@ -864,13 +889,24 @@ function resolveEncoderMode(
               <span>Host setup</span>
             </button>
           </div>
-          <Show when={!autoConnectBusy() && autoConnectDisabledReason().length > 0}>
+          <Show when={mode() === "advanced" && !autoConnectBusy() && autoConnectDisabledReason().length > 0}>
             <p class="toolbar-hint toolbar-hint-warn">{autoConnectDisabledReason()}</p>
           </Show>
-          <Show when={autoConnectSummary()}>
+          <Show when={mode() === "advanced" && autoConnectSummary()}>
             <p class="toolbar-hint" role="status">{autoConnectSummary()}</p>
           </Show>
         </section>
+
+        <Show when={mode() === "basic" && !session.service().active}>
+          <button
+            class="toolbar-btn toolbar-btn-primary"
+            disabled={!session.service().available || session.serviceBusy()}
+            onClick={() => void ensureBasicServiceReady()}
+          >
+            <Play size={14} />
+            {session.service().installed ? "Start WBeam service" : "Install and start WBeam service"}
+          </button>
+        </Show>
 
         <ul class="device-list" aria-label="Connected devices">
           <For each={session.devices()}>
@@ -881,7 +917,8 @@ function resolveEncoderMode(
                   <span class="model-text">{device.model}</span>
                 </div>
 
-                <div class="line split-line">
+                <Show when={mode() === "advanced"}>
+                  <div class="line split-line">
                   <span title="Platform and OS version">
                     <Smartphone size={14} /> {device.platform} {device.osVersion}
                   </span>
@@ -924,7 +961,14 @@ function resolveEncoderMode(
                   <span title="Current daemon stream state">
                     State {device.streamState}
                   </span>
-                </div>
+                  </div>
+                </Show>
+                <Show when={mode() === "basic"}>
+                  <div class="line split-line">
+                    <span><BatteryIcon level={device.batteryLevel} charging={device.batteryCharging} /> {device.batteryPercent}</span>
+                    <span>Stream: {device.streamState}</span>
+                  </div>
+                </Show>
 
                 <div class="line end-line">
                   {(() => {
@@ -970,7 +1014,7 @@ function resolveEncoderMode(
                           class="device-btn"
                           title={connectActionTitle}
                           disabled={connectBusy || connectDisabled}
-                          onClick={() => openConnectDialog(device)}
+                          onClick={() => mode() === "basic" ? void basicConnect(device) : openConnectDialog(device)}
                         >
                           <Show when={connectBusy} fallback={<Link2 size={13} />}>
                             <Loader2 size={13} class="spinning" />
@@ -1000,7 +1044,8 @@ function resolveEncoderMode(
           </For>
         </ul>
 
-        <section class="wayland-experimental-control">
+        <Show when={mode() === "advanced"}>
+          <section class="wayland-experimental-control">
           <label class={`checkbox-option ${isWaylandPortalHost() ? "" : "disabled"}`}>
             <input
               type="checkbox"
@@ -1016,9 +1061,11 @@ function resolveEncoderMode(
               </small>
             </span>
           </label>
-        </section>
+          </section>
+        </Show>
 
-        <section class="service-controls">
+        <Show when={mode() === "advanced"}>
+          <section class="service-controls">
           <button
             class={`svc-btn ${upgradeAvailable() ? "svc-upgrade" : ""}`}
             disabled={
@@ -1059,7 +1106,8 @@ function resolveEncoderMode(
             <Square size={14} />
             <span>Stop</span>
           </button>
-        </section>
+          </section>
+        </Show>
 
         <footer class="status-bar" title={session.service().summary}>
           <div class={`service-status-strip ${session.serviceState()}`}>
@@ -1071,10 +1119,12 @@ function resolveEncoderMode(
             </span>
           </div>
           <span>{session.devices().length} devices ({session.tabletCount()} tablet, {session.phoneCount()} phone)</span>
-          <span>
-            host: {safeUiText(session.hostProbe().os)}/{safeUiText(session.hostProbe().session, "legacy session")}/{safeUiText(session.hostProbe().desktop, "legacy desktop")} · capture={supportedCaptureLabel(session.hostProbe().captureMode)} · {session.hostProbe().supported && isSupportedCaptureMode(session.hostProbe().captureMode) ? "supported" : "unsupported"}
-          </span>
-          <span>updated: {session.updatedAt()}</span>
+          <Show when={mode() === "advanced"}>
+            <span>
+              host: {safeUiText(session.hostProbe().os)}/{safeUiText(session.hostProbe().session, "legacy session")}/{safeUiText(session.hostProbe().desktop, "legacy desktop")} · capture={supportedCaptureLabel(session.hostProbe().captureMode)} · {session.hostProbe().supported && isSupportedCaptureMode(session.hostProbe().captureMode) ? "supported" : "unsupported"}
+            </span>
+            <span>updated: {session.updatedAt()}</span>
+          </Show>
         </footer>
       </section>
       <Show when={connectDialogDevice()}>
