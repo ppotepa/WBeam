@@ -33,6 +33,7 @@ import type {
 import { HostApiManager } from "./managers/hostApiManager";
 import { createSessionManager } from "./managers/sessionManager";
 import { resolveSupportedBackend, type SupportedCaptureBackend } from "./managers/backendPolicy";
+import { createPollingLoop } from "./managers/pollingLoop";
 import connectResolutionPresets from "./config/connect-resolution-presets.json";
 import connectEncoderOptions from "./config/connect-encoder-options.json";
 
@@ -312,6 +313,8 @@ export default function App() {
     connectDialogCaptureBackend(), session.hostProbe(),
   );
   let virtualInstallPollTimer: number | null = null;
+  let installPollingGeneration = 0;
+  let installPollingActive = false;
   const [evdiWizardVisible, setEvdiWizardVisible] = createSignal(false);
   const upgradeAvailable = () =>
     session.service().active
@@ -558,8 +561,10 @@ function resolveEncoderMode(
   }
 
   function stopVirtualInstallPolling(): void {
+    installPollingGeneration += 1;
+    installPollingActive = false;
     if (virtualInstallPollTimer !== null) {
-      globalThis.clearInterval(virtualInstallPollTimer);
+      globalThis.clearTimeout(virtualInstallPollTimer);
       virtualInstallPollTimer = null;
     }
   }
@@ -586,11 +591,16 @@ function resolveEncoderMode(
       logs: ["[ui] requesting installer start..."],
     });
     stopVirtualInstallPolling();
+    const generation = installPollingGeneration;
+    installPollingActive = true;
     try {
       await api.startVirtualDepsInstall();
       const poll = async () => {
+        if (!installPollingActive || generation !== installPollingGeneration) return;
         try {
           const status = await api.getVirtualDepsInstallStatus();
+          // Responses from cancelled/previous installation attempts are stale.
+          if (!installPollingActive || generation !== installPollingGeneration) return;
           setVirtualInstallStatus(status);
           if (status.done) {
             stopVirtualInstallPolling();
@@ -609,8 +619,15 @@ function resolveEncoderMode(
             } else {
               session.setError(status.message);
             }
+          } else {
+            // Self-scheduling means there is at most one status request in flight.
+            virtualInstallPollTimer = globalThis.setTimeout(() => {
+              virtualInstallPollTimer = null;
+              void poll();
+            }, 600);
           }
         } catch (err) {
+          if (generation !== installPollingGeneration) return;
           stopVirtualInstallPolling();
           setVirtualInstallStatus({
             running: false,
@@ -623,9 +640,6 @@ function resolveEncoderMode(
         }
       };
       await poll();
-      virtualInstallPollTimer = globalThis.setInterval(() => {
-        void poll();
-      }, 600);
     } catch (err) {
       session.setError(`Dependency installation failed: ${String(err)}`);
       setVirtualInstallStatus({
@@ -640,32 +654,19 @@ function resolveEncoderMode(
     }
   }
 
-  onMount(async () => {
-    try {
-      const name = await api.getHostName();
-      const safe = name || "unknown-host";
-      setHostName(safe);
-      await getCurrentWindow().setTitle(`WBeam - ${safe}`);
-    } catch {
-      // ignore title update errors
-    }
-
-    await session.refreshSnapshot();
-    await refreshTrainedProfiles();
-    try {
-      const doctor = await api.getVirtualDoctor();
-      setVirtualStartupDoctor(doctor);
-    } catch {
-      // Non-blocking check; connect flow still performs per-device guard.
-    }
-
-    const timer = globalThis.setInterval(() => {
-      if (session.deviceActionBusy().length > 0 || session.refreshInFlight()) return;
-      void session.refreshSnapshot({ silent: true, forceDevices: true });
-    }, 1200);
-
+  onMount(() => {
+    let disposed = false;
+    const poller = createPollingLoop({
+      delayMs: 1200,
+      shouldPoll: () => !document.hidden
+        && session.deviceActionBusy().length === 0
+        && !session.refreshInFlight(),
+      work: () => session.refreshSnapshot({ silent: true, forceDevices: false }),
+      onError: (err) => console.error("Background status refresh failed", err),
+    });
     const refreshVisible = () => {
-      if (session.deviceActionBusy().length > 0 || session.refreshInFlight()) return;
+      if (disposed || session.deviceActionBusy().length > 0 || session.refreshInFlight()) return;
+      // Visibility/manual refresh bypasses device backoff; periodic polls do not.
       void session.refreshSnapshot({ silent: true, forceDevices: true });
     };
     const onFocus = () => refreshVisible();
@@ -675,12 +676,40 @@ function resolveEncoderMode(
     globalThis.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisibilityChange);
 
+    // Must be registered synchronously while Solid's owner is active,
+    // not after awaits inside an async onMount callback.
     onCleanup(() => {
-      globalThis.clearInterval(timer);
+      disposed = true;
+      poller.stop();
       globalThis.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibilityChange);
       stopVirtualInstallPolling();
     });
+
+    void (async () => {
+      try {
+        const name = await api.getHostName();
+        if (disposed) return;
+        const safe = name || "unknown-host";
+        setHostName(safe);
+        await getCurrentWindow().setTitle(`WBeam - ${safe}`);
+      } catch {
+        // Window title is optional. Continue probing even if it fails.
+      }
+      if (disposed) return;
+      await session.refreshSnapshot();
+      if (disposed) return;
+      await refreshTrainedProfiles();
+      if (disposed) return;
+      try {
+        const doctor = await api.getVirtualDoctor();
+        if (!disposed) setVirtualStartupDoctor(doctor);
+      } catch {
+        // Non-blocking check; connect performs its own capability guard.
+      } finally {
+        if (!disposed) poller.start();
+      }
+    })();
   });
 
   return (
