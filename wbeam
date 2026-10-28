@@ -45,7 +45,7 @@ else
   DEVICE_PORTS_FILE="$ROOT_DIR/.wbeam_device_ports"
 fi
 ADB_LOGCAT_PID_FILE="$LOG_DIR/adb-logcat.pid"
-VERSION_BASE="${WBEAM_VERSION_BASE:-0.1.2}"
+VERSION_BASE="${WBEAM_VERSION_BASE:-0.1.3}"
 
 
 
