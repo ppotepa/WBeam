@@ -113,6 +113,14 @@ export class HostApiManager {
     }
   }
 
+  async getEvdiDepsDoctor(): Promise<VirtualDoctor> {
+    try {
+      return await withTimeout(invoke<VirtualDoctor>("evdi_deps_check"), 5000, "evdi_deps_check");
+    } catch (err) {
+      throw new Error(normalizeApiError(err));
+    }
+  }
+
   async getVirtualDoctor(device?: DeviceBasic): Promise<VirtualDoctor> {
     try {
       const params = device ? { serial: device.serial, streamPort: device.streamPort } : {};
