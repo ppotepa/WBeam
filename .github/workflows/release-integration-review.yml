@@ -38,6 +38,7 @@ jobs:
         run: |
           bash -n wbeam scripts/ci/*.sh scripts/virtual-deps-check.sh scripts/virtual-deps-install.sh
           bash scripts/ci/test-release-version.sh
+          bash scripts/ci/test-deb-target.sh
           bash scripts/ci/test-evdi-diagnostics.sh
           bash scripts/ci/test-publication-contract.sh
           bash scripts/ci/check-version-consistency.sh
