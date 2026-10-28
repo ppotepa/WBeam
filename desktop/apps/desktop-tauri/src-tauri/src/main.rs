@@ -13,7 +13,7 @@ use crate::service::{
     service_uninstall,
 };
 use crate::virtual_monitor::{
-    virtual_doctor, virtual_install_deps_start, virtual_install_deps_status,
+    evdi_deps_check, virtual_doctor, virtual_install_deps_start, virtual_install_deps_status,
 };
 
 use serde::{Deserialize, Serialize};
@@ -1184,6 +1184,7 @@ fn main() {
             host_probe_brief,
             list_trained_profiles,
             virtual_doctor,
+            evdi_deps_check,
             virtual_install_deps_start,
             virtual_install_deps_status,
             device_connect,
