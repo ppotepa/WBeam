@@ -26,7 +26,9 @@ evdi_find_linkable_library() {
 evdi_find_runtime_library() {
   local directory library resolved
   if [[ -n "${WBEAM_EVDI_LIB_DIR:-}" ]]; then
-    for library in "${WBEAM_EVDI_LIB_DIR}/libevdi.so.1" "${WBEAM_EVDI_LIB_DIR}/libevdi.so"; do
+    # Debian 12 provides libevdi.so.0; Ubuntu 24.04 provides
+    # libevdi.so.1. Neither requires an unversioned dev symlink at runtime.
+    for library in "${WBEAM_EVDI_LIB_DIR}/libevdi.so.0" "${WBEAM_EVDI_LIB_DIR}/libevdi.so.1" "${WBEAM_EVDI_LIB_DIR}/libevdi.so"; do
       if [[ -f "$library" ]]; then
         printf '%s\n' "$library"
         return 0
@@ -38,7 +40,7 @@ evdi_find_runtime_library() {
   for directory in /usr/libexec/displaylink /usr/lib64 /usr/lib \
     /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu \
     /usr/local/lib64 /usr/local/lib; do
-    for library in "$directory/libevdi.so.1" "$directory/libevdi.so"; do
+    for library in "$directory/libevdi.so.0" "$directory/libevdi.so.1" "$directory/libevdi.so"; do
       if [[ -f "$library" ]]; then
         printf '%s\n' "$library"
         return 0
@@ -47,7 +49,7 @@ evdi_find_runtime_library() {
   done
 
   if command -v ldconfig >/dev/null 2>&1; then
-    resolved="$(ldconfig -p 2>/dev/null | awk '$1 == "libevdi.so.1" || $1 == "libevdi.so" {print $NF; exit}' || true)"
+    resolved="$(ldconfig -p 2>/dev/null | awk '$1 == "libevdi.so.0" || $1 == "libevdi.so.1" || $1 == "libevdi.so" {print $NF; exit}' || true)"
     if [[ -n "$resolved" && -f "$resolved" ]]; then
       printf '%s\n' "$resolved"
       return 0
