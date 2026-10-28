@@ -213,3 +213,10 @@ else
     echo "[virtual-deps] install_cmd=$install_cmd"
   fi
 fi
+
+# The JSON document is emitted in both cases; the exit code also needs to
+# reflect readiness for CLI callers and shell automation. The Tauri doctor
+# reads .ok from JSON and accepts a nonzero diagnostic exit.
+if [[ "$ok" != true ]]; then
+  exit 1
+fi
