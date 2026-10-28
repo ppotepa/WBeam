@@ -40,6 +40,20 @@ fn normalize_backend(raw: &str) -> String {
     raw.trim().to_ascii_lowercase()
 }
 
+// Backend identifiers form a single on-disk path component. Keep legacy
+// identifiers such as "x11_gst" readable for compatibility, but never let a
+// frontend-supplied string escape the user's profiles directory.
+fn validated_backend_component(raw: &str) -> Result<String, String> {
+    let normalized = normalize_backend(raw);
+    if normalized.is_empty()
+        || normalized.len() > 64
+        || !normalized.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    {
+        return Err("invalid profile backend identifier".to_string());
+    }
+    Ok(normalized)
+}
+
 fn curated_profiles_for_backend(backend: &str) -> Option<Vec<StoredTrainedProfile>> {
     let backend = normalize_backend(backend);
     if backend != "evdi" && backend != "wayland_portal" {
@@ -118,10 +132,13 @@ impl From<StoredTrainedProfile> for TrainedProfile {
 }
 
 pub(crate) fn trained_profiles_path(backend: &str) -> Result<PathBuf, String> {
+    // Validate *before* any create_dir_all side effect. Values such as "../"
+    // or absolute paths must not create directories outside profiles/.
+    let backend = validated_backend_component(backend)?;
     let dir = crate::wbeam_user_config_dir()
         .ok_or_else(|| "cannot resolve user config directory".to_string())?
         .join("profiles")
-        .join(normalize_backend(backend));
+        .join(backend);
     fs::create_dir_all(&dir).map_err(|e| format!("failed to create {}: {e}", dir.display()))?;
     Ok(dir.join("trained_profiles.json"))
 }
@@ -173,4 +190,31 @@ pub(crate) fn list_trained_profiles(backend: String) -> Result<Vec<TrainedProfil
     let mut profiles = load_trained_profiles_store(&backend)?.profiles;
     profiles.sort_by(|a, b| b.created_unix_ms.cmp(&a.created_unix_ms));
     Ok(profiles.into_iter().map(TrainedProfile::from).collect())
+}
+
+#[cfg(test)]
+mod profile_backend_path_tests {
+    use super::validated_backend_component;
+
+    #[test]
+    fn supported_and_legacy_identifiers_are_single_components() {
+        assert_eq!(validated_backend_component(" EVDI ").unwrap(), "evdi");
+        assert_eq!(validated_backend_component("wayland_portal").unwrap(), "wayland_portal");
+        // Dormant X11 data stays readable, but is not surfaced in release UI.
+        assert_eq!(validated_backend_component("x11_gst").unwrap(), "x11_gst");
+    }
+
+    #[test]
+    fn backend_path_traversal_and_separators_are_rejected() {
+        for value in ["", ".", "..", "../secrets", "evdi/../../other",
+                      "/tmp/export", "C:\\temp", "evdi\\other", "back end",
+                      "wayland\nportal", "üñíçødé"] {
+            assert!(validated_backend_component(value).is_err(), "{value:?}");
+        }
+    }
+
+    #[test]
+    fn oversized_backend_identifier_is_rejected() {
+        assert!(validated_backend_component(&"a".repeat(65)).is_err());
+    }
 }

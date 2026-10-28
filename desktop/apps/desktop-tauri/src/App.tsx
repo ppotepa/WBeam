@@ -498,23 +498,26 @@ export default function App() {
 
   async function refreshTrainedProfiles(): Promise<void> {
     const requestId = ++profilesRequestId;
-    const backend = connectDialogCaptureBackend();
-    // Profiles are backend-scoped; a concrete backend is required.
-    if (!backend || backend === "auto") {
+    // "Auto" is a UI selection, not a profile namespace. Resolve it to
+    // the concrete advertised backend before reading profiles.
+    const backend = selectedCaptureBackend();
+    if (!backend) {
       setTrainedProfiles([]);
       setConnectDialogProfileKey("");
       return;
     }
     try {
       const profiles = await api.listTrainedProfiles(backend);
-      if (requestId !== profilesRequestId || !connectDialogDevice()) return;
+      if (requestId !== profilesRequestId || !connectDialogDevice()
+        || selectedCaptureBackend() !== backend) return;
       setTrainedProfiles(profiles);
       const selected = connectDialogProfileKey();
       if (selected.length > 0 && !profiles.some((profile) => profile.key === selected)) {
         setConnectDialogProfileKey("");
       }
     } catch (err) {
-      if (requestId !== profilesRequestId || !connectDialogDevice()) return;
+      if (requestId !== profilesRequestId || !connectDialogDevice()
+        || selectedCaptureBackend() !== backend) return;
       setTrainedProfiles([]);
       session.setError(`Unable to load profiles for ${backend}: ${String(err)}`);
     }

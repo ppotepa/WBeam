@@ -47,3 +47,15 @@ test("connect dialog invalidates stale profile and doctor requests", () => {
   assert.match(app, /session\.devices\(\)\.find\(\(candidate\) => candidate\.serial === selectedDevice\.serial\)/);
   assert.match(app, /connectFormErrors\(\)\.length > 0/);
 });
+
+test("Auto loads profiles from resolved EVDI/Portal backend and rejects stale answers", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const from = app.indexOf("  async function refreshTrainedProfiles(): Promise<void> {");
+  const to = app.indexOf("  function openConnectDialog(", from);
+  assert.ok(from >= 0 && to > from);
+  const fetchProfiles = app.slice(from, to);
+  assert.match(fetchProfiles, /const backend = selectedCaptureBackend\(\);/);
+  assert.doesNotMatch(fetchProfiles, /backend === "auto"/);
+  assert.match(fetchProfiles, /api\.listTrainedProfiles\(backend\)/);
+  assert.equal((fetchProfiles.match(/selectedCaptureBackend\(\) !== backend/g) || []).length, 2);
+});
