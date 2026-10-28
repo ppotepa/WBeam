@@ -41,7 +41,7 @@ if printf '%s\n' "$streamer_links" | grep -Fq 'not found'; then
   echo "$streamer_links" >&2
   exit 1
 fi
-if ! printf '%s\n' "$streamer_links" | grep -Eq 'libevdi\\.so\\.[0-9]+'; then
+if ! printf '%s\n' "$streamer_links" | grep -Eq 'libevdi[.]so[.][0-9]+'; then
   echo "[build_deb] EVDI shared-library dependency not found in streamer; verify dynamic ABI" >&2
   echo "$streamer_links" >&2
   exit 1
