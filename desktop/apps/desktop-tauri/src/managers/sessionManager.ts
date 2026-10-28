@@ -1,5 +1,6 @@
 import { createMemo, createSignal } from "solid-js";
 import { HostApiManager } from "./hostApiManager";
+import { createRefreshCoordinator } from "./refreshCoordinator";
 import type { ConnectSessionConfig, DeviceBasic, HostProbeBrief, ServiceStatus } from "../types";
 
 const EMPTY_PROBE: HostProbeBrief = {
@@ -170,24 +171,28 @@ export function createSessionManager(api: HostApiManager) {
     return changed;
   }
 
-  async function refreshSnapshot(options?: { silent?: boolean; forceDevices?: boolean }) {
-    const silent = options?.silent ?? false;
-    const forceDevices = options?.forceDevices ?? !silent;
-    if (refreshInFlight()) return;
-    setRefreshInFlight(true);
-    if (!silent) setRefreshing(true);
-    try {
+  const refreshCoordinator = createRefreshCoordinator(
+    async ({ forceDevices }) => {
       const [serviceChanged, probeChanged] = await Promise.all([loadServiceStatus(), loadHostProbe()]);
-      // Keep ADB device list visible even when daemon service is stopped.
-      // Connect actions remain gated elsewhere by service/daemon readiness.
+      // Keep ADB devices visible when the host service is stopped. Periodic
+      // reads retain adaptive backoff; queued user/visibility reads can force.
       const devicesChanged = await loadDevices(loading(), forceDevices);
       if (serviceChanged || probeChanged || devicesChanged) {
         setUpdatedAt(new Date().toLocaleTimeString());
       }
-    } finally {
-      if (!silent) setRefreshing(false);
-      setRefreshInFlight(false);
-    }
+    },
+    (busy, interactive) => {
+      setRefreshInFlight(busy);
+      setRefreshing(interactive);
+    },
+  );
+
+  function refreshSnapshot(options?: { silent?: boolean; forceDevices?: boolean }): Promise<void> {
+    const silent = options?.silent ?? false;
+    return refreshCoordinator.refresh({
+      silent,
+      forceDevices: options?.forceDevices ?? !silent,
+    });
   }
 
   async function callServiceAction(action: "service_install" | "service_uninstall" | "service_start" | "service_stop") {

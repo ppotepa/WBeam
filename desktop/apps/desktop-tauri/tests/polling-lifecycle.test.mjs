@@ -95,3 +95,14 @@ test("owner cleanup is registered in synchronous onMount", () => {
   assert.match(app, /onCleanup\(\(\) => \{[\s\S]*?poller.stop\(\)/);
   assert.doesNotMatch(app, /setInterval\(/);
 });
+
+test("focus/visibility handler can queue a fresh read even during periodic polling", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const start = app.indexOf("const refreshVisible = () =>");
+  const end = app.indexOf("const onFocus =", start);
+  assert.ok(start > 0 && end > start);
+  const handler = app.slice(start, end);
+  assert.doesNotMatch(handler, /session\.refreshInFlight\(\)/);
+  assert.match(handler, /forceDevices: true/);
+  assert.match(handler, /document\.hidden/);
+});

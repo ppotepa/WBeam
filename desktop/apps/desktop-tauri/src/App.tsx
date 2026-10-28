@@ -826,8 +826,9 @@ function resolveEncoderMode(
       onError: (err) => console.error("Background status refresh failed", err),
     });
     const refreshVisible = () => {
-      if (disposed || session.deviceActionBusy().length > 0 || session.refreshInFlight()) return;
-      // Visibility/manual refresh bypasses device backoff; periodic polls do not.
+      if (disposed || document.hidden || session.deviceActionBusy().length > 0) return;
+      // Coalesce focus/visibility events; a forced refresh requested during a
+      // periodic poll must run afterwards rather than being dropped.
       void session.refreshSnapshot({ silent: true, forceDevices: true });
     };
     const onFocus = () => refreshVisible();
