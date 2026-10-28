@@ -4,7 +4,7 @@ set -Eeuo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/runtime-assets.sh"
 
-RPM_VERSION="${WBEAM_VERSION}"
+RPM_VERSION="${WBEAM_VERSION//-/.}"
 RPM_RELEASE="1"
 TOPDIR="$(mktemp -d)"
 trap 'rm -rf "${TOPDIR}"' EXIT
