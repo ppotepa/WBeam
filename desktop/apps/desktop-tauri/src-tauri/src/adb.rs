@@ -594,7 +594,8 @@ pub(crate) fn daemon_stream_state_and_port(
     stream_port: Option<u16>,
 ) -> Option<(String, u16)> {
     let control_port = crate::wbeam_control_port();
-    let mut url = format!("http://127.0.0.1:{control_port}/v1/status?serial={serial}");
+    let serial_param = crate::encode_query_component(serial);
+    let mut url = format!("http://127.0.0.1:{control_port}/v1/status?serial={serial_param}");
     if let Some(port) = stream_port {
         url.push_str(&format!("&stream_port={port}"));
     }
