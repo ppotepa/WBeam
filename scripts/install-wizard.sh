@@ -60,7 +60,7 @@ Options:
   -h, --help            show this help
 
 Notes:
-  Wayland mode is the recommended default and also covers X11 fallback.
+  Wayland Portal is the recommended capture path when EVDI is unavailable.
   EVDI mode installs kernel/displaylink components and may require Secure Boot
   MOK enrollment, group membership refresh, and a reboot.
 USAGE
@@ -265,7 +265,7 @@ print_probe() {
   echo "  arch: ${ARCH}"
   echo "  session: ${SESSION_TYPE}"
   echo "  wayland: ${WAYLAND_STATE}"
-  echo "  x11: ${X11_STATE}"
+  # Legacy X11 detection remains internal; it is not a supported UI backend.
   echo "  portal: ${PORTAL_STATE}"
   echo "  pipewire: ${PIPEWIRE_STATE}"
   echo "  encoder: ${ENCODER_STATE}"
@@ -274,8 +274,12 @@ print_probe() {
 
 normalize_backend() {
   case "$1" in
-    wayland|x11|portal|wayland-portal|wayland_portal|fallback)
+    wayland|portal|wayland-portal|wayland_portal)
       echo "wayland"
+      ;;
+    x11|fallback)
+      err "X11 legacy is unsupported; choose --backend wayland or --backend evdi."
+      return 2
       ;;
     evdi)
       echo "evdi"
@@ -305,8 +309,8 @@ choose_backend() {
 
   echo
   echo "Select capture backend:"
-  echo "  1) Wayland/X11 fallback - recommended"
-  echo "  2) EVDI virtual display - advanced/risky; may require DKMS, MOK enrollment, reboot"
+  echo "  1) Wayland Portal - supported default"
+  echo "  2) EVDI virtual display - requires compatible DKMS, kernel headers and possibly MOK/reboot"
   printf "Choice [1]: "
   local choice
   IFS= read -r choice
