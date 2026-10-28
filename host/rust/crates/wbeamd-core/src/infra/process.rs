@@ -168,7 +168,7 @@ pub fn build_revision() -> String {
     }
 
     option_env!("WBEAM_BUILD_REV")
-        .unwrap_or("0.1.2.dev00")
+        .unwrap_or("0.1.3.dev00")
         .to_string()
 }
 
