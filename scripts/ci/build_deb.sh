@@ -4,7 +4,10 @@ set -Eeuo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/runtime-assets.sh"
 
-DEB_VERSION="${WBEAM_VERSION}"
+# A Debian prerelease must sort *below* the final stable version.
+DEB_VERSION="${WBEAM_VERSION/-rc./~rc.}"
+DEB_VERSION="${DEB_VERSION/-beta./~beta.}"
+DEB_VERSION="${DEB_VERSION/-alpha./~alpha.}"
 ARCH="$(dpkg --print-architecture)"
 PKG_NAME="wbeam"
 
