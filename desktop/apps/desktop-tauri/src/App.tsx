@@ -32,6 +32,7 @@ import { createPollingLoop } from "./managers/pollingLoop";
 import { validateConnectForm } from "./managers/connectValidation";
 import { BatteryIcon, DeviceTypeIcon } from "./components/DeviceIndicators";
 import { ServiceControls } from "./components/ServiceControls";
+import { AccessibleDialog } from "./components/AccessibleDialog";
 import { decideAutoConnectBackend } from "./managers/autoconnectPolicy";
 import connectResolutionPresets from "./config/connect-resolution-presets.json";
 import connectEncoderOptions from "./config/connect-encoder-options.json";
@@ -823,7 +824,7 @@ function resolveEncoderMode(
 
   return (
     <main class="app-shell">
-      <section class="panel basic-400">
+      <section class={`panel basic-400 ${mode() === "advanced" ? "mode-advanced" : ""}`}>
         <header class="panel-header">
           <div>
             <h1>WBeam - {hostName()}</h1>
@@ -1005,6 +1006,7 @@ function resolveEncoderMode(
                         <button
                           class="device-btn"
                           title="Refresh this device state"
+                          aria-label={`Refresh ${device.model} status`}
                           disabled={session.refreshing() || isDeviceBusy(device)}
                           onClick={() => session.refreshSnapshot()}
                         >
@@ -1014,6 +1016,7 @@ function resolveEncoderMode(
                         <button
                           class="device-btn"
                           title={connectActionTitle}
+                          aria-label={`Connect ${device.model}: ${connectActionTitle}`}
                           disabled={connectBusy || connectDisabled}
                           onClick={() => mode() === "basic" ? void basicConnect(device) : openConnectDialog(device)}
                         >
@@ -1025,6 +1028,7 @@ function resolveEncoderMode(
                         <button
                           class="device-btn"
                           title={disconnectActionTitle}
+                          aria-label={`Disconnect ${device.model}: ${disconnectActionTitle}`}
                           disabled={disconnectDisabled}
                           onClick={() => session.disconnectDevice(device)}
                         >
@@ -1124,7 +1128,7 @@ function resolveEncoderMode(
           const profilesForCodec = () => trainedProfiles().filter((p) => p.encoder === connectDialogEncoderMode());
           const selectedProfile = () => profilesForCodec().find((profile) => profile.key === connectDialogProfileKey()) ?? null;
           return (
-            <dialog open class="modal-backdrop" aria-label="Select display mode">
+            <AccessibleDialog label="Select display mode" onClose={closeConnectDialog}>
               <section class="connect-modal">
                 <h3>Connect session</h3>
                 <p class="connect-modal-subtitle">{device.model} ({device.serial})</p>
@@ -1355,7 +1359,7 @@ function resolveEncoderMode(
                   </button>
                 </div>
               </section>
-            </dialog>
+            </AccessibleDialog>
           );
         }}
       </Show>
@@ -1363,7 +1367,7 @@ function resolveEncoderMode(
         {(doctorAccessor) => {
           const doctor = doctorAccessor();
           return (
-            <dialog open class="modal-backdrop" aria-label="Virtual desktop setup">
+            <AccessibleDialog label="Virtual desktop setup" onClose={closeVirtualSetup}>
               <section class="connect-modal setup-modal">
                 <h3>EVDI host setup</h3>
                 <p class="connect-modal-subtitle">Host backend: {safeUiText(doctor.hostBackend, "legacy backend (unsupported)")}</p>
@@ -1386,12 +1390,12 @@ function resolveEncoderMode(
                   </button>
                 </div>
               </section>
-            </dialog>
+            </AccessibleDialog>
           );
         }}
       </Show>
       <Show when={virtualInstallVisible()}>
-        <dialog open class="modal-backdrop" aria-label="Installing dependencies">
+        <AccessibleDialog label="Installing dependencies" onClose={closeVirtualInstallModal}>
           <section class="connect-modal setup-modal install-modal">
             <h3>Installing virtual desktop dependencies</h3>
             <p class="connect-modal-subtitle">Elevation is required (root/pkexec prompt).</p>
@@ -1417,10 +1421,10 @@ function resolveEncoderMode(
               </button>
             </div>
           </section>
-        </dialog>
+        </AccessibleDialog>
       </Show>
       <Show when={evdiWizardVisible()}>
-        <dialog open class="modal-backdrop" aria-label="EVDI setup wizard">
+        <AccessibleDialog label="EVDI setup wizard" onClose={() => setEvdiWizardVisible(false)}>
           <section class="connect-modal setup-modal">
             <h3>EVDI setup wizard</h3>
             <p class="connect-modal-subtitle">Configure EVDI kernel virtual displays for multiple connected devices.</p>
@@ -1452,7 +1456,7 @@ ls /dev/dri/card*</pre>
               <button class="device-btn" onClick={() => setEvdiWizardVisible(false)}>Close</button>
             </div>
           </section>
-        </dialog>
+        </AccessibleDialog>
       </Show>
     </main>
   );
