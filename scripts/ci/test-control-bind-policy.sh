@@ -51,6 +51,14 @@ grep -Fxq -- '--allow-unauthenticated-lan-control' "$tmp/args"
 grep -Fq 'default_value = "127.0.0.1"' "$main"
 grep -Fq 'validate_control_bind_address(' "$main"
 grep -Fq 'SocketAddr::new(bind_ip, args.control_port)' "$main"
+# Network exposure must be rejected *before* lock files or app sessions are
+# initialized, not merely before TcpListener::bind().
+policy_line="$(grep -n 'let bind_ip = match validate_control_bind_address(' "$main" | head -n1 | cut -d: -f1)"
+lock_line="$(grep -n 'let lock_path = PathBuf::from(&args.lock_file)' "$main" | head -n1 | cut -d: -f1)"
+[[ -n "$policy_line" && -n "$lock_line" && "$policy_line" -lt "$lock_line" ]] || {
+  echo "[control][FAIL] unsafe listener policy runs after daemon initialization" >&2
+  exit 1
+}
 if grep -Fq 'SocketAddr::from(([0, 0, 0, 0], args.control_port))' "$main"; then
   echo "[control][FAIL] old open-by-default listener returned" >&2
   exit 1
