@@ -64,10 +64,11 @@ pub trait HostBackendResolver: Send + Sync {
     fn resolve_capture_mode(&self, facts: &HostFacts) -> CaptureMode;
 }
 
-/// Default Linux policy:
-/// - Wayland -> portal streamer
-/// - X11 -> ximagesrc streamer
-/// - other OS/session -> unsupported
+/// Release default capture policy:
+/// - Wayland -> Wayland Portal
+/// - X11 / tty / unknown -> no automatic capture backend
+/// EVDI is independently advertised when a real kernel DRM card is present.
+/// Legacy X11 types and implementation remain in source but are not defaults.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DefaultHostBackendResolver;
 
@@ -75,7 +76,6 @@ impl HostBackendResolver for DefaultHostBackendResolver {
     fn resolve_capture_mode(&self, facts: &HostFacts) -> CaptureMode {
         match (facts.os, facts.session) {
             (HostOs::Linux, SessionKind::Wayland) => CaptureMode::WaylandPortal,
-            (HostOs::Linux, SessionKind::X11) => CaptureMode::X11Gst,
             _ => CaptureMode::UnsupportedHost,
         }
     }
@@ -116,16 +116,17 @@ impl HostProbe {
     }
 
     pub fn supports_streaming(&self) -> bool {
-        matches!(
-            self.capture_mode,
-            CaptureMode::WaylandPortal | CaptureMode::X11Gst | CaptureMode::Evdi
-        )
+        !self.available_backends().is_empty()
+    }
+
+    pub fn supports_capture_backend(&self, backend: &str) -> bool {
+        self.available_backends().contains(&backend)
     }
 
     pub fn unsupported_reason(&self) -> String {
         match self.capture_mode {
             CaptureMode::WaylandPortal => "streaming is supported".to_string(),
-            CaptureMode::X11Gst => "streaming is supported".to_string(),
+            CaptureMode::X11Gst => "Legacy X11 capture is unavailable in this release; use EVDI or Wayland Portal".to_string(),
             CaptureMode::Evdi => "streaming is supported".to_string(),
             CaptureMode::UnsupportedHost => format!(
                 "unsupported host environment: os={} session={} desktop={}",
@@ -178,21 +179,10 @@ impl HostProbe {
         }
     }
 
-    /// Returns backends available on this host beyond the default probe mode.
-    /// `wayland_portal` / `x11_gst` come from session type; `evdi` requires the
-    /// kernel module to have allocated at least one device node.
+    /// Returns only the release-supported capture backends. X11 remains a
+    /// dormant legacy implementation and must not be advertised or selected.
     pub fn available_backends(&self) -> Vec<&'static str> {
-        let mut backends = Vec::new();
-        if matches!(
-            self.capture_mode,
-            CaptureMode::WaylandPortal | CaptureMode::X11Gst
-        ) {
-            backends.push(self.capture_mode_name());
-        }
-        if Self::evdi_device_available() {
-            backends.push("evdi");
-        }
-        backends
+        release_backends(self.capture_mode, Self::evdi_device_available())
     }
 
     /// Reports usable EVDI capability only after a DRM card node exists.
@@ -203,6 +193,56 @@ impl HostProbe {
     }
 }
 
+
+// Pure release policy: keep backend advertisement independent of the
+// process environment so it can be tested without a DRM device.
+fn release_backends(default: CaptureMode, evdi_available: bool) -> Vec<&'static str> {
+    let mut backends = Vec::new();
+    if default == CaptureMode::WaylandPortal {
+        backends.push("wayland_portal");
+    }
+    if evdi_available {
+        backends.push("evdi");
+    }
+    backends
+}
+
+#[cfg(test)]
+mod release_capture_policy_tests {
+    use super::*;
+
+    fn facts(session: SessionKind) -> HostFacts {
+        HostFacts {
+            os: HostOs::Linux,
+            session,
+            desktop: DesktopFlavor::Gnome,
+            is_remote: false,
+            display: None,
+            wayland_display: None,
+        }
+    }
+
+    #[test]
+    fn wayland_default_is_portal() {
+        let probe = HostProbe::from_facts(&facts(SessionKind::Wayland), &DefaultHostBackendResolver);
+        assert_eq!(probe.capture_mode, CaptureMode::WaylandPortal);
+        assert_eq!(release_backends(probe.capture_mode, false), vec!["wayland_portal"]);
+    }
+
+    #[test]
+    fn x11_default_is_not_legacy_capture() {
+        let probe = HostProbe::from_facts(&facts(SessionKind::X11), &DefaultHostBackendResolver);
+        assert_eq!(probe.capture_mode, CaptureMode::UnsupportedHost);
+        assert!(release_backends(probe.capture_mode, false).is_empty());
+        assert_eq!(release_backends(probe.capture_mode, true), vec!["evdi"]);
+    }
+
+    #[test]
+    fn legacy_resolver_value_is_not_release_advertised() {
+        assert!(release_backends(CaptureMode::X11Gst, false).is_empty());
+        assert_eq!(release_backends(CaptureMode::X11Gst, true), vec!["evdi"]);
+    }
+}
 
 fn evdi_card_exists(platform_devices: &Path, dev_dri: &Path) -> bool {
     let Ok(platform) = fs::read_dir(platform_devices) else {
