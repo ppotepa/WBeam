@@ -67,6 +67,10 @@ jobs:
             libevdi0-dev libx11-dev libxrandr-dev libxfixes-dev libxext-dev libxrender-dev
       - name: Host API and core tests
         run: cargo test --locked --manifest-path host/rust/Cargo.toml -p wbeamd-api -p wbeamd-core
+      - name: EVDI streamer compile and linker tests
+        run: |
+          cargo check --locked --manifest-path host/rust/Cargo.toml -p wbeamd-streamer --no-default-features --features evdi
+          cargo test --locked --manifest-path host/rust/Cargo.toml -p wbeamd-streamer --no-default-features --features evdi
 
   tauri-native:
     name: Tauri Rust tests / compile
