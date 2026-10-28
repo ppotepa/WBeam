@@ -11,6 +11,7 @@ test("Basic and Advanced have different visible control sets", () => {
   assert.match(app, /async function basicConnect\(/);
   assert.match(app, /mode\(\) === "basic" \? void basicConnect\(device\) : openConnectDialog\(device\)/);
   assert.match(app, /async function ensureBasicServiceReady\(/);
+  assert.match(app, /<ServiceControls/);
 });
 
 test("Basic path selects supported backend, does not force legacy X11", () => {
@@ -23,4 +24,7 @@ test("device indicators are extracted without changing icon behavior", () => {
   assert.match(indicators, /export function BatteryIcon/);
   assert.match(indicators, /export function DeviceTypeIcon/);
   assert.match(app, /import \{ BatteryIcon, DeviceTypeIcon \} from "\.\/components\/DeviceIndicators";/);
+  const controls = readFileSync(new URL("../src/components/ServiceControls.tsx", import.meta.url), "utf8");
+  assert.match(controls, /export function ServiceControls/);
+  assert.match(controls, /props\.onStart\(\)/);
 });
