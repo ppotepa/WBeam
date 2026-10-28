@@ -36,6 +36,7 @@ quality_gates:
     - ./scripts/ci/validate-e2e-matrix.sh
     - bash scripts/ci/test-evdi-diagnostics.sh
     - bash scripts/ci/check-version-consistency.sh
+    - bash scripts/ci/test-publication-contract.sh
     - bash -n scripts/ci/*.sh scripts/virtual-deps-check.sh scripts/virtual-deps-install.sh wbeam host/scripts/run_wbeamd.sh
   rules:
     - if: $CI_COMMIT_TAG
