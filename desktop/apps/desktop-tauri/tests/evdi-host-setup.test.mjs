@@ -45,3 +45,36 @@ test("native EVDI doctor limits the subprocess independently of JS timeout", () 
   assert.match(native, /let ok = response\.get\("ok"\)/);
   assert.match(native, /&& output\.status\.success\(\)/);
 });
+
+test("Connect is gated until the EVDI runtime diagnostic succeeds", () => {
+  const start = app.indexOf("  const connectDialogBlockReason = () => {");
+  const end = app.indexOf("  const [autoConnectBusy", start);
+  assert.ok(start >= 0 && end > start);
+  const gating = app.slice(start, end);
+  assert.match(gating, /if \(backend === "evdi"\)/);
+  assert.match(gating, /if \(connectDialogDoctorLoading\(\)\)/);
+  assert.match(gating, /if \(!doctor\)/);
+  assert.match(gating, /if \(!doctor\.ok\)/);
+  assert.match(app, /const blockedReason = connectDialogBlockReason\(\);/);
+});
+
+test("Failed EVDI diagnostics block Connect instead of silently proceeding", () => {
+  const start = app.indexOf("  async function refreshConnectDialogDoctor()");
+  const end = app.indexOf("  function openConnectDialog(", start);
+  const refresh = app.slice(start, end);
+  assert.match(refresh, /getEvdiDepsDoctor\(\)/);
+  assert.match(refresh, /ok: false,/);
+  assert.match(refresh, /selectedCaptureBackend\(\) !== "evdi"/);
+  assert.match(refresh, /if \(requestId === connectDialogRequestId\) setConnectDialogDoctorLoading\(false\)/);
+});
+
+test("Slow connection cannot close a newer Connect dialog", () => {
+  const start = app.indexOf("  async function confirmConnect()");
+  const end = app.indexOf("  async function openVirtualSetup()", start);
+  assert.ok(start >= 0 && end > start);
+  const confirm = app.slice(start, end);
+  assert.match(confirm, /const requestId = connectDialogRequestId;/);
+  assert.match(confirm, /requestId !== connectDialogRequestId/);
+  assert.match(confirm, /if \(result\.ok && requestId === connectDialogRequestId/);
+  assert.match(confirm, /connectDialogDevice\(\)\?\.serial === device\.serial/);
+});
