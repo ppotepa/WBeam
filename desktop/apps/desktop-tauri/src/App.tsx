@@ -228,6 +228,24 @@ function serviceStatusHint(service: ServiceStatus): string {
   return "Install + Start service to enable probing and streaming.";
 }
 
+// X11/Xorg are legacy implementation details, not supported product modes.
+// Keep technical data intact for diagnostics, but never offer the legacy
+// capture path or surface its backend identifiers in the release UI.
+function safeUiText(value: string, legacyLabel = "Legacy capture is unsupported. Use EVDI or Wayland Portal."): string {
+  return /x11|xorg|xrandr/i.test(value) ? legacyLabel : value;
+}
+
+function supportedCaptureLabel(mode: string): string {
+  if (mode === "evdi") return "EVDI";
+  if (mode === "wayland_portal") return "Wayland Portal";
+  if (mode === "unknown" || !mode) return "unknown";
+  return "unsupported legacy/unknown backend";
+}
+
+function isSupportedCaptureMode(mode: string): boolean {
+  return mode === "evdi" || mode === "wayland_portal";
+}
+
 function connectTitle(connectBusy: boolean, connectDisabled: boolean, reason: string): string {
   if (connectBusy) return "Connecting...";
   if (connectDisabled) return `Connect blocked: ${reason}`;
@@ -689,7 +707,7 @@ function resolveEncoderMode(
         <p class="meta-line">Daemon APK: <strong>{session.daemonVersion() || session.hostVersion() || "not set"}</strong></p>
 
         <Show when={session.error()}>
-          <p class="error-line">{session.error()}</p>
+          <p class="error-line">{safeUiText(session.error())}</p>
         </Show>
         <Show when={!session.loading() && session.devices().length === 0 && !session.error()}>
           <p class="empty-line">
@@ -924,7 +942,7 @@ function resolveEncoderMode(
           </div>
           <span>{session.devices().length} devices ({session.tabletCount()} tablet, {session.phoneCount()} phone)</span>
           <span>
-            host: {session.hostProbe().os}/{session.hostProbe().session}/{session.hostProbe().desktop} · capture={session.hostProbe().captureMode} · {session.hostProbe().supported ? "supported" : "unsupported"}
+            host: {safeUiText(session.hostProbe().os)}/{safeUiText(session.hostProbe().session, "legacy session")}/{safeUiText(session.hostProbe().desktop, "legacy desktop")} · capture={supportedCaptureLabel(session.hostProbe().captureMode)} · {session.hostProbe().supported && isSupportedCaptureMode(session.hostProbe().captureMode) ? "supported" : "unsupported"}
           </span>
           <span>updated: {session.updatedAt()}</span>
         </footer>
@@ -938,10 +956,7 @@ function resolveEncoderMode(
           const virtualMonitorAvailable = () => isVirtualMonitorAvailable(doctor() ?? null);
           const virtualMonitorUnavailable = () => !virtualMonitorAvailable();
           const virtualMonitorHint = () => {
-            if (!virtualMonitorAvailable()) return "Not implemented for current host session yet.";
-            if (doctor()?.resolver === "linux_x11_monitor_object_experimental") {
-              return "Experimental simulated monitor space on X11 (xrandr --setmonitor); not a true output.";
-            }
+            if (!virtualMonitorAvailable()) return "A supported virtual monitor backend is not available for this host.";
             return "Creates real additional monitor space on host desktop.";
           };
           const qualityMode = () => connectDialogQualityMode();
@@ -1173,10 +1188,10 @@ function resolveEncoderMode(
                   <p class="setup-message">Checking host capabilities...</p>
                 </Show>
                 <Show when={connectDialogBlockReason()}>
-                  {(msg) => <p class="setup-missing">Connect blocked: {msg()}</p>}
+                  {(msg) => <p class="setup-missing">Connect blocked: {safeUiText(msg())}</p>}
                 </Show>
                 <Show when={!waylandHost && doctor()}>
-                  {(d) => <p class="setup-hint">{d().installHint}</p>}
+                  {(d) => <p class="setup-hint">{safeUiText(d().installHint)}</p>}
                 </Show>
                 <div class="connect-modal-actions">
                   <button class="device-btn" onClick={closeConnectDialog}>Cancel</button>
@@ -1196,11 +1211,11 @@ function resolveEncoderMode(
             <dialog open class="modal-backdrop" aria-label="Virtual desktop setup">
               <section class="connect-modal setup-modal">
                 <h3>Virtual desktop setup</h3>
-                <p class="connect-modal-subtitle">Host backend: {doctor.hostBackend}</p>
-                <p class="setup-message">{doctor.message}</p>
-                <p class="setup-hint">{doctor.installHint}</p>
+                <p class="connect-modal-subtitle">Host backend: {safeUiText(doctor.hostBackend, "legacy backend (unsupported)")}</p>
+                <p class="setup-message">{safeUiText(doctor.message)}</p>
+                <p class="setup-hint">{safeUiText(doctor.installHint)}</p>
                 <Show when={doctor.missingDeps.length > 0}>
-                  <p class="setup-missing">Missing: {doctor.missingDeps.join(", ")}</p>
+                  <p class="setup-missing">Missing: {safeUiText(doctor.missingDeps.join(", "))}</p>
                 </Show>
                 <div class="connect-modal-actions">
                   <button class="device-btn" onClick={closeVirtualSetup} disabled={virtualSetupInstalling()}>
@@ -1250,7 +1265,7 @@ function resolveEncoderMode(
         <dialog open class="modal-backdrop" aria-label="EVDI setup wizard">
           <section class="connect-modal setup-modal">
             <h3>EVDI setup wizard</h3>
-            <p class="connect-modal-subtitle">Enable multiple virtual monitors via EVDI (X11 backend).</p>
+            <p class="connect-modal-subtitle">Configure EVDI kernel virtual displays for multiple connected devices.</p>
             <ol class="setup-list">
               <li>
                 <strong>Load EVDI with multiple devices (run in terminal):</strong>

@@ -969,12 +969,8 @@ fn main() {
                 let _ = window.set_focus();
             }
         }))
-        .setup(|app| {
-            if should_show_x11_startup_notice() {
-                show_x11_startup_notice_window(app.handle());
-            }
-            Ok(())
-        })
+        // Legacy X11 notice is intentionally not registered in release UI.
+        // Its implementation remains in the repository for future cleanup.
         .invoke_handler(tauri::generate_handler![
             ping,
             host_name,
