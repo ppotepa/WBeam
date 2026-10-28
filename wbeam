@@ -1143,11 +1143,12 @@ android_install_with_signature_recover() {
   [[ -n "$out" ]] && printf '%s\n' "$out" >&2
 
   if printf '%s' "$out" | grep -Eq "INSTALL_FAILED_UPDATE_INCOMPATIBLE|INSTALL_PARSE_FAILED_INCONSISTENT_CERTIFICATES"; then
-    if [[ "$INSTALLED_MODE" -eq 1 ]]; then
-      echo "[android] ERROR: APK certificate mismatch; existing app/data NOT removed. Back up and migrate explicitly." >&2
+    if [[ "$INSTALLED_MODE" -eq 1 || "${WBEAM_ALLOW_DATA_DELETING_REINSTALL:-0}" != "1" ]]; then
+      echo "[android] ERROR: APK certificate mismatch; existing app/data NOT removed." >&2
+      echo "[android] Back up data, then explicitly migrate signatures. For disposable development installs only, set WBEAM_ALLOW_DATA_DELETING_REINSTALL=1 (destructive)." >&2
       return 1
     fi
-    echo "[android] Detected signature mismatch for ${package_name}; uninstalling existing package and retrying..."
+    echo "[android] Explicit destructive reinstall requested for ${package_name}; uninstalling existing package and retrying..."
     adb_device_cmd uninstall "$package_name" >/dev/null 2>&1 || true
     adb_device_cmd shell pm uninstall --user 0 "$package_name" >/dev/null 2>&1 || true
 
