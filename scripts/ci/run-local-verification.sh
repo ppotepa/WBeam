@@ -90,7 +90,7 @@ run_step() {
 run_step shell_syntax bash "$ROOT_DIR" bash -c \
   'bash -n wbeam scripts/virtual-deps-check.sh scripts/virtual-deps-install.sh scripts/evdi-compat.sh scripts/ci/*.sh'
 run_step release_shell bash "$ROOT_DIR" bash -c \
-  'set -Eeuo pipefail; bash scripts/ci/test-release-version.sh; bash scripts/ci/check-version-consistency.sh; bash scripts/ci/test-evdi-diagnostics.sh; bash scripts/ci/test-virtual-deps-runtime.sh; bash scripts/ci/test-virtual-deps-install-dry-run.sh; bash scripts/ci/test-deb-target.sh; bash scripts/ci/test-publication-contract.sh; bash scripts/ci/test-control-bind-policy.sh; bash scripts/ci/test-daemon-log-location.sh'
+  'set -Eeuo pipefail; bash scripts/ci/test-release-version.sh; bash scripts/ci/check-version-consistency.sh; bash scripts/ci/test-evdi-diagnostics.sh; bash scripts/ci/test-virtual-deps-runtime.sh; bash scripts/ci/test-virtual-deps-install-dry-run.sh; bash scripts/ci/test-deb-target.sh; bash scripts/ci/test-publication-contract.sh; bash scripts/ci/test-control-bind-policy.sh; bash scripts/ci/test-daemon-log-location.sh; bash scripts/ci/test-systemd-offline-start.sh'
 run_step python_e2e python3 "$ROOT_DIR" python3 -m unittest discover -s e2e/tests -v
 run_step desktop_install npm "$ROOT_DIR/desktop/apps/desktop-tauri" npm ci
 run_step desktop_test npm "$ROOT_DIR/desktop/apps/desktop-tauri" npm test

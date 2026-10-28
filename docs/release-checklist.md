@@ -200,3 +200,20 @@ under the **same user state tree**, at
 source checkout behavior remains `<repo>/logs/effective-runtime`.
 A clean-install check should start a real EVDI/Portal session and confirm a
 nonempty JSONL snapshot, with no attempted writes in the package tree.
+
+## Offline systemd startup guard (#114)
+
+The Android device may be disconnected when a Linux user service starts. ADB
+reverse is a best-effort preparation step and must **not** be a prerequisite
+for starting the Rust daemon itself. The packaged `wbeamd-rust.service`
+template uses systemd's `ExecStartPre=-...` form to ignore a nonzero exit from
+the USB helper (for example, no cable, no authorized Android device, or
+unavailable `adb`). A failing `ExecStart` daemon is **not** ignored.
+
+Run `bash scripts/ci/test-systemd-offline-start.sh` for an isolated unit
+generation regression check. Separately validate the real service on clean
+Fedora/RPM and Bookworm/Noble installations: start `systemctl --user start
+wbeamd-rust` with **no Android connected**, check
+`systemctl --user status wbeamd-rust` and `ss -ltnp` for localhost port
+5001, then connect USB, configure ADB reverse and stream to Android. A source
+guard does not replace these real systemd and hardware tests.
