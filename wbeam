@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALLED_MODE=0
+if [[ -f "$ROOT_DIR/VERSION.txt" ]]; then INSTALLED_MODE=1; fi
 HOST_SCRIPTS_DIR="$ROOT_DIR/host/scripts"
 WBEAM_CONFIG_HELPER="$HOST_SCRIPTS_DIR/wbeam_config.sh"
 if [[ -f "$WBEAM_CONFIG_HELPER" ]]; then
@@ -26,11 +28,23 @@ ANDROID_APK="$ANDROID_DIR/app/build/outputs/apk/debug/app-debug.apk"
 ANDROID_APK_RELEASE="$ANDROID_DIR/app/build/outputs/apk/release/app-release.apk"
 ANDROID_APK_RELEASE_UNSIGNED="$ANDROID_DIR/app/build/outputs/apk/release/app-release-unsigned.apk"
 ANDROID_SERIAL="${WBEAM_ANDROID_SERIAL:-}"
-ANDROID_PIPELINE_FILE="$ROOT_DIR/.wbeam_android_pipeline"
-LOG_DIR="$ROOT_DIR/logs"
+if [[ "$INSTALLED_MODE" -eq 1 ]]; then
+  ANDROID_APK="$ANDROID_DIR/wbeam-android.apk"
+  ANDROID_APK_RELEASE="$ANDROID_APK"
+  ANDROID_APK_RELEASE_UNSIGNED=""
+  WBEAM_STATE_DIR="${XDG_STATE_HOME:-${HOME:-/tmp}/.local/state}/wbeam"
+  mkdir -p "$WBEAM_STATE_DIR"
+  ANDROID_PIPELINE_FILE="$WBEAM_STATE_DIR/android-pipeline"
+  LOG_DIR="${WBEAM_LOG_DIR:-$WBEAM_STATE_DIR/logs}"
+  BUILD_VERSION_FILE="$WBEAM_STATE_DIR/build-version"
+  DEVICE_PORTS_FILE="$WBEAM_STATE_DIR/device-ports"
+else
+  ANDROID_PIPELINE_FILE="$ROOT_DIR/.wbeam_android_pipeline"
+  LOG_DIR="$ROOT_DIR/logs"
+  BUILD_VERSION_FILE="$ROOT_DIR/.wbeam_build_version"
+  DEVICE_PORTS_FILE="$ROOT_DIR/.wbeam_device_ports"
+fi
 ADB_LOGCAT_PID_FILE="$LOG_DIR/adb-logcat.pid"
-BUILD_VERSION_FILE="$ROOT_DIR/.wbeam_build_version"
-DEVICE_PORTS_FILE="$ROOT_DIR/.wbeam_device_ports"
 VERSION_BASE="${WBEAM_VERSION_BASE:-0.1.2}"
 
 
@@ -340,6 +354,14 @@ build_version_for_runtime() {
   if [[ -n "$explicit" ]]; then
     normalize_build_version "$explicit"
     return 0
+  fi
+  if [[ "$INSTALLED_MODE" -eq 1 ]]; then
+    local packaged_version
+    packaged_version="$(sed -n 's/^WBEAM_VERSION=//p' "$ROOT_DIR/VERSION.txt" | head -n 1)"
+    if [[ -n "$packaged_version" ]]; then
+      printf '%s\n' "$packaged_version"
+      return 0
+    fi
   fi
   local from_file
   from_file="$(build_version_read_file)"
@@ -812,6 +834,10 @@ host_can_build_evdi() {
 }
 
 host_build() {
+  if [[ "$INSTALLED_MODE" -eq 1 ]]; then
+    echo "[host] Source build unavailable in packaged installation; prebuilt daemon included." >&2
+    return 2
+  fi
   require_cmd cargo
   host_build_preflight
   local rust_dir="$ROOT_DIR/host/rust"
@@ -1071,6 +1097,10 @@ host_tuner() {
 }
 
 android_build() {
+  if [[ "$INSTALLED_MODE" -eq 1 ]]; then
+    echo "[android] Source build requires a repository checkout. Use 'wbeam android deploy' for bundled APK." >&2
+    return 2
+  fi
   local pipeline_mode min_sdk build_api_host build_stream_host gradle_user_home build_version
   local build_stream_port build_control_port
   pipeline_mode="$(android_pipeline_mode)"
@@ -1113,6 +1143,10 @@ android_install_with_signature_recover() {
   [[ -n "$out" ]] && printf '%s\n' "$out" >&2
 
   if printf '%s' "$out" | grep -Eq "INSTALL_FAILED_UPDATE_INCOMPATIBLE|INSTALL_PARSE_FAILED_INCONSISTENT_CERTIFICATES"; then
+    if [[ "$INSTALLED_MODE" -eq 1 ]]; then
+      echo "[android] ERROR: APK certificate mismatch; existing app/data NOT removed. Back up and migrate explicitly." >&2
+      return 1
+    fi
     echo "[android] Detected signature mismatch for ${package_name}; uninstalling existing package and retrying..."
     adb_device_cmd uninstall "$package_name" >/dev/null 2>&1 || true
     adb_device_cmd shell pm uninstall --user 0 "$package_name" >/dev/null 2>&1 || true
@@ -1177,6 +1211,15 @@ android_launch() {
 }
 
 android_deploy() {
+  if [[ "$INSTALLED_MODE" -eq 1 ]]; then
+    [[ -s "$ANDROID_APK_RELEASE" ]] || { echo "[android] Bundled APK missing: $ANDROID_APK_RELEASE" >&2; return 1; }
+    android_install_release
+    if ! android_try_reverse_setup "$STREAM_PORT" "$CONTROL_PORT"; then
+      echo "[android] WARN: adb reverse unavailable; check USB debugging and permissions." >&2
+    fi
+    if [[ "${WBEAM_ANDROID_SKIP_LAUNCH:-0}" != "1" ]]; then android_launch; fi
+    return 0
+  fi
   local pipeline_mode build_hosts build_api_host build_stream_host
   local deploy_stream_port deploy_control_port
   local skip_launch="${WBEAM_ANDROID_SKIP_LAUNCH:-0}"
@@ -1205,6 +1248,15 @@ android_deploy() {
 }
 
 android_deploy_all() {
+  if [[ "$INSTALLED_MODE" -eq 1 ]]; then
+    local serial failures=0
+    while IFS= read -r serial; do
+      [[ -n "$serial" ]] || continue
+      ANDROID_SERIAL="$serial" android_deploy || failures=$((failures + 1))
+    done < <(adb_connected_serials)
+    (( failures == 0 )) || return 1
+    return 0
+  fi
   local serials=()
   local serial=""
   local ok_count=0
@@ -1288,6 +1340,10 @@ android_deploy_all() {
 }
 
 android_build_release() {
+  if [[ "$INSTALLED_MODE" -eq 1 ]]; then
+    echo "[android] Release build requires source and Android SDK. Use bundled APK instead." >&2
+    return 2
+  fi
   local pipeline_mode min_sdk build_api_host build_stream_host gradle_user_home build_version
   local build_stream_port build_control_port
   pipeline_mode="$(android_pipeline_mode)"
@@ -1575,6 +1631,10 @@ android_install_release() {
 }
 
 android_deploy_release() {
+  if [[ "$INSTALLED_MODE" -eq 1 ]]; then
+    android_deploy
+    return $?
+  fi
   local pipeline_mode build_hosts build_api_host build_stream_host
   adb_logcat_ensure_running
   pipeline_mode="$(android_pipeline_mode)"
@@ -2279,6 +2339,10 @@ deps_virtual_install() {
 }
 
 install_wizard() {
+  if [[ "$INSTALLED_MODE" -eq 1 ]]; then
+    echo "[install] Host installed by package manager. Use desktop Host setup or 'wbeam android deploy'." >&2
+    return 2
+  fi
   "$ROOT_DIR/scripts/install-wizard.sh" "$@"
 }
 
@@ -2299,7 +2363,11 @@ case "$group" in
     case "$cmd" in
       setup|onboard|onboarding)
         shift 2
-        install_wizard --device-only "$@"
+        if [[ "$INSTALLED_MODE" -eq 1 ]]; then
+          android_deploy
+        else
+          install_wizard --device-only "$@"
+        fi
         ;;
       *)              print_help; exit 1 ;;
     esac
