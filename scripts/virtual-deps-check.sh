@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=evdi-compat.sh
+source "$SCRIPT_DIR/evdi-compat.sh"
 
 JSON=0
 BACKEND="evdi"
@@ -134,14 +137,36 @@ if [[ "$BACKEND" == "evdi" ]]; then
   if [[ ! -e "/lib/modules/${kernel}/build/Makefile" ]]; then
     missing+=("kernel-headers-for-${kernel}")
   fi
+  evdi_module_found=0
   if ! command_exists modinfo || ! modinfo evdi >/dev/null 2>&1; then
     missing+=("evdi-kernel-module")
-  elif ! command_exists lsmod || ! lsmod | grep -q '^evdi '; then
-    missing+=("evdi-module-loaded")
+  else
+    evdi_module_found=1
+    if ! command_exists lsmod || ! lsmod | grep -q '^evdi '; then
+      missing+=("evdi-module-loaded")
+      if command_exists mokutil && mokutil --sb-state 2>/dev/null | grep -qi enabled; then
+        # A Secure Boot / MOK check is required; it is not automatically the cause.
+        missing+=("evdi-secureboot-mok-check")
+      fi
+    fi
+  fi
+  if ! evdi_find_linkable_library >/dev/null; then
+    missing+=("libevdi-linker-library")
+  fi
+  # Classify the latest DKMS log only when no module was found. A stale
+  # historical log must not block a successfully installed EVDI module.
+  if [[ "$evdi_module_found" -eq 0 ]]; then
+    log_file="$(evdi_find_build_log "$kernel" || true)"
+    if [[ -n "$log_file" ]]; then
+      log_reason="$(evdi_build_failure_reason "$log_file")"
+      if [[ "$log_reason" != "dkms-failure-unclassified" ]]; then
+        missing+=("$log_reason")
+      fi
+    fi
   fi
   case "$manager" in
     deb) install_cmd="Install matching Linux kernel headers and evdi-dkms; then load: sudo modprobe evdi initial_device_count=4" ;;
-    rpm-dnf) install_cmd="Install matching kernel-devel and compatible evdi-dkms/akmod-evdi; then load: sudo modprobe evdi initial_device_count=4" ;;
+    rpm-dnf) install_cmd="Install matching kernel-devel and a compatible EVDI DKMS/akmod version; verify libevdi.so and Secure Boot MOK. If DKMS reports sign-compare failures on kernel ${kernel}, use a compatible upstream EVDI revision or Wayland Portal; do not disable compiler warnings globally." ;;
     rpm-yum|rpm-zypper) install_cmd="Install matching kernel-devel and evdi-dkms, then load EVDI for this kernel" ;;
     arch) install_cmd="$(arch_evdi_install_hint) ; install headers for ${kernel}; sudo modprobe evdi initial_device_count=4" ;;
     *) install_cmd="Install EVDI and matching kernel headers manually, then load the evdi module" ;;
