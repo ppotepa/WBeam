@@ -1,0 +1,101 @@
+name: WBeam Release Integration Review
+
+on:
+  push:
+    branches:
+      - release-013/review-integration-fixes
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    name: Solid/TypeScript + Node regressions
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/apps/desktop-tauri/package-lock.json
+      - name: Build and test desktop
+        working-directory: desktop/apps/desktop-tauri
+        run: |
+          npm ci
+          npm test
+          npm run build
+
+  python-and-shell:
+    name: Release checks / E2E runner / package scripts
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Syntax, release guards, EVDI classifier
+        run: |
+          bash -n wbeam scripts/ci/*.sh scripts/virtual-deps-check.sh scripts/virtual-deps-install.sh
+          bash scripts/ci/test-release-version.sh
+          bash scripts/ci/test-evdi-diagnostics.sh
+          bash scripts/ci/test-publication-contract.sh
+          bash scripts/ci/check-version-consistency.sh
+      - name: Python E2E runner tests
+        run: python -m unittest discover -s e2e/tests -v
+
+  rust-host:
+    name: Rust API and core unit tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Host prerequisite packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libssl-dev libdbus-1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            libx11-dev libxrandr-dev libxfixes-dev libxext-dev libxrender-dev
+      - name: Host API and core tests
+        run: cargo test --locked --manifest-path host/rust/Cargo.toml -p wbeamd-api -p wbeamd-core
+
+  tauri-native:
+    name: Tauri Rust tests / compile
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Native Tauri dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libssl-dev libdbus-1-dev libwebkit2gtk-4.1-dev \
+            libgtk-3-dev libsoup-3.0-dev libayatana-appindicator3-dev \
+            libx11-dev libxrandr-dev libxfixes-dev libxext-dev libxrender-dev
+      - name: Prepare frontend
+        working-directory: desktop/apps/desktop-tauri
+        run: npm ci && npm run build
+      - name: Test and check Tauri native
+        run: |
+          cargo test --locked --manifest-path desktop/apps/desktop-tauri/src-tauri/Cargo.toml
+          cargo check --locked --manifest-path desktop/apps/desktop-tauri/src-tauri/Cargo.toml
+
+  android-debug:
+    name: Android Java/JUnit/assembleDebug
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Android SDK 35
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Android unit tests and debug build
+        working-directory: android
+        run: bash ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug
