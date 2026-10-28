@@ -23,8 +23,7 @@ evdi_find_linkable_library() {
 evdi_find_build_log() {
   local kernel="$1" file
   # Prefer a DKMS log built for exactly the running kernel.
-  for file in /var/lib/dkms/evdi/*/"$kernel"/*/log/make.log \
-    /var/lib/dkms/evdi/*/build/make.log; do
+  for file in /var/lib/dkms/evdi/*/"$kernel"/*/log/make.log; do
     [[ -f "$file" && -r "$file" ]] || continue
     printf '%s\n' "$file"
     return 0
