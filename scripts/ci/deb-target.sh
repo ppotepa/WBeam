@@ -38,3 +38,18 @@ wbeam_deb_package_version() {
   version="${version/-alpha./~alpha.}"
   printf '%s+%s\n' "$version" "$target"
 }
+
+# A stable release supports both build ABIs; failing silently if one is
+# missing would publish an artifact that cannot install on its target OS.
+wbeam_deb_has_both_artifacts() {
+  local directory="${1:?artifact directory required}"
+  local -a bookworm_files=() noble_files=()
+  local f
+  for f in "$directory"/wbeam_*+bookworm_*.deb; do
+    [[ -e "$f" ]] && bookworm_files+=("$f")
+  done
+  for f in "$directory"/wbeam_*+noble_*.deb; do
+    [[ -e "$f" ]] && noble_files+=("$f")
+  done
+  (( ${#bookworm_files[@]} == 1 && ${#noble_files[@]} == 1 ))
+}
