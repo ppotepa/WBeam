@@ -27,6 +27,15 @@ wbeam_deb_evdi_build_package() {
   esac
 }
 
+# Check the exact EVDI ELF NEEDED SONAME, not merely any libevdi.so.*.
+wbeam_deb_evdi_soname() {
+  case "$1" in
+    bookworm) printf 'libevdi.so.0\n' ;;
+    noble) printf 'libevdi.so.1\n' ;;
+    *) return 1 ;;
+  esac
+}
+
 wbeam_deb_package_version() {
   local version="${1:?WBEAM_VERSION required}"
   local target="${2:?deb target required}"
