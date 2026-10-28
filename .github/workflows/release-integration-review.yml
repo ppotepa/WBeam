@@ -67,7 +67,7 @@ jobs:
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
             libevdi0-dev libx11-dev libxrandr-dev libxfixes-dev libxext-dev libxrender-dev
       - name: Host API and core tests
-        run: cargo test --locked --manifest-path host/rust/Cargo.toml -p wbeamd-api -p wbeamd-core
+        run: cargo test --locked --manifest-path host/rust/Cargo.toml -p wbeamd-api -p wbeamd-core -p wbeamd-server
       - name: EVDI streamer compile and linker tests
         run: |
           cargo check --locked --manifest-path host/rust/Cargo.toml -p wbeamd-streamer --no-default-features --features evdi
