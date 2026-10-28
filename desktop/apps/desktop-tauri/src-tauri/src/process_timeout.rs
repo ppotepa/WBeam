@@ -74,12 +74,23 @@ pub(crate) fn command_output_timeout(
         }
     };
 
-    let stdout = out_rx
-        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-        .map_err(|_| format!("{label} output pipes remained open after process exit"))?;
-    let stderr = err_rx
-        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-        .map_err(|_| format!("{label} error pipes remained open after process exit"))?;
+    let stdout = match out_rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+        Ok(stdout) => stdout,
+        Err(_) => {
+            // The direct process exited, but a descendant may still own the
+            // pipe. Kill the *original* Unix group before returning rather
+            // than leaving background subprocesses behind.
+            terminate_child(&mut child);
+            return Err(format!("{label} output pipes remained open after process exit"));
+        }
+    };
+    let stderr = match err_rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+        Ok(stderr) => stderr,
+        Err(_) => {
+            terminate_child(&mut child);
+            return Err(format!("{label} error pipes remained open after process exit"));
+        }
+    };
     Ok(Output { status, stdout, stderr })
 }
 
