@@ -229,7 +229,17 @@ pub(crate) fn wbeam_stream_port() -> u16 {
 // NOSONAR S3776 - Timestamp generation requires nested command fallbacks
 fn session_logs() -> &'static SessionLogs {
     SESSION_LOGS.get_or_init(|| {
-        let dir = repo_root().join("logs");
+        let root = repo_root();
+        // Installed runtime resources are read-only; mutable logs belong in XDG state.
+        let dir = if root.join("VERSION.txt").is_file() {
+            let base = std::env::var_os("XDG_STATE_HOME")
+                .map(PathBuf::from)
+                .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))
+                .unwrap_or_else(std::env::temp_dir);
+            base.join("wbeam/logs")
+        } else {
+            root.join("logs")
+        };
         let _ = fs::create_dir_all(&dir);
 
         let stamp = Command::new("date")

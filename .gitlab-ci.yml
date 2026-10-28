@@ -59,6 +59,9 @@ sonar_scan_push_master:
 
 build_deb:
   stage: build
+  needs:
+    - job: build_apk_release
+      artifacts: true
   image: rust:bookworm
   script:
     - apt-get update
@@ -96,6 +99,9 @@ build_deb:
 
 build_rpm:
   stage: build
+  needs:
+    - job: build_apk_release
+      artifacts: true
   image: fedora:41
   script:
     - dnf -y install ca-certificates curl git jq rust cargo gcc gcc-c++ make pkgconf-pkg-config
