@@ -27,7 +27,7 @@ fn version_base() -> String {
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "0.1.2".to_string())
+        .unwrap_or_else(|| "0.1.3".to_string())
 }
 
 fn git_short_rev() -> Option<String> {
