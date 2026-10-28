@@ -585,8 +585,34 @@ function resolveEncoderMode(
     }
   }
 
+  async function openVirtualSetup(): Promise<void> {
+    setVirtualSetupVisible(true);
+    setVirtualStartupDoctor({
+      ok: false, message: "Checking EVDI prerequisites...", actionable: false,
+      hostBackend: "evdi", resolver: "evdi_kernel", missingDeps: [], installHint: "",
+    });
+    try {
+      const doctor = await api.getEvdiDepsDoctor();
+      if (virtualSetupVisible()) setVirtualStartupDoctor(doctor);
+    } catch (err) {
+      if (!virtualSetupVisible()) return;
+      setVirtualStartupDoctor({
+        ok: false, message: `EVDI diagnostics unavailable: ${String(err)}`, actionable: false,
+        hostBackend: "evdi", resolver: "evdi_kernel", missingDeps: [],
+        installHint: "Check the installed EVDI diagnostic scripts and logs.",
+      });
+    }
+  }
+
   function closeVirtualSetup(): void {
+    if (virtualSetupInstalling()) return;
     setVirtualSetupVisible(false);
+  }
+
+  function hasActiveStreams(): boolean {
+    return session.devices().some((device) =>
+      device.streamState === "STREAMING" || device.streamState === "CONNECTING",
+    );
   }
 
   function stopVirtualInstallPolling(): void {
@@ -633,8 +659,9 @@ function resolveEncoderMode(
           setVirtualInstallStatus(status);
           if (status.done) {
             stopVirtualInstallPolling();
+            setVirtualSetupInstalling(false);
             if (status.success) {
-              const doctor = await api.getVirtualDoctor();
+              const doctor = await api.getEvdiDepsDoctor();
               setVirtualStartupDoctor(doctor);
               if (doctor.ok) {
                 setVirtualSetupVisible(false);
@@ -658,18 +685,20 @@ function resolveEncoderMode(
         } catch (err) {
           if (generation !== installPollingGeneration) return;
           stopVirtualInstallPolling();
+          setVirtualSetupInstalling(false);
           setVirtualInstallStatus({
             running: false,
             done: true,
             success: false,
-            message: `Installer status read failed: ${String(err)}`,
+            message: `Installer status unavailable (installation outcome unknown): ${String(err)}`,
             logs: [...virtualInstallStatus().logs, `[ui][error] ${String(err)}`],
           });
-          session.setError(`Dependency installation failed: ${String(err)}`);
+          session.setError("Unable to read installer progress. Check host state before retrying.");
         }
       };
       await poll();
     } catch (err) {
+      stopVirtualInstallPolling();
       session.setError(`Dependency installation failed: ${String(err)}`);
       setVirtualInstallStatus({
         running: false,
@@ -678,7 +707,6 @@ function resolveEncoderMode(
         message: `Dependency installation failed: ${String(err)}`,
         logs: [...virtualInstallStatus().logs, `[ui][error] ${String(err)}`],
       });
-    } finally {
       setVirtualSetupInstalling(false);
     }
   }
@@ -731,7 +759,7 @@ function resolveEncoderMode(
       await refreshTrainedProfiles();
       if (disposed) return;
       try {
-        const doctor = await api.getVirtualDoctor();
+        const doctor = await api.getEvdiDepsDoctor();
         if (!disposed) setVirtualStartupDoctor(doctor);
       } catch {
         // Non-blocking check; connect performs its own capability guard.
@@ -799,11 +827,11 @@ function resolveEncoderMode(
             </button>
             <button
               class="toolbar-btn"
-              onClick={() => setEvdiWizardVisible(true)}
-              title="Guide to enable EVDI virtual monitors (multiple devices)"
+              onClick={() => void openVirtualSetup()}
+              title="Diagnose and prepare EVDI on this Linux host"
             >
               <Settings size={14} />
-              <span>EVDI setup</span>
+              <span>Host setup</span>
             </button>
           </div>
           <Show when={!autoConnectBusy() && autoConnectDisabledReason().length > 0}>
@@ -1289,10 +1317,13 @@ function resolveEncoderMode(
           return (
             <dialog open class="modal-backdrop" aria-label="Virtual desktop setup">
               <section class="connect-modal setup-modal">
-                <h3>Virtual desktop setup</h3>
+                <h3>EVDI host setup</h3>
                 <p class="connect-modal-subtitle">Host backend: {safeUiText(doctor.hostBackend, "legacy backend (unsupported)")}</p>
                 <p class="setup-message">{safeUiText(doctor.message)}</p>
                 <p class="setup-hint">{safeUiText(doctor.installHint)}</p>
+                <Show when={hasActiveStreams()}>
+                  <p class="setup-missing" role="alert">Stop active streams before installing or reloading EVDI.</p>
+                </Show>
                 <Show when={doctor.missingDeps.length > 0}>
                   <p class="setup-missing">Missing: {safeUiText(doctor.missingDeps.join(", "))}</p>
                 </Show>
@@ -1300,7 +1331,7 @@ function resolveEncoderMode(
                   <button class="device-btn" onClick={closeVirtualSetup} disabled={virtualSetupInstalling()}>
                     Cancel
                   </button>
-                  <button class="device-btn" onClick={() => void installVirtualDeps()} disabled={virtualSetupInstalling()}>
+                  <button class="device-btn" onClick={() => void installVirtualDeps()} disabled={virtualSetupInstalling() || !doctor.actionable || doctor.ok || hasActiveStreams()}>
                     <Show when={virtualSetupInstalling()} fallback={"Install deps"}>
                       <><Loader2 size={13} class="spinning" /> Installing...</>
                     </Show>
