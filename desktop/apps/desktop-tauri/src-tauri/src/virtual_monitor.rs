@@ -248,7 +248,7 @@ pub(crate) fn virtual_doctor_blocking(
     if let Some(s) = serial {
         let trimmed = s.trim();
         if !trimmed.is_empty() {
-            params.push(format!("serial={trimmed}"));
+            params.push(format!("serial={}", crate::encode_query_component(trimmed)));
         }
     }
     if let Some(port) = stream_port {
