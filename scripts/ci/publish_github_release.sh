@@ -178,8 +178,12 @@ publish_release() {
   UPLOAD_URL="$(printf '%s' "${API_BODY}" | jq -r '.upload_url' | sed 's/{?name,label}//')"
 
   ALLOW_REPLACE_ASSETS="${allow_replace}"
-  for file in "${DIST_DIR}"/*; do
-    [[ -f "${file}" ]] || continue
+  # Publish only the validated Linux/Android artifact set plus provenance.
+  # Never upload stale or unsupported files accidentally left under dist/.
+  shopt -s nullglob
+  for file in "${DIST_DIR}"/*.deb "${DIST_DIR}"/*.rpm "${DIST_DIR}"/*.apk \
+    "${DIST_DIR}/VERSION.txt" "${DIST_DIR}/SHA256SUMS.txt"; do
+    [[ -s "${file}" ]] || continue
     echo "[publish] Uploading $(basename "${file}") to ${tag}"
     upload_asset "${UPLOAD_URL}" "${file}"
   done
