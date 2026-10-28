@@ -4,7 +4,10 @@ set -Eeuo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/runtime-assets.sh"
 
-RPM_VERSION="${WBEAM_VERSION//-/.}"
+# RPM supports ~ for pre-release ordering (0.1.3~rc.1 < 0.1.3).
+RPM_VERSION="${WBEAM_VERSION/-rc./~rc.}"
+RPM_VERSION="${RPM_VERSION/-beta./~beta.}"
+RPM_VERSION="${RPM_VERSION/-alpha./~alpha.}"
 RPM_RELEASE="1"
 TOPDIR="$(mktemp -d)"
 trap 'rm -rf "${TOPDIR}"' EXIT
