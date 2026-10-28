@@ -4,6 +4,7 @@
 set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 main="$ROOT_DIR/host/rust/crates/wbeamd-server/src/main.rs"
+core="$ROOT_DIR/host/rust/crates/wbeamd-core/src/lib.rs"
 template="$ROOT_DIR/host/rust/systemd/wbeamd-rust.service.template"
 package="$ROOT_DIR/scripts/ci/runtime-assets.sh"
 
@@ -16,10 +17,17 @@ grep -Fq 'if let Some(path) = requested {' "$main"
 grep -Fq 'Set XDG_STATE_HOME or HOME to an absolute path, or pass --log-dir' "$main"
 grep -Fq 'fn installed_runtime_uses_xdg_state_not_read_only_package_root()' "$main"
 grep -Fq 'fn installed_runtime_without_writable_state_home_fails_clearly()' "$main"
+# Session-level effective-runtime snapshots must obey the same writable
+# XDG state contract and must not default to root/logs in a package.
+grep -Fq 'fn resolve_core_runtime_log_dir(' "$core"
+grep -Fq 'fn installed_package_uses_xdg_state_home()' "$core"
+grep -Fq 'fn installed_package_never_falls_back_to_read_only_tree()' "$core"
+grep -Fq 'self.root.join("VERSION.txt").is_file()' "$core"
+grep -Fq 'logs.join("effective-runtime")' "$core"
 grep -Fq -- '--root @ROOT@' "$template"
 grep -Fq 'install -m 0644 "${DIST_DIR}/VERSION.txt" "$target/VERSION.txt"' "$package"
 if grep -Fq 'unwrap_or_else(|| root.join("host/rust/logs"))' "$main"; then
   echo "[daemon-log][FAIL] unconditional repo-relative log path returned" >&2
   exit 1
 fi
-echo "[daemon-log][PASS] packaged logs resolve to user XDG state; source checkout remains separate"
+echo "[daemon-log][PASS] server and core runtime logs use writable XDG state; source checkout unchanged"
