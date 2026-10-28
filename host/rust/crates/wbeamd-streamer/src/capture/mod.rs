@@ -102,7 +102,11 @@ pub async fn prepare_capture(cfg: &ResolvedConfig) -> Result<PreparedCapture> {
             let stream = backend::wayland::prepare(cfg).await?;
             Ok(PreparedCapture::Wayland(stream))
         }
-        CaptureBackend::X11 => Ok(PreparedCapture::X11),
+        // Keep the legacy implementation in source, but disable its release
+        // entrypoint. X11 is neither an AUTO fallback nor a supported mode.
+        CaptureBackend::X11 => anyhow::bail!(
+            "legacy X11 capture is disabled; use EVDI or Wayland Portal"
+        ),
         CaptureBackend::Evdi => {
             #[cfg(feature = "evdi")]
             {
@@ -115,9 +119,8 @@ pub async fn prepare_capture(cfg: &ResolvedConfig) -> Result<PreparedCapture> {
                 )
             }
         }
-        CaptureBackend::Auto => {
-            // Resolved config should already map AUTO to concrete mode.
-            Ok(PreparedCapture::X11)
-        }
+        CaptureBackend::Auto => anyhow::bail!(
+            "unresolved AUTO capture backend; select EVDI or Wayland Portal"
+        ),
     }
 }
