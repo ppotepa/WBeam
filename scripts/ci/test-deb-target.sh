@@ -20,4 +20,15 @@ if wbeam_deb_package_version 0.1.3 unknown >/dev/null; then
   echo "[deb] Unsupported artifact target was accepted" >&2
   exit 1
 fi
-echo "[deb][PASS] Bookworm/Noble binary profile and prerelease ordering"
+# Verify publication is blocked until both real distribution variants
+# are present. Dummy data is sufficient because this only checks filenames.
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+touch "$tmp/wbeam_0.1.3+bookworm_amd64.deb"
+if wbeam_deb_has_both_artifacts "$tmp"; then
+  echo "[deb][FAIL] accepted only Bookworm DEB" >&2
+  exit 1
+fi
+touch "$tmp/wbeam_0.1.3+noble_amd64.deb"
+wbeam_deb_has_both_artifacts "$tmp"
+echo "[deb][PASS] Bookworm/Noble ABI profiles, prerelease ordering and artifact completeness"
