@@ -357,7 +357,7 @@ export default function App() {
     if (session.devices().length === 0) return "No connected devices";
     const eligible = session.devices().filter((device) => connectDisabledReason(device).length === 0);
     if (eligible.length === 0) return "No devices eligible for connect";
-    return decideAutoConnectBackend(session.hostProbe(), session.devices().length).reason;
+    return decideAutoConnectBackend(session.hostProbe(), eligible.length).reason;
   }
 
   async function autoConnectAll(): Promise<void> {
@@ -367,7 +367,13 @@ export default function App() {
       session.setError(blocked);
       return;
     }
-    const decision = decideAutoConnectBackend(session.hostProbe(), session.devices().length);
+    // Only sessions eligible to start count towards backend concurrency.
+    // Offline/already streaming devices should not force EVDI for a single
+    // eligible Portal connection.
+    const eligibleCount = session.devices().filter((d) =>
+      connectDisabledReason(d).length === 0,
+    ).length;
+    const decision = decideAutoConnectBackend(session.hostProbe(), eligibleCount);
     if (!decision.backend) {
       session.setError(decision.reason);
       return;
@@ -1059,11 +1065,11 @@ function resolveEncoderMode(
 
         <Show when={mode() === "advanced"}>
           <section class="wayland-experimental-control">
-          <label class={`checkbox-option ${isWaylandPortalHost() ? "" : "disabled"}`}>
+          <label class={`checkbox-option ${session.hostProbe().availableBackends.includes("wayland_portal") ? "" : "disabled"}`}>
             <input
               type="checkbox"
               checked={waylandExperimentalDuplication()}
-              disabled={!isWaylandPortalHost()}
+              disabled={!session.hostProbe().availableBackends.includes("wayland_portal")}
               onChange={(event) => toggleWaylandExperimentalDuplication(event.currentTarget.checked)}
             />
             <span>
