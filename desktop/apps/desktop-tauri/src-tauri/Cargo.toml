@@ -1,6 +1,6 @@
 [package]
 name = "wbeam-desktop-tauri"
-version = "0.1.0"
+version = "0.1.3"
 edition = "2021"
 description = "WBeam desktop app (Tauri + Solid + TypeScript baseline)"
 
