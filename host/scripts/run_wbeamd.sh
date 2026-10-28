@@ -214,6 +214,15 @@ run_rust() {
     args+=(--log-dir "$WBEAM_RUST_LOG_DIR")
   fi
 
+  # Never open the unauthenticated HTTP control plane to a LAN by accident.
+  # With no overrides, the daemon listens on 127.0.0.1 for USB/ADB reverse.
+  if [[ -n "${WBEAM_CONTROL_BIND_ADDR:-}" ]]; then
+    args+=(--control-bind-address "$WBEAM_CONTROL_BIND_ADDR")
+  fi
+  if [[ "${WBEAM_ALLOW_UNAUTHENTICATED_LAN_CONTROL:-0}" == "1" ]]; then
+    args+=(--allow-unauthenticated-lan-control)
+  fi
+
   if [[ -n "${WBEAM_DAEMON_BIN:-}" && -x "${WBEAM_DAEMON_BIN}" ]]; then
     daemon_bin="${WBEAM_DAEMON_BIN}"
   elif [[ -x "$ROOT_DIR/host/rust/target/release/wbeamd-server" ]]; then

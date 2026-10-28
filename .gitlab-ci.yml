@@ -38,6 +38,7 @@ quality_gates:
     - bash scripts/ci/test-virtual-deps-runtime.sh
     - bash scripts/ci/test-virtual-deps-install-dry-run.sh
     - bash scripts/ci/test-local-verification-runner.sh
+    - bash scripts/ci/test-control-bind-policy.sh
     - bash scripts/ci/test-release-version.sh
     - bash scripts/ci/test-deb-target.sh
     - bash scripts/ci/check-version-consistency.sh
@@ -68,7 +69,7 @@ quality_rust_host:
   script:
     - apt-get update
     - DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends pkg-config libssl-dev libdbus-1-dev libx11-dev libxrandr-dev libxfixes-dev libxext-dev libxrender-dev
-    - cargo test --manifest-path host/rust/Cargo.toml -p wbeamd-api -p wbeamd-core
+    - cargo test --locked --manifest-path host/rust/Cargo.toml -p wbeamd-api -p wbeamd-core -p wbeamd-server
   rules:
     - if: $CI_COMMIT_TAG
     - if: $CI_COMMIT_BRANCH

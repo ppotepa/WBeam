@@ -90,14 +90,14 @@ run_step() {
 run_step shell_syntax bash "$ROOT_DIR" bash -c \
   'bash -n wbeam scripts/virtual-deps-check.sh scripts/virtual-deps-install.sh scripts/evdi-compat.sh scripts/ci/*.sh'
 run_step release_shell bash "$ROOT_DIR" bash -c \
-  'set -Eeuo pipefail; bash scripts/ci/test-release-version.sh; bash scripts/ci/check-version-consistency.sh; bash scripts/ci/test-evdi-diagnostics.sh; bash scripts/ci/test-virtual-deps-runtime.sh; bash scripts/ci/test-virtual-deps-install-dry-run.sh; bash scripts/ci/test-deb-target.sh; bash scripts/ci/test-publication-contract.sh'
+  'set -Eeuo pipefail; bash scripts/ci/test-release-version.sh; bash scripts/ci/check-version-consistency.sh; bash scripts/ci/test-evdi-diagnostics.sh; bash scripts/ci/test-virtual-deps-runtime.sh; bash scripts/ci/test-virtual-deps-install-dry-run.sh; bash scripts/ci/test-deb-target.sh; bash scripts/ci/test-publication-contract.sh; bash scripts/ci/test-control-bind-policy.sh'
 run_step python_e2e python3 "$ROOT_DIR" python3 -m unittest discover -s e2e/tests -v
 run_step desktop_install npm "$ROOT_DIR/desktop/apps/desktop-tauri" npm ci
 run_step desktop_test npm "$ROOT_DIR/desktop/apps/desktop-tauri" npm test
 run_step desktop_build npm "$ROOT_DIR/desktop/apps/desktop-tauri" npm run build
 
 if [[ "$MODE" == full ]]; then
-  run_step host_rust cargo "$ROOT_DIR" cargo test --locked --manifest-path host/rust/Cargo.toml -p wbeamd-api -p wbeamd-core
+  run_step host_rust cargo "$ROOT_DIR" cargo test --locked --manifest-path host/rust/Cargo.toml -p wbeamd-api -p wbeamd-core -p wbeamd-server
   run_step host_streamer cargo "$ROOT_DIR" bash -c 'set -Eeuo pipefail; cargo check --locked --manifest-path host/rust/Cargo.toml -p wbeamd-streamer --no-default-features --features evdi; cargo test --locked --manifest-path host/rust/Cargo.toml -p wbeamd-streamer --no-default-features --features evdi'
   run_step tauri_rust cargo "$ROOT_DIR" cargo test --locked --manifest-path desktop/apps/desktop-tauri/src-tauri/Cargo.toml
   run_step tauri_check cargo "$ROOT_DIR" cargo check --locked --manifest-path desktop/apps/desktop-tauri/src-tauri/Cargo.toml
