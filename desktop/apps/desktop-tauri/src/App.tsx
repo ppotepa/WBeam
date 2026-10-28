@@ -34,6 +34,7 @@ import { BatteryIcon, DeviceTypeIcon } from "./components/DeviceIndicators";
 import { ServiceControls } from "./components/ServiceControls";
 import { AccessibleDialog } from "./components/AccessibleDialog";
 import { decideAutoConnectBackend } from "./managers/autoconnectPolicy";
+import { buildDefaultConnectConfig } from "./managers/connectDefaults";
 import connectResolutionPresets from "./config/connect-resolution-presets.json";
 import connectEncoderOptions from "./config/connect-encoder-options.json";
 
@@ -376,9 +377,8 @@ export default function App() {
       session.setError(blocked);
       return;
     }
-    // Only sessions eligible to start count towards backend concurrency.
-    // Offline/already streaming devices should not force EVDI for a single
-    // eligible Portal connection.
+    // The set of eligible devices determines whether concurrent Portal is
+    // permitted. Never silently fall back to the legacy X11 capture backend.
     const eligibleCount = session.devices().filter((d) =>
       connectDisabledReason(d).length === 0,
     ).length;
@@ -393,45 +393,82 @@ export default function App() {
     let skipped = 0;
     let failed = 0;
     const errors: string[] = [];
+    const outcomes: string[] = [];
     setAutoConnectBusy(true);
     setAutoConnectSummary("");
     session.setError("");
     try {
+      if (backend === "evdi") {
+        // A DRM card alone cannot guarantee a usable libevdi/streamer runtime.
+        // Match the readiness guard used by manual EVDI Connect.
+        let doctor: VirtualDoctor;
+        try {
+          doctor = await api.getEvdiDepsDoctor();
+        } catch (err) {
+          const message = `EVDI diagnostics unavailable: ${String(err)}`;
+          session.setError(message);
+          setAutoConnectSummary(`Autoconnect blocked: ${message}`);
+          return;
+        }
+        if (!doctor.ok) {
+          const message = `EVDI setup required: ${doctor.message}`;
+          session.setError(message);
+          setAutoConnectSummary(`Autoconnect blocked: ${message}`);
+          return;
+        }
+      }
+
       for (const snapshot of devices) {
+        // Re-read after the preceding USB/start operation. Using a stale
+        // snapshot can start a stream for an unplugged or outdated device.
+        await session.refreshSnapshot({ silent: true, forceDevices: true });
+        if (session.deviceSnapshotStale()) {
+          skipped++;
+          outcomes.push(`${snapshot.serial}: skipped (ADB device status unavailable)`);
+          continue;
+        }
+        if (resolveSupportedBackend(backend, session.hostProbe()) !== backend) {
+          skipped++;
+          outcomes.push(`${snapshot.serial}: skipped (${backend} no longer available)`);
+          continue;
+        }
         const device = session.devices().find((d) => d.serial === snapshot.serial);
         if (!device) {
-          skipped += 1;
-          errors.push(`${snapshot.serial}: disconnected during setup`);
+          skipped++;
+          outcomes.push(`${snapshot.serial}: skipped (disconnected during setup)`);
           continue;
         }
         const reason = connectDisabledReason(device, backend);
         if (reason) {
-          skipped += 1;
+          skipped++;
+          outcomes.push(`${device.serial}: skipped (${reason})`);
           continue;
         }
-        const size = resolveSessionSizeForPreset(device, "device_max");
-        const connectConfig: ConnectSessionConfig = {
-          captureBackend: backend,
-          encoder: "h264",
-          manualFps: 60,
-          manualBitrateKbps: 20000,
-          size,
-        };
+
+        // Share the same adaptive defaults as the Basic Connect action.
+        const connectConfig = buildDefaultConnectConfig(backend);
         try {
           const result = await session.connectDevice(device, "virtual_monitor", connectConfig);
-          if (result.ok) accepted += 1;
-          else {
+          if (result.ok) {
+            accepted += 1;
+            outcomes.push(`${device.serial}: accepted`);
+          } else {
             failed += 1;
             errors.push(`${device.serial}: ${result.error}`);
+            outcomes.push(`${device.serial}: failed (${result.error})`);
           }
         } catch (err) {
           failed += 1;
           errors.push(`${device.serial}: ${String(err)}`);
+          outcomes.push(`${device.serial}: failed (${String(err)})`);
         }
       }
-      setAutoConnectSummary(`Connection requests: ${accepted} accepted, ${skipped} skipped, ${failed} failed (${backend}). Streaming state is checked separately.`);
+      setAutoConnectSummary(`Connection requests: ${accepted} accepted, ${skipped} skipped, ${failed} failed (${backend}). ${outcomes.join("; ")}. Streaming state is checked separately.`);
       if (errors.length > 0) session.setError(`Auto-connect issues: ${errors.join("; ")}`);
       await session.refreshSnapshot({ silent: true, forceDevices: true });
+    } catch (err) {
+      session.setError(`Auto-connect interrupted: ${String(err)}`);
+      setAutoConnectSummary(`Connection requests: ${accepted} accepted, ${skipped} skipped, ${failed} failed. Auto-connect interrupted; review device status.`);
     } finally {
       setAutoConnectBusy(false);
     }
@@ -452,11 +489,7 @@ export default function App() {
       session.setError("No supported backend available. Configure EVDI or Wayland Portal.");
       return;
     }
-    await session.connectDevice(device, "virtual_monitor", {
-      captureBackend: backend,
-      encoder: "h264",
-      runtimeProfile: "adaptive",
-    });
+    await session.connectDevice(device, "virtual_monitor", buildDefaultConnectConfig(backend));
     await session.refreshSnapshot({ silent: true, forceDevices: true });
   }
 
@@ -1502,7 +1535,7 @@ ls /dev/dri/card*</pre>
               </li>
             </ol>
             <p class="setup-message">
-              After reloading EVDI, use “Autoconnect all (EVDI 20 Mbps)” to start all devices in virtual monitor mode.
+              After reloading EVDI, use “Autoconnect all” for adaptive-quality sessions on eligible devices.
             </p>
             <div class="connect-modal-actions">
               <button class="device-btn" onClick={() => setEvdiWizardVisible(false)}>Close</button>
