@@ -1402,12 +1402,19 @@ impl DaemonCore {
         requested_mode: display_backends::DisplayMode,
         launch_size: &mut String,
         benchmark_mode: bool,
+        capture_backend: &str,
     ) -> Result<(), CoreError> {
         if benchmark_mode {
             return Ok(());
         }
-        if !self.host_probe.supports_streaming() {
-            let reason = self.host_probe.unsupported_reason();
+        // Never let a missing/invalid backend silently fall back to legacy
+        // X11. Require the *selected* EVDI or Portal backend to be present.
+        if !matches!(capture_backend, "evdi" | "wayland_portal")
+            || !self.host_probe.supports_capture_backend(capture_backend)
+        {
+            let reason = format!(
+                "capture backend '{capture_backend}' is unsupported or unavailable;                  use an available EVDI or Wayland Portal backend"
+            );
             {
                 let mut inner = self.inner.lock().await;
                 inner.state = STATE_IDLE.to_string();
@@ -1719,16 +1726,23 @@ impl DaemonCore {
     ) -> Result<display_backends::Activation, CoreError> {
         let serial_hint = self.target_serial.as_deref().unwrap_or("default");
         self.stop_virtual_display_if_any().await;
-        let activation = display_backends::activate_start(
-            &self.host_probe,
-            requested_mode,
-            serial_hint,
-            launch_size,
-        )
-        .map_err(|err| match err {
-            display_backends::ActivationError::Unsupported(msg) => CoreError::UnsupportedHost(msg),
-            display_backends::ActivationError::Failed(msg) => CoreError::Spawn(msg),
-        })?;
+        let activation = if benchmark_mode || capture_backend == "evdi" {
+            // EVDI allocates DRM devices directly in the streamer. An X11
+            // session must never enter the legacy XRandR virtual display
+            // activation path merely because EVDI is explicitly selected.
+            display_backends::Activation::default()
+        } else {
+            display_backends::activate_start(
+                &self.host_probe,
+                requested_mode,
+                serial_hint,
+                launch_size,
+            )
+            .map_err(|err| match err {
+                display_backends::ActivationError::Unsupported(msg) => CoreError::UnsupportedHost(msg),
+                display_backends::ActivationError::Failed(msg) => CoreError::Spawn(msg),
+            })?
+        };
 
         info!(
             serial = serial_hint,
@@ -1952,8 +1966,15 @@ impl DaemonCore {
         let (_, capture_backend_override, benchmark_mode, requested_mode) =
             self.requested_start_settings().await;
         let mut launch_size = cfg.size.clone();
-        self.ensure_start_supported(requested_mode, &mut launch_size, benchmark_mode)
-            .await?;
+        let capture_backend =
+            self.resolve_start_capture_backend(capture_backend_override.as_deref());
+        self.ensure_start_supported(
+            requested_mode,
+            &mut launch_size,
+            benchmark_mode,
+            &capture_backend,
+        )
+        .await?;
         self.touch_reverse_refresh().await;
         // Do not block /start HTTP response on adb reverse, because Android API17
         // client timeout is short (~1.5s) and reverse may fail/lag on tethered links.
@@ -1976,8 +1997,6 @@ impl DaemonCore {
                 return Err(err);
             }
         };
-        let capture_backend =
-            self.resolve_start_capture_backend(capture_backend_override.as_deref());
         if let Err(err) = self
             .ensure_streamer_supports_capture_backend(&rust_streamer_bin, &capture_backend)
             .await
