@@ -2,16 +2,12 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+ROOT_DIR="${WBEAM_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
 UNIT_TEMPLATE="$ROOT_DIR/host/rust/systemd/wbeamd-rust.service.template"
 
 CONTROL_PORT="${1:-5001}"
 STREAM_PORT="${2:-5000}"
 
-if ! command -v cargo >/dev/null 2>&1; then
-  echo "cargo is required" >&2
-  exit 1
-fi
 if ! command -v systemctl >/dev/null 2>&1; then
   echo "systemctl is required" >&2
   exit 1
@@ -21,10 +17,19 @@ BIN_DIR="$HOME/.local/bin"
 UNIT_DIR="$HOME/.config/systemd/user"
 mkdir -p "$BIN_DIR" "$UNIT_DIR"
 
-echo "[wbeam] building release binary..."
-cargo build --release --manifest-path "$ROOT_DIR/host/rust/Cargo.toml" -p wbeamd-server
-
-install -m 755 "$ROOT_DIR/host/rust/target/release/wbeamd-server" "$BIN_DIR/wbeamd-rust"
+if [[ -x "$ROOT_DIR/host/rust/target/release/wbeamd-server" ]]; then
+  daemon_bin="$ROOT_DIR/host/rust/target/release/wbeamd-server"
+elif [[ -x /usr/local/bin/wbeamd-server ]]; then
+  daemon_bin=/usr/local/bin/wbeamd-server
+elif command -v cargo >/dev/null 2>&1 && [[ -f "$ROOT_DIR/host/rust/Cargo.toml" ]]; then
+  echo "[wbeam] building release binary..."
+  cargo build --release --manifest-path "$ROOT_DIR/host/rust/Cargo.toml" -p wbeamd-server
+  daemon_bin="$ROOT_DIR/host/rust/target/release/wbeamd-server"
+else
+  echo "[wbeam] no prebuilt daemon or Rust workspace is available" >&2
+  exit 1
+fi
+install -m 755 "$daemon_bin" "$BIN_DIR/wbeamd-rust"
 
 cat > "$BIN_DIR/wbeam-usb-reverse.sh" <<USBREV
 #!/usr/bin/env bash

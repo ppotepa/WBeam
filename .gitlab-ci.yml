@@ -20,7 +20,7 @@ default:
         export WBEAM_VERSION="${CI_COMMIT_TAG#v}"
         export WBEAM_VERSION="${WBEAM_VERSION#V}"
       elif [ "${CI_COMMIT_BRANCH:-}" = "release" ]; then
-        export WBEAM_VERSION="0.1.2.${CI_PIPELINE_IID}.${CI_COMMIT_SHORT_SHA}"
+        export WBEAM_VERSION="0.1.3.${CI_PIPELINE_IID}.${CI_COMMIT_SHORT_SHA}"
       else
         export WBEAM_VERSION="0.0.0.${CI_DEFAULT_BRANCH}.${CI_PIPELINE_IID}.${CI_COMMIT_SHORT_SHA}"
       fi
@@ -34,6 +34,96 @@ quality_gates:
     - ./scripts/ci/check-repo-layout.sh
     - ./scripts/ci/check-boundaries.sh
     - ./scripts/ci/validate-e2e-matrix.sh
+    - bash scripts/ci/test-evdi-diagnostics.sh
+    - bash scripts/ci/test-release-version.sh
+    - bash scripts/ci/check-version-consistency.sh
+    - bash scripts/ci/test-publication-contract.sh
+    - bash -n scripts/ci/*.sh scripts/virtual-deps-check.sh scripts/virtual-deps-install.sh wbeam host/scripts/run_wbeamd.sh
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH
+
+# Unit, build and source-check jobs must run before release artifacts are
+# produced. The hardware-only EVDI and Android acceptance remains a separate
+# recorded RC gate (#117), not a pretend VM smoke.
+quality_frontend:
+  stage: quality
+  image: node:22-bookworm
+  script:
+    - cd desktop/apps/desktop-tauri
+    - npm ci
+    - npm test
+    - npm run build
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH
+
+quality_rust_host:
+  stage: quality
+  image: rust:bookworm
+  script:
+    - apt-get update
+    - DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends pkg-config libssl-dev libdbus-1-dev libx11-dev libxrandr-dev libxfixes-dev libxext-dev libxrender-dev
+    - cargo test --manifest-path host/rust/Cargo.toml -p wbeamd-api -p wbeamd-core
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH
+
+quality_tauri_native:
+  stage: quality
+  image: rust:bookworm
+  script:
+    - apt-get update
+    - >-
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends
+      pkg-config libssl-dev libdbus-1-dev libwebkit2gtk-4.1-dev
+      libgtk-3-dev libsoup-3.0-dev libayatana-appindicator3-dev
+      libx11-dev libxrandr-dev libxfixes-dev libxext-dev libxrender-dev
+      nodejs npm
+    - cd desktop/apps/desktop-tauri && npm ci && npm run build && cd -
+    - cargo test --manifest-path desktop/apps/desktop-tauri/src-tauri/Cargo.toml
+    - cargo check --manifest-path desktop/apps/desktop-tauri/src-tauri/Cargo.toml
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH
+
+quality_android_unit:
+  stage: quality
+  image: eclipse-temurin:17-jdk-jammy
+  variables:
+    ANDROID_SDK_ROOT: "/opt/android-sdk"
+    ANDROID_HOME: "/opt/android-sdk"
+    GRADLE_USER_HOME: "${CI_PROJECT_DIR}/.gradle-user"
+  script:
+    - apt-get update
+    - DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl unzip ca-certificates
+    - mkdir -p "${ANDROID_SDK_ROOT}/cmdline-tools"
+    - curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o /tmp/cmdline-tools.zip
+    - unzip -q /tmp/cmdline-tools.zip -d /tmp
+    - rm -rf "${ANDROID_SDK_ROOT}/cmdline-tools/latest"
+    - mv /tmp/cmdline-tools "${ANDROID_SDK_ROOT}/cmdline-tools/latest"
+    - |
+      set +o pipefail
+      yes | "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" --sdk_root="${ANDROID_SDK_ROOT}" --licenses >/dev/null
+      set -o pipefail
+    - '"${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" --sdk_root="${ANDROID_SDK_ROOT}" "platform-tools" "platforms;android-35" "build-tools;35.0.0"'
+    - cd android
+    - chmod +x ./gradlew
+    - ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug
+  artifacts:
+    when: always
+    paths:
+      - android/app/build/test-results/testDebugUnitTest/
+    expire_in: 14 days
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH
+
+quality_e2e_runner:
+  stage: quality
+  image: python:3.12-bookworm
+  script:
+    - python -m unittest discover -s e2e/tests -v
   rules:
     - if: $CI_COMMIT_TAG
     - if: $CI_COMMIT_BRANCH
@@ -59,6 +149,9 @@ sonar_scan_push_master:
 
 build_deb:
   stage: build
+  needs:
+    - job: build_apk_release
+      artifacts: true
   image: rust:bookworm
   script:
     - apt-get update
@@ -74,6 +167,7 @@ build_deb:
       libdbus-1-dev
       libgstreamer1.0-dev
       libgstreamer-plugins-base1.0-dev
+      libevdi0-dev
       libx11-dev
       libxrandr-dev
       libxfixes-dev
@@ -96,7 +190,12 @@ build_deb:
 
 build_rpm:
   stage: build
-  image: fedora:41
+  needs:
+    - job: build_apk_release
+      artifacts: true
+  # Fedora 43 is the declared RPM release target; cross-building on Fedora 41
+  # cannot establish driver/library compatibility with kernel 6.19.
+  image: fedora:43
   script:
     - dnf -y install ca-certificates curl git jq rust cargo gcc gcc-c++ make pkgconf-pkg-config
     - dnf -y install openssl-devel dbus-devel gstreamer1-devel gstreamer1-plugins-base-devel nodejs webkit2gtk4.1-devel gtk3-devel libsoup3-devel libayatana-appindicator-gtk3-devel
@@ -146,6 +245,22 @@ build_aarch64_tar:
 
 build_apk_release:
   stage: build
+  # Jobs with "needs" can bypass normal stage ordering in GitLab.
+  # The signed artifact must therefore explicitly depend on all required
+  # quality checks before downstream RPM/DEB/publish jobs may start.
+  needs:
+    - job: quality_gates
+      artifacts: false
+    - job: quality_frontend
+      artifacts: false
+    - job: quality_rust_host
+      artifacts: false
+    - job: quality_tauri_native
+      artifacts: false
+    - job: quality_android_unit
+      artifacts: false
+    - job: quality_e2e_runner
+      artifacts: false
   image: eclipse-temurin:17-jdk-jammy
   variables:
     ANDROID_SDK_ROOT: "/opt/android-sdk"
@@ -188,7 +303,7 @@ build_windows_server:
         }
         $env:WBEAM_VERSION = $tag
       } elseif ($env:CI_COMMIT_BRANCH -eq "release") {
-        $env:WBEAM_VERSION = "0.1.2.$($env:CI_PIPELINE_IID).$($env:CI_COMMIT_SHORT_SHA)"
+        $env:WBEAM_VERSION = "0.1.3.$($env:CI_PIPELINE_IID).$($env:CI_COMMIT_SHORT_SHA)"
       } else {
         $env:WBEAM_VERSION = "0.0.0.$($env:CI_DEFAULT_BRANCH).$($env:CI_PIPELINE_IID).$($env:CI_COMMIT_SHORT_SHA)"
       }
@@ -231,67 +346,8 @@ build_windows_server:
       - dist/*windows*.exe
       - dist/VERSION.txt
     expire_in: 14 days
-  rules: *build_release_rules
-
-build_windows_server:
-  stage: build
-  tags:
-    - windows
-    - zerotier
-    - build
-  before_script:
-    - |
-      $ErrorActionPreference = "Stop"
-      if ($env:CI_COMMIT_TAG) {
-        $tag = $env:CI_COMMIT_TAG
-        if ($tag.StartsWith("v") -or $tag.StartsWith("V")) {
-          $tag = $tag.Substring(1)
-        }
-        $env:WBEAM_VERSION = $tag
-      } elseif ($env:CI_COMMIT_BRANCH -eq "release") {
-        $env:WBEAM_VERSION = "0.1.2.$($env:CI_PIPELINE_IID).$($env:CI_COMMIT_SHORT_SHA)"
-      } else {
-        $env:WBEAM_VERSION = "0.0.0.$($env:CI_DEFAULT_BRANCH).$($env:CI_PIPELINE_IID).$($env:CI_COMMIT_SHORT_SHA)"
-      }
-      cmd /c "C:\BuildTools\Common7\Tools\VsDevCmd.bat -host_arch=x64 -arch=x64 && set" |
-        ForEach-Object {
-          if ($_ -match "^(.*?)=(.*)$") {
-            [System.Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
-          }
-        }
-      $cargoBase = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { "$env:USERPROFILE\.cargo" }
-      $rustupBase = if ($env:RUSTUP_HOME) { $env:RUSTUP_HOME } else { "$env:USERPROFILE\.rustup" }
-      if (Test-Path "$cargoBase\bin\cargo.exe") {
-        $env:Path = "$cargoBase\bin;$env:Path"
-      }
-      if (Test-Path $rustupBase) {
-        $env:RUSTUP_HOME = $rustupBase
-      }
-      if (Test-Path $cargoBase) {
-        $env:CARGO_HOME = $cargoBase
-      }
-      rustup default stable | Out-Null
-      cargo --version
-  script:
-    - |
-      Set-Location "$env:CI_PROJECT_DIR\host\rust"
-      cargo build --release -p wbeamd-server
-      New-Item -ItemType Directory -Path "$env:CI_PROJECT_DIR\dist" -Force | Out-Null
-      Copy-Item `
-        "$env:CI_PROJECT_DIR\host\rust\target\release\wbeamd-server.exe" `
-        "$env:CI_PROJECT_DIR\dist\wbeamd-server-$env:WBEAM_VERSION-windows-x86_64.exe" `
-        -Force
-      @(
-        "WBEAM_VERSION=$env:WBEAM_VERSION"
-        "CI_PIPELINE_ID=$env:CI_PIPELINE_ID"
-        "CI_COMMIT_SHA=$env:CI_COMMIT_SHA"
-        "CI_COMMIT_REF_NAME=$env:CI_COMMIT_REF_NAME"
-      ) | Set-Content -Path "$env:CI_PROJECT_DIR\dist\VERSION.txt" -Encoding ascii
-  artifacts:
-    paths:
-      - dist/*windows*.exe
-      - dist/VERSION.txt
-    expire_in: 14 days
+  allow_failure: true
+  when: manual
   rules: *build_release_rules
 
 publish_github_release:
@@ -299,9 +355,17 @@ publish_github_release:
   image: alpine:3.21
   variables:
     GIT_STRATEGY: fetch
+  needs:
+    - job: build_deb
+      artifacts: true
+    - job: build_rpm
+      artifacts: true
+    - job: build_apk_release
+      artifacts: true
   script:
-    - apk add --no-cache bash curl jq
+    - apk add --no-cache bash curl jq coreutils python3
     - ./scripts/ci/publish_github_release.sh
+  when: manual
   rules: *build_release_rules
 
 ff_release_to_master:
@@ -325,13 +389,22 @@ ff_release_to_master:
         git remote set-url origin "https://oauth2:${PUSH_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
       fi
     - git fetch origin master release
-    - git checkout -B master origin/master
-    - git merge --ff-only origin/release
     - |
-      if ! git push origin master; then
-        echo "[ff_release_to_master] Push rejected (likely protected branch / missing rights)."
-        echo "[ff_release_to_master] Set CI variable GITLAB_PUSH_TOKEN (or GITLAB_TOKEN) with push rights to enable auto-ff."
+      if [ "${WBEAM_MASTER_FF_APPROVED:-0}" != "1" ]; then
+        echo "[ff_release_to_master] WBEAM_MASTER_FF_APPROVED=1 required for exact tested-commit integration." >&2
+        exit 1
       fi
+      # The release branch may have advanced after the stable tag was tested.
+      # Never fast-forward master to a newer, untested branch tip.
+      RELEASE_SHA="$(git rev-parse origin/release)"
+      if [ "$RELEASE_SHA" != "$CI_COMMIT_SHA" ]; then
+        echo "[ff_release_to_master] Release branch moved after tag; refusing to merge untested revision." >&2
+        exit 1
+      fi
+      git checkout -B master origin/master
+      git merge --ff-only "$CI_COMMIT_SHA"
+      git push origin master
   allow_failure: true
+  when: manual
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "release"'
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\\.[0-9]+\\.[0-9]+$/'

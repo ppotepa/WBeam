@@ -71,6 +71,8 @@ import com.wbeam.ui.MainUiControlsCoordinator;
 import com.wbeam.ui.MainViewBehaviorCoordinator;
 import com.wbeam.ui.MainViewBindingCoordinator;
 import com.wbeam.ui.SettingsSelectionReader;
+import com.wbeam.ui.SettingsUiSupport;
+import com.wbeam.ui.SettingsPresets;
 import com.wbeam.ui.SettingsPayloadBuilder;
 import com.wbeam.ui.SettingsPanelController;
 import com.wbeam.ui.StreamConfigResolver;
@@ -205,6 +207,7 @@ public class MainActivity extends AppCompatActivity {
     private final MetricSeriesBuffer runtimeLatencySeries = new MetricSeriesBuffer(HUD_RESOURCE_SERIES_MAX);
     private final MetricSeriesBuffer runtimeQueueSeries = new MetricSeriesBuffer(HUD_RESOURCE_SERIES_MAX);
     // ── Infrastructure ─────────────────────────────────────────────────────────
+    private volatile boolean activityTornDown = false;
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService controlExecutor  = Executors.newSingleThreadExecutor();
     private final ExecutorService telemetryExecutor = Executors.newSingleThreadExecutor();
@@ -449,6 +452,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void handleDaemonStatusUpdate(MainDaemonRuntimeCoordinator.StatusInput input) {
+        if (activityTornDown) return;
         if (daemonStatusContext == null) {
             daemonStatusContext = MainDaemonRuntimeInputFactory.createStatusContext(
                     daemon,
@@ -467,6 +471,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void handleDaemonOffline(boolean wasReachable, Exception e) {
+        if (activityTornDown) return;
         MainDaemonRuntimeCoordinator.OfflineContext context =
                 MainDaemonRuntimeInputFactory.createOfflineContext(
                         daemon,
@@ -532,6 +537,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void performLifecycleCleanup() {
+        activityTornDown = true;
         MainActivityLifecycleCleaner.cleanup(
                 statusPoller,
                 () -> StartupOverlayControllerGuard.stopPulse(startupOverlayController),
@@ -549,6 +555,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void refreshUiAfterDaemonStateChange() {
+        if (activityTornDown) return;
         updateActionButtonsEnabled();
         updateHostHint();
         refreshStatusText();
@@ -782,7 +789,101 @@ public class MainActivity extends AppCompatActivity {
                             hideSimpleMenu();
                         })
         );
+        bindPrimaryActions();
         updateActionButtonsEnabled();
+    }
+
+    // Bind primary controls by their current view IDs. The simple menu bindings
+    // above remain owned by MainViewBehaviorCoordinator.
+    private void bindPrimaryActions() {
+        bindButton(R.id.settingsButton,
+                () -> MainUiControlsCoordinator.toggleSettingsPanel(settingsPanelController));
+        bindButton(R.id.logButton,
+                () -> uiState.liveLogVisible = MainActivityUiBinder.applyLiveLogPanelState(
+                        uiState.liveLogVisible, liveLogText, logButton));
+        bindButton(R.id.quickStartButton, () -> requestStartGuarded(true, true));
+        bindButton(R.id.startButton, () -> requestStartGuarded(true, true));
+        bindButton(R.id.quickStopButton, () -> {
+            if (sessionController != null) sessionController.requestStop(true);
+        });
+        bindButton(R.id.stopButton, () -> {
+            if (sessionController != null) sessionController.requestStop(true);
+        });
+        bindButton(R.id.quickTestButton, () -> {
+            if (videoTestController != null) videoTestController.startBandwidthTest();
+        });
+        bindButton(R.id.testButton, () -> {
+            if (videoTestController != null) videoTestController.startBandwidthTest();
+        });
+        Button testControl = findViewById(R.id.testButton);
+        if (testControl != null) {
+            testControl.setOnLongClickListener(v -> {
+                if (videoTestController == null) return false;
+                videoTestController.startPublicVideoTest();
+                return true;
+            });
+        }
+        bindButton(R.id.fullscreenButton,
+                () -> MainUiControlsCoordinator.toggleFullscreen(
+                        immersiveModeController, BuildConfig.DEBUG, topBar, statusPanel,
+                        this::hideSettingsPanel));
+        bindButton(R.id.cursorOverlayButton, this::toggleCursorOverlayMode);
+        bindButton(R.id.intraOnlyButton, () -> {
+            intraOnlyEnabled = !intraOnlyEnabled;
+            updateIntraOnlyButton();
+            updateHostHint();
+        });
+        bindButton(R.id.applySettingsButton, () -> {
+            refreshSettingsUi(true);
+            requestStartGuarded(true, true);
+            hideSettingsPanel();
+        });
+
+        bindButton(R.id.modeLowLatencyButton, () -> applySettingsPreset(SettingsPresets.LOW_LATENCY));
+        bindButton(R.id.modeSmoothButton, () -> applySettingsPreset(SettingsPresets.SMOOTH));
+        bindButton(R.id.qualityLowButton, () -> applySettingsPreset(SettingsPresets.QUALITY_LOW));
+        bindButton(R.id.qualityMedButton, () -> applySettingsPreset(SettingsPresets.QUALITY_MEDIUM));
+        bindButton(R.id.qualityHighButton, () -> applySettingsPreset(SettingsPresets.QUALITY_HIGH));
+        bindButton(R.id.advancedToggleButton, this::toggleAdvancedSettings);
+        // Preflight overlay remains interactive when the host is offline:
+        // Settings stays accessible and Retry triggers a fresh status check.
+        bindButton(R.id.preflightSettingsButton, () ->
+                MainUiControlsCoordinator.showSettingsPanel(settingsPanelController));
+        bindButton(R.id.preflightRetryButton, () -> {
+            if (statusPoller != null) statusPoller.start();
+            uiState.startupDismissed = false;
+            uiState.preflightComplete = false;
+            updatePreflightOverlay();
+            Toast.makeText(this, R.string.preflight_retry_requested, Toast.LENGTH_SHORT).show();
+        });
+    }
+
+    private void bindButton(int id, Runnable action) {
+        Button button = findViewById(id);
+        if (button != null) button.setOnClickListener(v -> action.run());
+    }
+
+    private void applySettingsPreset(SettingsPresets.Preset preset) {
+        if (resolutionSeek != null) resolutionSeek.setProgress(preset.resolutionScalePercent - 50);
+        if (fpsSeek != null && preset.fps > 0) fpsSeek.setProgress(preset.fps - 24);
+        if (bitrateSeek != null) bitrateSeek.setProgress(preset.bitrateMbps - 5);
+        SettingsUiSupport.setSpinnerSelection(profileSpinner, PROFILE_OPTIONS, DEFAULT_PROFILE);
+        if (preset.forceH264) {
+            SettingsUiSupport.setSpinnerSelection(encoderSpinner, ENCODER_OPTIONS, PREFERRED_VIDEO);
+        }
+        simpleMenuState.setMode(getSelectedEncoder());
+        simpleMenuState.setFps(getSelectedFps());
+        refreshSettingsUi(true);
+        Toast.makeText(this, "Preset selected. Tap Apply to restart streaming.", Toast.LENGTH_SHORT).show();
+    }
+
+    private void toggleAdvancedSettings() {
+        View advancedPanel = findViewById(R.id.advancedPanel);
+        Button toggle = findViewById(R.id.advancedToggleButton);
+        if (advancedPanel == null || toggle == null) return;
+        boolean show = advancedPanel.getVisibility() != View.VISIBLE;
+        advancedPanel.setVisibility(show ? View.VISIBLE : View.GONE);
+        toggle.setText(show ? "▼ Advanced" : "▶ Advanced");
     }
 
     private void setDebugOverlayVisible(boolean visible) {

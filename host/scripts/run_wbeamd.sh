@@ -191,7 +191,11 @@ fi
 
 echo "[wbeam] transport summary: serial=${ANDROID_SERIAL:-default} stream_reverse=${stream_reverse_ok} control_reverse=${control_reverse_ok}" >&2
 
-prepare_x11_env
+# Legacy X11 environment probing is unused in the supported EVDI/Portal paths.
+# Keep the legacy helper for backwards-compatible source mode only.
+if [[ "${WBEAM_CAPTURE_BACKEND:-}" == "x11_gst" ]]; then
+  prepare_x11_env
+fi
 
 run_rust() {
   local args=(
@@ -249,10 +253,7 @@ if [[ "$DAEMON_IMPL" == "python" ]]; then
 fi
 
 if [[ "$DAEMON_IMPL" == "rust" ]]; then
-  if ! command -v cargo >/dev/null 2>&1; then
-    echo "[wbeam] rust requested but cargo not found" >&2
-    exit 1
-  fi
+  # run_rust already prefers a packaged binary; Cargo is a source fallback.
   echo "[wbeam] daemon impl=rust"
   run_rust
 fi

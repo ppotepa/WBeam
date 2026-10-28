@@ -3,9 +3,28 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use std::thread;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 pub(crate) const SERVICE_NAME: &str = "wbeam-daemon";
+
+static SERVICE_ACTION_BUSY: AtomicBool = AtomicBool::new(false);
+
+struct ServiceActionGuard;
+
+impl ServiceActionGuard {
+    fn acquire() -> Result<Self, String> {
+        SERVICE_ACTION_BUSY.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| "Another service action is already in progress".to_string())?;
+        Ok(Self)
+    }
+}
+
+impl Drop for ServiceActionGuard {
+    fn drop(&mut self) {
+        SERVICE_ACTION_BUSY.store(false, Ordering::Release);
+    }
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -18,7 +37,7 @@ pub(crate) struct ServiceStatus {
 }
 
 pub(crate) fn service_ready_for_device_actions() -> Result<(), String> {
-    let svc = service_status();
+    let svc = service_status_blocking();
     if !svc.available {
         return Err("Desktop service control is unavailable on this host.".to_string());
     }
@@ -32,7 +51,19 @@ pub(crate) fn service_ready_for_device_actions() -> Result<(), String> {
 }
 
 #[tauri::command]
-pub(crate) fn service_status() -> ServiceStatus {
+pub(crate) async fn service_status() -> ServiceStatus {
+    tauri::async_runtime::spawn_blocking(service_status_blocking)
+        .await
+        .unwrap_or_else(|err| ServiceStatus {
+            available: false,
+            installed: false,
+            active: false,
+            enabled: false,
+            summary: format!("service status worker failed: {err}"),
+        })
+}
+
+pub(crate) fn service_status_blocking() -> ServiceStatus {
     crate::ui_service_log("service_status", "begin", "");
     if !command_exists("systemctl") {
         let status = ServiceStatus {
@@ -90,7 +121,7 @@ pub(crate) fn systemctl_show_prop(prop: &str) -> Option<String> {
     let mut cmd = Command::new("systemctl");
     cmd.args(["--user", "show", "-p", prop, "--value", SERVICE_NAME]);
     apply_systemctl_user_env(&mut cmd);
-    cmd.output()
+    crate::process_timeout::command_output_timeout(&mut cmd, Duration::from_secs(6), "systemctl show")
         .ok()
         .and_then(|out| {
             if !out.status.success() {
@@ -262,8 +293,9 @@ pub(crate) fn apply_systemctl_user_env(cmd: &mut Command) {
 }
 
 pub(crate) fn command_exists(name: &str) -> bool {
+    // Positional parameter is data, never interpolated into shell source.
     Command::new("sh")
-        .args(["-c", &format!("command -v {name} >/dev/null 2>&1")])
+        .args(["-c", "command -v \"$1\" >/dev/null 2>&1", "sh", name])
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
@@ -273,7 +305,7 @@ pub(crate) fn systemctl_state(action: &str) -> Option<String> {
     let mut cmd = Command::new("systemctl");
     cmd.args(["--user", action, SERVICE_NAME]);
     apply_systemctl_user_env(&mut cmd);
-    cmd.output()
+    crate::process_timeout::command_output_timeout(&mut cmd, Duration::from_secs(6), "systemctl state")
         .ok()
         .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
         .filter(|v| !v.is_empty())
@@ -283,7 +315,7 @@ pub(crate) fn systemctl_user(args: &[&str]) -> Result<(), String> {
     let mut cmd = Command::new("systemctl");
     cmd.arg("--user").args(args);
     apply_systemctl_user_env(&mut cmd);
-    let output = cmd.output().map_err(|e| format!("systemctl failed: {e}"))?;
+    let output = crate::process_timeout::command_output_timeout(&mut cmd, Duration::from_secs(8), "systemctl")?;
 
     if output.status.success() {
         return Ok(());
@@ -331,7 +363,17 @@ pub(crate) fn service_unit_content() -> String {
 }
 
 #[tauri::command]
-pub(crate) fn service_install() -> Result<ServiceStatus, String> {
+pub(crate) async fn service_install() -> Result<ServiceStatus, String> {
+    let guard = ServiceActionGuard::acquire()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        service_install_blocking()
+    })
+    .await
+    .map_err(|e| format!("service_install worker failed: {e}"))?
+}
+
+fn service_install_blocking() -> Result<ServiceStatus, String> {
     ensure_systemctl()?;
     let unit_path = unit_file_path();
     if let Some(parent) = unit_path.parent() {
@@ -343,11 +385,21 @@ pub(crate) fn service_install() -> Result<ServiceStatus, String> {
 
     systemctl_user(&["daemon-reload"])?;
     systemctl_user(&["enable", SERVICE_NAME])?;
-    Ok(service_status())
+    Ok(service_status_blocking())
 }
 
 #[tauri::command]
-pub(crate) fn service_uninstall() -> Result<ServiceStatus, String> {
+pub(crate) async fn service_uninstall() -> Result<ServiceStatus, String> {
+    let guard = ServiceActionGuard::acquire()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        service_uninstall_blocking()
+    })
+    .await
+    .map_err(|e| format!("service_uninstall worker failed: {e}"))?
+}
+
+fn service_uninstall_blocking() -> Result<ServiceStatus, String> {
     ensure_systemctl()?;
     let _ = systemctl_user(&["stop", SERVICE_NAME]);
     let _ = systemctl_user(&["disable", SERVICE_NAME]);
@@ -356,11 +408,21 @@ pub(crate) fn service_uninstall() -> Result<ServiceStatus, String> {
         fs::remove_file(&unit_path).map_err(|e| format!("cannot remove unit file: {e}"))?;
     }
     systemctl_user(&["daemon-reload"])?;
-    Ok(service_status())
+    Ok(service_status_blocking())
 }
 
 #[tauri::command]
-pub(crate) fn service_start() -> Result<ServiceStatus, String> {
+pub(crate) async fn service_start() -> Result<ServiceStatus, String> {
+    let guard = ServiceActionGuard::acquire()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        service_start_blocking()
+    })
+    .await
+    .map_err(|e| format!("service_start worker failed: {e}"))?
+}
+
+fn service_start_blocking() -> Result<ServiceStatus, String> {
     crate::ui_service_log("service_start", "begin", "");
     ensure_systemctl()?;
     let unit_path = unit_file_path();
@@ -394,7 +456,7 @@ pub(crate) fn service_start() -> Result<ServiceStatus, String> {
         }
         thread::sleep(Duration::from_millis(250));
     }
-    let status = service_status();
+    let status = service_status_blocking();
     crate::ui_service_log(
         "service_start",
         "ok",
@@ -407,10 +469,20 @@ pub(crate) fn service_start() -> Result<ServiceStatus, String> {
 }
 
 #[tauri::command]
-pub(crate) fn service_stop() -> Result<ServiceStatus, String> {
+pub(crate) async fn service_stop() -> Result<ServiceStatus, String> {
+    let guard = ServiceActionGuard::acquire()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        service_stop_blocking()
+    })
+    .await
+    .map_err(|e| format!("service_stop worker failed: {e}"))?
+}
+
+fn service_stop_blocking() -> Result<ServiceStatus, String> {
     ensure_systemctl()?;
     if unit_file_path().exists() {
         systemctl_user(&["stop", SERVICE_NAME])?;
     }
-    Ok(service_status())
+    Ok(service_status_blocking())
 }

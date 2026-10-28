@@ -114,33 +114,36 @@ fi
 case "$manager" in
   deb)
     with_sudo apt-get update
-    with_sudo apt-get install -y dkms linux-headers-generic evdi-dkms xvfb x11-xserver-utils
+    with_sudo apt-get install -y dkms "linux-headers-$(uname -r)" evdi-dkms
     ;;
   rpm-dnf)
-    with_sudo dnf install -y xorg-x11-server-Xvfb xrandr dkms kernel-devel akmod-evdi \
-      || with_sudo dnf install -y xorg-x11-server-Xvfb xrandr dkms kernel-devel evdi-dkms
+    with_sudo dnf install -y dkms "kernel-devel-$(uname -r)" akmod-evdi \
+      || with_sudo dnf install -y dkms "kernel-devel-$(uname -r)" evdi-dkms
     ;;
   rpm-yum)
-    with_sudo yum install -y xorg-x11-server-Xvfb xrandr dkms kernel-devel evdi-dkms
+    with_sudo yum install -y dkms kernel-devel evdi-dkms
     ;;
   rpm-zypper)
-    with_sudo zypper install -y xorg-x11-server-Xvfb xrandr dkms kernel-default-devel evdi-dkms
+    with_sudo zypper install -y dkms kernel-default-devel evdi-dkms
     ;;
   arch)
-    with_sudo pacman -S --noconfirm xorg-server-xvfb xorg-xrandr dkms linux-headers
+    with_sudo pacman -S --noconfirm dkms
+    echo "[virtual-deps] Install headers matching $(uname -r) before building the EVDI DKMS module."
     install_evdi_arch
     ;;
 esac
 
-if command_exists modprobe; then
-  with_sudo modprobe evdi initial_device_count=4 \
-    || with_sudo modprobe evdi \
-    || true
+if ! command_exists modprobe; then
+  echo "[virtual-deps] ERROR: modprobe not found; EVDI is not ready." >&2
+  exit 1
 fi
-
+if ! with_sudo modprobe evdi initial_device_count=4 && ! with_sudo modprobe evdi; then
+  echo "[virtual-deps] ERROR: EVDI module failed to load. Check Secure Boot, DKMS and kernel headers." >&2
+  exit 1
+fi
 if command_exists lsmod && ! lsmod | grep -q '^evdi '; then
-  echo "[virtual-deps] WARN: evdi module is still not loaded." >&2
-  echo "[virtual-deps] Try: sudo modprobe evdi initial_device_count=4" >&2
+  echo "[virtual-deps] ERROR: EVDI is not loaded. A reboot or MOK enrollment may be required." >&2
+  exit 1
 fi
 
-echo "[virtual-deps] install done"
+echo "[virtual-deps] EVDI installation and module load completed"

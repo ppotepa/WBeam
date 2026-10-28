@@ -51,7 +51,7 @@ Fresh machine wizard:
 ```bash
 git clone <repo> && cd WBeam
 
-# Probe the machine, choose Wayland/X11 or EVDI, install deps, build host,
+# Probe the machine, choose Wayland Portal or EVDI, install deps, build host,
 # install the user service, then onboard the Android phone.
 ./install-wbeam
 
@@ -83,7 +83,7 @@ confirmation outside the repo:
 - Android install may require accepting USB debugging and allowing APK installs
   on the device.
 - If EVDI is intentionally skipped, run with
-  `WBEAM_REDEPLOY_WITH_EVDI=0 ./redeploy-local` to use Wayland/X11 fallback.
+  `WBEAM_REDEPLOY_WITH_EVDI=0 ./redeploy-local` to use Wayland Portal.
 
 Fedora details are in `docs/FEDORA_43_SETUP.md`. General EVDI diagnostics are
 in `EVDI_SETUP_INDEX.md` and `docs/EVDI_SETUP_GUIDE.md`. The installer wizard
@@ -97,10 +97,12 @@ design is tracked in `docs/INSTALLER_WIZARD.md`.
 low latency, bypasses compositor. On Fedora, `./redeploy-local` attempts this
 automatically through `scripts/fedora-setup.sh --yes --with-evdi`.
 
-**Wayland portal** -- Fallback for Wayland sessions. Compositor-dependent
-performance (~30-60 FPS). Automatic if EVDI is unavailable.
+**Wayland Portal** -- ScreenCast/PipeWire capture for supported Wayland
+sessions. Consent and source types depend on the compositor. Automatic backend
+selection uses only available EVDI and Wayland Portal.
 
-**X11** -- Fallback for X11 sessions. Variable performance.
+Legacy X11 modules remain in the source tree but are not supported capture paths
+and are not available in the release UI.
 
 ---
 
@@ -181,15 +183,18 @@ H.264 when `openh264enc`, `x264enc`, or `nvh264enc` is available. Run
 **Low FPS** -- Switch to EVDI backend. Run `./wbeam host tuner` to find
 optimal encoding settings for your hardware.
 
-**Desktop UI issues on Wayland** -- Launch via `./desktop.sh`. If that fails,
-try `XDG_SESSION_TYPE=x11 ./desktop.sh`.
+**Desktop UI issues on Wayland** -- Launch via `./desktop.sh`.
+Inspect Tauri/WebKit dependencies and logs; switching to X11 is not supported.
 
 ---
 
 ## Supported Platforms
 
-- **Linux:** Arch, Debian, Ubuntu, Fedora, RHEL (kernel 5.10+ for EVDI)
-- **Android:** API 17+ (Android 4.2+), USB 2.0+
+- **Release acceptance targets:** Fedora 43 and Ubuntu 24.04 with GNOME
+  Wayland, EVDI and Wayland Portal. Hardware QA evidence is required.
+- **Other distributions/kernels:** may work, but not certified by this matrix.
+- **Android:** API 17+ is the configured minimum; verify real device/codec
+  support using `docs/release-checklist.md`.
 
 ---
 
@@ -205,6 +210,20 @@ See `docs/agents.workflow.md` for branch/PR conventions and commit format.
 
 ---
 
+## Releases and prebuilt installation
+
+The candidate tracked in [epic #101](https://github.com/ppotepa/WBeam/issues/101)
+is not a certified stable release until quality and physical acceptance gates pass.
+
+- Source development: `./install-wbeam` and `./redeploy-local`.
+- Prebuilt RPM/DEB (once published): install with your package manager, launch
+  `wbeam-desktop`, and use `wbeam android deploy` to install the bundled
+  signed APK without Android SDK or Gradle.
+- Release signing: `docs/ANDROID_RELEASE_SIGNING.md`.
+- Physical Android acceptance: `docs/release-checklist.md`.
+
 ## License
 
-See LICENSE file in repository root.
+Rust/Cargo and RPM metadata currently declare MIT. Publication remains blocked
+until the repository owner confirms legal terms and adds the root `LICENSE`
+file. Do not infer a license grant solely from packaging metadata.

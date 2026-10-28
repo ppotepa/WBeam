@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "release": "0.1.3-rc.1",
+  "tested_commit": "REPLACE_WITH_FULL_40_CHARACTER_GIT_COMMIT_SHA",
+  "qa_signoff": "PENDING",
+  "runs": [
+    {
+      "backend": "evdi",
+      "distro": "fedora-43",
+      "session": "gnome-wayland",
+      "source": "physical_android",
+      "kernel": "REPLACE_WITH_UNAME_R",
+      "android_api": 35,
+      "device_id_sha256": "REPLACE_WITH_SHA256_OF_ADB_SERIAL",
+      "artifact_sha256": "REPLACE_WITH_SHA256_OF_TESTED_RPM_OR_DEB",
+      "start_stop_cycles": 0,
+      "soak_seconds": 0,
+      "checks": {
+        "clean_package_install": {"status": "pending", "evidence": ""},
+        "signed_apk_install_and_update": {"status": "pending", "evidence": ""},
+        "rendered_frames_60s": {"status": "pending", "evidence": ""},
+        "stream_soak_1800s": {"status": "pending", "evidence": ""},
+        "start_stop_20": {"status": "pending", "evidence": ""},
+        "usb_disconnect_reconnect": {"status": "pending", "evidence": ""},
+        "daemon_restart_recovery": {"status": "pending", "evidence": ""},
+        "missing_evdi_diagnostics": {"status": "pending", "evidence": ""}
+      }
+    }
+  ]
+}

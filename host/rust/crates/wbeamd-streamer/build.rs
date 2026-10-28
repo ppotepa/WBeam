@@ -5,6 +5,8 @@ fn main() {
         if let Some(lib_dir) = evdi_lib_dir() {
             println!("cargo:rustc-link-search=native={}", lib_dir.display());
             println!("cargo:rustc-link-arg=-Wl,-rpath,{}", lib_dir.display());
+        } else {
+            println!("cargo:warning=EVDI feature requires the unversioned linker library libevdi.so. Install an appropriate development/DisplayLink package or set WBEAM_EVDI_LIB_DIR to its directory. A runtime-only libevdi.so.1 cannot satisfy -levdi.");
         }
         println!("cargo:rustc-link-lib=evdi");
     }

@@ -24,6 +24,9 @@ ERRORS=0
 WARNINGS=0
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
+# Reuse the same read-only classification shown by desktop Host setup.
+# shellcheck source=evdi-compat.sh
+source "$ROOT_DIR/scripts/evdi-compat.sh"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -229,6 +232,26 @@ fi
 
 RUNNING_KERNEL=$(uname -r)
 
+if [[ "$OS" == "fedora" ]] && ! modinfo evdi >/dev/null 2>&1; then
+    print_check "Fedora EVDI DKMS compatibility for running kernel $RUNNING_KERNEL"
+    log_path="$(evdi_find_build_log "$RUNNING_KERNEL" || true)"
+    if [[ -n "$log_path" ]]; then
+        reason="$(evdi_build_failure_reason "$log_path")"
+        if [[ "$reason" == "dkms-kernel-api-sign-compare" ]]; then
+            fail "DKMS build rejected kernel API signedness (-Werror=sign-compare). This is an EVDI/kernel compatibility issue, not an ADB or GStreamer failure. Inspect $log_path and test a compatible upstream EVDI release."
+            echo "  Safe alternative while EVDI compatibility is unresolved: Wayland Portal."
+        elif [[ "$reason" == "dkms-kernel-headers-mismatch" ]]; then
+            fail "DKMS build failed due to missing or mismatched running kernel headers. Inspect $log_path."
+        elif [[ "$reason" == "dkms-build-failed-other" ]]; then
+            warn "DKMS build log contains another compiler error: $log_path"
+        else
+            warn "DKMS build log was found; no recognized compatibility error: $log_path"
+        fi
+    else
+        warn "No EVDI DKMS make.log found for kernel $RUNNING_KERNEL; use dkms status and journalctl -k to investigate."
+    fi
+fi
+
 print_check "Linux headers installed (needed for DKMS build)"
 case "$PM" in
     pacman)
@@ -318,6 +341,10 @@ print_header "3. EVDI Library Check"
 
 print_check "libevdi library installed"
 LIBEVDI_PATH=$(find_libevdi || true)
+LINKABLE_LIBEVDI_PATH="$(evdi_find_linkable_library || true)"
+if [[ -z "$LINKABLE_LIBEVDI_PATH" ]]; then
+    fail "Linkable libevdi.so is missing for Rust streamer (-levdi). Runtime libevdi.so.1 alone is insufficient to build. Configure WBEAM_EVDI_LIB_DIR pointing at a directory containing libevdi.so."
+fi
 if [ -n "$LIBEVDI_PATH" ]; then
     LIBEVDI_VERSION=$(strings "$LIBEVDI_PATH" 2>/dev/null | grep "^1\." | head -1 || echo "unknown")
     pass "$LIBEVDI_PATH ($LIBEVDI_VERSION)"

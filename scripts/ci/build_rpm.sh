@@ -2,12 +2,25 @@
 set -Eeuo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/runtime-assets.sh"
+source "${ROOT_DIR}/scripts/evdi-compat.sh"
 
-RPM_VERSION="${WBEAM_VERSION}"
+# RPM supports ~ for pre-release ordering (0.1.3~rc.1 < 0.1.3).
+RPM_VERSION="${WBEAM_VERSION/-rc./~rc.}"
+RPM_VERSION="${RPM_VERSION/-beta./~beta.}"
+RPM_VERSION="${RPM_VERSION/-alpha./~alpha.}"
 RPM_RELEASE="1"
 TOPDIR="$(mktemp -d)"
 trap 'rm -rf "${TOPDIR}"' EXIT
 
+# The release contract requires EVDI; do not silently ship a Portal-only
+# streamer when Fedora's linkable libevdi.so is absent.
+if ! evdi_library="$(evdi_find_linkable_library)"; then
+  echo "[build_rpm] Missing EVDI linker library (libevdi.so). Configure the Fedora build runner to provide a compatible DisplayLink/EVDI development library or WBEAM_EVDI_LIB_DIR." >&2
+  echo "[build_rpm] Do not disable --features evdi to bypass this release gate." >&2
+  exit 1
+fi
+echo "[build_rpm] EVDI linker library: ${evdi_library}"
 echo "[build_rpm] Building Rust binaries..."
 cargo build --release -p wbeamd-server --manifest-path "${RUST_MANIFEST}"
 cargo build --release -p wbeamd-streamer --no-default-features --features evdi --manifest-path "${RUST_MANIFEST}"
@@ -24,12 +37,8 @@ mkdir -p "${TOPDIR}/"{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
 
 SRCROOT="${TOPDIR}/wbeam-${RPM_VERSION}"
 mkdir -p "${SRCROOT}"
-mkdir -p "${SRCROOT}/share/wbeam/host" "${SRCROOT}/share/wbeam/config" "${SRCROOT}/share/wbeam/host/rust/systemd" "${SRCROOT}/share/wbeam/host/rust/scripts"
-install -m 0755 "${ROOT_DIR}/wbeam" "${SRCROOT}/share/wbeam/wbeam"
-cp -a "${ROOT_DIR}/host/scripts" "${SRCROOT}/share/wbeam/host/"
-install -m 0644 "${ROOT_DIR}/host/rust/systemd/wbeamd-rust.service.template" "${SRCROOT}/share/wbeam/host/rust/systemd/wbeamd-rust.service.template"
-install -m 0755 "${ROOT_DIR}/host/rust/scripts/install_systemd_user.sh" "${SRCROOT}/share/wbeam/host/rust/scripts/install_systemd_user.sh"
-install -m 0644 "${ROOT_DIR}/config/wbeam.conf" "${SRCROOT}/share/wbeam/config/wbeam.conf"
+stage_wbeam_runtime_assets "${SRCROOT}/share/wbeam"
+assert_wbeam_runtime_assets "${SRCROOT}/share/wbeam"
 cat > "${SRCROOT}/wbeam" <<'EOF'
 #!/usr/bin/env bash
 export WBEAM_ROOT="${WBEAM_ROOT:-/usr/share/wbeam}"
@@ -76,6 +85,9 @@ Requires:       gtk3
 Requires:       webkit2gtk4.1
 Requires:       libsoup3
 Requires:       libayatana-appindicator-gtk3
+Requires:       android-tools
+Requires:       curl
+Requires:       gstreamer1-plugins-base
 
 %description
 WBeam host runtime package built by GitLab CI.
@@ -112,6 +124,9 @@ install -m 0644 README.md %{buildroot}/usr/share/doc/wbeam/README.md
 /usr/share/wbeam/desktop-icon.png
 /usr/share/wbeam/wbeam.desktop
 /usr/share/wbeam/config/wbeam.conf
+/usr/share/wbeam/scripts
+/usr/share/wbeam/android
+/usr/share/wbeam/VERSION.txt
 /usr/share/wbeam/host/scripts
 /usr/share/wbeam/host/rust/scripts/install_systemd_user.sh
 /usr/share/wbeam/host/rust/systemd/wbeamd-rust.service.template

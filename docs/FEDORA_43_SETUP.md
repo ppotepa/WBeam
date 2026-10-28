@@ -30,7 +30,7 @@ cd WBeam
 Fedora dependencies, builds the host from this checkout, installs the systemd
 user service, then runs Android phone onboarding.
 
-The recommended backend is Wayland/X11 fallback:
+The recommended supported fallback is Wayland Portal:
 
 ```bash
 ./install-wbeam --backend wayland
@@ -316,7 +316,7 @@ To disable auto dependency installation:
 ./redeploy-local --no-auto-deps
 ```
 
-To skip EVDI and force Wayland/X11 fallback only:
+To skip EVDI and use the supported Wayland Portal path only:
 
 ```bash
 WBEAM_REDEPLOY_WITH_EVDI=0 ./redeploy-local
@@ -539,3 +539,24 @@ Expected result:
   back to H.264.
 - `./redeploy-local` reaches Android deploy and desktop launch unless a device
   trust prompt remains.
+
+## Fedora 43 / kernel 6.19: known EVDI compatibility investigation
+
+Issue [#120](https://github.com/ppotepa/WBeam/issues/120) tracks the former
+report #96 on Fedora 43 kernel 6.19.11/GCC 15, including DKMS
+`-Werror=sign-compare` and missing `-levdi`. These are **two separate failure
+classes**. The current source changes improve classification but do not prove
+the kernel itself is supported.
+
+Use `bash scripts/virtual-deps-check.sh --json --backend evdi` and
+`bash scripts/evdi-diagnose.sh --verbose` to identify the issue. Check
+`/lib/modules/$(uname -r)/build/Makefile`, matching DKMS logs, the active
+EVDI module, Secure Boot/MOK, and `libevdi.so` in the linker path.
+`scripts/ci/build_rpm.sh` now fails early if no linkable EVDI library is
+present, rather than shipping a deceptively successful package without EVDI.
+
+If EVDI fails due to kernel API changes, do not disable global `-Werror`.
+Verify a compatible driver/kernel pair or use supported Wayland Portal; X11
+legacy code is retained but not offered to end users.
+
+See `docs/EVDI_COMPATIBILITY_MATRIX.md` for the outstanding hardware evidence.

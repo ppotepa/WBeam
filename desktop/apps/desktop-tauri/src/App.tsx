@@ -1,17 +1,12 @@
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import AlertTriangle from "lucide-solid/icons/alert-triangle";
-import BatteryCharging from "lucide-solid/icons/battery-charging";
-import BatteryFull from "lucide-solid/icons/battery-full";
-import BatteryLow from "lucide-solid/icons/battery-low";
-import BatteryMedium from "lucide-solid/icons/battery-medium";
 import Cpu from "lucide-solid/icons/cpu";
 import MonitorSmartphone from "lucide-solid/icons/monitor-smartphone";
 import Package from "lucide-solid/icons/package";
 import Settings from "lucide-solid/icons/settings";
 import ShieldCheck from "lucide-solid/icons/shield-check";
 import Smartphone from "lucide-solid/icons/smartphone";
-import Tablet from "lucide-solid/icons/tablet";
 import Play from "lucide-solid/icons/play";
 import Square from "lucide-solid/icons/square";
 import Download from "lucide-solid/icons/download";
@@ -32,20 +27,15 @@ import type {
 } from "./types";
 import { HostApiManager } from "./managers/hostApiManager";
 import { createSessionManager } from "./managers/sessionManager";
+import { resolveSupportedBackend, type SupportedCaptureBackend } from "./managers/backendPolicy";
+import { createPollingLoop } from "./managers/pollingLoop";
+import { validateConnectForm } from "./managers/connectValidation";
+import { BatteryIcon, DeviceTypeIcon } from "./components/DeviceIndicators";
+import { ServiceControls } from "./components/ServiceControls";
+import { AccessibleDialog } from "./components/AccessibleDialog";
+import { decideAutoConnectBackend } from "./managers/autoconnectPolicy";
 import connectResolutionPresets from "./config/connect-resolution-presets.json";
 import connectEncoderOptions from "./config/connect-encoder-options.json";
-
-function BatteryIcon(props: { readonly level: number | null; readonly charging: boolean }) {
-  if (props.charging) return <BatteryCharging size={14} />;
-  if (props.level === null) return <BatteryMedium size={14} />;
-  if (props.level >= 80) return <BatteryFull size={14} />;
-  if (props.level >= 30) return <BatteryMedium size={14} />;
-  return <BatteryLow size={14} />;
-}
-
-function DeviceTypeIcon(props: { readonly type: string }) {
-  return props.type === "Tablet" ? <Tablet size={16} /> : <Smartphone size={16} />;
-}
 
 type DisplayMode = "virtual_monitor" | "duplicate";
 const CONNECT_MODE_STORAGE_KEY = "wbeam.connect.mode.by.serial";
@@ -228,6 +218,24 @@ function serviceStatusHint(service: ServiceStatus): string {
   return "Install + Start service to enable probing and streaming.";
 }
 
+// X11/Xorg are legacy implementation details, not supported product modes.
+// Keep technical data intact for diagnostics, but never offer the legacy
+// capture path or surface its backend identifiers in the release UI.
+function safeUiText(value: string, legacyLabel = "Legacy capture is unsupported. Use EVDI or Wayland Portal."): string {
+  return /x11|xorg|xrandr/i.test(value) ? legacyLabel : value;
+}
+
+function supportedCaptureLabel(mode: string): string {
+  if (mode === "evdi") return "EVDI";
+  if (mode === "wayland_portal") return "Wayland Portal";
+  if (mode === "unknown" || !mode) return "unknown";
+  return "unsupported legacy/unknown backend";
+}
+
+function isSupportedCaptureMode(mode: string): boolean {
+  return mode === "evdi" || mode === "wayland_portal";
+}
+
 function connectTitle(connectBusy: boolean, connectDisabled: boolean, reason: string): string {
   if (connectBusy) return "Connecting...";
   if (connectDisabled) return `Connect blocked: ${reason}`;
@@ -273,8 +281,15 @@ export default function App() {
   const [trainedProfiles, setTrainedProfiles] = createSignal<TrainedProfile[]>([]);
   const [connectDialogDoctor, setConnectDialogDoctor] = createSignal<VirtualDoctor | null>(null);
   const [connectDialogDoctorLoading, setConnectDialogDoctorLoading] = createSignal(false);
-  const [connectDialogBlockReason, setConnectDialogBlockReason] = createSignal("");
+  const connectDialogBlockReason = () => {
+    const selected = connectDialogDevice();
+    if (!selected) return "";
+    const current = session.devices().find((device) => device.serial === selected.serial);
+    if (!current) return "The device was disconnected while configuring the session";
+    return connectDisabledReason(current, selectedCaptureBackend());
+  };
   const [autoConnectBusy, setAutoConnectBusy] = createSignal(false);
+  const [autoConnectSummary, setAutoConnectSummary] = createSignal("");
   const [waylandExperimentalDuplication, setWaylandExperimentalDuplication] = createSignal(
     loadWaylandExperimentalDuplication(),
   );
@@ -289,7 +304,23 @@ export default function App() {
     message: "idle",
     logs: [],
   });
+  const selectedCaptureBackend = () => resolveSupportedBackend(
+    connectDialogCaptureBackend(), session.hostProbe(),
+  );
+  const connectFormErrors = () => validateConnectForm({
+    captureBackend: selectedCaptureBackend(),
+    encoder: connectDialogEncoderMode(),
+    qualityMode: connectDialogQualityMode(),
+    profileKey: connectDialogProfileKey(),
+    profiles: trainedProfiles(),
+    manualFps: connectDialogManualFps(),
+    manualMbps: connectDialogManualMbps(),
+  });
+  let profilesRequestId = 0;
+  let connectDialogRequestId = 0;
   let virtualInstallPollTimer: number | null = null;
+  let installPollingGeneration = 0;
+  let installPollingActive = false;
   const [evdiWizardVisible, setEvdiWizardVisible] = createSignal(false);
   const upgradeAvailable = () =>
     session.service().active
@@ -300,11 +331,16 @@ export default function App() {
 
   const daemonVersionKnown = () => session.daemonVersion().length > 0;
 
-  function connectDisabledReason(device: DeviceBasic): string {
+  function connectDisabledReason(
+    device: DeviceBasic,
+    backend: SupportedCaptureBackend | null = resolveSupportedBackend("auto", session.hostProbe()),
+  ): string {
     return resolveConnectDisabledReason({
       device,
       deviceBusy: isDeviceBusy(device),
-      waylandPortalHost: isWaylandPortalHost(),
+      // Portal concurrency rules apply to the selected backend, not the
+      // host's default backend (which may be Portal while EVDI is selected).
+      waylandPortalHost: backend === "wayland_portal",
       deviceActionBusy: session.deviceActionBusy(),
       serviceActive: session.service().active,
       daemonVersionKnown: daemonVersionKnown(),
@@ -317,44 +353,116 @@ export default function App() {
 
   function autoConnectDisabledReason(): string {
     if (!session.service().active) return "Desktop service must be running";
+    if (session.deviceSnapshotStale()) return "Device status is outdated. Refresh before connecting.";
     if (session.devices().length === 0) return "No connected devices";
-    const hasConnectable = session.devices().some((device) => connectDisabledReason(device).length === 0);
-    if (!hasConnectable) return "No devices eligible for connect";
-    return "";
+    const eligible = session.devices().filter((device) => connectDisabledReason(device).length === 0);
+    if (eligible.length === 0) return "No devices eligible for connect";
+    return decideAutoConnectBackend(session.hostProbe(), eligible.length).reason;
   }
 
   async function autoConnectAll(): Promise<void> {
     if (autoConnectBusy()) return;
     const blocked = autoConnectDisabledReason();
-    if (blocked.length > 0) {
+    if (blocked) {
       session.setError(blocked);
       return;
     }
-
-    setAutoConnectBusy(true);
-    session.setError("");
-    const errors: string[] = [];
-    for (const device of session.devices()) {
-      const reason = connectDisabledReason(device);
-      if (reason.length > 0) continue;
-      const size = resolveSessionSizeForPreset(device, "device_max");
-      const connectConfig: ConnectSessionConfig = {
-        captureBackend: "evdi",
-        manualFps: 60,
-        manualBitrateKbps: 20000,
-        size,
-      };
-      try {
-        await session.connectDevice(device, "virtual_monitor", connectConfig);
-      } catch (err) {
-        errors.push(`${device.serial}: ${String(err)}`);
-      }
+    // Only sessions eligible to start count towards backend concurrency.
+    // Offline/already streaming devices should not force EVDI for a single
+    // eligible Portal connection.
+    const eligibleCount = session.devices().filter((d) =>
+      connectDisabledReason(d).length === 0,
+    ).length;
+    const decision = decideAutoConnectBackend(session.hostProbe(), eligibleCount);
+    if (!decision.backend) {
+      session.setError(decision.reason);
+      return;
     }
-    if (errors.length > 0) {
-      session.setError(`Auto-connect issues: ${errors.join("; ")}`);
+    const backend = decision.backend;
+    const devices = [...session.devices()];
+    let accepted = 0;
+    let skipped = 0;
+    let failed = 0;
+    const errors: string[] = [];
+    setAutoConnectBusy(true);
+    setAutoConnectSummary("");
+    session.setError("");
+    try {
+      for (const snapshot of devices) {
+        const device = session.devices().find((d) => d.serial === snapshot.serial);
+        if (!device) {
+          skipped += 1;
+          errors.push(`${snapshot.serial}: disconnected during setup`);
+          continue;
+        }
+        const reason = connectDisabledReason(device, backend);
+        if (reason) {
+          skipped += 1;
+          continue;
+        }
+        const size = resolveSessionSizeForPreset(device, "device_max");
+        const connectConfig: ConnectSessionConfig = {
+          captureBackend: backend,
+          encoder: "h264",
+          manualFps: 60,
+          manualBitrateKbps: 20000,
+          size,
+        };
+        try {
+          const result = await session.connectDevice(device, "virtual_monitor", connectConfig);
+          if (result.ok) accepted += 1;
+          else {
+            failed += 1;
+            errors.push(`${device.serial}: ${result.error}`);
+          }
+        } catch (err) {
+          failed += 1;
+          errors.push(`${device.serial}: ${String(err)}`);
+        }
+      }
+      setAutoConnectSummary(`Connection requests: ${accepted} accepted, ${skipped} skipped, ${failed} failed (${backend}). Streaming state is checked separately.`);
+      if (errors.length > 0) session.setError(`Auto-connect issues: ${errors.join("; ")}`);
+      await session.refreshSnapshot({ silent: true, forceDevices: true });
+    } finally {
+      setAutoConnectBusy(false);
+    }
+  }
+
+  async function basicConnect(device: DeviceBasic): Promise<void> {
+    if (session.deviceSnapshotStale()) {
+      session.setError("Device status is outdated. Refresh before connecting.");
+      return;
+    }
+    const blocked = connectDisabledReason(device);
+    if (blocked) {
+      session.setError(blocked);
+      return;
+    }
+    const backend = resolveSupportedBackend("auto", session.hostProbe());
+    if (!backend) {
+      session.setError("No supported backend available. Configure EVDI or Wayland Portal.");
+      return;
+    }
+    await session.connectDevice(device, "virtual_monitor", {
+      captureBackend: backend,
+      encoder: "h264",
+      runtimeProfile: "adaptive",
+    });
+    await session.refreshSnapshot({ silent: true, forceDevices: true });
+  }
+
+  async function ensureBasicServiceReady(): Promise<void> {
+    if (!session.service().available) {
+      session.setError("Systemd user service is unavailable on this host.");
+      return;
+    }
+    if (!session.service().installed) {
+      await session.callServiceAction("service_install");
+    }
+    if (session.service().installed && !session.service().active) {
+      await session.callServiceAction("service_start");
     }
     await session.refreshSnapshot({ silent: true, forceDevices: true });
-    setAutoConnectBusy(false);
   }
 
   function modeLabel(): "Basic" | "Advanced" {
@@ -389,8 +497,9 @@ export default function App() {
   }
 
   async function refreshTrainedProfiles(): Promise<void> {
+    const requestId = ++profilesRequestId;
     const backend = connectDialogCaptureBackend();
-    // Profiles are backend-scoped; abstract selection cannot determine a namespace.
+    // Profiles are backend-scoped; a concrete backend is required.
     if (!backend || backend === "auto") {
       setTrainedProfiles([]);
       setConnectDialogProfileKey("");
@@ -398,18 +507,23 @@ export default function App() {
     }
     try {
       const profiles = await api.listTrainedProfiles(backend);
+      if (requestId !== profilesRequestId || !connectDialogDevice()) return;
       setTrainedProfiles(profiles);
       const selected = connectDialogProfileKey();
-      const selectedExists = profiles.some((profile) => profile.key === selected);
-      if (selected.length > 0 && !selectedExists) {
+      if (selected.length > 0 && !profiles.some((profile) => profile.key === selected)) {
         setConnectDialogProfileKey("");
       }
-    } catch {
+    } catch (err) {
+      if (requestId !== profilesRequestId || !connectDialogDevice()) return;
       setTrainedProfiles([]);
+      session.setError(`Unable to load profiles for ${backend}: ${String(err)}`);
     }
   }
 
   function openConnectDialog(device: DeviceBasic): void {
+    const requestId = ++connectDialogRequestId;
+    profilesRequestId += 1;
+    setTrainedProfiles([]);
     const isWaylandHost = isWaylandPortalHost();
     let saved: DisplayMode = "virtual_monitor";
     if (!isWaylandHost) {
@@ -423,10 +537,8 @@ export default function App() {
     setConnectDialogManualMbps(10);
     setConnectDialogProfileKey("");
     setConnectDialogCaptureBackend("");
-    void refreshTrainedProfiles();
     setConnectDialogDoctor(null);
     setConnectDialogDoctorLoading(!isWaylandHost);
-    setConnectDialogBlockReason(connectDisabledReason(device));
     setConnectDialogDevice(device);
     if (isWaylandHost) {
       return;
@@ -434,37 +546,36 @@ export default function App() {
     void api
       .getVirtualDoctor(device)
       .then((doctor) => {
-        setConnectDialogDoctor(doctor);
+        if (requestId === connectDialogRequestId) setConnectDialogDoctor(doctor);
       })
       .catch(() => {
-        setConnectDialogDoctor(null);
+        if (requestId === connectDialogRequestId) setConnectDialogDoctor(null);
       })
       .finally(() => {
-        setConnectDialogDoctorLoading(false);
+        if (requestId === connectDialogRequestId) setConnectDialogDoctorLoading(false);
       });
   }
 
   function closeConnectDialog(): void {
+    connectDialogRequestId += 1;
+    profilesRequestId += 1;
     setConnectDialogDevice(null);
     setConnectDialogDoctor(null);
     setConnectDialogDoctorLoading(false);
-    setConnectDialogBlockReason("");
   }
 
   async function resolveBackendMode(
     device: DeviceBasic,
-    waylandHost: boolean,
+    captureBackend: SupportedCaptureBackend,
   ): Promise<"virtual_monitor" | "virtual_mirror" | "duplicate" | null> {
-    if (waylandHost) {
+    if (captureBackend === "wayland_portal") {
       return waylandExperimentalDuplication() ? "virtual_mirror" : "virtual_monitor";
     }
     const chosenMode = connectDialogMode();
     if (chosenMode === "virtual_monitor") {
-      const doctor = connectDialogDoctor() ?? await api.getVirtualDoctor(device);
-      if (!isVirtualMonitorAvailable(doctor)) {
-        session.setError(
-          "Virtual monitor mode is unavailable in current host session. Use Duplicate mode."
-        );
+      // Legacy X11 virtual doctor is not a gate for the independent EVDI backend.
+      if (!session.hostProbe().availableBackends.includes("evdi")) {
+        session.setError("EVDI is unavailable. Check the kernel module and host permissions.");
         return null;
       }
       return "virtual_monitor";
@@ -482,24 +593,35 @@ function resolveEncoderMode(
   return encoderValue;
 }
 
-  function resolveCaptureBackend(): CaptureBackend | undefined {
-    const captureBackend = connectDialogCaptureBackend();
-    if (captureBackend === "" || captureBackend === "auto") return undefined;
-    return captureBackend;
+  function resolveCaptureBackend(): SupportedCaptureBackend | null {
+    return selectedCaptureBackend();
   }
 
   async function confirmConnect(): Promise<void> {
-    const device = connectDialogDevice();
-    if (!device) return;
-    const waylandHost = isWaylandPortalHost();
-    const blockedReason = connectDisabledReason(device);
+    const selectedDevice = connectDialogDevice();
+    if (!selectedDevice) return;
+    const device = session.devices().find((candidate) => candidate.serial === selectedDevice.serial);
+    if (!device) {
+      session.setError("Device disconnected while configuring the session. Refresh devices and retry.");
+      return;
+    }
+    const errors = connectFormErrors();
+    if (errors.length > 0) {
+      session.setError(errors.join("; "));
+      return;
+    }
+    const captureBackend = resolveCaptureBackend();
+    if (!captureBackend) {
+      session.setError("Selected capture backend is unavailable. Choose EVDI or Wayland Portal.");
+      return;
+    }
+    const blockedReason = connectDisabledReason(device, captureBackend);
     if (blockedReason.length > 0) {
-      setConnectDialogBlockReason(blockedReason);
       session.setError(blockedReason);
       return;
     }
     try {
-      const backendMode = await resolveBackendMode(device, waylandHost);
+      const backendMode = await resolveBackendMode(device, captureBackend);
       if (!backendMode) return;
 
       const qualityMode = connectDialogQualityMode();
@@ -518,25 +640,53 @@ function resolveEncoderMode(
         profileName: (!isAdaptive && !isManual) ? selectedProfile?.key : undefined,
         encoder: resolveEncoderMode(selectedProfile, encoderValue),
         size: resolvedSize,
-        captureBackend: resolveCaptureBackend(),
+        captureBackend,
         manualFps: isManual ? connectDialogManualFps() : undefined,
         manualBitrateKbps: isManual ? connectDialogManualMbps() * 1000 : undefined,
       };
 
-      closeConnectDialog();
-      await session.connectDevice(device, backendMode, connectConfig);
+      const result = await session.connectDevice(device, backendMode, connectConfig);
+      if (result.ok) closeConnectDialog();
     } catch (err) {
       session.setError(`Connect mode validation failed: ${String(err)}`);
     }
   }
 
+  async function openVirtualSetup(): Promise<void> {
+    setVirtualSetupVisible(true);
+    setVirtualStartupDoctor({
+      ok: false, message: "Checking EVDI prerequisites...", actionable: false,
+      hostBackend: "evdi", resolver: "evdi_kernel", missingDeps: [], installHint: "",
+    });
+    try {
+      const doctor = await api.getEvdiDepsDoctor();
+      if (virtualSetupVisible()) setVirtualStartupDoctor(doctor);
+    } catch (err) {
+      if (!virtualSetupVisible()) return;
+      setVirtualStartupDoctor({
+        ok: false, message: `EVDI diagnostics unavailable: ${String(err)}`, actionable: false,
+        hostBackend: "evdi", resolver: "evdi_kernel", missingDeps: [],
+        installHint: "Check the installed EVDI diagnostic scripts and logs.",
+      });
+    }
+  }
+
   function closeVirtualSetup(): void {
+    if (virtualSetupInstalling()) return;
     setVirtualSetupVisible(false);
   }
 
+  function hasActiveStreams(): boolean {
+    return session.devices().some((device) =>
+      device.streamState === "STREAMING" || device.streamState === "CONNECTING",
+    );
+  }
+
   function stopVirtualInstallPolling(): void {
+    installPollingGeneration += 1;
+    installPollingActive = false;
     if (virtualInstallPollTimer !== null) {
-      globalThis.clearInterval(virtualInstallPollTimer);
+      globalThis.clearTimeout(virtualInstallPollTimer);
       virtualInstallPollTimer = null;
     }
   }
@@ -563,16 +713,22 @@ function resolveEncoderMode(
       logs: ["[ui] requesting installer start..."],
     });
     stopVirtualInstallPolling();
+    const generation = installPollingGeneration;
+    installPollingActive = true;
     try {
       await api.startVirtualDepsInstall();
       const poll = async () => {
+        if (!installPollingActive || generation !== installPollingGeneration) return;
         try {
           const status = await api.getVirtualDepsInstallStatus();
+          // Responses from cancelled/previous installation attempts are stale.
+          if (!installPollingActive || generation !== installPollingGeneration) return;
           setVirtualInstallStatus(status);
           if (status.done) {
             stopVirtualInstallPolling();
+            setVirtualSetupInstalling(false);
             if (status.success) {
-              const doctor = await api.getVirtualDoctor();
+              const doctor = await api.getEvdiDepsDoctor();
               setVirtualStartupDoctor(doctor);
               if (doctor.ok) {
                 setVirtualSetupVisible(false);
@@ -586,24 +742,30 @@ function resolveEncoderMode(
             } else {
               session.setError(status.message);
             }
+          } else {
+            // Self-scheduling means there is at most one status request in flight.
+            virtualInstallPollTimer = globalThis.setTimeout(() => {
+              virtualInstallPollTimer = null;
+              void poll();
+            }, 600);
           }
         } catch (err) {
+          if (generation !== installPollingGeneration) return;
           stopVirtualInstallPolling();
+          setVirtualSetupInstalling(false);
           setVirtualInstallStatus({
             running: false,
             done: true,
             success: false,
-            message: `Installer status read failed: ${String(err)}`,
+            message: `Installer status unavailable (installation outcome unknown): ${String(err)}`,
             logs: [...virtualInstallStatus().logs, `[ui][error] ${String(err)}`],
           });
-          session.setError(`Dependency installation failed: ${String(err)}`);
+          session.setError("Unable to read installer progress. Check host state before retrying.");
         }
       };
       await poll();
-      virtualInstallPollTimer = globalThis.setInterval(() => {
-        void poll();
-      }, 600);
     } catch (err) {
+      stopVirtualInstallPolling();
       session.setError(`Dependency installation failed: ${String(err)}`);
       setVirtualInstallStatus({
         running: false,
@@ -612,37 +774,23 @@ function resolveEncoderMode(
         message: `Dependency installation failed: ${String(err)}`,
         logs: [...virtualInstallStatus().logs, `[ui][error] ${String(err)}`],
       });
-    } finally {
       setVirtualSetupInstalling(false);
     }
   }
 
-  onMount(async () => {
-    try {
-      const name = await api.getHostName();
-      const safe = name || "unknown-host";
-      setHostName(safe);
-      await getCurrentWindow().setTitle(`WBeam - ${safe}`);
-    } catch {
-      // ignore title update errors
-    }
-
-    await session.refreshSnapshot();
-    await refreshTrainedProfiles();
-    try {
-      const doctor = await api.getVirtualDoctor();
-      setVirtualStartupDoctor(doctor);
-    } catch {
-      // Non-blocking check; connect flow still performs per-device guard.
-    }
-
-    const timer = globalThis.setInterval(() => {
-      if (session.deviceActionBusy().length > 0 || session.refreshInFlight()) return;
-      void session.refreshSnapshot({ silent: true, forceDevices: true });
-    }, 1200);
-
+  onMount(() => {
+    let disposed = false;
+    const poller = createPollingLoop({
+      delayMs: 1200,
+      shouldPoll: () => !document.hidden
+        && session.deviceActionBusy().length === 0
+        && !session.refreshInFlight(),
+      work: () => session.refreshSnapshot({ silent: true, forceDevices: false }),
+      onError: (err) => console.error("Background status refresh failed", err),
+    });
     const refreshVisible = () => {
-      if (session.deviceActionBusy().length > 0 || session.refreshInFlight()) return;
+      if (disposed || session.deviceActionBusy().length > 0 || session.refreshInFlight()) return;
+      // Visibility/manual refresh bypasses device backoff; periodic polls do not.
       void session.refreshSnapshot({ silent: true, forceDevices: true });
     };
     const onFocus = () => refreshVisible();
@@ -652,17 +800,45 @@ function resolveEncoderMode(
     globalThis.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisibilityChange);
 
+    // Must be registered synchronously while Solid's owner is active,
+    // not after awaits inside an async onMount callback.
     onCleanup(() => {
-      globalThis.clearInterval(timer);
+      disposed = true;
+      poller.stop();
       globalThis.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibilityChange);
       stopVirtualInstallPolling();
     });
+
+    void (async () => {
+      try {
+        const name = await api.getHostName();
+        if (disposed) return;
+        const safe = name || "unknown-host";
+        setHostName(safe);
+        await getCurrentWindow().setTitle(`WBeam - ${safe}`);
+      } catch {
+        // Window title is optional. Continue probing even if it fails.
+      }
+      if (disposed) return;
+      await session.refreshSnapshot();
+      if (disposed) return;
+      await refreshTrainedProfiles();
+      if (disposed) return;
+      try {
+        const doctor = await api.getEvdiDepsDoctor();
+        if (!disposed) setVirtualStartupDoctor(doctor);
+      } catch {
+        // Non-blocking check; connect performs its own capability guard.
+      } finally {
+        if (!disposed) poller.start();
+      }
+    })();
   });
 
   return (
     <main class="app-shell">
-      <section class="panel basic-400">
+      <section class={`panel basic-400 ${mode() === "advanced" ? "mode-advanced" : ""}`}>
         <header class="panel-header">
           <div>
             <h1>WBeam - {hostName()}</h1>
@@ -686,10 +862,18 @@ function resolveEncoderMode(
           </div>
         </header>
 
-        <p class="meta-line">Daemon APK: <strong>{session.daemonVersion() || session.hostVersion() || "not set"}</strong></p>
+        <Show when={mode() === "advanced"}>
+          <p class="meta-line">Daemon APK: <strong>{session.daemonVersion() || session.hostVersion() || "not set"}</strong></p>
+        </Show>
 
         <Show when={session.error()}>
-          <p class="error-line">{session.error()}</p>
+          <p class="error-line" role="alert">{safeUiText(session.error())}</p>
+        </Show>
+        <Show when={session.refreshError()}>
+          <p class="warn-line" role="status">{safeUiText(session.refreshError())}</p>
+        </Show>
+        <Show when={session.deviceSnapshotStale()}>
+          <p class="warn-line" role="status">Device status may be outdated. Last known devices are shown.</p>
         </Show>
         <Show when={!session.loading() && session.devices().length === 0 && !session.error()}>
           <p class="empty-line">
@@ -699,9 +883,10 @@ function resolveEncoderMode(
 
         <section class="toolbar">
           <div class="toolbar-row">
-            <button
+            <Show when={mode() === "advanced"}>
+              <button
               class="toolbar-btn toolbar-btn-primary"
-              title="Connect all devices using EVDI at native resolution, 60 fps, 20 Mbps"
+              title="Connect eligible devices using available supported backends. Multi-device requires EVDI."
               disabled={autoConnectBusy() || autoConnectDisabledReason().length > 0}
               onClick={() => void autoConnectAll()}
             >
@@ -709,23 +894,35 @@ function resolveEncoderMode(
                 <Loader2 size={14} class="spinning" />
               </Show>
               <span>{autoConnectBusy() ? "Connecting…" : "Autoconnect all"}</span>
-            </button>
+              </button>
+            </Show>
             <button
               class="toolbar-btn"
-              onClick={() => setEvdiWizardVisible(true)}
-              title="Guide to enable EVDI virtual monitors (multiple devices)"
+              onClick={() => void openVirtualSetup()}
+              title="Diagnose and prepare EVDI on this Linux host"
             >
               <Settings size={14} />
-              <span>EVDI setup</span>
+              <span>Host setup</span>
             </button>
           </div>
-          <Show when={!autoConnectBusy() && autoConnectDisabledReason().length > 0}>
+          <Show when={mode() === "advanced" && !autoConnectBusy() && autoConnectDisabledReason().length > 0}>
             <p class="toolbar-hint toolbar-hint-warn">{autoConnectDisabledReason()}</p>
           </Show>
-          <Show when={isWaylandPortalHost()}>
-            <p class="toolbar-hint">Wayland host — auto-connect uses EVDI. Ensure EVDI module is loaded.</p>
+          <Show when={mode() === "advanced" && autoConnectSummary()}>
+            <p class="toolbar-hint" role="status">{autoConnectSummary()}</p>
           </Show>
         </section>
+
+        <Show when={mode() === "basic" && !session.service().active}>
+          <button
+            class="toolbar-btn toolbar-btn-primary"
+            disabled={!session.service().available || session.serviceBusy()}
+            onClick={() => void ensureBasicServiceReady()}
+          >
+            <Play size={14} />
+            {session.service().installed ? "Start WBeam service" : "Install and start WBeam service"}
+          </button>
+        </Show>
 
         <ul class="device-list" aria-label="Connected devices">
           <For each={session.devices()}>
@@ -736,7 +933,8 @@ function resolveEncoderMode(
                   <span class="model-text">{device.model}</span>
                 </div>
 
-                <div class="line split-line">
+                <Show when={mode() === "advanced"}>
+                  <div class="line split-line">
                   <span title="Platform and OS version">
                     <Smartphone size={14} /> {device.platform} {device.osVersion}
                   </span>
@@ -779,7 +977,14 @@ function resolveEncoderMode(
                   <span title="Current daemon stream state">
                     State {device.streamState}
                   </span>
-                </div>
+                  </div>
+                </Show>
+                <Show when={mode() === "basic"}>
+                  <div class="line split-line">
+                    <span><BatteryIcon level={device.batteryLevel} charging={device.batteryCharging} /> {device.batteryPercent}</span>
+                    <span>Stream: {device.streamState}</span>
+                  </div>
+                </Show>
 
                 <div class="line end-line">
                   {(() => {
@@ -815,6 +1020,7 @@ function resolveEncoderMode(
                         <button
                           class="device-btn"
                           title="Refresh this device state"
+                          aria-label={`Refresh ${device.model} status`}
                           disabled={session.refreshing() || isDeviceBusy(device)}
                           onClick={() => session.refreshSnapshot()}
                         >
@@ -824,8 +1030,9 @@ function resolveEncoderMode(
                         <button
                           class="device-btn"
                           title={connectActionTitle}
+                          aria-label={`Connect ${device.model}: ${connectActionTitle}`}
                           disabled={connectBusy || connectDisabled}
-                          onClick={() => openConnectDialog(device)}
+                          onClick={() => mode() === "basic" ? void basicConnect(device) : openConnectDialog(device)}
                         >
                           <Show when={connectBusy} fallback={<Link2 size={13} />}>
                             <Loader2 size={13} class="spinning" />
@@ -835,6 +1042,7 @@ function resolveEncoderMode(
                         <button
                           class="device-btn"
                           title={disconnectActionTitle}
+                          aria-label={`Disconnect ${device.model}: ${disconnectActionTitle}`}
                           disabled={disconnectDisabled}
                           onClick={() => session.disconnectDevice(device)}
                         >
@@ -847,71 +1055,45 @@ function resolveEncoderMode(
                     );
                   })()}
                 </div>
+                <Show when={session.deviceActionErrors()[device.serial]}>
+                  {(message) => <p class="error-line" role="alert">{safeUiText(message())}</p>}
+                </Show>
               </li>
             )}
           </For>
         </ul>
 
-        <section class="wayland-experimental-control">
-          <label class={`checkbox-option ${isWaylandPortalHost() ? "" : "disabled"}`}>
+        <Show when={mode() === "advanced"}>
+          <section class="wayland-experimental-control">
+          <label class={`checkbox-option ${session.hostProbe().availableBackends.includes("wayland_portal") ? "" : "disabled"}`}>
             <input
               type="checkbox"
               checked={waylandExperimentalDuplication()}
-              disabled={!isWaylandPortalHost()}
+              disabled={!session.hostProbe().availableBackends.includes("wayland_portal")}
               onChange={(event) => toggleWaylandExperimentalDuplication(event.currentTarget.checked)}
             />
             <span>
               Use experimental virtual mirroring (Wayland only)
               {" "}
               <small>
-                Applies to Wayland connects only. For X11 this option is unavailable.
+                Applies only to Wayland Portal connections. Other backends ignore this setting.
               </small>
             </span>
           </label>
-        </section>
+          </section>
+        </Show>
 
-        <section class="service-controls">
-          <button
-            class={`svc-btn ${upgradeAvailable() ? "svc-upgrade" : ""}`}
-            disabled={
-              session.serviceBusy()
-              || !session.service().available
-              || (!upgradeAvailable() && session.service().installed)
-            }
-            onClick={() => installServiceOrUpgrade()}
-            title={upgradeAvailable() ? "Upgrade service to current host build" : "Install user service"}
-          >
-            <Download size={14} />
-            <span>{upgradeAvailable() ? "Upgrade" : "Install service"}</span>
-          </button>
-          <button
-            class="svc-btn"
-            disabled={session.serviceBusy() || !session.service().available || !session.service().installed}
-            onClick={() => session.callServiceAction("service_uninstall")}
-            title="Uninstall user service"
-          >
-            <Trash2 size={14} />
-            <span>Uninstall</span>
-          </button>
-          <button
-            class="svc-btn"
-            disabled={session.serviceBusy() || !session.service().available || !session.service().installed || session.service().active}
-            onClick={() => session.callServiceAction("service_start")}
-            title="Start service"
-          >
-            <Play size={14} />
-            <span>Start</span>
-          </button>
-          <button
-            class="svc-btn"
-            disabled={session.serviceBusy() || !session.service().available || !session.service().installed || !session.service().active}
-            onClick={() => session.callServiceAction("service_stop")}
-            title="Stop service"
-          >
-            <Square size={14} />
-            <span>Stop</span>
-          </button>
-        </section>
+        <Show when={mode() === "advanced"}>
+          <ServiceControls
+            service={session.service()}
+            busy={session.serviceBusy()}
+            upgradeAvailable={upgradeAvailable()}
+            onInstall={() => installServiceOrUpgrade()}
+            onUninstall={() => session.callServiceAction("service_uninstall")}
+            onStart={() => session.callServiceAction("service_start")}
+            onStop={() => session.callServiceAction("service_stop")}
+          />
+        </Show>
 
         <footer class="status-bar" title={session.service().summary}>
           <div class={`service-status-strip ${session.serviceState()}`}>
@@ -923,25 +1105,24 @@ function resolveEncoderMode(
             </span>
           </div>
           <span>{session.devices().length} devices ({session.tabletCount()} tablet, {session.phoneCount()} phone)</span>
-          <span>
-            host: {session.hostProbe().os}/{session.hostProbe().session}/{session.hostProbe().desktop} · capture={session.hostProbe().captureMode} · {session.hostProbe().supported ? "supported" : "unsupported"}
-          </span>
-          <span>updated: {session.updatedAt()}</span>
+          <Show when={mode() === "advanced"}>
+            <span>
+              host: {safeUiText(session.hostProbe().os)}/{safeUiText(session.hostProbe().session, "legacy session")}/{safeUiText(session.hostProbe().desktop, "legacy desktop")} · capture={supportedCaptureLabel(session.hostProbe().captureMode)} · {session.hostProbe().supported && isSupportedCaptureMode(session.hostProbe().captureMode) ? "supported" : "unsupported"}
+            </span>
+            <span>updated: {session.updatedAt()}</span>
+          </Show>
         </footer>
       </section>
       <Show when={connectDialogDevice()}>
         {(deviceAccessor) => {
           const device = deviceAccessor();
-          const waylandHost = isWaylandPortalHost();
+          const portalBackendSelected = () => selectedCaptureBackend() === "wayland_portal";
           const virtualMonitorSelected = () => connectDialogMode() === "virtual_monitor";
           const doctor = () => connectDialogDoctor();
-          const virtualMonitorAvailable = () => isVirtualMonitorAvailable(doctor() ?? null);
+          const virtualMonitorAvailable = () => selectedCaptureBackend() === "evdi";
           const virtualMonitorUnavailable = () => !virtualMonitorAvailable();
           const virtualMonitorHint = () => {
-            if (!virtualMonitorAvailable()) return "Not implemented for current host session yet.";
-            if (doctor()?.resolver === "linux_x11_monitor_object_experimental") {
-              return "Experimental simulated monitor space on X11 (xrandr --setmonitor); not a true output.";
-            }
+            if (!virtualMonitorAvailable()) return "A supported virtual monitor backend is not available for this host.";
             return "Creates real additional monitor space on host desktop.";
           };
           const qualityMode = () => connectDialogQualityMode();
@@ -952,7 +1133,7 @@ function resolveEncoderMode(
             if (isAdaptive()) return "auto (adaptive)";
             return resolveSessionSizeForPreset(device, connectDialogResolutionPresetId()) ?? "auto";
           };
-          const backendChosen = () => connectDialogCaptureBackend() !== "";
+          const backendChosen = () => selectedCaptureBackend() !== null;
           const concreteBackendChosen = () => {
             const b = connectDialogCaptureBackend();
             return b !== "" && b !== "auto";
@@ -961,12 +1142,12 @@ function resolveEncoderMode(
           const profilesForCodec = () => trainedProfiles().filter((p) => p.encoder === connectDialogEncoderMode());
           const selectedProfile = () => profilesForCodec().find((profile) => profile.key === connectDialogProfileKey()) ?? null;
           return (
-            <dialog open class="modal-backdrop" aria-label="Select display mode">
+            <AccessibleDialog label="Select display mode" onClose={closeConnectDialog}>
               <section class="connect-modal">
                 <h3>Connect session</h3>
                 <p class="connect-modal-subtitle">{device.model} ({device.serial})</p>
                 <Show
-                  when={!waylandHost}
+                  when={!portalBackendSelected()}
                   fallback={(
                     <p class="setup-hint">
                       Wayland mode: {waylandExperimentalDuplication() ? "Virtual mirror (experimental)" : "Virtual monitor (standard)"}
@@ -1014,18 +1195,19 @@ function resolveEncoderMode(
                         setConnectDialogCaptureBackend(event.currentTarget.value as CaptureBackend | "");
                         setConnectDialogEncoderMode("");
                         setConnectDialogProfileKey("");
+                        setTrainedProfiles([]);
                         void refreshTrainedProfiles();
                       }}
                     >
                       <option value="">— select backend —</option>
-                      <option value="auto">Auto (use host default)</option>
-                      <option value="evdi">EVDI — direct kernel capture (fastest, no 60 fps cap)</option>
+                      <option value="auto">Auto (available supported backend)</option>
+                      <option value="evdi">EVDI — direct kernel capture</option>
                       <option value="wayland_portal">Wayland portal (default on Wayland)</option>
                     </select>
                     <small>
-                      {connectDialogCaptureBackend() === "evdi"
-                        ? "Requires: sudo modprobe evdi initial_device_count=1"
-                        : `Host detected: ${session.hostProbe().captureMode}`}
+                      {selectedCaptureBackend()
+                        ? `Ready: ${selectedCaptureBackend()}`
+                        : "Backend unavailable. Run host setup or select an available backend."}
                     </small>
                   </label>
 
@@ -1173,19 +1355,25 @@ function resolveEncoderMode(
                   <p class="setup-message">Checking host capabilities...</p>
                 </Show>
                 <Show when={connectDialogBlockReason()}>
-                  {(msg) => <p class="setup-missing">Connect blocked: {msg()}</p>}
+                  {(msg) => <p class="setup-missing">Connect blocked: {safeUiText(msg())}</p>}
                 </Show>
-                <Show when={!waylandHost && doctor()}>
-                  {(d) => <p class="setup-hint">{d().installHint}</p>}
+                <Show when={connectFormErrors().length > 0}>
+                  <p class="setup-missing" role="status">{connectFormErrors()[0]}</p>
+                </Show>
+                <Show when={session.deviceActionErrors()[device.serial]}>
+                  {(msg) => <p class="setup-missing" role="alert">{safeUiText(msg())}</p>}
+                </Show>
+                <Show when={selectedCaptureBackend() === "evdi" && doctor()}>
+                  {(d) => <p class="setup-hint">{safeUiText(d().installHint)}</p>}
                 </Show>
                 <div class="connect-modal-actions">
                   <button class="device-btn" onClick={closeConnectDialog}>Cancel</button>
-                  <button class="device-btn" onClick={() => void confirmConnect()} disabled={connectDialogBlockReason().length > 0 || !backendChosen() || !codecChosen()}>
+                  <button class="device-btn" onClick={() => void confirmConnect()} disabled={connectDialogBlockReason().length > 0 || connectFormErrors().length > 0}>
                     Connect
                   </button>
                 </div>
               </section>
-            </dialog>
+            </AccessibleDialog>
           );
         }}
       </Show>
@@ -1193,32 +1381,35 @@ function resolveEncoderMode(
         {(doctorAccessor) => {
           const doctor = doctorAccessor();
           return (
-            <dialog open class="modal-backdrop" aria-label="Virtual desktop setup">
+            <AccessibleDialog label="Virtual desktop setup" onClose={closeVirtualSetup}>
               <section class="connect-modal setup-modal">
-                <h3>Virtual desktop setup</h3>
-                <p class="connect-modal-subtitle">Host backend: {doctor.hostBackend}</p>
-                <p class="setup-message">{doctor.message}</p>
-                <p class="setup-hint">{doctor.installHint}</p>
+                <h3>EVDI host setup</h3>
+                <p class="connect-modal-subtitle">Host backend: {safeUiText(doctor.hostBackend, "legacy backend (unsupported)")}</p>
+                <p class="setup-message">{safeUiText(doctor.message)}</p>
+                <p class="setup-hint">{safeUiText(doctor.installHint)}</p>
+                <Show when={hasActiveStreams()}>
+                  <p class="setup-missing" role="alert">Stop active streams before installing or reloading EVDI.</p>
+                </Show>
                 <Show when={doctor.missingDeps.length > 0}>
-                  <p class="setup-missing">Missing: {doctor.missingDeps.join(", ")}</p>
+                  <p class="setup-missing">Missing: {safeUiText(doctor.missingDeps.join(", "))}</p>
                 </Show>
                 <div class="connect-modal-actions">
                   <button class="device-btn" onClick={closeVirtualSetup} disabled={virtualSetupInstalling()}>
                     Cancel
                   </button>
-                  <button class="device-btn" onClick={() => void installVirtualDeps()} disabled={virtualSetupInstalling()}>
+                  <button class="device-btn" onClick={() => void installVirtualDeps()} disabled={virtualSetupInstalling() || !doctor.actionable || doctor.ok || hasActiveStreams()}>
                     <Show when={virtualSetupInstalling()} fallback={"Install deps"}>
                       <><Loader2 size={13} class="spinning" /> Installing...</>
                     </Show>
                   </button>
                 </div>
               </section>
-            </dialog>
+            </AccessibleDialog>
           );
         }}
       </Show>
       <Show when={virtualInstallVisible()}>
-        <dialog open class="modal-backdrop" aria-label="Installing dependencies">
+        <AccessibleDialog label="Installing dependencies" onClose={closeVirtualInstallModal}>
           <section class="connect-modal setup-modal install-modal">
             <h3>Installing virtual desktop dependencies</h3>
             <p class="connect-modal-subtitle">Elevation is required (root/pkexec prompt).</p>
@@ -1244,13 +1435,13 @@ function resolveEncoderMode(
               </button>
             </div>
           </section>
-        </dialog>
+        </AccessibleDialog>
       </Show>
       <Show when={evdiWizardVisible()}>
-        <dialog open class="modal-backdrop" aria-label="EVDI setup wizard">
+        <AccessibleDialog label="EVDI setup wizard" onClose={() => setEvdiWizardVisible(false)}>
           <section class="connect-modal setup-modal">
             <h3>EVDI setup wizard</h3>
-            <p class="connect-modal-subtitle">Enable multiple virtual monitors via EVDI (X11 backend).</p>
+            <p class="connect-modal-subtitle">Configure EVDI kernel virtual displays for multiple connected devices.</p>
             <ol class="setup-list">
               <li>
                 <strong>Load EVDI with multiple devices (run in terminal):</strong>
@@ -1279,7 +1470,7 @@ ls /dev/dri/card*</pre>
               <button class="device-btn" onClick={() => setEvdiWizardVisible(false)}>Close</button>
             </div>
           </section>
-        </dialog>
+        </AccessibleDialog>
       </Show>
     </main>
   );

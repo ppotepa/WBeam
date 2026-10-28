@@ -191,8 +191,54 @@ pub(crate) fn run_virtual_install_job() {
     }
 }
 
+// EVDI-specific release diagnostic. Legacy virtual_doctor remains available.
 #[tauri::command]
-pub(crate) fn virtual_doctor(
+pub(crate) async fn evdi_deps_check() -> Result<VirtualDoctor, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let script = crate::repo_root().join("scripts/virtual-deps-check.sh");
+        let output = Command::new("bash")
+            .arg(script)
+            .args(["--json", "--backend", "evdi"])
+            .output()
+            .map_err(|e| format!("EVDI dependency check could not start: {e}"))?;
+        let response: Value = serde_json::from_slice(&output.stdout)
+            .map_err(|e| format!("Invalid EVDI check output: {e}"))?;
+        let missing_deps: Vec<String> = response.get("missing").and_then(Value::as_array)
+            .map(|items| items.iter().filter_map(Value::as_str).map(str::to_string).collect())
+            .unwrap_or_default();
+        let ok = response.get("ok").and_then(Value::as_bool).unwrap_or(false)
+            && output.status.success();
+        let install_hint = response.get("install_cmd").and_then(Value::as_str)
+            .unwrap_or("Install EVDI with kernel headers matching your running kernel.").to_string();
+        let message = if ok {
+            "EVDI dependencies are present.".to_string()
+        } else if missing_deps.is_empty() {
+            "EVDI prerequisite check failed. Inspect logs and installed runtime files.".to_string()
+        } else {
+            format!("Missing EVDI prerequisites: {}", missing_deps.join(", "))
+        };
+        Ok(VirtualDoctor {
+            ok, message, actionable: !ok && !missing_deps.is_empty(),
+            host_backend: "evdi".to_string(),
+            resolver: "evdi_kernel".to_string(),
+            missing_deps, install_hint,
+        })
+    })
+    .await
+    .map_err(|e| format!("EVDI diagnostic worker failed: {e}"))?
+}
+
+#[tauri::command]
+pub(crate) async fn virtual_doctor(
+    serial: Option<String>,
+    stream_port: Option<u16>,
+) -> Result<VirtualDoctor, String> {
+    tauri::async_runtime::spawn_blocking(move || virtual_doctor_blocking(serial, stream_port))
+        .await
+        .map_err(|e| format!("virtual doctor worker failed: {e}"))?
+}
+
+pub(crate) fn virtual_doctor_blocking(
     serial: Option<String>,
     stream_port: Option<u16>,
 ) -> Result<VirtualDoctor, String> {
@@ -202,7 +248,7 @@ pub(crate) fn virtual_doctor(
     if let Some(s) = serial {
         let trimmed = s.trim();
         if !trimmed.is_empty() {
-            params.push(format!("serial={trimmed}"));
+            params.push(format!("serial={}", crate::encode_query_component(trimmed)));
         }
     }
     if let Some(port) = stream_port {

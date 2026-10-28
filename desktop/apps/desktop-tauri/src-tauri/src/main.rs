@@ -2,6 +2,7 @@
 
 mod adb;
 mod profiles;
+mod process_timeout;
 mod service;
 mod virtual_monitor;
 
@@ -12,18 +13,18 @@ use crate::service::{
     service_uninstall,
 };
 use crate::virtual_monitor::{
-    virtual_doctor, virtual_install_deps_start, virtual_install_deps_status,
+    evdi_deps_check, virtual_doctor, virtual_install_deps_start, virtual_install_deps_status,
 };
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
@@ -36,6 +37,35 @@ struct HostProbeBrief {
     desktop: String,
     capture_mode: String,
     supported: bool,
+    available_backends: Vec<String>,
+    evdi_available: bool,
+}
+
+static DEVICE_ACTIONS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+
+struct DeviceActionGuard {
+    serial: String,
+}
+
+impl DeviceActionGuard {
+    fn acquire(serial: &str) -> Result<Self, String> {
+        let mut active = DEVICE_ACTIONS.get_or_init(|| Mutex::new(HashSet::new()))
+            .lock().map_err(|_| "device action lock poisoned".to_string())?;
+        if !active.insert(serial.to_string()) {
+            return Err(format!("Device {serial} already has an action in progress"));
+        }
+        Ok(Self { serial: serial.to_string() })
+    }
+}
+
+impl Drop for DeviceActionGuard {
+    fn drop(&mut self) {
+        if let Some(actions) = DEVICE_ACTIONS.get() {
+            if let Ok(mut active) = actions.lock() {
+                active.remove(&self.serial);
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -199,7 +229,17 @@ pub(crate) fn wbeam_stream_port() -> u16 {
 // NOSONAR S3776 - Timestamp generation requires nested command fallbacks
 fn session_logs() -> &'static SessionLogs {
     SESSION_LOGS.get_or_init(|| {
-        let dir = repo_root().join("logs");
+        let root = repo_root();
+        // Installed runtime resources are read-only; mutable logs belong in XDG state.
+        let dir = if root.join("VERSION.txt").is_file() {
+            let base = std::env::var_os("XDG_STATE_HOME")
+                .map(PathBuf::from)
+                .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))
+                .unwrap_or_else(std::env::temp_dir);
+            base.join("wbeam/logs")
+        } else {
+            root.join("logs")
+        };
         let _ = fs::create_dir_all(&dir);
 
         let stamp = Command::new("date")
@@ -407,6 +447,45 @@ fn build_start_body_json(start_patch: Option<&StartConfigPatch>) -> Result<Optio
         .map_err(|e| format!("serialize start patch failed: {e}"))
 }
 
+/// Percent-encode a query component (not a full URL). ADB serials are not
+/// guaranteed to be URL-safe; '&', '#', '?' and '=' must never change the API
+/// route/query parameters supplied to the local daemon.
+pub(crate) fn encode_query_component(raw: &str) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(raw.len());
+    for byte in raw.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            out.push(byte as char);
+        } else {
+            let _ = write!(&mut out, "%{byte:02X}");
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod query_encoding_tests {
+    use super::encode_query_component;
+
+    #[test]
+    fn plain_serial_is_unchanged() {
+        assert_eq!(encode_query_component("ABC-123._~"), "ABC-123._~");
+    }
+
+    #[test]
+    fn serial_cannot_inject_query_parameters() {
+        assert_eq!(
+            encode_query_component("USB&stream_port=9999#frag"),
+            "USB%26stream_port%3D9999%23frag"
+        );
+    }
+
+    #[test]
+    fn utf8_and_spaces_are_encoded_bytewise() {
+        assert_eq!(encode_query_component("a b/ą"), "a%20b%2F%C4%85");
+    }
+}
+
 fn daemon_post_action(
     action: &str,
     serial: &str,
@@ -416,8 +495,9 @@ fn daemon_post_action(
     capture_backend: Option<&str>,
 ) -> Result<String, String> {
     let control_port = wbeam_control_port();
+    let serial_param = encode_query_component(serial);
     let mut url = format!(
-        "http://127.0.0.1:{control_port}/v1/{action}?serial={serial}&stream_port={stream_port}"
+        "http://127.0.0.1:{control_port}/v1/{action}?serial={serial_param}&stream_port={stream_port}"
     );
     if action == "start" {
         append_start_query_params(&mut url, display_mode, capture_backend);
@@ -499,7 +579,26 @@ fn host_name() -> String {
 }
 
 #[tauri::command]
-fn host_probe_brief() -> HostProbeBrief {
+async fn host_probe_brief() -> HostProbeBrief {
+    match tauri::async_runtime::spawn_blocking(host_probe_brief_blocking).await {
+        Ok(probe) => probe,
+        Err(err) => {
+            ui_service_log("host_probe_brief", "error", &format!("worker failed: {err}"));
+            HostProbeBrief {
+                reachable: false,
+                os: "unknown".into(),
+                session: "unknown".into(),
+                desktop: "unknown".into(),
+                capture_mode: "unknown".into(),
+                supported: false,
+                available_backends: Vec::new(),
+                evdi_available: false,
+            }
+        }
+    }
+}
+
+fn host_probe_brief_blocking() -> HostProbeBrief {
     ui_service_log("host_probe_brief", "begin", "");
     let control_port = wbeam_control_port();
     let url = format!("http://127.0.0.1:{control_port}/host-probe");
@@ -516,6 +615,8 @@ fn host_probe_brief() -> HostProbeBrief {
             desktop: "unknown".to_string(),
             capture_mode: "unknown".to_string(),
             supported: false,
+            available_backends: Vec::new(),
+            evdi_available: false,
         };
     };
 
@@ -528,11 +629,26 @@ fn host_probe_brief() -> HostProbeBrief {
             desktop: "unknown".to_string(),
             capture_mode: "unknown".to_string(),
             supported: false,
+            available_backends: Vec::new(),
+            evdi_available: false,
         };
     }
 
     let body = String::from_utf8_lossy(&output.stdout);
     let json: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+    // Filter the daemon's legacy backend names out of the user-facing API.
+    let available_backends = json
+        .get("available_backends")
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|v| v.as_str())
+                .filter(|backend| matches!(*backend, "evdi" | "wayland_portal"))
+                .map(str::to_string)
+                .collect::<Vec<String>>()
+        })
+        .unwrap_or_default();
     let probe = HostProbeBrief {
         reachable: true,
         os: json
@@ -559,6 +675,8 @@ fn host_probe_brief() -> HostProbeBrief {
             .get("supported")
             .and_then(|v| v.as_bool())
             .unwrap_or(false),
+        available_backends,
+        evdi_available: json.get("evdi_available").and_then(|v| v.as_bool()).unwrap_or(false),
     };
     ui_service_log(
         "host_probe_brief",
@@ -569,6 +687,83 @@ fn host_probe_brief() -> HostProbeBrief {
         ),
     );
     probe
+}
+
+fn resolve_supported_capture_backend(
+    requested: Option<&str>,
+    probe: &HostProbeBrief,
+) -> Result<&'static str, String> {
+    if !probe.reachable || !probe.supported {
+        return Err("Host is unavailable or the current session is unsupported".to_string());
+    }
+    let available = |backend: &str| probe.available_backends.iter().any(|v| v == backend);
+    let requested = requested.unwrap_or("auto").trim().to_ascii_lowercase();
+    match requested.as_str() {
+        "evdi" if available("evdi") => Ok("evdi"),
+        "wayland_portal" if available("wayland_portal") => Ok("wayland_portal"),
+        "evdi" => Err("EVDI is not available on this host. Check the kernel module and permissions.".to_string()),
+        "wayland_portal" => Err("Wayland Portal is not available on this host session.".to_string()),
+        "" | "auto" => {
+            if probe.capture_mode == "wayland_portal" && available("wayland_portal") {
+                return Ok("wayland_portal");
+            }
+            if available("evdi") {
+                return Ok("evdi");
+            }
+            if available("wayland_portal") {
+                return Ok("wayland_portal");
+            }
+            Err("Neither EVDI nor Wayland Portal is available; legacy X11 cannot be selected.".to_string())
+        }
+        _ => Err("Unsupported capture backend. Select EVDI or Wayland Portal.".to_string()),
+    }
+}
+
+#[cfg(test)]
+mod capture_backend_policy_tests {
+    use super::{resolve_supported_capture_backend, HostProbeBrief};
+
+    fn probe(default: &str, available: &[&str]) -> HostProbeBrief {
+        HostProbeBrief {
+            reachable: true,
+            os: "linux".into(),
+            session: "wayland".into(),
+            desktop: "kde".into(),
+            capture_mode: default.into(),
+            supported: true,
+            available_backends: available.iter().map(|v| (*v).into()).collect(),
+            evdi_available: available.contains(&"evdi"),
+        }
+    }
+
+    #[test]
+    fn explicit_evdi_is_not_blocked_by_portal_default() {
+        let host = probe("wayland_portal", &["wayland_portal", "evdi"]);
+        assert_eq!(resolve_supported_capture_backend(Some("evdi"), &host).unwrap(), "evdi");
+    }
+
+    #[test]
+    fn auto_never_resolves_to_legacy() {
+        let host = probe("x11_gst", &["x11_gst", "evdi"]);
+        assert_eq!(resolve_supported_capture_backend(Some("auto"), &host).unwrap(), "evdi");
+        let only_legacy = probe("x11_gst", &["x11_gst"]);
+        assert!(resolve_supported_capture_backend(None, &only_legacy).is_err());
+        assert!(resolve_supported_capture_backend(Some("x11_gst"), &host).is_err());
+    }
+
+    #[test]
+    fn explicit_unavailable_backend_is_rejected() {
+        let host = probe("wayland_portal", &["wayland_portal"]);
+        assert!(resolve_supported_capture_backend(Some("evdi"), &host).is_err());
+        assert_eq!(resolve_supported_capture_backend(None, &host).unwrap(), "wayland_portal");
+    }
+
+    #[test]
+    fn offline_host_does_not_connect() {
+        let mut host = probe("wayland_portal", &["wayland_portal"]);
+        host.reachable = false;
+        assert!(resolve_supported_capture_backend(None, &host).is_err());
+    }
 }
 
 fn reject_device_connect(
@@ -609,13 +804,14 @@ fn ensure_supported_display_mode(
     )
 }
 
-fn validate_virtual_mode_support(
+#[allow(dead_code)]
+fn validate_legacy_x11_virtual_mode_support(
     serial: &str,
     stream_port: u16,
     effective_stream_port: u16,
     normalized_mode: &str,
 ) -> Result<(), String> {
-    let host_probe = host_probe_brief();
+    let host_probe = host_probe_brief_blocking();
     let is_wayland_portal = host_probe.capture_mode == "wayland_portal";
     if !is_virtual_mode(normalized_mode)
         || should_skip_virtual_doctor(normalized_mode, is_wayland_portal)
@@ -623,7 +819,7 @@ fn validate_virtual_mode_support(
         return Ok(());
     }
 
-    let doctor = virtual_doctor(Some(serial.to_string()), Some(effective_stream_port))?;
+    let doctor = crate::virtual_monitor::virtual_doctor_blocking(Some(serial.to_string()), Some(effective_stream_port))?;
     if !doctor.ok {
         let msg = if !doctor.install_hint.trim().is_empty() {
             format!("Virtual monitor unavailable: {}", doctor.install_hint)
@@ -675,6 +871,28 @@ fn validate_virtual_mode_support(
     Ok(())
 }
 
+// The release path uses the selected capture backend, not the host's default
+// session. Portal handles virtual sources and EVDI manages its own devices;
+// the legacy X11 doctor must not gate these supported capture backends.
+fn validate_virtual_mode_support(
+    serial: &str,
+    stream_port: u16,
+    effective_stream_port: u16,
+    normalized_mode: &str,
+    capture_backend: &str,
+) -> Result<(), String> {
+    if matches!(capture_backend, "evdi" | "wayland_portal") {
+        return Ok(());
+    }
+    reject_device_connect(
+        serial,
+        stream_port,
+        effective_stream_port,
+        normalized_mode,
+        "Unsupported capture backend: use EVDI or Wayland Portal".to_string(),
+    )
+}
+
 fn daemon_start_connect(
     serial: &str,
     stream_port: u16,
@@ -710,8 +928,33 @@ fn daemon_start_connect(
 }
 
 #[tauri::command]
-// NOSONAR S3776 - Connect command must normalize and reconcile multiple inputs
-fn device_connect(
+async fn device_connect(
+    serial: String,
+    stream_port: u16,
+    display_mode: Option<String>,
+    connect_encoder: Option<String>,
+    connect_size: Option<String>,
+    connect_profile_name: Option<String>,
+    connect_runtime_profile: Option<String>,
+    connect_capture_backend: Option<String>,
+    connect_manual_fps: Option<u32>,
+    connect_manual_bitrate_kbps: Option<u32>,
+) -> Result<String, String> {
+    let guard = DeviceActionGuard::acquire(&serial)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        device_connect_blocking(
+            serial, stream_port, display_mode, connect_encoder, connect_size,
+            connect_profile_name, connect_runtime_profile, connect_capture_backend,
+            connect_manual_fps, connect_manual_bitrate_kbps,
+        )
+    })
+    .await
+    .map_err(|e| format!("device_connect worker failed: {e}"))?
+}
+
+// NOSONAR S3776 - Connect implementation normalizes several inputs
+fn device_connect_blocking(
     serial: String,
     stream_port: u16,
     display_mode: Option<String>,
@@ -739,6 +982,8 @@ fn device_connect(
     if effective_stream_port == 0 {
         effective_stream_port = 5000;
     }
+    let host_probe = host_probe_brief_blocking();
+    let supported_backend = resolve_supported_capture_backend(connect_capture_backend.as_deref(), &host_probe)?;
     let selected_profile = normalize_profile_selector(connect_profile_name);
     let mut start_patch = StartConfigPatch {
         profile: normalize_runtime_profile(connect_runtime_profile),
@@ -750,7 +995,7 @@ fn device_connect(
     };
     if start_patch.profile.is_none() {
         if let Some(selector) = selected_profile.as_deref() {
-            let profile_backend = connect_capture_backend.as_deref().unwrap_or("wayland_portal");
+            let profile_backend = supported_backend;
             let profile = find_trained_profile(selector, profile_backend)?
                 .ok_or_else(|| format!("trained profile not found: {selector}"))?;
             start_patch.encoder = normalize_encoder_name(Some(profile.encoder.clone()));
@@ -784,7 +1029,7 @@ fn device_connect(
         ),
     );
     connect_log(&serial, effective_stream_port, "device_connect begin");
-    validate_virtual_mode_support(&serial, stream_port, effective_stream_port, &normalized_mode)?;
+    validate_virtual_mode_support(&serial, stream_port, effective_stream_port, &normalized_mode, supported_backend)?;
     adb_prepare_connect(&serial, effective_stream_port)?;
     connect_log(
         &serial,
@@ -797,7 +1042,7 @@ fn device_connect(
         effective_stream_port,
         &normalized_mode,
         &start_patch,
-        connect_capture_backend.as_deref(),
+        Some(supported_backend),
     )?;
     ui_service_log(
         "device_connect",
@@ -816,7 +1061,17 @@ fn device_connect(
 }
 
 #[tauri::command]
-fn device_disconnect(serial: String, stream_port: u16) -> Result<String, String> {
+async fn device_disconnect(serial: String, stream_port: u16) -> Result<String, String> {
+    let guard = DeviceActionGuard::acquire(&serial)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        device_disconnect_blocking(serial, stream_port)
+    })
+    .await
+    .map_err(|e| format!("device_disconnect worker failed: {e}"))?
+}
+
+fn device_disconnect_blocking(serial: String, stream_port: u16) -> Result<String, String> {
     service_ready_for_device_actions()?;
     crate::adb::invalidate_devices_cache();
     let effective_stream_port = resolve_stream_port_for_serial(&serial, stream_port);
@@ -832,7 +1087,8 @@ fn device_disconnect(serial: String, stream_port: u16) -> Result<String, String>
     if res.is_err() {
         // Fallback: stream port may have drifted from stale UI mapping.
         let control_port = wbeam_control_port();
-        let url = format!("http://127.0.0.1:{control_port}/v1/stop?serial={serial}");
+        let serial_param = encode_query_component(&serial);
+        let url = format!("http://127.0.0.1:{control_port}/v1/stop?serial={serial_param}");
         let output = Command::new("curl")
             .args(["-sS", "--max-time", "3", "-X", "POST", &url])
             .output()
@@ -969,12 +1225,8 @@ fn main() {
                 let _ = window.set_focus();
             }
         }))
-        .setup(|app| {
-            if should_show_x11_startup_notice() {
-                show_x11_startup_notice_window(app.handle());
-            }
-            Ok(())
-        })
+        // Legacy X11 notice is intentionally not registered in release UI.
+        // Its implementation remains in the repository for future cleanup.
         .invoke_handler(tauri::generate_handler![
             ping,
             host_name,
@@ -983,6 +1235,7 @@ fn main() {
             host_probe_brief,
             list_trained_profiles,
             virtual_doctor,
+            evdi_deps_check,
             virtual_install_deps_start,
             virtual_install_deps_status,
             device_connect,

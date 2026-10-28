@@ -414,10 +414,9 @@ pub(crate) fn adb_cmd(args: &[&str]) -> Result<String, String> {
 }
 
 pub(crate) fn run_adb(args: &[&str]) -> Result<std::process::Output, String> {
-    Command::new("adb")
-        .args(args)
-        .output()
-        .map_err(|err| format!("adb failed: {err}"))
+    let mut cmd = Command::new("adb");
+    cmd.args(args);
+    crate::process_timeout::command_output_timeout(&mut cmd, Duration::from_secs(8), "adb")
 }
 
 pub(crate) fn should_retry_adb_error(stderr: &str) -> bool {
@@ -438,7 +437,7 @@ pub(crate) fn detect_platform(manufacturer: &str) -> String {
 }
 
 pub(crate) fn resolve_stream_port_for_serial(serial: &str, requested_stream_port: u16) -> u16 {
-    let response = list_devices_basic();
+    let response = list_devices_basic_blocking();
     response
         .devices
         .into_iter()
@@ -595,7 +594,8 @@ pub(crate) fn daemon_stream_state_and_port(
     stream_port: Option<u16>,
 ) -> Option<(String, u16)> {
     let control_port = crate::wbeam_control_port();
-    let mut url = format!("http://127.0.0.1:{control_port}/v1/status?serial={serial}");
+    let serial_param = crate::encode_query_component(serial);
+    let mut url = format!("http://127.0.0.1:{control_port}/v1/status?serial={serial_param}");
     if let Some(port) = stream_port {
         url.push_str(&format!("&stream_port={port}"));
     }
@@ -870,7 +870,19 @@ fn resolve_device_stream(
 }
 
 #[tauri::command]
-pub(crate) fn list_devices_basic() -> DevicesBasicResponse {
+pub(crate) async fn list_devices_basic() -> DevicesBasicResponse {
+    match tauri::async_runtime::spawn_blocking(list_devices_basic_blocking).await {
+        Ok(response) => response,
+        Err(err) => DevicesBasicResponse {
+            host_apk_version: String::new(),
+            daemon_apk_version: String::new(),
+            devices: Vec::new(),
+            error: Some(format!("Device scan worker failed: {err}")),
+        },
+    }
+}
+
+pub(crate) fn list_devices_basic_blocking() -> DevicesBasicResponse {
     let now = now_epoch_ms();
     if let Some(cached) = cached_devices_basic_response(now) {
         return cached;
@@ -879,7 +891,7 @@ pub(crate) fn list_devices_basic() -> DevicesBasicResponse {
     crate::ui_service_log("list_devices_basic", "begin", "");
     let host_apk_version = host_expected_apk_version();
     let daemon_apk_version = host_build_revision_from_health().unwrap_or_default();
-    let svc = crate::service::service_status();
+    let svc = crate::service::service_status_blocking();
     if !svc.available || !svc.installed || !svc.active {
         crate::ui_service_log(
             "list_devices_basic",
