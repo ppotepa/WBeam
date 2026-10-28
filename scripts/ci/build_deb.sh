@@ -66,7 +66,7 @@ Section: utils
 Priority: optional
 Architecture: ${ARCH}
 Maintainer: WBeam CI <ci@example.local>
-Depends: libgtk-3-0, libwebkit2gtk-4.1-0, libsoup-3.0-0, libayatana-appindicator3-1, adb, curl, gstreamer1.0-plugins-base
+Depends: libgtk-3-0, libwebkit2gtk-4.1-0, libsoup-3.0-0, libayatana-appindicator3-1, libevdi0, adb, curl, gstreamer1.0-plugins-base
 Description: WBeam host tools and daemon binaries
  WBeam host runtime package built by GitLab CI.
 EOF
