@@ -13,6 +13,12 @@ fi
 [[ "$(wbeam_deb_evdi_runtime_package noble)" == libevdi1 ]]
 [[ "$(wbeam_deb_evdi_build_package bookworm)" == libevdi0-dev ]]
 [[ "$(wbeam_deb_evdi_build_package noble)" == libevdi-dev ]]
+[[ "$(wbeam_deb_evdi_soname bookworm)" == libevdi.so.0 ]]
+[[ "$(wbeam_deb_evdi_soname noble)" == libevdi.so.1 ]]
+if wbeam_deb_evdi_soname unknown >/dev/null; then
+  echo "[deb] Unsupported target SONAME was accepted" >&2
+  exit 1
+fi
 [[ "$(wbeam_deb_package_version 0.1.3-rc.1 bookworm)" == '0.1.3~rc.1+bookworm' ]]
 [[ "$(wbeam_deb_package_version 0.1.3-rc.1 noble)" == '0.1.3~rc.1+noble' ]]
 [[ "$(wbeam_deb_package_version 0.1.3 noble)" == '0.1.3+noble' ]]
