@@ -34,6 +34,7 @@ quality_gates:
     - ./scripts/ci/check-repo-layout.sh
     - ./scripts/ci/check-boundaries.sh
     - ./scripts/ci/validate-e2e-matrix.sh
+    - bash scripts/ci/test-evdi-diagnostics.sh
     - bash scripts/ci/check-version-consistency.sh
     - bash -n scripts/ci/*.sh scripts/virtual-deps-check.sh scripts/virtual-deps-install.sh wbeam host/scripts/run_wbeamd.sh
   rules:
@@ -189,7 +190,9 @@ build_rpm:
   needs:
     - job: build_apk_release
       artifacts: true
-  image: fedora:41
+  # Fedora 43 is the declared RPM release target; cross-building on Fedora 41
+  # cannot establish driver/library compatibility with kernel 6.19.
+  image: fedora:43
   script:
     - dnf -y install ca-certificates curl git jq rust cargo gcc gcc-c++ make pkgconf-pkg-config
     - dnf -y install openssl-devel dbus-devel gstreamer1-devel gstreamer1-plugins-base-devel nodejs webkit2gtk4.1-devel gtk3-devel libsoup3-devel libayatana-appindicator-gtk3-devel
