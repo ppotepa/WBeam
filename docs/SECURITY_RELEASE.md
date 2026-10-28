@@ -26,6 +26,38 @@
 - **Release signing** uses protected CI secrets and `apksigner`. Never publish
   a debug-signed APK or silently uninstall an old APK on signature mismatch.
 
+## Control API listener policy (issue #151)
+
+WBeam's native control API includes unauthenticated `/v1/start`,
+`/v1/stop`, `/v1/apply` and other session-management operations.
+The daemon **binds to `127.0.0.1:5001` by default**; this permits
+Android USB connections through `adb reverse tcp:5001 tcp:5001`
+without exposing control commands to nearby LAN devices.
+
+For **explicitly trusted private LAN** access, an operator must set both:
+
+```bash
+WBEAM_CONTROL_BIND_ADDR=192.168.1.20 \
+WBEAM_ALLOW_UNAUTHENTICATED_LAN_CONTROL=1 \
+  bash host/scripts/run_wbeamd.sh 5001 5000
+```
+
+The equivalent direct daemon flags are
+`--control-bind-address 192.168.1.20` and
+`--allow-unauthenticated-lan-control`. A non-loopback address without
+the second flag is refused before binding a socket. The daemon logs a
+warning for any deliberately public listener.
+
+**LAN mode has no authentication, TLS or authorization.** Never expose
+port 5001 to the internet, public/guest Wi-Fi or untrusted peers. Use
+firewall restrictions on an isolated trusted network. Proper
+authenticated remote control requires separate protocol and Android
+client changes, followed by real hardware tests.
+
+Verify the listening interface with `ss -ltnp | grep ':5001'`.
+The separate video stream port has its own transport contract and must
+be evaluated independently.
+
 ## Manual verification required
 
 1. Build desktop under production CSP; verify Solid renders, scripts/styles,
