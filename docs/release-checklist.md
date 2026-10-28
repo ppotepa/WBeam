@@ -57,4 +57,48 @@ and presence of evidence files. It cannot independently prove that a person
 actually used physical hardware: a named QA signoff and review remain
 mandatory. A missing report must block stable release approval.
 
-See also `docs/release-checklist.md` and epic #101.
+See epic #101 for the full task graph and Definition of Done.
+
+## Publication gate — RC versus stable
+
+The release publisher is **manual** and requires protected CI approval and a
+completed QA report. It does not automatically create a stable release from
+pushing to the `release` branch.
+
+1. Merge and run all mandatory quality jobs, including native build, Android
+   unit tests, and the package asset checks. The source version and
+   `VERSION.txt` revision must match the commit being released.
+2. Configure protected GitLab CI variables `GH_TOKEN`, `GH_OWNER`,
+   `GH_REPO`, and release signing variables documented in
+   `docs/ANDROID_RELEASE_SIGNING.md`. Keep signing keys out of git and logs.
+3. Have a named QA reviewer complete the physical matrix with real Linux
+   package/APK artifacts. Place `hardware-acceptance.json` and its relative
+   evidence directory in a private CI job workspace/artifact mount. Set
+   `WBEAM_HARDWARE_ACCEPTANCE_FILE` to the accessible report path. A lone JSON
+   file without the referenced evidence is rejected.
+4. Obtain a maintainer decision on the declared MIT licensing and add the
+   appropriate root `LICENSE` file. The publisher refuses to run without it.
+5. Set protected `WBEAM_RELEASE_APPROVED=1` for the manual publication job
+   **after** reviewing CI results and the hardware evidence.
+6. Run `scripts/ci/check-release-artifacts.sh`: exactly one signed APK,
+   at least one DEB and RPM, matching `VERSION.txt` and Android
+   `versionCode`. Verify generated `SHA256SUMS.txt`.
+7. Trigger **manual** GitLab `publish_github_release` for the tested commit.
+   Version tags `v0.1.3-rc.1` / `v0.1.3-beta.1` publish with
+   `prerelease=true`. Only `v0.1.3` and similar stable semantic version tags
+   publish with `prerelease=false`. A release-branch build updates
+   `release-latest` as a prerelease, never an automatic stable tag.
+8. Tagged releases are immutable: publishing an existing version/tag or
+   replacing an existing asset fails. Produce a **new** tag for the next
+   release, and record its checksums and known limitations.
+
+After publishing, install the downloaded DEB/RPM/APK on a **clean** machine,
+compare the published SHA256 checksums and validate USB capture/reconnection.
+Do not fast-forward `master` automatically as part of an unreviewed branch
+push. The optional manual GitLab fast-forward job must be used only after
+stable signoff and branch review.
+
+**Known unmet gates as of this draft:** no signed APK and clean-package test
+artifacts were built in this session, no physical QA report exists, and a root
+`LICENSE` file is not present in the audited repository. These are blockers,
+not completed tasks. Refer to epic #101 and tasks #114–#120.
