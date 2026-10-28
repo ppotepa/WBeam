@@ -45,7 +45,7 @@ test("signed APK CI job explicitly waits for every release quality gate", () => 
     "quality_gates", "quality_frontend", "quality_rust_host",
     "quality_tauri_native", "quality_android_unit", "quality_e2e_runner",
   ]) {
-    assert.match(section, new RegExp(`job: ${job}\\\\b`));
+    assert.match(section, new RegExp(`job: ${job}\\b`));
   }
-  assert.match(gitlab, /publish_github_release:[\\s\\S]*?job: build_apk_release/);
+  assert.match(gitlab, /publish_github_release:[\s\S]*?job: build_apk_release/);
 });
