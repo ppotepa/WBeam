@@ -36,3 +36,12 @@ test("installer state does not claim finished before status.done", () => {
   assert.match(app, /installation outcome unknown/);
   assert.match(app, /disabled=\{virtualSetupInstalling\(\) \|\| !doctor.actionable \|\| doctor.ok \|\| hasActiveStreams\(\)\}/);
 });
+
+test("native EVDI doctor limits the subprocess independently of JS timeout", () => {
+  assert.match(native, /command_output_timeout\(/);
+  assert.match(native, /std::time::Duration::from_secs\(4\)/);
+  // Missing prerequisites are reported by JSON even if the shell diagnostic
+  // itself returns a nonzero exit status.
+  assert.match(native, /let ok = response\.get\("ok"\)/);
+  assert.match(native, /&& output\.status\.success\(\)/);
+});

@@ -17,5 +17,6 @@ grep -Fq 'SHA256SUMS.txt' "$manifest"
 grep -Fq 'sha256sum -c SHA256SUMS.txt' "$manifest"
 grep -Fq 'debs=(' "$manifest"
 grep -Fq 'rpms=(' "$manifest"
+grep -Fq 'wbeam_deb_has_both_artifacts' "$manifest"
 grep -Fq 'apks=(' "$manifest"
 echo '[release] Static publication guard contract: OK'

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 DRY_RUN=0
 YES=0
@@ -101,7 +102,9 @@ if [[ "$manager" == "unknown" ]]; then
   exit 2
 fi
 
-if [[ "$YES" -ne 1 ]]; then
+# Previewing commands must never demand input, acquire privileges or mutate
+# the host. In particular, --dry-run is useful in unattended diagnostics.
+if [[ "$YES" -ne 1 && "$DRY_RUN" -ne 1 ]]; then
   echo "[virtual-deps] This will install dependencies for virtual desktop mode."
   echo "[virtual-deps] Continue? [y/N]"
   read -r answer
@@ -133,6 +136,11 @@ case "$manager" in
     ;;
 esac
 
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  echo "[virtual-deps] DRY-RUN completed. No packages were installed, no module was loaded."
+  exit 0
+fi
+
 if ! command_exists modprobe; then
   echo "[virtual-deps] ERROR: modprobe not found; EVDI is not ready." >&2
   exit 1
@@ -143,6 +151,14 @@ if ! with_sudo modprobe evdi initial_device_count=4 && ! with_sudo modprobe evdi
 fi
 if command_exists lsmod && ! lsmod | grep -q '^evdi '; then
   echo "[virtual-deps] ERROR: EVDI is not loaded. A reboot or MOK enrollment may be required." >&2
+  exit 1
+fi
+
+# A loaded module alone is insufficient: the already-packaged streamer also
+# needs its matching runtime libevdi.so.0/.1. The checker retains diagnostic
+# JSON and returns nonzero if the installation is still incomplete.
+if ! bash "$SCRIPT_DIR/virtual-deps-check.sh" --json --backend evdi; then
+  echo "[virtual-deps] EVDI installed/loaded, but runtime prerequisites are incomplete." >&2
   exit 1
 fi
 

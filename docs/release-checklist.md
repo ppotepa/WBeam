@@ -82,7 +82,10 @@ pushing to the `release` branch.
    **after** reviewing CI results and the hardware evidence.
 6. Run `scripts/ci/check-release-artifacts.sh`: exactly one signed APK,
    at least one DEB and RPM, matching `VERSION.txt` and Android
-   `versionCode`. Verify generated `SHA256SUMS.txt`.
+   `versionCode`. Both distro-native DEBs are mandatory: **Bookworm**
+   (linked with libevdi0) and **Ubuntu Noble 24.04** (linked with libevdi1),
+   plus RPM and APK. Verify `dpkg-deb -f`, `ldd`, clean installs and
+   generated `SHA256SUMS.txt`.
 7. Trigger **manual** GitLab `publish_github_release` for the tested commit.
    Version tags `v0.1.3-rc.1` / `v0.1.3-beta.1` publish with
    `prerelease=true`. Only `v0.1.3` and similar stable semantic version tags

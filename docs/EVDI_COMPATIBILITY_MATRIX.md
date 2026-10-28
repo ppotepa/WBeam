@@ -32,6 +32,30 @@ missing header files as `dkms-kernel-headers-mismatch`; other DKMS build
 errors separately. Do not mistakenly attribute an old DKMS log from a
 different kernel to the current module.
 
+## Runtime vs build requirements
+
+The desktop's **EVDI Host setup** is a *runtime readiness* probe, not a
+development-toolchain audit. If EVDI is already loaded, it must not require
+kernel headers for the running kernel. If the distributed streamer can load
+the **matching ABI library** — `libevdi.so.0` on Debian Bookworm or
+`libevdi.so.1` on Ubuntu Noble — it must not require the unversioned
+`libevdi.so` symlink that only a development package normally supplies.
+Do not replace one SONAME with the other: the two ABIs require distinct
+binaries and package metadata (tracked by [#144](https://github.com/ppotepa/WBeam/issues/144)).
+
+Use `scripts/virtual-deps-check.sh --json --backend evdi` to verify runtime
+readiness: loaded module, runtime SONAME, and actionable failure details.
+The script now also returns a nonzero exit code when `ok=false`, while
+keeping the same JSON schema for the desktop doctor.
+
+**Building EVDI from source/RPM** still requires matching kernel headers
+if DKMS must compile a missing module, and the unversioned linker
+`libevdi.so` for `-levdi`. Keep this separate in
+`scripts/ci/build_rpm.sh` and `scripts/evdi-diagnose.sh`. The
+`scripts/ci/test-virtual-deps-runtime.sh` fixture verifies that a loaded
+module and runtime library can pass even when headers/development symlinks
+are absent.
+
 ## Distinguish failures
 
 1. **DKMS compile error**: e.g. `-Werror=sign-compare` from changed kernel

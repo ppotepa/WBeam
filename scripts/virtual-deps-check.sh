@@ -131,27 +131,39 @@ missing=()
 install_cmd=""
 
 if [[ "$BACKEND" == "evdi" ]]; then
-  # Kernel DRM EVDI capture does NOT require Xvfb or xrandr.
-  # Check the actual running kernel instead of a hardcoded headers package.
+  # Only check runtime requirements. Kernel headers and the unversioned
+  # libevdi.so linker symlink are build-time inputs, not prerequisites for
+  # a working, already loaded EVDI DRM module.
   kernel="$(uname -r)"
-  if [[ ! -e "/lib/modules/${kernel}/build/Makefile" ]]; then
-    missing+=("kernel-headers-for-${kernel}")
-  fi
   evdi_module_found=0
-  if ! command_exists modinfo || ! modinfo evdi >/dev/null 2>&1; then
-    missing+=("evdi-kernel-module")
-  else
+  evdi_module_loaded=0
+
+  if command_exists modinfo && modinfo evdi >/dev/null 2>&1; then
     evdi_module_found=1
-    if ! command_exists lsmod || ! lsmod | grep -q '^evdi '; then
+  fi
+  if command_exists lsmod && lsmod | grep -q '^evdi '; then
+    evdi_module_loaded=1
+  fi
+  if [[ "$evdi_module_loaded" -eq 0 ]]; then
+    if [[ "$evdi_module_found" -eq 0 ]]; then
+      missing+=("evdi-kernel-module")
+      # Headers are only required to *build* a missing kernel module.
+      if [[ ! -e "/lib/modules/${kernel}/build/Makefile" ]]; then
+        missing+=("kernel-headers-for-${kernel}")
+      fi
+    else
       missing+=("evdi-module-loaded")
       if command_exists mokutil && mokutil --sb-state 2>/dev/null | grep -qi enabled; then
-        # A Secure Boot / MOK check is required; it is not automatically the cause.
         missing+=("evdi-secureboot-mok-check")
       fi
     fi
   fi
-  if ! evdi_find_linkable_library >/dev/null; then
-    missing+=("libevdi-linker-library")
+
+  # Debian Bookworm links libevdi.so.0, Ubuntu Noble libevdi.so.1.
+  # Requiring unversioned libevdi.so from a -dev package incorrectly blocks
+  # installed binaries even when the matching runtime SONAME is available.
+  if ! evdi_find_runtime_library >/dev/null; then
+    missing+=("libevdi-runtime-library")
   fi
   # Classify the latest DKMS log only when no module was found. A stale
   # historical log must not block a successfully installed EVDI module.
@@ -201,4 +213,11 @@ else
     echo "[virtual-deps] missing=${missing[*]}"
     echo "[virtual-deps] install_cmd=$install_cmd"
   fi
+fi
+
+# The JSON document is emitted in both cases; the exit code also needs to
+# reflect readiness for CLI callers and shell automation. The Tauri doctor
+# reads .ok from JSON and accepts a nonzero diagnostic exit.
+if [[ "$ok" != true ]]; then
+  exit 1
 fi

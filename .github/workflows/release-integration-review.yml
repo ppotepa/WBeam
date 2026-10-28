@@ -3,7 +3,11 @@ name: WBeam Release Integration Review
 on:
   push:
     branches:
-      - release-013/review-integration-fixes
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -38,7 +42,10 @@ jobs:
         run: |
           bash -n wbeam scripts/ci/*.sh scripts/virtual-deps-check.sh scripts/virtual-deps-install.sh
           bash scripts/ci/test-release-version.sh
+          bash scripts/ci/test-deb-target.sh
           bash scripts/ci/test-evdi-diagnostics.sh
+          bash scripts/ci/test-virtual-deps-runtime.sh
+          bash scripts/ci/test-virtual-deps-install-dry-run.sh
           bash scripts/ci/test-publication-contract.sh
           bash scripts/ci/check-version-consistency.sh
       - name: Python E2E runner tests

@@ -196,11 +196,16 @@ pub(crate) fn run_virtual_install_job() {
 pub(crate) async fn evdi_deps_check() -> Result<VirtualDoctor, String> {
     tauri::async_runtime::spawn_blocking(|| {
         let script = crate::repo_root().join("scripts/virtual-deps-check.sh");
-        let output = Command::new("bash")
-            .arg(script)
-            .args(["--json", "--backend", "evdi"])
-            .output()
-            .map_err(|e| format!("EVDI dependency check could not start: {e}"))?;
+        // The frontend's 5s Promise timeout does not cancel a native child
+        // process. Bound the read-only check to 4s and kill/wait for its
+        // process on timeout, while preserving JSON from nonzero diagnostics.
+        let mut command = Command::new("bash");
+        command.arg(script).args(["--json", "--backend", "evdi"]);
+        let output = crate::process_timeout::command_output_timeout(
+            &mut command,
+            std::time::Duration::from_secs(4),
+            "EVDI dependency check",
+        )?;
         let response: Value = serde_json::from_slice(&output.stdout)
             .map_err(|e| format!("Invalid EVDI check output: {e}"))?;
         let missing_deps: Vec<String> = response.get("missing").and_then(Value::as_array)
