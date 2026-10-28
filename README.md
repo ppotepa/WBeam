@@ -218,7 +218,10 @@ is not a certified stable release until quality and physical acceptance gates pa
 - Source development: `./install-wbeam` and `./redeploy-local`.
 - Prebuilt RPM/DEB (once published): install with your package manager, launch
   `wbeam-desktop`, and use `wbeam android deploy` to install the bundled
-  signed APK without Android SDK or Gradle.
+  signed APK without Android SDK or Gradle. The DEB files are **not
+  interchangeable**: use `wbeam_*+bookworm_*.deb` on Debian 12 or
+  `wbeam_*+noble_*.deb` on Ubuntu 24.04. They are compiled against
+  their respective EVDI ABI (`libevdi0` vs `libevdi1`).
 - Release signing: `docs/ANDROID_RELEASE_SIGNING.md`.
 - Physical Android acceptance: `docs/release-checklist.md`.
 
