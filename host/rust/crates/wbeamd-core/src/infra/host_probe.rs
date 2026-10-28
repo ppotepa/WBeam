@@ -195,17 +195,77 @@ impl HostProbe {
         backends
     }
 
-    /// Returns true when at least one EVDI device node is accessible.
+    /// Returns true if an EVDI DRM card exists, or if a loaded EVDI module
+    /// exposes the control node used by evdi_add_device().
     pub fn evdi_device_available() -> bool {
-        // evdi devices appear as /dev/dri/evdi* after `modprobe evdi`.
-        if let Ok(entries) = std::fs::read_dir("/dev/dri") {
-            for entry in entries.flatten() {
-                if entry.file_name().to_string_lossy().starts_with("evdi") {
-                    return true;
-                }
+        // EVDI reuses /dev/dri/cardN, not /dev/dri/evdiN. See the EVDI
+        // upstream evdi_check_device() contract.
+        evdi_card_exists(Path::new("/sys/bus/platform/devices"), Path::new("/dev/dri"))
+            || Path::new("/sys/devices/evdi/add").exists()
+    }
+}
+
+
+fn evdi_card_exists(platform_devices: &Path, dev_dri: &Path) -> bool {
+    let Ok(platform) = fs::read_dir(platform_devices) else {
+        return false;
+    };
+    for device in platform.flatten() {
+        if !device.file_name().to_string_lossy().starts_with("evdi") {
+            continue;
+        }
+        let Ok(cards) = fs::read_dir(device.path().join("drm")) else {
+            continue;
+        };
+        for card in cards.flatten() {
+            let name = card.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with("card")
+                && name[4..].chars().all(|ch| ch.is_ascii_digit())
+                && dev_dri.join(name.as_ref()).exists()
+            {
+                return true;
             }
         }
-        false
+    }
+    false
+}
+
+#[cfg(test)]
+mod evdi_detection_tests {
+    use super::evdi_card_exists;
+    use std::{fs, path::Path};
+
+    #[test]
+    fn evdi_card_names_are_regular_drm_card_nodes() {
+        let root = std::env::temp_dir()
+            .join(format!("wbeam-evdi-check-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let sysfs = root.join("platform");
+        let dri = root.join("dev/dri");
+        fs::create_dir_all(sysfs.join("evdi.0/drm")).unwrap();
+        fs::create_dir_all(&dri).unwrap();
+        fs::write(sysfs.join("evdi.0/drm/card7"), "").unwrap();
+        fs::write(dri.join("card7"), "").unwrap();
+        assert!(evdi_card_exists(&sysfs, &dri));
+        fs::remove_file(dri.join("card7")).unwrap();
+        assert!(!evdi_card_exists(&sysfs, &dri));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_generic_gpu_card_is_not_evdi() {
+        let root = std::env::temp_dir()
+            .join(format!("wbeam-non-evdi-check-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let sysfs = root.join("platform");
+        let dri = root.join("dev/dri");
+        fs::create_dir_all(sysfs.join("gpu.0/drm")).unwrap();
+        fs::create_dir_all(&dri).unwrap();
+        fs::write(sysfs.join("gpu.0/drm/card0"), "").unwrap();
+        fs::write(dri.join("card0"), "").unwrap();
+        assert!(!evdi_card_exists(Path::new(&sysfs), &dri));
+        fs::remove_dir_all(&root).unwrap();
     }
 }
 
