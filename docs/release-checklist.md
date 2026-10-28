@@ -169,3 +169,26 @@ i `libevdi0-dev`. Na Ubuntu Noble budować przeciwko właściwemu ABI
 6.19 ani faktycznej transmisji EVDI do Androida: sprzętowe DoD
 #117/#120 pozostają obowiązkowe.
 
+
+## Installed daemon log storage (issue #154)
+
+Package installations place read-only files in `/usr/share/wbeam`.
+The **Rust daemon**, not only the Tauri desktop, must write logs outside
+the package tree. With `<WBEAM_ROOT>/VERSION.txt` present (DEB/RPM),
+`wbeamd-server` resolves its default log directory to:
+
+- `$XDG_STATE_HOME/wbeam/logs` when `XDG_STATE_HOME` is an absolute path;
+- otherwise `$HOME/.local/state/wbeam/logs`.
+
+The `--log-dir PATH` CLI argument always takes precedence. Source-tree
+runs retain their historical `<repo>/host/rust/logs` default.
+If neither state-home path is available for an installed daemon, startup
+must fail with an actionable error; it must not attempt to write under
+`/usr/share/wbeam`.
+
+Validate `bash scripts/ci/test-daemon-log-location.sh`, the Rust
+`daemon_log_dir_tests` and a **clean package install under an ordinary
+non-root user**. Confirm `systemctl --user status wbeamd-rust`,
+`ss -ltnp | grep ':5001'`, and `ls -l ~/.local/state/wbeam/logs`.
+The port should bind on loopback by default as in issue #151. Record
+any failed startup with a redacted journal excerpt under issue #154.
