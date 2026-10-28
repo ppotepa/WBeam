@@ -41,9 +41,21 @@ jq -e '.ok == true and (.missing | length) == 0' <<<"$result" >/dev/null || {
   exit 1
 }
 
-# Missing runtime SONAME remains actionable, but does not suggest rebuilding
-# the kernel module when it is already loaded.
+# Debian 12 uses libevdi.so.0, Ubuntu 24.04 uses libevdi.so.1.
+# Test both without requiring the build-only unversioned linker symlink.
 rm "$tmp/lib/libevdi.so.1"
+touch "$tmp/lib/libevdi.so.0"
+[[ "$(evdi_find_runtime_library)" == "$tmp/lib/libevdi.so.0" ]]
+result="$(bash "$CHECK" --json --backend evdi)"
+jq -e '.ok == true and (.missing | length) == 0' <<<"$result" >/dev/null || {
+  echo "[evdi][FAIL] Debian Bookworm .so.0 should satisfy runtime check" >&2
+  echo "$result" >&2
+  exit 1
+}
+
+# Missing *both* SONAME versions must be actionable, but should not
+# suggest rebuilding the kernel when it is already loaded.
+rm "$tmp/lib/libevdi.so.0"
 status=0
 result="$(bash "$CHECK" --json --backend evdi)" || status=$?
 [[ "$status" -eq 1 ]] || { echo "[evdi][FAIL] missing library diagnostic exit: $status" >&2; exit 1; }
