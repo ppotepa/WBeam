@@ -37,8 +37,11 @@ different kernel to the current module.
 The desktop's **EVDI Host setup** is a *runtime readiness* probe, not a
 development-toolchain audit. If EVDI is already loaded, it must not require
 kernel headers for the running kernel. If the distributed streamer can load
-the ABI library `libevdi.so.1`, it must not require the unversioned
+the **matching ABI library** — `libevdi.so.0` on Debian Bookworm or
+`libevdi.so.1` on Ubuntu Noble — it must not require the unversioned
 `libevdi.so` symlink that only a development package normally supplies.
+Do not replace one SONAME with the other: the two ABIs require distinct
+binaries and package metadata (tracked by [#144](https://github.com/ppotepa/WBeam/issues/144)).
 
 Use `scripts/virtual-deps-check.sh --json --backend evdi` to verify runtime
 readiness: loaded module, runtime SONAME, and actionable failure details.
