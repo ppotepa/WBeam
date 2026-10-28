@@ -16,8 +16,14 @@ function createMemo(compute) { return compute; }
 const compiled = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2020 },
 }).outputText;
-const code = compiled.replace('import { createMemo, createSignal } from "solid-js";', "");
-const { createSessionManager } = await import(`data:text/javascript;base64,${Buffer.from(shim + code).toString("base64")}`);
+const coordinatorSource = readFileSync(new URL("../src/managers/refreshCoordinator.ts", import.meta.url), "utf8");
+const coordinatorCode = ts.transpileModule(coordinatorSource, {
+  compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2020 },
+}).outputText;
+const code = compiled
+  .replace('import { createMemo, createSignal } from "solid-js";', "")
+  .replace('import { createRefreshCoordinator } from "./refreshCoordinator";', "");
+const { createSessionManager } = await import(`data:text/javascript;base64,${Buffer.from(shim + coordinatorCode + code).toString("base64")}`);
 
 const device = { serial: "usb-1", deviceClass: "Phone", streamState: "IDLE" };
 const service = { available: true, installed: true, active: true, enabled: true, summary: "running" };
@@ -100,4 +106,57 @@ test("duplicate device actions are guarded while the first is pending", async ()
   release();
   assert.equal((await first).ok, true);
   assert.equal(session.deviceActionBusy().length, 0);
+});
+
+test("manual Refresh during silent poll queues a forced follow-up instead of disappearing", async () => {
+  let releaseFirst;
+  let startedFirst;
+  const firstInFlight = new Promise((resolve) => { startedFirst = resolve; });
+  const holdFirst = new Promise((resolve) => { releaseFirst = resolve; });
+  let requests = 0;
+  const session = createSessionManager(api({
+    getDevices: async () => {
+      requests++;
+      if (requests === 1) {
+        startedFirst();
+        await holdFirst;
+      }
+      return { hostApkVersion: "1", daemonApkVersion: "1", devices: [device], error: null };
+    },
+  }));
+  const background = session.refreshSnapshot({ silent: true, forceDevices: false });
+  await firstInFlight;
+  const manual = session.refreshSnapshot();
+  assert.equal(manual, background);
+  assert.equal(session.refreshing(), true);
+  releaseFirst();
+  await manual;
+  assert.equal(requests, 2, "manual request must execute despite initial poll being in flight");
+  assert.equal(session.refreshInFlight(), false);
+  assert.equal(session.refreshing(), false);
+});
+
+test("repeated focus/visibility requests during a poll coalesce into one pass", async () => {
+  let releaseFirst;
+  let startedFirst;
+  const firstInFlight = new Promise((resolve) => { startedFirst = resolve; });
+  const holdFirst = new Promise((resolve) => { releaseFirst = resolve; });
+  let requests = 0;
+  const session = createSessionManager(api({
+    getDevices: async () => {
+      requests++;
+      if (requests === 1) {
+        startedFirst();
+        await holdFirst;
+      }
+      return { hostApkVersion: "1", daemonApkVersion: "1", devices: [device], error: null };
+    },
+  }));
+  const background = session.refreshSnapshot({ silent: true, forceDevices: false });
+  await firstInFlight;
+  void session.refreshSnapshot({ silent: true, forceDevices: true });
+  void session.refreshSnapshot({ silent: true, forceDevices: true });
+  releaseFirst();
+  await background;
+  assert.equal(requests, 2);
 });
