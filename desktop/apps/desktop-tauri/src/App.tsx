@@ -35,6 +35,7 @@ import { createSessionManager } from "./managers/sessionManager";
 import { resolveSupportedBackend, type SupportedCaptureBackend } from "./managers/backendPolicy";
 import { createPollingLoop } from "./managers/pollingLoop";
 import { validateConnectForm } from "./managers/connectValidation";
+import { decideAutoConnectBackend } from "./managers/autoconnectPolicy";
 import connectResolutionPresets from "./config/connect-resolution-presets.json";
 import connectEncoderOptions from "./config/connect-encoder-options.json";
 
@@ -296,6 +297,7 @@ export default function App() {
   const [connectDialogDoctorLoading, setConnectDialogDoctorLoading] = createSignal(false);
   const [connectDialogBlockReason, setConnectDialogBlockReason] = createSignal("");
   const [autoConnectBusy, setAutoConnectBusy] = createSignal(false);
+  const [autoConnectSummary, setAutoConnectSummary] = createSignal("");
   const [waylandExperimentalDuplication, setWaylandExperimentalDuplication] = createSignal(
     loadWaylandExperimentalDuplication(),
   );
@@ -354,45 +356,73 @@ export default function App() {
 
   function autoConnectDisabledReason(): string {
     if (!session.service().active) return "Desktop service must be running";
+    if (session.deviceSnapshotStale()) return "Device status is outdated. Refresh before connecting.";
     if (session.devices().length === 0) return "No connected devices";
-    const hasConnectable = session.devices().some((device) => connectDisabledReason(device).length === 0);
-    if (!hasConnectable) return "No devices eligible for connect";
-    return "";
+    const eligible = session.devices().filter((device) => connectDisabledReason(device).length === 0);
+    if (eligible.length === 0) return "No devices eligible for connect";
+    return decideAutoConnectBackend(session.hostProbe(), session.devices().length).reason;
   }
 
   async function autoConnectAll(): Promise<void> {
     if (autoConnectBusy()) return;
     const blocked = autoConnectDisabledReason();
-    if (blocked.length > 0) {
+    if (blocked) {
       session.setError(blocked);
       return;
     }
-
-    setAutoConnectBusy(true);
-    session.setError("");
+    const decision = decideAutoConnectBackend(session.hostProbe(), session.devices().length);
+    if (!decision.backend) {
+      session.setError(decision.reason);
+      return;
+    }
+    const backend = decision.backend;
+    const devices = [...session.devices()];
+    let accepted = 0;
+    let skipped = 0;
+    let failed = 0;
     const errors: string[] = [];
-    for (const device of session.devices()) {
-      const reason = connectDisabledReason(device);
-      if (reason.length > 0) continue;
-      const size = resolveSessionSizeForPreset(device, "device_max");
-      const connectConfig: ConnectSessionConfig = {
-        captureBackend: "evdi",
-        manualFps: 60,
-        manualBitrateKbps: 20000,
-        size,
-      };
-      try {
-        const result = await session.connectDevice(device, "virtual_monitor", connectConfig);
-        if (!result.ok) errors.push(`${device.serial}: ${result.error}`);
-      } catch (err) {
-        errors.push(`${device.serial}: ${String(err)}`);
+    setAutoConnectBusy(true);
+    setAutoConnectSummary("");
+    session.setError("");
+    try {
+      for (const snapshot of devices) {
+        const device = session.devices().find((d) => d.serial === snapshot.serial);
+        if (!device) {
+          skipped += 1;
+          errors.push(`${snapshot.serial}: disconnected during setup`);
+          continue;
+        }
+        const reason = connectDisabledReason(device);
+        if (reason) {
+          skipped += 1;
+          continue;
+        }
+        const size = resolveSessionSizeForPreset(device, "device_max");
+        const connectConfig: ConnectSessionConfig = {
+          captureBackend: backend,
+          encoder: "h264",
+          manualFps: 60,
+          manualBitrateKbps: 20000,
+          size,
+        };
+        try {
+          const result = await session.connectDevice(device, "virtual_monitor", connectConfig);
+          if (result.ok) accepted += 1;
+          else {
+            failed += 1;
+            errors.push(`${device.serial}: ${result.error}`);
+          }
+        } catch (err) {
+          failed += 1;
+          errors.push(`${device.serial}: ${String(err)}`);
+        }
       }
+      setAutoConnectSummary(`Connection requests: ${accepted} accepted, ${skipped} skipped, ${failed} failed (${backend}). Streaming state is checked separately.`);
+      if (errors.length > 0) session.setError(`Auto-connect issues: ${errors.join("; ")}`);
+      await session.refreshSnapshot({ silent: true, forceDevices: true });
+    } finally {
+      setAutoConnectBusy(false);
     }
-    if (errors.length > 0) {
-      session.setError(`Auto-connect issues: ${errors.join("; ")}`);
-    }
-    await session.refreshSnapshot({ silent: true, forceDevices: true });
-    setAutoConnectBusy(false);
   }
 
   function modeLabel(): "Basic" | "Advanced" {
@@ -816,7 +846,7 @@ function resolveEncoderMode(
           <div class="toolbar-row">
             <button
               class="toolbar-btn toolbar-btn-primary"
-              title="Connect all devices using EVDI at native resolution, 60 fps, 20 Mbps"
+              title="Connect eligible devices using available supported backends. Multi-device requires EVDI."
               disabled={autoConnectBusy() || autoConnectDisabledReason().length > 0}
               onClick={() => void autoConnectAll()}
             >
@@ -837,8 +867,8 @@ function resolveEncoderMode(
           <Show when={!autoConnectBusy() && autoConnectDisabledReason().length > 0}>
             <p class="toolbar-hint toolbar-hint-warn">{autoConnectDisabledReason()}</p>
           </Show>
-          <Show when={isWaylandPortalHost()}>
-            <p class="toolbar-hint">Wayland host — auto-connect uses EVDI. Ensure EVDI module is loaded.</p>
+          <Show when={autoConnectSummary()}>
+            <p class="toolbar-hint" role="status">{autoConnectSummary()}</p>
           </Show>
         </section>
 
