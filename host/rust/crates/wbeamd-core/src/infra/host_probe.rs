@@ -195,13 +195,11 @@ impl HostProbe {
         backends
     }
 
-    /// Returns true if an EVDI DRM card exists, or if a loaded EVDI module
-    /// exposes the control node used by evdi_add_device().
+    /// Reports usable EVDI capability only after a DRM card node exists.
     pub fn evdi_device_available() -> bool {
-        // EVDI reuses /dev/dri/cardN, not /dev/dri/evdiN. See the EVDI
-        // upstream evdi_check_device() contract.
+        // EVDI reuses /dev/dri/cardN, not /dev/dri/evdiN. Merely exposing
+        // /sys/devices/evdi/add does not imply a non-root app can create one.
         evdi_card_exists(Path::new("/sys/bus/platform/devices"), Path::new("/dev/dri"))
-            || Path::new("/sys/devices/evdi/add").exists()
     }
 }
 
@@ -221,6 +219,7 @@ fn evdi_card_exists(platform_devices: &Path, dev_dri: &Path) -> bool {
             let name = card.file_name();
             let name = name.to_string_lossy();
             if name.starts_with("card")
+                && name.len() > 4
                 && name[4..].chars().all(|ch| ch.is_ascii_digit())
                 && dev_dri.join(name.as_ref()).exists()
             {
