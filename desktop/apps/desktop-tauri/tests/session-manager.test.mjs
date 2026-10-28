@@ -45,6 +45,21 @@ test("failed connect returns a failure and survives silent refresh", async () =>
   assert.equal(session.deviceActionErrors()[device.serial], "USB denied");
 });
 
+test("daemon response with error and devices: [] also preserves previous snapshot", async () => {
+  let failing = false;
+  const session = createSessionManager(api({
+    getDevices: async () => failing
+      ? { hostApkVersion: "", daemonApkVersion: "", devices: [], error: "ADB devices failed" }
+      : { hostApkVersion: "1", daemonApkVersion: "1", devices: [device], error: null },
+  }));
+  await session.refreshSnapshot({ forceDevices: true });
+  failing = true;
+  await session.refreshSnapshot({ forceDevices: true });
+  assert.equal(session.devices().length, 1);
+  assert.equal(session.deviceSnapshotStale(), true);
+  assert.match(session.refreshError(), /ADB devices failed/);
+});
+
 test("transient device poll failure retains last snapshot with stale flag", async () => {
   let failing = false;
   const session = createSessionManager(api({
