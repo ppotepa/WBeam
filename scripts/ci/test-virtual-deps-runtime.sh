@@ -44,18 +44,24 @@ jq -e '.ok == true and (.missing | length) == 0' <<<"$result" >/dev/null || {
 # Missing runtime SONAME remains actionable, but does not suggest rebuilding
 # the kernel module when it is already loaded.
 rm "$tmp/lib/libevdi.so.1"
-result="$(bash "$CHECK" --json --backend evdi)"
+status=0
+result="$(bash "$CHECK" --json --backend evdi)" || status=$?
+[[ "$status" -eq 1 ]] || { echo "[evdi][FAIL] missing library diagnostic exit: $status" >&2; exit 1; }
 jq -e '.ok == false and (.missing | index("libevdi-runtime-library") != null)' <<<"$result" >/dev/null
 jq -e '[.missing[] | select(startswith("kernel-headers-for-"))] | length == 0' <<<"$result" >/dev/null
 
 # An installed-but-unloaded module needs a modprobe/MOK check, not headers.
 touch "$tmp/lib/libevdi.so.1"
-result="$(WBEAM_TEST_LOADED=0 bash "$CHECK" --json --backend evdi)"
+status=0
+result="$(WBEAM_TEST_LOADED=0 bash "$CHECK" --json --backend evdi)" || status=$?
+[[ "$status" -eq 1 ]] || { echo "[evdi][FAIL] unloaded module diagnostic exit: $status" >&2; exit 1; }
 jq -e '.ok == false and (.missing | index("evdi-module-loaded") != null)' <<<"$result" >/dev/null
 jq -e '[.missing[] | select(startswith("kernel-headers-for-"))] | length == 0' <<<"$result" >/dev/null
 
 # Only the missing module triggers the DKMS/header build diagnosis.
-result="$(WBEAM_TEST_LOADED=0 WBEAM_TEST_MODINFO_CODE=1 bash "$CHECK" --json --backend evdi)"
+status=0
+result="$(WBEAM_TEST_LOADED=0 WBEAM_TEST_MODINFO_CODE=1 bash "$CHECK" --json --backend evdi)" || status=$?
+[[ "$status" -eq 1 ]] || { echo "[evdi][FAIL] missing module diagnostic exit: $status" >&2; exit 1; }
 jq -e '.ok == false and (.missing | index("evdi-kernel-module") != null)' <<<"$result" >/dev/null
 jq -e '[.missing[] | select(startswith("kernel-headers-for-"))] | length == 1' <<<"$result" >/dev/null
 
