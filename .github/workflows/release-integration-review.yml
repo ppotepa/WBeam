@@ -11,7 +11,7 @@ permissions:
 jobs:
   frontend:
     name: Solid/TypeScript + Node regressions
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -28,7 +28,7 @@ jobs:
 
   python-and-shell:
     name: Release checks / E2E runner / package scripts
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -46,7 +46,7 @@ jobs:
 
   rust-host:
     name: Rust API and core unit tests
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -62,7 +62,7 @@ jobs:
 
   tauri-native:
     name: Tauri Rust tests / compile
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -86,7 +86,7 @@ jobs:
 
   android-debug:
     name: Android Java/JUnit/assembleDebug
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
