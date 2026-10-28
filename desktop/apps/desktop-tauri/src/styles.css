@@ -29,17 +29,21 @@ body {
 }
 
 .basic-400 {
-  width: min(400px, calc(100vw - 1rem));
-  min-width: min(400px, calc(100vw - 1rem));
-  max-width: min(400px, calc(100vw - 1rem));
-  height: min(800px, calc(100vh - 1rem));
-  min-height: min(800px, calc(100vh - 1rem));
-  max-height: min(800px, calc(100vh - 1rem));
+  width: min(520px, calc(100vw - 1rem));
+  min-width: 0;
+  max-width: calc(100vw - 1rem);
+  height: min(740px, calc(100dvh - 1rem));
+  min-height: 0;
+  max-height: calc(100dvh - 1rem);
   padding: 0.8rem;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   gap: 0.45rem;
+}
+
+.basic-400.mode-advanced {
+  width: min(720px, calc(100vw - 1rem));
 }
 
 .panel-header {
@@ -501,11 +505,22 @@ h1 {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(8, 12, 18, 0.72);
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 1rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
   display: grid;
   place-items: center;
   z-index: 120;
-  padding: 1rem;
+}
+
+.modal-backdrop::backdrop {
+  background: rgba(8, 12, 18, 0.8);
 }
 
 .connect-modal {
@@ -517,6 +532,9 @@ h1 {
   padding: 0.8rem;
   display: grid;
   gap: 0.55rem;
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .connect-modal h3 {
@@ -708,6 +726,10 @@ h1 {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.42rem;
+  position: sticky;
+  bottom: 0;
+  background: #0f1a2a;
+  padding-top: 0.35rem;
 }
 
 .setup-modal {
@@ -823,4 +845,32 @@ h1 {
 
 .install-bad {
   color: #ff9d9d;
+}
+
+/* Accessible keyboard navigation and lower-height desktop windows. */
+:where(button, select, input, textarea):focus-visible {
+  outline: 2px solid #8dc5ff;
+  outline-offset: 3px;
+}
+
+@media (max-height: 620px) {
+  .app-shell { align-items: stretch; }
+  .basic-400 { height: calc(100dvh - 1rem); }
+  .connect-modal { max-height: calc(100dvh - 1rem); }
+  .modal-backdrop { padding: 0.5rem; }
+}
+
+@media (max-width: 400px) {
+  .basic-400 { padding: 0.55rem; }
+  .connect-modal { width: calc(100vw - 1rem); }
+  .panel-header { flex-wrap: wrap; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinning, .device-row-busy::after, .install-progress-bar.running {
+    animation: none !important;
+  }
+  .device-btn, .toolbar-btn, .svc-btn, .refresh-btn, .icon-btn {
+    transition: none !important;
+  }
 }
