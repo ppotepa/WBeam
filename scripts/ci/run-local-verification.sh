@@ -97,7 +97,7 @@ run_step desktop_test npm "$ROOT_DIR/desktop/apps/desktop-tauri" npm test
 run_step desktop_build npm "$ROOT_DIR/desktop/apps/desktop-tauri" npm run build
 
 if [[ "$MODE" == full ]]; then
-  run_step host_rust cargo "$ROOT_DIR" cargo test --locked --manifest-path host/rust/Cargo.toml -p wbeamd-api -p wbeamd-core
+  run_step host_rust cargo "$ROOT_DIR" cargo test --locked --manifest-path host/rust/Cargo.toml -p wbeamd-api -p wbeamd-core -p wbeamd-server
   run_step host_streamer cargo "$ROOT_DIR" bash -c 'set -Eeuo pipefail; cargo check --locked --manifest-path host/rust/Cargo.toml -p wbeamd-streamer --no-default-features --features evdi; cargo test --locked --manifest-path host/rust/Cargo.toml -p wbeamd-streamer --no-default-features --features evdi'
   run_step tauri_rust cargo "$ROOT_DIR" cargo test --locked --manifest-path desktop/apps/desktop-tauri/src-tauri/Cargo.toml
   run_step tauri_check cargo "$ROOT_DIR" cargo check --locked --manifest-path desktop/apps/desktop-tauri/src-tauri/Cargo.toml
