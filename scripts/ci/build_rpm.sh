@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/runtime-assets.sh"
+source "${ROOT_DIR}/scripts/evdi-compat.sh"
 
 # RPM supports ~ for pre-release ordering (0.1.3~rc.1 < 0.1.3).
 RPM_VERSION="${WBEAM_VERSION/-rc./~rc.}"
@@ -12,6 +13,14 @@ RPM_RELEASE="1"
 TOPDIR="$(mktemp -d)"
 trap 'rm -rf "${TOPDIR}"' EXIT
 
+# The release contract requires EVDI; do not silently ship a Portal-only
+# streamer when Fedora's linkable libevdi.so is absent.
+if ! evdi_library="$(evdi_find_linkable_library)"; then
+  echo "[build_rpm] Missing EVDI linker library (libevdi.so). Configure the Fedora build runner to provide a compatible DisplayLink/EVDI development library or WBEAM_EVDI_LIB_DIR." >&2
+  echo "[build_rpm] Do not disable --features evdi to bypass this release gate." >&2
+  exit 1
+fi
+echo "[build_rpm] EVDI linker library: ${evdi_library}"
 echo "[build_rpm] Building Rust binaries..."
 cargo build --release -p wbeamd-server --manifest-path "${RUST_MANIFEST}"
 cargo build --release -p wbeamd-streamer --no-default-features --features evdi --manifest-path "${RUST_MANIFEST}"
