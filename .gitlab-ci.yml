@@ -36,6 +36,7 @@ quality_gates:
     - ./scripts/ci/validate-e2e-matrix.sh
     - bash scripts/ci/test-evdi-diagnostics.sh
     - bash scripts/ci/test-virtual-deps-runtime.sh
+    - bash scripts/ci/test-virtual-deps-install-dry-run.sh
     - bash scripts/ci/test-release-version.sh
     - bash scripts/ci/check-version-consistency.sh
     - bash scripts/ci/test-publication-contract.sh
