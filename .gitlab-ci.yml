@@ -372,13 +372,21 @@ ff_release_to_master:
         git remote set-url origin "https://oauth2:${PUSH_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
       fi
     - git fetch origin master release
-    - git checkout -B master origin/master
-    - git merge --ff-only origin/release
     - |
-      if ! git push origin master; then
-        echo "[ff_release_to_master] Push rejected (likely protected branch / missing rights)."
-        echo "[ff_release_to_master] Set CI variable GITLAB_PUSH_TOKEN (or GITLAB_TOKEN) with push rights to enable auto-ff."
+      if [ "${WBEAM_MASTER_FF_APPROVED:-0}" != "1" ]; then
+        echo "[ff_release_to_master] WBEAM_MASTER_FF_APPROVED=1 required for exact tested-commit integration." >&2
+        exit 1
       fi
+      # The release branch may have advanced after the stable tag was tested.
+      # Never fast-forward master to a newer, untested branch tip.
+      RELEASE_SHA="$(git rev-parse origin/release)"
+      if [ "$RELEASE_SHA" != "$CI_COMMIT_SHA" ]; then
+        echo "[ff_release_to_master] Release branch moved after tag; refusing to merge untested revision." >&2
+        exit 1
+      fi
+      git checkout -B master origin/master
+      git merge --ff-only "$CI_COMMIT_SHA"
+      git push origin master
   allow_failure: true
   when: manual
   rules:
