@@ -30,7 +30,7 @@ cd WBeam
 Fedora dependencies, builds the host from this checkout, installs the systemd
 user service, then runs Android phone onboarding.
 
-The recommended backend is Wayland/X11 fallback:
+The recommended supported fallback is Wayland Portal:
 
 ```bash
 ./install-wbeam --backend wayland
@@ -316,7 +316,7 @@ To disable auto dependency installation:
 ./redeploy-local --no-auto-deps
 ```
 
-To skip EVDI and force Wayland/X11 fallback only:
+To skip EVDI and use the supported Wayland Portal path only:
 
 ```bash
 WBEAM_REDEPLOY_WITH_EVDI=0 ./redeploy-local
