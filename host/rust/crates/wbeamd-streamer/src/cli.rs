@@ -15,6 +15,8 @@ pub enum StreamMode {
 pub enum CaptureBackend {
     Auto,
     WaylandPortal,
+    /// Retained for legacy source compatibility, disabled in release builds.
+    #[value(hide = true)]
     X11,
     Evdi,
 }
@@ -28,7 +30,7 @@ pub enum WaylandSourceType {
 #[derive(Debug, Parser, Clone)]
 #[command(
     name = "wbeamd-streamer",
-    about = "Host screencast (Wayland portal/X11) -> WBTP framed sender"
+    about = "Host screencast (Wayland Portal/EVDI) -> WBTP framed sender"
 )]
 pub struct Args {
     #[arg(long, default_value_t = 5000)]
@@ -139,6 +141,85 @@ fn defaults() -> ProfileDefaults {
     }
 }
 
+// A standalone streamer has no host daemon to choose a backend for it.
+// AUTO is safe only when a Wayland session can use Portal; DISPLAY may
+// describe XWayland and is never evidence that X11 capture is supported.
+fn resolve_release_capture_backend(
+    requested: CaptureBackend,
+    session: Option<&str>,
+    has_wayland_display: bool,
+    benchmark_game: bool,
+) -> Result<CaptureBackend> {
+    if benchmark_game {
+        // Synthetic benchmark does not capture any real desktop frames.
+        return Ok(CaptureBackend::WaylandPortal);
+    }
+    match requested {
+        CaptureBackend::Evdi => Ok(CaptureBackend::Evdi),
+        CaptureBackend::WaylandPortal => Ok(CaptureBackend::WaylandPortal),
+        CaptureBackend::X11 => anyhow::bail!(
+            "legacy X11 capture is disabled; select EVDI or Wayland Portal"
+        ),
+        CaptureBackend::Auto => {
+            if session.is_some_and(|kind| kind.eq_ignore_ascii_case("x11")) {
+                anyhow::bail!(
+                    "AUTO cannot capture an X11 session; select EVDI explicitly"
+                );
+            }
+            if session.is_some_and(|kind| kind.eq_ignore_ascii_case("wayland"))
+                || has_wayland_display
+            {
+                return Ok(CaptureBackend::WaylandPortal);
+            }
+            anyhow::bail!(
+                "AUTO needs a Wayland session with Portal; select EVDI explicitly on this host"
+            )
+        }
+    }
+}
+
+#[cfg(test)]
+mod release_capture_backend_tests {
+    use super::*;
+
+    #[test]
+    fn auto_uses_portal_on_wayland_even_with_xwayland_display() {
+        assert_eq!(
+            resolve_release_capture_backend(CaptureBackend::Auto, Some("wayland"), true, false)
+                .unwrap(),
+            CaptureBackend::WaylandPortal
+        );
+    }
+
+    #[test]
+    fn x11_and_unknown_sessions_never_fall_back_to_legacy() {
+        assert!(resolve_release_capture_backend(CaptureBackend::Auto, Some("x11"), false, false).is_err());
+        assert!(resolve_release_capture_backend(CaptureBackend::Auto, Some("x11"), true, false).is_err());
+        assert!(resolve_release_capture_backend(CaptureBackend::Auto, None, false, false).is_err());
+        assert!(resolve_release_capture_backend(CaptureBackend::X11, Some("x11"), false, false).is_err());
+    }
+
+    #[test]
+    fn explicit_evdi_is_allowed_independent_of_session_type() {
+        assert_eq!(
+            resolve_release_capture_backend(CaptureBackend::Evdi, Some("x11"), false, false).unwrap(),
+            CaptureBackend::Evdi
+        );
+        assert_eq!(
+            resolve_release_capture_backend(CaptureBackend::Auto, None, true, false).unwrap(),
+            CaptureBackend::WaylandPortal
+        );
+    }
+
+    #[test]
+    fn synthetic_benchmark_still_runs_without_a_desktop_session() {
+        assert_eq!(
+            resolve_release_capture_backend(CaptureBackend::Auto, None, false, true).unwrap(),
+            CaptureBackend::WaylandPortal
+        );
+    }
+}
+
 /// Apply default settings and parse size/fps/bitrate overrides.
 pub fn resolve_profile(args: &Args) -> Result<ResolvedConfig> {
     let defaults = defaults();
@@ -176,21 +257,12 @@ pub fn resolve_profile(args: &Args) -> Result<ResolvedConfig> {
         cursor_mode,
         stream_mode: args.stream_mode.unwrap_or(defaults.stream_mode),
         skip_videoscale: args.skip_videoscale,
-        capture_backend: match args.capture_backend {
-            CaptureBackend::Auto => {
-                if std::env::var("XDG_SESSION_TYPE")
-                    .ok()
-                    .map(|v| v.eq_ignore_ascii_case("x11"))
-                    .unwrap_or(false)
-                    || std::env::var_os("DISPLAY").is_some()
-                {
-                    CaptureBackend::X11
-                } else {
-                    CaptureBackend::WaylandPortal
-                }
-            }
-            v => v,
-        },
+        capture_backend: resolve_release_capture_backend(
+            args.capture_backend,
+            std::env::var("XDG_SESSION_TYPE").ok().as_deref(),
+            std::env::var_os("WAYLAND_DISPLAY").is_some(),
+            args.benchmark_game,
+        )?,
         benchmark_game: args.benchmark_game,
         intra_only: args.intra_only,
         queue_max_buffers: defaults.queue_max_buffers,
