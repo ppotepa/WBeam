@@ -11,19 +11,23 @@ normalize_tag_version() {
   local raw="${1:-}"
   raw="${raw#v}"
   raw="${raw#V}"
-  raw="${raw//_/.}"
-  raw="${raw//-/.}"
-  if [[ -z "${raw}" ]]; then
-    raw="0.0.0"
+  # Pre-release hyphens are semantically meaningful for RPM/DEB ordering,
+  # APK versionName and GitHub release tags; do not normalize to dots.
+  if [[ ! "$raw" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-(rc|beta|alpha)\.[0-9]+)?$ ]]; then
+    echo "[version] invalid semantic release tag: ${1:-}" >&2
+    return 2
   fi
-  printf '%s\n' "${raw}"
+  printf '%s\n' "$raw"
 }
 
 wbeam_version() {
   local base short_sha
   base="${WBEAM_VERSION_BASE:-0.1.3}"
   if [[ -n "${CI_COMMIT_TAG:-}" ]]; then
-    base="$(normalize_tag_version "${CI_COMMIT_TAG}")"
+    # A tagged build's artifact identity must match the tag exactly. A
+    # branch/dev build can include the short commit revision separately.
+    normalize_tag_version "${CI_COMMIT_TAG}"
+    return
   fi
 
   short_sha="${CI_COMMIT_SHA:-${CI_COMMIT_SHORT_SHA:-}}"
