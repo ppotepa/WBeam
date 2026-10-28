@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::net::{IpAddr, SocketAddr};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::extract::{Query, State};
@@ -112,6 +112,92 @@ mod control_bind_policy_tests {
     }
 }
 
+// A packaged WBeam root under /usr/share/wbeam is deliberately read-only.
+// Resolve mutable daemon logs to the user's XDG state directory. Keep source
+// builds and explicit --log-dir overrides backwards-compatible.
+fn resolve_daemon_log_dir(
+    root: &Path,
+    packaged: bool,
+    requested: Option<PathBuf>,
+    xdg_state_home: Option<&Path>,
+    home: Option<&Path>,
+) -> Result<PathBuf, String> {
+    if let Some(path) = requested {
+        return Ok(path);
+    }
+    if !packaged {
+        return Ok(root.join("host/rust/logs"));
+    }
+    if let Some(xdg) = xdg_state_home.filter(|path| path.is_absolute()) {
+        return Ok(xdg.join("wbeam/logs"));
+    }
+    if let Some(user_home) = home.filter(|path| path.is_absolute()) {
+        return Ok(user_home.join(".local/state/wbeam/logs"));
+    }
+    Err(
+        "Cannot resolve writable daemon log location for installed WBeam. \
+         Set XDG_STATE_HOME or HOME to an absolute path, or pass --log-dir."
+            .to_string(),
+    )
+}
+
+#[cfg(test)]
+mod daemon_log_dir_tests {
+    use super::resolve_daemon_log_dir;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn source_checkout_keeps_previous_relative_log_location() {
+        let root = Path::new("/home/test/src/WBeam");
+        assert_eq!(
+            resolve_daemon_log_dir(root, false, None, None, None).unwrap(),
+            root.join("host/rust/logs")
+        );
+    }
+
+    #[test]
+    fn installed_runtime_uses_xdg_state_not_read_only_package_root() {
+        let root = Path::new("/usr/share/wbeam");
+        assert_eq!(
+            resolve_daemon_log_dir(
+                root, true, None,
+                Some(Path::new("/home/test/.local/state")),
+                Some(Path::new("/home/test"))
+            ).unwrap(),
+            PathBuf::from("/home/test/.local/state/wbeam/logs")
+        );
+    }
+
+    #[test]
+    fn installed_runtime_falls_back_to_home_when_xdg_is_missing_or_relative() {
+        let root = Path::new("/usr/share/wbeam");
+        for xdg in [None, Some(Path::new("relative/path"))] {
+            assert_eq!(
+                resolve_daemon_log_dir(root, true, None, xdg, Some(Path::new("/home/test"))).unwrap(),
+                PathBuf::from("/home/test/.local/state/wbeam/logs")
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_log_dir_takes_precedence_in_all_installation_modes() {
+        let root = Path::new("/usr/share/wbeam");
+        let requested = PathBuf::from("/mnt/approved/logs");
+        assert_eq!(
+            resolve_daemon_log_dir(root, true, Some(requested.clone()), None, None).unwrap(),
+            requested
+        );
+    }
+
+    #[test]
+    fn installed_runtime_without_writable_state_home_fails_clearly() {
+        let root = Path::new("/usr/share/wbeam");
+        let error = resolve_daemon_log_dir(root, true, None, None, None).unwrap_err();
+        assert!(error.contains("XDG_STATE_HOME"));
+        assert!(error.contains("--log-dir"));
+    }
+}
+
 #[derive(Clone)]
 struct AppState {
     sessions: Arc<SessionRegistry>,
@@ -137,10 +223,21 @@ async fn main() {
         .root
         .map(PathBuf::from)
         .unwrap_or_else(|| workspace_root_from_manifest(env!("CARGO_MANIFEST_DIR")));
-    let log_dir = args
-        .log_dir
-        .map(PathBuf::from)
-        .unwrap_or_else(|| root.join("host/rust/logs"));
+    let state_home = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from);
+    let user_home = std::env::var_os("HOME").map(PathBuf::from);
+    let log_dir = match resolve_daemon_log_dir(
+        &root,
+        root.join("VERSION.txt").is_file(),
+        args.log_dir.map(PathBuf::from),
+        state_home.as_deref(),
+        user_home.as_deref(),
+    ) {
+        Ok(path) => path,
+        Err(message) => {
+            eprintln!("[wbeam] {message}");
+            std::process::exit(2);
+        }
+    };
 
     if let Err(err) = std::fs::create_dir_all(&log_dir) {
         eprintln!(
