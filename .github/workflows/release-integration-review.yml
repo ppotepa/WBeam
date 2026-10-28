@@ -1,12 +1,9 @@
 name: WBeam Release Integration Review
 
+# Temporarily manual-only: GitHub runners are not allocated (#142).
+# Re-enable push/pull_request triggers once a real runner executes the gates.
+# Keep the jobs and scripts intact; manual dispatch is available for QA.
 on:
-  push:
-    branches:
-      - master
-  pull_request:
-    branches:
-      - master
   workflow_dispatch:
 
 permissions:
