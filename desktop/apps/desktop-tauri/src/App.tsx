@@ -32,6 +32,7 @@ import type {
 } from "./types";
 import { HostApiManager } from "./managers/hostApiManager";
 import { createSessionManager } from "./managers/sessionManager";
+import { resolveSupportedBackend, type SupportedCaptureBackend } from "./managers/backendPolicy";
 import connectResolutionPresets from "./config/connect-resolution-presets.json";
 import connectEncoderOptions from "./config/connect-encoder-options.json";
 
@@ -307,6 +308,9 @@ export default function App() {
     message: "idle",
     logs: [],
   });
+  const selectedCaptureBackend = () => resolveSupportedBackend(
+    connectDialogCaptureBackend(), session.hostProbe(),
+  );
   let virtualInstallPollTimer: number | null = null;
   const [evdiWizardVisible, setEvdiWizardVisible] = createSignal(false);
   const upgradeAvailable = () =>
@@ -471,18 +475,16 @@ export default function App() {
 
   async function resolveBackendMode(
     device: DeviceBasic,
-    waylandHost: boolean,
+    captureBackend: SupportedCaptureBackend,
   ): Promise<"virtual_monitor" | "virtual_mirror" | "duplicate" | null> {
-    if (waylandHost) {
+    if (captureBackend === "wayland_portal") {
       return waylandExperimentalDuplication() ? "virtual_mirror" : "virtual_monitor";
     }
     const chosenMode = connectDialogMode();
     if (chosenMode === "virtual_monitor") {
-      const doctor = connectDialogDoctor() ?? await api.getVirtualDoctor(device);
-      if (!isVirtualMonitorAvailable(doctor)) {
-        session.setError(
-          "Virtual monitor mode is unavailable in current host session. Use Duplicate mode."
-        );
+      // Legacy X11 virtual doctor is not a gate for the independent EVDI backend.
+      if (!session.hostProbe().availableBackends.includes("evdi")) {
+        session.setError("EVDI is unavailable. Check the kernel module and host permissions.");
         return null;
       }
       return "virtual_monitor";
@@ -500,16 +502,18 @@ function resolveEncoderMode(
   return encoderValue;
 }
 
-  function resolveCaptureBackend(): CaptureBackend | undefined {
-    const captureBackend = connectDialogCaptureBackend();
-    if (captureBackend === "" || captureBackend === "auto") return undefined;
-    return captureBackend;
+  function resolveCaptureBackend(): SupportedCaptureBackend | null {
+    return selectedCaptureBackend();
   }
 
   async function confirmConnect(): Promise<void> {
     const device = connectDialogDevice();
     if (!device) return;
-    const waylandHost = isWaylandPortalHost();
+    const captureBackend = resolveCaptureBackend();
+    if (!captureBackend) {
+      session.setError("Selected capture backend is unavailable. Choose EVDI or Wayland Portal.");
+      return;
+    }
     const blockedReason = connectDisabledReason(device);
     if (blockedReason.length > 0) {
       setConnectDialogBlockReason(blockedReason);
@@ -517,7 +521,7 @@ function resolveEncoderMode(
       return;
     }
     try {
-      const backendMode = await resolveBackendMode(device, waylandHost);
+      const backendMode = await resolveBackendMode(device, captureBackend);
       if (!backendMode) return;
 
       const qualityMode = connectDialogQualityMode();
@@ -536,7 +540,7 @@ function resolveEncoderMode(
         profileName: (!isAdaptive && !isManual) ? selectedProfile?.key : undefined,
         encoder: resolveEncoderMode(selectedProfile, encoderValue),
         size: resolvedSize,
-        captureBackend: resolveCaptureBackend(),
+        captureBackend,
         manualFps: isManual ? connectDialogManualFps() : undefined,
         manualBitrateKbps: isManual ? connectDialogManualMbps() * 1000 : undefined,
       };
@@ -950,10 +954,10 @@ function resolveEncoderMode(
       <Show when={connectDialogDevice()}>
         {(deviceAccessor) => {
           const device = deviceAccessor();
-          const waylandHost = isWaylandPortalHost();
+          const portalBackendSelected = () => selectedCaptureBackend() === "wayland_portal";
           const virtualMonitorSelected = () => connectDialogMode() === "virtual_monitor";
           const doctor = () => connectDialogDoctor();
-          const virtualMonitorAvailable = () => isVirtualMonitorAvailable(doctor() ?? null);
+          const virtualMonitorAvailable = () => selectedCaptureBackend() === "evdi";
           const virtualMonitorUnavailable = () => !virtualMonitorAvailable();
           const virtualMonitorHint = () => {
             if (!virtualMonitorAvailable()) return "A supported virtual monitor backend is not available for this host.";
@@ -967,7 +971,7 @@ function resolveEncoderMode(
             if (isAdaptive()) return "auto (adaptive)";
             return resolveSessionSizeForPreset(device, connectDialogResolutionPresetId()) ?? "auto";
           };
-          const backendChosen = () => connectDialogCaptureBackend() !== "";
+          const backendChosen = () => selectedCaptureBackend() !== null;
           const concreteBackendChosen = () => {
             const b = connectDialogCaptureBackend();
             return b !== "" && b !== "auto";
@@ -981,7 +985,7 @@ function resolveEncoderMode(
                 <h3>Connect session</h3>
                 <p class="connect-modal-subtitle">{device.model} ({device.serial})</p>
                 <Show
-                  when={!waylandHost}
+                  when={!portalBackendSelected()}
                   fallback={(
                     <p class="setup-hint">
                       Wayland mode: {waylandExperimentalDuplication() ? "Virtual mirror (experimental)" : "Virtual monitor (standard)"}
@@ -1033,14 +1037,14 @@ function resolveEncoderMode(
                       }}
                     >
                       <option value="">— select backend —</option>
-                      <option value="auto">Auto (use host default)</option>
-                      <option value="evdi">EVDI — direct kernel capture (fastest, no 60 fps cap)</option>
+                      <option value="auto">Auto (available supported backend)</option>
+                      <option value="evdi">EVDI — direct kernel capture</option>
                       <option value="wayland_portal">Wayland portal (default on Wayland)</option>
                     </select>
                     <small>
-                      {connectDialogCaptureBackend() === "evdi"
-                        ? "Requires: sudo modprobe evdi initial_device_count=1"
-                        : `Host detected: ${supportedCaptureLabel(session.hostProbe().captureMode)}`}
+                      {selectedCaptureBackend()
+                        ? `Ready: ${selectedCaptureBackend()}`
+                        : "Backend unavailable. Run host setup or select an available backend."}
                     </small>
                   </label>
 
@@ -1190,7 +1194,7 @@ function resolveEncoderMode(
                 <Show when={connectDialogBlockReason()}>
                   {(msg) => <p class="setup-missing">Connect blocked: {safeUiText(msg())}</p>}
                 </Show>
-                <Show when={!waylandHost && doctor()}>
+                <Show when={selectedCaptureBackend() === "evdi" && doctor()}>
                   {(d) => <p class="setup-hint">{safeUiText(d().installHint)}</p>}
                 </Show>
                 <div class="connect-modal-actions">

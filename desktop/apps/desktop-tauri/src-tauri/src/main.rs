@@ -36,6 +36,8 @@ struct HostProbeBrief {
     desktop: String,
     capture_mode: String,
     supported: bool,
+    available_backends: Vec<String>,
+    evdi_available: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -516,6 +518,8 @@ fn host_probe_brief() -> HostProbeBrief {
             desktop: "unknown".to_string(),
             capture_mode: "unknown".to_string(),
             supported: false,
+            available_backends: Vec::new(),
+            evdi_available: false,
         };
     };
 
@@ -528,11 +532,26 @@ fn host_probe_brief() -> HostProbeBrief {
             desktop: "unknown".to_string(),
             capture_mode: "unknown".to_string(),
             supported: false,
+            available_backends: Vec::new(),
+            evdi_available: false,
         };
     }
 
     let body = String::from_utf8_lossy(&output.stdout);
     let json: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+    // Filter the daemon's legacy backend names out of the user-facing API.
+    let available_backends = json
+        .get("available_backends")
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|v| v.as_str())
+                .filter(|backend| matches!(*backend, "evdi" | "wayland_portal"))
+                .map(str::to_string)
+                .collect::<Vec<String>>()
+        })
+        .unwrap_or_default();
     let probe = HostProbeBrief {
         reachable: true,
         os: json
@@ -559,6 +578,8 @@ fn host_probe_brief() -> HostProbeBrief {
             .get("supported")
             .and_then(|v| v.as_bool())
             .unwrap_or(false),
+        available_backends,
+        evdi_available: json.get("evdi_available").and_then(|v| v.as_bool()).unwrap_or(false),
     };
     ui_service_log(
         "host_probe_brief",
@@ -569,6 +590,83 @@ fn host_probe_brief() -> HostProbeBrief {
         ),
     );
     probe
+}
+
+fn resolve_supported_capture_backend(
+    requested: Option<&str>,
+    probe: &HostProbeBrief,
+) -> Result<&'static str, String> {
+    if !probe.reachable || !probe.supported {
+        return Err("Host is unavailable or the current session is unsupported".to_string());
+    }
+    let available = |backend: &str| probe.available_backends.iter().any(|v| v == backend);
+    let requested = requested.unwrap_or("auto").trim().to_ascii_lowercase();
+    match requested.as_str() {
+        "evdi" if available("evdi") => Ok("evdi"),
+        "wayland_portal" if available("wayland_portal") => Ok("wayland_portal"),
+        "evdi" => Err("EVDI is not available on this host. Check the kernel module and permissions.".to_string()),
+        "wayland_portal" => Err("Wayland Portal is not available on this host session.".to_string()),
+        "" | "auto" => {
+            if probe.capture_mode == "wayland_portal" && available("wayland_portal") {
+                return Ok("wayland_portal");
+            }
+            if available("evdi") {
+                return Ok("evdi");
+            }
+            if available("wayland_portal") {
+                return Ok("wayland_portal");
+            }
+            Err("Neither EVDI nor Wayland Portal is available; legacy X11 cannot be selected.".to_string())
+        }
+        _ => Err("Unsupported capture backend. Select EVDI or Wayland Portal.".to_string()),
+    }
+}
+
+#[cfg(test)]
+mod capture_backend_policy_tests {
+    use super::{resolve_supported_capture_backend, HostProbeBrief};
+
+    fn probe(default: &str, available: &[&str]) -> HostProbeBrief {
+        HostProbeBrief {
+            reachable: true,
+            os: "linux".into(),
+            session: "wayland".into(),
+            desktop: "kde".into(),
+            capture_mode: default.into(),
+            supported: true,
+            available_backends: available.iter().map(|v| (*v).into()).collect(),
+            evdi_available: available.contains(&"evdi"),
+        }
+    }
+
+    #[test]
+    fn explicit_evdi_is_not_blocked_by_portal_default() {
+        let host = probe("wayland_portal", &["wayland_portal", "evdi"]);
+        assert_eq!(resolve_supported_capture_backend(Some("evdi"), &host).unwrap(), "evdi");
+    }
+
+    #[test]
+    fn auto_never_resolves_to_legacy() {
+        let host = probe("x11_gst", &["x11_gst", "evdi"]);
+        assert_eq!(resolve_supported_capture_backend(Some("auto"), &host).unwrap(), "evdi");
+        let only_legacy = probe("x11_gst", &["x11_gst"]);
+        assert!(resolve_supported_capture_backend(None, &only_legacy).is_err());
+        assert!(resolve_supported_capture_backend(Some("x11_gst"), &host).is_err());
+    }
+
+    #[test]
+    fn explicit_unavailable_backend_is_rejected() {
+        let host = probe("wayland_portal", &["wayland_portal"]);
+        assert!(resolve_supported_capture_backend(Some("evdi"), &host).is_err());
+        assert_eq!(resolve_supported_capture_backend(None, &host).unwrap(), "wayland_portal");
+    }
+
+    #[test]
+    fn offline_host_does_not_connect() {
+        let mut host = probe("wayland_portal", &["wayland_portal"]);
+        host.reachable = false;
+        assert!(resolve_supported_capture_backend(None, &host).is_err());
+    }
 }
 
 fn reject_device_connect(
@@ -609,7 +707,8 @@ fn ensure_supported_display_mode(
     )
 }
 
-fn validate_virtual_mode_support(
+#[allow(dead_code)]
+fn validate_legacy_x11_virtual_mode_support(
     serial: &str,
     stream_port: u16,
     effective_stream_port: u16,
@@ -673,6 +772,28 @@ fn validate_virtual_mode_support(
         );
     }
     Ok(())
+}
+
+// The release path uses the selected capture backend, not the host's default
+// session. Portal handles virtual sources and EVDI manages its own devices;
+// the legacy X11 doctor must not gate these supported capture backends.
+fn validate_virtual_mode_support(
+    serial: &str,
+    stream_port: u16,
+    effective_stream_port: u16,
+    normalized_mode: &str,
+    capture_backend: &str,
+) -> Result<(), String> {
+    if matches!(capture_backend, "evdi" | "wayland_portal") {
+        return Ok(());
+    }
+    reject_device_connect(
+        serial,
+        stream_port,
+        effective_stream_port,
+        normalized_mode,
+        "Unsupported capture backend: use EVDI or Wayland Portal".to_string(),
+    )
 }
 
 fn daemon_start_connect(
@@ -739,6 +860,8 @@ fn device_connect(
     if effective_stream_port == 0 {
         effective_stream_port = 5000;
     }
+    let host_probe = host_probe_brief();
+    let supported_backend = resolve_supported_capture_backend(connect_capture_backend.as_deref(), &host_probe)?;
     let selected_profile = normalize_profile_selector(connect_profile_name);
     let mut start_patch = StartConfigPatch {
         profile: normalize_runtime_profile(connect_runtime_profile),
@@ -750,7 +873,7 @@ fn device_connect(
     };
     if start_patch.profile.is_none() {
         if let Some(selector) = selected_profile.as_deref() {
-            let profile_backend = connect_capture_backend.as_deref().unwrap_or("wayland_portal");
+            let profile_backend = supported_backend;
             let profile = find_trained_profile(selector, profile_backend)?
                 .ok_or_else(|| format!("trained profile not found: {selector}"))?;
             start_patch.encoder = normalize_encoder_name(Some(profile.encoder.clone()));
@@ -784,7 +907,7 @@ fn device_connect(
         ),
     );
     connect_log(&serial, effective_stream_port, "device_connect begin");
-    validate_virtual_mode_support(&serial, stream_port, effective_stream_port, &normalized_mode)?;
+    validate_virtual_mode_support(&serial, stream_port, effective_stream_port, &normalized_mode, supported_backend)?;
     adb_prepare_connect(&serial, effective_stream_port)?;
     connect_log(
         &serial,
@@ -797,7 +920,7 @@ fn device_connect(
         effective_stream_port,
         &normalized_mode,
         &start_patch,
-        connect_capture_backend.as_deref(),
+        Some(supported_backend),
     )?;
     ui_service_log(
         "device_connect",

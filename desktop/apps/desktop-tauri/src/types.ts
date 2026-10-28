@@ -40,6 +40,8 @@ export type HostProbeBrief = {
   desktop: string;
   captureMode: string;
   supported: boolean;
+  availableBackends: string[];
+  evdiAvailable: boolean;
 };
 
 export type VirtualDoctor = {

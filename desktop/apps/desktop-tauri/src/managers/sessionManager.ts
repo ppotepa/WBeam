@@ -9,6 +9,8 @@ const EMPTY_PROBE: HostProbeBrief = {
   desktop: "unknown",
   captureMode: "unknown",
   supported: false,
+  availableBackends: [],
+  evdiAvailable: false,
 };
 
 export function createSessionManager(api: HostApiManager) {
