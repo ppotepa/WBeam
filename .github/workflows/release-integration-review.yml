@@ -3,7 +3,11 @@ name: WBeam Release Integration Review
 on:
   push:
     branches:
-      - release-013/review-integration-fixes
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
 
 permissions:
   contents: read
