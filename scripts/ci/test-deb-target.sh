@@ -22,6 +22,11 @@ fi
 [[ "$(wbeam_deb_package_version 0.1.3-rc.1 bookworm)" == '0.1.3~rc.1+bookworm' ]]
 [[ "$(wbeam_deb_package_version 0.1.3-rc.1 noble)" == '0.1.3~rc.1+noble' ]]
 [[ "$(wbeam_deb_package_version 0.1.3 noble)" == '0.1.3+noble' ]]
+# Assert Debian's actual version ordering, not only the expected string.
+if command -v dpkg >/dev/null 2>&1; then
+  dpkg --compare-versions '0.1.3~rc.1+bookworm' lt '0.1.3+bookworm'
+  dpkg --compare-versions '0.1.3~rc.1+noble' lt '0.1.3+noble'
+fi
 if wbeam_deb_package_version 0.1.3 unknown >/dev/null; then
   echo "[deb] Unsupported artifact target was accepted" >&2
   exit 1
