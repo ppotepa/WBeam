@@ -121,6 +121,18 @@ struct AppState {
 async fn main() {
     let args = Args::parse();
 
+    // Fail before creating logs, taking the daemon lock or starting sessions.
+    let bind_ip = match validate_control_bind_address(
+        args.control_bind_address,
+        args.allow_unauthenticated_lan_control,
+    ) {
+        Ok(ip) => ip,
+        Err(message) => {
+            eprintln!("[wbeam] {message} Requested: {}", args.control_bind_address);
+            std::process::exit(2);
+        }
+    };
+
     let root = args
         .root
         .map(PathBuf::from)
@@ -171,18 +183,11 @@ async fn main() {
 
     let app = build_router(app_state.clone());
 
-    let bind_ip = match validate_control_bind_address(
-        args.control_bind_address,
-        args.allow_unauthenticated_lan_control,
-    ) {
-        Ok(ip) => ip,
-        Err(message) => {
-            eprintln!("[wbeam] {message} Requested: {}", args.control_bind_address);
-            error!(requested_bind_address = %args.control_bind_address, "{message}");
-            std::process::exit(2);
-        }
-    };
     if !bind_ip.is_loopback() {
+        eprintln!(
+            "[wbeam] WARNING: unauthenticated, unencrypted control API exposed at {}; restrict access to a trusted LAN",
+            bind_ip
+        );
         warn!(
             bind_address = %bind_ip,
             "INSECURE LAN CONTROL: WBeam HTTP start/stop/apply endpoints have no authentication or TLS; restrict access with a firewall and use only on a trusted network"
