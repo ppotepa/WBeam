@@ -244,6 +244,22 @@ build_aarch64_tar:
 
 build_apk_release:
   stage: build
+  # Jobs with "needs" can bypass normal stage ordering in GitLab.
+  # The signed artifact must therefore explicitly depend on all required
+  # quality checks before downstream RPM/DEB/publish jobs may start.
+  needs:
+    - job: quality_gates
+      artifacts: false
+    - job: quality_frontend
+      artifacts: false
+    - job: quality_rust_host
+      artifacts: false
+    - job: quality_tauri_native
+      artifacts: false
+    - job: quality_android_unit
+      artifacts: false
+    - job: quality_e2e_runner
+      artifacts: false
   image: eclipse-temurin:17-jdk-jammy
   variables:
     ANDROID_SDK_ROOT: "/opt/android-sdk"
