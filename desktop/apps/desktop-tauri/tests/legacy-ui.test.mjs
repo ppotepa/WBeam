@@ -20,6 +20,7 @@ test("legacy diagnostics have presentation guards", () => {
   assert.match(app, /\{safeUiText\(d\(\)\.installHint\)\}/);
   assert.match(app, /Host detected: \$\{supportedCaptureLabel\(session\.hostProbe\(\)\.captureMode\)\}/);
   assert.doesNotMatch(app, /simulated monitor space on X11/);
+  assert.doesNotMatch(app, /For X11 this option is unavailable/);
 });
 
 test("legacy notice implementation is retained but not registered in app builder", () => {
