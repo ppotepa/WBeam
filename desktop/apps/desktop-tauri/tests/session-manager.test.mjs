@@ -160,3 +160,97 @@ test("repeated focus/visibility requests during a poll coalesce into one pass", 
   await background;
   assert.equal(requests, 2);
 });
+
+test("older background service response cannot undo a newer action read", async () => {
+  let resolveOld;
+  let notifyFirst;
+  const firstStarted = new Promise((resolve) => { notifyFirst = resolve; });
+  const old = new Promise((resolve) => { resolveOld = resolve; });
+  const latest = { ...service, active: true, summary: "latest running" };
+  let reads = 0;
+  const session = createSessionManager(api({
+    getServiceStatus: async () => {
+      if (++reads === 1) {
+        notifyFirst();
+        return await old;
+      }
+      return latest;
+    },
+  }));
+  const background = session.refreshSnapshot({ silent: true, forceDevices: true });
+  await firstStarted;
+  assert.equal((await session.connectDevice(device, "duplicate")).ok, true);
+  assert.equal(session.service().summary, "latest running");
+  resolveOld({ ...service, active: false, summary: "old stopped" });
+  await background;
+  assert.equal(session.service().summary, "latest running");
+});
+
+test("stale probe rejection must not reset a newer supported backend", async () => {
+  let rejectOld;
+  let notifyFirst;
+  const firstStarted = new Promise((resolve) => { notifyFirst = resolve; });
+  const stale = new Promise((_resolve, reject) => { rejectOld = reject; });
+  const latest = { ...probe, captureMode: "evdi", availableBackends: ["evdi"], evdiAvailable: true };
+  let reads = 0;
+  const session = createSessionManager(api({
+    getHostProbe: async () => {
+      if (++reads === 1) {
+        notifyFirst();
+        return await stale;
+      }
+      return latest;
+    },
+  }));
+  const background = session.refreshSnapshot({ silent: true, forceDevices: true });
+  await firstStarted;
+  assert.equal((await session.connectDevice(device, "duplicate")).ok, true);
+  assert.equal(session.hostProbe().captureMode, "evdi");
+  rejectOld(new Error("old probe timed out"));
+  await background;
+  assert.equal(session.hostProbe().captureMode, "evdi");
+  assert.deepEqual(session.hostProbe().availableBackends, ["evdi"]);
+});
+
+test("service action updates the cached key so polling can detect a changed daemon", async () => {
+  let reported = service;
+  const stopped = { ...service, active: false, summary: "stopped" };
+  const session = createSessionManager(api({
+    getServiceStatus: async () => reported,
+    serviceAction: async () => stopped,
+  }));
+  await session.refreshSnapshot();
+  await session.callServiceAction("service_stop");
+  assert.equal(session.service().active, false);
+  // For example, a service restarted outside the UI after the action.
+  reported = { ...service };
+  await session.refreshSnapshot();
+  assert.equal(session.service().active, true);
+  assert.equal(session.service().summary, "running");
+});
+
+test("service action cannot be overwritten by an older pending poll", async () => {
+  let resolveOld;
+  let notifyFirst;
+  const firstStarted = new Promise((resolve) => { notifyFirst = resolve; });
+  const old = new Promise((resolve) => { resolveOld = resolve; });
+  const stopped = { ...service, active: false, summary: "stopped by user" };
+  let reads = 0;
+  const session = createSessionManager(api({
+    getServiceStatus: async () => {
+      if (++reads === 1) {
+        notifyFirst();
+        return await old;
+      }
+      return stopped;
+    },
+    serviceAction: async () => stopped,
+  }));
+  const background = session.refreshSnapshot({ silent: true, forceDevices: true });
+  await firstStarted;
+  await session.callServiceAction("service_stop");
+  assert.equal(session.service().summary, "stopped by user");
+  resolveOld({ ...service, summary: "pre-action running" });
+  await background;
+  assert.equal(session.service().summary, "stopped by user");
+});

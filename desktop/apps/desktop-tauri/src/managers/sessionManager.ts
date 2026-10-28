@@ -50,6 +50,10 @@ export function createSessionManager(api: HostApiManager) {
   let lastServiceKey = "";
   let lastProbeKey = "";
   let lastVersionKey = "";
+  // A manual device action can fetch service/probe concurrently with an
+  // earlier background poll. Only the newest response may update each state.
+  let serviceStatusRequestId = 0;
+  let hostProbeRequestId = 0;
   let nextDevicesPollAt = 0;
   let devicesPollIntervalMs = 5000;
   const DEVICES_POLL_MIN_MS = 1200;
@@ -77,8 +81,10 @@ export function createSessionManager(api: HostApiManager) {
   });
 
   async function loadServiceStatus(): Promise<boolean> {
+    const requestId = ++serviceStatusRequestId;
     try {
       const next = await api.getServiceStatus();
+      if (requestId !== serviceStatusRequestId) return false;
       setServiceRefreshError("");
       const nextKey = JSON.stringify(next);
       if (nextKey !== lastServiceKey) {
@@ -88,14 +94,19 @@ export function createSessionManager(api: HostApiManager) {
       }
       return false;
     } catch (err) {
-      setServiceRefreshError(`Service refresh failed: ${actionErrorMessage(err)}`);
+      // A late failed request must not replace a newer valid service status.
+      if (requestId === serviceStatusRequestId) {
+        setServiceRefreshError(`Service refresh failed: ${actionErrorMessage(err)}`);
+      }
       return false;
     }
   }
 
   async function loadHostProbe(): Promise<boolean> {
+    const requestId = ++hostProbeRequestId;
     try {
       const next = await api.getHostProbe();
+      if (requestId !== hostProbeRequestId) return false;
       const nextKey = JSON.stringify(next);
       if (nextKey !== lastProbeKey) {
         setHostProbe(next);
@@ -104,6 +115,8 @@ export function createSessionManager(api: HostApiManager) {
       }
       return false;
     } catch {
+      // A stale failure must not reset a valid newer probe to unsupported.
+      if (requestId !== hostProbeRequestId) return false;
       const nextKey = JSON.stringify(EMPTY_PROBE);
       if (nextKey !== lastProbeKey) {
         setHostProbe(EMPTY_PROBE);
@@ -195,11 +208,21 @@ export function createSessionManager(api: HostApiManager) {
     });
   }
 
+  // Service actions return authoritative state; keep the cached snapshot
+  // key in sync so the next poll can detect a real state change correctly.
+  function applyServiceActionResult(next: ServiceStatus): void {
+    ++serviceStatusRequestId;
+    setService(next);
+    lastServiceKey = JSON.stringify(next);
+    setServiceRefreshError("");
+  }
+
   async function callServiceAction(action: "service_install" | "service_uninstall" | "service_start" | "service_stop") {
     setServiceBusy(true);
     setError("");
+    ++serviceStatusRequestId; // discard a pre-action poll already in flight
     try {
-      setService(await api.serviceAction(action));
+      applyServiceActionResult(await api.serviceAction(action));
     } catch (err) {
       setError(String(err));
       await loadServiceStatus();
@@ -212,6 +235,7 @@ export function createSessionManager(api: HostApiManager) {
   async function upgradeService() {
     setServiceBusy(true);
     setError("");
+    ++serviceStatusRequestId; // invalidate service status fetched before upgrade
     try {
       if (service().installed && service().active) {
         try {
