@@ -882,7 +882,7 @@ function resolveEncoderMode(
               Use experimental virtual mirroring (Wayland only)
               {" "}
               <small>
-                Applies to Wayland connects only. For X11 this option is unavailable.
+                Applies only to Wayland Portal connections. Other backends ignore this setting.
               </small>
             </span>
           </label>
