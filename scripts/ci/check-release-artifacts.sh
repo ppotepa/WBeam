@@ -3,6 +3,7 @@
 # Prerequisites: GNU coreutils, bash, and artifacts from the same CI pipeline.
 set -Eeuo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/deb-target.sh"
 
 [[ -s "${DIST_DIR}/VERSION.txt" ]] || {
   echo "[release] VERSION.txt is missing" >&2
@@ -28,6 +29,10 @@ fi
 
 shopt -s nullglob
 debs=("${DIST_DIR}"/*.deb)
+if ! wbeam_deb_has_both_artifacts "${DIST_DIR}"; then
+  echo "[release] Both Bookworm and Ubuntu Noble ABI-specific DEB packages are required" >&2
+  exit 1
+fi
 rpms=("${DIST_DIR}"/*.rpm)
 apks=("${DIST_DIR}"/*.apk)
 if (( ${#debs[@]} < 1 || ${#rpms[@]} < 1 || ${#apks[@]} != 1 )); then
