@@ -73,6 +73,24 @@ quality_rust_host:
     - if: $CI_COMMIT_TAG
     - if: $CI_COMMIT_BRANCH
 
+# Streamer is the release-critical EVDI/GStreamer binary; compiling only
+# wbeamd-core and wbeamd-api cannot detect -levdi/FFI/linker regressions.
+quality_rust_streamer:
+  stage: quality
+  image: rust:bookworm
+  script:
+    - apt-get update
+    - >-
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends
+      pkg-config libssl-dev libdbus-1-dev
+      libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libevdi0-dev
+      libx11-dev libxrandr-dev libxfixes-dev libxext-dev libxrender-dev
+    - cargo check --locked --manifest-path host/rust/Cargo.toml -p wbeamd-streamer --no-default-features --features evdi
+    - cargo test --locked --manifest-path host/rust/Cargo.toml -p wbeamd-streamer --no-default-features --features evdi
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH
+
 quality_tauri_native:
   stage: quality
   image: rust:bookworm
@@ -291,6 +309,8 @@ build_apk_release:
     - job: quality_frontend
       artifacts: false
     - job: quality_rust_host
+      artifacts: false
+    - job: quality_rust_streamer
       artifacts: false
     - job: quality_tauri_native
       artifacts: false
