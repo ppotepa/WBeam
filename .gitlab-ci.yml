@@ -38,6 +38,7 @@ quality_gates:
     - bash scripts/ci/test-virtual-deps-runtime.sh
     - bash scripts/ci/test-virtual-deps-install-dry-run.sh
     - bash scripts/ci/test-release-version.sh
+    - bash scripts/ci/test-deb-target.sh
     - bash scripts/ci/check-version-consistency.sh
     - bash scripts/ci/test-publication-contract.sh
     - bash -n scripts/ci/*.sh scripts/virtual-deps-check.sh scripts/virtual-deps-install.sh wbeam host/scripts/run_wbeamd.sh
@@ -151,6 +152,8 @@ sonar_scan_push_master:
 
 build_deb:
   stage: build
+  variables:
+    WBEAM_DEB_TARGET: bookworm
   needs:
     - job: build_apk_release
       artifacts: true
@@ -189,6 +192,37 @@ build_deb:
       - dist/VERSION.txt
     expire_in: 14 days
   rules: *build_release_rules
+
+build_ubuntu_deb:
+  stage: build
+  needs:
+    - job: build_apk_release
+      artifacts: true
+  image: ubuntu:24.04
+  variables:
+    DEBIAN_FRONTEND: noninteractive
+    WBEAM_DEB_TARGET: noble
+  script:
+    - apt-get update
+    - >-
+      apt-get install -y --no-install-recommends
+      ca-certificates curl git jq tar gzip xz-utils
+      pkg-config build-essential libssl-dev libdbus-1-dev dpkg-dev
+      libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      libevdi-dev libx11-dev libxrandr-dev libxfixes-dev libxext-dev libxrender-dev
+      nodejs npm libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev
+      libayatana-appindicator3-dev
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+    - export PATH="$HOME/.cargo/bin:$PATH"
+    - cargo --version
+    - ./scripts/ci/build_deb.sh
+  artifacts:
+    paths:
+      - dist/*+noble_*.deb
+      - dist/VERSION.txt
+    expire_in: 14 days
+  rules: *build_release_rules
+
 
 build_rpm:
   stage: build
@@ -359,6 +393,8 @@ publish_github_release:
     GIT_STRATEGY: fetch
   needs:
     - job: build_deb
+      artifacts: true
+    - job: build_ubuntu_deb
       artifacts: true
     - job: build_rpm
       artifacts: true
