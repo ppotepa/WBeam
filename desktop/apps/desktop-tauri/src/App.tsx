@@ -523,8 +523,32 @@ export default function App() {
     }
   }
 
-  function openConnectDialog(device: DeviceBasic): void {
+  // Check EVDI with its dedicated release doctor only after selecting it.
+  // The legacy virtual doctor can probe X11 and must never run in Connect UI.
+  async function refreshConnectDialogDoctor(): Promise<void> {
     const requestId = ++connectDialogRequestId;
+    const backend = selectedCaptureBackend();
+    setConnectDialogDoctor(null);
+    setConnectDialogDoctorLoading(backend === "evdi");
+    if (backend !== "evdi") return;
+    try {
+      const doctor = await api.getEvdiDepsDoctor();
+      if (requestId !== connectDialogRequestId
+        || !connectDialogDevice()
+        || selectedCaptureBackend() !== "evdi") return;
+      setConnectDialogDoctor(doctor);
+    } catch (err) {
+      if (requestId !== connectDialogRequestId
+        || !connectDialogDevice()
+        || selectedCaptureBackend() !== "evdi") return;
+      session.setError(`EVDI diagnostics unavailable: ${String(err)}`);
+    } finally {
+      if (requestId === connectDialogRequestId) setConnectDialogDoctorLoading(false);
+    }
+  }
+
+  function openConnectDialog(device: DeviceBasic): void {
+    connectDialogRequestId += 1;
     profilesRequestId += 1;
     setTrainedProfiles([]);
     const isWaylandHost = isWaylandPortalHost();
@@ -541,22 +565,8 @@ export default function App() {
     setConnectDialogProfileKey("");
     setConnectDialogCaptureBackend("");
     setConnectDialogDoctor(null);
-    setConnectDialogDoctorLoading(!isWaylandHost);
+    setConnectDialogDoctorLoading(false);
     setConnectDialogDevice(device);
-    if (isWaylandHost) {
-      return;
-    }
-    void api
-      .getVirtualDoctor(device)
-      .then((doctor) => {
-        if (requestId === connectDialogRequestId) setConnectDialogDoctor(doctor);
-      })
-      .catch(() => {
-        if (requestId === connectDialogRequestId) setConnectDialogDoctor(null);
-      })
-      .finally(() => {
-        if (requestId === connectDialogRequestId) setConnectDialogDoctorLoading(false);
-      });
   }
 
   function closeConnectDialog(): void {
@@ -1137,10 +1147,9 @@ function resolveEncoderMode(
             return resolveSessionSizeForPreset(device, connectDialogResolutionPresetId()) ?? "auto";
           };
           const backendChosen = () => selectedCaptureBackend() !== null;
-          const concreteBackendChosen = () => {
-            const b = connectDialogCaptureBackend();
-            return b !== "" && b !== "auto";
-          };
+          // Auto resolves to a concrete EVDI/Portal backend. Profiles belong
+          // to that resolved backend, not to a literal "auto" namespace.
+          const concreteBackendChosen = () => selectedCaptureBackend() !== null;
           const codecChosen = () => connectDialogEncoderMode() !== "";
           const profilesForCodec = () => trainedProfiles().filter((p) => p.encoder === connectDialogEncoderMode());
           const selectedProfile = () => profilesForCodec().find((profile) => profile.key === connectDialogProfileKey()) ?? null;
@@ -1200,6 +1209,7 @@ function resolveEncoderMode(
                         setConnectDialogProfileKey("");
                         setTrainedProfiles([]);
                         void refreshTrainedProfiles();
+                        void refreshConnectDialogDoctor();
                       }}
                     >
                       <option value="">— select backend —</option>
@@ -1329,7 +1339,7 @@ function resolveEncoderMode(
                             return `${p.fps}fps ${p.bitrateKbps}kbps — ${p.objective}, ${p.workload}`;
                           }
                           if (!backendChosen()) return "Choose backend first";
-                          if (!concreteBackendChosen()) return "Select a specific backend (not Auto) to use profiles";
+                          if (!concreteBackendChosen()) return "Select an available EVDI or Wayland Portal backend";
                           if (!codecChosen()) return "Choose codec first";
                           return "Pick a trained profile";
                         })()}
