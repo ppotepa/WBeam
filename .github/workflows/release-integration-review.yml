@@ -49,6 +49,7 @@ jobs:
           bash scripts/ci/test-local-verification-runner.sh
           bash scripts/ci/test-control-bind-policy.sh
           bash scripts/ci/test-daemon-log-location.sh
+          bash scripts/ci/test-systemd-offline-start.sh
           bash scripts/ci/test-publication-contract.sh
           bash scripts/ci/check-version-consistency.sh
       - name: Python E2E runner tests
