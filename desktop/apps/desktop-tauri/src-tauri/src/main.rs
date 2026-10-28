@@ -2,6 +2,7 @@
 
 mod adb;
 mod profiles;
+mod process_timeout;
 mod service;
 mod virtual_monitor;
 
@@ -17,13 +18,13 @@ use crate::virtual_monitor::{
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
@@ -38,6 +39,33 @@ struct HostProbeBrief {
     supported: bool,
     available_backends: Vec<String>,
     evdi_available: bool,
+}
+
+static DEVICE_ACTIONS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+
+struct DeviceActionGuard {
+    serial: String,
+}
+
+impl DeviceActionGuard {
+    fn acquire(serial: &str) -> Result<Self, String> {
+        let mut active = DEVICE_ACTIONS.get_or_init(|| Mutex::new(HashSet::new()))
+            .lock().map_err(|_| "device action lock poisoned".to_string())?;
+        if !active.insert(serial.to_string()) {
+            return Err(format!("Device {serial} already has an action in progress"));
+        }
+        Ok(Self { serial: serial.to_string() })
+    }
+}
+
+impl Drop for DeviceActionGuard {
+    fn drop(&mut self) {
+        if let Some(actions) = DEVICE_ACTIONS.get() {
+            if let Ok(mut active) = actions.lock() {
+                active.remove(&self.serial);
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -501,7 +529,26 @@ fn host_name() -> String {
 }
 
 #[tauri::command]
-fn host_probe_brief() -> HostProbeBrief {
+async fn host_probe_brief() -> HostProbeBrief {
+    match tauri::async_runtime::spawn_blocking(host_probe_brief_blocking).await {
+        Ok(probe) => probe,
+        Err(err) => {
+            ui_service_log("host_probe_brief", "error", &format!("worker failed: {err}"));
+            HostProbeBrief {
+                reachable: false,
+                os: "unknown".into(),
+                session: "unknown".into(),
+                desktop: "unknown".into(),
+                capture_mode: "unknown".into(),
+                supported: false,
+                available_backends: Vec::new(),
+                evdi_available: false,
+            }
+        }
+    }
+}
+
+fn host_probe_brief_blocking() -> HostProbeBrief {
     ui_service_log("host_probe_brief", "begin", "");
     let control_port = wbeam_control_port();
     let url = format!("http://127.0.0.1:{control_port}/host-probe");
@@ -714,7 +761,7 @@ fn validate_legacy_x11_virtual_mode_support(
     effective_stream_port: u16,
     normalized_mode: &str,
 ) -> Result<(), String> {
-    let host_probe = host_probe_brief();
+    let host_probe = host_probe_brief_blocking();
     let is_wayland_portal = host_probe.capture_mode == "wayland_portal";
     if !is_virtual_mode(normalized_mode)
         || should_skip_virtual_doctor(normalized_mode, is_wayland_portal)
@@ -722,7 +769,7 @@ fn validate_legacy_x11_virtual_mode_support(
         return Ok(());
     }
 
-    let doctor = virtual_doctor(Some(serial.to_string()), Some(effective_stream_port))?;
+    let doctor = crate::virtual_monitor::virtual_doctor_blocking(Some(serial.to_string()), Some(effective_stream_port))?;
     if !doctor.ok {
         let msg = if !doctor.install_hint.trim().is_empty() {
             format!("Virtual monitor unavailable: {}", doctor.install_hint)
@@ -831,8 +878,33 @@ fn daemon_start_connect(
 }
 
 #[tauri::command]
-// NOSONAR S3776 - Connect command must normalize and reconcile multiple inputs
-fn device_connect(
+async fn device_connect(
+    serial: String,
+    stream_port: u16,
+    display_mode: Option<String>,
+    connect_encoder: Option<String>,
+    connect_size: Option<String>,
+    connect_profile_name: Option<String>,
+    connect_runtime_profile: Option<String>,
+    connect_capture_backend: Option<String>,
+    connect_manual_fps: Option<u32>,
+    connect_manual_bitrate_kbps: Option<u32>,
+) -> Result<String, String> {
+    let guard = DeviceActionGuard::acquire(&serial)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        device_connect_blocking(
+            serial, stream_port, display_mode, connect_encoder, connect_size,
+            connect_profile_name, connect_runtime_profile, connect_capture_backend,
+            connect_manual_fps, connect_manual_bitrate_kbps,
+        )
+    })
+    .await
+    .map_err(|e| format!("device_connect worker failed: {e}"))?
+}
+
+// NOSONAR S3776 - Connect implementation normalizes several inputs
+fn device_connect_blocking(
     serial: String,
     stream_port: u16,
     display_mode: Option<String>,
@@ -860,7 +932,7 @@ fn device_connect(
     if effective_stream_port == 0 {
         effective_stream_port = 5000;
     }
-    let host_probe = host_probe_brief();
+    let host_probe = host_probe_brief_blocking();
     let supported_backend = resolve_supported_capture_backend(connect_capture_backend.as_deref(), &host_probe)?;
     let selected_profile = normalize_profile_selector(connect_profile_name);
     let mut start_patch = StartConfigPatch {
@@ -939,7 +1011,17 @@ fn device_connect(
 }
 
 #[tauri::command]
-fn device_disconnect(serial: String, stream_port: u16) -> Result<String, String> {
+async fn device_disconnect(serial: String, stream_port: u16) -> Result<String, String> {
+    let guard = DeviceActionGuard::acquire(&serial)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        device_disconnect_blocking(serial, stream_port)
+    })
+    .await
+    .map_err(|e| format!("device_disconnect worker failed: {e}"))?
+}
+
+fn device_disconnect_blocking(serial: String, stream_port: u16) -> Result<String, String> {
     service_ready_for_device_actions()?;
     crate::adb::invalidate_devices_cache();
     let effective_stream_port = resolve_stream_port_for_serial(&serial, stream_port);

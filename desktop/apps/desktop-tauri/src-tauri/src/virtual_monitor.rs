@@ -192,7 +192,16 @@ pub(crate) fn run_virtual_install_job() {
 }
 
 #[tauri::command]
-pub(crate) fn virtual_doctor(
+pub(crate) async fn virtual_doctor(
+    serial: Option<String>,
+    stream_port: Option<u16>,
+) -> Result<VirtualDoctor, String> {
+    tauri::async_runtime::spawn_blocking(move || virtual_doctor_blocking(serial, stream_port))
+        .await
+        .map_err(|e| format!("virtual doctor worker failed: {e}"))?
+}
+
+pub(crate) fn virtual_doctor_blocking(
     serial: Option<String>,
     stream_port: Option<u16>,
 ) -> Result<VirtualDoctor, String> {
