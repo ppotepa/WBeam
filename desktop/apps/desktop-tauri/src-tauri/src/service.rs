@@ -293,8 +293,9 @@ pub(crate) fn apply_systemctl_user_env(cmd: &mut Command) {
 }
 
 pub(crate) fn command_exists(name: &str) -> bool {
+    // Positional parameter is data, never interpolated into shell source.
     Command::new("sh")
-        .args(["-c", &format!("command -v {name} >/dev/null 2>&1")])
+        .args(["-c", "command -v \"$1\" >/dev/null 2>&1", "sh", name])
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
