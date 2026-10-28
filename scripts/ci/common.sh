@@ -21,7 +21,7 @@ normalize_tag_version() {
 
 wbeam_version() {
   local base short_sha
-  base="${WBEAM_VERSION_BASE:-0.1.2}"
+  base="${WBEAM_VERSION_BASE:-0.1.3}"
   if [[ -n "${CI_COMMIT_TAG:-}" ]]; then
     base="$(normalize_tag_version "${CI_COMMIT_TAG}")"
   fi
@@ -37,10 +37,12 @@ wbeam_version() {
 
 WBEAM_VERSION="${WBEAM_VERSION:-$(wbeam_version)}"
 export WBEAM_VERSION
+export WBEAM_BUILD_REV="${WBEAM_BUILD_REV:-$WBEAM_VERSION}"
 
 write_version_manifest() {
   cat > "${DIST_DIR}/VERSION.txt" <<EOF
 WBEAM_VERSION=${WBEAM_VERSION}
+WBEAM_VERSION_CODE=${WBEAM_VERSION_CODE:-}
 CI_PIPELINE_ID=${CI_PIPELINE_ID:-local}
 CI_COMMIT_SHA=${CI_COMMIT_SHA:-local}
 CI_COMMIT_REF_NAME=${CI_COMMIT_REF_NAME:-local}
