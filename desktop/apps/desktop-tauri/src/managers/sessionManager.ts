@@ -122,6 +122,15 @@ export function createSessionManager(api: HostApiManager) {
     if (initial) setLoading(true);
     try {
       const response = await api.getDevices();
+      if (response.error) {
+        // The daemon can report an ADB failure as an ordinary HTTP response
+        // with devices: []. Do not treat that as a successful empty snapshot.
+        setDevicesRefreshError(response.error);
+        setDeviceSnapshotStale(true);
+        devicesPollIntervalMs = Math.min(DEVICES_POLL_MAX_MS, devicesPollIntervalMs + 5000);
+        nextDevicesPollAt = Date.now() + devicesPollIntervalMs;
+        return false;
+      }
       const nextDevices = response.devices || [];
       const nextDevicesKey = JSON.stringify(nextDevices);
       if (nextDevicesKey !== lastDevicesKey) {
@@ -140,8 +149,8 @@ export function createSessionManager(api: HostApiManager) {
         changed = true;
       }
 
-      setDevicesRefreshError(response.error ?? "");
-      setDeviceSnapshotStale(Boolean(response.error));
+      setDevicesRefreshError("");
+      setDeviceSnapshotStale(false);
       if (force || changed) {
         devicesPollIntervalMs = DEVICES_POLL_MIN_MS;
       } else {
