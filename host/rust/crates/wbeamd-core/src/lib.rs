@@ -49,6 +49,26 @@ const INSTALLED_STREAMER_BIN: &str = "/usr/local/bin/wbeamd-streamer";
 const EVDI_FEATURE_MISSING_MARKER: &str =
     "capture_backend=evdi requires wbeamd-streamer to be built with --features evdi";
 
+// The release package mounts its root under /usr/share/wbeam (read-only for
+// the user service). Effective runtime snapshots must live beside the daemon
+// tracing logs in user state, not under the package tree. The resolver is pure
+// so source and installed behavior can be unit-tested without environment I/O.
+fn resolve_effective_runtime_log_dir(
+    root: &Path,
+    packaged: bool,
+    xdg_state_home: Option<&Path>,
+    home: Option<&Path>,
+) -> Option<PathBuf> {
+    if !packaged {
+        return Some(root.join("logs").join("effective-runtime"));
+    }
+    if let Some(xdg) = xdg_state_home.filter(|path| path.is_absolute()) {
+        return Some(xdg.join("wbeam/logs/effective-runtime"));
+    }
+    home.filter(|path| path.is_absolute())
+        .map(|path| path.join(".local/state/wbeam/logs/effective-runtime"))
+}
+
 fn now_unix_ms() -> u128 {
     match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(dur) => dur.as_millis(),
@@ -2333,7 +2353,15 @@ impl DaemonCore {
         }
     }
 
-    fn effective_runtime_log_path(&self) -> PathBuf {
+    fn effective_runtime_log_path(&self) -> Option<PathBuf> {
+        let xdg_state_home = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from);
+        let user_home = std::env::var_os("HOME").map(PathBuf::from);
+        let base = resolve_effective_runtime_log_dir(
+            &self.root,
+            self.root.join("VERSION.txt").is_file(),
+            xdg_state_home.as_deref(),
+            user_home.as_deref(),
+        )?;
         let serial = self
             .target_serial
             .as_deref()
@@ -2347,14 +2375,16 @@ impl DaemonCore {
                 }
             })
             .collect::<String>();
-        self.root
-            .join("logs")
-            .join("effective-runtime")
-            .join(format!("{serial}-{}.jsonl", self.stream_port))
+        Some(base.join(format!("{serial}-{}.jsonl", self.stream_port)))
     }
 
     fn persist_effective_runtime_snapshot(&self, run_id: u64, snapshot: &EffectiveRuntimeConfig) {
-        let path = self.effective_runtime_log_path();
+        let Some(path) = self.effective_runtime_log_path() else {
+            warn!(
+                "effective runtime: cannot resolve an absolute user state path; set XDG_STATE_HOME or HOME"
+            );
+            return;
+        };
         if let Some(parent) = path.parent() {
             if let Err(err) = std::fs::create_dir_all(parent) {
                 warn!(error = %err, path = %path.display(), "effective runtime: mkdir failed");
@@ -2758,4 +2788,59 @@ mod tests {
     }
 
     // ── telemetry (unit tests are in infra::telemetry) ─────────────────────
+}
+
+#[cfg(test)]
+mod effective_runtime_log_location_tests {
+    use super::resolve_effective_runtime_log_dir;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn source_checkout_retains_repo_runtime_snapshots() {
+        let root = Path::new("/home/test/WBeam");
+        assert_eq!(
+            resolve_effective_runtime_log_dir(root, false, None, None),
+            Some(root.join("logs/effective-runtime"))
+        );
+    }
+
+    #[test]
+    fn installed_runtime_snapshots_use_xdg_state_not_package_root() {
+        let root = Path::new("/usr/share/wbeam");
+        assert_eq!(
+            resolve_effective_runtime_log_dir(
+                root,
+                true,
+                Some(Path::new("/home/test/.local/state")),
+                Some(Path::new("/home/test"))
+            ),
+            Some(PathBuf::from("/home/test/.local/state/wbeam/logs/effective-runtime"))
+        );
+    }
+
+    #[test]
+    fn installed_runtime_snapshots_fall_back_to_home_for_bad_xdg() {
+        let root = Path::new("/usr/share/wbeam");
+        for xdg in [None, Some(Path::new("relative")), Some(Path::new(""))] {
+            assert_eq!(
+                resolve_effective_runtime_log_dir(
+                    root,
+                    true,
+                    xdg,
+                    Some(Path::new("/home/test"))
+                ),
+                Some(PathBuf::from("/home/test/.local/state/wbeam/logs/effective-runtime"))
+            );
+        }
+    }
+
+    #[test]
+    fn installed_runtime_snapshots_do_not_fall_back_to_read_only_root() {
+        let root = Path::new("/usr/share/wbeam");
+        assert_eq!(resolve_effective_runtime_log_dir(root, true, None, None), None);
+        assert_eq!(
+            resolve_effective_runtime_log_dir(root, true, None, Some(Path::new("relative/home"))),
+            None
+        );
+    }
 }

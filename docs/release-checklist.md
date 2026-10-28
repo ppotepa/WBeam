@@ -192,3 +192,11 @@ non-root user**. Confirm `systemctl --user status wbeamd-rust`,
 `ss -ltnp | grep ':5001'`, and `ls -l ~/.local/state/wbeam/logs`.
 The port should bind on loopback by default as in issue #151. Record
 any failed startup with a redacted journal excerpt under issue #154.
+
+Core runtime configuration snapshots (`logs/effective-runtime/*.jsonl`) must
+also stay out of `/usr/share/wbeam`. On an installed package they belong
+under the **same user state tree**, at
+`$XDG_STATE_HOME/wbeam/logs/effective-runtime` (or the HOME fallback);
+source checkout behavior remains `<repo>/logs/effective-runtime`.
+A clean-install check should start a real EVDI/Portal session and confirm a
+nonempty JSONL snapshot, with no attempted writes in the package tree.
