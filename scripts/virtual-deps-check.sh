@@ -159,8 +159,9 @@ if [[ "$BACKEND" == "evdi" ]]; then
     fi
   fi
 
-  # A packaged streamer links against libevdi.so.1 at *runtime*; requiring
-  # libevdi.so from the -dev package here incorrectly blocks installations.
+  # Debian Bookworm links libevdi.so.0, Ubuntu Noble libevdi.so.1.
+  # Requiring unversioned libevdi.so from a -dev package incorrectly blocks
+  # installed binaries even when the matching runtime SONAME is available.
   if ! evdi_find_runtime_library >/dev/null; then
     missing+=("libevdi-runtime-library")
   fi
