@@ -23,7 +23,7 @@ HELP
 show_cases() {
   printf '%s\n' shell_syntax release_shell python_e2e desktop_install desktop_test desktop_build
   if [[ "$MODE" == full ]]; then
-    printf '%s\n' host_rust tauri_rust tauri_check android_debug
+    printf '%s\n' host_rust host_streamer tauri_rust tauri_check android_debug
   fi
 }
 
@@ -98,6 +98,7 @@ run_step desktop_build npm "$ROOT_DIR/desktop/apps/desktop-tauri" npm run build
 
 if [[ "$MODE" == full ]]; then
   run_step host_rust cargo "$ROOT_DIR" cargo test --locked --manifest-path host/rust/Cargo.toml -p wbeamd-api -p wbeamd-core
+  run_step host_streamer cargo "$ROOT_DIR" bash -c 'set -Eeuo pipefail; cargo check --locked --manifest-path host/rust/Cargo.toml -p wbeamd-streamer --no-default-features --features evdi; cargo test --locked --manifest-path host/rust/Cargo.toml -p wbeamd-streamer --no-default-features --features evdi'
   run_step tauri_rust cargo "$ROOT_DIR" cargo test --locked --manifest-path desktop/apps/desktop-tauri/src-tauri/Cargo.toml
   run_step tauri_check cargo "$ROOT_DIR" cargo check --locked --manifest-path desktop/apps/desktop-tauri/src-tauri/Cargo.toml
   if [[ ! -f "$ROOT_DIR/android/gradlew" ]]; then
