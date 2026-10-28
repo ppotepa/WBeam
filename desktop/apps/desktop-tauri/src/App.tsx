@@ -281,7 +281,13 @@ export default function App() {
   const [trainedProfiles, setTrainedProfiles] = createSignal<TrainedProfile[]>([]);
   const [connectDialogDoctor, setConnectDialogDoctor] = createSignal<VirtualDoctor | null>(null);
   const [connectDialogDoctorLoading, setConnectDialogDoctorLoading] = createSignal(false);
-  const [connectDialogBlockReason, setConnectDialogBlockReason] = createSignal("");
+  const connectDialogBlockReason = () => {
+    const selected = connectDialogDevice();
+    if (!selected) return "";
+    const current = session.devices().find((device) => device.serial === selected.serial);
+    if (!current) return "The device was disconnected while configuring the session";
+    return connectDisabledReason(current, selectedCaptureBackend());
+  };
   const [autoConnectBusy, setAutoConnectBusy] = createSignal(false);
   const [autoConnectSummary, setAutoConnectSummary] = createSignal("");
   const [waylandExperimentalDuplication, setWaylandExperimentalDuplication] = createSignal(
@@ -325,11 +331,16 @@ export default function App() {
 
   const daemonVersionKnown = () => session.daemonVersion().length > 0;
 
-  function connectDisabledReason(device: DeviceBasic): string {
+  function connectDisabledReason(
+    device: DeviceBasic,
+    backend: SupportedCaptureBackend | null = resolveSupportedBackend("auto", session.hostProbe()),
+  ): string {
     return resolveConnectDisabledReason({
       device,
       deviceBusy: isDeviceBusy(device),
-      waylandPortalHost: isWaylandPortalHost(),
+      // Portal concurrency rules apply to the selected backend, not the
+      // host's default backend (which may be Portal while EVDI is selected).
+      waylandPortalHost: backend === "wayland_portal",
       deviceActionBusy: session.deviceActionBusy(),
       serviceActive: session.service().active,
       daemonVersionKnown: daemonVersionKnown(),
@@ -378,7 +389,7 @@ export default function App() {
           errors.push(`${snapshot.serial}: disconnected during setup`);
           continue;
         }
-        const reason = connectDisabledReason(device);
+        const reason = connectDisabledReason(device, backend);
         if (reason) {
           skipped += 1;
           continue;
@@ -522,7 +533,6 @@ export default function App() {
     setConnectDialogCaptureBackend("");
     setConnectDialogDoctor(null);
     setConnectDialogDoctorLoading(!isWaylandHost);
-    setConnectDialogBlockReason(connectDisabledReason(device));
     setConnectDialogDevice(device);
     if (isWaylandHost) {
       return;
@@ -546,7 +556,6 @@ export default function App() {
     setConnectDialogDevice(null);
     setConnectDialogDoctor(null);
     setConnectDialogDoctorLoading(false);
-    setConnectDialogBlockReason("");
   }
 
   async function resolveBackendMode(
@@ -600,9 +609,8 @@ function resolveEncoderMode(
       session.setError("Selected capture backend is unavailable. Choose EVDI or Wayland Portal.");
       return;
     }
-    const blockedReason = connectDisabledReason(device);
+    const blockedReason = connectDisabledReason(device, captureBackend);
     if (blockedReason.length > 0) {
-      setConnectDialogBlockReason(blockedReason);
       session.setError(blockedReason);
       return;
     }
