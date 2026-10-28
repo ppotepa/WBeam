@@ -364,6 +364,72 @@ fn runtime_config_path_for_session(root: &Path, session_label: Option<&str>) -> 
     config_dir.join("runtime_state.json")
 }
 
+// Keep the effective-runtime JSONL on writable user state storage when the
+// daemon is launched from read-only /usr/share/wbeam (DEB/RPM). Source runs
+// retain their historical ./logs location.
+fn resolve_core_runtime_log_dir(
+    root: &Path,
+    packaged: bool,
+    xdg_state_home: Option<&Path>,
+    home: Option<&Path>,
+) -> Option<PathBuf> {
+    if !packaged {
+        return Some(root.join("logs"));
+    }
+    if let Some(xdg) = xdg_state_home.filter(|p| p.is_absolute()) {
+        return Some(xdg.join("wbeam/logs"));
+    }
+    if let Some(user_home) = home.filter(|p| p.is_absolute()) {
+        return Some(user_home.join(".local/state/wbeam/logs"));
+    }
+    None
+}
+
+#[cfg(test)]
+mod core_runtime_log_dir_tests {
+    use super::resolve_core_runtime_log_dir;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn source_checkout_retains_local_logs_directory() {
+        let root = Path::new("/home/test/src/WBeam");
+        assert_eq!(
+            resolve_core_runtime_log_dir(root, false, None, None),
+            Some(root.join("logs"))
+        );
+    }
+
+    #[test]
+    fn installed_package_uses_xdg_state_home() {
+        let root = Path::new("/usr/share/wbeam");
+        assert_eq!(
+            resolve_core_runtime_log_dir(root, true,
+                Some(Path::new("/home/test/.local/state")),
+                Some(Path::new("/home/test"))),
+            Some(PathBuf::from("/home/test/.local/state/wbeam/logs"))
+        );
+    }
+
+    #[test]
+    fn installed_package_uses_home_if_xdg_is_relative_or_absent() {
+        let root = Path::new("/usr/share/wbeam");
+        for xdg in [None, Some(Path::new("relative"))] {
+            assert_eq!(
+                resolve_core_runtime_log_dir(root, true, xdg, Some(Path::new("/home/test"))),
+                Some(PathBuf::from("/home/test/.local/state/wbeam/logs"))
+            );
+        }
+    }
+
+    #[test]
+    fn installed_package_never_falls_back_to_read_only_tree() {
+        assert_eq!(
+            resolve_core_runtime_log_dir(Path::new("/usr/share/wbeam"), true, None, None),
+            None
+        );
+    }
+}
+
 fn default_config_from_presets(presets: &BTreeMap<String, ActiveConfig>) -> ActiveConfig {
     for key in ["default", "baseline"] {
         if let Some(cfg) = presets.get(key) {
@@ -2333,7 +2399,7 @@ impl DaemonCore {
         }
     }
 
-    fn effective_runtime_log_path(&self) -> PathBuf {
+    fn effective_runtime_log_path(&self) -> Option<PathBuf> {
         let serial = self
             .target_serial
             .as_deref()
@@ -2347,14 +2413,22 @@ impl DaemonCore {
                 }
             })
             .collect::<String>();
-        self.root
-            .join("logs")
-            .join("effective-runtime")
-            .join(format!("{serial}-{}.jsonl", self.stream_port))
+        let xdg_state_home = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from);
+        let user_home = std::env::var_os("HOME").map(PathBuf::from);
+        let logs = resolve_core_runtime_log_dir(
+            &self.root,
+            self.root.join("VERSION.txt").is_file(),
+            xdg_state_home.as_deref(),
+            user_home.as_deref(),
+        )?;
+        Some(logs.join("effective-runtime").join(format!("{serial}-{}.jsonl", self.stream_port)))
     }
 
     fn persist_effective_runtime_snapshot(&self, run_id: u64, snapshot: &EffectiveRuntimeConfig) {
-        let path = self.effective_runtime_log_path();
+        let Some(path) = self.effective_runtime_log_path() else {
+            warn!("effective runtime: no writable XDG_STATE_HOME/HOME for installed package");
+            return;
+        };
         if let Some(parent) = path.parent() {
             if let Err(err) = std::fs::create_dir_all(parent) {
                 warn!(error = %err, path = %path.display(), "effective runtime: mkdir failed");
