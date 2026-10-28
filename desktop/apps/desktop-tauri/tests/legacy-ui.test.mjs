@@ -18,6 +18,7 @@ test("legacy diagnostics have presentation guards", () => {
   assert.match(app, /capture=\{supportedCaptureLabel\(session\.hostProbe\(\)\.captureMode\)\}/);
   assert.match(app, /\{safeUiText\(doctor\.installHint\)\}/);
   assert.match(app, /\{safeUiText\(d\(\)\.installHint\)\}/);
+  assert.match(app, /Host detected: \$\{supportedCaptureLabel\(session\.hostProbe\(\)\.captureMode\)\}/);
   assert.doesNotMatch(app, /simulated monitor space on X11/);
 });
 
