@@ -13,7 +13,10 @@ printf 'fatal error: linux/version.h: No such file or directory\n' > "$tmp/heade
 printf 'error: undefined function evdi_foo\n' > "$tmp/generic.log"
 [[ "$(evdi_build_failure_reason "$tmp/generic.log")" == "dkms-build-failed-other" ]]
 [[ "$(evdi_build_failure_reason "$tmp/missing.log")" == "dkms-log-not-readable" ]]
-WBEAM_EVDI_LIB_DIR="$tmp" ! evdi_find_linkable_library >/dev/null
+if WBEAM_EVDI_LIB_DIR="$tmp" evdi_find_linkable_library >/dev/null; then
+  echo "[evdi] ERROR: accepted missing linker library" >&2
+  exit 1
+fi
 touch "$tmp/libevdi.so"
 WBEAM_EVDI_LIB_DIR="$tmp" evdi_find_linkable_library | grep -qx "$tmp/libevdi.so"
 echo "[evdi][PASS] DKMS diagnostic classification and library override"
