@@ -139,6 +139,10 @@ publish_release() {
   local name="$2"
   local prerelease="$3"
   local allow_replace="${4:-false}"
+  # Immutable tags are created as drafts first. Only after all package
+  # assets and SHA256SUMS have uploaded successfully do we publish.
+  local initial_draft="true"
+  if [[ "$allow_replace" == "true" ]]; then initial_draft="false"; fi
   local release_payload
   release_payload="$(jq -n \
     --arg tag_name "${tag}" \
@@ -146,7 +150,8 @@ publish_release() {
     --arg name "${name}" \
     --arg body "Automated release from GitLab pipeline ${CI_PIPELINE_URL:-local}. Version: ${WBEAM_VERSION}" \
     --argjson prerelease "${prerelease}" \
-    '{tag_name:$tag_name,target_commitish:$target_commitish,name:$name,body:$body,draft:false,prerelease:$prerelease}')"
+    --argjson draft "${initial_draft}" \
+    '{tag_name:$tag_name,target_commitish:$target_commitish,name:$name,body:$body,draft:$draft,prerelease:$prerelease}')"
 
   api_call GET "${API_ROOT}/releases/tags/${tag}"
   if [[ "${API_STATUS}" == "200" ]]; then
@@ -188,7 +193,15 @@ publish_release() {
     upload_asset "${UPLOAD_URL}" "${file}"
   done
 
-  echo "[publish] Release updated: https://github.com/${GH_OWNER}/${GH_REPO}/releases/tag/${tag}"
+  if [[ "$initial_draft" == "true" ]]; then
+    api_call PATCH "${API_ROOT}/releases/${RELEASE_ID}" '{"draft":false}'
+    if [[ "${API_STATUS}" != "200" ]]; then
+      echo "[publish] Assets uploaded but release remains a draft: tag=${tag}. Review and retry with a new tag/draft." >&2
+      exit 1
+    fi
+  fi
+
+  echo "[publish] Release published: https://github.com/${GH_OWNER}/${GH_REPO}/releases/tag/${tag}"
 }
 
 if [[ "${RELEASE_TAG}" == "release-latest" ]]; then
