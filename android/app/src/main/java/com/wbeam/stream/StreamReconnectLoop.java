@@ -111,7 +111,9 @@ final class StreamReconnectLoop {
             config.runtimeState.incrementSessionConnectId();
             config.runtimeState.resetSampleSeq();
 
-            config.statusListener.onStatus(config.stateStreaming, "connected [framed]", 0);
+            // TCP connect is not equivalent to a decoded frame. The decoder
+            // transitions to STREAMING only after actual frame presentation.
+            config.statusListener.onStatus(config.stateConnecting, "connected; awaiting first frame", 0);
             config.streamWorker.run(new BufferedInputStream(socket.getInputStream(), 256 * 1024), codecHolder);
         }
     }

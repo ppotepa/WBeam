@@ -207,6 +207,7 @@ public class MainActivity extends AppCompatActivity {
     private final MetricSeriesBuffer runtimeLatencySeries = new MetricSeriesBuffer(HUD_RESOURCE_SERIES_MAX);
     private final MetricSeriesBuffer runtimeQueueSeries = new MetricSeriesBuffer(HUD_RESOURCE_SERIES_MAX);
     // ── Infrastructure ─────────────────────────────────────────────────────────
+    private volatile boolean activityTornDown = false;
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService controlExecutor  = Executors.newSingleThreadExecutor();
     private final ExecutorService telemetryExecutor = Executors.newSingleThreadExecutor();
@@ -451,6 +452,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void handleDaemonStatusUpdate(MainDaemonRuntimeCoordinator.StatusInput input) {
+        if (activityTornDown) return;
         if (daemonStatusContext == null) {
             daemonStatusContext = MainDaemonRuntimeInputFactory.createStatusContext(
                     daemon,
@@ -469,6 +471,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void handleDaemonOffline(boolean wasReachable, Exception e) {
+        if (activityTornDown) return;
         MainDaemonRuntimeCoordinator.OfflineContext context =
                 MainDaemonRuntimeInputFactory.createOfflineContext(
                         daemon,
@@ -534,6 +537,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void performLifecycleCleanup() {
+        activityTornDown = true;
         MainActivityLifecycleCleaner.cleanup(
                 statusPoller,
                 () -> StartupOverlayControllerGuard.stopPulse(startupOverlayController),
@@ -551,6 +555,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void refreshUiAfterDaemonStateChange() {
+        if (activityTornDown) return;
         updateActionButtonsEnabled();
         updateHostHint();
         refreshStatusText();
@@ -840,6 +845,17 @@ public class MainActivity extends AppCompatActivity {
         bindButton(R.id.qualityMedButton, () -> applySettingsPreset(SettingsPresets.QUALITY_MEDIUM));
         bindButton(R.id.qualityHighButton, () -> applySettingsPreset(SettingsPresets.QUALITY_HIGH));
         bindButton(R.id.advancedToggleButton, this::toggleAdvancedSettings);
+        // Preflight overlay remains interactive when the host is offline:
+        // Settings stays accessible and Retry triggers a fresh status check.
+        bindButton(R.id.preflightSettingsButton, () ->
+                MainUiControlsCoordinator.showSettingsPanel(settingsPanelController));
+        bindButton(R.id.preflightRetryButton, () -> {
+            if (statusPoller != null) statusPoller.start();
+            uiState.startupDismissed = false;
+            uiState.preflightComplete = false;
+            updatePreflightOverlay();
+            Toast.makeText(this, R.string.preflight_retry_requested, Toast.LENGTH_SHORT).show();
+        });
     }
 
     private void bindButton(int id, Runnable action) {

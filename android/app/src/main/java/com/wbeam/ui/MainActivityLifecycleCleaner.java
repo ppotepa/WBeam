@@ -41,7 +41,7 @@ public final class MainActivityLifecycleCleaner {
             ExecutorService probeExecutor
     ) {
         // 1. Stop producers first so no new tasks are submitted.
-        statusPoller.stop();
+        if (statusPoller != null) statusPoller.stop();
         stopPreflightPulse.run();
 
         // 2. Cancel pending UI callbacks.
@@ -61,15 +61,22 @@ public final class MainActivityLifecycleCleaner {
     }
 
     private static void shutdownExecutor(String name, ExecutorService executor) {
+        if (executor == null) return;
         executor.shutdown();
-        try {
-            if (!executor.awaitTermination(EXECUTOR_DRAIN_MS, TimeUnit.MILLISECONDS)) {
-                Log.w(TAG, name + " executor did not drain within " + EXECUTOR_DRAIN_MS + " ms; forcing");
+        // onDestroy runs on the main thread. Do not block it for up to 4.5s
+        // waiting sequentially on control/telemetry/probe executor lanes.
+        Thread drainer = new Thread(() -> {
+            try {
+                if (!executor.awaitTermination(EXECUTOR_DRAIN_MS, TimeUnit.MILLISECONDS)) {
+                    Log.w(TAG, name + " executor did not drain within " + EXECUTOR_DRAIN_MS + " ms; forcing");
+                    executor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
                 executor.shutdownNow();
+                Thread.currentThread().interrupt();
             }
-        } catch (InterruptedException e) {
-            executor.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
+        }, "WBeam-" + name + "-shutdown");
+        drainer.setDaemon(true);
+        drainer.start();
     }
 }
