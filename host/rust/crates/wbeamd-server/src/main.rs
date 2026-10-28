@@ -61,11 +61,29 @@ fn validate_control_bind_address(
 
 #[cfg(test)]
 mod control_bind_policy_tests {
-    use super::validate_control_bind_address;
+    use super::{validate_control_bind_address, Args};
+    use clap::Parser;
     use std::net::IpAddr;
 
     fn ip(raw: &str) -> IpAddr {
         raw.parse().expect("valid test IP")
+    }
+
+    #[test]
+    fn cli_defaults_to_loopback_without_unsafe_lan_acknowledgement() {
+        let args = Args::parse_from(["wbeamd-rust"]);
+        assert_eq!(args.control_bind_address, ip("127.0.0.1"));
+        assert!(!args.allow_unauthenticated_lan_control);
+    }
+
+    #[test]
+    fn cli_rejects_invalid_ip_addresses() {
+        let invalid = Args::try_parse_from([
+            "wbeamd-rust",
+            "--control-bind-address",
+            "hostname-not-an-ip",
+        ]);
+        assert!(invalid.is_err());
     }
 
     #[test]
@@ -159,6 +177,7 @@ async fn main() {
     ) {
         Ok(ip) => ip,
         Err(message) => {
+            eprintln!("[wbeam] {message} Requested: {}", args.control_bind_address);
             error!(requested_bind_address = %args.control_bind_address, "{message}");
             std::process::exit(2);
         }
