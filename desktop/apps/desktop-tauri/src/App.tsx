@@ -286,7 +286,16 @@ export default function App() {
     if (!selected) return "";
     const current = session.devices().find((device) => device.serial === selected.serial);
     if (!current) return "The device was disconnected while configuring the session";
-    return connectDisabledReason(current, selectedCaptureBackend());
+    const backend = selectedCaptureBackend();
+    if (backend === "evdi") {
+      // Kernel card detection alone cannot prove the streamer can load the
+      // libevdi runtime. A pending/failed doctor must block Connect.
+      if (connectDialogDoctorLoading()) return "Checking EVDI dependencies...";
+      const doctor = connectDialogDoctor();
+      if (!doctor) return "Run EVDI diagnostics before connecting";
+      if (!doctor.ok) return `EVDI setup required: ${doctor.message}`;
+    }
+    return connectDisabledReason(current, backend);
   };
   const [autoConnectBusy, setAutoConnectBusy] = createSignal(false);
   const [autoConnectSummary, setAutoConnectSummary] = createSignal("");
@@ -541,7 +550,17 @@ export default function App() {
       if (requestId !== connectDialogRequestId
         || !connectDialogDevice()
         || selectedCaptureBackend() !== "evdi") return;
-      session.setError(`EVDI diagnostics unavailable: ${String(err)}`);
+      const message = `EVDI diagnostics unavailable: ${String(err)}`;
+      setConnectDialogDoctor({
+        ok: false,
+        message,
+        actionable: false,
+        hostBackend: "evdi",
+        resolver: "evdi_kernel",
+        missingDeps: [],
+        installHint: "Open Host setup to diagnose the installed EVDI runtime.",
+      });
+      session.setError(message);
     } finally {
       if (requestId === connectDialogRequestId) setConnectDialogDoctorLoading(false);
     }
@@ -613,6 +632,7 @@ function resolveEncoderMode(
   async function confirmConnect(): Promise<void> {
     const selectedDevice = connectDialogDevice();
     if (!selectedDevice) return;
+    const requestId = connectDialogRequestId;
     const device = session.devices().find((candidate) => candidate.serial === selectedDevice.serial);
     if (!device) {
       session.setError("Device disconnected while configuring the session. Refresh devices and retry.");
@@ -628,7 +648,7 @@ function resolveEncoderMode(
       session.setError("Selected capture backend is unavailable. Choose EVDI or Wayland Portal.");
       return;
     }
-    const blockedReason = connectDisabledReason(device, captureBackend);
+    const blockedReason = connectDialogBlockReason();
     if (blockedReason.length > 0) {
       session.setError(blockedReason);
       return;
@@ -636,6 +656,8 @@ function resolveEncoderMode(
     try {
       const backendMode = await resolveBackendMode(device, captureBackend);
       if (!backendMode) return;
+      if (requestId !== connectDialogRequestId
+        || connectDialogDevice()?.serial !== device.serial) return;
 
       const qualityMode = connectDialogQualityMode();
       const isAdaptive = qualityMode === "adaptive";
@@ -659,7 +681,9 @@ function resolveEncoderMode(
       };
 
       const result = await session.connectDevice(device, backendMode, connectConfig);
-      if (result.ok) closeConnectDialog();
+      // A slow previous device request must not dismiss a newer Connect modal.
+      if (result.ok && requestId === connectDialogRequestId
+        && connectDialogDevice()?.serial === device.serial) closeConnectDialog();
     } catch (err) {
       session.setError(`Connect mode validation failed: ${String(err)}`);
     }
