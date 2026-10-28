@@ -447,6 +447,45 @@ fn build_start_body_json(start_patch: Option<&StartConfigPatch>) -> Result<Optio
         .map_err(|e| format!("serialize start patch failed: {e}"))
 }
 
+/// Percent-encode a query component (not a full URL). ADB serials are not
+/// guaranteed to be URL-safe; '&', '#', '?' and '=' must never change the API
+/// route/query parameters supplied to the local daemon.
+pub(crate) fn encode_query_component(raw: &str) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(raw.len());
+    for byte in raw.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            out.push(byte as char);
+        } else {
+            let _ = write!(&mut out, "%{byte:02X}");
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod query_encoding_tests {
+    use super::encode_query_component;
+
+    #[test]
+    fn plain_serial_is_unchanged() {
+        assert_eq!(encode_query_component("ABC-123._~"), "ABC-123._~");
+    }
+
+    #[test]
+    fn serial_cannot_inject_query_parameters() {
+        assert_eq!(
+            encode_query_component("USB&stream_port=9999#frag"),
+            "USB%26stream_port%3D9999%23frag"
+        );
+    }
+
+    #[test]
+    fn utf8_and_spaces_are_encoded_bytewise() {
+        assert_eq!(encode_query_component("a b/ą"), "a%20b%2F%C4%85");
+    }
+}
+
 fn daemon_post_action(
     action: &str,
     serial: &str,
@@ -456,8 +495,9 @@ fn daemon_post_action(
     capture_backend: Option<&str>,
 ) -> Result<String, String> {
     let control_port = wbeam_control_port();
+    let serial_param = encode_query_component(serial);
     let mut url = format!(
-        "http://127.0.0.1:{control_port}/v1/{action}?serial={serial}&stream_port={stream_port}"
+        "http://127.0.0.1:{control_port}/v1/{action}?serial={serial_param}&stream_port={stream_port}"
     );
     if action == "start" {
         append_start_query_params(&mut url, display_mode, capture_backend);
@@ -1047,7 +1087,8 @@ fn device_disconnect_blocking(serial: String, stream_port: u16) -> Result<String
     if res.is_err() {
         // Fallback: stream port may have drifted from stale UI mapping.
         let control_port = wbeam_control_port();
-        let url = format!("http://127.0.0.1:{control_port}/v1/stop?serial={serial}");
+        let serial_param = encode_query_component(&serial);
+        let url = format!("http://127.0.0.1:{control_port}/v1/stop?serial={serial_param}");
         let output = Command::new("curl")
             .args(["-sS", "--max-time", "3", "-X", "POST", &url])
             .output()
