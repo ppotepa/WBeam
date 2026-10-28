@@ -1,7 +1,10 @@
 # WBeam E2E
 
-This folder contains local VM end-to-end test scaffolding. It is intentionally
-not wired into GitLab CI yet.
+This folder contains local VM end-to-end test scaffolding. Python runner
+**unit tests** execute in GitLab CI, but real VM/physical Android E2E acceptance
+does **not** run on shared CI runners. A local TCP receiver is not proof of
+actual Android rendering. See `docs/release-checklist.md` and
+`e2e/scripts/validate_hardware_acceptance.py` for physical-device signoff.
 
 The model is two-phase:
 
@@ -136,3 +139,14 @@ explicitly testing MOK enrollment. The scenario must collect `dmesg`, `dkms`,
 
 `x11_gst` needs a GNOME Xorg session or a deterministic Xvfb/Xorg session with
 capture access.
+
+## Release support versus historical scenarios
+
+`x11_gst` scenarios remain in the VM matrix strictly as historical/legacy
+technical tests. They are not supported release paths, are not surfaced in the
+product UI and must not be counted toward release acceptance. The two supported
+capture backends are `evdi` and `wayland_portal`.
+
+Release acceptance requires physical Android evidence for Fedora 43 and Ubuntu
+24.04 on GNOME Wayland; see `docs/release-checklist.md`. Keep private device
+serials, secrets and raw logcat outside the repository.
