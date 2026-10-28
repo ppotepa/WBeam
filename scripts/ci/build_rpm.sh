@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/runtime-assets.sh"
 
 RPM_VERSION="${WBEAM_VERSION}"
 RPM_RELEASE="1"
@@ -24,12 +25,8 @@ mkdir -p "${TOPDIR}/"{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
 
 SRCROOT="${TOPDIR}/wbeam-${RPM_VERSION}"
 mkdir -p "${SRCROOT}"
-mkdir -p "${SRCROOT}/share/wbeam/host" "${SRCROOT}/share/wbeam/config" "${SRCROOT}/share/wbeam/host/rust/systemd" "${SRCROOT}/share/wbeam/host/rust/scripts"
-install -m 0755 "${ROOT_DIR}/wbeam" "${SRCROOT}/share/wbeam/wbeam"
-cp -a "${ROOT_DIR}/host/scripts" "${SRCROOT}/share/wbeam/host/"
-install -m 0644 "${ROOT_DIR}/host/rust/systemd/wbeamd-rust.service.template" "${SRCROOT}/share/wbeam/host/rust/systemd/wbeamd-rust.service.template"
-install -m 0755 "${ROOT_DIR}/host/rust/scripts/install_systemd_user.sh" "${SRCROOT}/share/wbeam/host/rust/scripts/install_systemd_user.sh"
-install -m 0644 "${ROOT_DIR}/config/wbeam.conf" "${SRCROOT}/share/wbeam/config/wbeam.conf"
+stage_wbeam_runtime_assets "${SRCROOT}/share/wbeam"
+assert_wbeam_runtime_assets "${SRCROOT}/share/wbeam"
 cat > "${SRCROOT}/wbeam" <<'EOF'
 #!/usr/bin/env bash
 export WBEAM_ROOT="${WBEAM_ROOT:-/usr/share/wbeam}"
@@ -76,6 +73,9 @@ Requires:       gtk3
 Requires:       webkit2gtk4.1
 Requires:       libsoup3
 Requires:       libayatana-appindicator-gtk3
+Requires:       android-tools
+Requires:       curl
+Requires:       gstreamer1-plugins-base
 
 %description
 WBeam host runtime package built by GitLab CI.
@@ -112,6 +112,9 @@ install -m 0644 README.md %{buildroot}/usr/share/doc/wbeam/README.md
 /usr/share/wbeam/desktop-icon.png
 /usr/share/wbeam/wbeam.desktop
 /usr/share/wbeam/config/wbeam.conf
+/usr/share/wbeam/scripts
+/usr/share/wbeam/android
+/usr/share/wbeam/VERSION.txt
 /usr/share/wbeam/host/scripts
 /usr/share/wbeam/host/rust/scripts/install_systemd_user.sh
 /usr/share/wbeam/host/rust/systemd/wbeamd-rust.service.template

@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/runtime-assets.sh"
 
 DEB_VERSION="${WBEAM_VERSION}"
 ARCH="$(dpkg --print-architecture)"
@@ -22,13 +23,9 @@ write_version_manifest
 PKGROOT="$(mktemp -d)"
 trap 'rm -rf "${PKGROOT}"' EXIT
 
-mkdir -p "${PKGROOT}/DEBIAN" "${PKGROOT}/usr/local/bin" "${PKGROOT}/usr/share/doc/wbeam" "${PKGROOT}/usr/share/wbeam/host" "${PKGROOT}/usr/share/wbeam/config" "${PKGROOT}/usr/share/wbeam/host/rust/scripts" "${PKGROOT}/usr/share/applications" "${PKGROOT}/usr/share/icons/hicolor/256x256/apps"
-install -m 0755 "${ROOT_DIR}/wbeam" "${PKGROOT}/usr/share/wbeam/wbeam"
-cp -a "${ROOT_DIR}/host/scripts" "${PKGROOT}/usr/share/wbeam/host/"
-mkdir -p "${PKGROOT}/usr/share/wbeam/host/rust/systemd"
-install -m 0644 "${ROOT_DIR}/host/rust/systemd/wbeamd-rust.service.template" "${PKGROOT}/usr/share/wbeam/host/rust/systemd/wbeamd-rust.service.template"
-install -m 0755 "${ROOT_DIR}/host/rust/scripts/install_systemd_user.sh" "${PKGROOT}/usr/share/wbeam/host/rust/scripts/install_systemd_user.sh"
-install -m 0644 "${ROOT_DIR}/config/wbeam.conf" "${PKGROOT}/usr/share/wbeam/config/wbeam.conf"
+mkdir -p "${PKGROOT}/DEBIAN" "${PKGROOT}/usr/local/bin" "${PKGROOT}/usr/share/doc/wbeam" "${PKGROOT}/usr/share/applications" "${PKGROOT}/usr/share/icons/hicolor/256x256/apps"
+stage_wbeam_runtime_assets "${PKGROOT}/usr/share/wbeam"
+assert_wbeam_runtime_assets "${PKGROOT}/usr/share/wbeam"
 cat > "${PKGROOT}/usr/local/bin/wbeam" <<'EOF'
 #!/usr/bin/env bash
 export WBEAM_ROOT="${WBEAM_ROOT:-/usr/share/wbeam}"
@@ -66,7 +63,7 @@ Section: utils
 Priority: optional
 Architecture: ${ARCH}
 Maintainer: WBeam CI <ci@example.local>
-Depends: libgtk-3-0, libwebkit2gtk-4.1-0, libsoup-3.0-0, libayatana-appindicator3-1
+Depends: libgtk-3-0, libwebkit2gtk-4.1-0, libsoup-3.0-0, libayatana-appindicator3-1, adb, curl, gstreamer1.0-plugins-base
 Description: WBeam host tools and daemon binaries
  WBeam host runtime package built by GitLab CI.
 EOF
