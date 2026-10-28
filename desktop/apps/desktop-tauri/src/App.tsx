@@ -228,7 +228,7 @@ function safeUiText(value: string, legacyLabel = "Legacy capture is unsupported.
 function supportedCaptureLabel(mode: string): string {
   if (mode === "evdi") return "EVDI";
   if (mode === "wayland_portal") return "Wayland Portal";
-  if (mode === "unknown" || !mode) return "unknown";
+  if (mode === "unknown" || mode === "unsupported_host" || !mode) return "none";
   return "unsupported legacy/unknown backend";
 }
 
@@ -1144,7 +1144,7 @@ function resolveEncoderMode(
           <span>{session.devices().length} devices ({session.tabletCount()} tablet, {session.phoneCount()} phone)</span>
           <Show when={mode() === "advanced"}>
             <span>
-              host: {safeUiText(session.hostProbe().os)}/{safeUiText(session.hostProbe().session, "legacy session")}/{safeUiText(session.hostProbe().desktop, "legacy desktop")} · capture={supportedCaptureLabel(session.hostProbe().captureMode)} · {session.hostProbe().supported && isSupportedCaptureMode(session.hostProbe().captureMode) ? "supported" : "unsupported"}
+              host: {safeUiText(session.hostProbe().os)}/{safeUiText(session.hostProbe().session, "legacy session")}/{safeUiText(session.hostProbe().desktop, "legacy desktop")} · default={supportedCaptureLabel(session.hostProbe().captureMode)} · available={session.hostProbe().availableBackends.filter(isSupportedCaptureMode).map(supportedCaptureLabel).join(", ") || "none"} · {session.hostProbe().supported && session.hostProbe().availableBackends.some(isSupportedCaptureMode) ? "supported" : "unsupported"}
             </span>
             <span>updated: {session.updatedAt()}</span>
           </Show>

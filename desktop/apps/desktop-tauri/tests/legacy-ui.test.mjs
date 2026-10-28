@@ -15,7 +15,10 @@ test("only supported backends are offered in the Connect dropdown", () => {
 test("legacy diagnostics have presentation guards", () => {
   assert.match(app, /function safeUiText\(/);
   assert.match(app, /\{safeUiText\(session\.error\(\)\)\}/);
-  assert.match(app, /capture=\{supportedCaptureLabel\(session\.hostProbe\(\)\.captureMode\)\}/);
+  assert.match(app, /default=\{supportedCaptureLabel\(session\.hostProbe\(\)\.captureMode\)\}/);
+  assert.match(app, /availableBackends\.filter\(isSupportedCaptureMode\)\.map\(supportedCaptureLabel\)/);
+  assert.match(app, /availableBackends\.some\(isSupportedCaptureMode\)/);
+  assert.match(app, /mode === "unsupported_host" \|\| !mode/);
   assert.match(app, /\{safeUiText\(doctor\.installHint\)\}/);
   assert.match(app, /\{safeUiText\(d\(\)\.installHint\)\}/);
   assert.doesNotMatch(app, /Host detected: \$\{session\.hostProbe\(\)\.captureMode\}/);
