@@ -182,6 +182,14 @@ the package tree. With `<WBEAM_ROOT>/VERSION.txt` present (DEB/RPM),
 
 The `--log-dir PATH` CLI argument always takes precedence. Source-tree
 runs retain their historical `<repo>/host/rust/logs` default.
+
+The **`wbeamd-core` effective-runtime JSONL** must follow the same
+writable-state policy. In installed mode, check
+`$XDG_STATE_HOME/wbeam/logs/effective-runtime/` (or the HOME fallback),
+not `/usr/share/wbeam/logs/effective-runtime/`. Source-tree runs
+continue to use `<repo>/logs/effective-runtime/`. Verify both server
+rolling logs and per-session effective-runtime snapshots in a clean
+non-root package installation.
 If neither state-home path is available for an installed daemon, startup
 must fail with an actionable error; it must not attempt to write under
 `/usr/share/wbeam`.
