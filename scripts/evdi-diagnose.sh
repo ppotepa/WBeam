@@ -232,7 +232,7 @@ fi
 
 RUNNING_KERNEL=$(uname -r)
 
-if [[ "$OS" == "fedora" ]]; then
+if [[ "$OS" == "fedora" ]] && ! modinfo evdi >/dev/null 2>&1; then
     print_check "Fedora EVDI DKMS compatibility for running kernel $RUNNING_KERNEL"
     log_path="$(evdi_find_build_log "$RUNNING_KERNEL" || true)"
     if [[ -n "$log_path" ]]; then
