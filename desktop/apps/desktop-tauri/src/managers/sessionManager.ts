@@ -13,6 +13,14 @@ const EMPTY_PROBE: HostProbeBrief = {
   evdiAvailable: false,
 };
 
+export type DeviceActionResult =
+  | { ok: true; serial: string; action: "connect" | "disconnect"; state: "accepted" }
+  | { ok: false; serial: string; action: "connect" | "disconnect"; state: "failed"; error: string };
+
+function actionErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 export function createSessionManager(api: HostApiManager) {
   const [devices, setDevices] = createSignal<DeviceBasic[]>([]);
   const [hostVersion, setHostVersion] = createSignal<string>("");
@@ -27,7 +35,12 @@ export function createSessionManager(api: HostApiManager) {
   const [loading, setLoading] = createSignal(true);
   const [refreshing, setRefreshing] = createSignal(false);
   const [serviceBusy, setServiceBusy] = createSignal(false);
+  // User-initiated errors must not be erased by automatic polling.
   const [error, setError] = createSignal<string>("");
+  const [serviceRefreshError, setServiceRefreshError] = createSignal("");
+  const [devicesRefreshError, setDevicesRefreshError] = createSignal("");
+  const [deviceSnapshotStale, setDeviceSnapshotStale] = createSignal(false);
+  const [deviceActionErrors, setDeviceActionErrors] = createSignal<Record<string, string>>({});
   const [updatedAt, setUpdatedAt] = createSignal<string>("-");
   const [deviceActionBusy, setDeviceActionBusy] = createSignal<string[]>([]);
   const [hostProbe, setHostProbe] = createSignal<HostProbeBrief>(EMPTY_PROBE);
@@ -41,6 +54,19 @@ export function createSessionManager(api: HostApiManager) {
   const DEVICES_POLL_MIN_MS = 1200;
   const DEVICES_POLL_MAX_MS = 7000;
 
+  const refreshError = createMemo(() =>
+    [serviceRefreshError(), devicesRefreshError()].filter(Boolean).join(" · "),
+  );
+
+  function setDeviceActionError(serial: string, message: string): void {
+    setDeviceActionErrors((prev) => {
+      const next = { ...prev };
+      if (message) next[serial] = message;
+      else delete next[serial];
+      return next;
+    });
+  }
+
   const tabletCount = createMemo(() => devices().filter((d) => d.deviceClass === "Tablet").length);
   const phoneCount = createMemo(() => devices().filter((d) => d.deviceClass === "Phone").length);
   const serviceState = createMemo<"running" | "stopped" | "missing">(() => {
@@ -52,6 +78,7 @@ export function createSessionManager(api: HostApiManager) {
   async function loadServiceStatus(): Promise<boolean> {
     try {
       const next = await api.getServiceStatus();
+      setServiceRefreshError("");
       const nextKey = JSON.stringify(next);
       if (nextKey !== lastServiceKey) {
         setService(next);
@@ -60,7 +87,7 @@ export function createSessionManager(api: HostApiManager) {
       }
       return false;
     } catch (err) {
-      setError(String(err));
+      setServiceRefreshError(`Service refresh failed: ${actionErrorMessage(err)}`);
       return false;
     }
   }
@@ -93,7 +120,6 @@ export function createSessionManager(api: HostApiManager) {
     }
     let changed = false;
     if (initial) setLoading(true);
-    setError("");
     try {
       const response = await api.getDevices();
       const nextDevices = response.devices || [];
@@ -114,7 +140,8 @@ export function createSessionManager(api: HostApiManager) {
         changed = true;
       }
 
-      if (response.error) setError(response.error);
+      setDevicesRefreshError(response.error ?? "");
+      setDeviceSnapshotStale(Boolean(response.error));
       if (force || changed) {
         devicesPollIntervalMs = DEVICES_POLL_MIN_MS;
       } else {
@@ -122,10 +149,10 @@ export function createSessionManager(api: HostApiManager) {
       }
       nextDevicesPollAt = Date.now() + devicesPollIntervalMs;
     } catch (err) {
-      setError(String(err));
-      setDevices([]);
-      lastDevicesKey = "";
-      changed = true;
+      // A transient ADB/API failure must not wipe a previously observed device
+      // list or a user-action error. Keep the last successful snapshot marked stale.
+      setDevicesRefreshError(`Device refresh failed: ${actionErrorMessage(err)}`);
+      setDeviceSnapshotStale(true);
       devicesPollIntervalMs = Math.min(DEVICES_POLL_MAX_MS, devicesPollIntervalMs + 5000);
       nextDevicesPollAt = Date.now() + devicesPollIntervalMs;
     } finally {
@@ -195,33 +222,46 @@ export function createSessionManager(api: HostApiManager) {
     device: DeviceBasic,
     displayMode: "virtual_monitor" | "virtual_mirror" | "duplicate",
     connectConfig?: ConnectSessionConfig,
-  ) {
+  ): Promise<DeviceActionResult> {
     const key = `${device.serial}:connect`;
-    setDeviceActionBusy((prev) => (prev.includes(key) ? prev : [...prev, key]));
+    if (deviceActionBusy().some((entry) => entry.startsWith(`${device.serial}:`))) {
+      return { ok: false, serial: device.serial, action: "connect", state: "failed", error: "Device action already in progress" };
+    }
+    setDeviceActionBusy((prev) => [...prev, key]);
+    setDeviceActionError(device.serial, "");
     setError("");
     try {
+      // A resolved API request means accepted, NOT confirmed STREAMING.
       await api.connectDevice(device, displayMode, connectConfig);
-      // Devices haven't changed — just refresh service + probe state.
       await Promise.all([loadServiceStatus(), loadHostProbe()]);
       setUpdatedAt(new Date().toLocaleTimeString());
+      return { ok: true, serial: device.serial, action: "connect", state: "accepted" };
     } catch (err) {
-      setError(String(err));
+      const message = actionErrorMessage(err);
+      setDeviceActionError(device.serial, message);
+      return { ok: false, serial: device.serial, action: "connect", state: "failed", error: message };
     } finally {
       setDeviceActionBusy((prev) => prev.filter((entry) => entry !== key));
     }
   }
 
-  async function disconnectDevice(device: DeviceBasic) {
+  async function disconnectDevice(device: DeviceBasic): Promise<DeviceActionResult> {
     const key = `${device.serial}:disconnect`;
-    setDeviceActionBusy((prev) => (prev.includes(key) ? prev : [...prev, key]));
+    if (deviceActionBusy().some((entry) => entry.startsWith(`${device.serial}:`))) {
+      return { ok: false, serial: device.serial, action: "disconnect", state: "failed", error: "Device action already in progress" };
+    }
+    setDeviceActionBusy((prev) => [...prev, key]);
+    setDeviceActionError(device.serial, "");
     setError("");
     try {
       await api.disconnectDevice(device);
-      // Devices haven't changed — just refresh service + probe state.
       await Promise.all([loadServiceStatus(), loadHostProbe()]);
       setUpdatedAt(new Date().toLocaleTimeString());
+      return { ok: true, serial: device.serial, action: "disconnect", state: "accepted" };
     } catch (err) {
-      setError(String(err));
+      const message = actionErrorMessage(err);
+      setDeviceActionError(device.serial, message);
+      return { ok: false, serial: device.serial, action: "disconnect", state: "failed", error: message };
     } finally {
       setDeviceActionBusy((prev) => prev.filter((entry) => entry !== key));
     }
@@ -236,6 +276,9 @@ export function createSessionManager(api: HostApiManager) {
     refreshing,
     serviceBusy,
     error,
+    refreshError,
+    deviceSnapshotStale,
+    deviceActionErrors,
     updatedAt,
     deviceActionBusy,
     hostProbe,

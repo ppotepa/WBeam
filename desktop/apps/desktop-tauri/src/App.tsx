@@ -367,7 +367,8 @@ export default function App() {
         size,
       };
       try {
-        await session.connectDevice(device, "virtual_monitor", connectConfig);
+        const result = await session.connectDevice(device, "virtual_monitor", connectConfig);
+        if (!result.ok) errors.push(`${device.serial}: ${result.error}`);
       } catch (err) {
         errors.push(`${device.serial}: ${String(err)}`);
       }
@@ -545,8 +546,8 @@ function resolveEncoderMode(
         manualBitrateKbps: isManual ? connectDialogManualMbps() * 1000 : undefined,
       };
 
-      closeConnectDialog();
-      await session.connectDevice(device, backendMode, connectConfig);
+      const result = await session.connectDevice(device, backendMode, connectConfig);
+      if (result.ok) closeConnectDialog();
     } catch (err) {
       session.setError(`Connect mode validation failed: ${String(err)}`);
     }
@@ -711,7 +712,13 @@ function resolveEncoderMode(
         <p class="meta-line">Daemon APK: <strong>{session.daemonVersion() || session.hostVersion() || "not set"}</strong></p>
 
         <Show when={session.error()}>
-          <p class="error-line">{safeUiText(session.error())}</p>
+          <p class="error-line" role="alert">{safeUiText(session.error())}</p>
+        </Show>
+        <Show when={session.refreshError()}>
+          <p class="warn-line" role="status">{safeUiText(session.refreshError())}</p>
+        </Show>
+        <Show when={session.deviceSnapshotStale()}>
+          <p class="warn-line" role="status">Device status may be outdated. Last known devices are shown.</p>
         </Show>
         <Show when={!session.loading() && session.devices().length === 0 && !session.error()}>
           <p class="empty-line">
@@ -869,6 +876,9 @@ function resolveEncoderMode(
                     );
                   })()}
                 </div>
+                <Show when={session.deviceActionErrors()[device.serial]}>
+                  {(message) => <p class="error-line" role="alert">{safeUiText(message())}</p>}
+                </Show>
               </li>
             )}
           </For>
@@ -1193,6 +1203,9 @@ function resolveEncoderMode(
                 </Show>
                 <Show when={connectDialogBlockReason()}>
                   {(msg) => <p class="setup-missing">Connect blocked: {safeUiText(msg())}</p>}
+                </Show>
+                <Show when={session.deviceActionErrors()[device.serial]}>
+                  {(msg) => <p class="setup-missing" role="alert">{safeUiText(msg())}</p>}
                 </Show>
                 <Show when={selectedCaptureBackend() === "evdi" && doctor()}>
                   {(d) => <p class="setup-hint">{safeUiText(d().installHint)}</p>}
