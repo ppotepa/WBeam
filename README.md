@@ -104,6 +104,13 @@ selection uses only available EVDI and Wayland Portal.
 Legacy X11 modules remain in the source tree but are not supported capture paths
 and are not available in the release UI.
 
+**Control API:** WBeam listens on `127.0.0.1:5001` by default for the
+Android USB/ADB reverse workflow. To expose the **unauthenticated** API
+to an isolated trusted LAN, both
+`WBEAM_CONTROL_BIND_ADDR=<LAN-IP>` and
+`WBEAM_ALLOW_UNAUTHENTICATED_LAN_CONTROL=1` are required. Do **not**
+enable this on an internet-facing interface; see `docs/SECURITY_RELEASE.md`.
+
 ---
 
 ## Commands
