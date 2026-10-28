@@ -39,3 +39,18 @@ test("system command detection never interpolates a shell parameter", () => {
   assert.match(service, /command -v \\"\$1\\"/);
   assert.doesNotMatch(service, /format!\("command -v \{name\}/);
 });
+
+test("profile storage validates the backend before touching the filesystem", () => {
+  const profiles = read("../src-tauri/src/profiles.rs");
+  assert.match(profiles, /fn validated_backend_component\(raw: &str\) -> Result<String, String>/);
+  assert.match(profiles, /normalized\.bytes\(\)\.all\(/);
+  const pathFn = profiles.slice(
+    profiles.indexOf("pub(crate) fn trained_profiles_path("),
+    profiles.indexOf("pub(crate) fn migrate_legacy_profiles_once()"),
+  );
+  const validated = pathFn.indexOf("validated_backend_component(backend)?");
+  const mkdir = pathFn.indexOf("fs::create_dir_all");
+  assert.ok(validated >= 0 && mkdir > validated);
+  assert.doesNotMatch(pathFn, /\.join\(normalize_backend\(backend\)\)/);
+  assert.match(profiles, /fn backend_path_traversal_and_separators_are_rejected\(/);
+});
