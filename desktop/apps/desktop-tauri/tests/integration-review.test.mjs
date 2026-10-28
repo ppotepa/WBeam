@@ -38,3 +38,14 @@ test("GitLab master fast-forward refuses a release-branch SHA mismatch", () => {
   assert.match(gitlab, /git merge --ff-only "\$CI_COMMIT_SHA"/);
   assert.doesNotMatch(gitlab, /git merge --ff-only origin\/release/);
 });
+
+test("signed APK CI job explicitly waits for every release quality gate", () => {
+  const section = gitlab.split("build_apk_release:")[1].split("build_windows_server:")[0];
+  for (const job of [
+    "quality_gates", "quality_frontend", "quality_rust_host",
+    "quality_tauri_native", "quality_android_unit", "quality_e2e_runner",
+  ]) {
+    assert.match(section, new RegExp(`job: ${job}\\\\b`));
+  }
+  assert.match(gitlab, /publish_github_release:[\\s\\S]*?job: build_apk_release/);
+});
