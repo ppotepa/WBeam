@@ -55,6 +55,9 @@ git clone <repo> && cd WBeam
 # install the user service, then onboard the Android phone.
 ./install-wbeam
 
+# Debian/Ubuntu: installs native host build dependencies through apt.
+# Fedora: uses scripts/fedora-setup.sh.
+
 # Preview first if needed
 ./install-wbeam --dry-run
 ```

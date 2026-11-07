@@ -806,7 +806,7 @@ host_evdi_link_preflight() {
       ;;
     debian|ubuntu)
       echo "[host] Debian/Ubuntu fix:" >&2
-      echo "[host]   sudo apt-get install -y evdi-dkms" >&2
+      echo "[host]   sudo apt-get install -y libevdi-dev" >&2
       ;;
     *)
       echo "[host] Generic fix: install EVDI development/runtime package that provides libevdi.so." >&2

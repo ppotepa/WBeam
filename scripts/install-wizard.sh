@@ -338,7 +338,7 @@ print_plan() {
         fi
         ;;
       debian|ubuntu)
-        echo "  system deps: Debian/Ubuntu installer not implemented yet"
+        echo "  system deps: apt packages for host build and capture"
         ;;
       *)
         echo "  system deps: unsupported distro, manual deps required"
@@ -387,9 +387,19 @@ install_system_deps() {
       run_cmd "$ROOT_DIR/scripts/fedora-setup.sh" "${args[@]}"
       ;;
     debian|ubuntu)
-      err "Debian/Ubuntu installer backend is not implemented yet on this branch."
-      err "This wizard detects Debian/Ubuntu, but package install mapping still needs to be added."
-      return 1
+      local apt_cmd=(apt-get)
+      if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+        apt_cmd=(sudo apt-get)
+      fi
+      run_cmd "${apt_cmd[@]}" update
+      run_cmd "${apt_cmd[@]}" install -y --no-install-recommends \
+        build-essential pkg-config libssl-dev libdbus-1-dev \
+        libx11-dev libxrandr-dev libxfixes-dev libxext-dev libxrender-dev \
+        libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libevdi-dev
+      if [[ "$BACKEND" == "evdi" ]]; then
+        run_cmd "${apt_cmd[@]}" install -y --no-install-recommends \
+          dkms "linux-headers-$(uname -r)" evdi-dkms
+      fi
       ;;
     *)
       err "automatic install is not implemented for distro '$DISTRO_ID'."
