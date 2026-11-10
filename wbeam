@@ -854,7 +854,7 @@ host_build() {
       host_evdi_link_preflight
       return 1
     fi
-    echo "[host] libevdi.so not found; building streamer without EVDI support (Wayland/X11 fallback only)"
+    echo "[host] libevdi.so not found; building streamer without EVDI support (Wayland Portal only)"
     echo "[host] To enable EVDI later on Fedora: scripts/fedora-setup.sh --yes --enable-evdi-copr"
     cd "$rust_dir" && WBEAM_BUILD_REV="$build_version" cargo build --release -p wbeamd-streamer --no-default-features
   fi

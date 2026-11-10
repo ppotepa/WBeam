@@ -1,141 +1,87 @@
-# E2E Flow
+# VM disk lifecycle and reports
 
-The E2E VM workflow has two separate lifecycles.
+For setup and backend expectations, start with [the E2E guide](README.md).
+Run the commands below from the repository root.
 
-## 1. Base Image Lifecycle
+## Base images
 
-Base images are clean installed operating systems created from ISO. They are
-inputs to tests, not test artifacts.
+`prepare-base` installs a clean OS from the selected ISO, configures test SSH
+access and the requested session, checks the first boot, shuts down, and
+promotes the installed disk to a reusable base image. The base contains OS/test
+prerequisites, not WBeam build output.
 
-```text
-installer ISO
-  -> empty install disk
-  -> unattended OS install
-  -> first boot sanity checks
-  -> shutdown
-  -> immutable base qcow2
+```bash
+./e2e/run base-plan --distro fedora-43 --session gnome-wayland
+./e2e/run prepare-base --distro fedora-43 --session gnome-wayland
 ```
 
-Default path:
+The matrix defines `headless`, `gnome-wayland` and legacy `gnome-xorg` variants.
+Preparation validates `/var/lib/wbeam-e2e/base-ready.json` and the session
+sanity checks before promotion. Base files live at:
 
 ```text
 e2e/images/base/<distro>/<session>.qcow2
+e2e/images/base/<distro>/<session>.json
 ```
 
-Examples:
+The adjacent JSON records base-image metadata. Build intermediates/logs remain
+under `e2e/work/base-build/<distro>/<session>/`. Treat promoted bases as immutable
+inputs; rebuild deliberately if the OS/session setup must change.
 
-```text
-e2e/images/base/fedora-43/headless.qcow2
-e2e/images/base/fedora-43/gnome-wayland.qcow2
-e2e/images/base/fedora-43/gnome-xorg.qcow2
-e2e/images/base/ubuntu-24.04/gnome-wayland.qcow2
-e2e/images/base/debian-12/gnome-xorg.qcow2
-```
+## Disposable runs
 
-The base image must contain only the OS, SSH access, base desktop/session setup,
-and generic VM agent dependencies. It must not contain build output from the
-tested WBeam checkout.
-
-Required base variants come from `e2e/matrix.json` scenarios:
-
-- `headless`
-- `gnome-wayland`
-- `gnome-xorg`
-
-## 2. Test Run Lifecycle
-
-Every scenario runs from a disposable working disk.
-
-```text
-base qcow2
-  -> qcow2 overlay or full copy
-  -> boot VM
-  -> copy current checkout
-  -> guest-install-wbeam.sh
-  -> guest-stream-smoke.sh
-  -> collect reports
-  -> delete or retain working disk
-```
-
-Default working disk path:
-
-```text
-e2e/work/runs/<run-id>/<scenario-id>/disk.qcow2
-```
-
-Overlay creation:
+A test creates a working disk, boots the guest, copies the current checkout,
+runs `guest-install-wbeam.sh`, runs `guest-stream-smoke.sh`, and collects reports.
+The copy excludes `.git` and build outputs, so record the tested source commit
+in the host-side QA evidence rather than relying on a guest git revision.
 
 ```bash
-qemu-img create -f qcow2 \
-  -F qcow2 \
-  -b e2e/images/base/fedora-43/gnome-wayland.qcow2 \
-  e2e/work/runs/<run-id>/fedora43-gnome-wayland-evdi-h264/disk.qcow2
-```
-
-This is the default mode because it is fast and preserves the base image.
-
-Full copy creation:
-
-```bash
-qemu-img convert -O qcow2 \
-  e2e/images/base/fedora-43/gnome-wayland.qcow2 \
-  e2e/work/runs/<run-id>/fedora43-gnome-wayland-evdi-h264/disk.qcow2
-```
-
-Use full copy when the base image is on slow/shared storage or when the runner
-must be independent of the base path after start.
-
-## Commands
-
-```bash
-./e2e/run images
-./e2e/run base-plan --distro fedora-43 --session gnome-wayland
-./e2e/run prepare-base --distro fedora-43 --session gnome-wayland
+# Create a disk without running the scenario:
 ./e2e/run workdisk-create --scenario fedora43-gnome-wayland-evdi-h264
-./e2e/run workdisk-create --tag smoke --run-id local-smoke-1
-./e2e/run workdisk-create --scenario fedora43-headless-benchmark-h264 --copy-mode full
+
+# Build/run the headless smoke on an overlay:
 ./e2e/run run --scenario fedora43-headless-benchmark-h264
+
+# Use a full disk copy, independent of the base path after creation:
+./e2e/run run --scenario fedora43-headless-benchmark-h264 --copy-mode full
 ```
 
-`base-plan` prints the deterministic paths and install contract before the
-actual VM boot.
+The default overlay stores only changed blocks and requires its base to stay at
+the same path. `--copy-mode full` copies the whole base and uses more storage.
+Both refuse to proceed without the required base image. Working disks live at
+`e2e/work/runs/<run-id>/<scenario-id>/disk.qcow2`.
 
-`prepare-base` builds the unattended install disk, waits for SSH on the first
-installed boot, validates `/var/lib/wbeam-e2e/base-ready.json`, and promotes the
-result to `e2e/images/base/<distro>/<session>.qcow2`.
+By default, successful runs remove their working directory and failures retain
+it. Override with `--retain-workdisk never|on-fail|always`; inspect before using
+`./e2e/run clean --run-id RUN_ID` with the actual run ID. Reports survive
+work-directory cleanup.
 
-`workdisk-create` refuses to run when the matching base image does not exist.
+## Report layout
 
-`run` creates a disposable work disk, boots it, copies the local checkout,
-executes `guest-install-wbeam.sh`, executes `guest-stream-smoke.sh`, collects
-guest and system logs, and writes `summary.json` plus `junit.xml`.
+The runner writes reports under `e2e/reports/<run-id>/` (or
+`WBEAM_E2E_REPORT_DIR`). The top-level files are `matrix.json`, `host.json`,
+`summary.json` and `junit.xml`.
 
-## Report Contract
+| Location within a run | Contents |
+| --- | --- |
+| `<scenario>/guest-install.log`, `guest-stream.log` | SSH command output for installation and smoke |
+| `<scenario>/workdisk.json` | Working disk metadata |
+| `<scenario>/journal-system.log`, `journal-user.log`, `dmesg.log`, `dev-dri.log` | Guest diagnostics collected after a successful smoke |
+| `<scenario>/evdi-diagnose.log` | EVDI diagnostics for EVDI scenarios |
+| `<scenario>/guest/` | Files copied from the guest smoke report directory |
 
-Every scenario report should include:
+The guest directory contains `summary.json`, `health-before.json`,
+`host-probe.json`, `virtual-probe.json`, `apply.json`, `start.json`,
+`status-after.json`, `metrics.jsonl`, `metrics-after.json` and `client.json`.
+`daemon.stdout.log` and `daemon.stderr.log` are created when the smoke helper
+starts the daemon itself.
 
-```text
-summary.json
-install.log
-stream.log
-health-before.json
-host-probe.json
-virtual-probe.json
-apply.json
-start.json
-status-after.json
-metrics.jsonl
-metrics-after.json
-client.json
-daemon.stdout.log
-daemon.stderr.log
-```
+A failure before the collection phase may leave guest reports only on the
+retained working disk. The top-level summary records the failed phase/reason;
+missing artifacts are not evidence of a passing operation. A dry run writes
+`dry-run.json` and reports `phase: dry-run`, without VM/stream evidence.
 
-The top-level run report should include:
-
-```text
-matrix.json
-summary.json
-junit.xml
-host.json
-```
+Inspect the summary with `./e2e/run report --run-id RUN_ID`. Review logs and
+TCP byte counts against the [smoke test's limits](README.md#backend-expectations),
+then use the separate [physical acceptance process](../docs/release-checklist.md)
+for a release decision.

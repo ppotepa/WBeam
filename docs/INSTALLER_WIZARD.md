@@ -1,107 +1,95 @@
-# WBeam Installer Wizard
+# Source installer
 
-`install-wbeam` is the user-facing setup flow for a fresh Linux machine. It is
-separate from `redeploy-local`, which remains the developer rebuild/deploy flow.
+The installer prepares a source checkout, builds the host daemon and streamer,
+installs a systemd user service, and onboards an Android device. Run it as your
+normal desktop user from the repository root; package operations request `sudo`.
+For the build/deploy development loop, use `./redeploy-local` instead.
 
-Current scope on this branch:
-
-- Fedora bootstrap is implemented through `scripts/fedora-setup.sh`.
-- Wayland/X11 fallback is the recommended default backend.
-- EVDI is an advanced backend and can require DKMS/akmods, kernel headers,
-  DisplayLink/EVDI packages, `video` group membership, Secure Boot MOK
-  enrollment, and a reboot.
-- Android phone onboarding is built into the wizard and can be rerun separately.
-- Debian/Ubuntu detection exists, but package installation mapping is not
-  implemented yet.
-
-## Commands
-
-Preview without changing the machine:
+## Choose a setup path
 
 ```bash
-./install-wbeam --dry-run
-./wbeam install --dry-run --backend wayland
-./wbeam install --dry-run --backend evdi
+./install-wbeam --dry-run                 # inspect the plan
+./install-wbeam --backend wayland         # Wayland Portal setup
+./install-wbeam --backend evdi            # EVDI virtual display setup
 ```
 
-Install with the recommended compositor backend:
+`./wbeam install` is an alias for the same wizard.
+
+| Selection | Meaning |
+| --- | --- |
+| `wayland` | Setup for Wayland Portal capture. Requires a working Wayland session, compositor portal and PipeWire. |
+| `evdi` | Setup for EVDI capture. Requires a compatible kernel module, userspace library and DRM device access. |
+| `auto` (default) | Prompts interactively; selects `wayland` with `--yes` or outside an interactive terminal. |
+
+The installer choice and runtime automatic selection are different: the EVDI
+choice writes a service environment override; the Wayland choice currently
+leaves the daemon's capture override unset. Select **Wayland Portal** explicitly
+in the desktop UI if you need to force that backend.
+
+X11 code and helpers remain as a legacy path. The current installer rejects
+`--backend x11` and the daemon's normal start path accepts only available EVDI
+or Wayland Portal backends. X11 is not an automatic fallback.
+
+## What is installed
+
+| Host | Automatic dependency work |
+| --- | --- |
+| Fedora | Calls [`fedora-setup.sh`](../scripts/fedora-setup.sh) for native build tools, Tauri/GStreamer dependencies and Android SDK. Adds `--with-evdi` when selected. See [Fedora setup](FEDORA_43_SETUP.md). |
+| Debian / Ubuntu | Installs native host build libraries with `apt`, including `libevdi-dev`; adds DKMS, running-kernel headers and `evdi-dkms` for EVDI. |
+| Other distributions | Automatic wizard installation stops; prepare dependencies manually and use `--skip-system-deps`. |
+
+The Debian/Ubuntu branch is **not a complete workstation bootstrap**: Rust/Cargo,
+ADB, the Android JDK/SDK and desktop Node/Tauri dependencies must already be
+available for the stages that use them. Portal runtime services must also be
+installed and active. Source builds need network access to fetch dependencies.
+
+The remaining stages are:
+
+1. Build `wbeamd-server` and `wbeamd-streamer` through `./wbeam host build`.
+2. Write `~/.config/systemd/user/wbeam-daemon.service` and enable/start it.
+3. Report binary, service and local control API status.
+4. Select an authorized ADB device, run `./wbeam android deploy`, and report
+   host/APK version parity with `./wbeam version doctor`.
+
+EVDI setup may require matching kernel headers, module signing/MOK enrollment,
+a new login for group membership, or a reboot. `--yes` accepts the setup plan;
+it cannot complete firmware or Android trust prompts.
+
+## Useful options
 
 ```bash
-./install-wbeam --backend wayland
+./install-wbeam --yes --backend wayland --skip-device
+./wbeam device setup                     # retry phone onboarding only
+./wbeam device setup --android-serial SERIAL
 ```
 
-Install with EVDI:
+The phone needs USB debugging enabled and its authorization prompt accepted.
+Some devices also require permission to install via USB. With multiple devices,
+select one interactively or supply `--android-serial`.
+
+Use `--skip-system-deps`, `--skip-build`, `--skip-service` or `--skip-device`
+to omit an already completed stage. `--control-port` and `--stream-port`
+default to `5001` and `5000`. See `./install-wbeam --help` for all options.
+
+## State and verification
+
+The wizard writes `${XDG_STATE_HOME:-$HOME/.local/state}/wbeam/install-state.json`
+with the selected backend, distro, service/device status and reboot indicator.
+A missing or unauthorized phone can leave onboarding pending without failing
+host setup. The validation stage reports readiness; a successful wizard exit
+is not proof that a stream rendered on the device.
+
+After setup:
 
 ```bash
-./install-wbeam --backend evdi
+systemctl --user status wbeam-daemon.service
+curl -fsS http://127.0.0.1:5001/v1/host-probe
+./wbeam version doctor
 ```
 
-Rerun only Android phone onboarding:
+Open the desktop app with `./desktop.sh`, select the device and capture backend,
+and verify a real image on Android. Use the [release checklist](release-checklist.md)
+when recording acceptance evidence.
 
-```bash
-./wbeam device setup
-```
-
-Non-interactive source checkout install:
-
-```bash
-./install-wbeam --yes --backend wayland
-```
-
-## Wizard Stages
-
-1. Probe the machine:
-   - distro and package manager
-   - architecture
-   - Wayland/X11 availability
-   - portal, PipeWire, and WirePlumber service state
-   - GStreamer encoder availability
-   - EVDI library/module/user permission/Secure Boot state
-
-2. Choose backend:
-   - `wayland`: recommended; uses Wayland portal or X11 fallback according to
-     the current session
-   - `evdi`: advanced; installs and validates kernel/displaylink pieces
-
-3. Install/build:
-   - Fedora packages through `scripts/fedora-setup.sh --yes`
-   - EVDI packages through `scripts/fedora-setup.sh --yes --with-evdi`
-   - host binaries through `./wbeam host build`
-   - systemd user service as `wbeam-daemon.service`
-
-4. Validate:
-   - host binary exists
-   - streamer binary exists
-   - systemd user service state
-   - local control API reachability
-
-5. Phone onboarding:
-   - asks the user to connect the phone
-   - checks `adb devices`
-   - handles missing, unauthorized, offline, and multiple devices
-   - runs `./wbeam android deploy` for the selected serial
-   - runs `./wbeam version doctor`
-
-## State
-
-The wizard writes state to:
-
-```text
-~/.local/state/wbeam/install-state.json
-```
-
-That file records the selected backend, distro, service state, phone onboarding
-state, EVDI status, and whether a reboot is required.
-
-## Release Direction
-
-For source checkouts, the wizard builds locally. For GitHub Releases, the same
-wizard interface can later switch the install stage to package or asset
-installation:
-
-- `.rpm` on Fedora
-- `.deb` on Debian/Ubuntu
-- release APK for Android deploy
-
-The UX should stay the same: probe, choose backend, install, validate, onboard
-the phone.
+This wizard builds from source. For package readiness and installation checks,
+see the [release checklist](release-checklist.md).

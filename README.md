@@ -1,242 +1,116 @@
-# WBeam
+<p align="center">
+  <a href="docs/assets/wbeam.svg"><img src="docs/assets/wbeam.png" alt="WBeam logo" width="104" height="104"></a>
+</p>
 
-USB display streaming from Linux to Android over ADB.
+<h1 align="center">WBeam</h1>
 
-Captures a virtual display on the host, encodes H.264/H.265, and pushes
-frames to an Android device connected via USB. No Wi-Fi, no network config.
+<p align="center"><strong>A Linux display on your Android device, over USB.</strong></p>
 
----
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="docs/README.md">Documentation</a> ·
+  <a href="docs/repo-structure.md">Architecture</a> ·
+  <a href="docs/agents.workflow.md">Development</a> ·
+  <a href="https://github.com/ppotepa/WBeam/releases">Releases</a>
+</p>
 
-## Architecture
+WBeam captures an EVDI virtual display or a Wayland ScreenCast source, encodes
+H.264/H.265 where supported, and streams to an Android decoder. The Rust daemon
+owns capture and sessions; the Tauri desktop app handles setup and controls.
+The standard USB path uses `adb reverse`, so it needs no Wi-Fi configuration.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Linux Host                               │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│  ┌─────────────────┐           ┌──────────────────┐        │
-│  │  Display Capture│           │  WBeam Daemon    │        │
-│  │  (EVDI/Wayland) │──────────▶│  • Stream Mgmt   │        │
-│  └─────────────────┘           │  • Encoding      │        │
-│                                │  • Network Ctrl  │        │
-│  ┌─────────────────┐           └──────────────────┘        │
-│  │  Desktop UI     │                    │                   │
-│  │  (Tauri App)    │◀───────────────────┼───────┐          │
-│  └─────────────────┘                    │       │          │
-│                                         │       │          │
-│                                    ADB over USB  │          │
-│                                         │       │          │
-│                                         ▼       ▼          │
-└─────────────────────────────────────────────────────────────┘
-                                          │
-                        ┌─────────────────┴──────────────────┐
-                        │                                    │
-                   ┌────▼────────────┐            ┌──────────▼────┐
-                   │   Android Tablet│            │  Android Phone│
-                   ├─────────────────┤            ├───────────────┤
-                   │ • H.264/H.265   │            │ • H.264/H.265 │
-                   │ • Display Sink  │            │ • Display Sink │
-                   │ • Telemetry     │            │ • Telemetry   │
-                   └─────────────────┘            └───────────────┘
-```
+**Status:** source development. Fedora 43 and Ubuntu 24.04 with GNOME Wayland
+are release acceptance targets, not a claim of hardware certification. See the
+[release checklist](docs/release-checklist.md) for the evidence required before
+publication.
 
----
+## Quick start
 
-## Getting Started
-
-Prerequisites: Linux host, Android device (API 17+), USB cable, ADB.
-
-Fresh machine wizard:
+For this quick start, use a Linux Wayland session, a data-capable USB cable, and an Android device
+with USB debugging enabled. **Android 5.0 / API 21+ is needed for the standard
+`adb reverse` path.** The app's configured minimum is API 17; older devices need
+a separately configured direct/tethered connection. See [Android setup](android/README.md).
 
 ```bash
-git clone <repo> && cd WBeam
+git clone https://github.com/ppotepa/WBeam.git
+cd WBeam
 
-# Probe the machine, choose Wayland Portal or EVDI, install deps, build host,
-# install the user service, then onboard the Android phone.
-./install-wbeam
-
-# Debian/Ubuntu: installs native host build dependencies through apt.
-# Fedora: uses scripts/fedora-setup.sh.
-
-# Preview first if needed
 ./install-wbeam --dry-run
+./install-wbeam --backend wayland
+./desktop.sh
 ```
 
-Developer rebuild/deploy flow:
+The installer prepares the host, a systemd user service and Android onboarding.
+Accept the USB debugging prompt on the device and the ScreenCast permission
+dialog on the host. Source builds also require Rust/Cargo, Node/npm, a supported
+JDK and the Android SDK; automatic provisioning differs by distribution.
+Read the [installer guide](docs/INSTALLER_WIZARD.md) for prerequisites, EVDI
+selection and the Debian/Ubuntu limits; use the [Fedora guide](docs/FEDORA_43_SETUP.md)
+for its full bootstrap flow.
 
-```bash
-git clone <repo> && cd WBeam
+Already developing from a checkout? `./redeploy-local` rebuilds and deploys the
+host, desktop and Android app. It stops the current daemon, replaces its user
+service setup and deploys to connected devices; see the
+[development workflow](docs/agents.workflow.md).
 
-# Build host daemon, build+install APK, launch desktop UI.
-# On Fedora this also bootstraps missing build, Android SDK, GStreamer,
-# and EVDI/DisplayLink dependencies when possible.
-./redeploy-local
+## Desktop preview
 
-# Verify everything matches
-./wbeam version doctor
-```
+<p align="center">
+  <a href="docs/screenshot.png"><img src="docs/screenshot.png" alt="WBeam desktop showing a connected Android tablet, streaming state and service controls" width="320"></a>
+</p>
 
-On Fedora 43, both `./install-wbeam` and `./redeploy-local` call
-`scripts/fedora-setup.sh --yes` when native packages, Android SDK components,
-or EVDI/DisplayLink pieces are missing. Some system states still require manual
-confirmation outside the repo:
+<p align="center"><em>Repository screenshot from an earlier development build; labels and version numbers may differ from the current UI.</em></p>
 
-- Secure Boot MOK enrollment for DKMS EVDI modules requires a reboot and the
-  firmware MOK screen.
-- Android install may require accepting USB debugging and allowing APK installs
-  on the device.
-- If EVDI is intentionally skipped, run with
-  `WBEAM_REDEPLOY_WITH_EVDI=0 ./redeploy-local` to use Wayland Portal.
+## Capture paths
 
-Fedora details are in `docs/FEDORA_43_SETUP.md`. General EVDI diagnostics are
-in `EVDI_SETUP_INDEX.md` and `docs/EVDI_SETUP_GUIDE.md`. The installer wizard
-design is tracked in `docs/INSTALLER_WIZARD.md`.
+| Path | When to use it | Requirements and limits |
+| --- | --- | --- |
+| **Wayland Portal** (`wayland_portal`) | Capture a source offered by the compositor | ScreenCast portal, PipeWire and user consent; source types depend on the compositor. The installer calls this option `wayland`. |
+| **EVDI** (`evdi`) | Create and capture a virtual display | A compatible kernel module and `libevdi`, device permissions and an EVDI-enabled streamer. See the [setup guide](docs/EVDI_SETUP_GUIDE.md) and [compatibility matrix](docs/EVDI_COMPATIBILITY_MATRIX.md). |
+| **X11 — legacy** | Retained implementation and historical diagnostics | Remains in the repository. It is outside the current release UI, automatic selection and supported runtime paths. |
 
----
+Desktop **Auto** selects an available EVDI or Wayland Portal backend. A successful
+dependency check does not prove that capture or Android decoding works; confirm
+an actual moving image on the device.
 
-## Capture Backends
+## Everyday commands
 
-**EVDI** (recommended) -- Kernel-level virtual display. 1920x1080 fixed EDID,
-low latency, bypasses compositor. On Fedora, `./redeploy-local` attempts this
-automatically through `scripts/fedora-setup.sh --yes --with-evdi`.
+Run from the repository root:
 
-**Wayland Portal** -- ScreenCast/PipeWire capture for supported Wayland
-sessions. Consent and source types depend on the compositor. Automatic backend
-selection uses only available EVDI and Wayland Portal.
+| Task | Command |
+| --- | --- |
+| Open the desktop app | `./desktop.sh` |
+| Rerun Android onboarding | `./wbeam device setup` |
+| Check daemon and device versions | `./wbeam host status` · `./wbeam version doctor` |
+| Inspect active streams | `./wbeam watch streaming --once` |
+| Check EVDI prerequisites | `./wbeam deps virtual check --json` |
+| Tune encoding profiles | `./wbeam host tuner` |
+| Show all CLI groups | `./wbeam help` |
 
-Legacy X11 modules remain in the source tree but are not supported capture paths
-and are not available in the release UI.
-
-**Control API:** WBeam listens on `127.0.0.1:5001` by default for the
-Android USB/ADB reverse workflow. To expose the **unauthenticated** API
-to an isolated trusted LAN, both
-`WBEAM_CONTROL_BIND_ADDR=<LAN-IP>` and
-`WBEAM_ALLOW_UNAUTHENTICATED_LAN_CONTROL=1` are required. Do **not**
-enable this on an internet-facing interface; see `docs/SECURITY_RELEASE.md`.
-
----
-
-## Commands
-
-### `./wbeam` subcommands
-
-```
-host      build | run | debug | status | down/stop | probe | tuner
-android   build | install | launch | deploy | deploy-all
-          build-release | install-release | deploy-release
-version   new | current | doctor
-watch     tui | devices | connections | streaming | service
-          logs | status | health | doctor
-debug     up/start | watch/logs
-logs      live | host | adb (start|stop|status|tail)
-deps      virtual (check | install)
-ip        up | down | status
-```
-
-The daemon runs via `./wbeam host run` (foreground) or `./wbeam host debug`
-(debug mode). For persistent operation, manage the systemd user service
-(`~/.config/systemd/user/wbeam-daemon.service`) directly with `systemctl --user`.
-
-`./wbeam host tuner` launches the interactive Rust TUI autotuner for
-benchmarking encoding profiles against your hardware.
-
-### Other entrypoints
-
-| Script | What it does |
-|--------|-------------|
-| `./wbeam` | Main CLI |
-| `./install-wbeam` | Fresh-machine installer wizard |
-| `./wbgui` | Interactive TUI menu |
-| `./devtool` | Dev convenience (gui, deps install) |
-| `./desktop.sh` | Desktop app launcher |
-| `./redeploy-local` | Full rebuild + deploy + launch |
-| `./start-remote` | Remote session bootstrap |
-| `./runas-remote` | Run command as another desktop user |
-
-The trainer GUI is the desktop trainer-tauri app (`desktop/apps/trainer-tauri`).
-
----
-
-## Repository Layout
-
-```
-WBeam/
-  android/       Android client (APK)
-  host/          Linux daemon, streamer, training
-  desktop/       Tauri desktop apps (control + trainer)
-  shared/        Shared protocol definitions
-  config/        Configuration templates and profiles
-  scripts/       Setup and utility scripts
-  docs/          Documentation
-  logs/          Runtime logs (gitignored)
-```
-
-Key docs: `docs/repo-structure.md`, `docs/agents.workflow.md`,
-`docs/FEDORA_43_SETUP.md`, `docs/EVDI_SETUP_GUIDE.md`.
-
----
+For a persistent daemon, use `systemctl --user status wbeam-daemon.service`
+and `journalctl --user -u wbeam-daemon.service`. `./wbeam host run` is a separate
+foreground mode. Configuration and log locations are in the
+[repository guide](docs/repo-structure.md).
 
 ## Troubleshooting
 
-**No stream** -- Check `adb devices` shows your device. Check daemon is
-running (`./wbeam host status`). Check version parity (`./wbeam version doctor`).
-Inspect `logs/` and `desktop-connect.log`.
+| Symptom | First check |
+| --- | --- |
+| Device missing or unauthorized | Run `adb devices`; unlock the device and accept USB debugging. |
+| Connected, but no image | Check `./wbeam host status`, `./wbeam version doctor` and `./wbeam watch streaming --once`; confirm Portal consent or EVDI readiness. |
+| EVDI does not start | Run `bash scripts/evdi-diagnose.sh --verbose`; follow the [EVDI guide](docs/EVDI_SETUP_GUIDE.md). |
+| Encoder or desktop dependencies missing | Follow the distribution prerequisites in the [installer guide](docs/INSTALLER_WIZARD.md) or [Fedora guide](docs/FEDORA_43_SETUP.md). |
 
-**EVDI not loading** -- Run `bash scripts/evdi-diagnose.sh --verbose --fix`.
-On Fedora, rerun `./redeploy-local`; it will retry EVDI setup unless
-`WBEAM_REDEPLOY_WITH_EVDI=0` is set.
+The control API defaults to `127.0.0.1:5001`, but the video TCP listener binds
+all IPv4 interfaces on its selected stream port. Read the
+[security and network model](docs/SECURITY_RELEASE.md) before using a direct/LAN
+connection or changing bind settings.
 
-**No supported encoder** -- Fedora may lack H.265 encoders. WBeam falls back to
-H.264 when `openh264enc`, `x264enc`, or `nvh264enc` is available. Run
-`scripts/fedora-setup.sh --yes --no-android-sdk` to repair GStreamer packages.
+## Documentation and licensing
 
-**Low FPS** -- Switch to EVDI backend. Run `./wbeam host tuner` to find
-optimal encoding settings for your hardware.
+The [documentation index](docs/README.md) covers setup, architecture, the live
+wire/telemetry contract, testing, signing and release acceptance.
 
-**Desktop UI issues on Wayland** -- Launch via `./desktop.sh`.
-Inspect Tauri/WebKit dependencies and logs; switching to X11 is not supported.
-
----
-
-## Supported Platforms
-
-- **Release acceptance targets:** Fedora 43 and Ubuntu 24.04 with GNOME
-  Wayland, EVDI and Wayland Portal. Hardware QA evidence is required.
-- **Other distributions/kernels:** may work, but not certified by this matrix.
-- **Android:** API 17+ is the configured minimum; verify real device/codec
-  support using `docs/release-checklist.md`.
-
----
-
-## Development
-
-```bash
-./redeploy-local   # build everything, deploy, launch
-./wbgui            # interactive menu for common tasks
-./devtool          # dev shortcuts
-```
-
-See `docs/agents.workflow.md` for branch/PR conventions and commit format.
-
----
-
-## Releases and prebuilt installation
-
-The candidate tracked in [epic #101](https://github.com/ppotepa/WBeam/issues/101)
-is not a certified stable release until quality and physical acceptance gates pass.
-
-- Source development: `./install-wbeam` and `./redeploy-local`.
-- Prebuilt RPM/DEB (once published): install with your package manager, launch
-  `wbeam-desktop`, and use `wbeam android deploy` to install the bundled
-  signed APK without Android SDK or Gradle. The DEB files are **not
-  interchangeable**: use `wbeam_*+bookworm_*.deb` on Debian 12 or
-  `wbeam_*+noble_*.deb` on Ubuntu 24.04. They are compiled against
-  their respective EVDI ABI (`libevdi0` vs `libevdi1`).
-- Release signing: `docs/ANDROID_RELEASE_SIGNING.md`.
-- Physical Android acceptance: `docs/release-checklist.md`.
-
-## License
-
-Rust/Cargo and RPM metadata currently declare MIT. Publication remains blocked
-until the repository owner confirms legal terms and adds the root `LICENSE`
-file. Do not infer a license grant solely from packaging metadata.
+Cargo and RPM metadata declare MIT, but the repository has no root `LICENSE`
+file. Publication requires the owner to confirm the terms and add that file;
+packaging metadata alone is not a license grant.

@@ -40,7 +40,7 @@ Notes:
     Use --no-auto-deps or WBEAM_REDEPLOY_AUTO_DEPS=0 to disable this.
   - Fedora EVDI setup tries distro packages first, then the matching
     displaylink-rpm GitHub Release RPM. Set WBEAM_REDEPLOY_WITH_EVDI=0 to skip
-    EVDI and use Wayland/X11 fallback only.
+    EVDI bootstrap. Wayland Portal requires a working ScreenCast session.
 USAGE
 }
 
@@ -247,7 +247,7 @@ ensure_host_build_deps() {
 
   if [[ -z "$missing_pkg" && ( "$evdi_status" == "ok" || "$want_evdi" -eq 0 ) ]]; then
     if [[ "$evdi_status" != "ok" && "$want_evdi" -eq 0 ]]; then
-      echo "[redeploy-local] EVDI not ready (${evdi_status}); continuing with Wayland/X11 fallback because WBEAM_REDEPLOY_WITH_EVDI=0"
+      echo "[redeploy-local] EVDI not ready (${evdi_status}); skipping EVDI bootstrap because WBEAM_REDEPLOY_WITH_EVDI=0; Wayland Portal requires a working ScreenCast session"
     fi
     return 0
   fi
@@ -257,7 +257,7 @@ ensure_host_build_deps() {
     echo "[redeploy-local] ERROR: EVDI MOK enrollment is already queued; reboot is required before EVDI can load." >&2
     echo "[redeploy-local] On reboot choose: Enroll MOK -> Continue -> Yes, then enter the password set during mokutil import." >&2
     echo "[redeploy-local] After logging back in, rerun ./redeploy-local." >&2
-    echo "[redeploy-local] To bypass EVDI and use Wayland/X11 fallback only:" >&2
+    echo "[redeploy-local] To skip EVDI bootstrap and use an available Wayland Portal session:" >&2
     echo "[redeploy-local]   WBEAM_REDEPLOY_WITH_EVDI=0 ./redeploy-local" >&2
     return 1
   fi
@@ -308,7 +308,7 @@ ensure_host_build_deps() {
           echo "[redeploy-local]   sudo mokutil --import /var/lib/dkms/mok.pub" >&2
           echo "[redeploy-local]   sudo reboot" >&2
           echo "[redeploy-local]   sudo dkms autoinstall" >&2
-          echo "[redeploy-local] To bypass EVDI and use Wayland/X11 fallback only:" >&2
+          echo "[redeploy-local] To skip EVDI bootstrap and use an available Wayland Portal session:" >&2
           echo "[redeploy-local]   WBEAM_REDEPLOY_WITH_EVDI=0 ./redeploy-local" >&2
           return 1
         fi
