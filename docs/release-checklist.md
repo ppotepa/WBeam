@@ -1,159 +1,45 @@
-# Physical Android release acceptance — WBeam 0.1.3
+# Release acceptance and publication
 
-**VM/TCP smoke does not prove that the Android application renders frames.**
-The existing `e2e/matrix.json` retains legacy X11 scenarios for historical
-debugging, but **only EVDI and Wayland Portal** qualify for release support.
-Release acceptance is collected **separately** and never automatically marked
-passing by a simulated VM client.
+This checklist defines the evidence required to publish WBeam. It is not a
+record of completed QA. Source checks, VM smoke and physical Android acceptance
+are separate gates; a green TCP receiver cannot certify Android rendering.
 
-## Required release matrix
+EVDI and Wayland Portal are the release acceptance backends. X11 code and VM
+scenarios are retained as legacy material and do not count toward this matrix.
+The original scope is in [epic #101](https://github.com/ppotepa/WBeam/issues/101);
+an issue being closed does not establish that its acceptance checks passed.
 
-| Linux host | EVDI | Wayland Portal |
-| --- | --- | --- |
-| Fedora 43 / GNOME Wayland | physical Android + EVDI soak | physical Android + Portal consent |
-| Ubuntu 24.04 / GNOME Wayland | physical Android + EVDI soak | physical Android + Portal consent |
+## 1. Validate the source revision
 
-For each run, record `uname -r`, distro, Android API level, SHA-256 of the
-ADB serial (not the raw serial), SHA-256 of the **installed package artifact**,
-full tested commit and actual build revision. Use a tablet and a phone across
-the matrix; enumerate device form factors in the QA notes.
+GitLab defines quality, build and publication jobs in
+[`.gitlab-ci.yml`](../.gitlab-ci.yml). GitHub's
+[integration workflow](../.github/workflows/release-integration-review.yml)
+is currently manual (`workflow_dispatch`). A queued or skipped job is not a
+passing test.
 
-Use the **built DEB/RPM/APK**, not a source checkout. Collect evidence in a
-private/controlled directory. Each check must be marked `pass` only after
-completing the operation and saving a nonempty log, screenshot or report file.
-
-The required checks are: clean package install; signed APK install and upgrade;
-60 seconds with **real rendered frames on Android**; 1800 seconds streaming;
-20 connect/disconnect cycles; USB unplug/replug; host daemon restart and
-recovery; plus missing EVDI diagnostics (EVDI) or denied ScreenCast permission
-(Portal). Any failure/skip blocks the claimed support for that matrix pair.
-
-## Collection and validation
-
-The existing USB soak helper can provide telemetry during 30-minute tests:
+From the repository root, the local runner can execute the available gates:
 
 ```bash
-WBEAM_SOAK_LOG_DIR=/path/to/private/reports host/scripts/soak_usb_30m.sh 1800
-```
-
-Capture ADB logcat, host status, daemon metrics, actual screen evidence, and
-package details. **Review and redact private data before attaching evidence**.
-Do not commit APK signing secrets, raw USB serials, device properties or
-sensitive logcat dumps to a public repository.
-
-Start with `e2e/release-acceptance.example.json`, create four matrix entries,
-and replace every `pending` with evidence-backed `pass`. Keep all evidence
-paths relative to the acceptance JSON file and within its directory.
-
-```bash
-python3 e2e/scripts/validate_hardware_acceptance.py \
-  /path/to/qa/hardware-acceptance.json --release 0.1.3-rc.1
-python3 -m unittest discover -s e2e/tests -v
-```
-
-The validator checks required fields, physical/VM identification, 20 cycles,
-1800-second soak, SHA-256 metadata, four environment/backend combinations
-and presence of evidence files. It cannot independently prove that a person
-actually used physical hardware: a named QA signoff and review remain
-mandatory. A missing report must block stable release approval.
-
-See epic #101 for the full task graph and Definition of Done.
-
-## Publication gate — RC versus stable
-
-The release publisher is **manual** and requires protected CI approval and a
-completed QA report. It does not automatically create a stable release from
-pushing to the `release` branch.
-
-1. Merge and run all mandatory quality jobs, including native build, Android
-   unit tests, and the package asset checks. The source version and
-   `VERSION.txt` revision must match the commit being released.
-2. Configure protected GitLab CI variables `GH_TOKEN`, `GH_OWNER`,
-   `GH_REPO`, and release signing variables documented in
-   `docs/ANDROID_RELEASE_SIGNING.md`. Keep signing keys out of git and logs.
-3. Have a named QA reviewer complete the physical matrix with real Linux
-   package/APK artifacts. Place `hardware-acceptance.json` and its relative
-   evidence directory in a private CI job workspace/artifact mount. Set
-   `WBEAM_HARDWARE_ACCEPTANCE_FILE` to the accessible report path. A lone JSON
-   file without the referenced evidence is rejected.
-4. Obtain a maintainer decision on the declared MIT licensing and add the
-   appropriate root `LICENSE` file. The publisher refuses to run without it.
-5. Set protected `WBEAM_RELEASE_APPROVED=1` for the manual publication job
-   **after** reviewing CI results and the hardware evidence.
-6. Run `scripts/ci/check-release-artifacts.sh`: exactly one signed APK,
-   at least one DEB and RPM, matching `VERSION.txt` and Android
-   `versionCode`. Both distro-native DEBs are mandatory: **Bookworm**
-   (linked with libevdi0) and **Ubuntu Noble 24.04** (linked with libevdi1),
-   plus RPM and APK. Verify `dpkg-deb -f`, `ldd`, clean installs and
-   generated `SHA256SUMS.txt`.
-7. Trigger **manual** GitLab `publish_github_release` for the tested commit.
-   Version tags `v0.1.3-rc.1` / `v0.1.3-beta.1` publish with
-   `prerelease=true`. Only `v0.1.3` and similar stable semantic version tags
-   publish with `prerelease=false`. A release-branch build updates
-   `release-latest` as a prerelease, never an automatic stable tag.
-8. Tagged releases are immutable: publishing an existing version/tag or
-   replacing an existing asset fails. Produce a **new** tag for the next
-   release, and record its checksums and known limitations.
-
-After publishing, install the downloaded DEB/RPM/APK on a **clean** machine,
-compare the published SHA256 checksums and validate USB capture/reconnection.
-Do not fast-forward `master` automatically as part of an unreviewed branch
-push. The optional manual GitLab fast-forward job must be used only after
-stable signoff and branch review.
-
-**Known unmet gates as of this draft:** no signed APK and clean-package test
-artifacts were built in this session, no physical QA report exists, and a root
-`LICENSE` file is not present in the audited repository. These are blockers,
-not completed tasks. Refer to epic #101 and tasks #114–#120.
-
-
-## Lokalna weryfikacja, gdy GitHub Actions nie przydziela runnerów
-
-Nie zastępuje to odbioru na sprzęcie ani podpisywania APK, ale pozwala
-**wykonać kod**, a nie polegać na pustych statusach GitHub Actions (#142).
-
-Z katalogu głównego WBeam:
-
-```bash
-# Bez instalowania narzędzi ani instalacji kernela:
 bash scripts/ci/run-local-verification.sh --list
-
-# Bash, Python/E2E unit i desktop Node/TypeScript:
 bash scripts/ci/run-local-verification.sh --quick
-
-# Dodatkowo host/Tauri Cargo i Android Gradle (Rust/SDK wymagane):
-bash scripts/ci/run-local-verification.sh --full
-
-# Własne miejsce zapisu:
-bash scripts/ci/run-local-verification.sh --full --report-dir ~/wbeam-qa
+bash scripts/ci/run-local-verification.sh --full --report-dir /path/to/private/qa
 ```
 
-Raport trafia domyślnie do
-`$XDG_STATE_HOME/wbeam/verification/<UTC timestamp>/`
-(lub `~/.local/state/wbeam/verification/...`), w plikach
-`summary.tsv`, `metadata.txt` (w tym commit SHA) i oddzielnych logach.
+`--quick` runs shell checks, Python/E2E unit tests and desktop npm install/test/
+build. `--full` adds host and Tauri Rust tests/checks plus Android debug tests/
+build; it requires their native dependencies and Android SDK. It does not
+install missing system dependencies or perform physical-device acceptance.
 
-`PASS` oznacza wykonany test, `FAIL` błąd wykonania, `BLOCKED` brak
-wymaganego narzędzia/katalogu. Skrypt zwraca kod `0` tylko gdy wszystkie
-wybrane testy przeszły; `1` gdy któryś nie przeszedł i `2` przy samych
-brakujących prerekwizytach. Nie podaje fałszywego „PASS” na brak `cargo`,
-Android SDK albo nieskuteczne `npm ci`.
+The default report directory is
+`${XDG_STATE_HOME:-$HOME/.local/state}/wbeam/verification/<UTC timestamp>/`,
+with `summary.tsv`, commit metadata and per-step logs. Exit codes are `0` when
+all selected steps pass, `1` for failed steps, and `2` when missing prerequisites
+block steps without another failure. Missing commands/directories are detected
+as BLOCKED; missing libraries or SDK components can instead cause a build FAIL.
+Review `FAIL`/`BLOCKED` and redact logs
+before sharing them.
 
-**Przed umieszczeniem logów w publicznym issue:** usuń numery seryjne ADB,
-identyfikatory urządzeń, adresy sieciowe, dane użytkowników oraz wszelkie
-sekrety. W #116 i #101 podaj wynik `summary.tsv`, commit SHA oraz
-niesensytywne fragmenty logów. Po zaliczeniu tych testów nadal wykonaj
-physical hardware matrix i sprawdzenie podpisanych artefaktów.
-
-## Bramka kompilacji EVDI streamera
-
-Jakość hosta Rust nie może być oceniana wyłącznie przez testy
-`wbeamd-api` i `wbeamd-core`. Natywny streamer ma zależności
-`gstreamer` i `libevdi.so` oraz oddzielne FFI/linker, dlatego
-GitLab wymaga jobu **`quality_rust_streamer`** przed
-`build_apk_release` i pakietami. GitHub Actions wykonuje oba polecenia
-w jobie Rust host; lokalny `run-local-verification.sh --full` zapisuje
-oddzielny `host_streamer.log`.
+The native EVDI streamer must compile and link, independently of API/core tests:
 
 ```bash
 cargo check --locked --manifest-path host/rust/Cargo.toml \
@@ -162,58 +48,136 @@ cargo test --locked --manifest-path host/rust/Cargo.toml \
   -p wbeamd-streamer --no-default-features --features evdi
 ```
 
-Na Debianie potrzebne są kompatybilne pakiety deweloperskie GStreamera
-i `libevdi0-dev`. Na Ubuntu Noble budować przeciwko właściwemu ABI
-`libevdi1`/`libevdi-dev` (zob. #144). Zielony
-`cargo check` nie potwierdza jeszcze działania DKMS/Fedora kernel
-6.19 ani faktycznej transmisji EVDI do Androida: sprzętowe DoD
-#117/#120 pozostają obowiązkowe.
+GitLab's `quality_rust_streamer` gates release artifacts. Use the target
+distribution's GStreamer and EVDI development libraries; Bookworm and Noble
+have different EVDI ABIs. Compilation does not establish kernel/module or
+physical streaming compatibility.
 
+## 2. Test the built packages on physical hardware
 
-## Installed daemon log storage (issue #154)
+| Linux host/session | EVDI | Wayland Portal |
+| --- | --- | --- |
+| Fedora 43 / GNOME Wayland | Physical Android + EVDI | Physical Android + Portal |
+| Ubuntu 24.04 / GNOME Wayland | Physical Android + EVDI | Physical Android + Portal |
 
-Package installations place read-only files in `/usr/share/wbeam`.
-The **Rust daemon**, not only the Tauri desktop, must write logs outside
-the package tree. With `<WBEAM_ROOT>/VERSION.txt` present (DEB/RPM),
-`wbeamd-server` resolves its default log directory to:
+Use the built DEB/RPM and signed APK, with a phone and tablet represented across
+the four runs. Record the kernel (`uname -r`), Android API, device form factor,
+hash of the ADB serial, tested commit, actual host/APK revision and SHA-256 of
+the installed package artifacts. Store APK identity/signing details in the
+evidence as well as Linux package details.
 
-- `$XDG_STATE_HOME/wbeam/logs` when `XDG_STATE_HOME` is an absolute path;
-- otherwise `$HOME/.local/state/wbeam/logs`.
+Every run must complete:
 
-The `--log-dir PATH` CLI argument always takes precedence. Source-tree
-runs retain their historical `<repo>/host/rust/logs` default.
-If neither state-home path is available for an installed daemon, startup
-must fail with an actionable error; it must not attempt to write under
-`/usr/share/wbeam`.
+| Check | Required evidence |
+| --- | --- |
+| Clean package installation | Package identity, dependencies and successful startup as an ordinary user |
+| Signed APK installation and update | Approved certificate, same-key upgrade and preserved settings |
+| Rendered frames | At least 60 seconds of visible frames on the physical Android display |
+| Streaming soak | At least 1,800 seconds of real streaming with telemetry |
+| Start/stop | At least 20 cycles |
+| USB recovery | Unplug/replug and recover the session |
+| Daemon recovery | Restart and recover the session |
+| Backend failure handling | Missing EVDI diagnostics, or denied ScreenCast consent for Portal |
 
-Validate `bash scripts/ci/test-daemon-log-location.sh`, the Rust
-`daemon_log_dir_tests` and a **clean package install under an ordinary
-non-root user**. Confirm `systemctl --user status wbeamd-rust`,
-`ss -ltnp | grep ':5001'`, and `ls -l ~/.local/state/wbeam/logs`.
-The port should bind on loopback by default as in issue #151. Record
-any failed startup with a redacted journal excerpt under issue #154.
+A failure or skip blocks acceptance. Keep nonempty logs, screenshots or reports
+for each check. The USB soak helper can collect telemetry after a real session
+is started; it does not replace visual confirmation:
 
-Core runtime configuration snapshots (`logs/effective-runtime/*.jsonl`) must
-also stay out of `/usr/share/wbeam`. On an installed package they belong
-under the **same user state tree**, at
-`$XDG_STATE_HOME/wbeam/logs/effective-runtime` (or the HOME fallback);
-source checkout behavior remains `<repo>/logs/effective-runtime`.
-A clean-install check should start a real EVDI/Portal session and confirm a
-nonempty JSONL snapshot, with no attempted writes in the package tree.
+```bash
+WBEAM_SOAK_LOG_DIR=/path/to/private/qa/soak \
+  bash host/scripts/soak_usb_30m.sh 1800
+```
 
-## Offline systemd startup guard (#114)
+### Installed service and writable state
 
-The Android device may be disconnected when a Linux user service starts. ADB
-reverse is a best-effort preparation step and must **not** be a prerequisite
-for starting the Rust daemon itself. The packaged `wbeamd-rust.service`
-template uses systemd's `ExecStartPre=-...` form to ignore a nonzero exit from
-the USB helper (for example, no cable, no authorized Android device, or
-unavailable `adb`). A failing `ExecStart` daemon is **not** ignored.
+The installer and desktop manage `wbeam-daemon.service`. The separate
+`host/rust/scripts/install_systemd_user.sh` helper installs
+`wbeamd-rust.service`. Inspect the unit actually used by the tested package
+workflow; do not start both on the same control port.
 
-Run `bash scripts/ci/test-systemd-offline-start.sh` for an isolated unit
-generation regression check. Separately validate the real service on clean
-Fedora/RPM and Bookworm/Noble installations: start `systemctl --user start
-wbeamd-rust` with **no Android connected**, check
-`systemctl --user status wbeamd-rust` and `ss -ltnp` for localhost port
-5001, then connect USB, configure ADB reverse and stream to Android. A source
-guard does not replace these real systemd and hardware tests.
+Start it with **no Android device attached**, confirm the control API is
+listening on loopback, then attach USB, authorize ADB and stream. For the
+`wbeamd-rust` template, `ExecStartPre=-...` makes failed ADB preparation
+nonfatal; the daemon's `ExecStart` must still succeed.
+
+Package files under `/usr/share/wbeam` are read-only. With `VERSION.txt`
+present at the runtime root, default daemon logs and effective-runtime
+snapshots belong under an absolute `$XDG_STATE_HOME/wbeam/logs` or
+`$HOME/.local/state/wbeam/logs`. The daemon's `--log-dir` overrides its log
+destination. Source runs default to `host/rust/logs` for daemon logs and
+`logs/effective-runtime` for snapshots. Confirm a nonempty snapshot after a
+real session and no attempted writes under `/usr/share/wbeam`.
+
+Source regression guards are available, alongside the real install tests:
+
+```bash
+bash scripts/ci/test-daemon-log-location.sh
+bash scripts/ci/test-systemd-offline-start.sh
+```
+
+Also complete the [security review](SECURITY_RELEASE.md), including the separate
+video listener's exposure.
+
+## 3. Collect and review the acceptance report
+
+Copy [the acceptance template](../e2e/release-acceptance.example.json) into a
+private QA directory. Create all four matrix entries and replace `pending`
+only after performing the checks. Evidence paths must be relative to the
+report and remain inside its directory.
+
+```bash
+python3 e2e/scripts/validate_hardware_acceptance.py \
+  /path/to/private/qa/hardware-acceptance.json --release 0.1.3-rc.1
+```
+
+Use the exact artifact revision for `--release` (the value of `WBEAM_VERSION`,
+without a tag's `v` prefix). The validator checks metadata formats, required
+pairs, recorded durations/cycles, `pass` statuses and nonempty evidence files.
+It does not inspect their contents, prove physical execution, or compare the
+report's commit and hashes with the built artifacts. A named reviewer must
+perform those comparisons, verify the phone/tablet coverage and approve the
+actual evidence before publication.
+
+Do not publish raw serials, sensitive logcat, keystores or signing secrets.
+Keep the report **and** its evidence accessible to the publication job.
+
+## 4. Publish the approved artifact set
+
+Publication is a manual GitLab job and requires the following inputs:
+
+1. Passing required quality/build jobs for the tested commit and release-signed
+   APKs; see [signing instructions](ANDROID_RELEASE_SIGNING.md).
+2. A root `LICENSE` containing terms confirmed by the maintainer. Packaging
+   metadata declaring MIT is insufficient; the publisher checks for the file.
+3. Protected `GH_TOKEN`, `GH_OWNER`, `GH_REPO`, and
+   `WBEAM_HARDWARE_ACCEPTANCE_FILE` pointing to the reviewed report.
+4. Protected `WBEAM_RELEASE_APPROVED=1`, set only after maintainer review.
+
+The artifact set contains exactly one version-named APK, both ABI-specific
+DEBs (`+bookworm` and `+noble`), at least one RPM and `VERSION.txt`. Run the check
+in the build workspace with that build's `WBEAM_VERSION` and `CI_COMMIT_SHA`:
+
+```bash
+bash scripts/ci/check-release-artifacts.sh
+```
+
+This script checks file presence/nonemptiness, naming and manifest metadata,
+then generates and verifies `SHA256SUMS.txt`. It does not inspect embedded
+package versions, reverify APK signatures or test installation. Review
+`dpkg-deb -f`, dependencies/linking, APK metadata and the clean-install evidence
+separately. Bookworm's `libevdi0` and Noble's `libevdi1` packages are not
+interchangeable.
+
+Trigger `publish_github_release` for that tested commit. Stable tags such as
+`v0.1.3` publish as stable; `v0.1.3-rc.1`, `-beta.1` or `-alpha.1` publish as
+prereleases. A `release` branch build updates the mutable `release-latest`
+prerelease. All of these routes require the approval/report gates above.
+Existing versioned releases and their assets are not overwritten; use a new
+version for a new artifact set. Windows and aarch64 build outputs are not part
+of this publisher's supported upload set.
+
+After publication, download the packages, check `SHA256SUMS.txt`, and repeat
+installation and USB recovery on a clean machine. The optional
+`ff_release_to_master` job has its own `WBEAM_MASTER_FF_APPROVED=1` gate and
+checks that the release branch still points to the tested stable-tag commit.
+Publication alone does not authorize integrating an untested newer commit.

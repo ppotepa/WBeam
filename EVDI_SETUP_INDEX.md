@@ -1,9 +1,8 @@
-# EVDI Setup Index
+# EVDI documentation
 
-Full documentation: [docs/EVDI_SETUP_GUIDE.md](docs/EVDI_SETUP_GUIDE.md)
+- [Setup and diagnostics](docs/EVDI_SETUP_GUIDE.md)
+- [Fedora 43 source setup](docs/FEDORA_43_SETUP.md)
+- [Compatibility and evidence](docs/EVDI_COMPATIBILITY_MATRIX.md)
+- [EVDI tools](scripts/EVDI_TOOLS_README.md)
 
-Scripts:
-
-- `scripts/fedora-setup.sh --yes --with-evdi` -- preferred Fedora 43 EVDI/bootstrap flow
-- `scripts/evdi-setup.sh` -- distro-neutral EVDI-only helper (requires sudo)
-- `scripts/evdi-diagnose.sh` -- diagnostic and verification tool
+Start source installation with `./install-wbeam --backend evdi`.

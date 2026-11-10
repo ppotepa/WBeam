@@ -44,7 +44,7 @@ Usage:
   ./wbeam device setup [options]
 
 Options:
-  --backend wayland     use compositor capture (Wayland portal or X11 fallback)
+  --backend wayland     prepare Wayland Portal capture (requires a Wayland session)
   --backend evdi        use EVDI virtual display (advanced/risky)
   --backend auto        ask interactively, defaulting to wayland
   -y, --yes             accept the generated plan

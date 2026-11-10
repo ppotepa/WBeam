@@ -1,291 +1,137 @@
-# EVDI Capture Backend - Setup Guide
+# EVDI capture
 
-## Quick Start
+EVDI exposes a virtual DRM display that the compositor renders into. WBeam reads
+its framebuffer through libevdi and feeds the encoder directly, without the
+ScreenCast portal/PipeWire capture path. A compositor still has to render to the
+virtual display; a loaded module alone is insufficient.
+
+The streamer generates an EDID from the requested size and frame rate, with an
+even-sized landscape capture mode. It is not fixed at 1920×1080. The compositor,
+encoder, USB link and Android decoder determine the effective result; latency
+and CPU use need measurement on the target hardware.
+
+## Installation
+
+Run commands from the repository root. For a source checkout:
 
 ```bash
-cd ~/git/WBeam
-scripts/fedora-setup.sh --yes --with-evdi  # Fedora 43
-# or: sudo bash scripts/evdi-setup.sh      # distro-neutral legacy helper
-bash scripts/evdi-diagnose.sh      # verify
-./wbeam host run                   # start daemon
-curl -X POST "http://localhost:5001/v1/start?capture_backend=evdi"
+./install-wbeam --backend evdi
 ```
 
-## Supported Distributions
-
-| Distribution | Package Manager | Notes |
-|---|---|---|
-| Arch Linux | pacman | Official repos or AUR (`yay -S evdi-dkms`) |
-| Debian 11+ / Ubuntu 20.04+ | apt | May require universe repo |
-| Fedora 43 | dnf | Prefer `scripts/fedora-setup.sh --yes --with-evdi`; falls back to DisplayLink RPM release assets |
-| Fedora 38-42 | dnf | COPR or DisplayLink RPMs may be available |
-| RHEL 8+ / CentOS 8+ | yum | COPR or source build; may need `epel-release` |
-
-Requirements: x86_64, kernel 4.14+, sudo access, ~500 MB disk.
-
-## Automated Setup
-
-On Fedora 43, prefer the distro-specific helper because it understands the
-current DisplayLink RPM fallback, Secure Boot MOK enrollment state, and
-`libevdi` linker path:
+On Fedora 43, the dependency stage uses the Fedora helper, which can also be run
+separately:
 
 ```bash
 scripts/fedora-setup.sh --yes --with-evdi
 ```
 
-The normal Fedora fresh-clone command, `./redeploy-local`, calls that helper
-automatically when EVDI is missing.
+See [Fedora setup](FEDORA_43_SETUP.md) for its package discovery, kernel-header
+and Secure Boot flow. On Debian/Ubuntu, the wizard installs native host libraries
+and EVDI/DKMS packages; the remaining source toolchain must be prepared as
+described in the [installer guide](INSTALLER_WIZARD.md).
 
-For other distros, or as a lower-level EVDI-only helper:
+Fedora 43 and Ubuntu 24.04 are release acceptance targets, not a guarantee for
+all kernels or drivers. Other distributions need their own compatible EVDI
+packages and validation. Track tested combinations in the
+[compatibility matrix](EVDI_COMPATIBILITY_MATRIX.md).
+
+The older `scripts/evdi-setup.sh` remains available for legacy maintenance.
+It uses limited device/library checks and is not the primary readiness test or
+a substitute for distro-specific package instructions. See
+[EVDI tools](../scripts/EVDI_TOOLS_README.md).
+
+## Build requirements and runtime requirements
+
+| Layer | Required evidence |
+| --- | --- |
+| Build a kernel module | Driver compatible with the running kernel, matching kernel headers and a working DKMS/akmod build. |
+| Build the EVDI streamer | GStreamer development libraries, the Cargo `evdi` feature and linkable `libevdi.so`. |
+| Run an installed streamer | Loaded EVDI module, usable EVDI DRM device, user access and the library ABI required by that binary. Kernel headers and an unversioned development symlink are not runtime requirements. |
+| Display real frames | Active graphical session/compositor, encoder, ADB transport and Android decoder all working together. |
+
+Debian Bookworm and Ubuntu Noble packages use different libevdi ABIs. Install the
+package built for your distribution; do not redirect one SONAME to another.
+
+`./wbeam host build` enables EVDI when its library probe finds it. To build
+explicitly against a custom library directory:
 
 ```bash
-sudo bash scripts/evdi-setup.sh                # standard install
-sudo bash scripts/evdi-setup.sh --dry-run       # preview only
-sudo bash scripts/evdi-setup.sh --skip-diagnostic  # headless/CI
+WBEAM_EVDI_LIB_DIR=/path/to/libevdi-dir \
+  cargo build --release --manifest-path host/rust/Cargo.toml \
+  -p wbeamd-streamer --no-default-features --features evdi
 ```
 
-The script detects your distro, installs kernel headers and build tools,
-installs EVDI via DKMS, loads the module, creates device nodes, configures
-persistent loading, sets user group permissions, and writes udev rules.
+That directory must contain `libevdi.so`. The build script adds it to the linker
+search path and runtime rpath. The CLI's automatic feature probe is separate;
+setting this variable alone does not guarantee `./wbeam host build` selects the
+EVDI feature.
 
-Exit 0 on success; non-zero on error.
-
-## Manual Setup
-
-### Arch
+## Diagnostics
 
 ```bash
-sudo pacman -Sy
-sudo pacman -S --noconfirm linux-headers base-devel dkms
-yay -S evdi-dkms          # or: git clone https://aur.archlinux.org/evdi-dkms.git && cd evdi-dkms && makepkg -si
+bash scripts/virtual-deps-check.sh --json --backend evdi
+bash scripts/evdi-diagnose.sh --verbose --fix
 ```
 
-### Debian / Ubuntu
+The first command performs a preliminary runtime dependency check and returns a
+nonzero exit status when `ok` is false. The detailed diagnostic also checks
+build/linker concerns; `--fix` **prints repair suggestions**. Neither command
+proves that the compositor is producing frames or that the Android device can
+display them.
+
+| Failure | Next check |
+| --- | --- |
+| Module missing | Compare `uname -r`, `dkms status` and the running kernel's headers. Inspect the matching DKMS `make.log`. |
+| Module built but rejected | Inspect `modinfo evdi`, `journalctl -k` and Secure Boot/MOK state. Enroll the module's signing key and reboot if required. |
+| `cannot find -levdi` | Install the appropriate development/DisplayLink package or use the explicit custom-library build above. This is independent of DKMS. |
+| Runtime library missing | Use `ldd` on the actual streamer binary to verify its required SONAME resolves. The generic dependency probe only checks library presence. |
+| Device or permission failure | Check the EVDI DRM devices under `/sys/devices/platform/evdi*/drm/` and `/dev/dri/`, then the active user's access/group membership. Do not assume `card0` is EVDI. |
+| Stream starts without frames | Check effective backend/codec, compositor display configuration, daemon/streamer logs and Android telemetry. A running process is not frame acceptance. |
+
+When the module is installed but not loaded:
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y linux-headers-$(uname -r) build-essential dkms evdi-dkms
-```
-
-### Fedora
-
-```bash
-scripts/fedora-setup.sh --yes --with-evdi
-```
-
-That command first tries `akmod-evdi` and `evdi-dkms`. If they are unavailable,
-it resolves the matching `fedora-<version>-displaylink-*.rpm` asset from
-`displaylink-rpm/displaylink-rpm` GitHub Releases. To explicitly try the
-historical COPR path before falling back:
-
-```bash
-scripts/fedora-setup.sh --yes --enable-evdi-copr
-```
-
-On Fedora 43, COPR may return 404; the GitHub Release RPM fallback is expected.
-
-### RHEL / CentOS
-
-```bash
-sudo yum check-update
-sudo yum install -y kernel-devel gcc make dkms
-sudo yum copr enable displaylink-rpm/displaylink
-sudo yum install -y evdi-dkms
-```
-
-If COPR is unavailable, build from source:
-
-```bash
-git clone https://github.com/displaylink-rpm/evdi.git && cd evdi
-sudo dkms add . && sudo dkms build -m evdi -v $(cat VERSION.txt) && sudo dkms install -m evdi -v $(cat VERSION.txt)
-```
-
-### Load Module and Persist
-
-```bash
-sudo modprobe -r evdi 2>/dev/null || true
 sudo modprobe evdi initial_device_count=4
-echo "options evdi initial_device_count=4" | sudo tee /etc/modprobe.d/evdi.conf
 ```
 
-### User Permissions
+Changing module parameters requires a new load and may affect existing virtual
+displays. Do not unload an in-use module as a routine diagnostic. The supplied
+helpers use four initial devices; inspect the running state instead of assuming
+that count applied to an already-loaded module.
+
+After a group membership change, log out and back in. After a kernel update,
+verify the module rebuilt, loaded and retained its signing trust before relying
+on EVDI again.
+
+If EVDI is unavailable, select **Wayland Portal** on a compatible Wayland
+session. X11 capture and XRandR helpers are retained as legacy code; the current
+normal start path does not select them automatically. Starting Xvfb is not a
+repair for an EVDI/Portal capture failure.
+
+## Select and inspect capture
+
+For the first stream, select EVDI in the desktop UI after onboarding the Android
+device. For API diagnostics on a single/default session with transport already
+prepared:
 
 ```bash
-sudo usermod -a -G video $(whoami)
-newgrp video    # or log out and back in
+curl -fsS -X POST 'http://127.0.0.1:5001/v1/start?capture_backend=evdi' \
+  -H 'Content-Type: application/json' \
+  -d '{"encoder":"h264","profile":"default","size":"1920x1080","fps":60,"bitrate_kbps":20000}'
+curl -fsS 'http://127.0.0.1:5001/v1/status'
+curl -fsS -X POST 'http://127.0.0.1:5001/v1/stop'
 ```
 
-## Verification
+Use the same `serial` query parameter on start/status/stop when addressing a
+particular device. `capture_backend` is a query parameter, while encoder/size/
+frame-rate settings are JSON fields. Inspect `effective_runtime_config` after
+startup; a start response alone is not proof of delivered frames.
 
-```bash
-bash scripts/evdi-diagnose.sh              # quick
-bash scripts/evdi-diagnose.sh --verbose    # detailed
-bash scripts/evdi-diagnose.sh --fix        # with fix recommendations
-```
+For a persistent default, set `WBEAM_CAPTURE_BACKEND=evdi` in
+`${XDG_CONFIG_HOME:-$HOME/.config}/wbeam/wbeam.conf`, then restart the daemon.
+Process environment overrides the file; a per-start API/UI selection overrides
+the daemon default. Stop and start the session to switch backends.
 
-Manual checks:
-
-```bash
-lsmod | grep evdi                          # module loaded
-ls -la /dev/dri/card0                      # device exists (crw-rw---- root video)
-groups | grep video                        # user in video group
-```
-
-## Troubleshooting
-
-### Module not loading
-
-```
-modprobe: ERROR: could not insert 'evdi': No such file or directory
-```
-
-1. Check DKMS: `dkms status` -- should show `evdi` as built/installed.
-2. If only "added", rebuild:
-   ```bash
-   EVDI_VERSION=$(ls /usr/src/ | grep evdi | head -1 | sed 's/evdi-//')
-   sudo dkms build -m evdi -v $EVDI_VERSION && sudo dkms install -m evdi -v $EVDI_VERSION
-   ```
-3. Build failure -- verify headers match running kernel:
-   `uname -r` vs `dpkg -l | grep linux-headers-$(uname -r)` (Debian) or `rpm -q kernel-devel-$(uname -r)` (RPM).
-4. Secure Boot may block unsigned modules. Enroll the DKMS MOK key or disable
-   Secure Boot. On Fedora, `scripts/fedora-setup.sh --yes --with-evdi` can
-   queue `mokutil --import /var/lib/dkms/mok.pub`; you must still reboot and
-   complete `Enroll MOK -> Continue -> Yes` in firmware.
-
-### Device not created
-
-```bash
-lsmod | grep evdi                    # confirm module loaded
-cat /sys/module/evdi/parameters/initial_device_count   # should be 4
-sudo modprobe evdi initial_device_count=4              # reload if needed
-dmesg | tail -50 | grep -i evdi                        # check for errors
-sudo udevadm trigger                                   # force device creation
-```
-
-### Permission denied
-
-```bash
-ls -la /dev/dri/card0        # should show group "video" with rw
-groups | grep video           # user must be in video group
-sudo usermod -a -G video $(whoami) && newgrp video
-cat /etc/udev/rules.d/50-evdi.rules   # verify udev rules exist
-```
-
-### libevdi not found
-
-```bash
-find /usr -name "libevdi.so*" 2>/dev/null   # locate library
-sudo ldconfig                                # refresh cache
-```
-
-If missing, reinstall the EVDI package for your distro. Fedora DisplayLink RPMs
-install `libevdi.so` under `/usr/libexec/displaylink`; WBeam's streamer build
-detects that path automatically. For a custom location:
-
-```bash
-WBEAM_EVDI_LIB_DIR=/path/to/libevdi-dir ./wbeam host build
-```
-
-### No supported encoder found
-
-The streamer needs at least one H.264 encoder. H.265 is optional.
-
-```bash
-gst-inspect-1.0 openh264enc x264enc nvh264enc nvh265enc x265enc
-```
-
-If H.265 is requested but unavailable, WBeam falls back to H.264 when
-`openh264enc`, `x264enc`, or `nvh264enc` exists. On Fedora, repair the common
-H.264 fallback package with:
-
-```bash
-scripts/fedora-setup.sh --yes --no-android-sdk
-```
-
-### Stream starts but no video
-
-1. Verify parameter name is `capture_backend` (not `backend`).
-2. Check logs: `tail -100 logs/*.host*.log | grep -i error`
-3. Headless host may need a virtual display:
-   ```bash
-   sudo Xvfb :99 -screen 0 1920x1080x24 &
-   export DISPLAY=:99
-   ```
-
-## API Usage
-
-```bash
-# Start stream
-curl -X POST "http://localhost:5001/v1/start?capture_backend=evdi"
-
-# With encoder options
-curl -X POST "http://localhost:5001/v1/start?capture_backend=evdi" \
-  -H "Content-Type: application/json" \
-  -d '{"encoder":"h264","profile":"adaptive","bitrate_kbps":20000}'
-
-# Check status
-curl -s http://localhost:5001/v1/health | jq '.state, .effective_runtime_config.capture_backend'
-```
-
-Response (example):
-
-```json
-{
-  "state": "STARTING",
-  "effective_runtime_config": {
-    "capture_backend": "evdi",
-    "requested_encoder": "h264",
-    "size": "1920x1080",
-    "fps": 60
-  },
-  "stream_process_alive": true,
-  "ok": true
-}
-```
-
-## Advanced Configuration
-
-Set EVDI as default backend in `~/.config/wbeam/wbeam.conf`:
-
-```ini
-[streamer]
-WBEAM_CAPTURE_BACKEND=evdi
-```
-
-Multiple virtual devices:
-
-```bash
-echo "options evdi initial_device_count=4" | sudo tee /etc/modprobe.d/evdi.conf
-```
-
-Debug logging:
-
-```bash
-RUST_LOG=debug ./wbeam host debug 2>&1 | grep -i evdi
-```
-
-## FAQ
-
-**Does EVDI work with Wayland?**
-Yes. It captures at the kernel level, bypassing the display server.
-
-**Does it use more CPU?**
-No. Direct kernel capture uses less CPU than portal/X11 methods.
-
-**Can I switch between EVDI and other backends?**
-Yes, dynamically via the `capture_backend` query parameter, without restarting the daemon.
-
-**Does EVDI survive sleep/suspend?**
-The module usually reloads on resume; the daemon may need a restart.
-
-**What resolution does EVDI support?**
-Fixed at EDID 1920x1080. The downstream pipeline scales to the requested size.
-
-**Do I need to re-run setup after kernel updates?**
-Usually not. DKMS recompiles automatically for new kernels.
-
-**Does EVDI work in VMs or WSL?**
-Generally no. VMs lack the required passthrough; WSL does not support kernel modules.
-
-**How do I uninstall EVDI?**
-`sudo dkms remove -m evdi --all` then remove the package via your distro's package manager.
+Record a real image-stream test and soak results using the
+[release checklist](release-checklist.md) before declaring a configuration
+supported.

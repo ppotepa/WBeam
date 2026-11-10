@@ -1,152 +1,106 @@
-# WBeam E2E
+# VM and hardware testing
 
-This folder contains local VM end-to-end test scaffolding. Python runner
-**unit tests** execute in GitLab CI, but real VM/physical Android E2E acceptance
-does **not** run on shared CI runners. A local TCP receiver is not proof of
-actual Android rendering. See `docs/release-checklist.md` and
-`e2e/scripts/validate_hardware_acceptance.py` for physical-device signoff.
+This directory contains local QEMU/KVM test tooling. CI runs the Python
+**runner/validator unit tests**, not real VM sessions or physical Android
+acceptance. A local TCP client receives bytes but does not decode or render
+frames; use the [release checklist](../docs/release-checklist.md) for hardware
+signoff.
 
-The model is two-phase:
+## Start with a headless smoke scenario
 
-1. Keep distro ISOs outside git.
-2. Build clean base disks from ISO once per distro/session variant.
-3. Never boot tests from a base disk directly.
-4. For each test, create a qcow2 overlay or full copy from the base disk.
-5. Boot the VM from that working disk.
-6. Copy this checkout into the guest.
-7. Install/build WBeam in the guest.
-8. Start a stream for at least 60 seconds.
-9. Collect logs and JSON reports.
-10. Delete or archive the working disk.
-
-Base disks, runtime disks, and reports are ignored under `e2e/images/base/`,
-`e2e/work/`, and `e2e/reports/`.
-
-## Commands
+Run commands from the repository root. The host needs Python 3, QEMU/KVM,
+`qemu-img`, SSH, `ssh-keygen`, rsync and a seed-ISO tool (`genisoimage`, `xorriso`
+or `cloud-localds`). Download the distro installer ISOs separately; do not
+commit images, generated disks, SSH keys or private reports.
 
 ```bash
 ./e2e/run validate
-./e2e/run status
 ./e2e/run init-env
 ./e2e/run iso-sources
-./e2e/run env-shell
+# Edit e2e/env.local to point to the downloaded ISOs.
+eval "$(./e2e/run env-shell)"
+./e2e/scripts/preflight.sh --strict
+
+./e2e/run base-plan --distro fedora-43 --session headless
+./e2e/run prepare-base --distro fedora-43 --session headless
+./e2e/run run --scenario fedora43-headless-benchmark-h264
+./e2e/run report --run-id RUN_ID
+```
+
+Replace `RUN_ID` with the ID printed by the run. `preflight.sh --strict` checks
+the tools and ISO inputs for the entire matrix;
+missing inputs cause failure. Without `--strict` it reports warnings and may
+exit successfully despite missing prerequisites. Base preparation installs an
+OS, and guest installation installs packages/builds WBeam: these are active VM
+operations, not read-only checks.
+
+## Inputs and paths
+
+[The matrix](matrix.json) defines Fedora 43, Ubuntu 24.04 and Debian 12
+scenarios. Use the ISO paths in [env.example](env.example):
+
+| Environment variable | Input |
+| --- | --- |
+| `WBEAM_E2E_ISO_FEDORA_43` | Fedora 43 installer ISO |
+| `WBEAM_E2E_ISO_UBUNTU_24_04` | Ubuntu 24.04 installer ISO |
+| `WBEAM_E2E_ISO_DEBIAN_12` | Debian 12 installer ISO |
+| `WBEAM_E2E_BASE_DIR` | Optional base disk root; default `e2e/images/base` |
+| `WBEAM_E2E_WORK_DIR` | Optional disposable/build disk root; default `e2e/work` |
+| `WBEAM_E2E_REPORT_DIR` | Optional report root; default `e2e/reports` |
+
+Base images contain a clean OS and test access. Each run creates a disposable
+qcow2 overlay (or `--copy-mode full`), copies the current checkout, builds in
+the guest, starts the smoke test and collects reports. Never boot a test
+from the base disk itself. See [disk lifecycle and report layout](FLOW.md).
+
+## Inspect and select work
+
+```bash
+./e2e/run status
 ./e2e/run next
-./e2e/run list
 ./e2e/run list --distro fedora-43 --backend evdi
 ./e2e/run plan --tag smoke
 ./e2e/run images
-./e2e/run base-plan --distro fedora-43 --session gnome-wayland
-./e2e/run prepare-base --distro fedora-43 --session headless
 ./e2e/run prepare-base --all --missing
-./e2e/run workdisk-create --scenario fedora43-headless-benchmark-h264
-./e2e/run workdisk-create --tag smoke --ready
-./e2e/run run --scenario fedora43-headless-benchmark-h264
 ./e2e/run run --tag smoke --ready
-./e2e/run report --run-id <run-id>
-./e2e/run clean --run-id <run-id>
-./e2e/scripts/preflight.sh
+./e2e/run clean --run-id RUN_ID
 ```
 
-The VM runner uses the same matrix and guest scripts:
+`status`/`next` show local prerequisites and recorded runner progress, not a
+release certification percentage. `--ready` selects scenarios with existing
+base disks; it does not validate a desktop session or capture permission.
+`run --dry-run` exercises orchestration/report creation without a VM; a
+report with `phase: dry-run` is not execution evidence.
 
-- `e2e/matrix.json` defines distro/session/backend scenarios.
-- `e2e/FLOW.md` defines the base-image and working-disk lifecycle.
-- `e2e/scripts/guest-install-wbeam.sh` runs inside the guest and prepares WBeam.
-- `e2e/scripts/guest-stream-smoke.sh` runs inside the guest and validates a
-  60-second stream through the daemon API plus a local TCP stream client.
+`run` removes working disks after success and retains them on failure by
+default (`--retain-workdisk on-fail`). `clean` removes a run's disposable work
+directory, leaving base images and reports intact.
 
-## Disk Layout
+## Backend expectations
 
-Default local paths:
+| Backend | Purpose and limits |
+| --- | --- |
+| `benchmark_game` | First smoke tier: synthetic frames without desktop capture consent. Exercises guest build, daemon startup, encoding and TCP receive. |
+| `wayland_portal` | Requires a real GNOME Wayland session and ScreenCast consent. The runner does not automate first consent or seed a restore token; handle consent explicitly. |
+| `evdi` | Requires a working guest kernel/module/library stack. Collect diagnostics and keep Secure Boot/MOK testing explicit. A VM pass does not certify a physical host's kernel. |
+| `x11_gst` | Retained legacy scenarios and source. Current daemon/streamer entrypoints reject X11 capture, so these rows are not expected to pass on the release path. |
 
-```text
-e2e/images/base/<distro>/<session>.qcow2
-e2e/work/base-build/<distro>/<session>/
-e2e/work/runs/<run-id>/<scenario-id>/disk.qcow2
-e2e/reports/<run-id>/<scenario-id>/
-```
+The guest smoke runs for a configured observation interval (60 seconds by
+default), requires a TCP connection with some bytes received, and accepts a
+final state of `STREAMING`, `STARTING` or `RECONNECTING`. It does not prove
+continuous frame delivery, successful decoding, or 60 seconds of visible
+Android output. Review `guest/client.json` and the logs, not just `status: pass`.
 
-Example:
+Only EVDI and Wayland Portal belong to the physical release matrix. Debian
+and legacy X11 VM rows remain engineering scenarios; the matrix's existence
+is not a claim of certified platform support.
+
+## Unit checks
 
 ```bash
-# Show the deterministic base image flow:
-./e2e/run base-plan --distro fedora-43 --session gnome-wayland
-
-# Build the clean base disk from ISO:
-./e2e/run prepare-base --distro fedora-43 --session gnome-wayland
-
-# Or prepare every missing base image in one pass:
-./e2e/run prepare-base --all --missing
-
-# Then each test creates an overlay. The base image stays untouched:
-./e2e/run workdisk-create --scenario fedora43-gnome-wayland-evdi-h264
-
-# Or run the full scenario end-to-end:
-./e2e/run run --scenario fedora43-gnome-wayland-evdi-h264
-
-# Or run every smoke scenario that already has a base image:
-./e2e/run run --tag smoke --ready
+python3 -m unittest discover -s e2e/tests -v
 ```
 
-## ISO Inputs
-
-Set these environment variables on the host that runs the VM tests:
-
-```bash
-export WBEAM_E2E_ISO_FEDORA_43=/path/to/Fedora-Everything-netinst-x86_64-43-1.6.iso
-export WBEAM_E2E_ISO_UBUNTU_24_04=/path/to/ubuntu-24.04-desktop-amd64.iso
-export WBEAM_E2E_ISO_DEBIAN_12=/path/to/debian-12-amd64-netinst.iso
-```
-
-Or use the checked-in template:
-
-```bash
-./e2e/run init-env
-./e2e/run iso-sources
-$EDITOR e2e/env.local
-eval "$(./e2e/run env-shell)"
-```
-
-Optional runtime paths:
-
-```bash
-export WBEAM_E2E_WORK_DIR=/fast/tmp/wbeam-e2e-work
-export WBEAM_E2E_REPORT_DIR=/fast/tmp/wbeam-e2e-reports
-export WBEAM_E2E_BASE_DIR=/fast/vm-images/wbeam-base
-```
-
-Use `./e2e/run status` at any time to see the current completion percentage and
-which evidence is still missing, including the exact ISO environment variables
-and exact base image paths that still need to be prepared before a real VM run.
-It also prints the next commands to run in order.
-
-Use `./e2e/run next` when you only want the actionable command queue without the
-rest of the status report.
-
-## Backend Notes
-
-`benchmark_game` is the first smoke tier. It needs no desktop capture permission
-and proves install, build, daemon startup, encode, TCP transport, and report
-collection.
-
-`wayland_portal` needs a real GNOME Wayland session. First-run portal consent is
-not deterministic yet, so the runner should either seed a restore token or keep
-the first consent flow as a separate semi-manual scenario.
-
-`evdi` should run with Secure Boot disabled in the VM unless the scenario is
-explicitly testing MOK enrollment. The scenario must collect `dmesg`, `dkms`,
-`modinfo evdi`, `/dev/dri`, and `scripts/evdi-diagnose.sh --verbose` output.
-
-`x11_gst` needs a GNOME Xorg session or a deterministic Xvfb/Xorg session with
-capture access.
-
-## Release support versus historical scenarios
-
-`x11_gst` scenarios remain in the VM matrix strictly as historical/legacy
-technical tests. They are not supported release paths, are not surfaced in the
-product UI and must not be counted toward release acceptance. The two supported
-capture backends are `evdi` and `wayland_portal`.
-
-Release acceptance requires physical Android evidence for Fedora 43 and Ubuntu
-24.04 on GNOME Wayland; see `docs/release-checklist.md`. Keep private device
-serials, secrets and raw logcat outside the repository.
+These tests cover runner behavior, seeds, reports and hardware-report
+validation. Keep physical QA evidence separate, with private device data
+redacted before sharing.

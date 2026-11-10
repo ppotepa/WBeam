@@ -1,41 +1,25 @@
-# EVDI Scripts
+# EVDI tools
 
-Full documentation: [../docs/EVDI_SETUP_GUIDE.md](../docs/EVDI_SETUP_GUIDE.md)
+Run from the repository root. See the [setup guide](../docs/EVDI_SETUP_GUIDE.md)
+for requirements and the [compatibility matrix](../docs/EVDI_COMPATIBILITY_MATRIX.md)
+for validation status.
 
-## Fedora 43
+| Tool | Purpose |
+| --- | --- |
+| `./install-wbeam --backend evdi` | Source installation, host build, user service and Android onboarding. |
+| `scripts/fedora-setup.sh --yes --with-evdi` | Fedora package/bootstrap flow, including library lookup, module build and MOK checks. |
+| `bash scripts/virtual-deps-check.sh --json --backend evdi` | Preliminary runtime dependency probe used by desktop setup. Prints JSON and returns nonzero when dependencies are missing. |
+| `bash scripts/evdi-diagnose.sh --verbose --fix` | Detailed read-only diagnostics, including build/linker checks and repair suggestions. |
+| `scripts/evdi-setup.sh` | Older package-manager-based EVDI helper retained for legacy maintenance. |
 
-Use the Fedora-specific bootstrap first. It handles DisplayLink RPM fallback,
-Secure Boot MOK enrollment state, `libevdi` linker lookup, and Android/GStreamer
-host dependencies:
+`evdi-diagnose.sh --fix` prints suggestions; it does not apply repairs. Its exit
+code is the number of reported errors (warnings alone do not fail it). Runtime
+readiness, source build readiness and a real frame-stream test are different
+checks; see the setup guide before interpreting a failure.
 
-```bash
-./redeploy-local
-# or directly:
-scripts/fedora-setup.sh --yes --with-evdi
-```
-
-## evdi-setup.sh
-
-Distro-neutral EVDI install and configuration helper. Detects distro, installs
-dependencies, compiles module, configures persistence and permissions. On
-Fedora 43 prefer `scripts/fedora-setup.sh --yes --with-evdi`.
-
-```bash
-sudo bash scripts/evdi-setup.sh                   # standard install
-sudo bash scripts/evdi-setup.sh --dry-run          # preview only
-sudo bash scripts/evdi-setup.sh --skip-diagnostic  # headless/CI
-```
-
-## evdi-diagnose.sh
-
-Diagnostic tool. Checks module, device node, library, permissions, and
-WBeam configuration. On Secure Boot systems it also reports whether the DKMS
-MOK key is enrolled or waiting for reboot/firmware enrollment.
-
-```bash
-bash scripts/evdi-diagnose.sh              # quick check
-bash scripts/evdi-diagnose.sh --verbose    # detailed output
-bash scripts/evdi-diagnose.sh --fix        # with fix recommendations
-```
-
-Exit 0 = all checks passed; non-zero = number of errors found.
+The legacy setup helper accepts `--dry-run` and `--skip-diagnostic` and requires
+root, including in dry-run mode. It retains historical assumptions about
+`/dev/dri/card0`, library locations and udev rules, and its package-manager
+coverage is not a support matrix. Prefer the wizard/Fedora helper or your
+distribution's packages for new installations. Do not use its completion banner
+as proof of usable EVDI capture.

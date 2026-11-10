@@ -1,23 +1,14 @@
-# Desktop Domain
+# Desktop Client
 
-Canonical desktop domain boundary.
+The desktop client lives in
+[`apps/desktop-tauri`](apps/desktop-tauri/README.md). It provides device discovery,
+connect/disconnect controls, host service integration, profiles and status.
 
-## Purpose
+SolidJS/TypeScript renders the UI. The Tauri Rust bridge handles ADB, service
+wrappers and host API requests. The daemon remains the authority for stream
+lifecycle and session state.
 
-`desktop/` owns desktop UX clients:
-
-- main desktop control app,
-- desktop-side service wrappers/integration glue.
-
-Desktop remains a client of host daemon API.
-
-## Migration Status
-
-Active implementation lives in:
-
-- `desktop/apps/desktop-tauri`
-
-## Contract
-
-- Do not move stream/session business logic into desktop UI.
-- Desktop sends intent and renders status/metrics from host authority.
+Run `./desktop.sh` from the repository root after
+[setup](../docs/INSTALLER_WIZARD.md). See the
+[app guide](apps/desktop-tauri/README.md) for direct development commands and the
+[architecture map](../docs/repo-structure.md) for domain boundaries.

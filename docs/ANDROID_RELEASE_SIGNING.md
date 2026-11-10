@@ -1,54 +1,71 @@
-# Android release signing / WBeam 0.1.3
+# Android release signing
 
-Release APKs **must not use Android's debug keystore**. Do not commit keystores,
-passwords, export certificates with private keys, or CI secret values.
+Release APKs require a release keystore. Debug builds need no signing secrets.
+Signing is one part of the [release acceptance process](release-checklist.md).
 
-## Required protected CI environment
+## Build inputs
 
-Provide a signing keystore as a protected **file variable**, and these variables
-to the GitLab release pipeline:
+Configure these protected GitLab CI variables; use a **file variable** for the
+keystore and keep passwords masked:
 
-| Environment variable | Meaning |
+| Variable | Meaning |
 | --- | --- |
-| `WBEAM_ANDROID_KEYSTORE_PATH` | Absolute path to protected keystore file |
-| `WBEAM_ANDROID_STORE_PASSWORD` | Keystore password (secret) |
+| `WBEAM_ANDROID_KEYSTORE_PATH` | Absolute path to the readable keystore file |
+| `WBEAM_ANDROID_STORE_PASSWORD` | Keystore password |
 | `WBEAM_ANDROID_KEY_ALIAS` | Signing key alias |
-| `WBEAM_ANDROID_KEY_PASSWORD` | Signing key password (secret) |
-| `WBEAM_VERSION_CODE` | Positive, increasing integer above 1 (optional in CI) |
+| `WBEAM_ANDROID_KEY_PASSWORD` | Signing key password |
+| `WBEAM_VERSION_CODE` | Increasing integer from 2 through 2,100,000,000 |
 
-`scripts/ci/build_apk_release.sh` derives `WBEAM_VERSION_CODE` as
-`10000 + CI_PIPELINE_IID` when it is absent in CI. CI_PIPELINE_IID increases
-within a GitLab project; if artifacts are published by a different project,
-maintain a globally monotonic code yourself. Manual release builds must supply
-`WBEAM_VERSION_CODE`. The `versionName` is the exact `WBEAM_VERSION`/build
-revision supplied by the pipeline. Host and Android must match.
+Run the release wrapper from the repository root after supplying those values
+securely in the environment. Set `WBEAM_VERSION` to the intended artifact
+revision for a standalone build; the CI pipeline supplies it automatically:
 
-Debug builds remain available without any signing secrets. A release build
-fails if any release signing field or versionCode is missing/invalid.
-The pipeline runs `apksigner verify --print-certs` and refuses a debug
-certificate. Publish checksums together with every release.
+```bash
+bash scripts/ci/check-version-consistency.sh
+bash scripts/ci/build_apk_release.sh
+```
 
-## Existing debug-signed installation
+The wrapper derives `WBEAM_VERSION_CODE=10000 + CI_PIPELINE_IID` only when the
+code is absent and a numeric pipeline IID is available. Manual builds must
+supply it. IIDs increase within one GitLab project; moving publication to a
+different project requires preserving a globally increasing version code.
 
-Android refuses an in-place update if certificates differ, regardless of
-`versionCode`. **Do not silently uninstall the previous app.** WBeam's
-installed-mode CLI now refuses an incompatible signature without removing
-application data. Source/developer CLI also requires explicit
-`WBEAM_ALLOW_DATA_DELETING_REINSTALL=1` before destructive reinstall.
+The wrapper passes `WBEAM_VERSION` as Gradle's `WBEAM_BUILD_REV`, which becomes
+the APK `versionName` and runtime build revision. The host and APK revisions
+must match. For direct Gradle builds, set `WBEAM_BUILD_REV` explicitly;
+`WBEAM_VERSION` alone is not a Gradle input. See
+[development versioning](agents.workflow.md#versioning).
 
-Users should export whatever app settings/data they need **before** explicitly
-uninstalling the previous debug-signed APK and installing the new
-release-signed APK. A lossless migration is not guaranteed; do not claim one
-until a verified export/import mechanism exists.
+The build fails for missing signing inputs or an invalid release version code.
+The wrapper runs `apksigner verify --print-certs`, rejects an Android Debug
+certificate, and writes `dist/wbeam-android-<version>.apk` plus `VERSION.txt`.
+The later artifact checker generates checksums; it does not repeat signature
+verification. Keep keystores, private keys and secret values out of git, logs,
+issues and PR descriptions.
 
-## Verification checklist
+## Updating an existing installation
 
-1. Run `scripts/ci/check-version-consistency.sh`.
-2. Run Gradle debug tests without any release secrets.
-3. Run a release build with protected secrets and an increasing versionCode.
-4. Check `apksigner verify --print-certs <release.apk>`.
-5. Install release A and update to release B signed by the **same key**,
-   confirming unchanged package ID and preserved user settings.
-6. Verify host daemon and APK build revisions match at runtime.
+Android rejects an update signed by a different certificate, regardless of
+version code. The installed-mode CLI refuses that update without uninstalling
+the app. The source/developer CLI permits destructive recovery only when
+`WBEAM_ALLOW_DATA_DELETING_REINSTALL=1` is explicitly set.
 
-Do not copy signing values to logs, PR descriptions or issues.
+For a debug-to-release migration, preserve needed settings/data before the
+user explicitly uninstalls the old app. There is no verified lossless
+export/import migration documented here. Ordinary release upgrades must keep
+the same signing key and package ID (`com.wbeam` unless deliberately overridden).
+
+## Verification
+
+1. Run debug unit tests without release secrets.
+2. Build the release APK with the intended version and an increasing code.
+3. Inspect `apksigner verify --print-certs <release.apk>` and compare the
+   certificate fingerprint with the approved signing key.
+4. Install release A, then update to release B signed by the same key; verify
+   package identity and retained settings on a physical Android device.
+5. Check the host/APK revision with `./wbeam version doctor` in a source checkout
+   or `wbeam version doctor` after package installation.
+
+Implementation: [Gradle configuration](../android/app/build.gradle),
+[release build wrapper](../scripts/ci/build_apk_release.sh),
+[CLI signature handling](../wbeam).

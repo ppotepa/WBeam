@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# Set the WBeam capture backend for the current session.
+# Set the WBeam capture backend preference for the next daemon launch.
 #
 # Usage: set-capture-mode.sh [wayland|evdi|x11|auto]
 #
 # Backends:
-#   wayland  - XDG ScreenCast portal (default on Wayland, 60 fps cap)
-#   evdi     - Direct kernel capture via EVDI (requires root for modprobe)
-#   x11      - GStreamer X11 capture (XDG/X11 sessions)
-#   auto     - Auto-detect (default)
+#   wayland  - XDG ScreenCast portal (requires a supported Wayland session)
+#   evdi     - EVDI virtual display (requires root for modprobe)
+#   x11      - Retained legacy value; rejected by current release runtime
+#   auto     - Clear the stored preference and use the daemon default
 #
-# The setting is written to ~/.config/wbeam/wbeam.conf and takes effect on
-# the next /v1/start call.  The desktop UI "Capture Backend" dropdown in the
-# Connect dialog overrides this file for individual sessions.
+# The setting is written to ${XDG_CONFIG_HOME:-$HOME/.config}/wbeam/wbeam.conf.
+# Restart the daemon through its launcher to reload the file. An existing
+# process environment or a per-session API request can override this preference.
 
 set -euo pipefail
 

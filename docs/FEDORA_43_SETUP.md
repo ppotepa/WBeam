@@ -1,562 +1,161 @@
-# Fedora 43 Local Setup
+# Fedora 43 source setup
 
-This guide is for a Fedora 43 Workstation machine running WBeam from this repo.
-For a fresh machine, start with the installer wizard:
+Run these commands as your normal user in a graphical desktop session. Fedora
+43 with GNOME Wayland is a release acceptance target; that does not certify every
+kernel/EVDI combination. See the [EVDI evidence matrix](EVDI_COMPATIBILITY_MATRIX.md).
 
-```bash
-./install-wbeam
-```
-
-For the developer rebuild/deploy loop, use `./redeploy-local`.
-
-WBeam has four moving parts on Fedora:
-
-- Rust host daemon and streamer (`host/rust`)
-- Tauri desktop app (`desktop/apps/desktop-tauri`)
-- Android APK build/deploy (`android`)
-- optional EVDI virtual display capture
-
-## 0. Fresh Clone Flow
-
-On Fedora 43, a clean workstation should start with the installer wizard:
+## First installation
 
 ```bash
-git clone <repo> WBeam
+git clone https://github.com/ppotepa/WBeam.git
 cd WBeam
-./install-wbeam
-```
-
-`install-wbeam` probes the machine, asks for the capture backend, bootstraps
-Fedora dependencies, builds the host from this checkout, installs the systemd
-user service, then runs Android phone onboarding.
-
-The recommended supported fallback is Wayland Portal:
-
-```bash
+./install-wbeam --dry-run
 ./install-wbeam --backend wayland
 ```
 
-EVDI is available as an advanced/risky option:
+The [installer](INSTALLER_WIZARD.md) probes the machine, installs Fedora
+prerequisites, builds the host, starts a systemd user service and onboards the
+Android device. Wayland Portal needs a working compositor portal and PipeWire;
+accept the screen-sharing prompt when starting a stream.
 
-```bash
-./install-wbeam --backend evdi
-```
+For an EVDI virtual display, use `./install-wbeam --backend evdi` instead.
+EVDI setup can require a kernel-module build, MOK enrollment, a new login and a
+reboot. X11 helpers remain legacy code and are not the runtime fallback.
 
-For a dry-run preview:
-
-```bash
-./install-wbeam --dry-run
-```
-
-`redeploy-local` remains the normal dev loop and bootstraps missing Fedora
-dependencies as needed while rebuilding/redeploying:
-
-1. stops old host/desktop service state,
-2. runs `scripts/fedora-setup.sh --yes` when native build packages or Android
-   SDK components are missing,
-3. adds `--with-evdi` automatically when EVDI is not ready,
-4. builds the Rust daemon and streamer,
-5. builds and deploys the Android APK to connected devices,
-6. launches the desktop UI.
-
-The script can install packages and download the Android command-line SDK, but
-it cannot bypass OS or device trust prompts. These may still require manual
-action:
-
-- Fedora `sudo` authentication for `dnf`, `usermod`, `modprobe`, and `mokutil`.
-- Secure Boot MOK enrollment for the DKMS EVDI module. If queued, reboot and
-  choose `Enroll MOK -> Continue -> Yes`, then enter the temporary password.
-- Logging out and back in after being added to the `video` group.
-- Accepting Android USB debugging and allowing APK installs on the device.
-
-Rerun `./install-wbeam` or `./redeploy-local` after completing any required
-reboot, login, or device prompt. To rerun only phone onboarding:
-
-```bash
-./wbeam device setup
-```
-
-### Current Fedora Bootstrap Coverage
-
-The Fedora flow now handles these previously manual or dev-machine-only pieces:
-
-- GLib/GObject/GIO and GStreamer development packages required by Rust crates.
-- Java 21 selection for Gradle, avoiding Java 25 class-file incompatibility.
-- Android command-line SDK installation under `~/Android/Sdk`, SDK licenses,
-  platform 35, build tools 35.0.0, and `android/local.properties`.
-- GStreamer H.264 runtime fallback through `openh264enc` when H.265 encoders are
-  unavailable.
-- EVDI package discovery using distro packages first, then DisplayLink RPM
-  release assets.
-- DisplayLink `libevdi.so` runtime/linker lookup from `/usr/libexec/displaylink`.
-- Running-kernel `kernel-devel` mismatch diagnostics before DKMS build.
-- Secure Boot MOK import, pending-reboot detection, and firmware enrollment
-  instructions.
-- `video` group membership checks for EVDI device access.
-
-## 1. Install Fedora Packages
-
-Install the base build, Tauri, GStreamer, Android SDK, and virtual-display
-tools with the repo helper:
-
-```bash
-scripts/fedora-setup.sh --dry-run
-scripts/fedora-setup.sh --yes
-```
-
-The equivalent manual command is:
-
-```bash
-sudo dnf group install -y "c-development"
-
-sudo dnf install -y \
-  git curl wget file pkgconf-pkg-config \
-  gcc gcc-c++ make cmake clang openssl-devel \
-  rust cargo \
-  nodejs npm \
-  python3 \
-  java-21-openjdk-devel \
-  android-tools mokutil \
-  glib2-devel \
-  gstreamer1-devel gstreamer1-plugins-base-devel \
-  gstreamer1-plugins-good gstreamer1-plugins-bad-free \
-  gstreamer1-plugin-openh264 gstreamer1-vaapi \
-  webkit2gtk4.1-devel libappindicator-gtk3-devel librsvg2-devel libxdo-devel \
-  xrandr xorg-x11-server-Xvfb \
-  akmods dkms kernel-devel kernel-headers
-```
-
-Notes:
-
-- `glib2-devel` fixes host streamer build failures like missing
-  `glib-2.0.pc` or `gobject-2.0.pc`.
-- `webkit2gtk4.1-devel`, `libappindicator-gtk3-devel`, `librsvg2-devel`, and
-  `libxdo-devel` are the Fedora Tauri desktop build dependencies.
-- `android-tools` provides Fedora's system `adb`. The setup script also
-  installs Google's Android command-line SDK under `~/Android/Sdk` by default.
-- If Fedora has installed a new kernel, reboot before building EVDI so
-  `kernel-devel` matches `uname -r`.
-
-## 2. Android SDK
-
-The Gradle project uses Android Gradle Plugin `8.5.2`, `compileSdk = 35`, and
-`buildToolsVersion = "35.0.0"`.
-
-`scripts/fedora-setup.sh --yes` installs the command-line SDK by default:
+## Dependency helper
 
 ```bash
 scripts/fedora-setup.sh --yes
+scripts/fedora-setup.sh --yes --no-android-sdk  # host/desktop work only
 ```
 
-It downloads Android command-line tools into `~/Android/Sdk`, accepts SDK
-licenses, installs `platform-tools`, `platforms;android-35`, and
-`build-tools;35.0.0`, then writes `android/local.properties`.
+The helper installs Rust/Cargo, Node/npm, Java 21, ADB, native Tauri/GStreamer
+build dependencies and an H.264 encoder package. Its package list in
+[`scripts/fedora-setup.sh`](../scripts/fedora-setup.sh) is the source of truth.
+It also installs Android command-line tools unless skipped.
 
-To skip SDK bootstrap for host/desktop-only work:
+`--dry-run` prints package commands, but the script still probes the current
+Fedora installation and checks installed encoders. On a fresh machine it can
+stop before printing every later stage; this is not an installation failure.
 
-```bash
-scripts/fedora-setup.sh --yes --no-android-sdk
-```
+### Android build tools
 
-Android Studio is also fine:
+The project uses Android Gradle Plugin 8.5.2, compile SDK 35 and Build Tools
+35.0.0. The helper installs these under `~/Android/Sdk` by default, accepts SDK
+licenses and writes `android/local.properties`. A custom SDK root can be passed
+with `--android-sdk-root PATH`.
 
-1. Install Android Studio.
-2. Open SDK Manager.
-3. Install:
-   - Android SDK Platform 35
-   - Android SDK Build-Tools 35.0.0
-   - Android SDK Platform-Tools
-   - Android SDK Command-line Tools
-
-Then set the SDK path for shells. Add this to `~/.bashrc` or equivalent:
+For interactive shells:
 
 ```bash
 export ANDROID_HOME="$HOME/Android/Sdk"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
-export PATH="$ANDROID_HOME/platform-tools:$PATH"
-```
-
-Reload the shell:
-
-```bash
-source ~/.bashrc
-adb version
-```
-
-## 3. EVDI Capture
-
-EVDI is the preferred low-latency capture path. On Fedora 43 it usually comes
-from DisplayLink/EVDI packaging rather than the base Fedora repositories.
-
-The normal `./redeploy-local` path requests EVDI automatically on Fedora. To
-run the EVDI setup directly:
-
-```bash
-./wbeam deps virtual check
-scripts/fedora-setup.sh --yes --with-evdi
-```
-
-The setup order is:
-
-1. try `akmod-evdi`,
-2. try `evdi-dkms`,
-3. optionally try the historical `displaylink-rpm/displaylink` COPR,
-4. fall back to the matching `fedora-43-displaylink-*.rpm` asset from
-   `displaylink-rpm/displaylink-rpm` GitHub Releases.
-
-To explicitly try COPR before the GitHub RPM fallback:
-
-```bash
-scripts/fedora-setup.sh --yes --enable-evdi-copr
-```
-
-On Fedora 43 the COPR endpoint may return 404. That is expected; the GitHub
-Release RPM fallback is the current automatic path.
-
-Alternatively, enable the DisplayLink/EVDI package source you use on this
-machine, then install one of:
-
-```bash
-sudo dnf install -y akmod-evdi
-# or
-sudo dnf install -y evdi-dkms
-```
-
-Load the module:
-
-```bash
-sudo modprobe evdi initial_device_count=4
-```
-
-Verify:
-
-```bash
-bash scripts/evdi-diagnose.sh --verbose
-./wbeam deps virtual check
-```
-
-If Secure Boot is enabled, Fedora may refuse to load unsigned DKMS/akmod kernel
-modules with `Key was rejected by service`. Enroll the DKMS MOK key and reboot,
-or disable Secure Boot for this dev machine:
-
-```bash
-sudo mokutil --import /var/lib/dkms/mok.pub
-sudo reboot
-sudo dkms autoinstall
-```
-
-`scripts/fedora-setup.sh --with-evdi` detects this state and, when run from an
-interactive terminal, queues `mokutil --import /var/lib/dkms/mok.pub`
-automatically. You still must reboot and complete the firmware MOK manager
-screen manually: `Enroll MOK -> Continue -> Yes`, then enter the temporary
-password you chose. After the import is queued, `redeploy-local` records this
-as `secureboot-mok-pending-reboot` and stops early until you reboot and finish
-the firmware enrollment. If `mokutil --import` reports `SKIP: ... already in
-the enrollment request`, reboot instead of rerunning setup.
-
-If `modprobe evdi` reports `Module evdi not found`, also check that the running
-kernel matches installed kernel headers:
-
-```bash
-uname -r
-ls -l /lib/modules/$(uname -r)/build
-rpm -q kernel-core kernel-devel
-```
-
-When the running kernel is older than the installed `kernel-devel`, reboot into
-the newer installed kernel and rerun `./redeploy-local`. On this class of
-failure DKMS shows `evdi/<version>: added`, but no module is built yet.
-
-The older distro-neutral EVDI helper is still available:
-
-```bash
-sudo bash scripts/evdi-setup.sh
-```
-
-Prefer `scripts/fedora-setup.sh --yes --with-evdi` on Fedora 43 because it knows
-about the DisplayLink RPM fallback, Secure Boot MOK state, `libevdi` linker
-path, and the running-kernel `kernel-devel` check.
-
-## 4. Build and Run
-
-From the repo root:
-
-```bash
-npm --prefix desktop/apps/desktop-tauri ci
-./wbeam host build
-```
-
-Connect an Android device with USB debugging enabled:
-
-```bash
+export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
 adb devices
 ```
 
-Run the installer wizard or the normal local redeploy flow:
+The device must appear as `device`, not `unauthorized` or `offline`. Unlock it
+and accept USB debugging. Retry onboarding with `./wbeam device setup`.
+
+## EVDI setup
 
 ```bash
-./install-wbeam
+scripts/fedora-setup.sh --yes --with-evdi
+bash scripts/virtual-deps-check.sh --json --backend evdi
+bash scripts/evdi-diagnose.sh --verbose
 ```
 
-For development:
+The helper tries `akmod-evdi`, then `evdi-dkms`, then a matching
+`fedora-<version>-displaylink-*.rpm` from the DisplayLink RPM project's latest
+GitHub release. A suitable asset may be absent. `--enable-evdi-copr` additionally
+tries the historical COPR before package installation; do not assume that
+repository exists for a particular Fedora version.
+
+The helper checks the running kernel's build tree, builds a missing module via
+DKMS, checks signing, adds the user to `video`, and attempts to load EVDI. The
+DisplayLink library directory `/usr/libexec/displaylink` is registered when
+needed. Package installation or `modinfo` success alone does not prove capture
+works; finish with a real Android stream.
+
+### Kernel or Secure Boot stops
+
+```bash
+uname -r
+rpm -q kernel-core kernel-devel
+dkms status
+modinfo evdi
+mokutil --sb-state
+```
+
+If matching `kernel-devel` is unavailable, boot a kernel with matching headers
+and rerun setup. If Secure Boot rejects the module, enroll the key used to sign
+it. The helper can queue the DKMS key from `/var/lib/dkms/mok.pub` in an
+interactive terminal. Complete `Enroll MOK → Continue → Yes` on reboot, using
+the temporary password you selected. Rerun setup after logging back in.
+
+`secureboot-mok-pending-reboot` means the enrollment request still needs that
+firmware step. `user-not-in-video` means the active session needs the new group
+membership; log out and back in. Do not repeatedly rebuild to solve either.
+
+Kernel API/compiler failures, including the reported Fedora 43 kernel
+6.19.11/GCC 15 `-Werror=sign-compare` failure, are separate from missing
+`libevdi.so` linker errors. Follow the [compatibility matrix](EVDI_COMPATIBILITY_MATRIX.md)
+to collect evidence for the exact driver/kernel pair.
+
+## Development loop
 
 ```bash
 ./redeploy-local
 ```
 
-On Fedora, `redeploy-local` automatically runs `scripts/fedora-setup.sh --yes`
-when native host build dependencies are missing. It also tries to make EVDI
-ready automatically, using distro packages first and the Fedora DisplayLink/EVDI
-GitHub Release RPM if needed.
-If Android deploy is enabled and the SDK is missing, `redeploy-local`
-automatically runs `scripts/fedora-setup.sh --yes --with-android-sdk`.
-To disable auto dependency installation:
+This stops old processes, removes the desktop-managed user service, builds the
+host and desktop, deploys the Android APK to authorized connected devices, and
+launches the desktop UI. The desktop then manages its service lifecycle.
+Missing Fedora dependencies trigger the setup helper automatically; EVDI
+bootstrap is requested by default on Fedora.
+
+| Command | Effect |
+| --- | --- |
+| `WBEAM_REDEPLOY_WITH_EVDI=0 ./redeploy-local` | Skip automatic EVDI setup; select Wayland Portal in the UI. This variable does not pin runtime capture. |
+| `./redeploy-local --no-auto-deps` | Do not install dependencies automatically. |
+| `./redeploy-local --no-android` | Skip Android deploy. |
+| `./redeploy-local --no-desktop-start` | Build/deploy without launching the desktop. |
+| `./redeploy-local --host-restart` | Also start the host debug daemon. |
+
+`--no-host-build` reuses existing binaries; it is not a way to fix missing or
+outdated host binaries. A redeploy can finish without an Android install if no
+authorized device is connected, so inspect its output.
+
+## Troubleshooting
+
+| Symptom | Check or repair |
+| --- | --- |
+| Missing `glib-2.0.pc`, `gobject-2.0.pc` or GStreamer development files | Run `scripts/fedora-setup.sh --yes --no-android-sdk`, then `./wbeam host build`. |
+| Missing SDK platform/build tools | Run `scripts/fedora-setup.sh --yes --with-android-sdk`; verify `android/local.properties` or `ANDROID_HOME`. |
+| Gradle reports class-file major version 69 | Install Java 21 (`sudo dnf install java-21-openjdk-devel`); override selection with `WBEAM_ANDROID_JAVA_HOME=/usr/lib/jvm/java-21-openjdk` if necessary. |
+| Tauri native dependency errors | Rerun the helper for WebKit/AppIndicator dependencies, then launch `./desktop.sh`. |
+| No H.264 encoder | Check `openh264enc`, `x264enc`, `nvh264enc` individually with `gst-inspect-1.0`; rerun the helper to install the Fedora OpenH264 fallback. |
+| EVDI module or library failure | Use the [EVDI setup guide](EVDI_SETUP_GUIDE.md#diagnostics); separate module build/load, runtime library and source linker failures. |
+| Android install is blocked | Accept USB debugging and the device's install-via-USB permission, then rerun `./wbeam device setup`. |
+
+H.265 is optional. When a requested H.265 encoder is unavailable, the streamer
+can resolve to H.264 if a supported encoder exists. Inspect the effective
+configuration/logs rather than assuming the requested codec was selected.
+
+## Verify the result
 
 ```bash
-./redeploy-local --no-auto-deps
-```
-
-To skip EVDI and use the supported Wayland Portal path only:
-
-```bash
-WBEAM_REDEPLOY_WITH_EVDI=0 ./redeploy-local
-```
-
-Useful variants:
-
-```bash
-./redeploy-local --no-android          # host + desktop only
-./redeploy-local --no-desktop-start    # build/deploy, do not launch GUI
-./redeploy-local --host-restart        # also start host debug daemon
-```
-
-Check the final state:
-
-```bash
-./wbeam version doctor
 ./wbeam host status
+curl -fsS http://127.0.0.1:5001/v1/host-probe
+./wbeam version doctor
 ./wbeam watch connections --once
 ```
 
-## 5. Common Fedora Fixes
-
-### `glib-2.0.pc` or `gobject-2.0.pc` Missing
-
-`./wbeam host build` runs a preflight for these native libraries before Cargo
-starts compiling the streamer. If it reports missing `glib-2.0`,
-`gstreamer-1.0`, or related modules, run the Fedora setup script:
-
-```bash
-scripts/fedora-setup.sh --yes
-```
-
-Install:
-
-```bash
-sudo dnf install -y glib2-devel pkgconf-pkg-config
-```
-
-Then rerun:
-
-```bash
-./wbeam host build
-```
-
-### `adb` Missing
-
-Install Fedora's ADB package or use the Android SDK platform-tools:
-
-```bash
-sudo dnf install -y android-tools
-adb devices
-```
-
-If the device is listed as `unauthorized`, unlock the device and accept the USB
-debugging prompt.
-
-### Gradle Cannot Find SDK Platform 35 or Build Tools 35.0.0
-
-`./wbeam android build` checks the Android SDK before invoking Gradle. Install
-or repair the SDK with:
-
-```bash
-scripts/fedora-setup.sh --yes --with-android-sdk
-```
-
-If you already have command-line tools, you can use `sdkmanager` directly:
-
-```bash
-sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
-```
-
-Make sure `ANDROID_HOME` points at the SDK root.
-
-### Gradle Fails with `Unsupported class file major version 69`
-
-That means Gradle was launched with Java 25. WBeam selects Java 21
-automatically when `/usr/lib/jvm/java-21-openjdk` is installed:
-
-```bash
-sudo dnf install -y java-21-openjdk-devel
-```
-
-To override explicitly:
-
-```bash
-export WBEAM_ANDROID_JAVA_HOME=/usr/lib/jvm/java-21-openjdk
-```
-
-### Tauri Desktop Build Fails on WebKit/AppIndicator
-
-Install the Fedora Tauri dependencies:
-
-```bash
-sudo dnf install -y webkit2gtk4.1-devel libappindicator-gtk3-devel librsvg2-devel libxdo-devel
-```
-
-Then rebuild:
-
-```bash
-npm --prefix desktop/apps/desktop-tauri run build
-```
-
-### No Supported Encoder Found
-
-The host streamer needs at least one supported H.264 encoder. On Fedora, the
-normal fallback is `openh264enc` from `gstreamer1-plugin-openh264`.
-
-Check encoders:
-
-```bash
-gst-inspect-1.0 openh264enc x264enc nvh264enc
-```
-
-Repair the Fedora install:
-
-```bash
-scripts/fedora-setup.sh --yes --no-android-sdk
-```
-
-H.265 is optional. If `nvh265enc` or `x265enc` is unavailable, use H.264 in the
-Android app or desktop UI. Current streamer builds also fall back from requested
-`h265` to H.264 automatically when a supported H.264 encoder is available. The
-effective runtime log should then show `requested_encoder=h265` and
-`resolved_backend=openh264`, `x264`, or `nvenc264`, with `parse_mode=h264_*`.
-
-### EVDI Builds but Does Not Load
-
-Check the kernel/module state:
-
-```bash
-uname -r
-dkms status
-modinfo evdi
-sudo modprobe evdi initial_device_count=4
-dmesg | tail -80 | grep -i evdi
-```
-
-If `kernel-devel` does not match `uname -r`, update/reboot and rebuild the
-module.
-
-### Streamer Linker Cannot Find libevdi
-
-The DisplayLink RPM installs `libevdi.so` under `/usr/libexec/displaylink`.
-WBeam's streamer build script detects that path automatically. If a custom EVDI
-package installs it elsewhere and the build fails with `cannot find -levdi`,
-point the build at that directory:
-
-```bash
-WBEAM_EVDI_LIB_DIR=/path/to/libevdi-dir ./wbeam host build
-```
-
-### Wayland Fallback
-
-If EVDI is not ready yet, WBeam can still use the Wayland portal fallback. It is
-slower and compositor-dependent, but it is enough to verify the rest of the
-stack:
-
-```bash
-./redeploy-local --no-host-build
-./desktop.sh
-```
-
-Choose the Wayland portal capture backend in the desktop UI.
-
-## 6. Quick Preflight
-
-Run this before `./redeploy-local` on a fresh Fedora install:
-
-```bash
-command -v cargo node npm java adb pkg-config
-pkg-config --exists glib-2.0 gobject-2.0 gstreamer-1.0
-./wbeam deps virtual check
-adb devices
-```
-
-Expected result:
-
-- all commands resolve,
-- `pkg-config` exits successfully,
-- virtual deps are either OK or only EVDI is knowingly deferred,
-- at least one Android device is in `device` state if Android deploy is wanted.
-
-## 7. Clean Fedora Validation Checklist
-
-Use this when validating a newly cloned repo on a Fedora machine that was not
-used for WBeam development before:
-
-```bash
-git clone <repo> WBeam
-cd WBeam
-./redeploy-local
-```
-
-Record the first stop point exactly. The expected recoverable stops are:
-
-- `secureboot-mok-pending-reboot`: reboot, enroll MOK in firmware, log back in,
-  rerun `./redeploy-local`.
-- `user-not-in-video`: log out and back in, rerun `./redeploy-local`.
-- Android `INSTALL_FAILED_USER_RESTRICTED`: allow APK installs/USB debugging on
-  the device, rerun `./redeploy-local`.
-
-After the final run, verify:
-
-```bash
-./wbeam version doctor
-./wbeam host build
-./wbeam android build
-bash scripts/evdi-diagnose.sh --verbose
-gst-inspect-1.0 openh264enc x264enc nvh264enc nvh265enc x265enc
-ldd host/rust/target/release/wbeamd-streamer | grep -E 'evdi|not found'
-```
-
-Expected result:
-
-- `./wbeam host build` builds `wbeamd-server` and `wbeamd-streamer`.
-- If DisplayLink RPM provides EVDI, `libevdi.so.1` resolves from
-  `/usr/libexec/displaylink` or another installed EVDI library directory.
-- At least one H.264 encoder exists. H.265 may be absent; WBeam should fall
-  back to H.264.
-- `./redeploy-local` reaches Android deploy and desktop launch unless a device
-  trust prompt remains.
-
-## Fedora 43 / kernel 6.19: known EVDI compatibility investigation
-
-Issue [#120](https://github.com/ppotepa/WBeam/issues/120) tracks the former
-report #96 on Fedora 43 kernel 6.19.11/GCC 15, including DKMS
-`-Werror=sign-compare` and missing `-levdi`. These are **two separate failure
-classes**. The current source changes improve classification but do not prove
-the kernel itself is supported.
-
-Use `bash scripts/virtual-deps-check.sh --json --backend evdi` and
-`bash scripts/evdi-diagnose.sh --verbose` to identify the issue. Check
-`/lib/modules/$(uname -r)/build/Makefile`, matching DKMS logs, the active
-EVDI module, Secure Boot/MOK, and `libevdi.so` in the linker path.
-`scripts/ci/build_rpm.sh` now fails early if no linkable EVDI library is
-present, rather than shipping a deceptively successful package without EVDI.
-
-If EVDI fails due to kernel API changes, do not disable global `-Werror`.
-Verify a compatible driver/kernel pair or use supported Wayland Portal; X11
-legacy code is retained but not offered to end users.
-
-See `docs/EVDI_COMPATIBILITY_MATRIX.md` for the outstanding hardware evidence.
+For a source build, `./wbeam host build` should produce the daemon and streamer;
+`./wbeam android build` should produce the debug APK. For EVDI, also inspect
+`ldd host/rust/target/release/wbeamd-streamer` for a resolved, matching libevdi
+ABI and missing libraries.
+
+Start a stream in the desktop UI and verify actual Android frames. Record the
+selected backend, effective codec, kernel, driver/package versions and observed
+results using the [release checklist](release-checklist.md).
