@@ -3,7 +3,6 @@
 //! Keeps the Android device able to reach the host's stream and control
 //! ports over USB via `usb_reverse.sh` and `adb reverse`.
 
-use std::net::TcpListener;
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::{Mutex as StdMutex, OnceLock};
@@ -17,30 +16,6 @@ const ANDROID_DEVICE_CONTROL_PORT: u16 = 5001;
 
 static USB_REVERSE_GUARD: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
 static USB_REVERSE_LAST_AT: OnceLock<StdMutex<Option<Instant>>> = OnceLock::new();
-
-/// Attempt to open the stream port.  If it is busy, try to kill the occupant
-/// with `fuser -k`, then retry once.
-pub fn ensure_stream_port_available(stream_port: u16) -> Result<(), String> {
-    if TcpListener::bind(("0.0.0.0", stream_port)).is_ok() {
-        return Ok(());
-    }
-
-    warn!(port = stream_port, "stream port busy, trying self-heal");
-    let _ = std::process::Command::new("fuser")
-        .arg("-k")
-        .arg(format!("{stream_port}/tcp"))
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-
-    std::thread::sleep(std::time::Duration::from_millis(200));
-
-    if TcpListener::bind(("0.0.0.0", stream_port)).is_ok() {
-        return Ok(());
-    }
-
-    Err(format!("stream port {stream_port} is busy"))
-}
 
 /// Run `usb_reverse.sh` and `adb reverse` to expose host ports on the device.
 pub async fn ensure_usb_reverse(

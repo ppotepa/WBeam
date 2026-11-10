@@ -16,10 +16,12 @@ stage_wbeam_runtime_assets() {
   fi
   mkdir -p "$target"/{host/scripts,host/rust/systemd,host/rust/scripts,config,scripts,android}
   install -m 0755 "${ROOT_DIR}/wbeam" "$target/wbeam"
+  install -m 0755 "${ROOT_DIR}/waybeam" "$target/waybeam"
   cp -a "${ROOT_DIR}/host/scripts/." "$target/host/scripts/"
   install -m 0644 "${ROOT_DIR}/host/rust/systemd/wbeamd-rust.service.template" "$target/host/rust/systemd/"
   install -m 0755 "${ROOT_DIR}/host/rust/scripts/install_systemd_user.sh" "$target/host/rust/scripts/"
   install -m 0644 "${ROOT_DIR}/config/wbeam.conf" "$target/config/"
+  install -m 0644 "${ROOT_DIR}/config/branding.json" "${ROOT_DIR}/config/branding.sh" "$target/config/"
   local script
   for script in "${ROOT_DIR}"/scripts/*.sh; do
     [[ -f "$script" ]] || continue
@@ -33,10 +35,10 @@ stage_wbeam_runtime_assets() {
 assert_wbeam_runtime_assets() {
   local root="$1"
   local f
-  for f in wbeam VERSION.txt android/wbeam-android.apk config/wbeam.conf \
-    host/scripts/run_wbeamd.sh host/scripts/wbeam_config.sh \
+  for f in wbeam waybeam VERSION.txt android/wbeam-android.apk config/wbeam.conf config/branding.json config/branding.sh \
+    host/scripts/run_wbeamd.sh host/scripts/wbeam_config.sh host/scripts/usb_reverse.sh \
     scripts/virtual-deps-check.sh scripts/virtual-deps-install.sh \
-    scripts/evdi-diagnose.sh scripts/fedora-setup.sh; do
+    scripts/evdi-compat.sh scripts/evdi-diagnose.sh scripts/fedora-setup.sh; do
     if [[ ! -s "$root/$f" ]]; then
       echo "[package] Missing runtime asset: $root/$f" >&2
       return 1

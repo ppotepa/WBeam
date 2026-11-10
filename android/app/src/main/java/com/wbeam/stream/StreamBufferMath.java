@@ -20,25 +20,15 @@ final class StreamBufferMath {
     }
 
     static double percentileMs(long[] buf, int n, double q, long[] scratch) {
-        if (n <= 0) {
+        if (n <= 0 || n > buf.length || n > scratch.length || Double.isNaN(q)) {
             return 0.0;
         }
         System.arraycopy(buf, 0, scratch, 0, n);
-        int idx = Math.min(n - 1, Math.max(0, (int) (n * q)));
+        // Nearest-rank percentile; e.g. p95 of 100 observations is rank 95.
+        double quantile = Math.max(0.0, Math.min(1.0, q));
+        int idx = Math.min(n - 1, Math.max(0, (int) Math.ceil(n * quantile) - 1));
         long selected = selectKth(scratch, n, idx);
         return selected / 1_000_000.0;
-    }
-
-    static double estimateE2eLatencyMs(long presentedPtsUs) {
-        if (presentedPtsUs <= 0L) {
-            return 0.0;
-        }
-        long nowUs = System.currentTimeMillis() * 1000L;
-        long lagUs = nowUs - presentedPtsUs;
-        if (lagUs <= 0L) {
-            return 0.0;
-        }
-        return lagUs / 1000.0;
     }
 
     static int estimateTransportDepthFrames(int streamLen, int avgNalSize) {

@@ -1,6 +1,6 @@
 # Release acceptance and publication
 
-This checklist defines the evidence required to publish WBeam. It is not a
+This checklist defines the evidence required to publish WayBeam. It is not a
 record of completed QA. Source checks, VM smoke and physical Android acceptance
 are separate gates; a green TCP receiver cannot certify Android rendering.
 
@@ -127,16 +127,27 @@ report and remain inside its directory.
 
 ```bash
 python3 e2e/scripts/validate_hardware_acceptance.py \
-  /path/to/private/qa/hardware-acceptance.json --release 0.1.3-rc.1
+  /path/to/private/qa/hardware-acceptance.json \
+  --release 0.1.3-rc.1 \
+  --commit "$(git rev-parse HEAD)" \
+  --artifacts-dir dist
 ```
 
 Use the exact artifact revision for `--release` (the value of `WBEAM_VERSION`,
-without a tag's `v` prefix). The validator checks metadata formats, required
-pairs, recorded durations/cycles, `pass` statuses and nonempty evidence files.
-It does not inspect their contents, prove physical execution, or compare the
-report's commit and hashes with the built artifacts. A named reviewer must
-perform those comparisons, verify the phone/tablet coverage and approve the
-actual evidence before publication.
+without a tag's `v` prefix), and the commit that built the files in `dist/`.
+Schema 2 binds each run to `artifact`/`artifact_sha256` (the tested host package)
+and `apk_artifact`/`apk_sha256` (the tested APK). Each check also records
+`evidence_sha256`; compute hashes after redacting evidence, before sign-off.
+The top-level `artifacts` map records the filename and SHA-256 of **every**
+DEB, RPM, APK and `VERSION.txt` in the publication directory, including Bookworm.
+`SHA256SUMS.txt` is derived from that approved set and is excluded from the map.
+
+The validator compares the report commit with the expected build commit and
+`VERSION.txt`, verifies the exact artifact inventory, hashes packages/APK/evidence, checks distribution and
+version names, and requires all matrix pairs, durations/cycles and passing
+checks. Schema 1 reports must be recollected or explicitly reviewed and migrated.
+It cannot prove physical execution from a log: a named reviewer must verify
+phone/tablet coverage and the substance of the evidence before publication.
 
 Do not publish raw serials, sensitive logcat, keystores or signing secrets.
 Keep the report **and** its evidence accessible to the publication job.
@@ -149,7 +160,7 @@ Publication is a manual GitLab job and requires the following inputs:
    APKs; see [signing instructions](ANDROID_RELEASE_SIGNING.md).
 2. A root `LICENSE` containing terms confirmed by the maintainer. Packaging
    metadata declaring MIT is insufficient; the publisher checks for the file.
-3. Protected `GH_TOKEN`, `GH_OWNER`, `GH_REPO`, and
+3. The full build `CI_COMMIT_SHA`, protected `GH_TOKEN`, `GH_OWNER`, `GH_REPO`, and
    `WBEAM_HARDWARE_ACCEPTANCE_FILE` pointing to the reviewed report.
 4. Protected `WBEAM_RELEASE_APPROVED=1`, set only after maintainer review.
 
@@ -173,8 +184,14 @@ Trigger `publish_github_release` for that tested commit. Stable tags such as
 prereleases. A `release` branch build updates the mutable `release-latest`
 prerelease. All of these routes require the approval/report gates above.
 Existing versioned releases and their assets are not overwritten; use a new
-version for a new artifact set. Windows and aarch64 build outputs are not part
-of this publisher's supported upload set.
+version for a new artifact set. Existing lightweight and annotated version tags
+must resolve to the tested commit. Only the explicit `release-latest` route may
+move its tag to the approved commit; tag/source archives and binary assets must
+refer to the same revision. The publisher keeps the release as a draft during
+upload and verification; the rolling release removes stale assets outside the
+approved set. Windows and aarch64 build outputs are not part
+of this publisher's supported upload set. The experimental aarch64 archive
+contains the daemon binary and version manifest, not a complete runtime/CLI.
 
 After publication, download the packages, check `SHA256SUMS.txt`, and repeat
 installation and USB recovery on a clean machine. The optional

@@ -27,9 +27,9 @@ acceptance. Record executed checks, blockers and evidence in the PR/MR.
 ```bash
 ./redeploy-local                # rebuild, deploy to connected devices, launch UI
 ./desktop.sh                    # launch the desktop development app
-./wbeam android deploy-all      # build/deploy Android to connected devices
-./wbeam watch streaming --once  # inspect runtime state
-./wbeam version doctor          # inspect host/APK version parity
+./waybeam android deploy-all      # build/deploy Android to connected devices
+./waybeam watch streaming --once  # inspect runtime state
+./waybeam version doctor          # inspect host/APK version parity
 ```
 
 `redeploy-local` stops daemon processes and removes the existing daemon user
@@ -38,19 +38,23 @@ dependencies and EVDI components; inspect `./redeploy-local --help` for skip
 options. To skip its EVDI bootstrap, use `WBEAM_REDEPLOY_WITH_EVDI=0`.
 
 For daemon-only debugging, stop the managed service before running
-`./wbeam host debug`; otherwise two launch paths can contend for the same ports.
+`./waybeam host debug`; otherwise two launch paths can contend for the same ports.
 Restore normal operation with `systemctl --user start wbeam-daemon.service`.
-`./wbeam host run` runs the release binary in the foreground; `host down` stops
+`./waybeam host run` runs the release binary in the foreground; `host down` stops
 processes and is not a replacement for stopping a managed service.
 
-Use `./wbeam help` for the full command surface and `./wbgui` for the TUI menu.
+Use `./waybeam help` for the full command surface and `./wbgui` for the TUI menu.
 `./devtool` provides developer shortcuts; `./start-remote` and `./runas-remote`
 support remote graphical-session workflows. The profile tuner is
-`./wbeam host tuner`; there is no separate trainer desktop app in this checkout.
+`./waybeam host tuner`; there is no separate trainer desktop app in this checkout.
 
-The CLI still lists `host probe`, but its `host/scripts/probe_host.py` helper is
-absent. With the daemon running, use
-`curl -fsS http://127.0.0.1:5001/v1/host-probe` for host capabilities.
+With the daemon running, `./waybeam host probe --json` retrieves host/backend
+capabilities from `/v1/host-probe`, using the configured control port/address.
+A failed or timed-out API request returns a nonzero exit status.
+
+Product display names come from `config/branding.json`. Run
+`python3 scripts/apply-branding.py --check` before a build; see
+[branding and upgrades](BRANDING.md) for the apply workflow and stable IDs.
 
 ## Validation
 
@@ -73,7 +77,7 @@ build logs. Neither outcome is a pass.
 For individual checks, use paths that do not depend on a previous `cd`:
 
 ```bash
-cargo test --locked --manifest-path host/rust/Cargo.toml -p wbeamd-api -p wbeamd-core -p wbeamd-server
+cargo test --locked --manifest-path host/rust/Cargo.toml -p wbeamd-api -p wbeamd-core -p wbeamd-server -p wbeamd-tuner
 cargo test --locked --manifest-path host/rust/Cargo.toml -p wbeamd-streamer --no-default-features --features evdi
 npm --prefix desktop/apps/desktop-tauri ci
 npm --prefix desktop/apps/desktop-tauri test
@@ -111,10 +115,11 @@ The source of truth for jobs and triggers is
 | GitLab `release` branch | `0.1.3.<pipeline IID>.<short SHA>` |
 | Other GitLab branches | `0.0.0.<default branch>.<pipeline IID>.<short SHA>` |
 | Standalone packaging helper | `0.1.3.<first five SHA characters>`; `dev00` if no CI SHA is supplied |
-| Local `./wbeam` source build | `0.1.3.<five-character Git revision>` by default |
+| Local `./waybeam` source build | `0.1.3.<five-character Git revision>` by default |
 
 Explicit build variables can override defaults; see
-[`scripts/ci/common.sh`](../scripts/ci/common.sh) and [`wbeam`](../wbeam).
+[`scripts/ci/common.sh`](../scripts/ci/common.sh) and the CLI implementation
+[`wbeam`](../wbeam), invoked through `./waybeam`.
 Host and Android compatibility versions must match. Desktop version is not
 that handshake gate. Signing and Android `versionCode` requirements belong in
 the [signing guide](ANDROID_RELEASE_SIGNING.md).

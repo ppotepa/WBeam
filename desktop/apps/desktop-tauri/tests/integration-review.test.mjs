@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { loadAppFunction } from "./app-functions.mjs";
 
 function read(path) {
   return readFileSync(new URL(path, import.meta.url), "utf8");
@@ -19,11 +20,31 @@ test("EVDI capability checks real DRM cardN nodes and not nonexistent evdiN", ()
 });
 
 test("Connect modal rechecks current device and selected concrete backend", () => {
-  assert.match(ui, /const connectDialogBlockReason = \(\) => \{/);
-  assert.match(ui, /session\.devices\(\)\.find\(\(device\) => device\.serial === selected\.serial\)/);
-  assert.match(ui, /return connectDisabledReason\(current, selectedCaptureBackend\(\)\)/);
-  assert.match(ui, /waylandPortalHost: backend === "wayland_portal"/);
-  assert.doesNotMatch(ui, /setConnectDialogBlockReason/);
+  const selected = { serial: "tablet", apkInstalled: true, apkMatchesDaemon: true, streamState: "IDLE" };
+  let devices = [selected];
+  let backend = "evdi";
+  const session = {
+    devices: () => devices,
+    deviceActionBusy: () => ["other-device:connect"],
+    service: () => ({ active: true }),
+  };
+  const connectDisabledReason = loadAppFunction("connectDisabledReason", {
+    session, isDeviceBusy: () => false, daemonVersionKnown: () => true,
+    resolveConnectDisabledReason: loadAppFunction("resolveConnectDisabledReason"),
+  });
+  const guard = loadAppFunction("connectDialogBlockReason", {
+    session, connectDialogDevice: () => selected, selectedCaptureBackend: () => backend,
+    connectDialogDoctorLoading: () => false, connectDialogDoctor: () => ({ ok: true }),
+    connectDisabledReason,
+  });
+  assert.equal(guard(), ""); // EVDI must not inherit Portal's concurrency block.
+  backend = "wayland_portal";
+  assert.match(guard(), /Another Wayland portal connect/);
+  backend = "evdi";
+  devices = [{ ...selected, apkMatchesDaemon: false }];
+  assert.match(guard(), /APK version must match/); // Re-read, don't trust the modal's snapshot.
+  devices = [];
+  assert.match(guard(), /disconnected/);
 });
 
 test("Autoconnect capacity counts only eligible devices", () => {

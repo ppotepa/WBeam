@@ -1,6 +1,6 @@
 # Architecture and Repository Map
 
-WBeam runs a Linux control daemon, a capture/encode worker, an Android receiver,
+WayBeam runs a Linux control daemon, a capture/encode worker, an Android receiver,
 and a desktop control client. The daemon owns session state; clients send intent
 and display the state returned by its API.
 
@@ -19,8 +19,9 @@ The control API defaults to `127.0.0.1:5001`; the base stream port is `5000`.
 The session registry assigns separate stream ports to multiple devices. ADB
 reverse lets Android connect through its own loopback address. Older devices
 without reverse support need a reachable host address; see the
-[Android guide](../android/README.md). The stream listener currently binds all
-IPv4 interfaces. See [network exposure and trust](SECURITY_RELEASE.md) before
+[Android guide](../android/README.md). Both listeners default to loopback and
+require separate opt-ins for non-loopback addresses. See
+[network exposure and trust](SECURITY_RELEASE.md) before
 using a direct LAN or tethered connection.
 
 Release capture paths are EVDI and Wayland Portal. X11 capture and display
@@ -31,8 +32,8 @@ rejects X11 capture and does not select it as an automatic fallback.
 
 | Path | Responsibility |
 |---|---|
-| [`wbeam`](../wbeam) | Main CLI: host, Android, diagnostics, version checks |
-| [`install-wbeam`](../install-wbeam) | Fresh-machine source installer |
+| [`waybeam`](../waybeam) | Main CLI: host, Android, diagnostics, version checks; `wbeam` remains compatible |
+| [`install-waybeam`](../install-waybeam) | Source installer; `install-wbeam` remains compatible |
 | [`redeploy-local`](../redeploy-local) | Developer rebuild, Android deploy, desktop launch |
 | [`desktop.sh`](../desktop.sh), [`devtool`](../devtool), [`wbgui`](../wbgui) | Desktop launcher and developer menus |
 | [`start-remote`](../start-remote), [`runas-remote`](../runas-remote) | Bootstrap or run commands in another desktop session |
@@ -62,7 +63,7 @@ active location; explicit log-directory overrides take precedence.
 | `wbeamd-core` | Session lifecycle, adaptation, configuration and process supervision |
 | `wbeamd-server` | Axum HTTP routes, per-device session registry and display coordination |
 | `wbeamd-streamer` | Capture → GStreamer encode → WBTP framing → TCP transport |
-| `wbeamd-tuner` | Interactive Rust TUI autotuner, launched by `./wbeam host tuner` |
+| `wbeamd-tuner` | Interactive Rust TUI autotuner, launched by `./waybeam host tuner` |
 
 Use `GET /v1/health` for daemon health, `/v1/host-probe` for capture availability,
 and `/v1/status` for session state. `/v1/start`, `/v1/stop` and `/v1/apply` control

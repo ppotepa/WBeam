@@ -1,4 +1,4 @@
-# WBeam Desktop
+# WayBeam Desktop
 
 Tauri 2 application with SolidJS, TypeScript and Vite. The frontend talks to
 the Rust bridge; the bridge calls the host daemon and manages local ADB/service
@@ -14,7 +14,7 @@ From the repository root, after [setup](../../../docs/INSTALLER_WIZARD.md):
 ./desktop.sh --release
 ```
 
-The launcher loads WBeam user configuration and establishes the graphical
+The launcher loads WayBeam user configuration and establishes the graphical
 session environment. Native builds need Rust, Node/npm and the system Tauri
 dependencies installed by the setup flow.
 

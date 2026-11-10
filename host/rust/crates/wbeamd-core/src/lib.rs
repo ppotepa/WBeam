@@ -829,17 +829,21 @@ impl DaemonCore {
 
         if stream_uptime > 0 {
             let fps = u64::from(inner.active_config.fps);
-            if metrics.frame_in == 0 {
+            if metrics.latest_client_metrics.is_none() && metrics.frame_in == 0 {
                 metrics.frame_in = fps.saturating_mul(stream_uptime);
+                metrics.frame_counts_estimated = true;
             }
-            if metrics.frame_out == 0 {
+            if metrics.latest_client_metrics.is_none() && metrics.frame_out == 0 {
                 metrics.frame_out = fps.saturating_mul(stream_uptime);
+                metrics.frame_counts_estimated = true;
             }
-            if metrics.bitrate_actual_bps == 0 {
+            if metrics.latest_client_metrics.is_none() && metrics.bitrate_actual_bps == 0 {
                 metrics.bitrate_actual_bps = u64::from(inner.active_config.bitrate_kbps) * 1000;
+                metrics.bitrate_estimated = true;
             }
         } else {
             metrics.bitrate_actual_bps = 0;
+            metrics.bitrate_estimated = false;
         }
 
         MetricsResponse {
@@ -1001,7 +1005,7 @@ impl DaemonCore {
 
     fn log_client_metrics(client: &ClientMetricsRequest) {
         info!(
-            "client-metrics trace_id={} recv={:.1}fps decode={:.1}fps present={:.1}fps recv≈{:.2}Mb/s decode_p95={:.1}ms e2e_p95={:.1}ms",
+            "client-metrics trace_id={} recv={:.1}fps decode={:.1}fps present={:.1}fps recv≈{:.2}Mb/s decode_p95={:.1}ms e2e_p95={:.1}ms e2e_available={}",
             client
                 .trace_id
                 .map(|t| format!("{:#018x}", t))
@@ -1012,6 +1016,7 @@ impl DaemonCore {
             (client.recv_bps as f64 * 8.0) / 1_000_000.0,
             client.decode_time_ms_p95,
             client.e2e_latency_ms_p95,
+            client.e2e_latency_available,
         );
     }
 
@@ -1041,11 +1046,8 @@ impl DaemonCore {
             recv_fps: client.recv_fps,
             decode_fps: client.decode_fps,
             present_fps: client.present_fps,
-            frametime_ms_p95: if client.present_fps > 0.0 {
-                1000.0 / client.present_fps.max(0.1)
-            } else {
-                0.0
-            },
+            frametime_ms_p95: client.frametime_ms_p95,
+            e2e_latency_available: client.e2e_latency_available,
             e2e_latency_ms_p50: client.e2e_latency_ms_p50,
             e2e_latency_ms_p95: client.e2e_latency_ms_p95,
             decode_time_ms_p95: client.decode_time_ms_p95,
@@ -1055,11 +1057,11 @@ impl DaemonCore {
             let elapsed = started.elapsed().as_secs_f64().max(1.0);
             inner.metrics.frame_in = (client.recv_fps * elapsed) as u64;
             inner.metrics.frame_out = (client.present_fps * elapsed) as u64;
+            inner.metrics.frame_counts_estimated = true;
             inner.metrics.drops = client.dropped_frames.saturating_add(client.too_late_frames);
         }
-        if client.recv_bps > 0 {
-            inner.metrics.bitrate_actual_bps = client.recv_bps.saturating_mul(8);
-        }
+        inner.metrics.bitrate_actual_bps = client.recv_bps.saturating_mul(8);
+        inner.metrics.bitrate_estimated = false;
     }
 
     fn decode_starved_with_traffic(client: &ClientMetricsRequest) -> bool {
@@ -1280,6 +1282,7 @@ impl DaemonCore {
         &self,
         mut client: ClientMetricsRequest,
     ) -> Result<ClientMetricsResponse, CoreError> {
+        client.normalize_timing_measurements();
         Self::log_client_metrics(&client);
         Self::fill_client_timestamp(&mut client);
 
@@ -1581,19 +1584,13 @@ impl DaemonCore {
         (run_id, existing_pid)
     }
 
-    async fn stop_existing_process_and_validate_port(
-        &self,
-        existing_pid: Option<u32>,
-    ) -> Result<(), CoreError> {
+    async fn stop_existing_process(&self, existing_pid: Option<u32>) {
         if let Some(pid) = existing_pid {
             proc::terminate_pid(pid).await;
         }
-        if adb::ensure_stream_port_available(self.stream_port).is_err() {
-            let err = CoreError::PortBusy(self.stream_port);
-            self.mark_start_failed(err.to_string()).await;
-            return Err(err);
-        }
-        Ok(())
+        // The streamer binds its selected address before capture starts. A
+        // wildcard preflight would conflict with unrelated interfaces, and
+        // owning the same port never grants permission to terminate a process.
     }
 
     fn rust_streamer_bin_path(&self) -> Result<PathBuf, CoreError> {
@@ -2007,8 +2004,7 @@ impl DaemonCore {
         let (run_id, existing_pid) = self
             .begin_start_attempt(&cfg, &launch_size, benchmark_mode, reason)
             .await;
-        self.stop_existing_process_and_validate_port(existing_pid)
-            .await?;
+        self.stop_existing_process(existing_pid).await;
 
         let rust_streamer_bin = match self.rust_streamer_bin_path() {
             Ok(path) => path,
@@ -2121,6 +2117,7 @@ impl DaemonCore {
             }
             if let Some(bps) = bitrate_actual_bps {
                 inner.metrics.bitrate_actual_bps = bps;
+                inner.metrics.bitrate_estimated = false;
             }
             // Transport stats are now primarily delivered via structured WBEAM_EVENT;
             // this call is retained as a belt-and-suspenders fallback for streamer
@@ -2271,6 +2268,7 @@ impl DaemonCore {
         inner.stream_started_at = Some(Instant::now());
         inner.last_streaming_line_at = Some(Instant::now());
         inner.metrics.bitrate_actual_bps = u64::from(inner.active_config.bitrate_kbps) * 1000;
+        inner.metrics.bitrate_estimated = true;
         inner.no_present_streak = 0;
     }
 
@@ -2441,6 +2439,128 @@ mod tests {
             ActiveConfig::balanced_default(),
             presets,
         )
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn stream_start_leaves_other_interface_listeners_untouched() {
+        use std::net::{TcpListener, TcpStream};
+
+        // This is the false conflict caused by the former wildcard preflight:
+        // the same port is available on the streamer's default loopback address.
+        let unrelated = TcpListener::bind(("127.0.0.2", 0)).unwrap();
+        let unrelated_address = unrelated.local_addr().unwrap();
+        let port = unrelated_address.port();
+        assert!(TcpListener::bind(("0.0.0.0", port)).is_err());
+        let core = DaemonCore::new(std::env::temp_dir().join("waybeam-port-test"), port, 0);
+
+        core.stop_existing_process(None).await;
+
+        let streamer = TcpListener::bind(("127.0.0.1", port))
+            .expect("an unrelated interface must not block the streamer's actual bind");
+        let connection = TcpStream::connect(unrelated_address)
+            .expect("starting a stream must leave the unrelated listener alive");
+        let (accepted, _) = unrelated.accept().unwrap();
+        assert_eq!(accepted.local_addr().unwrap(), unrelated_address);
+        assert_eq!(streamer.local_addr().unwrap().port(), port);
+        drop(connection);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn streamer_bind_failure_preserves_listener_and_reports_child_error() {
+        use std::net::{TcpListener, TcpStream};
+
+        let occupied = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = occupied.local_addr().unwrap();
+        let bind_error = TcpListener::bind(address).unwrap_err();
+        let core = DaemonCore::new(
+            std::env::temp_dir().join("waybeam-bind-error-test"),
+            address.port(),
+            0,
+        );
+        {
+            let mut inner = core.inner.lock().await;
+            inner.state = STATE_STARTING.to_string();
+            inner.run_id = 1;
+        }
+
+        core.stop_existing_process(None).await;
+        // Model the streamer's actual bind error through its real child/stderr
+        // lifecycle, without requiring GStreamer or duplicating bind policy.
+        let expected_error = format!("Error: bind video listener at {address}: {bind_error}");
+        let mut child = Command::new("sh");
+        child
+            .arg("-c")
+            .arg("printf '%s\\n' \"$1\" >&2; exit 1")
+            .arg("mock-streamer")
+            .arg(&expected_error)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        core.spawn_stream_child(1, child).await.unwrap();
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let inner = core.inner.lock().await;
+                if inner.current_pid.is_none()
+                    && inner.state == STATE_IDLE
+                    && inner.last_error.contains(&expected_error)
+                {
+                    assert_eq!(inner.metrics.restart_count, 0);
+                    break;
+                }
+                drop(inner);
+                sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("a failed bind must surface through the existing child-error path");
+        let connection = TcpStream::connect(address)
+            .expect("the failed stream start must not kill the port's existing owner");
+        let (accepted, _) = occupied.accept().unwrap();
+        assert_eq!(accepted.local_addr().unwrap(), address);
+        drop(connection);
+    }
+
+    #[test]
+    fn observed_client_timing_is_preserved_and_estimates_are_labelled() {
+        let mut inner = default_inner();
+        inner.stream_started_at = Some(Instant::now() - Duration::from_secs(10));
+        let client = ClientMetricsRequest {
+            recv_fps: 60.0,
+            present_fps: 50.0,
+            recv_bps: 1_500_000,
+            frametime_ms_p95: Some(27.5),
+            ..Default::default()
+        };
+
+        DaemonCore::update_client_kpis(&mut inner, &client);
+
+        assert_eq!(inner.metrics.kpi.frametime_ms_p95, Some(27.5));
+        assert!(!inner.metrics.kpi.e2e_latency_available);
+        assert!(inner.metrics.frame_counts_estimated);
+        assert!(inner.metrics.frame_in >= 600);
+        assert!(inner.metrics.frame_out >= 500);
+        assert_eq!(inner.metrics.bitrate_actual_bps, 12_000_000);
+        assert!(!inner.metrics.bitrate_estimated);
+    }
+
+    #[tokio::test]
+    async fn observed_zero_rates_are_not_replaced_by_configured_targets() {
+        let core = streaming_core_ready().await;
+        {
+            let mut inner = core.inner.lock().await;
+            inner.metrics.bitrate_actual_bps = 12_000_000;
+            DaemonCore::update_client_kpis(&mut inner, &ClientMetricsRequest::default());
+        }
+
+        let metrics = core.metrics().await.metrics;
+        assert_eq!(metrics.frame_in, 0);
+        assert_eq!(metrics.frame_out, 0);
+        assert!(metrics.frame_counts_estimated);
+        assert_eq!(metrics.bitrate_actual_bps, 0);
+        assert!(!metrics.bitrate_estimated);
+        assert_eq!(metrics.kpi.frametime_ms_p95, None);
     }
 
     #[test]

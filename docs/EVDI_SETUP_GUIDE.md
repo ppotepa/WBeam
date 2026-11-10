@@ -1,6 +1,6 @@
 # EVDI capture
 
-EVDI exposes a virtual DRM display that the compositor renders into. WBeam reads
+EVDI exposes a virtual DRM display that the compositor renders into. WayBeam reads
 its framebuffer through libevdi and feeds the encoder directly, without the
 ScreenCast portal/PipeWire capture path. A compositor still has to render to the
 virtual display; a loaded module alone is insufficient.
@@ -15,7 +15,7 @@ and CPU use need measurement on the target hardware.
 Run commands from the repository root. For a source checkout:
 
 ```bash
-./install-wbeam --backend evdi
+./install-waybeam --backend evdi
 ```
 
 On Fedora 43, the dependency stage uses the Fedora helper, which can also be run
@@ -36,8 +36,9 @@ packages and validation. Track tested combinations in the
 [compatibility matrix](EVDI_COMPATIBILITY_MATRIX.md).
 
 The older `scripts/evdi-setup.sh` remains available for legacy maintenance.
-It uses limited device/library checks and is not the primary readiness test or
-a substitute for distro-specific package instructions. See
+It supports an unprivileged dry-run, EVDI-specific device permissions and
+persistent module loading. Its package coverage is still limited; use
+distro-specific instructions and the runtime probe to verify readiness. See
 [EVDI tools](../scripts/EVDI_TOOLS_README.md).
 
 ## Build requirements and runtime requirements
@@ -52,7 +53,7 @@ a substitute for distro-specific package instructions. See
 Debian Bookworm and Ubuntu Noble packages use different libevdi ABIs. Install the
 package built for your distribution; do not redirect one SONAME to another.
 
-`./wbeam host build` enables EVDI when its library probe finds it. To build
+`./waybeam host build` enables EVDI when its library probe finds it. To build
 explicitly against a custom library directory:
 
 ```bash
@@ -62,9 +63,9 @@ WBEAM_EVDI_LIB_DIR=/path/to/libevdi-dir \
 ```
 
 That directory must contain `libevdi.so`. The build script adds it to the linker
-search path and runtime rpath. The CLI's automatic feature probe is separate;
-setting this variable alone does not guarantee `./wbeam host build` selects the
-EVDI feature.
+search path and runtime rpath. The CLI uses the same lookup:
+`WBEAM_EVDI_LIB_DIR=/path/to/libevdi-dir ./waybeam host build` enables EVDI. An
+explicit invalid directory fails instead of silently omitting the EVDI feature.
 
 ## Diagnostics
 
@@ -79,12 +80,16 @@ build/linker concerns; `--fix` **prints repair suggestions**. Neither command
 proves that the compositor is producing frames or that the Android device can
 display them.
 
+The ABI check uses `ldd` and a `binutils` ELF inspector (`readelf` or `objdump`).
+Packaged runtimes depend on `binutils`; a missing inspector is reported as an
+unverified dependency, not treated as proof of compatibility.
+
 | Failure | Next check |
 | --- | --- |
 | Module missing | Compare `uname -r`, `dkms status` and the running kernel's headers. Inspect the matching DKMS `make.log`. |
 | Module built but rejected | Inspect `modinfo evdi`, `journalctl -k` and Secure Boot/MOK state. Enroll the module's signing key and reboot if required. |
 | `cannot find -levdi` | Install the appropriate development/DisplayLink package or use the explicit custom-library build above. This is independent of DKMS. |
-| Runtime library missing | Use `ldd` on the actual streamer binary to verify its required SONAME resolves. The generic dependency probe only checks library presence. |
+| Runtime library missing | Use `ldd` on the actual streamer binary to verify its required SONAME resolves. The runtime probe checks the selected binary's required/resolved SONAME and reports missing or mismatched dependencies. |
 | Device or permission failure | Check the EVDI DRM devices under `/sys/devices/platform/evdi*/drm/` and `/dev/dri/`, then the active user's access/group membership. Do not assume `card0` is EVDI. |
 | Stream starts without frames | Check effective backend/codec, compositor display configuration, daemon/streamer logs and Android telemetry. A running process is not frame acceptance. |
 

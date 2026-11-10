@@ -164,16 +164,13 @@ final class FramedVideoDecodeLoop {
         long flushCountSec = 0L;
         long recoveryUnlockSec = 0L;
         long waitGateDropsSec = 0L;
-        long decodeNsTotal = 0L;
         int decodeNsBufN = 0;
-        long renderNsMax = 0L;
         long lastLog = SystemClock.elapsedRealtime();
         long lastPresentMs = SystemClock.elapsedRealtime();
         long totalInSincePresent = 0L;
         long lastDecodeProgressMs = SystemClock.elapsedRealtime();
         long expectedSeq = -1L;
-        long lastQueuedPtsUs = -1L;
-        long lastPresentedPtsUs = -1L;
+        StreamTimestampMapper timestampMapper = new StreamTimestampMapper();
         boolean flushIssued = false;
         boolean waitForKeyframe = false;
         // Number of next rendered frames that must not use drop-late policy
@@ -306,12 +303,8 @@ final class FramedVideoDecodeLoop {
                         totalInSincePresent = 0;
                         flushIssued = false;
                         wakeBurstProtectRenders = Math.max(0, wakeBurstProtectRenders - drainStats.renderedCount);
-                        if (drainStats.lastRenderedPtsUs > 0) {
-                            lastPresentedPtsUs = drainStats.lastRenderedPtsUs;
-                        }
                     }
                     tooLateSec += drainStats.droppedLateCount;
-                    renderNsMax = Math.max(renderNsMax, drainStats.renderNsMax);
                 }
                 continue;
             }
@@ -321,7 +314,8 @@ final class FramedVideoDecodeLoop {
             }
             boolean frameIsKey = frameHeader.frameIsKey;
             long seqU32 = frameHeader.seqU32;
-            long ptsUs = frameHeader.ptsUs;
+            long ptsUs = timestampMapper.map(
+                    frameHeader.ptsUs, SystemClock.elapsedRealtimeNanos() / 1_000L);
             int payloadLen = frameHeader.payloadLen;
 
             WbtpPayloadBuffer.validatePayloadLength(payloadLen, framePayloadHardCap);
@@ -338,13 +332,6 @@ final class FramedVideoDecodeLoop {
             }
             if (seqU32 > expectedSeq + seqGapBudget) {
                 expectedSeq = seqU32;
-            }
-            if (lastQueuedPtsUs > 0 && ptsUs + 1_000 < lastQueuedPtsUs) {
-                WbtpFrameIo.skipFully(input, streamReadScratch, payloadLen);
-                bytes += frameHeaderSize + payloadLen;
-                droppedSec++;
-                expectedSeq = seqU32 + 1;
-                continue;
             }
 
             long nowAfterDrain = SystemClock.elapsedRealtime();
@@ -385,12 +372,8 @@ final class FramedVideoDecodeLoop {
                     totalInSincePresent = 0;
                     flushIssued = false;
                     wakeBurstProtectRenders = Math.max(0, wakeBurstProtectRenders - drainStats.renderedCount);
-                    if (drainStats.lastRenderedPtsUs > 0) {
-                        lastPresentedPtsUs = drainStats.lastRenderedPtsUs;
-                    }
                 }
                 tooLateSec += drainStats.droppedLateCount;
-                renderNsMax = Math.max(renderNsMax, drainStats.renderNsMax);
                 decoderBackpressured = pendingDecodeQueue >= decodeQueueMaxFrames;
             }
 
@@ -410,7 +393,6 @@ final class FramedVideoDecodeLoop {
                     long t0 = SystemClock.elapsedRealtimeNanos();
                     if (MediaCodecBridge.queueNalFromStream(codec, input, streamReadScratch, payloadLen, ptsUs, 1_000)) {
                         long dn = SystemClock.elapsedRealtimeNanos() - t0;
-                        decodeNsTotal += dn;
                         decodeNsBuf[(decodeNsBufN++) & 127] = dn;
                         inFrames++;
                         totalInSincePresent++;
@@ -425,7 +407,6 @@ final class FramedVideoDecodeLoop {
                         }
                         pendingDecodeQueue = Math.min(decodeQueueMaxFrames, pendingDecodeQueue + 1);
                         lastDecodeProgressMs = nowAfterDrain;
-                        lastQueuedPtsUs = ptsUs;
                         expectedSeq = seqU32 + 1;
                     } else {
                         WbtpFrameIo.skipFully(input, streamReadScratch, payloadLen);
@@ -517,7 +498,6 @@ final class FramedVideoDecodeLoop {
                         long t0 = SystemClock.elapsedRealtimeNanos();
                         if (MediaCodecBridge.queueNal(codec, payloadBuf, 0, payloadLen, ptsUs, 1_000)) {
                             long dn = SystemClock.elapsedRealtimeNanos() - t0;
-                            decodeNsTotal += dn;
                             decodeNsBuf[(decodeNsBufN++) & 127] = dn;
                             inFrames++;
                             totalInSincePresent++;
@@ -532,7 +512,6 @@ final class FramedVideoDecodeLoop {
                             }
                             pendingDecodeQueue = Math.min(decodeQueueMaxFrames, pendingDecodeQueue + 1);
                             lastDecodeProgressMs = nowAfterDrain;
-                            lastQueuedPtsUs = ptsUs;
                             expectedSeq = seqU32 + 1;
                         } else {
                             droppedSec++;
@@ -625,20 +604,19 @@ final class FramedVideoDecodeLoop {
                                 + " | max_payload: " + (maxPayloadSeen / 1024) + "KB"
                                 + " | reconnects: " + runtimeState.getReconnects()
                 );
-                double decodeMsP50 = inFrames > 0 ? (decodeNsTotal / 1_000_000.0) / inFrames : 0.0;
+                double decodeMsP50 = StreamBufferMath.percentileMs(decodeNsBuf, Math.min(decodeNsBufN, 128), 0.50, decodeNsScratch);
                 double decodeMsP95 = StreamBufferMath.percentileMs(decodeNsBuf, Math.min(decodeNsBufN, 128), 0.95, decodeNsScratch);
-                double renderMsP95 = renderNsMax / 1_000_000.0;
-                long nowEpochUs = System.currentTimeMillis() * 1000L;
-                long transportLagUs = (lastQueuedPtsUs > 0 && nowEpochUs > lastQueuedPtsUs)
-                        ? (nowEpochUs - lastQueuedPtsUs)
-                        : 0L;
-                int transportQueueDepth = (int) Math.max(0L, Math.min(16L, transportLagUs / Math.max(1L, frameUs)));
+                double renderMsP95 = drainStats.presentationMetrics.renderP95Ms();
+                int transportQueueDepth = StreamBufferMath.estimateTransportDepthFrames(
+                        Math.max(0, input.available()), Math.max(512, maxPayloadSeen + frameHeaderSize));
                 int queueDecodeDepth = Math.min(decodeQueueMaxFrames, pendingDecodeQueue);
                 int queueRenderDepth = Math.min(renderQueueMaxFrames, drainStats.renderedCount > 0 ? 1 : 0);
-                double e2eMs = StreamBufferMath.estimateE2eLatencyMs(lastPresentedPtsUs);
+                double sampleSeconds = Math.max(0.001, (nowMs - lastLog) / 1000.0);
                 statusListener.onClientMetrics(new ClientMetricsSample(
-                        inFrames, inFrames, outFrames, bytes,
-                        decodeMsP50, decodeMsP95, renderMsP95, e2eMs, e2eMs,
+                        inFrames / sampleSeconds, inFrames / sampleSeconds, outFrames / sampleSeconds,
+                        (long) (bytes / sampleSeconds),
+                        decodeMsP50, decodeMsP95, renderMsP95,
+                        drainStats.presentationMetrics.frameTimeP95Ms(),
                         transportQueueDepth,
                         queueDecodeDepth,
                         queueRenderDepth,
@@ -667,9 +645,8 @@ final class FramedVideoDecodeLoop {
                 flushCountSec = 0;
                 recoveryUnlockSec = 0;
                 waitGateDropsSec = 0;
-                decodeNsTotal = 0;
                 decodeNsBufN = 0;
-                renderNsMax = 0;
+                drainStats.presentationMetrics.clearWindow();
                 lastLog = nowMs;
             }
         }

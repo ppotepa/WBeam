@@ -11,11 +11,11 @@ clients request changes through the API; they do not own host session state.
 From the repository root, after [setup](../docs/INSTALLER_WIZARD.md):
 
 ```bash
-./wbeam host build
-./wbeam host run       # foreground daemon
+./waybeam host build
+./waybeam host run       # foreground daemon
 ```
 
-Use `./wbeam host status` in another terminal; `./wbeam host tuner` starts the
+Use `./waybeam host status` in another terminal; `./waybeam host tuner` starts the
 interactive autotuner. Persistent installations use the `wbeam-daemon` systemd
 user service. Avoid starting a second daemon on the same control port.
 

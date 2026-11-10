@@ -9,13 +9,13 @@ telemetry. Session lifecycle and adaptation remain owned by the host daemon.
 Run from the repository root after [source setup](../docs/INSTALLER_WIZARD.md):
 
 ```bash
-./wbeam android build
-./wbeam android deploy
-./wbeam version doctor
+./waybeam android build
+./waybeam android deploy
+./waybeam version doctor
 ```
 
 For multiple devices, set `WBEAM_ANDROID_SERIAL=<serial>` before a command or use
-`./wbeam android deploy-all`. Accept USB debugging authorization on the device.
+`./waybeam android deploy-all`. Accept USB debugging authorization on the device.
 Signed release builds have separate
 [signing requirements](../docs/ANDROID_RELEASE_SIGNING.md).
 
@@ -40,7 +40,7 @@ The preferred transport is TCP through **ADB reverse**, normally available on
 Android API 21+. API 17–20 devices, or devices where reverse fails, require a
 direct host address over a suitable tethered/LAN connection. The deploy script
 attempts to resolve that address; choosing `modern` alone does not make reverse
-available. The host control API binds loopback by default, so direct access also
+available. Both host listeners bind loopback by default, so direct access also
 requires the explicit [trusted-interface configuration](../docs/SECURITY_RELEASE.md).
 It is not a zero-configuration fallback.
 

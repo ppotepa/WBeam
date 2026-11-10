@@ -411,7 +411,7 @@ public final class RuntimeHudRenderCoordinator {
 
     private static long quantize(double value, double stepsPerUnit) {
         if (!Double.isFinite(value)) {
-            return 0L;
+            return Long.MIN_VALUE;
         }
         return Math.round(value * stepsPerUnit);
     }

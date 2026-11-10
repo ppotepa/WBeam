@@ -1,10 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  WBeam only ever talks to a host on the local LAN or USB-tether subnet.
-  Cleartext HTTP is required for the control plane (port 5001).
-  Android's domain-config does NOT support IP subnet matching, so the only
-  practical option for arbitrary RFC-1918 addresses is base-config="true".
-  This app never communicates with the public internet.
+  The normal USB workflow uses cleartext HTTP through ADB reverse (port 5001).
+  Configurable host addresses also permit deliberate LAN operation.
+  This base-config allows cleartext globally; it does not restrict hosts to
+  private IP ranges. Access restrictions belong to the transport deployment.
 -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="true" />

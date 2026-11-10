@@ -63,9 +63,9 @@ the same signing key and package ID (`com.wbeam` unless deliberately overridden)
    certificate fingerprint with the approved signing key.
 4. Install release A, then update to release B signed by the same key; verify
    package identity and retained settings on a physical Android device.
-5. Check the host/APK revision with `./wbeam version doctor` in a source checkout
-   or `wbeam version doctor` after package installation.
+5. Check the host/APK revision with `./waybeam version doctor` in a source checkout
+   or `waybeam version doctor` after package installation.
 
 Implementation: [Gradle configuration](../android/app/build.gradle),
 [release build wrapper](../scripts/ci/build_apk_release.sh),
-[CLI signature handling](../wbeam).
+[CLI signature handling](../waybeam).

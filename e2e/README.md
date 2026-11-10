@@ -31,7 +31,7 @@ Replace `RUN_ID` with the ID printed by the run. `preflight.sh --strict` checks
 the tools and ISO inputs for the entire matrix;
 missing inputs cause failure. Without `--strict` it reports warnings and may
 exit successfully despite missing prerequisites. Base preparation installs an
-OS, and guest installation installs packages/builds WBeam: these are active VM
+OS, and guest installation installs packages/builds WayBeam: these are active VM
 operations, not read-only checks.
 
 ## Inputs and paths

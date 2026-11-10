@@ -1,4 +1,4 @@
-# Wire Protocol and Telemetry
+# WayBeam Wire Protocol and Telemetry
 
 This page describes the current implementation. The authoritative contracts are
 [HTTP models](../host/rust/crates/wbeamd-api/src/lib.rs),
@@ -26,6 +26,8 @@ Example `POST /v1/client-metrics` body (illustrative values):
   "decode_time_ms_p50": 0.3,
   "decode_time_ms_p95": 0.6,
   "render_time_ms_p95": 0.2,
+  "frametime_ms_p95": 18.0,
+  "e2e_latency_available": false,
   "e2e_latency_ms_p50": 0.0,
   "e2e_latency_ms_p95": 0.0,
   "transport_queue_depth": 1,
@@ -39,7 +41,11 @@ Example `POST /v1/client-metrics` body (illustrative values):
 }
 ```
 
-All fields except `trace_id` are required in a JSON object.
+The original fields, except `trace_id`, are required in a JSON object. The
+additive `frametime_ms_p95` field is optional/nullable; it is `null` when no
+presentation intervals were observed. `e2e_latency_available` defaults to
+`false` for older clients. When unavailable, the E2E numeric fields remain `0`
+for compatibility; consumers must check the availability flag.
 `timestamp_ms` is Android wall-clock milliseconds since the Unix epoch; zero is
 replaced with host wall time. `trace_id` combines a client connection counter
 (high 32 bits) and sample counter (low 32 bits). Drop/late fields are cumulative
@@ -64,9 +70,10 @@ sampling rate.
 | `effective_runtime_config` | Resolved configuration, present when available |
 | `host_name`, `uptime`, `last_error` | Host name, integer uptime seconds and error string (empty when clear) |
 | `target_serial`, `stream_port`, `control_port` | Session routing; `target_serial` is optional |
-| `metrics.kpi` | `target_fps`, `recv_fps`, `decode_fps`, `present_fps`, `frametime_ms_p95`, latency/decode/render fields |
+| `metrics.kpi` | FPS, nullable observed `frametime_ms_p95`, decode/render durations, E2E values and `e2e_latency_available` |
 | `metrics.latest_client_metrics` | Most recent accepted client payload, or `null` |
-| `metrics.bitrate_actual_bps` | Bitrate from client receive rate, streamer output or configured fallback |
+| `metrics.frame_in`, `metrics.frame_out`, `metrics.frame_counts_estimated` | Frame-total estimates derived from rates and uptime; the flag identifies estimates |
+| `metrics.bitrate_actual_bps`, `metrics.bitrate_estimated` | Client/streamer observed bitrate, or a configured target marked as estimated |
 | `metrics.transport_runtime` | Host sender FPS, queue depths, sequence and timeout/drop/retry counters |
 | `metrics.adaptive_level`, `adaptive_events`, `adaptive_action`, `adaptive_reason` | Current adaptation state and decisions (all under `metrics`) |
 | `metrics.frame_budget_ms`, `queue_limits`, `e2e_schema` | Declared budgets/schema metadata (all under `metrics`) |
@@ -83,34 +90,48 @@ with the process; they are not globally unique. Existing files are appended.
 
 ## Interpreting Measurements
 
-Current telemetry is useful for diagnosis, but several names imply stronger
-measurements than the code provides:
+- `decode_time_ms_p50` and `decode_time_ms_p95` are nearest-rank percentiles of
+  observed input-queue call durations in the video loop. They do not measure the
+  complete hardware decode pipeline. PNG measures bitmap decode calls separately.
+- `render_time_ms_p95` is a percentile of observed output-release calls (video)
+  or canvas submission work (PNG), not the time photons appear on the display.
+- `frametime_ms_p95` is a percentile of consecutive client output-release times,
+  measured with the local monotonic clock. It is `null` until an interval exists;
+  the host does not derive a percentile from inverse FPS. Timing windows retain
+  up to 128 observations.
+- FPS and receive rate use the actual sample-window duration. `present_fps=0`
+  stays zero even when receive/decode activity continues. Observed zero frame
+  rates and receive bitrate are not replaced by configured targets.
+- Transport queue depth is a bounded estimate from locally buffered bytes and
+  frame size. It is not inferred by subtracting sender and receiver clocks.
+- `frame_in`/`frame_out` remain rate × uptime estimates, explicitly marked by
+  `frame_counts_estimated`. Configured bitrate fallback is marked with
+  `bitrate_estimated`; these are not physical-frame counts or measured throughput.
+- `frame_budget_ms`, `queue_limits` and `e2e_schema` are budgets/schema metadata,
+  not observations of every pipeline stage.
 
-- The framed-video loop's `decode_time_ms_p50` is a mean input-queue call duration;
-  `decode_time_ms_p95` is computed from those sampled durations. Neither measures
-  the complete hardware decoder pipeline.
-- `render_time_ms_p95` is a window maximum of output-release/render calls, not
-  a measured 95th percentile of physical display presentation.
-- `e2e_latency_ms_p50` and `e2e_latency_ms_p95` receive the same single estimate
-  from the last presented PTS. They are not independent percentiles.
-- The host computes `frametime_ms_p95` as `1000 / present_fps`; it is not a
-  percentile of individual frame intervals. `frame_in` and `frame_out` are
-  estimates from the latest FPS and stream uptime. In the absence of measurements,
-  frame counts and `bitrate_actual_bps` can fall back to configured targets.
-- `frame_budget_ms`, `queue_limits` and `e2e_schema` describe budgets/contracts;
-  they do not prove that each listed stage timestamp is measured or transmitted.
+**Absolute E2E latency is unavailable in the current protocol.** WBTP provides
+an opaque sender PTS, not a clock synchronization exchange. Android maps plausible
+forward PTS deltas onto its own monotonic playback timeline, reanchoring resets,
+large discontinuities and out-of-range values. It never subtracts sender PTS from
+Unix wall time. Both relative GStreamer timestamps and older epoch-based senders
+can therefore play without creating epoch-sized latency or queue estimates.
 
-**Known clock limitation:** the sender forwards GStreamer buffer PTS and only
-falls back to Unix time when PTS is missing. EVDI explicitly produces elapsed
-capture time, while Android's E2E estimator subtracts the PTS from Unix wall time.
-There is no clock-domain conversion in that path. E2E values and transport-depth
-estimates derived from this difference can therefore be invalid (including very
-large latency values). Do not use them as physical latency acceptance evidence
-until timestamp semantics and host/device clock alignment are corrected.
+The current client sends `e2e_latency_available=false`. The host clears E2E
+values from older clients without that flag and rejects negative, non-finite,
+reversed or greater-than-60-second latency values. A future client claiming
+availability must establish a valid capture-to-presentation clock mapping;
+setting a JSON flag alone does not establish measurement accuracy. Use separate
+physical latency instrumentation for release acceptance.
 
-Implementation references: [sender](../host/rust/crates/wbeamd-streamer/src/transport/sender.rs),
-[EVDI timestamps](../host/rust/crates/wbeamd-streamer/src/capture/backend/evdi.rs),
-[Android latency math](../android/app/src/main/java/com/wbeam/stream/StreamBufferMath.java),
+The tuner displays unavailable E2E explicitly and averages only available p95
+samples for its summary, including their coverage. In scoring, each missing E2E
+sample receives the existing capped 500 ms cost; missing telemetry cannot improve
+a candidate's score. Other observed metrics still distinguish candidates.
+
+Implementation references:
+[playback timestamp mapping](../android/app/src/main/java/com/wbeam/stream/StreamTimestampMapper.java),
+[presentation samples](../android/app/src/main/java/com/wbeam/stream/PresentationMetrics.java),
 [framed decoder](../android/app/src/main/java/com/wbeam/stream/FramedVideoDecodeLoop.java),
 and [host aggregation](../host/rust/crates/wbeamd-core/src/lib.rs).
 
@@ -118,8 +139,6 @@ and [host aggregation](../host/rust/crates/wbeamd-core/src/lib.rs).
 
 The production TCP connection begins with a **24-byte `WBS1` HELLO v2**, followed
 by **WBTP/1 frames with 22-byte headers**. All multi-byte integers are big-endian.
-This framing is implemented; the earlier proposed little-endian `WBM0`/C3 layout
-is not the wire format.
 
 ### HELLO v2
 
@@ -149,7 +168,7 @@ current app accepts a v1 greeting.
 | 4 | 1 | Frame version `1` |
 | 5 | 1 | Flags; `0x02` marks a keyframe |
 | 6 | 4 | Sequence, `u32`, starts at zero per TCP connection and wraps |
-| 10 | 8 | Timestamp/PTS in microseconds; see clock limitation above |
+| 10 | 8 | Opaque sender PTS in microseconds; not a synchronized wall-clock timestamp |
 | 18 | 4 | Payload length |
 | 22 | N | Encoded access unit, or PNG frame for the PNG lane |
 

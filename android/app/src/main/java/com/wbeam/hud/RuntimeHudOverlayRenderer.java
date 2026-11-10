@@ -22,10 +22,10 @@ public final class RuntimeHudOverlayRenderer {
         private double recvFps;
         private double decodeFps;
         private double liveMbps;
-        private double e2eP95;
+        private double e2eP95 = Double.NaN;
         private double decodeP95;
         private double renderP95;
-        private double frametimeP95;
+        private double frametimeP95 = Double.NaN;
         private double dropsPerSec;
         private int qT;
         private int qD;

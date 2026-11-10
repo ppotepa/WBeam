@@ -21,10 +21,10 @@ public final class RuntimeTelemetryMapper {
         private double presentFps;
         private double recvFps;
         private double decodeFps;
-        private double frametimeP95;
+        private double frametimeP95 = Double.NaN;
         private double decodeP95;
         private double renderP95;
-        private double e2eP95;
+        private double e2eP95 = Double.NaN;
 
         private int qT;
         private int qD;
@@ -298,18 +298,12 @@ public final class RuntimeTelemetryMapper {
         if (!Double.isFinite(out.getPresentFps()) || out.getPresentFps() < 0.0) {
             out.setPresentFps(0.0);
         }
-        if (out.getPresentFps() < 1.0) {
-            if (Double.isFinite(out.getDecodeFps()) && out.getDecodeFps() >= 1.0) {
-                out.setPresentFps(out.getDecodeFps());
-            } else if (Double.isFinite(out.getRecvFps()) && out.getRecvFps() >= 1.0) {
-                out.setPresentFps(out.getRecvFps());
-            }
-        }
-
-        out.setFrametimeP95(kpi != null ? kpi.optDouble("frametime_ms_p95", 0.0) : 0.0);
+        // Decode/receive progress must not turn zero presented frames into FPS.
+        out.setFrametimeP95(measuredTiming(kpi, "frametime_ms_p95", false));
         out.setDecodeP95(kpi != null ? kpi.optDouble("decode_time_ms_p95", 0.0) : 0.0);
         out.setRenderP95(kpi != null ? kpi.optDouble("render_time_ms_p95", 0.0) : 0.0);
-        out.setE2eP95(kpi != null ? kpi.optDouble("e2e_latency_ms_p95", 0.0) : 0.0);
+        out.setE2eP95(kpi != null && kpi.optBoolean("e2e_latency_available", false)
+                ? measuredTiming(kpi, "e2e_latency_ms_p95", true) : Double.NaN);
 
         out.setQT(latest != null ? latest.optInt("transport_queue_depth", 0) : 0);
         out.setQD(latest != null ? latest.optInt("decode_queue_depth", 0) : 0);
@@ -384,6 +378,15 @@ public final class RuntimeTelemetryMapper {
         }
 
         return out;
+    }
+
+    private static double measuredTiming(JSONObject kpi, String key, boolean allowZero) {
+        if (kpi == null || kpi.isNull(key)) {
+            return Double.NaN;
+        }
+        double value = kpi.optDouble(key, Double.NaN);
+        return Double.isFinite(value) && value >= 0.0 && value <= 60_000.0
+                && (allowZero || value > 0.0) ? value : Double.NaN;
     }
 
     private static String fmtScore(double value) {

@@ -8,12 +8,12 @@ For the build/deploy development loop, use `./redeploy-local` instead.
 ## Choose a setup path
 
 ```bash
-./install-wbeam --dry-run                 # inspect the plan
-./install-wbeam --backend wayland         # Wayland Portal setup
-./install-wbeam --backend evdi            # EVDI virtual display setup
+./install-waybeam --dry-run                 # inspect the plan
+./install-waybeam --backend wayland         # Wayland Portal setup
+./install-waybeam --backend evdi            # EVDI virtual display setup
 ```
 
-`./wbeam install` is an alias for the same wizard.
+`./waybeam install` is an alias for the same wizard.
 
 | Selection | Meaning |
 | --- | --- |
@@ -21,10 +21,11 @@ For the build/deploy development loop, use `./redeploy-local` instead.
 | `evdi` | Setup for EVDI capture. Requires a compatible kernel module, userspace library and DRM device access. |
 | `auto` (default) | Prompts interactively; selects `wayland` with `--yes` or outside an interactive terminal. |
 
-The installer choice and runtime automatic selection are different: the EVDI
-choice writes a service environment override; the Wayland choice currently
-leaves the daemon's capture override unset. Select **Wayland Portal** explicitly
-in the desktop UI if you need to force that backend.
+The installer writes the selected backend into the service environment:
+`evdi` or `wayland_portal`. This fixes the daemon default for that installation;
+a per-session desktop/API choice still takes precedence. Explicit control/video
+bind variables supplied to the installer are persisted as well; see the
+[network policy](SECURITY_RELEASE.md) for the required LAN opt-ins.
 
 X11 code and helpers remain as a legacy path. The current installer rejects
 `--backend x11` and the daemon's normal start path accepts only available EVDI
@@ -35,7 +36,7 @@ or Wayland Portal backends. X11 is not an automatic fallback.
 | Host | Automatic dependency work |
 | --- | --- |
 | Fedora | Calls [`fedora-setup.sh`](../scripts/fedora-setup.sh) for native build tools, Tauri/GStreamer dependencies and Android SDK. Adds `--with-evdi` when selected. See [Fedora setup](FEDORA_43_SETUP.md). |
-| Debian / Ubuntu | Installs native host build libraries with `apt`, including `libevdi-dev`; adds DKMS, running-kernel headers and `evdi-dkms` for EVDI. |
+| Debian / Ubuntu | Installs native host build libraries with `apt`, including `libevdi0-dev` on Debian 12 and `libevdi-dev` on Ubuntu; adds DKMS, running-kernel headers and `evdi-dkms` for EVDI. |
 | Other distributions | Automatic wizard installation stops; prepare dependencies manually and use `--skip-system-deps`. |
 
 The Debian/Ubuntu branch is **not a complete workstation bootstrap**: Rust/Cargo,
@@ -45,11 +46,11 @@ installed and active. Source builds need network access to fetch dependencies.
 
 The remaining stages are:
 
-1. Build `wbeamd-server` and `wbeamd-streamer` through `./wbeam host build`.
+1. Build `wbeamd-server` and `wbeamd-streamer` through `./waybeam host build`.
 2. Write `~/.config/systemd/user/wbeam-daemon.service` and enable/start it.
 3. Report binary, service and local control API status.
-4. Select an authorized ADB device, run `./wbeam android deploy`, and report
-   host/APK version parity with `./wbeam version doctor`.
+4. Select an authorized ADB device, run `./waybeam android deploy`, and report
+   host/APK version parity with `./waybeam version doctor`.
 
 EVDI setup may require matching kernel headers, module signing/MOK enrollment,
 a new login for group membership, or a reboot. `--yes` accepts the setup plan;
@@ -58,9 +59,9 @@ it cannot complete firmware or Android trust prompts.
 ## Useful options
 
 ```bash
-./install-wbeam --yes --backend wayland --skip-device
-./wbeam device setup                     # retry phone onboarding only
-./wbeam device setup --android-serial SERIAL
+./install-waybeam --yes --backend wayland --skip-device
+./waybeam device setup                     # retry phone onboarding only
+./waybeam device setup --android-serial SERIAL
 ```
 
 The phone needs USB debugging enabled and its authorization prompt accepted.
@@ -69,7 +70,7 @@ select one interactively or supply `--android-serial`.
 
 Use `--skip-system-deps`, `--skip-build`, `--skip-service` or `--skip-device`
 to omit an already completed stage. `--control-port` and `--stream-port`
-default to `5001` and `5000`. See `./install-wbeam --help` for all options.
+default to `5001` and `5000`. See `./install-waybeam --help` for all options.
 
 ## State and verification
 
@@ -83,8 +84,8 @@ After setup:
 
 ```bash
 systemctl --user status wbeam-daemon.service
-curl -fsS http://127.0.0.1:5001/v1/host-probe
-./wbeam version doctor
+./waybeam host probe --json
+./waybeam version doctor
 ```
 
 Open the desktop app with `./desktop.sh`, select the device and capture backend,

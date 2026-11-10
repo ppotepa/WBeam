@@ -8,7 +8,7 @@ Run the commands below from the repository root.
 `prepare-base` installs a clean OS from the selected ISO, configures test SSH
 access and the requested session, checks the first boot, shuts down, and
 promotes the installed disk to a reusable base image. The base contains OS/test
-prerequisites, not WBeam build output.
+prerequisites, not WayBeam build output.
 
 ```bash
 ./e2e/run base-plan --distro fedora-43 --session gnome-wayland

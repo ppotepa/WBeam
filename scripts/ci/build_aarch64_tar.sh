@@ -18,10 +18,22 @@ export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
 cargo build --release --target "${TARGET}" -p wbeamd-server --manifest-path "${RUST_MANIFEST}"
 
 mkdir -p "${PKGROOT}/bin" "${PKGROOT}/doc"
-install -m 0755 "${ROOT_DIR}/wbeam" "${PKGROOT}/bin/wbeam"
 install -m 0755 "${ROOT_DIR}/host/rust/target/${TARGET}/release/wbeamd-server" "${PKGROOT}/bin/wbeamd-server"
-install -m 0644 "${ROOT_DIR}/README.md" "${PKGROOT}/doc/README.md"
+cat > "${PKGROOT}/doc/README.md" <<'EOF'
+# WayBeam experimental aarch64 daemon
+
+This archive contains only `bin/wbeamd-server`. It is a cross-build artifact
+for daemon development, outside the supported release package set.
+
+Run `./bin/wbeamd-server --help` from the extracted directory to inspect its
+arguments. Streaming requires a matching streamer, native capture dependencies
+and the runtime configuration from the source checkout. Desktop and Android
+components are distributed through the complete build/package workflow.
+
+Source and setup: https://github.com/ppotepa/WBeam
+EOF
 write_version_manifest
+install -m 0644 "${DIST_DIR}/VERSION.txt" "${PKGROOT}/VERSION.txt"
 
 tar -C "${PKGROOT}" -czf "${DIST_DIR}/${OUT_NAME}" .
 echo "[build_aarch64] Created ${DIST_DIR}/${OUT_NAME}"

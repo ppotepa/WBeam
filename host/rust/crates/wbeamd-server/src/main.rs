@@ -23,7 +23,7 @@ use server::runtime_utils::{
 use server::session_registry::{SessionQuery, SessionRegistry};
 
 #[derive(Debug, Parser)]
-#[command(name = "wbeamd-rust", about = "WBeam host daemon in Rust")]
+#[command(name = "wbeamd-rust", about = "WayBeam host daemon in Rust")]
 struct Args {
     #[arg(long, default_value_t = 5001)]
     control_port: u16,
@@ -112,7 +112,7 @@ mod control_bind_policy_tests {
     }
 }
 
-// A packaged WBeam root under /usr/share/wbeam is deliberately read-only.
+// A packaged WayBeam root under /usr/share/wbeam is deliberately read-only.
 // Resolve mutable daemon logs to the user's XDG state directory. Keep source
 // builds and explicit --log-dir overrides backwards-compatible.
 fn resolve_daemon_log_dir(
@@ -135,7 +135,7 @@ fn resolve_daemon_log_dir(
         return Ok(user_home.join(".local/state/wbeam/logs"));
     }
     Err(
-        "Cannot resolve writable daemon log location for installed WBeam. \
+        "Cannot resolve writable daemon log location for installed WayBeam. \
          Set XDG_STATE_HOME or HOME to an absolute path, or pass --log-dir."
             .to_string(),
     )
@@ -287,7 +287,7 @@ async fn main() {
         );
         warn!(
             bind_address = %bind_ip,
-            "INSECURE LAN CONTROL: WBeam HTTP start/stop/apply endpoints have no authentication or TLS; restrict access with a firewall and use only on a trusted network"
+            "INSECURE LAN CONTROL: WayBeam HTTP start/stop/apply endpoints have no authentication or TLS; restrict access with a firewall and use only on a trusted network"
         );
     }
     let addr = SocketAddr::new(bind_ip, args.control_port);

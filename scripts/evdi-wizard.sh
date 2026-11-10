@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-echo "=== WBeam EVDI Wizard (multi-monitor) ==="
-echo "This will reload the EVDI module with multiple virtual devices (initial_device_count=4)"
-echo "and persist the setting to /etc/modprobe.d/evdi.conf."
+echo "=== WayBeam EVDI Wizard ==="
+echo "This will install EVDI prerequisites, load the module if needed, and configure"
+echo "four initial virtual displays plus user permissions for future boots."
+echo "An already-active EVDI module will not be unloaded; changing its device count"
+echo "may require a reboot after existing display sessions have been stopped."
 echo
 read -r -p "Proceed? [y/N] " answer
 if [[ ! "${answer:-}" =~ ^[Yy]$ ]]; then
@@ -11,22 +14,9 @@ if [[ ! "${answer:-}" =~ ^[Yy]$ ]]; then
   exit 1
 fi
 
-echo "--- Unloading existing evdi (ignore errors if not loaded) ---"
-sudo modprobe -r evdi 2>/dev/null || true
-
-echo "--- Loading evdi with 4 virtual devices ---"
-sudo modprobe evdi initial_device_count=4
-
-echo "--- Persisting module option ---"
-echo "options evdi initial_device_count=4" | sudo tee /etc/modprobe.d/evdi.conf >/dev/null
-
-echo "--- Verifying ---"
-echo -n "initial_device_count: "
-cat /sys/module/evdi/parameters/initial_device_count 2>/dev/null || echo "unavailable"
-ls -l /dev/dri/card* 2>/dev/null || true
-
+sudo bash "$SCRIPT_DIR/evdi-setup.sh"
 echo
 echo "Next steps:"
-echo "  1) Restart WBeam host service: ./wbeam host stop && ./wbeam host start"
-echo "  2) Reconnect devices or use the desktop UI Autoconnect."
-echo "Done."
+echo "  1) Complete any requested reboot or new login."
+echo "  2) Restart the host service: systemctl --user restart wbeam-daemon.service"
+echo "  3) Reconnect devices in the desktop UI and verify real frames."

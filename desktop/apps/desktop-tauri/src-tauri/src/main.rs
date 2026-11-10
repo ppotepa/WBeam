@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod adb;
+mod branding;
 mod profiles;
 mod process_timeout;
 mod service;
@@ -1207,7 +1208,7 @@ fn show_x11_startup_notice_window(app: &tauri::AppHandle) {
         return;
     }
     let _ = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("x11-warning.html".into()))
-        .title("WBeam - X11 Experimental Notice")
+        .title(format!("{} - X11 Legacy Notice", branding::APP_NAME))
         .inner_size(560.0, 260.0)
         .resizable(false)
         .always_on_top(true)

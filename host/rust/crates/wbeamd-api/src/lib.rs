@@ -86,6 +86,12 @@ pub struct ClientMetricsRequest {
     pub decode_time_ms_p50: f64,
     pub decode_time_ms_p95: f64,
     pub render_time_ms_p95: f64,
+    /// Observed client output-release intervals; absent on older clients.
+    #[serde(default)]
+    pub frametime_ms_p95: Option<f64>,
+    /// False unless the client has a valid capture-to-presentation clock mapping.
+    #[serde(default)]
+    pub e2e_latency_available: bool,
     pub e2e_latency_ms_p50: f64,
     pub e2e_latency_ms_p95: f64,
     pub transport_queue_depth: u32,
@@ -141,6 +147,8 @@ impl Default for ClientMetricsRequest {
             decode_time_ms_p50: 0.0,
             decode_time_ms_p95: 0.0,
             render_time_ms_p95: 0.0,
+            frametime_ms_p95: None,
+            e2e_latency_available: false,
             e2e_latency_ms_p50: 0.0,
             e2e_latency_ms_p95: 0.0,
             transport_queue_depth: 0,
@@ -152,6 +160,24 @@ impl Default for ClientMetricsRequest {
             timestamp_ms: 0,
             trace_id: None,
         }
+    }
+}
+
+impl ClientMetricsRequest {
+    /// Reject legacy clock-domain errors and non-finite/unbounded timings before
+    /// they enter status, logs or adaptation. Unknown E2E is explicitly unavailable.
+    pub fn normalize_timing_measurements(&mut self) {
+        let valid_ms = |value: f64| value.is_finite() && (0.0..=60_000.0).contains(&value);
+        if !self.e2e_latency_available
+            || !valid_ms(self.e2e_latency_ms_p50)
+            || !valid_ms(self.e2e_latency_ms_p95)
+            || self.e2e_latency_ms_p50 > self.e2e_latency_ms_p95
+        {
+            self.e2e_latency_available = false;
+            self.e2e_latency_ms_p50 = 0.0;
+            self.e2e_latency_ms_p95 = 0.0;
+        }
+        self.frametime_ms_p95 = self.frametime_ms_p95.filter(|value| valid_ms(*value) && *value > 0.0);
     }
 }
 
@@ -277,7 +303,8 @@ pub struct KpiSnapshot {
     pub recv_fps: f64,
     pub decode_fps: f64,
     pub present_fps: f64,
-    pub frametime_ms_p95: f64,
+    pub frametime_ms_p95: Option<f64>,
+    pub e2e_latency_available: bool,
     pub e2e_latency_ms_p50: f64,
     pub e2e_latency_ms_p95: f64,
     pub decode_time_ms_p95: f64,
@@ -308,8 +335,12 @@ pub struct MetricsSnapshot {
     pub reconnects: u64,
     pub frame_in: u64,
     pub frame_out: u64,
+    /// Frame totals are inferred from client rates, not cumulative source counters.
+    pub frame_counts_estimated: bool,
     pub drops: u64,
     pub bitrate_actual_bps: u64,
+    /// True when the displayed bitrate is the configured target rather than an observation.
+    pub bitrate_estimated: bool,
     pub encode_latency_ms: f64,
     pub stream_uptime_sec: u64,
     pub frame_budget_ms: FrameBudgetMs,
@@ -629,6 +660,66 @@ pub fn valid_values() -> ValidValues {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_metrics_have_no_verified_latency_or_frame_percentile() {
+        let mut payload = serde_json::to_value(ClientMetricsRequest::default()).unwrap();
+        let object = payload.as_object_mut().unwrap();
+        object.remove("frametime_ms_p95");
+        object.remove("e2e_latency_available");
+        object.insert("e2e_latency_ms_p50".into(), serde_json::json!(1_700_000_000_000.0));
+        object.insert("e2e_latency_ms_p95".into(), serde_json::json!(1_700_000_000_000.0));
+        let mut client: ClientMetricsRequest = serde_json::from_value(payload).unwrap();
+        client.normalize_timing_measurements();
+        assert_eq!(client.frametime_ms_p95, None);
+        assert!(!client.e2e_latency_available);
+        assert_eq!(client.e2e_latency_ms_p95, 0.0);
+    }
+
+    #[test]
+    fn invalid_or_epoch_sized_latency_cannot_be_marked_available() {
+        for invalid in [-1.0, f64::NAN, f64::INFINITY, 1_700_000_000_000.0] {
+            let mut client = ClientMetricsRequest {
+                e2e_latency_available: true,
+                e2e_latency_ms_p50: invalid,
+                e2e_latency_ms_p95: invalid,
+                frametime_ms_p95: Some(invalid),
+                ..Default::default()
+            };
+            client.normalize_timing_measurements();
+            assert!(!client.e2e_latency_available);
+            assert_eq!(client.e2e_latency_ms_p50, 0.0);
+            assert_eq!(client.e2e_latency_ms_p95, 0.0);
+            assert_eq!(client.frametime_ms_p95, None);
+        }
+    }
+
+    #[test]
+    fn observed_percentile_is_preserved_without_fps_inference() {
+        let mut client = ClientMetricsRequest {
+            present_fps: 60.0,
+            frametime_ms_p95: Some(31.25),
+            ..Default::default()
+        };
+        client.normalize_timing_measurements();
+        assert_eq!(client.frametime_ms_p95, Some(31.25));
+        assert!(!client.e2e_latency_available);
+        let encoded = serde_json::to_value(&client).unwrap();
+        assert_eq!(encoded["frametime_ms_p95"], 31.25);
+        assert_eq!(encoded["e2e_latency_available"], false);
+    }
+
+    #[test]
+    fn reversed_latency_percentiles_are_rejected() {
+        let mut client = ClientMetricsRequest {
+            e2e_latency_available: true,
+            e2e_latency_ms_p50: 30.0,
+            e2e_latency_ms_p95: 10.0,
+            ..Default::default()
+        };
+        client.normalize_timing_measurements();
+        assert!(!client.e2e_latency_available);
+    }
 
     fn base_config(encoder: &str, bitrate_kbps: u32) -> ActiveConfig {
         ActiveConfig {

@@ -4,6 +4,9 @@ set -euo pipefail
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
 
+WBEAM_PRODUCT_NAME=WayBeam
+if [[ -f "$ROOT_DIR/config/branding.sh" ]]; then source "$ROOT_DIR/config/branding.sh"; fi
+
 BACKEND="${WBEAM_INSTALL_BACKEND:-auto}"
 YES=0
 DRY_RUN=0
@@ -39,9 +42,9 @@ SELECTED_ANDROID_SERIAL=""
 usage() {
   cat <<'USAGE'
 Usage:
-  ./install-wbeam [options]
-  ./wbeam install [options]
-  ./wbeam device setup [options]
+  ./install-waybeam [options]
+  ./waybeam install [options]
+  ./waybeam device setup [options]
 
 Options:
   --backend wayland     prepare Wayland Portal capture (requires a Wayland session)
@@ -347,7 +350,7 @@ print_plan() {
   else
     echo "  system deps: skipped"
   fi
-  [[ "$SKIP_BUILD" -eq 0 ]] && echo "  build: ./wbeam host build" || echo "  build: skipped"
+  [[ "$SKIP_BUILD" -eq 0 ]] && echo "  build: ./waybeam host build" || echo "  build: skipped"
   [[ "$SKIP_SERVICE" -eq 0 ]] && echo "  service: install/start ${SERVICE_NAME}.service" || echo "  service: skipped"
   [[ "$SKIP_DEVICE" -eq 0 ]] && echo "  phone: adb onboarding and APK deploy" || echo "  phone: skipped"
   if [[ "$BACKEND" == "evdi" ]]; then
@@ -388,6 +391,10 @@ install_system_deps() {
       ;;
     debian|ubuntu)
       local apt_cmd=(apt-get)
+      local evdi_dev_package=libevdi-dev
+      if [[ "$DISTRO_ID" == "debian" && "$DISTRO_VERSION" == 12* ]]; then
+        evdi_dev_package=libevdi0-dev
+      fi
       if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
         apt_cmd=(sudo apt-get)
       fi
@@ -395,7 +402,7 @@ install_system_deps() {
       run_cmd "${apt_cmd[@]}" install -y --no-install-recommends \
         build-essential pkg-config libssl-dev libdbus-1-dev \
         libx11-dev libxrandr-dev libxfixes-dev libxext-dev libxrender-dev \
-        libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libevdi-dev
+        libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev "$evdi_dev_package"
       if [[ "$BACKEND" == "evdi" ]]; then
         run_cmd "${apt_cmd[@]}" install -y --no-install-recommends \
           dkms "linux-headers-$(uname -r)" evdi-dkms
@@ -414,10 +421,23 @@ build_host() {
   run_cmd "$ROOT_DIR/wbeam" host build
 }
 
+service_environment() {
+  local key="$1" value="${!1:-}"
+  [[ -n "$value" ]] || return 0
+  if [[ "$value" == *$'\n'* || "$value" == *$'\r'* ]]; then
+    err "$key must not contain a newline"
+    return 1
+  fi
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//%/%%}"
+  printf 'Environment="%s=%s"\n' "$key" "$value"
+}
+
 service_unit_content() {
   cat <<EOF
 [Unit]
-Description=WBeam Screen Streaming Daemon
+Description=${WBEAM_PRODUCT_NAME} Screen Streaming Daemon
 After=graphical-session.target
 
 [Service]
@@ -429,9 +449,16 @@ Environment=RUST_LOG=info
 Environment=WBEAM_ROOT=$ROOT_DIR
 Environment=WBEAM_LOCK_FILE=/tmp/wbeamd-service-${CONTROL_PORT}.lock
 EOF
-  if [[ "$BACKEND" == "evdi" ]]; then
-    echo "Environment=WBEAM_CAPTURE_BACKEND=evdi"
-  fi
+  case "$BACKEND" in
+    evdi) echo "Environment=WBEAM_CAPTURE_BACKEND=evdi" ;;
+    wayland) echo "Environment=WBEAM_CAPTURE_BACKEND=wayland_portal" ;;
+  esac
+  local key
+  for key in WBEAM_RUST_STREAMER_BIN WBEAM_EVDI_LIB_DIR \
+    WBEAM_CONTROL_BIND_ADDR WBEAM_ALLOW_UNAUTHENTICATED_LAN_CONTROL \
+    WBEAM_STREAM_BIND_ADDR WBEAM_ALLOW_UNAUTHENTICATED_LAN_STREAM; do
+    service_environment "$key" || return 1
+  done
   echo
   cat <<'EOF'
 [Install]
@@ -462,7 +489,14 @@ install_service() {
   fi
 
   mkdir -p "$unit_dir"
-  service_unit_content > "$unit_path"
+  local temporary_unit
+  temporary_unit="$(mktemp "$unit_dir/.${SERVICE_NAME}.XXXXXX")"
+  if ! service_unit_content > "$temporary_unit"; then
+    rm -f "$temporary_unit"
+    return 1
+  fi
+  chmod 0644 "$temporary_unit"
+  mv -f "$temporary_unit" "$unit_path"
   run_cmd systemctl --user daemon-reload
   run_cmd systemctl --user enable --now "${SERVICE_NAME}.service"
   SERVICE_STATE="$(systemctl --user is-active "$SERVICE_NAME" 2>/dev/null || true)"
@@ -598,7 +632,7 @@ device_onboarding() {
 
   if [[ "$DRY_RUN" -eq 1 ]]; then
     log "DRY-RUN: would run adb start-server and wait for an authorized device"
-    log "DRY-RUN: would run ./wbeam android deploy for the selected serial"
+    log "DRY-RUN: would run ./waybeam android deploy for the selected serial"
     DEVICE_STATE="dry-run"
     return 0
   fi
@@ -606,7 +640,7 @@ device_onboarding() {
   local serial
   if ! select_adb_device; then
     DEVICE_STATE="pending"
-    warn "phone onboarding left pending; rerun: ./wbeam device setup"
+    warn "phone onboarding left pending; rerun: ./waybeam device setup"
     return 0
   fi
 

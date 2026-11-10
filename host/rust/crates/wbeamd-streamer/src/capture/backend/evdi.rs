@@ -135,14 +135,14 @@ fn generate_edid(width: i32, height: i32, fps: i32) -> [u8; 128] {
     dtd[16] = 0; // border pixels V
     dtd[17] = 0x18; // non-interlaced, digital separate sync
 
-    // ── Descriptor 2: Monitor name "WBeam" ──────────────────────────────
+    // ── Descriptor 2: Monitor name "WayBeam" ────────────────────────────
     let name_desc = &mut edid[72..90];
     name_desc[0] = 0x00;
     name_desc[1] = 0x00;
     name_desc[2] = 0x00;
     name_desc[3] = 0xFC; // tag: monitor name
     name_desc[4] = 0x00;
-    let name_bytes = b"WBeam\n";
+    let name_bytes = b"WayBeam\n";
     name_desc[5..5 + name_bytes.len()].copy_from_slice(name_bytes);
     for b in &mut name_desc[5 + name_bytes.len()..18] {
         *b = 0x20; // pad with spaces
@@ -271,7 +271,7 @@ fn is_evdi_card_in_use_by_others(idx: i32) -> bool {
 /// Try to claim EVDI device `idx`:
 /// 1. Must be a confirmed EVDI device
 /// 2. Must not already be connected by another DRM client
-/// 3. Must win the flock race against other WBeam streamers
+/// 3. Must win the flock race against other WayBeam streamers
 fn try_claim_evdi(idx: i32) -> Option<std::fs::File> {
     if !is_confirmed_evdi(idx) {
         return None;

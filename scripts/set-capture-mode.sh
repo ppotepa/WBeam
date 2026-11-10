@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Set the WBeam capture backend preference for the next daemon launch.
+# Set the WayBeam capture backend preference for the next daemon launch.
 #
 # Usage: set-capture-mode.sh [wayland|evdi|x11|auto]
 #

@@ -192,8 +192,8 @@ public final class RuntimeHudComputation {
                 .append('/')
                 .append(fmt1(presentFps))
                 .append(" | e2e ")
-                .append(fmt1(e2eP95))
-                .append("ms | dec ")
+                .append(TimingValueFormatter.milliseconds(e2eP95, 1))
+                .append(" | dec ")
                 .append(fmt1(decodeP95))
                 .append("ms | ren ")
                 .append(fmt1(renderP95))
@@ -304,7 +304,7 @@ public final class RuntimeHudComputation {
 
     private static String formatFixed(double value, int decimals) {
         if (!Double.isFinite(value)) {
-            return "0";
+            return "unavailable";
         }
         int safeDecimals = Math.max(0, Math.min(3, decimals));
         long factor;

@@ -2,7 +2,7 @@
 
 This table records validation status, not a list of all installable packages.
 An upstream release, successful link, or `modinfo` result does not prove a working
-WBeam stream. A PASS needs evidence for the exact kernel, driver, userspace ABI
+WayBeam stream. A PASS needs evidence for the exact kernel, driver, userspace ABI
 and Android device.
 
 | Configuration | Evidence recorded here | Status |
@@ -60,9 +60,10 @@ symlink. Debian 12 packages link `libevdi.so.0`; Ubuntu 24.04 packages link
 `libevdi.so.1`. These ABIs require separate binaries/package metadata (see
 [#144](https://github.com/ppotepa/WBeam/issues/144)).
 
-The runtime dependency checker accepts either library's presence and does not
-prove that it matches a given binary. Check `ldd` on the actual streamer, active
-user DRM permissions and real capture separately. The fixture
+The runtime dependency checker inspects the selected streamer's library
+requirements/resolution and checks the active user's read/write access to EVDI
+DRM nodes. Missing streamer/ABI evidence is reported separately from library
+presence. Real capture still requires a device test. The fixture
 [`test-virtual-deps-runtime.sh`](../scripts/ci/test-virtual-deps-runtime.sh)
 verifies that missing build-only inputs do not block an already-loaded runtime;
 it is not a hardware test.
@@ -72,7 +73,7 @@ it is not a hardware test.
 - Exact distribution, kernel, compiler, EVDI source revision/package and module
   signing status; record a pinned version, not a floating upstream `master`.
 - DKMS build/load results, library resolution and EVDI device access for the
-  user running WBeam.
+  user running WayBeam.
 - Package/source build result with EVDI enabled.
 - A real Android image stream for at least 60 seconds, followed by the
   30-minute soak required by the release checklist.

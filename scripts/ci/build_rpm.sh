@@ -4,6 +4,7 @@ set -Eeuo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/runtime-assets.sh"
 source "${ROOT_DIR}/scripts/evdi-compat.sh"
+source "${ROOT_DIR}/config/branding.sh"
 
 # RPM supports ~ for pre-release ordering (0.1.3~rc.1 < 0.1.3).
 RPM_VERSION="${WBEAM_VERSION/-rc./~rc.}"
@@ -55,18 +56,7 @@ exec /usr/local/bin/wbeam-desktop-tauri "$@"
 EOF
 chmod 0755 "${SRCROOT}/wbeam-desktop"
 install -m 0644 "${ROOT_DIR}/desktop/apps/desktop-tauri/src-tauri/icons/icon.png" "${SRCROOT}/share/wbeam/desktop-icon.png"
-cat > "${SRCROOT}/share/wbeam/wbeam.desktop" <<'EOF'
-[Desktop Entry]
-Type=Application
-Version=1.0
-Name=WBeam Desktop
-Comment=WBeam desktop control and host service manager
-Exec=/usr/local/bin/wbeam-desktop
-Icon=wbeam
-Terminal=false
-Categories=Utility;Network;
-StartupNotify=true
-EOF
+install -m 0644 "${ROOT_DIR}/config/waybeam.desktop" "${SRCROOT}/share/wbeam/wbeam.desktop"
 install -m 0644 "${ROOT_DIR}/README.md" "${SRCROOT}/README.md"
 tar -C "${TOPDIR}" -czf "${TOPDIR}/SOURCES/wbeam-${RPM_VERSION}.tar.gz" "wbeam-${RPM_VERSION}"
 
@@ -76,9 +66,9 @@ cat > "${TOPDIR}/SPECS/wbeam.spec" <<EOF
 Name:           wbeam
 Version:        ${RPM_VERSION}
 Release:        ${RPM_RELEASE}%{?dist}
-Summary:        WBeam host tools and daemon binaries
+Summary:        ${WBEAM_PRODUCT_NAME} host tools and daemon binaries
 License:        MIT
-URL:            https://github.com/WBeam/WBeam
+URL:            https://github.com/ppotepa/WBeam
 Source0:        %{name}-%{version}.tar.gz
 BuildArch:      %{_arch}
 Requires:       gtk3
@@ -87,10 +77,11 @@ Requires:       libsoup3
 Requires:       libayatana-appindicator-gtk3
 Requires:       android-tools
 Requires:       curl
+Requires:       binutils
 Requires:       gstreamer1-plugins-base
 
 %description
-WBeam host runtime package built by GitLab CI.
+${WBEAM_PRODUCT_NAME} host runtime package built by GitLab CI.
 
 %prep
 %setup -q
@@ -104,10 +95,12 @@ mkdir -p %{buildroot}/usr/share/doc/wbeam
 mkdir -p %{buildroot}/usr/share/applications
 mkdir -p %{buildroot}/usr/share/icons/hicolor/256x256/apps
 install -m 0755 wbeam %{buildroot}/usr/local/bin/wbeam
+ln -s wbeam %{buildroot}/usr/local/bin/waybeam
 install -m 0755 wbeamd-server %{buildroot}/usr/local/bin/wbeamd-server
 install -m 0755 wbeamd-streamer %{buildroot}/usr/local/bin/wbeamd-streamer
 install -m 0755 wbeam-desktop-tauri %{buildroot}/usr/local/bin/wbeam-desktop-tauri
 install -m 0755 wbeam-desktop %{buildroot}/usr/local/bin/wbeam-desktop
+ln -s wbeam-desktop %{buildroot}/usr/local/bin/waybeam-desktop
 mkdir -p %{buildroot}/usr/share/wbeam
 cp -a share/wbeam/. %{buildroot}/usr/share/wbeam/
 install -m 0644 share/wbeam/desktop-icon.png %{buildroot}/usr/share/icons/hicolor/256x256/apps/wbeam.png
@@ -116,14 +109,17 @@ install -m 0644 README.md %{buildroot}/usr/share/doc/wbeam/README.md
 
 %files
 /usr/local/bin/wbeam
+/usr/local/bin/waybeam
 /usr/local/bin/wbeamd-server
 /usr/local/bin/wbeamd-streamer
 /usr/local/bin/wbeam-desktop-tauri
 /usr/local/bin/wbeam-desktop
+/usr/local/bin/waybeam-desktop
 /usr/share/wbeam/wbeam
+/usr/share/wbeam/waybeam
 /usr/share/wbeam/desktop-icon.png
 /usr/share/wbeam/wbeam.desktop
-/usr/share/wbeam/config/wbeam.conf
+/usr/share/wbeam/config
 /usr/share/wbeam/scripts
 /usr/share/wbeam/android
 /usr/share/wbeam/VERSION.txt

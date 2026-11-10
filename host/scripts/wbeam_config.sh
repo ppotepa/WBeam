@@ -2,7 +2,7 @@
 
 # shellcheck shell=bash
 
-# Load WBeam config keys from:
+# Load WayBeam config keys from:
 #  1) ~/.config/wbeam/wbeam.conf (or $XDG_CONFIG_HOME/wbeam/wbeam.conf)
 #
 # If missing, user config is bootstrapped from <repo>/config/wbeam.conf.

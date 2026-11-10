@@ -502,7 +502,7 @@ pub fn build_source(cfg: &ResolvedConfig) -> Result<gst::Element> {
         .name("bench_title")
         .build()
     {
-        title.set_property("text", "WBeam Benchmark 2D • 12s loop • 4 scenes");
+        title.set_property("text", "WayBeam Benchmark 2D • 12s loop • 4 scenes");
         let _ = title.set_property_from_str("valignment", "top");
         let _ = title.set_property_from_str("halignment", "left");
         let _ = title.set_property_from_str("font-desc", "Sans Bold 24");

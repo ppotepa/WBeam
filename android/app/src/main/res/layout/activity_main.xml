@@ -242,7 +242,7 @@
                 android:layout_height="wrap_content"
                 android:fontFamily="monospace"
                 android:gravity="center"
-                android:text="WBEAM"
+                android:text="@string/app_name"
                 android:textColor="#F8FAFC"
                 android:textSize="22sp"
                 android:textStyle="bold" />
@@ -559,7 +559,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="WBeam Settings"
+                    android:text="@string/settings_title"
                     android:textColor="#F8FAFC"
                     android:textSize="18sp"
                     android:textStyle="bold" />
@@ -844,7 +844,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="WBeam Quick Menu"
+            android:text="@string/quick_menu_title"
             android:textColor="#F8FAFC"
             android:textSize="16sp"
             android:textStyle="bold" />

@@ -339,6 +339,7 @@ pub(crate) fn unit_file_path() -> PathBuf {
 }
 
 pub(crate) fn service_unit_content() -> String {
+    let app_name = crate::branding::APP_NAME;
     let root_path = crate::repo_root();
     let _ = crate::ensure_user_wbeam_config(&root_path);
     let daemon_bin_override = crate::wbeam_config_value("WBEAM_DAEMON_BIN");
@@ -358,7 +359,7 @@ pub(crate) fn service_unit_content() -> String {
         format!("{default_runner} {control_port} {stream_port}")
     };
     format!(
-        "[Unit]\nDescription=WBeam Screen Streaming Daemon\nAfter=graphical-session.target\n\n[Service]\nType=simple\nExecStart={exec_start}\nRestart=on-failure\nRestartSec=3\nEnvironment=RUST_LOG=info\nEnvironment=WBEAM_ROOT={root}\nEnvironment=WBEAM_LOCK_FILE={service_lock_file}\n\n[Install]\nWantedBy=default.target\n"
+        "[Unit]\nDescription={app_name} Screen Streaming Daemon\nAfter=graphical-session.target\n\n[Service]\nType=simple\nExecStart={exec_start}\nRestart=on-failure\nRestartSec=3\nEnvironment=RUST_LOG=info\nEnvironment=WBEAM_ROOT={root}\nEnvironment=WBEAM_LOCK_FILE={service_lock_file}\n\n[Install]\nWantedBy=default.target\n"
     )
 }
 

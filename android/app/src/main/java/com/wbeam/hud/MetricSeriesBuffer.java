@@ -27,6 +27,10 @@ public final class MetricSeriesBuffer implements Iterable<Double> {
         return values.isEmpty();
     }
 
+    public void clear() {
+        values.clear();
+    }
+
     public double latest(double fallback) {
         Double tail = values.peekLast();
         return tail == null ? fallback : tail;

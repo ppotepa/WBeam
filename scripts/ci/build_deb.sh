@@ -4,6 +4,7 @@ set -Eeuo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/runtime-assets.sh"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/deb-target.sh"
+source "${ROOT_DIR}/config/branding.sh"
 
 # A supported DEB is compiled against the actual target distribution ABI.
 # Never relabel a Bookworm/libevdi0 binary as Noble/libevdi1.
@@ -79,6 +80,7 @@ export WBEAM_ROOT="${WBEAM_ROOT:-/usr/share/wbeam}"
 exec "${WBEAM_ROOT}/wbeam" "$@"
 EOF
 chmod 0755 "${PKGROOT}/usr/local/bin/wbeam"
+ln -s wbeam "${PKGROOT}/usr/local/bin/waybeam"
 install -m 0755 "${ROOT_DIR}/host/rust/target/release/wbeamd-server" "${PKGROOT}/usr/local/bin/wbeamd-server"
 install -m 0755 "${ROOT_DIR}/host/rust/target/release/wbeamd-streamer" "${PKGROOT}/usr/local/bin/wbeamd-streamer"
 install -m 0755 "${ROOT_DIR}/desktop/apps/desktop-tauri/src-tauri/target/release/wbeam-desktop-tauri" "${PKGROOT}/usr/local/bin/wbeam-desktop-tauri"
@@ -88,19 +90,9 @@ export WBEAM_ROOT="${WBEAM_ROOT:-/usr/share/wbeam}"
 exec /usr/local/bin/wbeam-desktop-tauri "$@"
 EOF
 chmod 0755 "${PKGROOT}/usr/local/bin/wbeam-desktop"
+ln -s wbeam-desktop "${PKGROOT}/usr/local/bin/waybeam-desktop"
 install -m 0644 "${ROOT_DIR}/desktop/apps/desktop-tauri/src-tauri/icons/icon.png" "${PKGROOT}/usr/share/icons/hicolor/256x256/apps/wbeam.png"
-cat > "${PKGROOT}/usr/share/applications/wbeam.desktop" <<'EOF'
-[Desktop Entry]
-Type=Application
-Version=1.0
-Name=WBeam Desktop
-Comment=WBeam desktop control and host service manager
-Exec=/usr/local/bin/wbeam-desktop
-Icon=wbeam
-Terminal=false
-Categories=Utility;Network;
-StartupNotify=true
-EOF
+install -m 0644 "${ROOT_DIR}/config/waybeam.desktop" "${PKGROOT}/usr/share/applications/wbeam.desktop"
 install -m 0644 "${ROOT_DIR}/README.md" "${PKGROOT}/usr/share/doc/wbeam/README.md"
 
 cat > "${PKGROOT}/DEBIAN/control" <<EOF
@@ -109,10 +101,10 @@ Version: ${DEB_VERSION}
 Section: utils
 Priority: optional
 Architecture: ${ARCH}
-Maintainer: WBeam CI <ci@example.local>
-Depends: libgtk-3-0, libwebkit2gtk-4.1-0, libsoup-3.0-0, libayatana-appindicator3-1, ${EVDI_RUNTIME_PKG}, adb, curl, gstreamer1.0-plugins-base
-Description: WBeam host tools and daemon binaries
- WBeam host runtime package built by GitLab CI.
+Maintainer: ${WBEAM_PRODUCT_NAME} CI <ci@example.local>
+Depends: libgtk-3-0, libwebkit2gtk-4.1-0, libsoup-3.0-0, libayatana-appindicator3-1, ${EVDI_RUNTIME_PKG}, adb, curl, binutils, gstreamer1.0-plugins-base
+Description: ${WBEAM_PRODUCT_NAME} host tools and daemon binaries
+ ${WBEAM_PRODUCT_NAME} host runtime package built by GitLab CI.
 EOF
 
 OUT_FILE="${DIST_DIR}/${PKG_NAME}_${DEB_VERSION}_${ARCH}.deb"

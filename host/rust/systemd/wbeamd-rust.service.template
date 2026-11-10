@@ -1,5 +1,5 @@
 [Unit]
-Description=WBeam Rust Host Daemon
+Description=WayBeam Rust Host Daemon
 After=network.target
 
 [Service]

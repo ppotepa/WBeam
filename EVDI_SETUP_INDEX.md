@@ -5,4 +5,4 @@
 - [Compatibility and evidence](docs/EVDI_COMPATIBILITY_MATRIX.md)
 - [EVDI tools](scripts/EVDI_TOOLS_README.md)
 
-Start source installation with `./install-wbeam --backend evdi`.
+Start source installation with `./install-waybeam --backend evdi`.

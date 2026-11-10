@@ -470,9 +470,10 @@ public final class HostApiClient {
         JSONObject kpi = new JSONObject();
         kpi.put("target_fps", 0.0);
         kpi.put("present_fps", LocalApiState.latestPresentFps);
-        kpi.put("frametime_ms_p95", 0.0);
+        kpi.put("frametime_ms_p95", JSONObject.NULL);
         kpi.put("decode_time_ms_p95", 0.0);
         kpi.put("render_time_ms_p95", 0.0);
+        kpi.put("e2e_latency_available", false);
         kpi.put("e2e_latency_ms_p95", 0.0);
         metrics.put("kpi", kpi);
 

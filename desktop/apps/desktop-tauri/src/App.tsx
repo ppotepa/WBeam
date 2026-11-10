@@ -35,6 +35,7 @@ import { ServiceControls } from "./components/ServiceControls";
 import { AccessibleDialog } from "./components/AccessibleDialog";
 import { decideAutoConnectBackend } from "./managers/autoconnectPolicy";
 import { buildDefaultConnectConfig } from "./managers/connectDefaults";
+import { APP_NAME } from "./config/branding";
 import connectResolutionPresets from "./config/connect-resolution-presets.json";
 import connectEncoderOptions from "./config/connect-encoder-options.json";
 
@@ -887,7 +888,7 @@ function resolveEncoderMode(
         if (disposed) return;
         const safe = name || "unknown-host";
         setHostName(safe);
-        await getCurrentWindow().setTitle(`WBeam - ${safe}`);
+        await getCurrentWindow().setTitle(`${APP_NAME} - ${safe}`);
       } catch {
         // Window title is optional. Continue probing even if it fails.
       }
@@ -912,7 +913,7 @@ function resolveEncoderMode(
       <section class={`panel basic-400 ${mode() === "advanced" ? "mode-advanced" : ""}`}>
         <header class="panel-header">
           <div>
-            <h1>WBeam - {hostName()}</h1>
+            <h1>{APP_NAME} - {hostName()}</h1>
             <p class="mode-line">Mode: {modeLabel()}</p>
           </div>
           <div class="header-actions">
@@ -991,7 +992,7 @@ function resolveEncoderMode(
             onClick={() => void ensureBasicServiceReady()}
           >
             <Play size={14} />
-            {session.service().installed ? "Start WBeam service" : "Install and start WBeam service"}
+            {session.service().installed ? `Start ${APP_NAME} service` : `Install and start ${APP_NAME} service`}
           </button>
         </Show>
 
@@ -1033,7 +1034,7 @@ function resolveEncoderMode(
                 </div>
 
                 <div class="line split-line">
-                  <span title="Whether com.wbeam is installed">
+                  <span title={`Whether ${APP_NAME} is installed`}>
                     <Package size={14} /> {device.apkInstalled ? "Installed" : "Missing"}
                   </span>
                   <span class="version-pill" title="Installed APK version">
@@ -1524,9 +1525,8 @@ sudo modprobe evdi initial_device_count=4</pre>
                 <pre class="setup-hint code-block">echo "options evdi initial_device_count=4" | sudo tee /etc/modprobe.d/evdi.conf</pre>
               </li>
               <li>
-                <strong>Restart WBeam service and reconnect devices:</strong>
-                <pre class="setup-hint code-block">./wbeam host stop
-./wbeam host start</pre>
+                <strong>Restart {APP_NAME} service and reconnect devices:</strong>
+                <pre class="setup-hint code-block">systemctl --user restart wbeam-daemon.service</pre>
               </li>
               <li>
                 <strong>Verify:</strong>

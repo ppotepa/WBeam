@@ -6,7 +6,7 @@ for validation status.
 
 | Tool | Purpose |
 | --- | --- |
-| `./install-wbeam --backend evdi` | Source installation, host build, user service and Android onboarding. |
+| `./install-waybeam --backend evdi` | Source installation, host build, user service and Android onboarding. |
 | `scripts/fedora-setup.sh --yes --with-evdi` | Fedora package/bootstrap flow, including library lookup, module build and MOK checks. |
 | `bash scripts/virtual-deps-check.sh --json --backend evdi` | Preliminary runtime dependency probe used by desktop setup. Prints JSON and returns nonzero when dependencies are missing. |
 | `bash scripts/evdi-diagnose.sh --verbose --fix` | Detailed read-only diagnostics, including build/linker checks and repair suggestions. |
@@ -17,9 +17,9 @@ code is the number of reported errors (warnings alone do not fail it). Runtime
 readiness, source build readiness and a real frame-stream test are different
 checks; see the setup guide before interpreting a failure.
 
-The legacy setup helper accepts `--dry-run` and `--skip-diagnostic` and requires
-root, including in dry-run mode. It retains historical assumptions about
-`/dev/dri/card0`, library locations and udev rules, and its package-manager
-coverage is not a support matrix. Prefer the wizard/Fedora helper or your
-distribution's packages for new installations. Do not use its completion banner
-as proof of usable EVDI capture.
+The legacy setup helper accepts `--dry-run` without root; real installation
+requires sudo. It identifies EVDI devices through sysfs, writes modules-load
+configuration and uses a narrow `0660`/video/uaccess rule. It removes only the
+old helper's exact world-writable rule, retaining a backup and unrelated rules.
+Package failures stop setup, and an active module is never unloaded. The helper
+checks dependencies; confirm actual capture from the desktop user's session.

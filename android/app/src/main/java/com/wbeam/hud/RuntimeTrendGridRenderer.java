@@ -26,9 +26,12 @@ public final class RuntimeTrendGridRenderer {
                 "MBPS", mbps, HudRenderSupport.hudToneClass(mbpsTone), "Mbps", fpsLowAnchor
         ) + HudRenderSupport.buildTrendCardHtml(
                 "DROPS / SEC", drops, HudRenderSupport.hudToneClass(dropTone), "", fpsLowAnchor
-        ) + HudRenderSupport.buildTrendCardHtml(
-                "LAT p95", latency, HudRenderSupport.hudToneClass(latTone), "ms", fpsLowAnchor
-        ) + HudRenderSupport.buildTrendCardHtml(
+        ) + (latency.isEmpty()
+                ? "<div class='trend-card'><div class='trend-head'><span class='trend-label'>LAT p95</span>"
+                    + "<span class='trend-range'>unavailable</span></div></div>"
+                : HudRenderSupport.buildTrendCardHtml(
+                    "LAT p95", latency, HudRenderSupport.hudToneClass(latTone), "ms", fpsLowAnchor
+                )) + HudRenderSupport.buildTrendCardHtml(
                 "QUEUE DEPTH", queue, HudRenderSupport.hudToneClass(queueTone), "", fpsLowAnchor
         );
     }

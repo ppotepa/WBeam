@@ -54,7 +54,8 @@ impl PreparedCapture {
         }
     }
 
-    pub fn announce_streaming(&self, port: u16) {
+    pub fn announce_streaming(&self, address: std::net::SocketAddr) {
+        let port = address.port();
         let backend = match self {
             PreparedCapture::Wayland(_) => "wayland_portal",
             PreparedCapture::X11 => "x11",
@@ -70,17 +71,17 @@ impl PreparedCapture {
         // Human-readable log line (kept for backwards compat and log readability).
         match self {
             PreparedCapture::Wayland(_) => {
-                println!("[wbeam] Streaming Wayland screencast on tcp://0.0.0.0:{port}");
+                println!("[wbeam] Streaming Wayland screencast on tcp://{address}");
             }
             PreparedCapture::X11 => {
-                println!("[wbeam] Streaming X11 screencast on tcp://0.0.0.0:{port}");
+                println!("[wbeam] Streaming X11 screencast on tcp://{address}");
             }
             #[cfg(feature = "evdi")]
             PreparedCapture::Evdi => {
-                println!("[wbeam] Streaming EVDI capture on tcp://0.0.0.0:{port}");
+                println!("[wbeam] Streaming EVDI capture on tcp://{address}");
             }
             PreparedCapture::BenchmarkGame => {
-                println!("[wbeam] Streaming benchmark game source on tcp://0.0.0.0:{port}");
+                println!("[wbeam] Streaming benchmark game source on tcp://{address}");
             }
         }
     }

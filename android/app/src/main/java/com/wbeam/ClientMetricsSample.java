@@ -16,6 +16,7 @@ public final class ClientMetricsSample {
     public final double decodeMsP50;
     public final double decodeMsP95;
     public final double renderMsP95;
+    public final Double frameTimeMsP95;
     public final double e2eP50;
     public final double e2eP95;
     public final int    transportQueueDepth;
@@ -36,8 +37,7 @@ public final class ClientMetricsSample {
             double decodeMsP50,
             double decodeMsP95,
             double renderMsP95,
-            double e2eP50,
-            double e2eP95,
+            Double frameTimeMsP95,
             int    transportQueueDepth,
             int    decodeQueueDepth,
             int    renderQueueDepth,
@@ -53,8 +53,9 @@ public final class ClientMetricsSample {
         this.decodeMsP50         = decodeMsP50;
         this.decodeMsP95         = decodeMsP95;
         this.renderMsP95         = renderMsP95;
-        this.e2eP50              = e2eP50;
-        this.e2eP95              = e2eP95;
+        this.frameTimeMsP95      = frameTimeMsP95;
+        this.e2eP50              = Double.NaN;
+        this.e2eP95              = Double.NaN;
         this.transportQueueDepth = transportQueueDepth;
         this.decodeQueueDepth    = decodeQueueDepth;
         this.renderQueueDepth    = renderQueueDepth;
@@ -74,8 +75,11 @@ public final class ClientMetricsSample {
         json.put("decode_time_ms_p50",   decodeMsP50);
         json.put("decode_time_ms_p95",   decodeMsP95);
         json.put("render_time_ms_p95",   renderMsP95);
-        json.put("e2e_latency_ms_p50",   e2eP50);
-        json.put("e2e_latency_ms_p95",   e2eP95);
+        json.put("frametime_ms_p95",     frameTimeMsP95 == null ? JSONObject.NULL : frameTimeMsP95);
+        // WBTP has no clock-sync exchange. Opaque sender PTS cannot measure E2E.
+        json.put("e2e_latency_available", false);
+        json.put("e2e_latency_ms_p50",   0.0);
+        json.put("e2e_latency_ms_p95",   0.0);
         json.put("transport_queue_depth",transportQueueDepth);
         json.put("decode_queue_depth",   decodeQueueDepth);
         json.put("render_queue_depth",   renderQueueDepth);
