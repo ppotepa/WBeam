@@ -165,96 +165,9 @@ pub(crate) fn daemon_lock_hint() -> Option<String> {
     None
 }
 
-fn terminate_and_cleanup_lock(lock_path: &PathBuf, pid: u32) {
-    let pid_s = pid.to_string();
-    let _ = Command::new("kill").args(["-TERM", &pid_s]).status();
-    for _ in 0..10 {
-        if !process_exists(pid) {
-            let _ = fs::remove_file(lock_path);
-            return;
-        }
-        thread::sleep(Duration::from_millis(100));
-    }
-
-    let _ = Command::new("kill").args(["-KILL", &pid_s]).status();
-    for _ in 0..10 {
-        if !process_exists(pid) {
-            let _ = fs::remove_file(lock_path);
-            return;
-        }
-        thread::sleep(Duration::from_millis(100));
-    }
-}
-
-pub(crate) fn stop_conflicting_lock_holder() {
-    for lock in ["/tmp/wbeamd.lock", "/tmp/wbeamd-service-5001.lock"] {
-        let lock_path = PathBuf::from(lock);
-        let Ok(pid_text) = fs::read_to_string(&lock_path) else {
-            continue;
-        };
-        let Ok(pid) = pid_text.trim().parse::<u32>() else {
-            continue;
-        };
-        if !process_name_matches(pid, "wbeamd-server") {
-            continue;
-        }
-        terminate_and_cleanup_lock(&lock_path, pid);
-    }
-}
-
-pub(crate) fn stop_conflicting_port_holder(control_port: u16) {
-    let pattern = format!("wbeamd-server --control-port {control_port}");
-    let output = Command::new("pgrep").args(["-f", &pattern]).output();
-    let Ok(output) = output else {
-        return;
-    };
-    if !output.status.success() {
-        return;
-    }
-    let pids = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|line| line.trim().parse::<u32>().ok())
-        .collect::<Vec<_>>();
-    for pid in pids {
-        if !process_name_matches(pid, "wbeamd-server") {
-            continue;
-        }
-        let pid_s = pid.to_string();
-        let _ = Command::new("kill").args(["-TERM", &pid_s]).status();
-        for _ in 0..10 {
-            if !process_exists(pid) {
-                break;
-            }
-            thread::sleep(Duration::from_millis(100));
-        }
-        if process_exists(pid) {
-            let _ = Command::new("kill").args(["-KILL", &pid_s]).status();
-        }
-    }
-}
-
-pub(crate) fn process_exists(pid: u32) -> bool {
-    Command::new("ps")
-        .args(["-p", &pid.to_string()])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
-pub(crate) fn process_name_matches(pid: u32, needle: &str) -> bool {
-    let output = Command::new("ps")
-        .args(["-p", &pid.to_string(), "-o", "comm="])
-        .output();
-    let Ok(output) = output else {
-        return false;
-    };
-    if !output.status.success() {
-        return false;
-    }
-    String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .contains(needle)
-}
+// A service start never terminates arbitrary processes by PID, lock-file
+// contents, or command-line substring. systemd owns only the managed unit;
+// a separate foreground daemon or busy port is reported as a start error.
 
 pub(crate) fn ensure_systemctl() -> Result<(), String> {
     if command_exists("systemctl") {
@@ -338,7 +251,52 @@ pub(crate) fn unit_file_path() -> PathBuf {
     PathBuf::from(home).join(format!(".config/systemd/user/{SERVICE_NAME}.service"))
 }
 
-pub(crate) fn service_unit_content() -> String {
+// The shell installer and Tauri manage the same user unit. A desktop reinstall
+// must not silently replace the selected backend or explicit network/EVDI
+// overrides. Preserve only recognized single-key Environment= directives in
+// the original [Service] section; never carry over arbitrary ExecStart lines.
+fn preserved_service_environment(previous: &str) -> String {
+    const KEYS: &[&str] = &[
+        "WBEAM_CAPTURE_BACKEND",
+        "WBEAM_RUST_STREAMER_BIN",
+        "WBEAM_EVDI_LIB_DIR",
+        "WBEAM_CONTROL_BIND_ADDR",
+        "WBEAM_ALLOW_UNAUTHENTICATED_LAN_CONTROL",
+        "WBEAM_STREAM_BIND_ADDR",
+        "WBEAM_ALLOW_UNAUTHENTICATED_LAN_STREAM",
+    ];
+    let mut in_service = false;
+    let mut entries: Vec<(String, String)> = Vec::new();
+    for raw_line in previous.lines() {
+        let line = raw_line.trim();
+        if line.starts_with('[') && line.ends_with(']') {
+            in_service = line == "[Service]";
+            continue;
+        }
+        if !in_service {
+            continue;
+        }
+        let Some(assignment) = line.strip_prefix("Environment=") else {
+            continue;
+        };
+        let Some((key, _)) = assignment.trim_start_matches('"').split_once('=') else {
+            continue;
+        };
+        if !KEYS.contains(&key) {
+            continue;
+        }
+        // systemd interprets the last assignment to a key as authoritative.
+        if let Some((_, existing_line)) = entries.iter_mut().find(|(name, _)| name.as_str() == key) {
+            *existing_line = line.to_string();
+        } else {
+            entries.push((key.to_string(), line.to_string()));
+        }
+    }
+    entries.into_iter().map(|(_, line)| line).collect::<Vec<_>>().join("\n")
+}
+
+pub(crate) fn service_unit_content(previous_unit: &str) -> String {
+    let app_name = crate::branding::APP_NAME;
     let root_path = crate::repo_root();
     let _ = crate::ensure_user_wbeam_config(&root_path);
     let daemon_bin_override = crate::wbeam_config_value("WBEAM_DAEMON_BIN");
@@ -350,6 +308,7 @@ pub(crate) fn service_unit_content() -> String {
     let stream_port = crate::wbeam_stream_port();
     let service_lock_file = format!("/tmp/wbeamd-service-{control_port}.lock");
     let root = root_path.to_string_lossy().to_string();
+    let preserved_env = preserved_service_environment(previous_unit);
     let exec_start = if let Some(bin) = daemon_bin_override {
         // Backward compatible override for prebuilt daemon binaries.
         format!("{bin} --control-port {control_port} --stream-port {stream_port} --root {root}")
@@ -358,8 +317,51 @@ pub(crate) fn service_unit_content() -> String {
         format!("{default_runner} {control_port} {stream_port}")
     };
     format!(
-        "[Unit]\nDescription=WBeam Screen Streaming Daemon\nAfter=graphical-session.target\n\n[Service]\nType=simple\nExecStart={exec_start}\nRestart=on-failure\nRestartSec=3\nEnvironment=RUST_LOG=info\nEnvironment=WBEAM_ROOT={root}\nEnvironment=WBEAM_LOCK_FILE={service_lock_file}\n\n[Install]\nWantedBy=default.target\n"
+        "[Unit]\nDescription={app_name} Screen Streaming Daemon\nAfter=graphical-session.target\n\n[Service]\nType=simple\nExecStart={exec_start}\nRestart=on-failure\nRestartSec=3\nEnvironment=RUST_LOG=info\nEnvironment=WBEAM_ROOT={root}\nEnvironment=WBEAM_LOCK_FILE={service_lock_file}\n{preserved_env}\n\n[Install]\nWantedBy=default.target\n"
     )
+}
+
+#[cfg(test)]
+mod service_unit_migration_tests {
+    use super::preserved_service_environment;
+
+    #[test]
+    fn desktop_service_reinstall_preserves_explicit_installer_backend_and_binds() {
+        let previous = r#"[Unit]
+Description=WayBeam
+[Service]
+ExecStart=/old/command --do-not-preserve
+Environment=RUST_LOG=trace
+Environment=WBEAM_CAPTURE_BACKEND=wayland_portal
+Environment="WBEAM_STREAM_BIND_ADDR=192.0.2.10"
+Environment="WBEAM_ALLOW_UNAUTHENTICATED_LAN_STREAM=1"
+Environment="WBEAM_CONTROL_BIND_ADDR=192.0.2.10"
+Environment="WBEAM_ALLOW_UNAUTHENTICATED_LAN_CONTROL=1"
+Environment="WBEAM_EVDI_LIB_DIR=/opt/old evdi"
+[Install]
+Environment=WBEAM_CAPTURE_BACKEND=evdi
+"#;
+        let preserved = preserved_service_environment(previous);
+        for expected in [
+            "Environment=WBEAM_CAPTURE_BACKEND=wayland_portal",
+            "Environment=\"WBEAM_STREAM_BIND_ADDR=192.0.2.10\"",
+            "Environment=\"WBEAM_ALLOW_UNAUTHENTICATED_LAN_STREAM=1\"",
+            "Environment=\"WBEAM_CONTROL_BIND_ADDR=192.0.2.10\"",
+            "Environment=\"WBEAM_ALLOW_UNAUTHENTICATED_LAN_CONTROL=1\"",
+            "Environment=\"WBEAM_EVDI_LIB_DIR=/opt/old evdi\"",
+        ] {
+            assert!(preserved.lines().any(|line| line == expected), "{expected}");
+        }
+        assert!(!preserved.contains("RUST_LOG"));
+        assert!(!preserved.contains("ExecStart"));
+        assert!(!preserved.contains("BACKEND=evdi"));
+    }
+
+    #[test]
+    fn last_duplicate_environment_assignment_wins() {
+        let previous = "[Service]\nEnvironment=WBEAM_CAPTURE_BACKEND=evdi\nEnvironment=WBEAM_CAPTURE_BACKEND=wayland_portal\n";
+        assert_eq!(preserved_service_environment(previous), "Environment=WBEAM_CAPTURE_BACKEND=wayland_portal");
+    }
 }
 
 #[tauri::command]
@@ -380,7 +382,12 @@ fn service_install_blocking() -> Result<ServiceStatus, String> {
         fs::create_dir_all(parent).map_err(|e| format!("cannot create unit dir: {e}"))?;
     }
 
-    fs::write(&unit_path, service_unit_content())
+    let previous = match fs::read_to_string(&unit_path) {
+        Ok(contents) => contents,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(err) => return Err(format!("cannot read existing unit before reinstall: {err}")),
+    };
+    fs::write(&unit_path, service_unit_content(&previous))
         .map_err(|e| format!("cannot write unit file: {e}"))?;
 
     systemctl_user(&["daemon-reload"])?;
@@ -430,15 +437,15 @@ fn service_start_blocking() -> Result<ServiceStatus, String> {
         crate::ui_service_log("service_start", "error", "service is not installed");
         return Err("service is not installed".to_string());
     }
-    let expected = service_unit_content();
-    let current = fs::read_to_string(&unit_path).unwrap_or_default();
+    let current = fs::read_to_string(&unit_path)
+        .map_err(|e| format!("cannot read service unit before starting: {e}"))?;
+    let expected = service_unit_content(&current);
     if current != expected {
         fs::write(&unit_path, expected).map_err(|e| format!("cannot rewrite unit file: {e}"))?;
         systemctl_user(&["daemon-reload"])?;
     }
-    let control_port = crate::wbeam_control_port();
-    stop_conflicting_port_holder(control_port);
-    stop_conflicting_lock_holder();
+    // Do not search for or kill a same-named process to free its port/lock.
+    // Let systemd and the daemon's own bind/lock validation report conflicts.
     let _ = systemctl_user(&["reset-failed", SERVICE_NAME]);
     if let Err(err) = systemctl_user(&["start", SERVICE_NAME]) {
         crate::ui_service_log("service_start", "error", &err);

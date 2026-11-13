@@ -44,8 +44,13 @@ def wbeamAppIdSuffixRaw = (project.findProperty("WBEAM_APP_ID_SUFFIX") ?: System
 def wbeamAppIdSuffix = wbeamAppIdSuffixRaw.isEmpty()
     ? ""
     : (wbeamAppIdSuffixRaw.startsWith(".") ? wbeamAppIdSuffixRaw : ".${wbeamAppIdSuffixRaw}")
-def wbeamAppNameRaw = (project.findProperty("WBEAM_APP_NAME") ?: System.getenv("WBEAM_ANDROID_APP_NAME") ?: "WBeam").toString().trim()
-def wbeamAppName = wbeamAppNameRaw.isEmpty() ? "WBeam" : wbeamAppNameRaw.replace("\"", "")
+def wbeamBranding = new groovy.json.JsonSlurper().parse(rootProject.file("../config/branding.json"))
+def wbeamDefaultAppName = wbeamBranding.displayName?.toString()?.trim()
+if (!wbeamDefaultAppName) {
+    throw new GradleException("config/branding.json must specify displayName")
+}
+def wbeamAppNameRaw = (project.findProperty("WBEAM_APP_NAME") ?: System.getenv("WBEAM_ANDROID_APP_NAME") ?: wbeamDefaultAppName).toString().trim()
+def wbeamAppName = wbeamAppNameRaw.isEmpty() ? wbeamDefaultAppName : wbeamAppNameRaw.replace("\"", "")
 
 // Debug remains independent; release requires protected keystore variables.
 def versionCodeInput = (project.findProperty("WBEAM_VERSION_CODE") ?: System.getenv("WBEAM_VERSION_CODE") ?: "1").toString()
@@ -85,6 +90,9 @@ android {
         versionCode = wbeamVersionCode
         versionName = wbeamBuildRevision
         resValue "string", "app_name", "\"${wbeamAppName}\""
+        resValue "string", "settings_title", "\"${wbeamAppName} Settings\""
+        resValue "string", "quick_menu_title", "\"${wbeamAppName} Quick Menu\""
+        resValue "string", "stream_channel_name", "\"${wbeamAppName} Stream\""
         buildConfigField "String", "WBEAM_BUILD_REV", "\"${wbeamBuildRevision}\""
         buildConfigField "String", "WBEAM_HOST", "\"${wbeamHost}\""
         buildConfigField "String", "WBEAM_API_HOST", "\"${wbeamApiHost}\""
@@ -129,4 +137,5 @@ dependencies {
     implementation 'com.google.android.material:material:1.4.0'
     implementation 'com.squareup.okhttp3:okhttp:3.12.13'
     testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
 }

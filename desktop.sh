@@ -48,7 +48,7 @@ new_log_file() {
 
 usage() {
   cat <<'EOF'
-WBeam Desktop GUI launcher
+WayBeam Desktop GUI launcher
 
 Usage:
   ./desktop.sh
@@ -141,7 +141,7 @@ desktop_kill_stale_dev() {
     return 0
   fi
 
-  echo "[desktop] port 1420 is in use by non-WBeam process (pid=$pid)." >&2
+  echo "[desktop] port 1420 is in use by non-WayBeam process (pid=$pid)." >&2
   echo "[desktop] command: $cmd" >&2
   echo "[desktop] free port 1420 and retry." >&2
   return 1

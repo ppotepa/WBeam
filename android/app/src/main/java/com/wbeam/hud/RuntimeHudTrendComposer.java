@@ -22,7 +22,12 @@ public final class RuntimeHudTrendComposer {
         runtimePresentSeries.addSample(Math.max(0.0, presentFps));
         runtimeMbpsSeries.addSample(Math.max(0.0, bitrateMbps));
         runtimeDropSeries.addSample(Math.max(0.0, dropPerSec));
-        runtimeLatencySeries.addSample(Math.max(0.0, e2eP95));
+        if (TimingValueFormatter.isAvailable(e2eP95)) {
+            runtimeLatencySeries.addSample(e2eP95);
+        } else {
+            // Do not present a previous session's measurements as current.
+            runtimeLatencySeries.clear();
+        }
         double queueDepth = (double) qT + qD + qR;
         runtimeQueueSeries.addSample(Math.max(0.0, queueDepth));
     }

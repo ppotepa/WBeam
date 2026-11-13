@@ -1,4 +1,4 @@
-name: WBeam Release Integration Review
+name: WayBeam Release Integration Review
 
 # Temporarily manual-only: GitHub runners are not allocated (#142).
 # Re-enable push/pull_request triggers once a real runner executes the gates.
@@ -12,7 +12,7 @@ permissions:
 jobs:
   frontend:
     name: Solid/TypeScript + Node regressions
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -29,20 +29,27 @@ jobs:
 
   python-and-shell:
     name: Release checks / E2E runner / package scripts
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Publication fixture prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends jq
       - name: Syntax, release guards, EVDI classifier
         run: |
-          bash -n wbeam scripts/ci/*.sh scripts/virtual-deps-check.sh scripts/virtual-deps-install.sh
+          bash scripts/ci/check-shell-syntax.sh
+          python3 scripts/apply-branding.py --check
           bash scripts/ci/test-release-version.sh
           bash scripts/ci/test-deb-target.sh
           bash scripts/ci/test-evdi-diagnostics.sh
           bash scripts/ci/test-virtual-deps-runtime.sh
           bash scripts/ci/test-virtual-deps-install-dry-run.sh
+          bash scripts/ci/test-host-shell-regressions.sh
+          bash scripts/ci/test-evdi-setup.sh
           bash scripts/ci/test-local-verification-runner.sh
           bash scripts/ci/test-control-bind-policy.sh
           bash scripts/ci/test-daemon-log-location.sh
@@ -54,7 +61,7 @@ jobs:
 
   rust-host:
     name: Rust API and core unit tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -64,9 +71,9 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             pkg-config libssl-dev libdbus-1-dev \
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-            libevdi0-dev libx11-dev libxrandr-dev libxfixes-dev libxext-dev libxrender-dev
+            libevdi-dev libx11-dev libxrandr-dev libxfixes-dev libxext-dev libxrender-dev
       - name: Host API and core tests
-        run: cargo test --locked --manifest-path host/rust/Cargo.toml -p wbeamd-api -p wbeamd-core -p wbeamd-server
+        run: cargo test --locked --manifest-path host/rust/Cargo.toml -p wbeamd-api -p wbeamd-core -p wbeamd-server -p wbeamd-tuner
       - name: EVDI streamer compile and linker tests
         run: |
           cargo check --locked --manifest-path host/rust/Cargo.toml -p wbeamd-streamer --no-default-features --features evdi
@@ -74,7 +81,7 @@ jobs:
 
   tauri-native:
     name: Tauri Rust tests / compile
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -98,7 +105,7 @@ jobs:
 
   android-debug:
     name: Android Java/JUnit/assembleDebug
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4

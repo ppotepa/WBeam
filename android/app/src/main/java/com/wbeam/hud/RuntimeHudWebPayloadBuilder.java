@@ -26,10 +26,10 @@ public final class RuntimeHudWebPayloadBuilder {
         private double recvFps;
         private double decodeFps;
         private double liveMbps;
-        private double e2eP95;
+        private double e2eP95 = Double.NaN;
         private double decodeP95;
         private double renderP95;
-        private double frametimeP95;
+        private double frametimeP95 = Double.NaN;
         private double dropsPerSec;
 
         private int qT;
@@ -386,10 +386,11 @@ public final class RuntimeHudWebPayloadBuilder {
         cards.append(HudRenderSupport.hudCard("RECV FPS", HudRenderSupport.fmt1(in.getRecvFps()), ""));
         cards.append(HudRenderSupport.hudCard("DECODE FPS", HudRenderSupport.fmt1(in.getDecodeFps()), ""));
         cards.append(HudRenderSupport.hudCard("LIVE MBPS", HudRenderSupport.fmtDoubleOrPlaceholder(in.getLiveMbps(), "%.2f", "PENDING"), toneClass));
-        cards.append(HudRenderSupport.hudCard("E2E p95", HudRenderSupport.fmt1(in.getE2eP95()) + " ms", toneClass));
+        cards.append(HudRenderSupport.hudCard("E2E p95", TimingValueFormatter.milliseconds(in.getE2eP95(), 1),
+                TimingValueFormatter.isAvailable(in.getE2eP95()) ? toneClass : ""));
         cards.append(HudRenderSupport.hudCard("Decode p95", HudRenderSupport.fmtDoubleOrPlaceholder(in.getDecodeP95(), "%.2f", "-") + " ms", ""));
         cards.append(HudRenderSupport.hudCard("Render p95", HudRenderSupport.fmtDoubleOrPlaceholder(in.getRenderP95(), "%.2f", "-") + " ms", ""));
-        cards.append(HudRenderSupport.hudCard("Frame p95", HudRenderSupport.fmtDoubleOrPlaceholder(in.getFrametimeP95(), "%.2f", "-") + " ms", ""));
+        cards.append(HudRenderSupport.hudCard("Frame p95", TimingValueFormatter.milliseconds(in.getFrametimeP95(), 2), ""));
         cards.append(HudRenderSupport.hudCard("Drops / s", HudRenderSupport.fmtDoubleOrPlaceholder(in.getDropsPerSec(), "%.3f", "PENDING"), toneClass));
         cards.append(HudRenderSupport.hudCard("Drops total", String.valueOf(in.getDrops()), ""));
 

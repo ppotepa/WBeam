@@ -136,14 +136,14 @@ public class StreamService extends Service {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(
                     CHANNEL_ID,
-                    "WBeam Stream",
+                    getString(R.string.stream_channel_name),
                     NotificationManager.IMPORTANCE_LOW
             );
             nm.createNotificationChannel(channel);
         }
 
         return new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("WBeam")
+                .setContentTitle(getString(R.string.app_name))
                 .setContentText(text)
                 .setSmallIcon(android.R.drawable.presence_video_online)
                 .setOngoing(true)

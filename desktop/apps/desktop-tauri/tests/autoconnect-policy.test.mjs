@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import ts from "typescript";
+import { loadAppFunction } from "./app-functions.mjs";
 
 function transpile(relPath) {
   const source = readFileSync(new URL(relPath, import.meta.url), "utf8");
@@ -15,7 +16,7 @@ const policySource = transpile("../src/managers/autoconnectPolicy.ts")
   .replace(/import\s+\{\s*resolveSupportedBackend\s*\}\s+from\s+["']\.\/backendPolicy["'];?/, "");
 const defaultConfigSource = transpile("../src/managers/connectDefaults.ts");
 const combined = `${backendSource}\n${policySource}\n${defaultConfigSource}`;
-const { decideAutoConnectBackend, buildDefaultConnectConfig } = await import(`data:text/javascript;base64,${Buffer.from(combined).toString("base64")}`);
+const { decideAutoConnectBackend, buildDefaultConnectConfig, resolveSupportedBackend } = await import(`data:text/javascript;base64,${Buffer.from(combined).toString("base64")}`);
 
 const probe = (captureMode, availableBackends) => ({
   reachable: true, supported: true, captureMode, availableBackends,
@@ -42,12 +43,53 @@ test("neither Auto nor multi-device uses X11 legacy", () => {
   assert.equal(decideAutoConnectBackend(probe("x11_gst", ["x11_gst"]), 3).backend, null);
 });
 
-test("autoconnect renders per-device results and releases its busy guard", () => {
-  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
-  assert.match(app, /const result = await session\.connectDevice\(device, "virtual_monitor", connectConfig\)/);
-  assert.match(app, /if \(result\.ok\) accepted \+= 1/);
-  assert.match(app, /setAutoConnectSummary/);
-  assert.match(app, /finally \{\s*setAutoConnectBusy\(false\)/);
+function autoConnectHarness(doctor = async () => ({ ok: true })) {
+  const busy = [];
+  const summaries = [];
+  const requests = [];
+  const devices = ["accepted", "failed", "skipped"].map((serial) => ({ serial }));
+  const session = {
+    devices: () => devices,
+    hostProbe: () => probe("evdi", ["evdi"]),
+    deviceSnapshotStale: () => false,
+    setError: () => {},
+    refreshSnapshot: async () => {},
+    connectDevice: async (device) => {
+      requests.push(device.serial);
+      return device.serial === "accepted" ? { ok: true } : { ok: false, error: "start refused" };
+    },
+  };
+  const connect = loadAppFunction("autoConnectAll", {
+    session, api: { getEvdiDepsDoctor: doctor }, autoConnectBusy: () => false,
+    autoConnectDisabledReason: () => "",
+    connectDisabledReason: (device) => device.serial === "skipped" ? "APK missing" : "",
+    decideAutoConnectBackend, resolveSupportedBackend, buildDefaultConnectConfig,
+    setAutoConnectBusy: (value) => busy.push(value),
+    setAutoConnectSummary: (value) => summaries.push(value),
+  });
+  return { connect, busy, summaries, requests };
+}
+
+test("autoconnect reports each outcome and releases its busy guard", async () => {
+  const run = autoConnectHarness();
+  await run.connect();
+  assert.deepEqual(run.requests, ["accepted", "failed"]);
+  assert.deepEqual(run.busy, [true, false]);
+  const summary = run.summaries.at(-1);
+  assert.match(summary, /1 accepted, 1 skipped, 1 failed/);
+  assert.match(summary, /failed: failed \(start refused\)/);
+  assert.match(summary, /skipped: skipped \(APK missing\)/);
+});
+
+test("unavailable EVDI diagnostics never start a session or leave Auto-connect busy", async () => {
+  for (const doctor of [async () => ({ ok: false, message: "missing library" }),
+    async () => { throw new Error("doctor unavailable"); }]) {
+    const run = autoConnectHarness(doctor);
+    await run.connect();
+    assert.deepEqual(run.requests, []);
+    assert.deepEqual(run.busy, [true, false]);
+    assert.match(run.summaries.at(-1), /Autoconnect blocked/);
+  }
 });
 
 test("Basic and Auto-connect use identical adaptive config for both supported backends", () => {

@@ -4,7 +4,7 @@
 //! frames each buffer, and writes it over TCP.
 
 use std::io::Write;
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::net::{TcpListener, TcpStream};
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
 use std::sync::mpsc::{self, RecvTimeoutError, TrySendError};
@@ -685,7 +685,7 @@ fn run_accept_loop(
 /// 5. Exits when `stop` is set to `true`.
 pub fn spawn_sender(
     appsink: gst_app::AppSink,
-    port: u16,
+    listener: TcpListener,
     fps: u32,
     cfg: ResolvedConfig,
     stream_mode: StreamMode,
@@ -700,10 +700,9 @@ pub fn spawn_sender(
         let queue_stats = QueueStats::new();
         let runtime = SenderRuntime::new(fps, &cfg, stream_mode, codec_flags);
 
-        let listener =
-            TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port))).expect("bind tcp listener");
-        listener.set_nonblocking(true).ok();
-        println!("[wbeam-framed] listening on :{port}");
+        if let Ok(address) = listener.local_addr() {
+            println!("[wbeam-framed] listening on {address}");
+        }
         let producer_handle = spawn_producer(
             appsink,
             runtime,

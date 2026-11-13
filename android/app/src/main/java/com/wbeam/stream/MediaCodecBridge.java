@@ -160,11 +160,13 @@ final class MediaCodecBridge {
                 } else {
                     long renderStartNs = SystemClock.elapsedRealtimeNanos();
                     codec.releaseOutputBuffer(outputIndex, true);
+                    long renderFinishedNs = SystemClock.elapsedRealtimeNanos();
+                    stats.presentationMetrics.record(renderStartNs, renderFinishedNs);
                     stats.renderedCount++;
                     stats.lastRenderedPtsUs = info.presentationTimeUs;
                     stats.renderNsMax = Math.max(
                             stats.renderNsMax,
-                            SystemClock.elapsedRealtimeNanos() - renderStartNs
+                            renderFinishedNs - renderStartNs
                     );
                 }
                 continue;
@@ -179,9 +181,11 @@ final class MediaCodecBridge {
         if (dropLateOutput && latestRenderableIndex >= 0) {
             long renderStartNs = SystemClock.elapsedRealtimeNanos();
             codec.releaseOutputBuffer(latestRenderableIndex, true);
+            long renderFinishedNs = SystemClock.elapsedRealtimeNanos();
+            stats.presentationMetrics.record(renderStartNs, renderFinishedNs);
             stats.renderedCount = 1;
             stats.lastRenderedPtsUs = latestRenderablePtsUs;
-            stats.renderNsMax = SystemClock.elapsedRealtimeNanos() - renderStartNs;
+            stats.renderNsMax = renderFinishedNs - renderStartNs;
         }
     }
 
@@ -196,6 +200,7 @@ final class MediaCodecBridge {
     }
 
     static final class DrainStats {
+        final PresentationMetrics presentationMetrics = new PresentationMetrics();
         int releasedCount;
         int renderedCount;
         int droppedLateCount;

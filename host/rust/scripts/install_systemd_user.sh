@@ -56,4 +56,4 @@ echo "[wbeam] service status:"
 systemctl --user --no-pager --full status wbeamd-rust.service || true
 
 echo "[wbeam] installed. For auto-start without active login session run once:"
-echo "  loginctl enable-linger $USER"
+echo "  loginctl enable-linger ${USER:-$(id -un)}"

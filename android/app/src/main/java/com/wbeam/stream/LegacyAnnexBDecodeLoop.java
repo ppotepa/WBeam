@@ -93,14 +93,11 @@ final class LegacyAnnexBDecodeLoop {
         long outFrames = 0;
         long droppedSec = 0;
         long tooLateSec = 0;
-        long decodeNsTotal = 0;
         long[] decodeNsBuf = new long[128];
         long[] decodeNsScratch = new long[128];
         int decodeNsBufN = 0;
-        long renderNsMax = 0;
         long lastLog = SystemClock.elapsedRealtime();
         long lastPresentMs = SystemClock.elapsedRealtime();
-        long lastPresentedPtsUs = -1L;
         long pendingWithNoPresent = 0;
         long lastDecodeProgressMs = SystemClock.elapsedRealtime();
         long lastDrainAttemptMs = 0L;
@@ -226,7 +223,6 @@ final class LegacyAnnexBDecodeLoop {
                     }
                     outFrames += drainStats.renderedCount;
                     tooLateSec += drainStats.droppedLateCount;
-                    renderNsMax = Math.max(renderNsMax, drainStats.renderNsMax);
                     renderQueueDepth = drainStats.renderedCount > 0 ? 1 : 0;
 
                     if (pendingDecodeQueue >= decodeQueueMaxFrames) {
@@ -234,7 +230,6 @@ final class LegacyAnnexBDecodeLoop {
                             long t0 = SystemClock.elapsedRealtimeNanos();
                             if (MediaCodecBridge.queueNal(codec, nalData, nalOff, nalSize, frames * frameUs, 1_000)) {
                                 long dn = SystemClock.elapsedRealtimeNanos() - t0;
-                                decodeNsTotal += dn;
                                 decodeNsBuf[(decodeNsBufN++) & 127] = dn;
                                 avgNalSize = ((avgNalSize * 7) + nalSize) / 8;
                                 inFrames++;
@@ -250,7 +245,6 @@ final class LegacyAnnexBDecodeLoop {
                         long t0 = SystemClock.elapsedRealtimeNanos();
                         if (MediaCodecBridge.queueNal(codec, nalData, nalOff, nalSize, frames * frameUs, 1_000)) {
                             long dn = SystemClock.elapsedRealtimeNanos() - t0;
-                            decodeNsTotal += dn;
                             decodeNsBuf[(decodeNsBufN++) & 127] = dn;
                             avgNalSize = ((avgNalSize * 7) + nalSize) / 8;
                             inFrames++;
@@ -298,7 +292,6 @@ final class LegacyAnnexBDecodeLoop {
                             }
                             outFrames += drainStats.renderedCount;
                             tooLateSec += drainStats.droppedLateCount;
-                            renderNsMax = Math.max(renderNsMax, drainStats.renderNsMax);
                             renderQueueDepth = drainStats.renderedCount > 0 ? 1 : 0;
 
                             if (pendingDecodeQueue >= decodeQueueMaxFrames) {
@@ -306,7 +299,6 @@ final class LegacyAnnexBDecodeLoop {
                                     long t0 = SystemClock.elapsedRealtimeNanos();
                                     if (MediaCodecBridge.queueNal(codec, streamBuf, sHead, nalSize, frames * frameUs, 1_000)) {
                                         long dn = SystemClock.elapsedRealtimeNanos() - t0;
-                                        decodeNsTotal += dn;
                                         decodeNsBuf[(decodeNsBufN++) & 127] = dn;
                                         avgNalSize = ((avgNalSize * 7) + nalSize) / 8;
                                         inFrames++;
@@ -322,7 +314,6 @@ final class LegacyAnnexBDecodeLoop {
                                 long t0 = SystemClock.elapsedRealtimeNanos();
                                 if (MediaCodecBridge.queueNal(codec, streamBuf, sHead, nalSize, frames * frameUs, 1_000)) {
                                     long dn = SystemClock.elapsedRealtimeNanos() - t0;
-                                    decodeNsTotal += dn;
                                     decodeNsBuf[(decodeNsBufN++) & 127] = dn;
                                     avgNalSize = ((avgNalSize * 7) + nalSize) / 8;
                                     inFrames++;
@@ -343,9 +334,6 @@ final class LegacyAnnexBDecodeLoop {
                 pendingWithNoPresent = 0;
             } else if (inFrames > 0) {
                 pendingWithNoPresent++;
-            }
-            if (drainStats.renderedCount > 0 && drainStats.lastRenderedPtsUs > 0) {
-                lastPresentedPtsUs = drainStats.lastRenderedPtsUs;
             }
             if (pendingWithNoPresent > 300 && (SystemClock.elapsedRealtime() - lastPresentMs) > 5_000) {
                 throw new IOException("C5: black-screen watchdog: 0 frames presented in 5s with "
@@ -370,13 +358,15 @@ final class LegacyAnnexBDecodeLoop {
                                 + renderQueueDepth
                                 + " | reconnects: " + runtimeState.getReconnects()
                 );
-                double decodeMsP50 = inFrames > 0 ? (decodeNsTotal / 1_000_000.0) / inFrames : 0.0;
+                double decodeMsP50 = StreamBufferMath.percentileMs(decodeNsBuf, Math.min(decodeNsBufN, 128), 0.50, decodeNsScratch);
                 double decodeMsP95 = StreamBufferMath.percentileMs(decodeNsBuf, Math.min(decodeNsBufN, 128), 0.95, decodeNsScratch);
-                double renderMsP95 = renderNsMax / 1_000_000.0;
-                double e2eMs = StreamBufferMath.estimateE2eLatencyMs(lastPresentedPtsUs);
+                double renderMsP95 = drainStats.presentationMetrics.renderP95Ms();
+                double sampleSeconds = Math.max(0.001, (now - lastLog) / 1000.0);
                 statusListener.onClientMetrics(new ClientMetricsSample(
-                        inFrames, inFrames, outFrames, bytes,
-                        decodeMsP50, decodeMsP95, renderMsP95, e2eMs, e2eMs,
+                        inFrames / sampleSeconds, inFrames / sampleSeconds, outFrames / sampleSeconds,
+                        (long) (bytes / sampleSeconds),
+                        decodeMsP50, decodeMsP95, renderMsP95,
+                        drainStats.presentationMetrics.frameTimeP95Ms(),
                         StreamBufferMath.estimateTransportDepthFrames(bufAvail, avgNalSize),
                         Math.min(decodeQueueMaxFrames, pendingDecodeQueue),
                         Math.min(renderQueueMaxFrames, renderQueueDepth),
@@ -397,9 +387,8 @@ final class LegacyAnnexBDecodeLoop {
                 outFrames = 0;
                 droppedSec = 0;
                 tooLateSec = 0;
-                decodeNsTotal = 0;
                 decodeNsBufN = 0;
-                renderNsMax = 0;
+                drainStats.presentationMetrics.clearWindow();
                 lastLog = now;
             }
         }

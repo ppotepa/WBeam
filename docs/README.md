@@ -1,4 +1,4 @@
-# WBeam documentation
+# WayBeam documentation
 
 Start with the [project overview and quick start](../README.md). The guides below
 describe the checked-in implementation; release targets and historical test
@@ -19,6 +19,7 @@ results are identified separately from verified hardware support.
 
 | Need | Guide |
 | --- | --- |
+| Change display names or understand upgrade compatibility | [Branding and upgrades](BRANDING.md) |
 | Find components, runtime flow and configuration | [Repository and architecture](repo-structure.md) |
 | Build, validate and prepare a contribution | [Development workflow](agents.workflow.md) |
 | Inspect frame headers, API metrics and latency limits | [Wire protocol and telemetry](telemetry_schema.md) |
@@ -37,5 +38,5 @@ X11 remains a **legacy** implementation. Current release paths are EVDI and
 Wayland Portal; legacy source, helper options and test scenarios do not imply
 release support. The [repository guide](repo-structure.md) explains the boundary.
 
-For CLI options, use `./wbeam help` from the repository root. Keep setup details
+For CLI options, use `./waybeam help` from the repository root. Keep setup details
 in their owning guide and link to them instead of maintaining parallel recipes.

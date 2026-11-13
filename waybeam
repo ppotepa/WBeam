@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Canonical product command; retain the existing CLI implementation and settings.
+set -euo pipefail
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+exec "$ROOT_DIR/wbeam" "$@"

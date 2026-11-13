@@ -40,7 +40,7 @@ chmod +x "$tmp/bin/systemctl"
 
 HOME="$home" WBEAM_ROOT="$runtime" PATH="$tmp/bin:$PATH" \
 WBEAM_TEST_SYSTEMCTL_LOG="$tmp/systemctl.log" \
-  bash "$installer" 5501 5500 > "$tmp/installer.stdout" 2>&1
+  env -u USER bash "$installer" 5501 5500 > "$tmp/installer.stdout" 2>&1
 
 unit="$home/.config/systemd/user/wbeamd-rust.service"
 [[ -s "$unit" ]]

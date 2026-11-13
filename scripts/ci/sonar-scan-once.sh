@@ -5,7 +5,7 @@ REPO_DIR="${REPO_DIR:-/workspace}"
 SONAR_HOST_URL="${SONAR_HOST_URL:-http://sonarqube:9000}"
 SONAR_USER_HOME="${SONAR_USER_HOME:-${REPO_DIR}/.sonar}"
 PROJECT_KEY="${PROJECT_KEY:-wbeam}"
-PROJECT_NAME="${PROJECT_NAME:-WBeam}"
+PROJECT_NAME="${PROJECT_NAME:-WayBeam}"
 PRE_SCAN_CMD="${PRE_SCAN_CMD:-}"
 
 if [ -z "${SONAR_TOKEN:-}" ]; then

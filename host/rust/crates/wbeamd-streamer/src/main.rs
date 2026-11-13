@@ -25,6 +25,18 @@ use transport::{hello_mode_bits, spawn_sender, HELLO_CODEC_HEVC, HELLO_CODEC_PNG
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    let stream_bind_env = std::env::var("WBEAM_STREAM_BIND_ADDR").ok();
+    let stream_allow_env = std::env::var("WBEAM_ALLOW_UNAUTHENTICATED_LAN_STREAM").ok();
+    let listen_address = transport::bind::resolve_bind_address(
+        args.port,
+        args.stream_bind_address,
+        args.allow_unauthenticated_lan_stream,
+        stream_bind_env.as_deref(),
+        stream_allow_env.as_deref(),
+    ).map_err(anyhow::Error::msg)?;
+    // Fail before capture consent/setup if the policy or socket is unavailable.
+    let listener = transport::bind::bind_listener(listen_address)
+        .with_context(|| format!("bind video listener at {listen_address}"))?;
     gst::init()?;
 
     let cfg = resolve_profile(&args)?;
@@ -63,7 +75,7 @@ async fn main() -> Result<()> {
 
     let sender_handle = spawn_sender(
         appsink,
-        args.port,
+        listener,
         cfg.fps,
         cfg.clone(),
         cfg.stream_mode,
@@ -95,7 +107,7 @@ async fn main() -> Result<()> {
         }
     })?;
 
-    capture.announce_streaming(args.port);
+    capture.announce_streaming(listen_address);
     if args.debug_fps > 0 {
         println!(
             "[wbeam] Debug frames: {} ({} fps, max 300 files)",

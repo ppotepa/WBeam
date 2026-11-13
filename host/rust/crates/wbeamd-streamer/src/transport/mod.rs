@@ -1,4 +1,5 @@
 mod sender;
+pub(crate) mod bind;
 
 use crate::cli::StreamMode;
 

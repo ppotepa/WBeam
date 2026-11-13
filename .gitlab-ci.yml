@@ -30,7 +30,7 @@ quality_gates:
   stage: quality
   image: alpine:3.21
   script:
-    - apk add --no-cache bash ripgrep jq
+    - apk add --no-cache bash ripgrep jq git python3 coreutils
     - ./scripts/ci/check-repo-layout.sh
     - ./scripts/ci/check-boundaries.sh
     - ./scripts/ci/validate-e2e-matrix.sh
@@ -45,7 +45,10 @@ quality_gates:
     - bash scripts/ci/test-deb-target.sh
     - bash scripts/ci/check-version-consistency.sh
     - bash scripts/ci/test-publication-contract.sh
-    - bash -n scripts/ci/*.sh scripts/virtual-deps-check.sh scripts/virtual-deps-install.sh wbeam host/scripts/run_wbeamd.sh
+    - bash scripts/ci/check-shell-syntax.sh
+    - python3 scripts/apply-branding.py --check
+    - bash scripts/ci/test-host-shell-regressions.sh
+    - bash scripts/ci/test-evdi-setup.sh
   rules:
     - if: $CI_COMMIT_TAG
     - if: $CI_COMMIT_BRANCH
@@ -71,7 +74,7 @@ quality_rust_host:
   script:
     - apt-get update
     - DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends pkg-config libssl-dev libdbus-1-dev libx11-dev libxrandr-dev libxfixes-dev libxext-dev libxrender-dev
-    - cargo test --locked --manifest-path host/rust/Cargo.toml -p wbeamd-api -p wbeamd-core -p wbeamd-server
+    - cargo test --locked --manifest-path host/rust/Cargo.toml -p wbeamd-api -p wbeamd-core -p wbeamd-server -p wbeamd-tuner
   rules:
     - if: $CI_COMMIT_TAG
     - if: $CI_COMMIT_BRANCH
@@ -148,6 +151,8 @@ quality_e2e_runner:
   stage: quality
   image: python:3.12-bookworm
   script:
+    - apt-get update
+    - DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends jq
     - python -m unittest discover -s e2e/tests -v
   rules:
     - if: $CI_COMMIT_TAG
@@ -167,7 +172,7 @@ sonar_scan_push_master:
       -Dsonar.host.url="${SONAR_HOST_URL}"
       -Dsonar.token="${SONAR_TOKEN}"
       -Dsonar.projectKey="wbeam"
-      -Dsonar.projectName="WBeam"
+      -Dsonar.projectName="WayBeam"
       -Dsonar.qualitygate.wait=false
   rules:
     - if: '$CI_COMMIT_BRANCH == "master"'
@@ -258,7 +263,7 @@ build_rpm:
     - dnf -y install ca-certificates curl git jq rust cargo gcc gcc-c++ make pkgconf-pkg-config
     - dnf -y install openssl-devel dbus-devel gstreamer1-devel gstreamer1-plugins-base-devel nodejs webkit2gtk4.1-devel gtk3-devel libsoup3-devel libayatana-appindicator-gtk3-devel
     - dnf -y install libX11-devel libXrandr-devel libXfixes-devel libXext-devel libXrender-devel
-    - dnf -y install rpm-build tar gzip findutils
+    - dnf -y install rpm-build tar gzip findutils binutils
     - ./scripts/ci/build_rpm.sh
   artifacts:
     paths:

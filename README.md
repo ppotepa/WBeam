@@ -1,8 +1,8 @@
 <p align="center">
-  <a href="docs/assets/wbeam.svg"><img src="docs/assets/wbeam.png" alt="WBeam logo" width="104" height="104"></a>
+  <a href="docs/assets/wbeam.svg"><img src="docs/assets/wbeam.png" alt="WayBeam logo" width="104" height="104"></a>
 </p>
 
-<h1 align="center">WBeam</h1>
+<h1 align="center">WayBeam</h1>
 
 <p align="center"><strong>A Linux display on your Android device, over USB.</strong></p>
 
@@ -14,7 +14,7 @@
   <a href="https://github.com/ppotepa/WBeam/releases">Releases</a>
 </p>
 
-WBeam captures an EVDI virtual display or a Wayland ScreenCast source, encodes
+WayBeam captures an EVDI virtual display or a Wayland ScreenCast source, encodes
 H.264/H.265 where supported, and streams to an Android decoder. The Rust daemon
 owns capture and sessions; the Tauri desktop app handles setup and controls.
 The standard USB path uses `adb reverse`, so it needs no Wi-Fi configuration.
@@ -23,6 +23,9 @@ The standard USB path uses `adb reverse`, so it needs no Wi-Fi configuration.
 are release acceptance targets, not a claim of hardware certification. See the
 [release checklist](docs/release-checklist.md) for the evidence required before
 publication.
+
+The application is now **WayBeam**. Existing package IDs, settings and service
+names remain compatible; see [branding and upgrades](docs/BRANDING.md).
 
 ## Quick start
 
@@ -35,8 +38,8 @@ a separately configured direct/tethered connection. See [Android setup](android/
 git clone https://github.com/ppotepa/WBeam.git
 cd WBeam
 
-./install-wbeam --dry-run
-./install-wbeam --backend wayland
+./install-waybeam --dry-run
+./install-waybeam --backend wayland
 ./desktop.sh
 ```
 
@@ -56,7 +59,7 @@ service setup and deploys to connected devices; see the
 ## Desktop preview
 
 <p align="center">
-  <a href="docs/screenshot.png"><img src="docs/screenshot.png" alt="WBeam desktop showing a connected Android tablet, streaming state and service controls" width="320"></a>
+  <a href="docs/screenshot.png"><img src="docs/screenshot.png" alt="WayBeam desktop showing a connected Android tablet, streaming state and service controls" width="320"></a>
 </p>
 
 <p align="center"><em>Repository screenshot from an earlier development build; labels and version numbers may differ from the current UI.</em></p>
@@ -80,15 +83,15 @@ Run from the repository root:
 | Task | Command |
 | --- | --- |
 | Open the desktop app | `./desktop.sh` |
-| Rerun Android onboarding | `./wbeam device setup` |
-| Check daemon and device versions | `./wbeam host status` · `./wbeam version doctor` |
-| Inspect active streams | `./wbeam watch streaming --once` |
-| Check EVDI prerequisites | `./wbeam deps virtual check --json` |
-| Tune encoding profiles | `./wbeam host tuner` |
-| Show all CLI groups | `./wbeam help` |
+| Rerun Android onboarding | `./waybeam device setup` |
+| Check daemon and device versions | `./waybeam host status` · `./waybeam version doctor` |
+| Inspect active streams | `./waybeam watch streaming --once` |
+| Check EVDI prerequisites | `./waybeam deps virtual check --json` |
+| Tune encoding profiles | `./waybeam host tuner` |
+| Show all CLI groups | `./waybeam help` |
 
 For a persistent daemon, use `systemctl --user status wbeam-daemon.service`
-and `journalctl --user -u wbeam-daemon.service`. `./wbeam host run` is a separate
+and `journalctl --user -u wbeam-daemon.service`. `./waybeam host run` is a separate
 foreground mode. Configuration and log locations are in the
 [repository guide](docs/repo-structure.md).
 
@@ -97,12 +100,13 @@ foreground mode. Configuration and log locations are in the
 | Symptom | First check |
 | --- | --- |
 | Device missing or unauthorized | Run `adb devices`; unlock the device and accept USB debugging. |
-| Connected, but no image | Check `./wbeam host status`, `./wbeam version doctor` and `./wbeam watch streaming --once`; confirm Portal consent or EVDI readiness. |
+| Connected, but no image | Check `./waybeam host status`, `./waybeam version doctor` and `./waybeam watch streaming --once`; confirm Portal consent or EVDI readiness. |
 | EVDI does not start | Run `bash scripts/evdi-diagnose.sh --verbose`; follow the [EVDI guide](docs/EVDI_SETUP_GUIDE.md). |
 | Encoder or desktop dependencies missing | Follow the distribution prerequisites in the [installer guide](docs/INSTALLER_WIZARD.md) or [Fedora guide](docs/FEDORA_43_SETUP.md). |
 
-The control API defaults to `127.0.0.1:5001`, but the video TCP listener binds
-all IPv4 interfaces on its selected stream port. Read the
+The control API and video TCP listener both default to loopback (`127.0.0.1`),
+on ports `5001` and `5000`. Direct/LAN access needs explicit opt-in for each
+listener. Read the
 [security and network model](docs/SECURITY_RELEASE.md) before using a direct/LAN
 connection or changing bind settings.
 

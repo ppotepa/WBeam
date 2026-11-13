@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Rect;
+import android.os.SystemClock;
 import android.view.Surface;
 
 @SuppressWarnings("java:S108")
@@ -26,12 +27,17 @@ final class PngSurfaceRenderer {
         if (!surface.isValid()) {
             return RenderResult.notRendered();
         }
+        long decodeStartedNs = SystemClock.elapsedRealtimeNanos();
         Bitmap bitmap = decodeBitmap(payloadBuf, payloadLen);
+        long decodeNs = SystemClock.elapsedRealtimeNanos() - decodeStartedNs;
         if (bitmap == null) {
             return RenderResult.notRendered();
         }
 
         Canvas canvas = null;
+        long renderStartedNs = SystemClock.elapsedRealtimeNanos();
+        boolean drawn = false;
+        boolean posted = false;
         try {
             canvas = surface.lockCanvas(null);
             if (canvas == null) {
@@ -39,18 +45,22 @@ final class PngSurfaceRenderer {
             }
             dstRect.set(0, 0, canvas.getWidth(), canvas.getHeight());
             canvas.drawBitmap(bitmap, null, dstRect, paint);
-            return RenderResult.ofRenderedFrame();
+            drawn = true;
         } catch (Exception e) {
-            return RenderResult.notRendered();
+            // Return an unsuccessful sample after releasing the locked canvas.
         } finally {
             if (canvas != null) {
                 try {
                     surface.unlockCanvasAndPost(canvas);
+                    posted = true;
                 } catch (Exception ignored) {
                     // surface may already be invalidated during teardown
                 }
             }
         }
+        long finishedNs = SystemClock.elapsedRealtimeNanos();
+        return new RenderResult(drawn && posted, decodeNs,
+                finishedNs - renderStartedNs, finishedNs);
     }
 
     private Bitmap decodeBitmap(byte[] payloadBuf, int payloadLen) {
@@ -69,17 +79,19 @@ final class PngSurfaceRenderer {
 
     static final class RenderResult {
         final boolean rendered;
+        final long decodeNs;
+        final long renderNs;
+        final long presentedAtNs;
 
-        private RenderResult(boolean rendered) {
+        private RenderResult(boolean rendered, long decodeNs, long renderNs, long presentedAtNs) {
             this.rendered = rendered;
-        }
-
-        static RenderResult ofRenderedFrame() {
-            return new RenderResult(true);
+            this.decodeNs = decodeNs;
+            this.renderNs = renderNs;
+            this.presentedAtNs = presentedAtNs;
         }
 
         static RenderResult notRendered() {
-            return new RenderResult(false);
+            return new RenderResult(false, 0L, 0L, 0L);
         }
     }
 }

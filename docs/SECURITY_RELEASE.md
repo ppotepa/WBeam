@@ -1,38 +1,56 @@
 # Security boundaries and release review
 
-WBeam uses ADB reverse for the normal USB workflow. Its control API and video
+WayBeam uses ADB reverse for the normal USB workflow. Its control API and video
 transport have separate listeners and neither provides application-level
-authentication or TLS. USB use alone does not establish that every host
-listener is restricted to loopback.
+authentication or TLS. Both listeners default to loopback for USB use.
 
 ## Listeners
 
 | Interface | Current behavior | Operational requirement |
 | --- | --- | --- |
 | Control HTTP API, port `5001` by default | Binds to `127.0.0.1`; non-loopback binds require explicit opt-in | Keep local for USB use; any LAN access must be restricted to trusted peers |
-| Framed video over TCP, port `5000` by default | The streamer binds to `0.0.0.0` (all IPv4 interfaces) while streaming | Restrict inbound access to stream ports on untrusted networks; inspect per-device ports as well |
+| Framed video over TCP, port `5000` by default | Binds to `127.0.0.1`; non-loopback binds require a separate explicit opt-in | Keep local for USB use; inspect all per-device stream ports |
 
 The video behavior is implemented in
 [`transport/sender.rs`](../host/rust/crates/wbeamd-streamer/src/transport/sender.rs).
-The control bind policy does **not** restrict that listener. Check the actual
-sockets with `ss -ltnp`; do not infer exposure from the address the desktop or
-Android client uses to connect.
+The two listeners have independent bind settings. Check actual sockets with
+`ss -ltnp`, including each per-device port.
 
-### Explicit LAN control
+### Explicit trusted-network access
 
 The API includes unauthenticated session operations such as `/v1/start`,
 `/v1/stop` and `/v1/apply`. To deliberately allow a trusted private LAN address,
-set both options when launching the daemon from a source checkout:
+configure both control and video when launching the daemon from a source checkout:
 
 ```bash
 WBEAM_CONTROL_BIND_ADDR=192.168.1.20 \
 WBEAM_ALLOW_UNAUTHENTICATED_LAN_CONTROL=1 \
+WBEAM_STREAM_BIND_ADDR=192.168.1.20 \
+WBEAM_ALLOW_UNAUTHENTICATED_LAN_STREAM=1 \
   bash host/scripts/run_wbeamd.sh 5001 5000
 ```
 
-The direct binary equivalents are `--control-bind-address 192.168.1.20` and
-`--allow-unauthenticated-lan-control`. A non-loopback address without opt-in is
-rejected before binding. LAN mode adds no authentication, authorization or
+On source Android deployment, if `adb reverse` is unavailable and the
+CLI selects an IP fallback automatically, it now requires matching explicit
+control/video bind addresses and both opt-ins. It fails rather than silently
+baking an unreachable address into the APK. Advanced explicitly supplied
+`WBEAM_ANDROID_API_HOST`/`WBEAM_ANDROID_STREAM_HOST` addresses remain the
+administrator's responsibility. A daemon configured only through a systemd
+unit must also expose those matching settings to the deployment CLI.
+
+The daemon binary accepts `--control-bind-address` and
+`--allow-unauthenticated-lan-control`. The standalone streamer accepts
+`--stream-bind-address` and `--allow-unauthenticated-lan-stream`; daemon-spawned
+workers inherit the stream environment variables. An invalid or non-loopback
+address without its opt-in fails before capture starts. The installer persists
+explicitly supplied bind/opt-in variables in its user unit. Services using
+`run_wbeamd.sh` can read these `WBEAM_*` keys from user configuration after a
+restart; an existing systemd environment override takes precedence. A service
+launching `wbeamd-server` directly instead needs the control CLI flags and
+stream `Environment=` settings in its unit. The retained native service template
+uses this direct form.
+
+LAN mode adds no authentication, authorization or
 encryption; do not expose these ports to the internet or untrusted peers.
 Authenticated remote access requires protocol and client changes plus testing.
 

@@ -29,7 +29,7 @@ use serde_json::{json, Value};
 #[derive(Debug, Parser)]
 #[command(
     name = "wbeam-tuner",
-    about = "Interactive tuner wizard for WBeam codecs"
+    about = "Interactive tuner wizard for WayBeam codecs"
 )]
 struct Args {
     #[arg(long, default_value = "http://127.0.0.1:5001")]
@@ -253,7 +253,7 @@ struct MetricSample {
     present_fps: f64,
     decode_p95: f64,
     render_p95: f64,
-    e2e_p95: f64,
+    e2e_p95: Option<f64>,
     dropped_frames: f64,
     too_late_frames: f64,
     q_transport: f64,
@@ -1349,13 +1349,12 @@ fn parse_metric_sample(metrics_payload: &Value) -> Option<MetricSample> {
             80.0,
             10_000.0,
         ),
-        e2e_p95: normalize_metric_ms(
-            kpi.get("e2e_latency_ms_p95")
-                .and_then(Value::as_f64)
-                .unwrap_or(0.0),
-            500.0,
-            10_000.0,
-        ),
+        e2e_p95: kpi
+            .get("e2e_latency_available")
+            .and_then(Value::as_bool)
+            .filter(|available| *available)
+            .and_then(|_| kpi.get("e2e_latency_ms_p95").and_then(Value::as_f64))
+            .filter(|value| value.is_finite() && (0.0..=60_000.0).contains(value)),
         dropped_frames: latest
             .get("dropped_frames")
             .and_then(Value::as_f64)
@@ -1383,6 +1382,10 @@ fn parse_metric_sample(metrics_payload: &Value) -> Option<MetricSample> {
     })
 }
 
+fn mbps_from_bytes_per_second(bytes_per_second: f64) -> f64 {
+    bytes_per_second * 8.0 / 1_000_000.0
+}
+
 fn score_candidate(samples: &[MetricSample]) -> (f64, bool, String) {
     if samples.is_empty() {
         return (-10_000.0, true, "no metrics samples".to_string());
@@ -1402,7 +1405,20 @@ fn score_candidate(samples: &[MetricSample]) -> (f64, bool, String) {
     let target = mean(|s| s.target_fps).max(1.0);
     let recv = mean(|s| s.recv_fps).max(0.0);
     let present = mean(|s| s.present_fps).max(0.0);
-    let e2e_p95 = mean(|s| s.e2e_p95).max(0.0);
+    let e2e_samples: Vec<f64> = samples.iter().filter_map(|s| s.e2e_p95).collect();
+    let e2e_summary = if e2e_samples.is_empty() {
+        "unavailable".to_string()
+    } else {
+        format!(
+            "{:.1}ms ({:.0}% available)",
+            e2e_samples.iter().sum::<f64>() / e2e_samples.len() as f64,
+            e2e_samples.len() as f64 * 100.0 / n
+        )
+    };
+    // Missing E2E must not look better than a measured latency. Use the same
+    // worst-case cost as the existing 500 ms cap, while retaining the absent
+    // value in the summary. Other observed metrics can still rank candidates.
+    let e2e_score_cost = mean(|s| s.e2e_p95.unwrap_or(500.0).min(500.0));
     let decode_p95 = mean(|s| s.decode_p95).max(0.0);
     let render_p95 = mean(|s| s.render_p95).max(0.0);
     let q_t = max(|s| s.q_transport).max(0.0);
@@ -1416,17 +1432,16 @@ fn score_candidate(samples: &[MetricSample]) -> (f64, bool, String) {
         .filter(|s| s.state.eq_ignore_ascii_case("streaming"))
         .count() as f64
         / n;
-    let e2e_valid_ratio = samples.iter().filter(|s| s.e2e_p95 > 0.0).count() as f64 / n;
     let decode_valid_ratio = samples.iter().filter(|s| s.decode_p95 > 0.0).count() as f64 / n;
     let render_valid_ratio = samples.iter().filter(|s| s.render_p95 > 0.0).count() as f64 / n;
     let telemetry_valid_ratio = samples
         .iter()
-        .filter(|s| s.e2e_p95 > 0.0 && s.decode_p95 > 0.0 && s.render_p95 > 0.0)
+        .filter(|s| s.decode_p95 > 0.0 && s.render_p95 > 0.0)
         .count() as f64
         / n;
 
     if recv < 1.0 {
-        let approx_mbps = (recv_bps / 1_000_000.0).max(0.0);
+        let approx_mbps = mbps_from_bytes_per_second(recv_bps).max(0.0);
         if recv_bps > 150_000.0 {
             return (
                 -9_150.0,
@@ -1461,7 +1476,7 @@ fn score_candidate(samples: &[MetricSample]) -> (f64, bool, String) {
     }
 
     let mut score = 1000.0;
-    score -= 2.0 * e2e_p95;
+    score -= 2.0 * e2e_score_cost;
     score -= 1.2 * decode_p95;
     score -= 0.8 * render_p95;
     score -= 8.0 * dropped_delta;
@@ -1471,9 +1486,6 @@ fn score_candidate(samples: &[MetricSample]) -> (f64, bool, String) {
     score -= 2.0 * (q_d - 1.0).max(0.0);
     score -= 1.5 * (q_r - 1.0).max(0.0);
     score -= 0.0000015 * recv_bps;
-    if e2e_valid_ratio < 0.5 {
-        score -= 180.0;
-    }
     if decode_valid_ratio < 0.5 {
         score -= 120.0;
     }
@@ -1492,7 +1504,7 @@ fn score_candidate(samples: &[MetricSample]) -> (f64, bool, String) {
         score,
         false,
         format!(
-            "p95={e2e_p95:.1}ms present={present:.1}/{target:.1} q={q_t:.0}/{q_d:.0} dropΔ={dropped_delta:.1} telemetry={:.0}%",
+            "e2e95(avg)={e2e_summary} present={present:.1}/{target:.1} q={q_t:.0}/{q_d:.0} dropΔ={dropped_delta:.1} decode/render={:.0}%",
             telemetry_valid_ratio * 100.0
         ),
     )
@@ -1521,7 +1533,7 @@ fn summarize_samples(samples: &[MetricSample]) -> String {
         mean(|s| s.recv_fps),
         mean(|s| s.present_fps),
         mean(|s| s.target_fps),
-        mean(|s| s.recv_bps) / 1_000_000.0,
+        mbps_from_bytes_per_second(mean(|s| s.recv_bps)),
         states
     )
 }
@@ -2374,7 +2386,7 @@ fn detail_from_connection(conn: &ConnectionSnapshot) -> String {
         conn.decode_fps,
         conn.present_fps,
         conn.target_fps,
-        conn.recv_bps / 1_000_000.0,
+        mbps_from_bytes_per_second(conn.recv_bps),
         conn.restart_count,
         conn.reconnects,
         if conn.last_error.trim().is_empty() {
@@ -2425,7 +2437,7 @@ fn ui(frame: &mut ratatui::Frame, app: &App) {
 
     let header = Paragraph::new(Line::from(vec![
         Span::styled(
-            "WBeam Tuner  ",
+            "WayBeam Tuner  ",
             Style::default()
                 .fg(COLOR_ORANGE)
                 .bg(COLOR_MOCHA_SURFACE)
@@ -2980,4 +2992,80 @@ fn main() -> Result<()> {
     loop_result?;
     restore_result?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn byte_rates_are_reported_as_megabits_not_megabytes() {
+        assert_eq!(mbps_from_bytes_per_second(1_000_000.0), 8.0);
+        assert_eq!(mbps_from_bytes_per_second(0.0), 0.0);
+        let mut sample = parse_metric_sample(&sample_payload()).unwrap();
+        sample.recv_bps = 1_000_000.0;
+        let summary = summarize_samples(&[sample]);
+        assert!(summary.contains("recv≈8.00Mb/s"), "{summary}");
+    }
+
+    fn sample_payload() -> Value {
+        serde_json::json!({
+            "state": "streaming",
+            "metrics": {
+                "kpi": {
+                    "target_fps": 60,
+                    "recv_fps": 60,
+                    "present_fps": 60,
+                    "decode_time_ms_p95": 2,
+                    "render_time_ms_p95": 1,
+                    "e2e_latency_ms_p95": 0
+                },
+                "latest_client_metrics": { "recv_bps": 1_000_000 }
+            }
+        })
+    }
+
+    #[test]
+    fn e2e_requires_explicit_availability_and_a_valid_duration() {
+        let mut payload = sample_payload();
+        assert_eq!(parse_metric_sample(&payload).unwrap().e2e_p95, None);
+
+        payload["metrics"]["kpi"]["e2e_latency_available"] = Value::Bool(true);
+        for value in [Value::Null, serde_json::json!(-1), serde_json::json!(1.7e12)] {
+            payload["metrics"]["kpi"]["e2e_latency_ms_p95"] = value;
+            assert_eq!(parse_metric_sample(&payload).unwrap().e2e_p95, None);
+        }
+
+        payload["metrics"]["kpi"]["e2e_latency_ms_p95"] = serde_json::json!(42.0);
+        assert_eq!(parse_metric_sample(&payload).unwrap().e2e_p95, Some(42.0));
+        payload["metrics"]["kpi"]["e2e_latency_available"] = Value::Bool(false);
+        assert_eq!(parse_metric_sample(&payload).unwrap().e2e_p95, None);
+    }
+
+    #[test]
+    fn missing_latency_is_visible_and_never_improves_a_candidate_score() {
+        let missing = parse_metric_sample(&sample_payload()).unwrap();
+        let (missing_score, failed, summary) = score_candidate(&[missing.clone()]);
+        assert!(!failed, "other measurements can still rank the candidate");
+        assert!(summary.contains("e2e95(avg)=unavailable"));
+
+        for duration in [0.0, 42.0, 500.0, 60_000.0] {
+            let mut measured = missing.clone();
+            measured.e2e_p95 = Some(duration);
+            let (score, failed, _) = score_candidate(&[measured]);
+            assert!(!failed);
+            assert!(missing_score <= score);
+        }
+    }
+
+    #[test]
+    fn partial_latency_coverage_does_not_average_placeholders_as_zero() {
+        let missing = parse_metric_sample(&sample_payload()).unwrap();
+        let mut measured = missing.clone();
+        measured.e2e_p95 = Some(80.0);
+        let (measured_score, _, _) = score_candidate(&[measured.clone()]);
+        let (mixed_score, _, summary) = score_candidate(&[measured, missing]);
+        assert!(summary.contains("80.0ms (50% available)"));
+        assert!(mixed_score < measured_score);
+    }
 }

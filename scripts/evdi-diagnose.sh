@@ -1,558 +1,211 @@
-#!/bin/bash
-################################################################################
-# WBeam EVDI Diagnostic Tool
-# 
-# Detects issues preventing EVDI capture backend from working
-# Cross-platform: supports Arch, Debian, Ubuntu, Fedora, RHEL, CentOS
-#
-# Usage: ./scripts/evdi-diagnose.sh [--verbose] [--fix-recommendations]
-################################################################################
-
+#!/usr/bin/env bash
+# WayBeam EVDI diagnostics. Read-only: no compiler invocation, device open,
+# package installation, permission change, module load or temporary C program.
 set -u
-
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# Global flags
-VERBOSE=0
-FIX_RECOMMENDATIONS=0
-ERRORS=0
-WARNINGS=0
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
-# Reuse the same read-only classification shown by desktop Host setup.
-# shellcheck source=evdi-compat.sh
 source "$ROOT_DIR/scripts/evdi-compat.sh"
 
-# Parse arguments
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --verbose|-v) VERBOSE=1; shift ;;
-        --fix|-f) FIX_RECOMMENDATIONS=1; shift ;;
-        *) echo "Unknown option: $1"; exit 1 ;;
-    esac
-done
-
-evdi_mok_pending_file() {
-    echo "$ROOT_DIR/.cache/evdi-mok-import-pending"
-}
-
-evdi_mok_key_sha256() {
-    sha256sum "$1" | awk '{print $1}'
-}
-
+evdi_mok_pending_file() { printf '%s/.cache/evdi-mok-import-pending\n' "$ROOT_DIR"; }
 evdi_mok_import_pending() {
-    local mok_pub="$1" marker current_sha
-    marker="$(evdi_mok_pending_file)"
-    [[ -f "$mok_pub" && -f "$marker" ]] || return 1
-    current_sha="$(evdi_mok_key_sha256 "$mok_pub")"
-    grep -qx "sha256=${current_sha}" "$marker"
+  local key="$1" marker current_sha
+  marker="$(evdi_mok_pending_file)"
+  [[ -f "$key" && -f "$marker" ]] || return 1
+  current_sha="$(sha256sum "$key" | awk '{print $1}')"
+  grep -Fxq "sha256=$current_sha" "$marker"
 }
 
-print_header() {
-    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
-    echo -e "${BLUE}  $1${NC}"
-    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+diagnostic_pass() { printf '[PASS] %s\n' "$*"; }
+diagnostic_warn() { WARNINGS=$((WARNINGS + 1)); printf '[WARN] %s\n' "$*"; }
+diagnostic_fail() { ERRORS=$((ERRORS + 1)); printf '[FAIL] %s\n' "$*"; }
+
+evdi_diagnostic_hint() {
+  [[ "$FIX_RECOMMENDATIONS" -eq 1 ]] || return 0
+  case "$1" in
+    libevdi-elf-inspector-missing)
+      echo '  Install binutils (readelf or objdump) to verify the actual library ABI.' ;;
+    libevdi-abi-mismatch:*|libevdi-runtime-library:*)
+      echo '  Install the libevdi package matching this streamer. Do not redirect .so.0 to .so.1 or vice versa.' ;;
+    streamer-binary-missing|streamer-without-evdi)
+      echo '  Build the EVDI streamer with ./waybeam host build, or install the matching distribution package.' ;;
+    streamer-linker-check-unavailable)
+      echo '  Install the libc runtime diagnostic tools providing ldd.' ;;
+    *) echo '  Inspect the selected streamer and its dynamic dependencies; run ldd on that binary.' ;;
+  esac
 }
 
-print_check() {
-    echo -ne "${BLUE}→${NC} $1 ... "
-}
-
-pass() {
-    echo -e "${GREEN}✓${NC}"
-    [[ $VERBOSE == 1 ]] && echo "  Details: $1"
-}
-
-fail() {
-    echo -e "${RED}✗${NC}"
-    ((ERRORS++))
-    echo -e "  ${RED}Error: $1${NC}"
-}
-
-warn() {
-    echo -e "${YELLOW}⚠${NC}"
-    ((WARNINGS++))
-    echo -e "  ${YELLOW}Warning: $1${NC}"
-}
-
-# Detect OS
-detect_os() {
-    if [ -f /etc/os-release ]; then
-        . /etc/os-release
-        echo "$ID"
-    else
-        uname -s
-    fi
-}
-
-# Detect package manager
-detect_package_manager() {
-    if command -v pacman &> /dev/null; then
-        echo "pacman"
-    elif command -v apt &> /dev/null; then
-        echo "apt"
-    elif command -v dnf &> /dev/null; then
-        echo "dnf"
-    elif command -v yum &> /dev/null; then
-        echo "yum"
-    else
-        echo "unknown"
-    fi
-}
-
-# Get package name for different distros
-get_package_name() {
-    local pkg=$1
-    local pm=$2
-    
-    case "$pm" in
-        pacman)
-            case "$pkg" in
-                evdi) echo "evdi-dkms" ;;
-                modprobe) echo "kmod" ;;
-                *) echo "$pkg" ;;
-            esac
-            ;;
-        apt)
-            case "$pkg" in
-                evdi) echo "evdi-dkms" ;;
-                dkms) echo "dkms" ;;
-                linux-headers) echo "linux-headers-$(uname -r)" ;;
-                *) echo "$pkg" ;;
-            esac
-            ;;
-        dnf|yum)
-            case "$pkg" in
-                evdi) echo "evdi-dkms" ;;
-                dkms) echo "dkms" ;;
-                linux-headers) echo "kernel-devel" ;;
-                *) echo "$pkg" ;;
-            esac
-            ;;
+evdi_diagnose_main() {
+  local VERBOSE=0 FIX_RECOMMENDATIONS=0 ERRORS=0 WARNINGS=0
+  local distro=unknown kernel user module_loaded=0 module_present=0
+  local log_path reason linkable card accessible=0 key_status config_path
+  local -a cards=() runtime_issues=()
+  while (($#)); do
+    case "$1" in
+      --verbose|-v) VERBOSE=1; shift ;;
+      --fix|--fix-recommendations|-f) FIX_RECOMMENDATIONS=1; shift ;;
+      --help|-h)
+        echo 'Usage: scripts/evdi-diagnose.sh [--verbose] [--fix]'
+        echo 'Read-only runtime checks and separate source-build diagnostics; --fix prints suggestions.'
+        return 0 ;;
+      *) echo "Unknown option: $1" >&2; return 2 ;;
     esac
-}
+  done
+  if [[ -r /etc/os-release ]]; then
+    distro="$(. /etc/os-release; printf '%s' "${ID:-unknown}")"
+  fi
+  kernel="$(uname -r)"
+  user="$(id -un)"
+  printf 'WayBeam EVDI diagnostics\nHost: %s; kernel: %s; current user: %s\n' "$distro" "$kernel" "$user"
 
-# Check if package is installed
-is_package_installed() {
-    local pkg=$1
-    local pm=$2
-    
-    case "$pm" in
-        pacman)
-            pacman -Q "$pkg" &> /dev/null
-            ;;
-        apt)
-            dpkg -l | grep -q "^ii.*$pkg"
-            ;;
-        dnf|yum)
-            rpm -q "$pkg" &> /dev/null
-            ;;
-        *)
-            return 1
-            ;;
-    esac
-}
-
-first_installed_package() {
-    local pm=$1
-    shift
-    local pkg
-    for pkg in "$@"; do
-        if is_package_installed "$pkg" "$pm"; then
-            echo "$pkg"
-            return 0
-        fi
+  echo
+  echo '1. Module and DRM runtime'
+  if command -v modinfo >/dev/null 2>&1 && modinfo evdi >/dev/null 2>&1; then
+    module_present=1
+    diagnostic_pass 'EVDI module is installed for the running kernel'
+  fi
+  if command -v lsmod >/dev/null 2>&1; then
+    if lsmod | grep '^evdi ' >/dev/null; then module_loaded=1; fi
+  elif grep -q '^evdi ' /proc/modules 2>/dev/null; then
+    module_loaded=1
+  fi
+  if [[ "$module_loaded" -eq 1 ]]; then
+    diagnostic_pass 'EVDI module is loaded'
+  else
+    diagnostic_fail 'EVDI module is not loaded'
+    if [[ "$FIX_RECOMMENDATIONS" -eq 1 ]]; then
+      echo '  Inspect dkms status and module signing. Load with: sudo modprobe evdi initial_device_count=4'
+      echo '  The setup helper writes both module options and modules-load.d for future boots.'
+    fi
+  fi
+  mapfile -t cards < <(evdi_find_drm_devices || true)
+  if [[ "${#cards[@]}" -eq 0 ]]; then
+    diagnostic_fail 'No EVDI DRM device exists in sysfs and /dev/dri; a physical card0 is not sufficient'
+  else
+    for card in "${cards[@]}"; do
+      if evdi_device_accessible "$card"; then
+        diagnostic_pass "Current user can read/write EVDI device $card"
+        accessible=1
+      elif [[ "$VERBOSE" -eq 1 ]]; then
+        printf '[INFO] Current user cannot read/write %s\n' "$card"
+      fi
     done
-    return 1
-}
+    if [[ "$accessible" -eq 0 ]]; then
+      diagnostic_fail 'Current user cannot read/write any EVDI DRM device'
+      if [[ "$FIX_RECOMMENDATIONS" -eq 1 ]]; then
+        echo '  Check the device ACL/group, add the desktop user to video if needed, then log out and back in.'
+        echo '  Run this check from that desktop session, not through sudo; do not use world-writable permissions.'
+      fi
+    fi
+  fi
+  if [[ "$VERBOSE" -eq 1 ]]; then
+    printf '[INFO] Current-session groups: %s\n' "$(id -nG)"
+  fi
 
-find_libevdi() {
-    local candidate
-    for candidate in \
-        /usr/lib/libevdi.so /usr/lib64/libevdi.so \
-        /usr/lib/libevdi.so.* /usr/lib64/libevdi.so.* \
-        /usr/libexec/displaylink/libevdi.so /usr/libexec/displaylink/libevdi.so.*; do
-        if [ -e "$candidate" ]; then
-            echo "$candidate"
-            return 0
-        fi
+  echo
+  echo '2. Selected streamer and userspace ABI'
+  printf '[INFO] Streamer: %s\n' "$(evdi_selected_streamer "$ROOT_DIR")"
+  mapfile -t runtime_issues < <(evdi_streamer_runtime_issues "$ROOT_DIR")
+  if [[ "${#runtime_issues[@]}" -eq 0 ]]; then
+    diagnostic_pass 'Selected streamer resolves its required libevdi SONAME and matching ELF metadata'
+  else
+    for reason in "${runtime_issues[@]}"; do
+      diagnostic_fail "$reason"
+      evdi_diagnostic_hint "$reason"
     done
-    if command -v ldconfig >/dev/null 2>&1; then
-        ldconfig -p 2>/dev/null | awk '/libevdi\.so/ {print $NF; exit}'
+  fi
+
+  echo
+  echo '3. Source-build diagnostics (not installed-runtime requirements)'
+  if [[ -e "/lib/modules/$kernel/build/Makefile" ]]; then
+    diagnostic_pass "Matching kernel headers: /lib/modules/$kernel/build"
+  else
+    diagnostic_warn "Kernel headers for $kernel are absent; they are needed only when building a module"
+    if [[ "$FIX_RECOMMENDATIONS" -eq 1 ]]; then
+      echo '  Install headers/devel for the running kernel, or boot the kernel matching your installed headers.'
     fi
-}
-
-# Main diagnostic flow
-print_header "WBeam EVDI Capture Backend Diagnostics"
-
-OS=$(detect_os)
-PM=$(detect_package_manager)
-
-echo ""
-echo "System Information:"
-echo "  OS: $OS"
-echo "  Package Manager: $PM"
-echo "  Kernel: $(uname -r)"
-echo "  User: $(whoami)"
-echo ""
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 1. Module Installation Check
-# ─────────────────────────────────────────────────────────────────────────────
-
-print_header "1. EVDI Module Installation"
-
-print_check "EVDI module package installed"
-if EVDI_PACKAGE=$(first_installed_package "$PM" evdi-dkms akmod-evdi evdi libevdi displaylink); then
-    case "$PM" in
-        pacman) EVDI_VERSION=$(pacman -Q "$EVDI_PACKAGE" 2>/dev/null | awk '{print $2}' || echo "unknown") ;;
-        apt) EVDI_VERSION=$(dpkg-query -W -f='${Version}' "$EVDI_PACKAGE" 2>/dev/null || echo "unknown") ;;
-        dnf|yum) EVDI_VERSION=$(rpm -q "$EVDI_PACKAGE" 2>/dev/null || echo "unknown") ;;
-        *) EVDI_VERSION="unknown" ;;
-    esac
-    pass "$EVDI_PACKAGE installed ($EVDI_VERSION)"
-else
-    fail "EVDI package not installed (checked evdi-dkms, akmod-evdi, evdi, libevdi, displaylink)"
-    if [[ $FIX_RECOMMENDATIONS == 1 ]]; then
-        echo ""
-        echo "  📦 To install EVDI:"
-        case "$PM" in
-            pacman) echo "    sudo pacman -S --noconfirm evdi-dkms" ;;
-            apt) echo "    sudo apt install -y evdi-dkms dkms linux-headers-\$(uname -r)" ;;
-            dnf) echo "    scripts/fedora-setup.sh --yes --with-evdi" ;;
-            yum) echo "    sudo yum install -y evdi-dkms dkms kernel-devel" ;;
-        esac
-    fi
-fi
-
-RUNNING_KERNEL=$(uname -r)
-
-if [[ "$OS" == "fedora" ]] && ! modinfo evdi >/dev/null 2>&1; then
-    print_check "Fedora EVDI DKMS compatibility for running kernel $RUNNING_KERNEL"
-    log_path="$(evdi_find_build_log "$RUNNING_KERNEL" || true)"
+  fi
+  linkable="$(evdi_find_linkable_library || true)"
+  if [[ -n "$linkable" ]]; then
+    diagnostic_pass "Source-linker library: $linkable"
+  else
+    diagnostic_warn 'Unversioned libevdi.so is absent; source builds need its development package or WBEAM_EVDI_LIB_DIR'
+  fi
+  # A historical compiler failure must not invalidate an already-loaded module.
+  if [[ "$module_loaded" -eq 0 && "$module_present" -eq 0 ]]; then
+    log_path="$(evdi_find_build_log "$kernel" || true)"
     if [[ -n "$log_path" ]]; then
-        reason="$(evdi_build_failure_reason "$log_path")"
-        if [[ "$reason" == "dkms-kernel-api-sign-compare" ]]; then
-            fail "DKMS build rejected kernel API signedness (-Werror=sign-compare). This is an EVDI/kernel compatibility issue, not an ADB or GStreamer failure. Inspect $log_path and test a compatible upstream EVDI release."
-            echo "  Safe alternative while EVDI compatibility is unresolved: Wayland Portal."
-        elif [[ "$reason" == "dkms-kernel-headers-mismatch" ]]; then
-            fail "DKMS build failed due to missing or mismatched running kernel headers. Inspect $log_path."
-        elif [[ "$reason" == "dkms-build-failed-other" ]]; then
-            warn "DKMS build log contains another compiler error: $log_path"
-        else
-            warn "DKMS build log was found; no recognized compatibility error: $log_path"
-        fi
+      reason="$(evdi_build_failure_reason "$log_path")"
+      diagnostic_warn "$reason: $log_path"
+      if [[ "$FIX_RECOMMENDATIONS" -eq 1 ]]; then
+        case "$reason" in
+          dkms-kernel-api-sign-compare)
+            echo '  Test a compatible EVDI/kernel pair; do not disable global compiler warnings or modify installed kernel headers.' ;;
+          dkms-kernel-headers-mismatch)
+            echo '  Check the exact running-kernel headers and the matching DKMS build log.' ;;
+          *) echo '  Inspect the matching DKMS log before retrying the module build.' ;;
+        esac
+      fi
     else
-        warn "No EVDI DKMS make.log found for kernel $RUNNING_KERNEL; use dkms status and journalctl -k to investigate."
+      diagnostic_warn "No readable EVDI DKMS make.log found for running kernel $kernel"
     fi
-fi
+  fi
+  if [[ "$VERBOSE" -eq 1 ]] && command -v dkms >/dev/null 2>&1; then
+    echo '[INFO] DKMS status:'
+    dkms status || diagnostic_warn 'dkms status failed'
+  fi
 
-print_check "Linux headers installed (needed for DKMS build)"
-case "$PM" in
-    pacman)
-        if [ -e "/lib/modules/$RUNNING_KERNEL/build/Makefile" ]; then
-            pass "/lib/modules/$RUNNING_KERNEL/build"
+  echo
+  echo '4. Secure Boot and configuration'
+  if command -v mokutil >/dev/null 2>&1; then
+    key_status="$(mokutil --sb-state 2>/dev/null || true)"
+    if [[ "$key_status" == *enabled* ]]; then
+      printf '[INFO] Secure Boot enabled\n'
+      if [[ -f /var/lib/dkms/mok.pub ]]; then
+        key_status="$(mokutil --test-key /var/lib/dkms/mok.pub 2>&1 || true)"
+        if [[ "$key_status" == *'not enrolled'* ]]; then
+          if [[ "$module_loaded" -eq 1 ]]; then
+            diagnostic_warn 'DKMS MOK key is not enrolled; loaded EVDI may use a different signing key'
+          elif evdi_mok_import_pending /var/lib/dkms/mok.pub; then
+            diagnostic_fail 'DKMS MOK enrollment is queued; reboot and complete firmware enrollment'
+          else
+            diagnostic_fail 'DKMS MOK key is not enrolled; inspect the module signing key before loading EVDI'
+          fi
+          if [[ "$FIX_RECOMMENDATIONS" -eq 1 && "$module_loaded" -eq 0 ]]; then
+            echo '  For the DKMS key: sudo mokutil --import /var/lib/dkms/mok.pub'
+            echo '  Then reboot and complete Enroll MOK in firmware with the temporary password.'
+          fi
+        elif [[ "$key_status" == *'already enrolled'* || "$key_status" == *'is enrolled'* ]]; then
+          diagnostic_pass 'DKMS MOK key is enrolled'
         else
-            warn "headers for running kernel $RUNNING_KERNEL not installed"
+          diagnostic_warn 'Cannot determine DKMS MOK enrollment from mokutil output'
         fi
-        ;;
-    apt)
-        if dpkg -l | grep -q "^ii.*linux-headers"; then
-            pass "linux-headers"
-        else
-            warn "linux-headers not installed"
-        fi
-        ;;
-    dnf|yum)
-        if rpm -q kernel-devel &> /dev/null; then
-            pass "kernel-devel"
-        else
-            warn "kernel-devel not installed"
-        fi
-        ;;
-esac
-
-print_check "Linux headers match running kernel"
-if [ -e "/lib/modules/$RUNNING_KERNEL/build/Makefile" ]; then
-    pass "/lib/modules/$RUNNING_KERNEL/build"
-else
-    fail "kernel-devel for running kernel $RUNNING_KERNEL is not installed or incomplete"
-    if [[ $FIX_RECOMMENDATIONS == 1 ]]; then
-        echo ""
-        echo "  🔧 Fedora usually fixes this by rebooting into the installed kernel that has matching kernel-devel:"
-        echo "    sudo reboot"
-        echo "    ./redeploy-local"
-        echo ""
-        echo "  🔧 Or update kernel packages together before rebooting:"
-        echo "    sudo dnf upgrade --refresh kernel kernel-core kernel-modules kernel-devel"
-    fi
-fi
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 2. Module Loading Check
-# ─────────────────────────────────────────────────────────────────────────────
-
-print_header "2. Module Loading & Device Creation"
-
-print_check "EVDI module loaded"
-if grep -q "^evdi " /proc/modules 2>/dev/null; then
-    DEVICE_COUNT=$(cat /sys/module/evdi/parameters/initial_device_count 2>/dev/null || echo "unknown")
-    pass "Module loaded (initial_device_count=$DEVICE_COUNT)"
-else
-    fail "EVDI module not loaded"
-    if [[ $FIX_RECOMMENDATIONS == 1 ]]; then
-        echo ""
-        echo "  🔧 To load EVDI module:"
-        echo "    sudo modprobe evdi initial_device_count=4"
-        echo ""
-        echo "  🔧 To make it persistent across reboots:"
-        echo "    echo 'options evdi initial_device_count=4' | sudo tee /etc/modprobe.d/evdi.conf"
-    fi
-fi
-
-print_check "EVDI device nodes exist"
-if [ -e /dev/dri/card0 ]; then
-    pass "/dev/dri/card0 exists"
-    # Check if it's EVDI
-    if ls -la /sys/class/drm/card0 2>/dev/null | grep -q evdi; then
-        pass "  card0 is controlled by EVDI"
-    fi
-else
-    fail "/dev/dri/card0 does not exist"
-    if [[ $FIX_RECOMMENDATIONS == 1 ]]; then
-        echo ""
-        echo "  ℹ️  Possible causes:"
-        echo "    1. EVDI module not loaded"
-        echo "    2. Module loaded with initial_device_count=0"
-        echo "    3. udev rules issue"
-    fi
-fi
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 3. Library Check
-# ─────────────────────────────────────────────────────────────────────────────
-
-print_header "3. EVDI Library Check"
-
-print_check "libevdi library installed"
-LIBEVDI_PATH=$(find_libevdi || true)
-LINKABLE_LIBEVDI_PATH="$(evdi_find_linkable_library || true)"
-if [[ -z "$LINKABLE_LIBEVDI_PATH" ]]; then
-    fail "Linkable libevdi.so is missing for Rust streamer (-levdi). Runtime libevdi.so.1 alone is insufficient to build. Configure WBEAM_EVDI_LIB_DIR pointing at a directory containing libevdi.so."
-fi
-if [ -n "$LIBEVDI_PATH" ]; then
-    LIBEVDI_VERSION=$(strings "$LIBEVDI_PATH" 2>/dev/null | grep "^1\." | head -1 || echo "unknown")
-    pass "$LIBEVDI_PATH ($LIBEVDI_VERSION)"
-else
-    fail "libevdi.so not found"
-fi
-
-print_check "libevdi can be loaded"
-if [ -z "$LIBEVDI_PATH" ]; then
-    fail "Cannot load libevdi because libevdi.so is not installed"
-elif LD_LIBRARY_PATH=/usr/lib:/usr/lib64 ldd "$LIBEVDI_PATH" 2>/dev/null | grep -q "not found"; then
-    fail "libevdi has unresolved dependencies"
-else
-    pass "All dependencies satisfied"
-fi
-
-if command -v mokutil >/dev/null 2>&1; then
-    print_check "Secure Boot state"
-    SECURE_BOOT_ENABLED=0
-    if mokutil --sb-state 2>/dev/null | grep -qi enabled; then
-        SECURE_BOOT_ENABLED=1
-        warn "Secure Boot is enabled; unsigned DKMS/akmods EVDI modules may be blocked by kernel lockdown"
+      else
+        diagnostic_warn 'No /var/lib/dkms/mok.pub; inspect the signing key used by your EVDI package'
+      fi
+    elif [[ -n "$key_status" ]]; then
+      printf '[INFO] %s\n' "$key_status"
     else
-        pass "Secure Boot is not enabled"
+      diagnostic_warn 'Secure Boot state is unavailable'
     fi
-
-    if [[ "$SECURE_BOOT_ENABLED" -eq 1 && -f /var/lib/dkms/mok.pub ]]; then
-        print_check "DKMS MOK key enrolled"
-        MOK_TEST_OUTPUT="$(mokutil --test-key /var/lib/dkms/mok.pub 2>&1 || true)"
-        if printf '%s\n' "$MOK_TEST_OUTPUT" | grep -qi "not enrolled"; then
-            if evdi_mok_import_pending /var/lib/dkms/mok.pub; then
-                fail "DKMS MOK enrollment is queued but not completed; reboot and enroll it in firmware"
-            else
-                fail "/var/lib/dkms/mok.pub is not enrolled; Secure Boot will reject the evdi module"
-            fi
-            if [[ $FIX_RECOMMENDATIONS == 1 ]]; then
-                echo ""
-                if evdi_mok_import_pending /var/lib/dkms/mok.pub; then
-                    echo "  🔧 MOK enrollment is already queued. Reboot and finish the firmware prompt:"
-                else
-                    echo "  🔧 Queue DKMS MOK enrollment, then reboot and enroll it in firmware:"
-                    echo "    sudo mokutil --import /var/lib/dkms/mok.pub"
-                fi
-                echo "    sudo reboot"
-                echo ""
-                echo "  ℹ️  On reboot choose: Enroll MOK -> Continue -> Yes, then enter the password you set."
-            fi
-        else
-            pass "DKMS MOK key appears enrolled"
-        fi
+  fi
+  config_path="${XDG_CONFIG_HOME:-${HOME:-}/.config}/wbeam/wbeam.conf"
+  if [[ -f "$config_path" ]]; then
+    printf '[INFO] User configuration: %s\n' "$config_path"
+    if [[ "$VERBOSE" -eq 1 ]]; then
+      awk '/^[[:space:]]*WBEAM_CAPTURE_BACKEND[[:space:]]*=/ {print "[INFO] " $0}' "$config_path"
     fi
-fi
+  else
+    printf '[INFO] No user config; daemon defaults apply unless environment/API overrides them\n'
+  fi
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 4. Permissions Check
-# ─────────────────────────────────────────────────────────────────────────────
-
-print_header "4. User Permissions"
-
-CURRENT_USER=$(whoami)
-print_check "User in 'video' group"
-if id -nG | tr ' ' '\n' | grep -qx video; then
-    pass "Current session for '$CURRENT_USER' has video group"
-else
-    if groups "$CURRENT_USER" | grep -q "\bvideo\b"; then
-        fail "User '$CURRENT_USER' is in video group in account database, but this login session has not picked it up"
-    else
-        fail "User '$CURRENT_USER' is NOT in video group"
-    fi
-    if [[ $FIX_RECOMMENDATIONS == 1 ]]; then
-        echo ""
-        echo "  🔧 To add user to video group:"
-        echo "    sudo usermod -a -G video $CURRENT_USER"
-        echo ""
-        echo "  ℹ️  After running this, you need to:"
-        echo "    1. Log out and log back in, OR"
-        echo "    2. Run: newgrp video"
-    fi
-fi
-
-print_check "Device node readable/writable"
-if [ -e /dev/dri/card0 ]; then
-    if [ -r /dev/dri/card0 ] && [ -w /dev/dri/card0 ]; then
-        pass "Permissions OK"
-    else
-        fail "Cannot read/write /dev/dri/card0"
-        if [[ $FIX_RECOMMENDATIONS == 1 ]]; then
-            echo ""
-            echo "  🔧 Check current permissions:"
-            echo "    ls -la /dev/dri/card0"
-            echo ""
-            echo "  🔧 Add to video group (usually fixes this):"
-            echo "    sudo usermod -a -G video \$(whoami)"
-        fi
-    fi
-else
-    warn "Cannot check - /dev/dri/card0 does not exist"
-fi
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 5. Functional Test
-# ─────────────────────────────────────────────────────────────────────────────
-
-print_header "5. Functional Test"
-
-print_check "EVDI device accessible from user code"
-if command -v modinfo &> /dev/null; then
-    if modinfo evdi &> /dev/null; then
-        pass "modinfo can read EVDI module"
-    else
-        warn "modinfo evdi failed"
-    fi
-else
-    warn "modinfo not available"
-fi
-
-print_check "Test with libevdi directly"
-if [ -n "$LIBEVDI_PATH" ]; then
-    # Try to compile and run test
-    cat > /tmp/test_evdi_minimal.c << 'CEOF'
-#include <evdi_lib.h>
-#include <stdio.h>
-#include <stdlib.h>
-int main() {
-    for (int i = 0; i < 2; i++) {
-        enum evdi_device_status status = evdi_check_device(i);
-        if (status == 0) { /* AVAILABLE */
-            evdi_handle h = evdi_open(i);
-            if (h) {
-                evdi_close(h);
-                exit(0); /* Success */
-            }
-        }
-    }
-    exit(1); /* No device found or failed to open */
+  printf '\nSummary: %s runtime error(s), %s warning(s).\n' "$ERRORS" "$WARNINGS"
+  echo 'These read-only checks do not test compositor rendering or Android frames.'
+  if [[ "$ERRORS" -gt 0 && "$FIX_RECOMMENDATIONS" -eq 0 ]]; then
+    echo 'Run with --fix for repair suggestions; no changes will be applied.'
+  fi
+  return "$ERRORS"
 }
-CEOF
-    if gcc -o /tmp/test_evdi_minimal /tmp/test_evdi_minimal.c -levdi 2>/dev/null && \
-       /tmp/test_evdi_minimal 2>/dev/null; then
-        pass "Successfully opened EVDI device with libevdi"
-    else
-        if [ -e /dev/dri/card0 ]; then
-            warn "Could not open EVDI device (may need permissions or module reload)"
-        else
-            fail "No EVDI device found"
-        fi
-    fi
-    rm -f /tmp/test_evdi_minimal /tmp/test_evdi_minimal.c
-else
-    warn "Cannot test - libevdi.so not found"
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  evdi_diagnose_main "$@"
 fi
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 6. WBeam Configuration Check
-# ─────────────────────────────────────────────────────────────────────────────
-
-print_header "6. WBeam Configuration"
-
-print_check "WBeam config file exists"
-if [ -f ~/.config/wbeam/wbeam.conf ]; then
-    pass "Config exists"
-    
-    print_check "EVDI backend configuration"
-    if grep -q "WBEAM_CAPTURE_BACKEND.*evdi" ~/.config/wbeam/wbeam.conf; then
-        pass "EVDI explicitly configured"
-    else
-        echo -e "${YELLOW}ℹ${NC}  Not configured as default (will use ?capture_backend=evdi parameter)"
-    fi
-else
-    pass "Using defaults"
-fi
-
-print_check "WBeam daemon executable exists"
-if [ -f ./wbeam ]; then
-    pass "wbeam script found"
-else
-    fail "wbeam script not found in current directory"
-fi
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Summary
-# ─────────────────────────────────────────────────────────────────────────────
-
-print_header "Summary"
-
-echo ""
-if [ $ERRORS -eq 0 ] && [ $WARNINGS -eq 0 ]; then
-    echo -e "${GREEN}✅ All checks passed! EVDI is ready to use.${NC}"
-    echo ""
-    echo "Quick start:"
-    echo "  1. ./wbeam host run"
-    echo "  2. curl -X POST 'http://localhost:5001/v1/start?capture_backend=evdi'"
-elif [ $ERRORS -eq 0 ]; then
-    echo -e "${YELLOW}⚠️  $WARNINGS warning(s) found - EVDI should mostly work${NC}"
-else
-    echo -e "${RED}❌ $ERRORS error(s) found - EVDI will not work${NC}"
-    echo ""
-    echo "Action required:"
-    if [[ $FIX_RECOMMENDATIONS == 0 ]]; then
-        echo "  Run with --fix flag to see repair suggestions:"
-        echo "    $0 --fix"
-    fi
-fi
-
-echo ""
-echo "Report:"
-echo "  Errors: $ERRORS"
-echo "  Warnings: $WARNINGS"
-echo ""
-
-exit $ERRORS

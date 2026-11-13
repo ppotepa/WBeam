@@ -35,6 +35,12 @@ pub enum WaylandSourceType {
 pub struct Args {
     #[arg(long, default_value_t = 5000)]
     pub port: u16,
+    /// Video listener address; defaults to WBEAM_STREAM_BIND_ADDR or 127.0.0.1.
+    #[arg(long)]
+    pub stream_bind_address: Option<std::net::IpAddr>,
+    /// Allow an unauthenticated stream on an explicitly trusted non-loopback interface.
+    #[arg(long, default_value_t = false)]
+    pub allow_unauthenticated_lan_stream: bool,
     #[arg(long)]
     pub size: Option<String>,
     #[arg(long)]

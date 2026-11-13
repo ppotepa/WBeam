@@ -1,5 +1,12 @@
 import type { CurrentChildPreset, HudSeries, HudSnapshot, LiveStage } from "./app-types";
 
+function measuredE2e(line: string, rawValue?: string): string {
+  if (!/\be2e_latency_available=true(?:\s|$)/.test(line) || !rawValue) return "unavailable";
+  const value = rawValue.replace(/ms$/, "");
+  const number = Number(value);
+  return value.length > 0 && Number.isFinite(number) && number >= 0 ? value : "unavailable";
+}
+
 function updateHudFromTrialStart(line: string, hudData: Record<string, string>): void {
   const trialStartRe = /^\[(t\d+)] apply /;
   const start = trialStartRe.exec(line);
@@ -11,14 +18,14 @@ function updateHudFromTrialScore(
   hudData: Record<string, string>
 ): void {
   const trialScoreRe =
-    /^\[(t\d+)] score=([-0-9.]+) present=([-0-9.]+) recv=([-0-9.]+) e2e95=([-0-9.]+)ms drops\/s=([-0-9.]+)(?: mbps=([-0-9.]+))?/;
+    /^\[(t\d+)] score=([-0-9.]+) present=([-0-9.]+) recv=([-0-9.]+) e2e95=(\S+) drops\/s=([-0-9.]+)(?: mbps=([-0-9.]+))?/;
   const scoreMatch = trialScoreRe.exec(line);
   if (scoreMatch) {
     hudData.trialId = scoreMatch[1];
     hudData.score = scoreMatch[2];
     hudData.presentFps = scoreMatch[3];
     hudData.recvFps = scoreMatch[4];
-    hudData.e2eP95Ms = scoreMatch[5];
+    hudData.e2eP95Ms = measuredE2e(line, scoreMatch[5]);
     hudData.dropsPerSec = scoreMatch[6];
     if (scoreMatch[7]) hudData.bitrateMbps = scoreMatch[7];
   }
@@ -51,7 +58,7 @@ function updateHudFromProtoDone(
     hudData.score = field("score") ?? hudData.score;
     hudData.presentFps = field("sender_p50") ?? hudData.presentFps;
     hudData.recvFps = field("pipe_p50") ?? hudData.recvFps;
-    hudData.e2eP95Ms = field("timeout_mean") ?? hudData.e2eP95Ms;
+    hudData.e2eP95Ms = measuredE2e(line, field("e2e_latency_ms_p95"));
     const drop = field("drop");
     if (drop) hudData.dropsPerSec = `${drop}%`;
     const mbps = field("mbps");
@@ -83,7 +90,7 @@ export function parseHud(lines: string[]): HudSnapshot {
     presentFps: "-",
     recvFps: "-",
     bitrateMbps: "-",
-    e2eP95Ms: "-",
+    e2eP95Ms: "unavailable",
     dropsPerSec: "-",
     progress: "-",
     generation: "-",
@@ -116,7 +123,7 @@ export function parseHud(lines: string[]): HudSnapshot {
 
 export function parseHudSeries(lines: string[]): HudSeries {
   const trialScoreRe =
-    /^\[(t\d+)] score=([-0-9.]+) present=([-0-9.]+) recv=([-0-9.]+) e2e95=([-0-9.]+)ms drops\/s=([-0-9.]+)/;
+    /^\[(t\d+)] score=([-0-9.]+) present=([-0-9.]+) recv=([-0-9.]+) e2e95=(\S+) drops\/s=([-0-9.]+)/;
   const protoDoneRe =
     /done trial=([\w.:-]+) score=([-0-9.]+).*sender_p50=([-0-9.]+).*pipe_p50=([-0-9.]+).*timeout_mean=([-0-9.]+).*drop=([-0-9.]+)%/;
   const series: HudSeries = { score: [], present: [], recv: [], drops: [] };

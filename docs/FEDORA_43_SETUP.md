@@ -9,8 +9,8 @@ kernel/EVDI combination. See the [EVDI evidence matrix](EVDI_COMPATIBILITY_MATRI
 ```bash
 git clone https://github.com/ppotepa/WBeam.git
 cd WBeam
-./install-wbeam --dry-run
-./install-wbeam --backend wayland
+./install-waybeam --dry-run
+./install-waybeam --backend wayland
 ```
 
 The [installer](INSTALLER_WIZARD.md) probes the machine, installs Fedora
@@ -18,7 +18,7 @@ prerequisites, builds the host, starts a systemd user service and onboards the
 Android device. Wayland Portal needs a working compositor portal and PipeWire;
 accept the screen-sharing prompt when starting a stream.
 
-For an EVDI virtual display, use `./install-wbeam --backend evdi` instead.
+For an EVDI virtual display, use `./install-waybeam --backend evdi` instead.
 EVDI setup can require a kernel-module build, MOK enrollment, a new login and a
 reboot. X11 helpers remain legacy code and are not the runtime fallback.
 
@@ -55,7 +55,7 @@ adb devices
 ```
 
 The device must appear as `device`, not `unauthorized` or `offline`. Unlock it
-and accept USB debugging. Retry onboarding with `./wbeam device setup`.
+and accept USB debugging. Retry onboarding with `./waybeam device setup`.
 
 ## EVDI setup
 
@@ -130,13 +130,13 @@ authorized device is connected, so inspect its output.
 
 | Symptom | Check or repair |
 | --- | --- |
-| Missing `glib-2.0.pc`, `gobject-2.0.pc` or GStreamer development files | Run `scripts/fedora-setup.sh --yes --no-android-sdk`, then `./wbeam host build`. |
+| Missing `glib-2.0.pc`, `gobject-2.0.pc` or GStreamer development files | Run `scripts/fedora-setup.sh --yes --no-android-sdk`, then `./waybeam host build`. |
 | Missing SDK platform/build tools | Run `scripts/fedora-setup.sh --yes --with-android-sdk`; verify `android/local.properties` or `ANDROID_HOME`. |
 | Gradle reports class-file major version 69 | Install Java 21 (`sudo dnf install java-21-openjdk-devel`); override selection with `WBEAM_ANDROID_JAVA_HOME=/usr/lib/jvm/java-21-openjdk` if necessary. |
 | Tauri native dependency errors | Rerun the helper for WebKit/AppIndicator dependencies, then launch `./desktop.sh`. |
 | No H.264 encoder | Check `openh264enc`, `x264enc`, `nvh264enc` individually with `gst-inspect-1.0`; rerun the helper to install the Fedora OpenH264 fallback. |
 | EVDI module or library failure | Use the [EVDI setup guide](EVDI_SETUP_GUIDE.md#diagnostics); separate module build/load, runtime library and source linker failures. |
-| Android install is blocked | Accept USB debugging and the device's install-via-USB permission, then rerun `./wbeam device setup`. |
+| Android install is blocked | Accept USB debugging and the device's install-via-USB permission, then rerun `./waybeam device setup`. |
 
 H.265 is optional. When a requested H.265 encoder is unavailable, the streamer
 can resolve to H.264 if a supported encoder exists. Inspect the effective
@@ -145,14 +145,14 @@ configuration/logs rather than assuming the requested codec was selected.
 ## Verify the result
 
 ```bash
-./wbeam host status
+./waybeam host status
 curl -fsS http://127.0.0.1:5001/v1/host-probe
-./wbeam version doctor
-./wbeam watch connections --once
+./waybeam version doctor
+./waybeam watch connections --once
 ```
 
-For a source build, `./wbeam host build` should produce the daemon and streamer;
-`./wbeam android build` should produce the debug APK. For EVDI, also inspect
+For a source build, `./waybeam host build` should produce the daemon and streamer;
+`./waybeam android build` should produce the debug APK. For EVDI, also inspect
 `ldd host/rust/target/release/wbeamd-streamer` for a resolved, matching libevdi
 ABI and missing libraries.
 

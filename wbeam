@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WBEAM_PRODUCT_NAME=WayBeam
+if [[ -f "$ROOT_DIR/config/branding.sh" ]]; then source "$ROOT_DIR/config/branding.sh"; fi
 INSTALLED_MODE=0
 if [[ -f "$ROOT_DIR/VERSION.txt" ]]; then INSTALLED_MODE=1; fi
 HOST_SCRIPTS_DIR="$ROOT_DIR/host/scripts"
@@ -11,8 +13,20 @@ if [[ -f "$WBEAM_CONFIG_HELPER" ]]; then
   source "$WBEAM_CONFIG_HELPER"
   wbeam_load_config "$ROOT_DIR"
 fi
+# The LAN fallback must not silently bake an unreachable address into an APK.
+# shellcheck source=scripts/android-lan-bind-policy.sh
+source "$ROOT_DIR/scripts/android-lan-bind-policy.sh"
 
 CONTROL_PORT="${WBEAM_CONTROL_PORT:-5001}"
+# The control daemon accepts explicit interface binds. Diagnostic clients must
+# connect to that address rather than blindly querying IPv4 localhost.
+CONTROL_CONNECT_HOST="${WBEAM_CONTROL_BIND_ADDR:-127.0.0.1}"
+case "$CONTROL_CONNECT_HOST" in
+  0.0.0.0) CONTROL_CONNECT_HOST=127.0.0.1 ;;
+  ::) CONTROL_CONNECT_HOST='[::1]' ;;
+  *:*) CONTROL_CONNECT_HOST="[$CONTROL_CONNECT_HOST]" ;;
+esac
+CONTROL_BASE_URL="http://${CONTROL_CONNECT_HOST}:${CONTROL_PORT}"
 STREAM_PORT="${WBEAM_STREAM_PORT:-5000}"
 DAEMON_NAME="${WBEAM_DAEMON_SERVICE_NAME:-wbeam-daemon}"
 
@@ -50,11 +64,10 @@ VERSION_BASE="${WBEAM_VERSION_BASE:-0.1.3}"
 
 
 print_help() {
+  printf '%s command runner\n\n' "$WBEAM_PRODUCT_NAME"
   cat <<'EOF'
-WBeam command runner
-
 Usage:
-  ./wbeam <group> <command>
+  ./waybeam <group> <command>
   ./wbgui                        # interactive TUI menu (arrow keys)
 
 Groups:
@@ -72,37 +85,37 @@ Groups:
 
 Examples:
   ./wbgui
-  ./wbeam install --dry-run       # show installer wizard probe + plan
-  ./wbeam install                 # install host, service, and onboard phone
-  ./wbeam device setup            # rerun only Android phone onboarding
-  ./wbeam host build             # build wbeamd-server + wbeamd-streamer
-  ./wbeam host run               # release binary, foreground
-  ./wbeam host debug             # debug build + coloured logs + ADB sidecar
-  ./wbeam host probe             # host fingerprint JSON (os/session/display/providers/tools)
-  ./wbeam host tuner             # interactive Rust TUI autotuner wizard
-  ./wbeam android deploy         # build + install + launch in one step
-  ./wbeam android deploy-all     # build once, install + launch on all connected devices
-  ./wbeam android build          # ./gradlew assembleDebug only
-  ./wbeam android install        # adb install only (uses existing debug APK)
-  ./wbeam android launch         # adb shell am start only
-  ./wbeam android build-release  # ./gradlew assembleRelease
-  ./wbeam android install-release
-  ./wbeam android deploy-release
-  ./wbeam deps virtual check --json
-  ./wbeam deps virtual install --dry-run
-  ./wbeam version doctor         # diagnose host/APK version mismatch
-  ./wbeam watch devices          # refresh adb/device status every 1s
-  ./wbeam watch connections      # refresh host/ports/reverse map every 1s
-  ./wbeam watch streaming        # per-device stream state + fps/config
-  ./wbeam watch service          # service state + host probe + activity
-  ./wbeam watch logs             # current host/adb/service logs snapshot
-  ./wbeam watch tui              # interactive screens (1..5, r, q)
-  ./wbeam watch connections --once
-  watch -n 1 -d --color 'WBEAM_WATCH_COLOR=1 ./wbeam watch connections --once'
-  WBEAM_WATCH_LOG=1 ./wbeam watch doctor
-  ./wbeam debug up
-  ./wbeam logs live
-  ./wbeam logs adb start
+  ./waybeam install --dry-run       # show installer wizard probe + plan
+  ./waybeam install                 # install host, service, and onboard phone
+  ./waybeam device setup            # rerun only Android phone onboarding
+  ./waybeam host build             # build wbeamd-server + wbeamd-streamer
+  ./waybeam host run               # release binary, foreground
+  ./waybeam host debug             # debug build + coloured logs + ADB sidecar
+  ./waybeam host probe             # running daemon's host/backend capability JSON
+  ./waybeam host tuner             # interactive Rust TUI autotuner wizard
+  ./waybeam android deploy         # build + install + launch in one step
+  ./waybeam android deploy-all     # build once, install + launch on all connected devices
+  ./waybeam android build          # ./gradlew assembleDebug only
+  ./waybeam android install        # adb install only (uses existing debug APK)
+  ./waybeam android launch         # adb shell am start only
+  ./waybeam android build-release  # ./gradlew assembleRelease
+  ./waybeam android install-release
+  ./waybeam android deploy-release
+  ./waybeam deps virtual check --json
+  ./waybeam deps virtual install --dry-run
+  ./waybeam version doctor         # diagnose host/APK version mismatch
+  ./waybeam watch devices          # refresh adb/device status every 1s
+  ./waybeam watch connections      # refresh host/ports/reverse map every 1s
+  ./waybeam watch streaming        # per-device stream state + fps/config
+  ./waybeam watch service          # service state + host probe + activity
+  ./waybeam watch logs             # current host/adb/service logs snapshot
+  ./waybeam watch tui              # interactive screens (1..5, r, q)
+  ./waybeam watch connections --once
+  watch -n 1 -d --color 'WBEAM_WATCH_COLOR=1 ./waybeam watch connections --once'
+  WBEAM_WATCH_LOG=1 ./waybeam watch doctor
+  ./waybeam debug up
+  ./waybeam logs live
+  ./waybeam logs adb start
 EOF
 }
 
@@ -421,7 +434,7 @@ watch_log_file() {
 
 host_health_raw() {
   local url
-  url="http://127.0.0.1:${CONTROL_PORT}/health"
+  url="${CONTROL_BASE_URL}/health"
   curl -fsS --max-time 1 "$url" 2>/dev/null || return 1
 }
 
@@ -451,7 +464,7 @@ version_doctor() {
 
   {
     echo "[version-doctor] time=$now"
-    echo "[version-doctor] control_api=http://127.0.0.1:${CONTROL_PORT}"
+    echo "[version-doctor] control_api=${CONTROL_BASE_URL}"
 
     if host_health="$(host_health_raw)"; then
       host_build="$(json_string_field "$host_health" "build_revision")"
@@ -656,13 +669,19 @@ android_resolve_deploy_hosts() {
     local host_ip_mod
     host_ip_mod="$(detect_host_ip || true)"
     if [[ -n "$host_ip_mod" ]]; then
-      echo "[android] WARN: adb reverse failed; using LAN IP ${host_ip_mod} for modern pipeline" >&2
+      waybeam_require_trusted_lan_binds "$host_ip_mod" || return 1
+      echo "[android] WARN: adb reverse failed; using explicitly configured LAN IP ${host_ip_mod} for modern pipeline" >&2
       android_echo_hosts "$host_ip_mod" "$host_ip_mod"
       return 0
     fi
-    echo "[android] WARN: adb reverse failed and no LAN IP detected; falling back to 127.0.0.1" >&2
-    android_echo_hosts "127.0.0.1" "127.0.0.1"
-    return 0
+    if [[ "$allow_no_transport" =~ ^(1|true|TRUE|yes|on)$ ]]; then
+      echo "[android] WARN: adb reverse failed and no LAN IP detected; explicitly forcing unreachable loopback APK." >&2
+      android_echo_hosts "127.0.0.1" "127.0.0.1"
+      return 0
+    fi
+    echo "[android] ERROR: adb reverse failed and no LAN IP is available; refusing unreachable APK configuration." >&2
+    echo "[android] Set WBEAM_ANDROID_ALLOW_NO_TRANSPORT=1 only for deliberate offline testing." >&2
+    return 1
   fi
 
   local host_ip
@@ -673,6 +692,7 @@ android_resolve_deploy_hosts() {
   # Try host IP unconditionally; the device-side IP check is irrelevant here
   # because it's the *host* address we're embedding in the APK.
   if [[ -n "$host_ip" ]]; then
+    waybeam_require_trusted_lan_binds "$host_ip" || return 1
     if ! android_probe_control_api_from_device "$host_ip"; then
       local host_iface
       host_iface="$(ip -4 -o addr show scope global 2>/dev/null | awk -v target="$host_ip" '{split($4,a,"/"); if (a[1]==target) {print $2; exit}}' || true)"
@@ -682,7 +702,7 @@ android_resolve_deploy_hosts() {
         echo "[android] Fix firewall (run locally as root):" >&2
         echo "  sudo iptables -I INPUT -i ${host_iface} -s 192.168.42.0/24 -p tcp -m multiport --dports ${CONTROL_PORT},${STREAM_PORT} -j ACCEPT" >&2
       fi
-      echo "[android] Then rerun: ./wbeam android deploy" >&2
+      echo "[android] Then rerun: ./waybeam android deploy" >&2
       return 1
     fi
     # api_only_fallback is only meaningful for modern (where stream may use
@@ -784,14 +804,14 @@ host_evdi_link_preflight() {
     return 0
   fi
 
-  if ldconfig -p 2>/dev/null | grep -q 'libevdi\.so'; then
-    return 0
-  fi
-  if compgen -G "/usr/lib*/libevdi.so*" >/dev/null 2>&1; then
+  if host_evdi_linkable_library >/dev/null; then
     return 0
   fi
 
-  echo "[host] ERROR: libevdi.so not found; cannot build streamer with EVDI support." >&2
+  echo "[host] ERROR: linkable libevdi.so not found; a runtime-only SONAME library cannot satisfy the source build." >&2
+  if [[ -n "${WBEAM_EVDI_LIB_DIR:-}" ]]; then
+    echo "[host] WBEAM_EVDI_LIB_DIR must contain libevdi.so: $WBEAM_EVDI_LIB_DIR" >&2
+  fi
   case "$(detect_linux_id)" in
     fedora)
       echo "[host] Fedora fix:" >&2
@@ -806,7 +826,7 @@ host_evdi_link_preflight() {
       ;;
     debian|ubuntu)
       echo "[host] Debian/Ubuntu fix:" >&2
-      echo "[host]   sudo apt-get install -y libevdi-dev" >&2
+      echo "[host]   install libevdi0-dev on Debian 12, or libevdi-dev on Ubuntu 24.04/current Debian" >&2
       ;;
     *)
       echo "[host] Generic fix: install EVDI development/runtime package that provides libevdi.so." >&2
@@ -816,6 +836,13 @@ host_evdi_link_preflight() {
   return 1
 }
 
+host_evdi_linkable_library() (
+  # Keep build-time feature detection consistent with packaging and diagnostics.
+  # This only reads the filesystem; it never installs or loads EVDI.
+  source "$ROOT_DIR/scripts/evdi-compat.sh"
+  evdi_find_linkable_library
+)
+
 host_build_preflight() {
   host_pkg_config_preflight
 }
@@ -824,13 +851,7 @@ host_can_build_evdi() {
   if [[ "${WBEAM_HOST_STREAMER_EVDI:-auto}" =~ ^(0|false|FALSE|no|off)$ ]]; then
     return 1
   fi
-  if ldconfig -p 2>/dev/null | grep -q 'libevdi\.so'; then
-    return 0
-  fi
-  if compgen -G "/usr/lib*/libevdi.so*" >/dev/null 2>&1; then
-    return 0
-  fi
-  return 1
+  host_evdi_linkable_library >/dev/null
 }
 
 host_build() {
@@ -841,19 +862,23 @@ host_build() {
   require_cmd cargo
   host_build_preflight
   local rust_dir="$ROOT_DIR/host/rust"
-  local build_version
+  local build_version with_evdi=0
+  if host_can_build_evdi; then
+    with_evdi=1
+  elif [[ ! "${WBEAM_HOST_STREAMER_EVDI:-auto}" =~ ^(0|false|FALSE|no|off)$ ]] &&
+       { [[ "${WBEAM_HOST_STREAMER_EVDI:-auto}" =~ ^(1|true|TRUE|yes|on)$ ]] || [[ -n "${WBEAM_EVDI_LIB_DIR:-}" ]]; }; then
+    # An explicit EVDI request must not silently produce a Portal-only binary.
+    host_evdi_link_preflight
+    with_evdi=1
+  fi
   build_version="$(build_version_for_build)"
   echo "[host] Build version: $build_version"
   echo "[host] Building Rust backend (release)…"
   cd "$rust_dir" && WBEAM_BUILD_REV="$build_version" cargo build --release -p wbeamd-server
-  if host_can_build_evdi; then
+  if [[ "$with_evdi" -eq 1 ]]; then
     echo "[host] Building streamer with EVDI support"
     cd "$rust_dir" && WBEAM_BUILD_REV="$build_version" cargo build --release -p wbeamd-streamer --no-default-features --features evdi
   else
-    if [[ "${WBEAM_HOST_STREAMER_EVDI:-auto}" =~ ^(1|true|TRUE|yes|on)$ ]]; then
-      host_evdi_link_preflight
-      return 1
-    fi
     echo "[host] libevdi.so not found; building streamer without EVDI support (Wayland Portal only)"
     echo "[host] To enable EVDI later on Fedora: scripts/fedora-setup.sh --yes --enable-evdi-copr"
     cd "$rust_dir" && WBEAM_BUILD_REV="$build_version" cargo build --release -p wbeamd-streamer --no-default-features
@@ -873,12 +898,8 @@ ensure_daemon_binary() {
   exit 1
 }
 
-stop_local_processes() {
-  pkill -9 wbeamd-streamer 2>/dev/null || true
-  pkill -9 wbeamd-server 2>/dev/null || true
-  rm -f /tmp/wbeamd.lock
-}
-
+# No process-name-wide kill: an unrelated user's session or a second WayBeam
+# instance must never be terminated just to free our listener.
 ensure_log_dir() {
   mkdir -p "$LOG_DIR"
 }
@@ -979,7 +1000,7 @@ adb_logcat_ensure_running() {
 }
 
 control_api_status() {
-  curl -sSf "http://127.0.0.1:${CONTROL_PORT}/status"
+  curl -sSf "${CONTROL_BASE_URL}/status"
 }
 
 print_control_unreachable_diagnostics() {
@@ -1026,22 +1047,26 @@ ip_status() {
 # Run the release binary in the foreground (no systemd, clean output)
 host_run() {
   ensure_daemon_binary
-  stop_local_processes
   if command -v adb >/dev/null 2>&1; then
     adb start-server >/dev/null 2>&1 || true
     adb_device_cmd reverse "tcp:${STREAM_PORT}"   "tcp:${STREAM_PORT}"   2>/dev/null || true
     adb_device_cmd reverse "tcp:${CONTROL_PORT}" "tcp:${CONTROL_PORT}" 2>/dev/null || true
   fi
   echo "[wbeam] host run — release binary, foreground"
-  echo "[wbeam] control=127.0.0.1:${CONTROL_PORT}  stream=127.0.0.1:${STREAM_PORT}"
+  echo "[wbeam] control=${WBEAM_CONTROL_BIND_ADDR:-127.0.0.1}:${CONTROL_PORT}  stream=${WBEAM_STREAM_BIND_ADDR:-127.0.0.1}:${STREAM_PORT}"
   echo "[wbeam] Ctrl-C to stop"
   echo ""
   export RUST_LOG="${RUST_LOG:-info}"
   export WBEAM_USE_RUST_STREAMER=1
-  exec "$DAEMON_BIN" \
-    --control-port "$CONTROL_PORT" \
-    --stream-port  "$STREAM_PORT" \
-    --root         "$ROOT_DIR"
+  local -a daemon_args=(--control-port "$CONTROL_PORT" --stream-port "$STREAM_PORT" --root "$ROOT_DIR")
+  if [[ -n "${WBEAM_CONTROL_BIND_ADDR:-}" ]]; then
+    daemon_args+=(--control-bind-address "$WBEAM_CONTROL_BIND_ADDR")
+  fi
+  if [[ "${WBEAM_ALLOW_UNAUTHENTICATED_LAN_CONTROL:-0}" == "1" ]]; then
+    daemon_args+=(--allow-unauthenticated-lan-control)
+  fi
+  # A busy listener is handled by the daemon; do not kill an existing owner.
+  exec "$DAEMON_BIN" "${daemon_args[@]}"
 }
 
 # Debug run: full RUST_LOG=debug, coloured output, ADB logcat sidecar
@@ -1051,7 +1076,14 @@ host_debug() {
 
 # Backwards-compat aliases
 daemon_up()   { host_run; }
-daemon_down() { stop_local_processes; echo "Daemon processes stopped."; }
+daemon_down() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    echo "[host] systemctl unavailable; stop foreground processes with Ctrl-C." >&2
+    return 1
+  fi
+  systemctl --user stop "${DAEMON_NAME}.service" || return 1
+  echo "[host] Stopped ${DAEMON_NAME}.service; unrelated/foreground processes were left untouched."
+}
 daemon_status() {
   if control_api_status >/dev/null 2>&1; then
     control_api_status
@@ -1063,14 +1095,26 @@ daemon_status() {
 }
 
 host_probe() {
-  if command -v python3 >/dev/null 2>&1; then
-    exec python3 "$HOST_SCRIPTS_DIR/probe_host.py" "$@"
+  case "${1:-}" in
+    --help|-h)
+      echo "Usage: ./waybeam host probe [--json]"
+      echo "Read host/backend capabilities from the running daemon's /v1/host-probe API."
+      return 0
+      ;;
+    --json) shift ;;
+  esac
+  if [[ "$#" -gt 0 ]]; then
+    echo "[host] unknown probe argument: $1 (use --help)" >&2
+    return 2
   fi
-  if command -v python >/dev/null 2>&1; then
-    exec python "$HOST_SCRIPTS_DIR/probe_host.py" "$@"
+  require_cmd curl
+  local url="${CONTROL_BASE_URL}/v1/host-probe" response
+  if ! response="$(curl --silent --show-error --fail --connect-timeout 2 --max-time 5 "$url")"; then
+    echo "[host] Cannot read host capabilities from $url." >&2
+    echo "[host] Start the daemon with ./waybeam host run or systemctl --user start ${DAEMON_NAME}.service, then retry." >&2
+    return 1
   fi
-  echo "Missing required command: python3 (or python)" >&2
-  exit 1
+  printf '%s\n' "$response"
 }
 
 host_tuner() {
@@ -1079,7 +1123,7 @@ host_tuner() {
   local rust_dir="$ROOT_DIR/host/rust"
   local tuner_stream_port="${WBEAM_STREAM_PORT:-$STREAM_PORT}"
   local tuner_control_port="${WBEAM_CONTROL_PORT:-$CONTROL_PORT}"
-  local tuner_args=("--host-url" "http://127.0.0.1:${tuner_control_port}")
+  local tuner_args=("--host-url" "http://${CONTROL_CONNECT_HOST}:${tuner_control_port}")
   if [[ -n "$ANDROID_SERIAL" ]]; then
     echo "[host] tuner using serial=$ANDROID_SERIAL" >&2
     if android_try_reverse_setup "$tuner_stream_port" "$tuner_control_port"; then
@@ -1098,7 +1142,7 @@ host_tuner() {
 
 android_build() {
   if [[ "$INSTALLED_MODE" -eq 1 ]]; then
-    echo "[android] Source build requires a repository checkout. Use 'wbeam android deploy' for bundled APK." >&2
+    echo "[android] Source build requires a repository checkout. Use 'waybeam android deploy' for bundled APK." >&2
     return 2
   fi
   local pipeline_mode min_sdk build_api_host build_stream_host gradle_user_home build_version
@@ -1184,17 +1228,17 @@ android_install_with_signature_recover() {
 android_install() {
   if [[ ! -f "$ANDROID_APK" ]]; then
     echo "APK not found: $ANDROID_APK" >&2
-    echo "Run './wbeam android build' first." >&2
+    echo "Run './waybeam android build' first." >&2
     exit 1
   fi
-  adb start-server >/dev/null
-  adb_device_cmd wait-for-device
+  adb start-server >/dev/null || return 1
+  adb_device_cmd wait-for-device || return 1
   if android_should_skip_install "$ANDROID_APK"; then
     echo "[android] APK version+config unchanged ($(android_expected_version_name)); skipping install (${ANDROID_SERIAL:-default})."
     return 0
   fi
   echo "[android] Installing $ANDROID_APK (${ANDROID_SERIAL:-default})…"
-  android_install_with_signature_recover "$ANDROID_APK" "$ANDROID_PACKAGE"
+  android_install_with_signature_recover "$ANDROID_APK" "$ANDROID_PACKAGE" || return 1
   # Record the build config that is now on the device so future skip checks work.
   local build_stamp install_stamp
   build_stamp="$(android_build_stamp_path "$ANDROID_APK")"
@@ -1205,8 +1249,8 @@ android_install() {
 }
 
 android_launch() {
-  adb start-server >/dev/null
-  adb_device_cmd wait-for-device
+  adb start-server >/dev/null || return 1
+  adb_device_cmd wait-for-device || return 1
   echo "[android] Launching ${ANDROID_PACKAGE}/${ANDROID_ACTIVITY} ($(android_target_desc))…"
   adb_device_cmd shell am start -n "${ANDROID_PACKAGE}/${ANDROID_ACTIVITY}"
 }
@@ -1214,11 +1258,11 @@ android_launch() {
 android_deploy() {
   if [[ "$INSTALLED_MODE" -eq 1 ]]; then
     [[ -s "$ANDROID_APK_RELEASE" ]] || { echo "[android] Bundled APK missing: $ANDROID_APK_RELEASE" >&2; return 1; }
-    android_install_release
+    android_install_release || return 1
     if ! android_try_reverse_setup "$STREAM_PORT" "$CONTROL_PORT"; then
       echo "[android] WARN: adb reverse unavailable; check USB debugging and permissions." >&2
     fi
-    if [[ "${WBEAM_ANDROID_SKIP_LAUNCH:-0}" != "1" ]]; then android_launch; fi
+    if [[ "${WBEAM_ANDROID_SKIP_LAUNCH:-0}" != "1" ]]; then android_launch || return 1; fi
     return 0
   fi
   local pipeline_mode build_hosts build_api_host build_stream_host
@@ -1250,11 +1294,19 @@ android_deploy() {
 
 android_deploy_all() {
   if [[ "$INSTALLED_MODE" -eq 1 ]]; then
-    local serial failures=0
+    local serial device_list failures=0
+    if ! device_list="$(android_connected_serials)"; then
+      echo "[android] Failed to enumerate connected adb devices." >&2
+      return 1
+    fi
+    if [[ -z "$device_list" ]]; then
+      echo "[android] No connected adb devices in 'device' state; authorize a device and retry." >&2
+      return 1
+    fi
     while IFS= read -r serial; do
       [[ -n "$serial" ]] || continue
       ANDROID_SERIAL="$serial" android_deploy || failures=$((failures + 1))
-    done < <(adb_connected_serials)
+    done <<< "$device_list"
     (( failures == 0 )) || return 1
     return 0
   fi
@@ -1605,7 +1657,7 @@ android_install_release() {
 
   if [[ -z "$release_apk" ]]; then
     echo "Release APK not found." >&2
-    echo "Run './wbeam android build-release' first." >&2
+    echo "Run './waybeam android build-release' first." >&2
     exit 1
   fi
 
@@ -1615,14 +1667,14 @@ android_install_release() {
     exit 1
   fi
 
-  adb start-server >/dev/null
-  adb_device_cmd wait-for-device
+  adb start-server >/dev/null || return 1
+  adb_device_cmd wait-for-device || return 1
   if android_should_skip_install "$release_apk"; then
     echo "[android] APK version+config unchanged ($(android_expected_version_name)); skipping release install (${ANDROID_SERIAL:-default})."
     return 0
   fi
   echo "[android] Installing $release_apk ($(android_target_desc))…"
-  android_install_with_signature_recover "$release_apk" "$ANDROID_PACKAGE"
+  android_install_with_signature_recover "$release_apk" "$ANDROID_PACKAGE" || return 1
   local build_stamp install_stamp
   build_stamp="$(android_build_stamp_path "$release_apk")"
   install_stamp="$(android_install_stamp_path "$release_apk")"
@@ -1761,13 +1813,13 @@ watch_android_max_res() {
 watch_session_status_json() {
   local serial="$1"
   local stream_port="$2"
-  curl -fsS --max-time 1 "http://127.0.0.1:${CONTROL_PORT}/v1/status?serial=${serial}&stream_port=${stream_port}" 2>/dev/null || true
+  curl -fsS --max-time 1 "${CONTROL_BASE_URL}/v1/status?serial=${serial}&stream_port=${stream_port}" 2>/dev/null || true
 }
 
 watch_session_metrics_json() {
   local serial="$1"
   local stream_port="$2"
-  curl -fsS --max-time 1 "http://127.0.0.1:${CONTROL_PORT}/v1/metrics?serial=${serial}&stream_port=${stream_port}" 2>/dev/null || true
+  curl -fsS --max-time 1 "${CONTROL_BASE_URL}/v1/metrics?serial=${serial}&stream_port=${stream_port}" 2>/dev/null || true
 }
 
 watch_adb_reverse_has_port() {
@@ -1834,9 +1886,9 @@ watch_connections_once() {
   local stream_port control_port reverse_count
   local -a serials
 
-  health_json="$(curl -fsS --max-time 1 "http://127.0.0.1:${CONTROL_PORT}/v1/health" 2>/dev/null || true)"
-  probe_json="$(curl -fsS --max-time 1 "http://127.0.0.1:${CONTROL_PORT}/v1/host-probe" 2>/dev/null || true)"
-  status_json="$(curl -fsS --max-time 1 "http://127.0.0.1:${CONTROL_PORT}/v1/status" 2>/dev/null || true)"
+  health_json="$(curl -fsS --max-time 1 "${CONTROL_BASE_URL}/v1/health" 2>/dev/null || true)"
+  probe_json="$(curl -fsS --max-time 1 "${CONTROL_BASE_URL}/v1/host-probe" 2>/dev/null || true)"
+  status_json="$(curl -fsS --max-time 1 "${CONTROL_BASE_URL}/v1/status" 2>/dev/null || true)"
 
   echo "host:"
   if [[ -z "$health_json" || -z "$probe_json" ]]; then
@@ -1926,9 +1978,9 @@ watch_service_once() {
   fi
   uptime="$(watch_service_uptime "$main_pid")"
 
-  health_json="$(curl -fsS --max-time 1 "http://127.0.0.1:${CONTROL_PORT}/v1/health" 2>/dev/null || true)"
-  probe_json="$(curl -fsS --max-time 1 "http://127.0.0.1:${CONTROL_PORT}/v1/host-probe" 2>/dev/null || true)"
-  status_json="$(curl -fsS --max-time 1 "http://127.0.0.1:${CONTROL_PORT}/v1/status" 2>/dev/null || true)"
+  health_json="$(curl -fsS --max-time 1 "${CONTROL_BASE_URL}/v1/health" 2>/dev/null || true)"
+  probe_json="$(curl -fsS --max-time 1 "${CONTROL_BASE_URL}/v1/host-probe" 2>/dev/null || true)"
+  status_json="$(curl -fsS --max-time 1 "${CONTROL_BASE_URL}/v1/status" 2>/dev/null || true)"
 
   echo "service:"
   printf '  %-12s %-16s %-10s %-14s\n' "installed" "$(watch_status_label "$installed")" "active" "$(watch_status_label "${active:-unknown}")"
@@ -2163,9 +2215,9 @@ watch_streaming_once() {
 
 watch_health_once() {
   local code_health code_probe code_status
-  code_health="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 1 "http://127.0.0.1:${CONTROL_PORT}/v1/health" || true)"
-  code_probe="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 1 "http://127.0.0.1:${CONTROL_PORT}/v1/host-probe" || true)"
-  code_status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 1 "http://127.0.0.1:${CONTROL_PORT}/v1/status" || true)"
+  code_health="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 1 "${CONTROL_BASE_URL}/v1/health" || true)"
+  code_probe="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 1 "${CONTROL_BASE_URL}/v1/host-probe" || true)"
+  code_status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 1 "${CONTROL_BASE_URL}/v1/status" || true)"
   printf 'endpoint /v1/health    http=%s\n' "$(watch_status_label "${code_health:-000}")"
   printf 'endpoint /v1/host-probe http=%s\n' "$(watch_status_label "${code_probe:-000}")"
   printf 'endpoint /v1/status    http=%s\n' "$(watch_status_label "${code_status:-000}")"

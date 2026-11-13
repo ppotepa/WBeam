@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verify WBeam from a checkout when hosted CI runners are unavailable.
+# Verify WayBeam from a checkout when hosted CI runners are unavailable.
 # This script never publishes releases, mutates the kernel or needs signing keys.
 set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -15,13 +15,15 @@ Usage: bash scripts/ci/run-local-verification.sh [--quick|--full] [--report-dir 
   --help   Show this help
 
 Reports: <report-dir>/summary.tsv, metadata.txt and one .log per test.
-Missing prerequisites cause a BLOCKED result and a nonzero exit code.
+Quick prerequisites: Bash, git, jq, Python 3, Node/npm and GNU coreutils.
+Missing entrypoint tools cause BLOCKED; dependency or test errors cause FAIL.
+Both return a nonzero exit code.
 This is *not* a replacement for hardware EVDI/Portal acceptance.
 HELP
 }
 
 show_cases() {
-  printf '%s\n' shell_syntax release_shell python_e2e desktop_install desktop_test desktop_build
+  printf '%s\n' shell_syntax branding release_shell python_e2e desktop_install desktop_test desktop_build
   if [[ "$MODE" == full ]]; then
     printf '%s\n' host_rust host_streamer tauri_rust tauri_check android_debug
   fi
@@ -87,17 +89,17 @@ run_step() {
   fi
 }
 
-run_step shell_syntax bash "$ROOT_DIR" bash -c \
-  'bash -n wbeam scripts/virtual-deps-check.sh scripts/virtual-deps-install.sh scripts/evdi-compat.sh scripts/ci/*.sh'
+run_step shell_syntax bash "$ROOT_DIR" bash scripts/ci/check-shell-syntax.sh
+run_step branding python3 "$ROOT_DIR" python3 scripts/apply-branding.py --check
 run_step release_shell bash "$ROOT_DIR" bash -c \
-  'set -Eeuo pipefail; bash scripts/ci/test-release-version.sh; bash scripts/ci/check-version-consistency.sh; bash scripts/ci/test-evdi-diagnostics.sh; bash scripts/ci/test-virtual-deps-runtime.sh; bash scripts/ci/test-virtual-deps-install-dry-run.sh; bash scripts/ci/test-deb-target.sh; bash scripts/ci/test-publication-contract.sh; bash scripts/ci/test-control-bind-policy.sh; bash scripts/ci/test-daemon-log-location.sh; bash scripts/ci/test-systemd-offline-start.sh'
+  'set -Eeuo pipefail; bash scripts/ci/test-release-version.sh; bash scripts/ci/check-version-consistency.sh; bash scripts/ci/test-evdi-diagnostics.sh; bash scripts/ci/test-virtual-deps-runtime.sh; bash scripts/ci/test-virtual-deps-install-dry-run.sh; bash scripts/ci/test-host-shell-regressions.sh; bash scripts/ci/test-evdi-setup.sh; bash scripts/ci/test-deb-target.sh; bash scripts/ci/test-publication-contract.sh; bash scripts/ci/test-control-bind-policy.sh; bash scripts/ci/test-daemon-log-location.sh; bash scripts/ci/test-systemd-offline-start.sh'
 run_step python_e2e python3 "$ROOT_DIR" python3 -m unittest discover -s e2e/tests -v
 run_step desktop_install npm "$ROOT_DIR/desktop/apps/desktop-tauri" npm ci
 run_step desktop_test npm "$ROOT_DIR/desktop/apps/desktop-tauri" npm test
 run_step desktop_build npm "$ROOT_DIR/desktop/apps/desktop-tauri" npm run build
 
 if [[ "$MODE" == full ]]; then
-  run_step host_rust cargo "$ROOT_DIR" cargo test --locked --manifest-path host/rust/Cargo.toml -p wbeamd-api -p wbeamd-core -p wbeamd-server
+  run_step host_rust cargo "$ROOT_DIR" cargo test --locked --manifest-path host/rust/Cargo.toml -p wbeamd-api -p wbeamd-core -p wbeamd-server -p wbeamd-tuner
   run_step host_streamer cargo "$ROOT_DIR" bash -c 'set -Eeuo pipefail; cargo check --locked --manifest-path host/rust/Cargo.toml -p wbeamd-streamer --no-default-features --features evdi; cargo test --locked --manifest-path host/rust/Cargo.toml -p wbeamd-streamer --no-default-features --features evdi'
   run_step tauri_rust cargo "$ROOT_DIR" cargo test --locked --manifest-path desktop/apps/desktop-tauri/src-tauri/Cargo.toml
   run_step tauri_check cargo "$ROOT_DIR" cargo check --locked --manifest-path desktop/apps/desktop-tauri/src-tauri/Cargo.toml

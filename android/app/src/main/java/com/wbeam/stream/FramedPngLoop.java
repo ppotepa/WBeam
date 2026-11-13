@@ -92,13 +92,16 @@ final class FramedPngLoop {
             }
 
             long seqU32 = frameHeader.seqU32;
-            long ptsUs = frameHeader.ptsUs;
 
             if (ctx.expectedSeq < 0) {
                 ctx.expectedSeq = seqU32;
             }
 
-            if (!isFrameEligible(seqU32, ptsUs, ctx)) {
+            WbtpPayloadBuffer.validatePayloadLength(frameHeader.payloadLen, config.framePayloadHardCap);
+            if (!isFrameEligible(seqU32, ctx)) {
+                // A rejected header still owns a payload on this byte stream.
+                WbtpFrameIo.skipFully(input, ctx.skipScratch, frameHeader.payloadLen);
+                ctx.bytes += config.frameHeaderSize + frameHeader.payloadLen;
                 continue;
             }
 
@@ -111,9 +114,9 @@ final class FramedPngLoop {
 
             skipBacklogFramesIfNeeded(input, ctx);
 
-            processFrame(pngRenderer, frameHeader.payloadLen, seqU32, ptsUs, ctx);
+            processFrame(pngRenderer, frameHeader.payloadLen, seqU32, ctx);
 
-            handlePeriodicLogging(ctx);
+            handlePeriodicLogging(input, ctx);
         }
     }
 
@@ -128,18 +131,13 @@ final class FramedPngLoop {
         );
     }
 
-    private boolean isFrameEligible(long seqU32, long ptsUs, RunContext ctx) {
+    private boolean isFrameEligible(long seqU32, RunContext ctx) {
         if (seqU32 < ctx.expectedSeq) {
             ctx.droppedSec++;
             return false;
         }
         if (seqU32 > ctx.expectedSeq + ctx.seqGapBudget) {
             ctx.expectedSeq = seqU32;
-        }
-        if (ctx.lastQueuedPtsUs > 0 && ptsUs + 1_000 < ctx.lastQueuedPtsUs) {
-            ctx.droppedSec++;
-            ctx.expectedSeq = seqU32 + 1;
-            return false;
         }
         return true;
     }
@@ -199,22 +197,20 @@ final class FramedPngLoop {
         }
     }
 
-    private void processFrame(PngSurfaceRenderer pngRenderer, int payloadLen, long seqU32, long ptsUs, RunContext ctx) {
-        long t0 = SystemClock.elapsedRealtimeNanos();
+    private void processFrame(PngSurfaceRenderer pngRenderer, int payloadLen, long seqU32, RunContext ctx) {
         PngSurfaceRenderer.RenderResult renderResult = pngRenderer.render(ctx.payloadBuf, payloadLen);
         if (renderResult.rendered) {
             ctx.outFrames++;
             ctx.lastPresentMs = SystemClock.elapsedRealtime();
-            ctx.lastQueuedPtsUs = ptsUs;
+            ctx.presentationMetrics.record(renderResult.presentedAtNs - renderResult.renderNs,
+                    renderResult.presentedAtNs);
             ctx.expectedSeq = seqU32 + 1;
         } else {
             ctx.droppedSec++;
             ctx.expectedSeq = seqU32 + 1;
         }
 
-        long dn = SystemClock.elapsedRealtimeNanos() - t0;
-        ctx.decodeNsTotal += dn;
-        ctx.decodeNsBuf[(ctx.decodeNsBufN++) & 127] = dn;
+        ctx.decodeNsBuf[(ctx.decodeNsBufN++) & 127] = renderResult.decodeNs;
         ctx.inFrames++;
 
         long nowMs = SystemClock.elapsedRealtime();
@@ -225,7 +221,7 @@ final class FramedPngLoop {
         }
     }
 
-    private void handlePeriodicLogging(RunContext ctx) throws IOException {
+    private void handlePeriodicLogging(InputStream input, RunContext ctx) throws IOException {
         long nowMs = SystemClock.elapsedRealtime();
         if (nowMs - ctx.lastLog < 1000) {
             return;
@@ -235,7 +231,7 @@ final class FramedPngLoop {
         config.runtimeState.resetReconnectDelayMs();
 
         int payloadEstimate = Math.max(8 * 1024, ctx.maxPayloadSeen + config.frameHeaderSize);
-        int backlogBytes = Math.max(0, 0);
+        int backlogBytes = Math.max(0, input.available());
         int backlogFramesEstimate = payloadEstimate > 0 ? (backlogBytes / payloadEstimate) : 0;
 
         config.statusListener.onStatus(config.stateStreaming, "rendering live desktop [framed/png]", ctx.bytes);
@@ -248,16 +244,15 @@ final class FramedPngLoop {
                         + " | reconnects: " + config.runtimeState.getReconnects()
         );
 
-        double decodeMsP50 = ctx.inFrames > 0 ? (ctx.decodeNsTotal / 1_000_000.0) / ctx.inFrames : 0.0;
+        double decodeMsP50 = StreamBufferMath.percentileMs(ctx.decodeNsBuf, Math.min(ctx.decodeNsBufN, 128), 0.50, ctx.decodeNsScratch);
         double decodeMsP95 = StreamBufferMath.percentileMs(ctx.decodeNsBuf, Math.min(ctx.decodeNsBufN, 128), 0.95, ctx.decodeNsScratch);
-        long nowEpochUs = System.currentTimeMillis() * 1000L;
-        long transportLagUs = (ctx.lastQueuedPtsUs > 0 && nowEpochUs > ctx.lastQueuedPtsUs)
-                ? (nowEpochUs - ctx.lastQueuedPtsUs)
-                : 0L;
-        int transportQueueDepth = (int) Math.max(0L, Math.min(16L, transportLagUs / Math.max(1L, config.frameUs)));
+        int transportQueueDepth = Math.min(16, backlogFramesEstimate);
+        double sampleSeconds = Math.max(0.001, (nowMs - ctx.lastLog) / 1000.0);
         config.statusListener.onClientMetrics(new ClientMetricsSample(
-                ctx.inFrames, ctx.inFrames, ctx.outFrames, ctx.bytes,
-                decodeMsP50, decodeMsP95, 0.0, 0.0, 0.0,
+                ctx.inFrames / sampleSeconds, ctx.inFrames / sampleSeconds,
+                ctx.outFrames / sampleSeconds, (long) (ctx.bytes / sampleSeconds),
+                decodeMsP50, decodeMsP95, ctx.presentationMetrics.renderP95Ms(),
+                ctx.presentationMetrics.frameTimeP95Ms(),
                 transportQueueDepth,
                 0,
                 0,
@@ -280,8 +275,8 @@ final class FramedPngLoop {
         ctx.payloadGrowEvents = 0;
         ctx.resyncSuccessSec = 0;
         ctx.resyncFailSec = 0;
-        ctx.decodeNsTotal = 0;
         ctx.decodeNsBufN = 0;
+        ctx.presentationMetrics.clearWindow();
         ctx.lastLog = nowMs;
     }
 
@@ -290,7 +285,7 @@ final class FramedPngLoop {
         long inFrames = 0L;
         long outFrames = 0L;
         long droppedSec = 0L;
-        long decodeNsTotal = 0L;
+        final PresentationMetrics presentationMetrics = new PresentationMetrics();
         long[] decodeNsBuf = new long[128];
         long[] decodeNsScratch = new long[128];
         int decodeNsBufN = 0;
@@ -301,7 +296,6 @@ final class FramedPngLoop {
         long lastLog = SystemClock.elapsedRealtime();
         long lastPresentMs = SystemClock.elapsedRealtime();
         long expectedSeq = -1L;
-        long lastQueuedPtsUs = -1L;
         long lastBacklogCheckMs = 0L;
         final int seqGapBudget;
         final boolean dropBacklogFrames;

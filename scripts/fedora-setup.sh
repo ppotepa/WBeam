@@ -18,7 +18,7 @@ usage() {
 Usage:
   scripts/fedora-setup.sh [options]
 
-Installs Fedora packages needed for local WBeam development:
+Installs Fedora packages needed for local WayBeam development:
   - Rust host build
   - Tauri desktop build
   - GStreamer streamer build/runtime
@@ -189,7 +189,11 @@ ensure_android_cmdline_tools() {
     return 0
   fi
 
-  tmp_dir="$(mktemp -d)"
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    tmp_dir="${TMPDIR:-/tmp}/wbeam-android-sdk-preview"
+  else
+    tmp_dir="$(mktemp -d)"
+  fi
   zip_file="$tmp_dir/cmdline-tools.zip"
   extracted="$tmp_dir/extracted"
   run_cmd mkdir -p "$sdk_root/cmdline-tools"
@@ -307,7 +311,7 @@ verify_gstreamer_encoders() {
 
   if [[ "$h265_ok" -ne 1 ]]; then
     echo "[fedora-setup] WARN: no supported H.265 GStreamer encoder found (nvh265enc/x265enc)." >&2
-    echo "[fedora-setup] WBeam will use H.264 unless H.265 support is installed separately." >&2
+    echo "[fedora-setup] WayBeam will use H.264 unless H.265 support is installed separately." >&2
   fi
 }
 
@@ -355,7 +359,7 @@ request = urllib.request.Request(
     api_url,
     headers={
         "Accept": "application/vnd.github+json",
-        "User-Agent": "WBeam-fedora-setup",
+        "User-Agent": "WayBeam-fedora-setup",
     },
 )
 
@@ -645,7 +649,7 @@ BASE_PACKAGES=(
   kernel-headers
 )
 
-echo "[fedora-setup] Installing Fedora dependencies for WBeam"
+echo "[fedora-setup] Installing Fedora dependencies for WayBeam"
 
 if [[ "$INSTALL_GROUP" -eq 1 ]]; then
   dnf_group_install "c-development"
@@ -653,7 +657,11 @@ fi
 
 dnf_install "${BASE_PACKAGES[@]}"
 
-verify_gstreamer_encoders
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  echo "[fedora-setup] DRY-RUN: verify GStreamer encoders after installing packages"
+else
+  verify_gstreamer_encoders
+fi
 
 if [[ "$WITH_ANDROID_SDK" -eq 1 ]]; then
   ensure_android_sdk
