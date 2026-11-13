@@ -38,9 +38,17 @@ if tool == "dpkg":
     print("amd64")
 elif tool == "ldd":
     soname = os.environ["WBEAM_TEST_SONAME"]
-    print("\t%s => %s/%s (0x0123456789ab)" % (soname, os.environ["WBEAM_EVDI_LIB_DIR"], soname))
+    lib = Path(os.environ["WBEAM_EVDI_LIB_DIR"]) / soname
+    if not lib.is_file():
+        print("\t%s => not found" % soname)
+    else:
+        print("\t%s => %s (0x0123456789ab)" % (soname, lib))
 elif tool == "readelf":
-    print(" 0x0000000000000001 (NEEDED) Shared library: [%s]" % os.environ["WBEAM_TEST_SONAME"])
+    soname = os.environ["WBEAM_TEST_SONAME"]
+    print(" 0x0000000000000001 (NEEDED) Shared library: [%s]" % soname)
+    if args[-1].endswith((".so.0", ".so.1")):
+        actual = os.environ.get("WBEAM_TEST_ACTUAL_SONAME", soname)
+        print(" 0x000000000000000e (SONAME) Library soname: [%s]" % actual)
 elif tool == "dpkg-deb":
     assert args[0] == "--build", args
     shutil.copytree(args[1], capture / "deb-root", symlinks=True)
@@ -126,6 +134,8 @@ class RuntimePackagingTests(unittest.TestCase):
         library = self.base / "libevdi"
         library.mkdir()
         (library / "libevdi.so").write_text("fixture linker library\n")
+        for soname in ("libevdi.so.0", "libevdi.so.1"):
+            (library / soname).write_text("fixture runtime " + soname + "\n")
         stub = self.bin / "fixture-tool"
         stub.write_text(TOOL_STUB)
         stub.chmod(0o755)
@@ -281,11 +291,21 @@ class RuntimePackagingTests(unittest.TestCase):
                 self.assertIn("Package: wbeam\n", control)
                 self.assertIn(f"Version: 0.1.3~rc.2+{target}\n", control)
                 self.assertIn("libevdi0" if target == "bookworm" else "libevdi1", control)
+                self.assertIn("gstreamer1.0-plugins-ugly", control)
+
+    def test_rpm_rejects_broken_evdi_runtime_abi(self):
+        for override in ({"WBEAM_TEST_ACTUAL_SONAME": "libevdi.so.1"},
+                         {"WBEAM_TEST_SONAME": "libevdi.so.9"}):
+            with self.subTest(override=override):
+                result = self.run_command(["bash", self.root / "scripts/ci/build_rpm.sh"], **override)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("EVDI runtime/linker validation failed", result.stderr)
 
     def test_rpm_staging_is_covered_by_files_manifest(self):
         self.assert_success(self.run_command(["bash", self.root / "scripts/ci/build_rpm.sh"]))
         package = self.capture / "rpm-root"
         self.assert_package(package)
+        self.assertIn("Requires:       gstreamer1-plugin-openh264", (self.capture / "wbeam.spec").read_text())
         spec = (self.capture / "wbeam.spec").read_text()
         manifest = spec.split("\n%files\n", 1)[1].split("\n%changelog", 1)[0].splitlines()
         owned = [line.strip() for line in manifest if line.strip() and not line.startswith("#")]

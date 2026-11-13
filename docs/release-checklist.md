@@ -190,7 +190,7 @@ move its tag to the approved commit; tag/source archives and binary assets must
 refer to the same revision. The publisher keeps the release as a draft during
 upload and verification; the rolling release removes stale assets outside the
 approved set. Windows and aarch64 build outputs are not part
-of this publisher's supported upload set. The experimental aarch64 archive
+of this publisher's supported upload set. The supported publication set is x86_64 only (amd64 for DEB, x86_64 for RPM); additional architectures require a separate tested release matrix. The experimental aarch64 archive
 contains the daemon binary and version manifest, not a complete runtime/CLI.
 
 After publication, download the packages, check `SHA256SUMS.txt`, and repeat

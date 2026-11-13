@@ -102,7 +102,7 @@ Section: utils
 Priority: optional
 Architecture: ${ARCH}
 Maintainer: ${WBEAM_PRODUCT_NAME} CI <ci@example.local>
-Depends: libgtk-3-0, libwebkit2gtk-4.1-0, libsoup-3.0-0, libayatana-appindicator3-1, ${EVDI_RUNTIME_PKG}, adb, curl, binutils, gstreamer1.0-plugins-base
+Depends: libgtk-3-0, libwebkit2gtk-4.1-0, libsoup-3.0-0, libayatana-appindicator3-1, ${EVDI_RUNTIME_PKG}, adb, curl, binutils, gstreamer1.0-plugins-base, gstreamer1.0-plugins-ugly
 Description: ${WBEAM_PRODUCT_NAME} host tools and daemon binaries
  ${WBEAM_PRODUCT_NAME} host runtime package built by GitLab CI.
 EOF

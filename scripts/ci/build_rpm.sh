@@ -25,6 +25,16 @@ echo "[build_rpm] EVDI linker library: ${evdi_library}"
 echo "[build_rpm] Building Rust binaries..."
 cargo build --release -p wbeamd-server --manifest-path "${RUST_MANIFEST}"
 cargo build --release -p wbeamd-streamer --no-default-features --features evdi --manifest-path "${RUST_MANIFEST}"
+# The linker input alone says nothing about the produced binary's runtime ABI.
+# Validate the exact streamer just built, including all unresolved shared libs.
+streamer_bin="${ROOT_DIR}/host/rust/target/release/wbeamd-streamer"
+runtime_issues="$(WBEAM_RUST_STREAMER_BIN="$streamer_bin" evdi_streamer_runtime_issues "$ROOT_DIR")"
+if [[ -n "$runtime_issues" ]]; then
+  echo "[build_rpm] EVDI runtime/linker validation failed for $streamer_bin:" >&2
+  printf '%s\n' "$runtime_issues" >&2
+  exit 1
+fi
+echo "[build_rpm] Streamer EVDI dependencies and SONAME: verified"
 echo "[build_rpm] Building desktop Tauri app..."
 (
   cd "${ROOT_DIR}/desktop/apps/desktop-tauri"
@@ -79,6 +89,7 @@ Requires:       android-tools
 Requires:       curl
 Requires:       binutils
 Requires:       gstreamer1-plugins-base
+Requires:       gstreamer1-plugin-openh264
 
 %description
 ${WBEAM_PRODUCT_NAME} host runtime package built by GitLab CI.

@@ -14,6 +14,13 @@ manifest_version="$(sed -n 's/^WBEAM_VERSION=//p' "${DIST_DIR}/VERSION.txt" | he
   echo "[release] manifest version mismatch: expected ${WBEAM_VERSION}, found ${manifest_version:-none}" >&2
   exit 1
 }
+if [[ -n "${CI_COMMIT_TAG:-}" ]]; then
+  tag_version="$(normalize_tag_version "$CI_COMMIT_TAG")" || exit 1
+  if [[ "$tag_version" != "$WBEAM_VERSION" ]]; then
+    echo "[release] tagged release $CI_COMMIT_TAG does not match artifact version $WBEAM_VERSION" >&2
+    exit 1
+  fi
+fi
 version_code="$(sed -n 's/^WBEAM_VERSION_CODE=//p' "${DIST_DIR}/VERSION.txt" | head -n 1)"
 [[ "$version_code" =~ ^[1-9][0-9]{0,9}$ ]] && (( version_code > 1 && version_code <= 2100000000 )) || {
   echo "[release] missing/invalid signed Android versionCode" >&2
@@ -56,7 +63,7 @@ fi
 for file in "${debs[@]}"; do
   name="$(basename "$file")"
   case "$name" in
-    wbeam_"$(wbeam_deb_package_version "$WBEAM_VERSION" bookworm)"_*.deb|wbeam_"$(wbeam_deb_package_version "$WBEAM_VERSION" noble)"_*.deb) ;;
+    wbeam_"$(wbeam_deb_package_version "$WBEAM_VERSION" bookworm)"_amd64.deb|wbeam_"$(wbeam_deb_package_version "$WBEAM_VERSION" noble)"_amd64.deb) ;;
     *) echo "[release] stale or unsupported DEB artifact: $name" >&2; exit 1 ;;
   esac
 done
@@ -65,7 +72,7 @@ rpm_version="${rpm_version/-beta./~beta.}"
 rpm_version="${rpm_version/-alpha./~alpha.}"
 for file in "${rpms[@]}"; do
   case "$(basename "$file")" in
-    wbeam-"$rpm_version"-1.x86_64.rpm|wbeam-"$rpm_version"-1.aarch64.rpm|wbeam-"$rpm_version"-1.fc43.x86_64.rpm|wbeam-"$rpm_version"-1.fc43.aarch64.rpm) ;;
+    wbeam-"$rpm_version"-1.x86_64.rpm|wbeam-"$rpm_version"-1.fc43.x86_64.rpm) ;;
     *) echo "[release] stale or unsupported RPM artifact: $(basename "$file")" >&2; exit 1 ;;
   esac
 done

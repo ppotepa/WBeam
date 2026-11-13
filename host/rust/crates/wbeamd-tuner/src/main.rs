@@ -1382,6 +1382,10 @@ fn parse_metric_sample(metrics_payload: &Value) -> Option<MetricSample> {
     })
 }
 
+fn mbps_from_bytes_per_second(bytes_per_second: f64) -> f64 {
+    bytes_per_second * 8.0 / 1_000_000.0
+}
+
 fn score_candidate(samples: &[MetricSample]) -> (f64, bool, String) {
     if samples.is_empty() {
         return (-10_000.0, true, "no metrics samples".to_string());
@@ -1437,7 +1441,7 @@ fn score_candidate(samples: &[MetricSample]) -> (f64, bool, String) {
         / n;
 
     if recv < 1.0 {
-        let approx_mbps = (recv_bps * 8.0 / 1_000_000.0).max(0.0);
+        let approx_mbps = mbps_from_bytes_per_second(recv_bps).max(0.0);
         if recv_bps > 150_000.0 {
             return (
                 -9_150.0,
@@ -1529,7 +1533,7 @@ fn summarize_samples(samples: &[MetricSample]) -> String {
         mean(|s| s.recv_fps),
         mean(|s| s.present_fps),
         mean(|s| s.target_fps),
-        mean(|s| s.recv_bps) / 1_000_000.0,
+        mbps_from_bytes_per_second(mean(|s| s.recv_bps)),
         states
     )
 }
@@ -2382,7 +2386,7 @@ fn detail_from_connection(conn: &ConnectionSnapshot) -> String {
         conn.decode_fps,
         conn.present_fps,
         conn.target_fps,
-        conn.recv_bps / 1_000_000.0,
+        mbps_from_bytes_per_second(conn.recv_bps),
         conn.restart_count,
         conn.reconnects,
         if conn.last_error.trim().is_empty() {
@@ -2993,6 +2997,16 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn byte_rates_are_reported_as_megabits_not_megabytes() {
+        assert_eq!(mbps_from_bytes_per_second(1_000_000.0), 8.0);
+        assert_eq!(mbps_from_bytes_per_second(0.0), 0.0);
+        let mut sample = parse_metric_sample(&sample_payload()).unwrap();
+        sample.recv_bps = 1_000_000.0;
+        let summary = summarize_samples(&[sample]);
+        assert!(summary.contains("recv≈8.00Mb/s"), "{summary}");
+    }
 
     fn sample_payload() -> Value {
         serde_json::json!({

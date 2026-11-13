@@ -171,11 +171,11 @@ def validate_report(
                         problems.append(f"{prefix}: apk_artifact must name this release's APK")
                 elif distro == "ubuntu-24.04":
                     deb_version = re.sub(r"-(rc|beta|alpha)\.", r"~\1.", expected_release)
-                    if not re.fullmatch(r"wbeam_" + re.escape(deb_version) + r"\+noble_[a-z0-9]+\.deb", filename):
+                    if not re.fullmatch(r"wbeam_" + re.escape(deb_version) + r"\+noble_amd64\.deb", filename):
                         problems.append(f"{prefix}: Ubuntu run requires this release's Noble DEB")
                 else:
                     rpm_version = re.sub(r"-(rc|beta|alpha)\.", r"~\1.", expected_release)
-                    if not re.fullmatch(r"wbeam-" + re.escape(rpm_version) + r"-1(?:\.fc43)?\.(?:x86_64|aarch64)\.rpm", filename):
+                    if not re.fullmatch(r"wbeam-" + re.escape(rpm_version) + r"-1(?:\.fc43)?\.x86_64\.rpm", filename):
                         problems.append(f"{prefix}: Fedora run requires this release's Fedora RPM")
             except (OSError, RuntimeError, ValueError) as exc:
                 problems.append(f"{prefix}: cannot verify {file_key}: {exc}")

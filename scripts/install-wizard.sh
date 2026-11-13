@@ -402,7 +402,8 @@ install_system_deps() {
       run_cmd "${apt_cmd[@]}" install -y --no-install-recommends \
         build-essential pkg-config libssl-dev libdbus-1-dev \
         libx11-dev libxrandr-dev libxfixes-dev libxext-dev libxrender-dev \
-        libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev "$evdi_dev_package"
+        libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+        gstreamer1.0-plugins-ugly "$evdi_dev_package"
       if [[ "$BACKEND" == "evdi" ]]; then
         run_cmd "${apt_cmd[@]}" install -y --no-install-recommends \
           dkms "linux-headers-$(uname -r)" evdi-dkms

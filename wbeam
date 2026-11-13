@@ -15,6 +15,15 @@ if [[ -f "$WBEAM_CONFIG_HELPER" ]]; then
 fi
 
 CONTROL_PORT="${WBEAM_CONTROL_PORT:-5001}"
+# The control daemon accepts explicit interface binds. Diagnostic clients must
+# connect to that address rather than blindly querying IPv4 localhost.
+CONTROL_CONNECT_HOST="${WBEAM_CONTROL_BIND_ADDR:-127.0.0.1}"
+case "$CONTROL_CONNECT_HOST" in
+  0.0.0.0) CONTROL_CONNECT_HOST=127.0.0.1 ;;
+  ::) CONTROL_CONNECT_HOST='[::1]' ;;
+  *:*) CONTROL_CONNECT_HOST="[$CONTROL_CONNECT_HOST]" ;;
+esac
+CONTROL_BASE_URL="http://${CONTROL_CONNECT_HOST}:${CONTROL_PORT}"
 STREAM_PORT="${WBEAM_STREAM_PORT:-5000}"
 DAEMON_NAME="${WBEAM_DAEMON_SERVICE_NAME:-wbeam-daemon}"
 
@@ -422,7 +431,7 @@ watch_log_file() {
 
 host_health_raw() {
   local url
-  url="http://127.0.0.1:${CONTROL_PORT}/health"
+  url="${CONTROL_BASE_URL}/health"
   curl -fsS --max-time 1 "$url" 2>/dev/null || return 1
 }
 
@@ -452,7 +461,7 @@ version_doctor() {
 
   {
     echo "[version-doctor] time=$now"
-    echo "[version-doctor] control_api=http://127.0.0.1:${CONTROL_PORT}"
+    echo "[version-doctor] control_api=${CONTROL_BASE_URL}"
 
     if host_health="$(host_health_raw)"; then
       host_build="$(json_string_field "$host_health" "build_revision")"
@@ -879,12 +888,8 @@ ensure_daemon_binary() {
   exit 1
 }
 
-stop_local_processes() {
-  pkill -9 wbeamd-streamer 2>/dev/null || true
-  pkill -9 wbeamd-server 2>/dev/null || true
-  rm -f /tmp/wbeamd.lock
-}
-
+# No process-name-wide kill: an unrelated user's session or a second WayBeam
+# instance must never be terminated just to free our listener.
 ensure_log_dir() {
   mkdir -p "$LOG_DIR"
 }
@@ -985,7 +990,7 @@ adb_logcat_ensure_running() {
 }
 
 control_api_status() {
-  curl -sSf "http://127.0.0.1:${CONTROL_PORT}/status"
+  curl -sSf "${CONTROL_BASE_URL}/status"
 }
 
 print_control_unreachable_diagnostics() {
@@ -1032,7 +1037,6 @@ ip_status() {
 # Run the release binary in the foreground (no systemd, clean output)
 host_run() {
   ensure_daemon_binary
-  stop_local_processes
   if command -v adb >/dev/null 2>&1; then
     adb start-server >/dev/null 2>&1 || true
     adb_device_cmd reverse "tcp:${STREAM_PORT}"   "tcp:${STREAM_PORT}"   2>/dev/null || true
@@ -1044,10 +1048,15 @@ host_run() {
   echo ""
   export RUST_LOG="${RUST_LOG:-info}"
   export WBEAM_USE_RUST_STREAMER=1
-  exec "$DAEMON_BIN" \
-    --control-port "$CONTROL_PORT" \
-    --stream-port  "$STREAM_PORT" \
-    --root         "$ROOT_DIR"
+  local -a daemon_args=(--control-port "$CONTROL_PORT" --stream-port "$STREAM_PORT" --root "$ROOT_DIR")
+  if [[ -n "${WBEAM_CONTROL_BIND_ADDR:-}" ]]; then
+    daemon_args+=(--control-bind-address "$WBEAM_CONTROL_BIND_ADDR")
+  fi
+  if [[ "${WBEAM_ALLOW_UNAUTHENTICATED_LAN_CONTROL:-0}" == "1" ]]; then
+    daemon_args+=(--allow-unauthenticated-lan-control)
+  fi
+  # A busy listener is handled by the daemon; do not kill an existing owner.
+  exec "$DAEMON_BIN" "${daemon_args[@]}"
 }
 
 # Debug run: full RUST_LOG=debug, coloured output, ADB logcat sidecar
@@ -1057,7 +1066,14 @@ host_debug() {
 
 # Backwards-compat aliases
 daemon_up()   { host_run; }
-daemon_down() { stop_local_processes; echo "Daemon processes stopped."; }
+daemon_down() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    echo "[host] systemctl unavailable; stop foreground processes with Ctrl-C." >&2
+    return 1
+  fi
+  systemctl --user stop "${DAEMON_NAME}.service" || return 1
+  echo "[host] Stopped ${DAEMON_NAME}.service; unrelated/foreground processes were left untouched."
+}
 daemon_status() {
   if control_api_status >/dev/null 2>&1; then
     control_api_status
@@ -1082,14 +1098,7 @@ host_probe() {
     return 2
   fi
   require_cmd curl
-  local bind_addr="${WBEAM_CONTROL_BIND_ADDR:-127.0.0.1}" response
-  # Wildcard listeners are reached locally; bracket a concrete IPv6 address.
-  case "$bind_addr" in
-    0.0.0.0) bind_addr=127.0.0.1 ;;
-    ::) bind_addr='[::1]' ;;
-    *:*) bind_addr="[$bind_addr]" ;;
-  esac
-  local url="http://${bind_addr}:${CONTROL_PORT}/v1/host-probe"
+  local url="${CONTROL_BASE_URL}/v1/host-probe" response
   if ! response="$(curl --silent --show-error --fail --connect-timeout 2 --max-time 5 "$url")"; then
     echo "[host] Cannot read host capabilities from $url." >&2
     echo "[host] Start the daemon with ./waybeam host run or systemctl --user start ${DAEMON_NAME}.service, then retry." >&2
@@ -1104,7 +1113,7 @@ host_tuner() {
   local rust_dir="$ROOT_DIR/host/rust"
   local tuner_stream_port="${WBEAM_STREAM_PORT:-$STREAM_PORT}"
   local tuner_control_port="${WBEAM_CONTROL_PORT:-$CONTROL_PORT}"
-  local tuner_args=("--host-url" "http://127.0.0.1:${tuner_control_port}")
+  local tuner_args=("--host-url" "http://${CONTROL_CONNECT_HOST}:${tuner_control_port}")
   if [[ -n "$ANDROID_SERIAL" ]]; then
     echo "[host] tuner using serial=$ANDROID_SERIAL" >&2
     if android_try_reverse_setup "$tuner_stream_port" "$tuner_control_port"; then
@@ -1794,13 +1803,13 @@ watch_android_max_res() {
 watch_session_status_json() {
   local serial="$1"
   local stream_port="$2"
-  curl -fsS --max-time 1 "http://127.0.0.1:${CONTROL_PORT}/v1/status?serial=${serial}&stream_port=${stream_port}" 2>/dev/null || true
+  curl -fsS --max-time 1 "${CONTROL_BASE_URL}/v1/status?serial=${serial}&stream_port=${stream_port}" 2>/dev/null || true
 }
 
 watch_session_metrics_json() {
   local serial="$1"
   local stream_port="$2"
-  curl -fsS --max-time 1 "http://127.0.0.1:${CONTROL_PORT}/v1/metrics?serial=${serial}&stream_port=${stream_port}" 2>/dev/null || true
+  curl -fsS --max-time 1 "${CONTROL_BASE_URL}/v1/metrics?serial=${serial}&stream_port=${stream_port}" 2>/dev/null || true
 }
 
 watch_adb_reverse_has_port() {
@@ -1867,9 +1876,9 @@ watch_connections_once() {
   local stream_port control_port reverse_count
   local -a serials
 
-  health_json="$(curl -fsS --max-time 1 "http://127.0.0.1:${CONTROL_PORT}/v1/health" 2>/dev/null || true)"
-  probe_json="$(curl -fsS --max-time 1 "http://127.0.0.1:${CONTROL_PORT}/v1/host-probe" 2>/dev/null || true)"
-  status_json="$(curl -fsS --max-time 1 "http://127.0.0.1:${CONTROL_PORT}/v1/status" 2>/dev/null || true)"
+  health_json="$(curl -fsS --max-time 1 "${CONTROL_BASE_URL}/v1/health" 2>/dev/null || true)"
+  probe_json="$(curl -fsS --max-time 1 "${CONTROL_BASE_URL}/v1/host-probe" 2>/dev/null || true)"
+  status_json="$(curl -fsS --max-time 1 "${CONTROL_BASE_URL}/v1/status" 2>/dev/null || true)"
 
   echo "host:"
   if [[ -z "$health_json" || -z "$probe_json" ]]; then
@@ -1959,9 +1968,9 @@ watch_service_once() {
   fi
   uptime="$(watch_service_uptime "$main_pid")"
 
-  health_json="$(curl -fsS --max-time 1 "http://127.0.0.1:${CONTROL_PORT}/v1/health" 2>/dev/null || true)"
-  probe_json="$(curl -fsS --max-time 1 "http://127.0.0.1:${CONTROL_PORT}/v1/host-probe" 2>/dev/null || true)"
-  status_json="$(curl -fsS --max-time 1 "http://127.0.0.1:${CONTROL_PORT}/v1/status" 2>/dev/null || true)"
+  health_json="$(curl -fsS --max-time 1 "${CONTROL_BASE_URL}/v1/health" 2>/dev/null || true)"
+  probe_json="$(curl -fsS --max-time 1 "${CONTROL_BASE_URL}/v1/host-probe" 2>/dev/null || true)"
+  status_json="$(curl -fsS --max-time 1 "${CONTROL_BASE_URL}/v1/status" 2>/dev/null || true)"
 
   echo "service:"
   printf '  %-12s %-16s %-10s %-14s\n' "installed" "$(watch_status_label "$installed")" "active" "$(watch_status_label "${active:-unknown}")"
@@ -2196,9 +2205,9 @@ watch_streaming_once() {
 
 watch_health_once() {
   local code_health code_probe code_status
-  code_health="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 1 "http://127.0.0.1:${CONTROL_PORT}/v1/health" || true)"
-  code_probe="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 1 "http://127.0.0.1:${CONTROL_PORT}/v1/host-probe" || true)"
-  code_status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 1 "http://127.0.0.1:${CONTROL_PORT}/v1/status" || true)"
+  code_health="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 1 "${CONTROL_BASE_URL}/v1/health" || true)"
+  code_probe="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 1 "${CONTROL_BASE_URL}/v1/host-probe" || true)"
+  code_status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 1 "${CONTROL_BASE_URL}/v1/status" || true)"
   printf 'endpoint /v1/health    http=%s\n' "$(watch_status_label "${code_health:-000}")"
   printf 'endpoint /v1/host-probe http=%s\n' "$(watch_status_label "${code_probe:-000}")"
   printf 'endpoint /v1/status    http=%s\n' "$(watch_status_label "${code_status:-000}")"

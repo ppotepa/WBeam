@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 runtime="$tmp/runtime"
-mkdir -p "$runtime/host/rust" "$runtime/host/scripts" "$runtime/scripts" \
+mkdir -p "$runtime/host/rust/target/release" "$runtime/host/scripts" "$runtime/scripts" \
   "$runtime/config" "$tmp/bin" "$tmp/config" "$tmp/lib"
 cp "$ROOT_DIR/wbeam" "$runtime/wbeam"
 cp "$ROOT_DIR/scripts/evdi-compat.sh" "$runtime/scripts/"
@@ -29,12 +29,25 @@ cat > "$tmp/bin/pkg-config" <<'MOCK'
 #!/bin/sh
 exit 0
 MOCK
+cat > "$runtime/host/rust/target/release/wbeamd-server" <<'MOCK'
+#!/bin/sh
+printf '%s\n' "$@" > "$WBEAM_TEST_DAEMON_ARGS"
+MOCK
+cat > "$tmp/bin/adb" <<'MOCK'
+#!/bin/sh
+exit 0
+MOCK
+cat > "$tmp/bin/pkill" <<'MOCK'
+#!/bin/sh
+echo 'unsafe process-name kill' >&2
+exit 93
+MOCK
 cat > "$tmp/bin/systemctl" <<'MOCK'
 #!/bin/sh
 printf 'inactive\n'
 exit 3
 MOCK
-chmod +x "$tmp/bin/"*
+chmod +x "$tmp/bin/"* "$runtime/host/rust/target/release/wbeamd-server"
 export PATH="$tmp/bin:$PATH"
 
 # Probe returns daemon JSON, honors the configured endpoint and has a bounded
@@ -55,6 +68,16 @@ status=0
 "$runtime/wbeam" host probe --unknown > /dev/null 2>&1 || status=$?
 [[ "$status" -eq 2 ]]
 
+# Explicit LAN control must reach the daemon CLI, not just its log line.
+export WBEAM_TEST_DAEMON_ARGS="$tmp/daemon.args"
+WBEAM_CONTROL_BIND_ADDR=192.0.2.10 WBEAM_ALLOW_UNAUTHENTICATED_LAN_CONTROL=1 \
+  "$runtime/wbeam" host run > "$tmp/host-run.log"
+grep -Fxq -- '--control-bind-address' "$WBEAM_TEST_DAEMON_ARGS"
+grep -Fxq -- '192.0.2.10' "$WBEAM_TEST_DAEMON_ARGS"
+grep -Fxq -- '--allow-unauthenticated-lan-control' "$WBEAM_TEST_DAEMON_ARGS"
+: > "$WBEAM_TEST_CURL_LOG"
+WBEAM_CONTROL_BIND_ADDR=192.0.2.10 "$runtime/wbeam" host status > /dev/null
+grep -Fxq 'http://192.0.2.10:5001/status' "$WBEAM_TEST_CURL_LOG"
 # A custom development directory selects EVDI; a runtime-only directory cannot
 # silently produce a different capture binary for an explicit request.
 touch "$tmp/lib/libevdi.so"
