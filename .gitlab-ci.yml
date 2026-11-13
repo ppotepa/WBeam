@@ -263,7 +263,7 @@ build_rpm:
     - dnf -y install ca-certificates curl git jq rust cargo gcc gcc-c++ make pkgconf-pkg-config
     - dnf -y install openssl-devel dbus-devel gstreamer1-devel gstreamer1-plugins-base-devel nodejs webkit2gtk4.1-devel gtk3-devel libsoup3-devel libayatana-appindicator-gtk3-devel
     - dnf -y install libX11-devel libXrandr-devel libXfixes-devel libXext-devel libXrender-devel
-    - dnf -y install rpm-build tar gzip findutils
+    - dnf -y install rpm-build tar gzip findutils binutils
     - ./scripts/ci/build_rpm.sh
   artifacts:
     paths:
