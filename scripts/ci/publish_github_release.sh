@@ -165,6 +165,47 @@ prune_rolling_assets() {
   done <<< "$ids"
 }
 
+# A partially uploaded immutable release may be retried only while still
+# private. Every pre-existing asset must belong to the approved inventory and
+# have the same GitHub-reported SHA-256 as the local, QA-approved file.
+verify_draft_asset_inventory() {
+  local approved_names="$1" page=1 count all_assets='[]' name file expected actual state
+  local asset
+  while true; do
+    api_call GET "${API_ROOT}/releases/${RELEASE_ID}/assets?per_page=100&page=${page}"
+    if [[ "$API_STATUS" != "200" ]]; then
+      echo "[publish] Cannot inspect versioned draft assets, status=${API_STATUS}" >&2
+      exit 1
+    fi
+    count="$(printf '%s' "$API_BODY" | jq -er '
+      if type == "array" and all(.[]; (.name | type == "string") and (.digest | type == "string"))
+      then length else error("malformed release asset inventory") end')" || exit 1
+    all_assets="$(jq -cn --argjson existing "$all_assets" --argjson page "$API_BODY" '$existing + $page')"
+    if (( count < 100 )); then break; fi
+    page=$((page + 1))
+  done
+  if ! jq -e 'group_by(.name) | all(.[]; length == 1)' <<<"$all_assets" >/dev/null; then
+    echo '[publish] Duplicate asset names on versioned draft; refusing recovery' >&2
+    exit 1
+  fi
+  while IFS= read -r asset; do
+    [[ -n "$asset" ]] || continue
+    name="$(jq -r '.name' <<<"$asset")"
+    if ! jq -e --arg n "$name" 'index($n) != null' <<<"$approved_names" >/dev/null; then
+      echo "[publish] Unapproved existing draft asset: $name" >&2
+      exit 1
+    fi
+    file="${DIST_DIR}/${name}"
+    expected="sha256:$(sha256sum "$file" | awk '{print $1}')"
+    actual="$(jq -r '.digest' <<<"$asset")"
+    state="$(jq -r '.state // ""' <<<"$asset")"
+    if [[ "$state" != "uploaded" || "$actual" != "$expected" ]]; then
+      echo "[publish] Existing draft asset digest/state mismatch: $name" >&2
+      exit 1
+    fi
+  done < <(jq -c '.[]' <<<"$all_assets")
+}
+
 upload_asset() {
   local upload_url="$1"
   local file_path="$2"
@@ -179,13 +220,24 @@ upload_asset() {
     exit 1
   fi
 
-  local existing_id
-  existing_id="$(printf '%s' "${API_BODY}" | jq -r --arg n "${file_name}" '.[] | select(.name == $n) | .id' | head -n1)"
-  if [[ -n "${existing_id}" && "${existing_id}" != "null" ]]; then
+  local existing_asset existing_id digest
+  existing_asset="$(printf '%s' "${API_BODY}" | jq -c --arg n "${file_name}" '.[] | select(.name == $n)' | head -n1)"
+  if [[ -n "$existing_asset" ]]; then
+    if [[ "${RESUME_DRAFT:-false}" == "true" ]]; then
+      digest="sha256:$(sha256sum "$file_path" | awk '{print $1}')"
+      if [[ "$(jq -r '.digest // ""' <<<"$existing_asset")" != "$digest" ||
+            "$(jq -r '.state // ""' <<<"$existing_asset")" != "uploaded" ]]; then
+        echo "[publish] Existing draft asset digest/state mismatch: $file_name" >&2
+        exit 1
+      fi
+      echo "[publish] Reusing verified draft asset: $file_name"
+      return 0
+    fi
     if [[ "${ALLOW_REPLACE_ASSETS:-false}" != "true" ]]; then
       echo "[publish] Refusing to replace an existing tagged release asset: ${file_name}" >&2
       exit 1
     fi
+    existing_id="$(jq -r '.id' <<<"$existing_asset")"
     api_call DELETE "${API_ROOT}/releases/assets/${existing_id}"
     if [[ "${API_STATUS}" != "204" ]]; then
       echo "[publish] Could not delete old asset ${file_name}, status=${API_STATUS}" >&2
@@ -279,6 +331,7 @@ publish_release() {
   # Keep new assets private until uploads and the final tag/commit check pass.
   # The rolling release is made a draft before its ref is moved as well.
   local release_payload release_body approved_names file
+  local RESUME_DRAFT=false
   local -a files=() names=()
   release_payload="$(jq -n \
     --arg tag_name "${tag}" \
@@ -292,18 +345,26 @@ publish_release() {
   api_call GET "${API_ROOT}/releases/tags/${tag}"
   if [[ "${API_STATUS}" == "200" ]]; then
     if [[ "${allow_replace}" != "true" ]]; then
-      echo "[publish] Versioned GitHub release already exists (${tag}); refusing to mutate it." >&2
-      exit 1
+      if [[ "$(printf '%s' "$API_BODY" | jq -r '.draft // false')" != "true" ]]; then
+        echo "[publish] Versioned GitHub release already exists (${tag}); refusing to mutate it." >&2
+        exit 1
+      fi
+      # Cache before the Git ref lookup overwrites API_BODY.
+      release_body="$API_BODY"
+      verify_tag_commit "$tag"
+      RESUME_DRAFT=true
+      echo "[publish] Resuming unpublished draft for tested commit: $tag"
+    else
+      RELEASE_ID="$(printf '%s' "${API_BODY}" | jq -r '.id')"
+      api_call PATCH "${API_ROOT}/releases/${RELEASE_ID}" "${release_payload}"
+      if [[ "${API_STATUS}" != "200" ]]; then
+        echo "[publish] Failed to update release ${tag}, status=${API_STATUS}" >&2
+        echo "${API_BODY}" >&2
+        exit 1
+      fi
+      release_body="$API_BODY"
+      ensure_release_tag "$tag" "$allow_replace"
     fi
-    RELEASE_ID="$(printf '%s' "${API_BODY}" | jq -r '.id')"
-    api_call PATCH "${API_ROOT}/releases/${RELEASE_ID}" "${release_payload}"
-    if [[ "${API_STATUS}" != "200" ]]; then
-      echo "[publish] Failed to update release ${tag}, status=${API_STATUS}" >&2
-      echo "${API_BODY}" >&2
-      exit 1
-    fi
-    release_body="$API_BODY"
-    ensure_release_tag "$tag" "$allow_replace"
   elif [[ "${API_STATUS}" == "404" ]]; then
     ensure_release_tag "$tag" "$allow_replace"
     api_call POST "${API_ROOT}/releases" "${release_payload}"
@@ -328,10 +389,14 @@ publish_release() {
   shopt -s nullglob
   files=("${DIST_DIR}"/*.deb "${DIST_DIR}"/*.rpm "${DIST_DIR}"/*.apk \
     "${DIST_DIR}/VERSION.txt" "${DIST_DIR}/SHA256SUMS.txt")
-  if [[ "$allow_replace" == "true" ]]; then
+  if [[ "$allow_replace" == "true" || "$RESUME_DRAFT" == "true" ]]; then
     for file in "${files[@]}"; do names+=("$(basename "$file")"); done
     approved_names="$(jq -cn --args '$ARGS.positional' "${names[@]}")"
-    prune_rolling_assets "$tag" "$approved_names"
+    if [[ "$allow_replace" == "true" ]]; then
+      prune_rolling_assets "$tag" "$approved_names"
+    else
+      verify_draft_asset_inventory "$approved_names"
+    fi
   fi
   for file in "${files[@]}"; do
     [[ -s "${file}" ]] || continue

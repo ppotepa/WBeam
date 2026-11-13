@@ -183,8 +183,10 @@ Trigger `publish_github_release` for that tested commit. Stable tags such as
 `v0.1.3` publish as stable; `v0.1.3-rc.1`, `-beta.1` or `-alpha.1` publish as
 prereleases. A `release` branch build updates the mutable `release-latest`
 prerelease. All of these routes require the approval/report gates above.
-Existing versioned releases and their assets are not overwritten; use a new
-version for a new artifact set. Existing lightweight and annotated version tags
+Published versioned releases and their assets are immutable. An interrupted
+unpublished versioned draft can be resumed only for the identical tested commit;
+existing assets must match their approved SHA-256, and unapproved/duplicate
+assets block recovery. Use a new version for a new artifact set. Existing lightweight and annotated version tags
 must resolve to the tested commit. Only the explicit `release-latest` route may
 move its tag to the approved commit; tag/source archives and binary assets must
 refer to the same revision. The publisher keeps the release as a draft during

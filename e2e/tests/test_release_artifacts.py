@@ -133,7 +133,7 @@ class ReleaseArtifactTests(unittest.TestCase):
         curl.write_text(textwrap.dedent("""\
             #!/usr/bin/env python3
             # Hermetic fake API: this process never opens a network connection.
-            import json, os, pathlib, sys
+            import hashlib, json, os, pathlib, sys
             from urllib.parse import urlsplit, parse_qs
             args = sys.argv[1:]
             def option(name, default=None):
@@ -153,8 +153,13 @@ class ReleaseArtifactTests(unittest.TestCase):
             if parsed.netloc == 'uploads.github.com' and method == 'POST':
                 name = parse_qs(parsed.query)['name'][0]
                 event['asset'] = name
-                assert pathlib.Path(option('--data-binary')[1:]).is_file()
-                response = {'id': max((asset['id'] for asset in state['assets']), default=0) + 1, 'name': name}
+                upload = pathlib.Path(option('--data-binary')[1:])
+                assert upload.is_file()
+                response = {
+                    'id': max((asset['id'] for asset in state['assets']), default=0) + 1,
+                    'name': name, 'state': 'uploaded',
+                    'digest': 'sha256:' + hashlib.sha256(upload.read_bytes()).hexdigest(),
+                }
                 state['assets'].append(response)
                 status = 201
                 if 'drift_on_upload' in state:
@@ -239,6 +244,67 @@ class ReleaseArtifactTests(unittest.TestCase):
         self.assertTrue(all(call["draft"] is True for call in uploads))
         self.assertEqual(calls[-2]["path"], "/git/ref/tags/v0.1.3-rc.1")
         self.assertEqual(calls[-1]["payload"], {"draft": False})
+
+    def test_version_tag_cannot_disagree_with_qa_approved_artifacts(self):
+        self.mock_github({})
+        self.env["CI_COMMIT_TAG"] = "v0.1.4"
+        result = self.run_script("publish_github_release.sh")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("tagged release v0.1.4 does not match artifact version", result.stderr)
+        self.assertEqual(self.api_calls(), [])
+
+    def test_unsupported_arm_rpm_cannot_be_published(self):
+        self.mock_github({})
+        (self.dist / "wbeam-0.1.3~rc.1-1.fc43.aarch64.rpm").write_bytes(b"unsupported architecture")
+        result = self.run_script("publish_github_release.sh")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("stale or unsupported RPM artifact", result.stderr)
+        self.assertEqual(self.api_calls(), [])
+
+    def test_private_versioned_draft_resumes_after_partial_upload(self):
+        name = "wbeam_0.1.3~rc.1+bookworm_amd64.deb"
+        digest = "sha256:" + hashlib.sha256((self.dist / name).read_bytes()).hexdigest()
+        self.mock_github({
+            "refs": {"v0.1.3-rc.1": {"type": "commit", "sha": self.commit}},
+            "release": {"tag_name": "v0.1.3-rc.1", "draft": True},
+            "assets": [{"id": 42, "name": name, "digest": digest, "state": "uploaded"}],
+        })
+        result = self.run_script("publish_github_release.sh")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = json.loads(self.state_path.read_text())
+        self.assertFalse(state["release"]["draft"])
+        self.assertEqual(len(state["assets"]), 6)
+        self.assertTrue(any(asset["id"] == 42 for asset in state["assets"]))
+        self.assertEqual(len([call for call in self.api_calls() if "asset" in call]), 5)
+        self.assertFalse(any(call["method"] == "DELETE" for call in self.api_calls()))
+
+    def test_draft_resume_rejects_mismatched_or_unapproved_assets(self):
+        name = "wbeam_0.1.3~rc.1+bookworm_amd64.deb"
+        for asset, expected_error in [
+            ({"id": 1, "name": name, "digest": "sha256:" + "0" * 64, "state": "uploaded"}, "digest/state mismatch"),
+            ({"id": 1, "name": "unapproved.apk", "digest": "sha256:" + "0" * 64, "state": "uploaded"}, "Unapproved existing draft asset"),
+        ]:
+            with self.subTest(asset=asset):
+                self.mock_github({
+                    "refs": {"v0.1.3-rc.1": {"type": "commit", "sha": self.commit}},
+                    "release": {"tag_name": "v0.1.3-rc.1", "draft": True},
+                    "assets": [asset],
+                })
+                result = self.run_script("publish_github_release.sh")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected_error, result.stderr)
+                self.assertTrue(json.loads(self.state_path.read_text())["release"]["draft"])
+                self.assertFalse(any("asset" in call for call in self.api_calls()))
+
+    def test_published_versioned_release_is_still_immutable(self):
+        self.mock_github({
+            "refs": {"v0.1.3-rc.1": {"type": "commit", "sha": self.commit}},
+            "release": {"tag_name": "v0.1.3-rc.1", "draft": False},
+        })
+        result = self.run_script("publish_github_release.sh")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Versioned GitHub release already exists", result.stderr)
+        self.assertTrue(all(call["method"] == "GET" for call in self.api_calls()))
 
     def test_immutable_tag_mismatch_fails_without_any_github_write(self):
         self.mock_github({"refs": {"v0.1.3-rc.1": {"type": "commit", "sha": "b" * 40}}})
