@@ -30,6 +30,14 @@ WBEAM_ALLOW_UNAUTHENTICATED_LAN_STREAM=1 \
   bash host/scripts/run_wbeamd.sh 5001 5000
 ```
 
+On source Android deployment, if `adb reverse` is unavailable and the
+CLI selects an IP fallback automatically, it now requires matching explicit
+control/video bind addresses and both opt-ins. It fails rather than silently
+baking an unreachable address into the APK. Advanced explicitly supplied
+`WBEAM_ANDROID_API_HOST`/`WBEAM_ANDROID_STREAM_HOST` addresses remain the
+administrator's responsibility. A daemon configured only through a systemd
+unit must also expose those matching settings to the deployment CLI.
+
 The daemon binary accepts `--control-bind-address` and
 `--allow-unauthenticated-lan-control`. The standalone streamer accepts
 `--stream-bind-address` and `--allow-unauthenticated-lan-stream`; daemon-spawned

@@ -38,7 +38,7 @@ assert_wbeam_runtime_assets() {
   for f in wbeam waybeam VERSION.txt android/wbeam-android.apk config/wbeam.conf config/branding.json config/branding.sh \
     host/scripts/run_wbeamd.sh host/scripts/wbeam_config.sh host/scripts/usb_reverse.sh \
     scripts/virtual-deps-check.sh scripts/virtual-deps-install.sh \
-    scripts/evdi-compat.sh scripts/evdi-diagnose.sh scripts/fedora-setup.sh; do
+    scripts/android-lan-bind-policy.sh scripts/evdi-compat.sh scripts/evdi-diagnose.sh scripts/fedora-setup.sh; do
     if [[ ! -s "$root/$f" ]]; then
       echo "[package] Missing runtime asset: $root/$f" >&2
       return 1

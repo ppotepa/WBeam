@@ -8,7 +8,7 @@ runtime="$tmp/runtime"
 mkdir -p "$runtime/host/rust/target/release" "$runtime/host/scripts" "$runtime/scripts" \
   "$runtime/config" "$tmp/bin" "$tmp/config" "$tmp/lib"
 cp "$ROOT_DIR/wbeam" "$runtime/wbeam"
-cp "$ROOT_DIR/scripts/evdi-compat.sh" "$runtime/scripts/"
+cp "$ROOT_DIR/scripts/evdi-compat.sh" "$ROOT_DIR/scripts/android-lan-bind-policy.sh" "$runtime/scripts/"
 cp "$ROOT_DIR/host/scripts/wbeam_config.sh" "$runtime/host/scripts/"
 cp "$ROOT_DIR/config/wbeam.conf" "$runtime/config/"
 if [[ -f "$ROOT_DIR/config/branding.sh" ]]; then cp "$ROOT_DIR/config/branding.sh" "$runtime/config/"; fi
@@ -94,6 +94,23 @@ touch "$tmp/lib/libevdi.so"
 WBEAM_EVDI_LIB_DIR="$tmp/lib" WBEAM_HOST_STREAMER_EVDI=0 "$runtime/wbeam" host build > "$tmp/portal-build.log"
 grep -Fxq 'build --release -p wbeamd-streamer --no-default-features' "$WBEAM_TEST_CARGO_LOG"
 ! grep -Fq -- '--features evdi' "$WBEAM_TEST_CARGO_LOG"
+
+# The trusted LAN fallback needs independently opted-in API and stream binds.
+# A remote address alone, or a single listener opt-in, is never sufficient.
+source "$ROOT_DIR/scripts/android-lan-bind-policy.sh"
+status=0
+waybeam_require_trusted_lan_binds 192.0.2.10 2>"$tmp/lan-error.log" || status=$?
+[[ "$status" -ne 0 ]]
+grep -Fq 'WBEAM_CONTROL_BIND_ADDR' "$tmp/lan-error.log"
+status=0
+WBEAM_CONTROL_BIND_ADDR=192.0.2.10 WBEAM_ALLOW_UNAUTHENTICATED_LAN_CONTROL=1 \
+WBEAM_STREAM_BIND_ADDR=127.0.0.1 WBEAM_ALLOW_UNAUTHENTICATED_LAN_STREAM=1 \
+  waybeam_require_trusted_lan_binds 192.0.2.10 2>"$tmp/lan-stream-error.log" || status=$?
+[[ "$status" -ne 0 ]]
+grep -Fq 'WBEAM_STREAM_BIND_ADDR' "$tmp/lan-stream-error.log"
+WBEAM_CONTROL_BIND_ADDR=0.0.0.0 WBEAM_ALLOW_UNAUTHENTICATED_LAN_CONTROL=1 \
+WBEAM_STREAM_BIND_ADDR=192.0.2.10 WBEAM_ALLOW_UNAUTHENTICATED_LAN_STREAM=1 \
+  waybeam_require_trusted_lan_binds 192.0.2.10
 
 # Installer previews are non-mutating and show exact service overrides.
 installer="$ROOT_DIR/scripts/install-wizard.sh"

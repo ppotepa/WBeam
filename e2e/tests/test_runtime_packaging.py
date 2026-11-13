@@ -213,6 +213,7 @@ class RuntimePackagingTests(unittest.TestCase):
             "wbeam", "waybeam", "host/scripts/run_wbeamd.sh", "host/scripts/usb_reverse.sh",
             "scripts/evdi-compat.sh",
             "scripts/virtual-deps-check.sh", "scripts/virtual-deps-install.sh",
+            "scripts/android-lan-bind-policy.sh",
         ):
             path = runtime / relative
             self.assertTrue(path.is_file(), relative)

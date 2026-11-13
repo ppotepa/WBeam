@@ -165,96 +165,9 @@ pub(crate) fn daemon_lock_hint() -> Option<String> {
     None
 }
 
-fn terminate_and_cleanup_lock(lock_path: &PathBuf, pid: u32) {
-    let pid_s = pid.to_string();
-    let _ = Command::new("kill").args(["-TERM", &pid_s]).status();
-    for _ in 0..10 {
-        if !process_exists(pid) {
-            let _ = fs::remove_file(lock_path);
-            return;
-        }
-        thread::sleep(Duration::from_millis(100));
-    }
-
-    let _ = Command::new("kill").args(["-KILL", &pid_s]).status();
-    for _ in 0..10 {
-        if !process_exists(pid) {
-            let _ = fs::remove_file(lock_path);
-            return;
-        }
-        thread::sleep(Duration::from_millis(100));
-    }
-}
-
-pub(crate) fn stop_conflicting_lock_holder() {
-    for lock in ["/tmp/wbeamd.lock", "/tmp/wbeamd-service-5001.lock"] {
-        let lock_path = PathBuf::from(lock);
-        let Ok(pid_text) = fs::read_to_string(&lock_path) else {
-            continue;
-        };
-        let Ok(pid) = pid_text.trim().parse::<u32>() else {
-            continue;
-        };
-        if !process_name_matches(pid, "wbeamd-server") {
-            continue;
-        }
-        terminate_and_cleanup_lock(&lock_path, pid);
-    }
-}
-
-pub(crate) fn stop_conflicting_port_holder(control_port: u16) {
-    let pattern = format!("wbeamd-server --control-port {control_port}");
-    let output = Command::new("pgrep").args(["-f", &pattern]).output();
-    let Ok(output) = output else {
-        return;
-    };
-    if !output.status.success() {
-        return;
-    }
-    let pids = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|line| line.trim().parse::<u32>().ok())
-        .collect::<Vec<_>>();
-    for pid in pids {
-        if !process_name_matches(pid, "wbeamd-server") {
-            continue;
-        }
-        let pid_s = pid.to_string();
-        let _ = Command::new("kill").args(["-TERM", &pid_s]).status();
-        for _ in 0..10 {
-            if !process_exists(pid) {
-                break;
-            }
-            thread::sleep(Duration::from_millis(100));
-        }
-        if process_exists(pid) {
-            let _ = Command::new("kill").args(["-KILL", &pid_s]).status();
-        }
-    }
-}
-
-pub(crate) fn process_exists(pid: u32) -> bool {
-    Command::new("ps")
-        .args(["-p", &pid.to_string()])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
-pub(crate) fn process_name_matches(pid: u32, needle: &str) -> bool {
-    let output = Command::new("ps")
-        .args(["-p", &pid.to_string(), "-o", "comm="])
-        .output();
-    let Ok(output) = output else {
-        return false;
-    };
-    if !output.status.success() {
-        return false;
-    }
-    String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .contains(needle)
-}
+// A service start never terminates arbitrary processes by PID, lock-file
+// contents, or command-line substring. systemd owns only the managed unit;
+// a separate foreground daemon or busy port is reported as a start error.
 
 pub(crate) fn ensure_systemctl() -> Result<(), String> {
     if command_exists("systemctl") {
@@ -373,7 +286,7 @@ fn preserved_service_environment(previous: &str) -> String {
             continue;
         }
         // systemd interprets the last assignment to a key as authoritative.
-        if let Some((_, existing_line)) = entries.iter_mut().find(|(name, _)| name == key) {
+        if let Some((_, existing_line)) = entries.iter_mut().find(|(name, _)| name.as_str() == key) {
             *existing_line = line.to_string();
         } else {
             entries.push((key.to_string(), line.to_string()));
@@ -524,15 +437,15 @@ fn service_start_blocking() -> Result<ServiceStatus, String> {
         crate::ui_service_log("service_start", "error", "service is not installed");
         return Err("service is not installed".to_string());
     }
-    let expected = service_unit_content();
-    let current = fs::read_to_string(&unit_path).unwrap_or_default();
+    let current = fs::read_to_string(&unit_path)
+        .map_err(|e| format!("cannot read service unit before starting: {e}"))?;
+    let expected = service_unit_content(&current);
     if current != expected {
         fs::write(&unit_path, expected).map_err(|e| format!("cannot rewrite unit file: {e}"))?;
         systemctl_user(&["daemon-reload"])?;
     }
-    let control_port = crate::wbeam_control_port();
-    stop_conflicting_port_holder(control_port);
-    stop_conflicting_lock_holder();
+    // Do not search for or kill a same-named process to free its port/lock.
+    // Let systemd and the daemon's own bind/lock validation report conflicts.
     let _ = systemctl_user(&["reset-failed", SERVICE_NAME]);
     if let Err(err) = systemctl_user(&["start", SERVICE_NAME]) {
         crate::ui_service_log("service_start", "error", &err);

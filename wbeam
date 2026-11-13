@@ -13,6 +13,9 @@ if [[ -f "$WBEAM_CONFIG_HELPER" ]]; then
   source "$WBEAM_CONFIG_HELPER"
   wbeam_load_config "$ROOT_DIR"
 fi
+# The LAN fallback must not silently bake an unreachable address into an APK.
+# shellcheck source=scripts/android-lan-bind-policy.sh
+source "$ROOT_DIR/scripts/android-lan-bind-policy.sh"
 
 CONTROL_PORT="${WBEAM_CONTROL_PORT:-5001}"
 # The control daemon accepts explicit interface binds. Diagnostic clients must
@@ -666,13 +669,19 @@ android_resolve_deploy_hosts() {
     local host_ip_mod
     host_ip_mod="$(detect_host_ip || true)"
     if [[ -n "$host_ip_mod" ]]; then
-      echo "[android] WARN: adb reverse failed; using LAN IP ${host_ip_mod} for modern pipeline" >&2
+      waybeam_require_trusted_lan_binds "$host_ip_mod" || return 1
+      echo "[android] WARN: adb reverse failed; using explicitly configured LAN IP ${host_ip_mod} for modern pipeline" >&2
       android_echo_hosts "$host_ip_mod" "$host_ip_mod"
       return 0
     fi
-    echo "[android] WARN: adb reverse failed and no LAN IP detected; falling back to 127.0.0.1" >&2
-    android_echo_hosts "127.0.0.1" "127.0.0.1"
-    return 0
+    if [[ "$allow_no_transport" =~ ^(1|true|TRUE|yes|on)$ ]]; then
+      echo "[android] WARN: adb reverse failed and no LAN IP detected; explicitly forcing unreachable loopback APK." >&2
+      android_echo_hosts "127.0.0.1" "127.0.0.1"
+      return 0
+    fi
+    echo "[android] ERROR: adb reverse failed and no LAN IP is available; refusing unreachable APK configuration." >&2
+    echo "[android] Set WBEAM_ANDROID_ALLOW_NO_TRANSPORT=1 only for deliberate offline testing." >&2
+    return 1
   fi
 
   local host_ip
@@ -683,6 +692,7 @@ android_resolve_deploy_hosts() {
   # Try host IP unconditionally; the device-side IP check is irrelevant here
   # because it's the *host* address we're embedding in the APK.
   if [[ -n "$host_ip" ]]; then
+    waybeam_require_trusted_lan_binds "$host_ip" || return 1
     if ! android_probe_control_api_from_device "$host_ip"; then
       local host_iface
       host_iface="$(ip -4 -o addr show scope global 2>/dev/null | awk -v target="$host_ip" '{split($4,a,"/"); if (a[1]==target) {print $2; exit}}' || true)"
